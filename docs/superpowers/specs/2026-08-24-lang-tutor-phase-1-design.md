@@ -92,10 +92,11 @@ type Question = MultipleChoiceQuestion;
 type AnswerRecord = {
   question_id: string;
   is_correct: boolean;
+  answer_string: string;   // what the learner actually answered
 };
 ```
 
-Three deliberate decisions here:
+Four deliberate decisions here:
 
 **`Question` is a tagged union with one member.** The `type` field exists from day
 one so the session screen dispatches through a `switch` rather than an `if` that
@@ -107,11 +108,26 @@ single most important seam in phase 1, and it costs roughly ten lines.
 **`correct_option` is an index, not a string.** Duplicate option text can never
 produce a false positive, and the tapped-option state is already an index.
 
-**`AnswerRecord` carries only `is_correct`.** Scoring records whether a question
-was answered correctly, never whether a particular button was tapped. Voice and
-free-text answers therefore drop into scoring and Results without changes. Future
-question types may attach their own raw payload; `is_correct` remains the
-contract.
+**Scoring reads `is_correct` and nothing else.** Correctness is recorded per
+question, never as "which button was tapped", so voice and free-text answers drop
+into scoring and Results without changes. `is_correct` is the contract every future
+question type must satisfy.
+
+**`answer_string` records what the learner answered, as text.** It exists for a
+future audit log and answer analysis — which distractors get chosen, which words
+are consistently confused. Text rather than an option index, for two reasons.
+Option order is shuffled per session, so a stored index would be un-analysable
+later; and text is the one representation every planned question type can produce,
+so free-text answers, voice transcripts, and tapped options all populate the same
+field rather than each needing their own.
+
+For multiple choice, `answer_string` is `options[selected_index]`. It is always
+populated in phase 1, since there is no way to skip a question. Nothing reads it in
+phase 1 — it is written and never displayed. Since phase 1 state is in-memory,
+these records still die with the session; what the field buys now is that the
+question types, the engine, and the record shape are already producing the data an
+audit log will want, so enabling one later is a storage change rather than a
+retrofit of every question type.
 
 There is no vocabulary-entry type in phase 1. `vocab_entry_id` is an opaque
 forward-looking string.
@@ -307,6 +323,9 @@ Jest, covering `src/session.ts` only:
 - `correct_option` still indexes the correct answer after option shuffling.
 - `answer` scores correctly, advances, and reaches a terminal state after the
   last question.
+- `answer` records `answer_string` as the text of the selected option, including
+  when the answer is wrong. Worth a test precisely because nothing in phase 1
+  displays this field, so an error in it would otherwise be invisible.
 
 No component or snapshot tests in phase 1. They would calcify the exact layout
 and copy that is about to be iterated on.
@@ -340,6 +359,7 @@ Three decisions carry the weight of everything planned after phase 1:
 | Points, streaks, daily targets, progress | All session state flows through `useSession`. |
 | A real server | `snake_case` data fields; mock data isolated in one module. |
 | More interface languages | All UI copy in `src/strings.ts`; directional styles use `start`/`end`, so an LTR interface needs no layout rewrite. |
+| An audit log and answer analysis | `AnswerRecord.answer_string` is populated from the first session, in a form every question type can produce. |
 
 Everything else — extra screens, a different palette, dark mode — is cheap to add
 later and is therefore deliberately absent.
