@@ -1,0 +1,16 @@
+export const strings = {
+  appTitle: 'lang tutor',
+  homeSubtitle: 'תרגול אוצר מילים',
+  homeSetLabel: (count: number) => `${count} מילים באנגלית`,
+  start: 'התחל',
+  questionInstruction: 'מה הפירוש?',
+  continueLabel: 'המשך',
+  feedbackCorrect: 'נכון!',
+  feedbackWrong: 'התשובה הנכונה:',
+  resultsHeadlineGreat: 'מצוין!',
+  resultsHeadlineGood: 'עבודה טובה!',
+  resultsHeadlineKeepPractising: 'ממשיכים לתרגל',
+  resultsMissedTitle: 'כדאי לחזור על אלה',
+  practiseAgain: 'תרגל שוב',
+  done: 'סיום',
+} as const;
