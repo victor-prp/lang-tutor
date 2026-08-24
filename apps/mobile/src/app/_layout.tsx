@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { SessionProvider } from '@/hooks/useSession';
 import { colors } from '@/theme';
 
 // RTL is set two different ways because the platforms disagree about how.
@@ -26,9 +27,11 @@ export default function RootLayout() {
     // fallback provider, but relying on that is relying on an internal detail —
     // and on web the insets are zero without an explicit provider.
     <SafeAreaProvider>
-      <View style={styles.root} {...rtlProps}>
-        <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-      </View>
+      <SessionProvider>
+        <View style={styles.root} {...rtlProps}>
+          <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+        </View>
+      </SessionProvider>
     </SafeAreaProvider>
   );
 }
