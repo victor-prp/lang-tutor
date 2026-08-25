@@ -41,13 +41,12 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.xxl,
     fontWeight: '700',
     color: colors.text,
-    textAlign: 'right',
+    writingDirection: 'rtl',
   },
   subtitle: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.muted,
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
   card: {
@@ -62,7 +61,6 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.lg,
     lineHeight: lineHeights.lg,
     color: colors.text,
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
   button: {

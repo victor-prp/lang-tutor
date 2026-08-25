@@ -39,8 +39,12 @@ export default function ResultsScreen() {
             <Text style={styles.missedTitle}>{strings.resultsMissedTitle}</Text>
             {missedQuestions.map(({ question, correct_answer }) => (
               <View key={question.id} style={styles.missedRow}>
-                <Text style={styles.missedPrompt}>{question.question}</Text>
-                <Text style={styles.missedAnswer}>{correct_answer}</Text>
+                <View style={styles.missedCellStart}>
+                  <Text style={styles.missedPrompt}>{question.question}</Text>
+                </View>
+                <View style={styles.missedCellEnd}>
+                  <Text style={styles.missedAnswer}>{correct_answer}</Text>
+                </View>
               </View>
             ))}
           </View>
@@ -80,6 +84,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
     textAlign: 'center',
+    // Numeric runs joined by a slash reverse inside an RTL paragraph.
+    writingDirection: 'ltr',
   },
   missed: { marginTop: spacing.lg, gap: spacing.sm },
   missedTitle: {
@@ -87,7 +93,6 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.md,
     fontWeight: '700',
     color: colors.muted,
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
   missedRow: {
@@ -102,22 +107,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   // The English side sits at the start of the row (the right, under RTL) and
-  // reads LTR internally; the Hebrew side takes the remaining half.
+  // keeps an LTR base direction so its punctuation stays put; the Hebrew side
+  // takes the remaining half. Alignment comes from these flex cells rather
+  // than a physical textAlign, which native RTL would swap.
+  missedCellStart: { flex: 1, alignItems: 'flex-start' },
+  missedCellEnd: { flex: 1, alignItems: 'flex-end' },
   missedPrompt: {
-    flex: 1,
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.text,
     writingDirection: 'ltr',
-    textAlign: 'right',
   },
   missedAnswer: {
-    flex: 1,
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.muted,
     writingDirection: 'rtl',
-    textAlign: 'left',
   },
   actions: { paddingBottom: spacing.lg, gap: spacing.sm },
   primary: {

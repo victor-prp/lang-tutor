@@ -51,7 +51,6 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.text,
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
   labelDimmed: { color: colors.muted },

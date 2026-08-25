@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
@@ -14,6 +15,9 @@ const HIDDEN_OFFSET = 200;
 
 export function FeedbackBanner({ isCorrect, correctAnswer, onContinue }: Props) {
   const translateY = useRef(new Animated.Value(HIDDEN_OFFSET)).current;
+  // The banner is absolutely positioned, so it sits outside the screen's
+  // SafeAreaView padding and would otherwise run under the Android nav bar.
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     translateY.setValue(HIDDEN_OFFSET);
@@ -29,7 +33,7 @@ export function FeedbackBanner({ isCorrect, correctAnswer, onContinue }: Props) 
       style={[
         styles.banner,
         isCorrect ? styles.bannerCorrect : styles.bannerWrong,
-        { transform: [{ translateY }] },
+        { paddingBottom: insets.bottom + spacing.xl, transform: [{ translateY }] },
       ]}
     >
       <Text style={[styles.title, isCorrect ? styles.titleCorrect : styles.titleWrong]}>
@@ -50,7 +54,6 @@ const styles = StyleSheet.create({
     end: 0,
     bottom: 0,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
     borderTopStartRadius: radii.lg,
     borderTopEndRadius: radii.lg,
@@ -62,7 +65,6 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.lg,
     lineHeight: lineHeights.lg,
     fontWeight: '700',
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
   titleCorrect: { color: colors.correct },
@@ -71,7 +73,6 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.text,
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
   button: {

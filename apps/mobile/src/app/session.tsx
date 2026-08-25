@@ -94,11 +94,15 @@ const styles = StyleSheet.create({
   },
   // A glyph, not an icon, so it is not auto-mirrored. Back points right in RTL.
   back: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.muted },
+  // "1 / 10" is two numeric runs joined by a neutral slash. Inside an RTL
+  // paragraph the bidi algorithm reverses the run order and it reads "10 / 1",
+  // so this one string declares an LTR base direction.
   counter: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.muted,
     fontWeight: '700',
+    writingDirection: 'ltr',
   },
   // Bottom padding keeps the last option clear of the overlaid banner.
   body: { paddingTop: spacing.xl, paddingBottom: spacing.xxl * 4 },

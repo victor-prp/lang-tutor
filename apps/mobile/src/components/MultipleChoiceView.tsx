@@ -59,7 +59,6 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.muted,
-    textAlign: 'right',
     writingDirection: 'rtl',
   },
   // The English prompt is centred and explicitly LTR so it reads correctly
