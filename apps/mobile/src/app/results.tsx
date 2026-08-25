@@ -32,7 +32,7 @@ export default function ResultsScreen() {
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.headline}>{headlineFor(correctCount, total)}</Text>
-        <Text style={styles.score}>{`${correctCount} / ${total}`}</Text>
+        <Text style={styles.score}>{strings.scoreLabel(correctCount, total)}</Text>
 
         {missedQuestions.length > 0 ? (
           <View style={styles.missed}>
@@ -84,8 +84,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
     textAlign: 'center',
-    // Numeric runs joined by a slash reverse inside an RTL paragraph.
-    writingDirection: 'ltr',
+    // Direction is handled in the string itself: see strings.scoreLabel.
   },
   missed: { marginTop: spacing.lg, gap: spacing.sm },
   missedTitle: {

@@ -8,6 +8,7 @@ import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { ProgressBar } from '@/components/ProgressBar';
 import { useSession } from '@/hooks/useSession';
+import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 // The one place phase 1 dispatches on question type. Adding a question type
@@ -64,7 +65,9 @@ export default function SessionScreen() {
         <Pressable accessibilityRole="button" hitSlop={12} onPress={() => router.back()}>
           <Text style={styles.back}>{'→'}</Text>
         </Pressable>
-        <Text style={styles.counter}>{`${session.position} / ${session.total}`}</Text>
+        <Text style={styles.counter}>
+          {strings.progressLabel(session.position, session.total)}
+        </Text>
       </View>
 
       <ProgressBar position={session.position} total={session.total} />
@@ -94,15 +97,12 @@ const styles = StyleSheet.create({
   },
   // A glyph, not an icon, so it is not auto-mirrored. Back points right in RTL.
   back: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.muted },
-  // "1 / 10" is two numeric runs joined by a neutral slash. Inside an RTL
-  // paragraph the bidi algorithm reverses the run order and it reads "10 / 1",
-  // so this one string declares an LTR base direction.
+  // Direction is handled in the string itself: see strings.progressLabel.
   counter: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.muted,
     fontWeight: '700',
-    writingDirection: 'ltr',
   },
   // Bottom padding keeps the last option clear of the overlaid banner.
   body: { paddingTop: spacing.xl, paddingBottom: spacing.xxl * 4 },
