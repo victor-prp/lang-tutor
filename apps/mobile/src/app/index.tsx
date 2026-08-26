@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useSession } from '@/hooks/useSession';
-import { SESSION_LENGTH } from '@/session';
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 

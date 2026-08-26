@@ -25,4 +25,7 @@ export const strings = {
   resultsMissedTitle: 'כדאי לחזור על אלה',
   practiseAgain: 'תרגל שוב',
   done: 'סיום',
+  errorTitle: 'משהו השתבש',
+  errorMessage: 'נתחיל שוב מההתחלה',
+  errorAction: 'אישור',
 } as const;
