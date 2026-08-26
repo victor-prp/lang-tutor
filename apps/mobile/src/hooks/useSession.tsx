@@ -1,7 +1,16 @@
 import type { MissedQuestion, Question, Score } from '@lang-tutor/core/api';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { router } from 'expo-router';
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Alert } from 'react-native';
 
 import { createSession, nextStep } from '@/api/client';
@@ -50,9 +59,15 @@ type QuizState = {
 const SessionContext = createContext<SessionValue | null>(null);
 
 function handleApiFailure() {
-  Alert.alert(strings.errorTitle, strings.errorMessage, [
-    { text: strings.errorAction, onPress: () => router.replace('/') },
-  ]);
+  // cancelable: false — Android otherwise lets the back button or a tap
+  // outside dismiss this without invoking onPress, which would strand the
+  // learner on a dead session screen with no way to get home.
+  Alert.alert(
+    strings.errorTitle,
+    strings.errorMessage,
+    [{ text: strings.errorAction, onPress: () => router.replace('/') }],
+    { cancelable: false },
+  );
 }
 
 function applyQueued(current: QuizState, queued: Queued): QuizState {
@@ -83,7 +98,40 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // but the server is now the source of truth for progress and scoring.
   const [state, setState] = useState<QuizState | null>(null);
 
+  // Mirrors `state` for use inside async callbacks that resolve after a
+  // render has moved on (e.g. select()'s nextStep().catch()), where the
+  // callback's own closed-over `state` is stale and reading fresh state
+  // requires either this ref or a side effect inside setState's updater.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   const start = useCallback(() => {
+    // Installed synchronously, before the async chain below runs, so that
+    // `hasSession` flips true on the same render start() is called. Both
+    // callers (Home's onStart, Results' onPractiseAgain) navigate
+    // synchronously right after calling start() — if hasSession stayed
+    // false (or a stale `complete: true` stayed live) until createSession
+    // resolved, SessionScreen's own redirect/back-to-results logic would
+    // bounce the learner away before the real session ever lands.
+    //
+    // sessionId/userId are placeholders, never actually read: select()
+    // bails out whenever `state.question` is undefined, which holds for
+    // this pending state for as long as it's live.
+    setState({
+      sessionId: '',
+      userId: '',
+      question: undefined,
+      position: 0,
+      total: SESSION_LENGTH,
+      selectedOption: null,
+      complete: false,
+      correctCount: 0,
+      missedQuestions: [],
+      queued: null,
+      advanceRequested: false,
+    });
     void (async () => {
       try {
         const userId = await getOrCreateUserId();
@@ -137,7 +185,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             return latest.advanceRequested ? applyQueued(latest, queued) : { ...latest, queued };
           });
         })
-        .catch(() => handleApiFailure());
+        .catch(() => {
+          // Guarded the same way the .then() above is: if the learner has
+          // since abandoned this session (e.g. backed out and started a new
+          // one) while this call was in flight, its rejection must not
+          // alert-and-redirect-home over top of a perfectly healthy new
+          // session. Reads stateRef rather than `state` because this runs
+          // after the async gap, when the closure's `state` is stale.
+          if (stateRef.current?.sessionId === sessionId) handleApiFailure();
+        });
     },
     [state],
   );
