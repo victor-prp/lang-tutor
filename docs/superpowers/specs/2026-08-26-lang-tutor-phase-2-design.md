@@ -213,15 +213,20 @@ sides disagreeing about what actually crosses the wire.
   server needed; covers the `404`/idempotency/completion behaviors end-to-end through the
   routes.
 - `apps/mobile/src/api/client.ts` — unit tests with mocked `fetch`.
-- **`apps/server/src/integration.test.ts`** — the new layer. Imports the app from
-  `app.ts` (not `index.ts`, which would also bind the real port as an import side effect),
-  starts it on an ephemeral port via `@hono/node-server`, and drives it with real `fetch`
-  calls through
+- **`apps/server/tests/integration/session-flow.test.ts`** — the new layer, deliberately
+  outside `src/` since it isn't a unit test: it imports the app from `app.ts` (not
+  `index.ts`, which would also bind the real port as an import side effect), starts it on
+  an ephemeral port via `@hono/node-server`, and drives it with real `fetch` calls through
   a full ten-question session (create → repeated `next-step` → completion), asserting on
   the actual HTTP responses. Unlike the route-level tests above, this goes over a real
   socket, so it exercises real JSON serialization rather than an in-process shortcut —
   it's the automated check that the documented wire contract is what the server actually
-  produces.
+  produces. No Docker Compose or second process: the "other side" of the integration is
+  the real app running in the same test process, on loopback — there's no separate
+  service to orchestrate since phase 2 has no database and doesn't launch `apps/mobile`
+  itself. Runs via the same `npm test --workspace apps/server` command as the unit tests;
+  `apps/server`'s Jest `testMatch` covers both `src/**/*.test.ts` and
+  `tests/**/*.test.ts`.
 - No new component/screen tests, same rationale as phase 1: they would calcify UI that's
   still being iterated on. Instead, the plan's final verification step is running the
   real server and the real Expo app together and playing a full session by hand — the
@@ -258,14 +263,15 @@ lang-tutor-init/
 │   │        src/data/mockQuestions.ts, src/data/mockQuestions.test.ts)
 │   └── server/                        new workspace
 │       ├── package.json, tsconfig.json
-│       └── src/
-│           ├── app.ts                 the Hono app, no listen call
-│           ├── index.ts               listens on 0.0.0.0 via @hono/node-server
-│           ├── routes/{sessions.ts,schemas.ts}
-│           ├── store/sessionStore.ts
-│           ├── session.ts
-│           ├── integration.test.ts    real HTTP, full session, against the real app
-│           └── data/mockQuestions.ts  moved from apps/mobile, unchanged content
+│       ├── src/
+│       │   ├── app.ts                 the Hono app, no listen call
+│       │   ├── index.ts               listens on 0.0.0.0 via @hono/node-server
+│       │   ├── routes/{sessions.ts,schemas.ts}
+│       │   ├── store/sessionStore.ts
+│       │   ├── session.ts
+│       │   └── data/mockQuestions.ts  moved from apps/mobile, unchanged content
+│       └── tests/integration/
+│           └── session-flow.test.ts   real HTTP, full session, against the real app
 └── packages/core/src/api/
     └── types.ts                       + CreateSessionResponse, NextStepRequest,
                                         NextStepResponse — shared by server routes and
