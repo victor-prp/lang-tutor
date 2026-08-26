@@ -7,7 +7,11 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 // expo-crypto's own auto-generated Jest mock (expo-crypto/mocks/ExpoCrypto.ts)
 // ships `randomUUID(): any {}` — an empty stub that always returns
 // `undefined` — so it must be overridden here to get a real string back.
-jest.mock('expo-crypto', () => ({ randomUUID: () => 'test-uuid' }));
+// Each call returns a distinct value so the "second call" test below actually
+// proves persistence (that AsyncStorage is consulted) rather than passing
+// vacuously because the mock always returns the same string.
+let mockCallCount = 0;
+jest.mock('expo-crypto', () => ({ randomUUID: () => `test-uuid-${++mockCallCount}` }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 

@@ -25,12 +25,15 @@ design. Anything a consumer needs comes from `@lang-tutor/core/api` (types) or
 
 ## Running it
 
-Two processes: the server, then the app.
+Two processes: the server, then the app. The mobile app reads its server URL from
+`apps/mobile/.env.local`, which Expo auto-loads and git ignores (only `.env.example` is
+committed) — create it before the first run.
 
 ```bash
-npm install       # from the repo root — it owns dependency resolution
-npm run server    # terminal 1 — binds 0.0.0.0:3001 by default
-npm run mobile    # terminal 2
+npm install                                        # from the repo root — it owns dependency resolution
+cp apps/mobile/.env.example apps/mobile/.env.local  # EXPO_PUBLIC_API_URL=http://localhost:3001, works as-is below
+npm run server                                      # terminal 1 — binds 0.0.0.0:3001 by default
+npm run mobile                                      # terminal 2
 ```
 
 Then press `w` for the browser, or scan the QR code with Expo Go on a phone. The
@@ -39,10 +42,9 @@ confirm layout on a real device.
 
 **Testing on a physical device:** the phone needs a real IP to reach the server —
 `localhost` only works for the web target and simulators, which share the dev machine's
-network namespace.
+network namespace. Edit the `apps/mobile/.env.local` created above:
 
 ```bash
-cp apps/mobile/.env.example apps/mobile/.env.local
 # edit apps/mobile/.env.local: set EXPO_PUBLIC_API_URL to your dev machine's LAN IP
 # (macOS: ipconfig getifaddr en0), then restart `npm run mobile`
 ```

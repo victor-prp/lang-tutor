@@ -51,11 +51,11 @@ export function createSessionsRouter(store: SessionStore, questionPool: readonly
 
   router.post('/:id/next-step', async (c) => {
     const sessionId = c.req.param('id');
-    const record = store.get(sessionId);
-    if (!record) return c.json({ error: 'session not found' }, 404);
-
     const parsed = NextStepRequestSchema.safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: 'invalid request' }, 400);
+
+    const record = store.get(sessionId);
+    if (!record) return c.json({ error: 'session not found' }, 404);
 
     const outcome = step(record, parsed.data.question_id, parsed.data.option_index);
     if (outcome.status === 'invalid_question') {
