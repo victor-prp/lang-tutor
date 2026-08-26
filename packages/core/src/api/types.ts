@@ -29,3 +29,43 @@ export type MissedQuestion = {
   question: Question;
   correct_answer: string;
 };
+
+export type Position = {
+  position: number;
+  total: number;
+};
+
+export type CreateSessionRequest = {
+  user_id: string;
+};
+
+export type CreateSessionResponse = {
+  session_id: string;
+  question: Question;
+  position: Position;
+};
+
+export type NextStepRequest = {
+  user_id: string;
+  question_id: string;
+  option_index: number;
+};
+
+// A discriminated union on `complete`: when true, the caller has everything
+// the Results screen needs (score, missed_questions) in this same response —
+// there is no separate results call.
+export type NextStepResponse =
+  | {
+      session_id: string;
+      question: Question;
+      position: Position;
+      complete: false;
+    }
+  | {
+      session_id: string;
+      question: null;
+      position: Position;
+      complete: true;
+      score: Score;
+      missed_questions: MissedQuestion[];
+    };
