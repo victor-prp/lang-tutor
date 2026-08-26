@@ -42,6 +42,13 @@ Two commands, translated directly to REST endpoints. `user_id` is sent on every
 request — a client-generated placeholder (no auth yet) that future phases can use to
 tie sessions to a real identity.
 
+The request/response shapes below are defined once, as TypeScript types in
+`@lang-tutor/core/api` (alongside `Question`, `AnswerRecord`, etc.), and imported by both
+`apps/server`'s route handlers and `apps/mobile`'s `api/client.ts`. Neither side defines
+its own copy. This is what makes a shape mismatch between client and server a `tsc`
+compile error instead of a runtime surprise — the same reasoning phase 1 used for the
+`Question` type itself.
+
 ### `create-new-session` — `POST /api/sessions`
 
 ```
@@ -109,7 +116,8 @@ different execution environments).
 apps/server/
 ├── package.json, tsconfig.json
 └── src/
-    ├── index.ts              Hono app; @hono/node-server listen on 0.0.0.0
+    ├── app.ts                builds and exports the Hono app (routes, CORS) — no listen call
+    ├── index.ts              imports app.ts; @hono/node-server listen on 0.0.0.0
     ├── routes/
     │   ├── sessions.ts       the 2 route handlers
     │   └── schemas.ts        Zod schemas for the two request bodies
@@ -131,6 +139,10 @@ apps/server/
   this is exactly the reuse phase 1's layering was built for.
 - Zod schemas live in `apps/server/`, not in `packages/core`. Core stays dependency-free;
   only the server parses untrusted input, so only the server needs a validation library.
+  (Zod schemas and the shared TS response types both describe the same shapes but serve
+  different purposes: the TS types keep client and server in sync at compile time; the
+  Zod schemas guard the server against a request that doesn't actually match its type at
+  runtime, since `tsc` can't stop a malformed HTTP body from arriving.)
 - CORS is enabled via Hono's `cors()` middleware, needed for the Expo web target (native
   `fetch` from Expo Go is not subject to CORS, but the web target is).
 - Binding `0.0.0.0` (not `localhost`) is required so a phone running Expo Go on the same
@@ -186,7 +198,11 @@ machine's network namespace.
 
 ## Testing approach
 
-Mirrors phase 1's boundary: pure logic is unit-tested, components/screens are not.
+Mirrors phase 1's boundary — pure logic is unit-tested, components/screens are not — plus
+one addition phase 1 didn't need: an integration layer, since this phase introduces a
+second process that the app and server both have to agree with over the network. Unit
+tests on each side only check that side's own assumptions; they don't catch the two
+sides disagreeing about what actually crosses the wire.
 
 - `apps/server/src/session.ts` — unit tests analogous to phase 1's `session.test.ts`:
   create, answer-and-advance, completion (score + missed questions in the final step),
@@ -197,8 +213,21 @@ Mirrors phase 1's boundary: pure logic is unit-tested, components/screens are no
   server needed; covers the `404`/idempotency/completion behaviors end-to-end through the
   routes.
 - `apps/mobile/src/api/client.ts` — unit tests with mocked `fetch`.
+- **`apps/server/src/integration.test.ts`** — the new layer. Imports the app from
+  `app.ts` (not `index.ts`, which would also bind the real port as an import side effect),
+  starts it on an ephemeral port via `@hono/node-server`, and drives it with real `fetch`
+  calls through
+  a full ten-question session (create → repeated `next-step` → completion), asserting on
+  the actual HTTP responses. Unlike the route-level tests above, this goes over a real
+  socket, so it exercises real JSON serialization rather than an in-process shortcut —
+  it's the automated check that the documented wire contract is what the server actually
+  produces.
 - No new component/screen tests, same rationale as phase 1: they would calcify UI that's
-  still being iterated on.
+  still being iterated on. Instead, the plan's final verification step is running the
+  real server and the real Expo app together and playing a full session by hand — the
+  same role phase 1's "run and confirm mirroring" step played, extended to also confirm
+  the client and server are actually talking to each other correctly, not just that each
+  one's automated tests pass in isolation.
 
 ## Out of scope for phase 2
 
@@ -230,10 +259,16 @@ lang-tutor-init/
 │   └── server/                        new workspace
 │       ├── package.json, tsconfig.json
 │       └── src/
-│           ├── index.ts
+│           ├── app.ts                 the Hono app, no listen call
+│           ├── index.ts               listens on 0.0.0.0 via @hono/node-server
 │           ├── routes/{sessions.ts,schemas.ts}
 │           ├── store/sessionStore.ts
 │           ├── session.ts
+│           ├── integration.test.ts    real HTTP, full session, against the real app
 │           └── data/mockQuestions.ts  moved from apps/mobile, unchanged content
+└── packages/core/src/api/
+    └── types.ts                       + CreateSessionResponse, NextStepRequest,
+                                        NextStepResponse — shared by server routes and
+                                        apps/mobile/src/api/client.ts
 ```
 
