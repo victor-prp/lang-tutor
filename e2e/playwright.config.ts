@@ -41,11 +41,17 @@ export default defineConfig({
       // hosting it can never disagree. EXPO_PUBLIC_API_URL must be set HERE:
       // export-time inlining is the only thing that controls the app's API
       // target, and it overrides apps/mobile/.env.local without touching it.
+      // Served on 8082, not Metro's default 8081: reuseExistingServer must
+      // never let this entry silently attach to a `npm run mobile` dev server
+      // a developer happens to have running elsewhere.
       command: 'npm run build:web -w apps/mobile && npm run serve:web -w apps/mobile',
       cwd: REPO_ROOT,
       url: APP_URL,
       env: { EXPO_PUBLIC_API_URL: API_URL },
-      reuseExistingServer: !process.env.CI,
+      // Deliberately not tied to CI: a stray process already on this port must
+      // fail the run loudly (port already in use) rather than have Playwright
+      // silently reuse it and run the test against the wrong server.
+      reuseExistingServer: false,
       // Generous: Playwright starts counting before the export begins. ~9s warm,
       // materially slower on a cold Metro cache.
       timeout: 300_000,

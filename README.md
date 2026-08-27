@@ -69,7 +69,7 @@ npm run e2e
 ```
 
 It needs no servers running first — Playwright starts both itself: `apps/server`, and a
-static web export of the app served on port 8081. It builds that export on every run
+static web export of the app served on port 8082. It builds that export on every run
 (~9s), which is deliberate: **the Metro dev server ignores an injected
 `EXPO_PUBLIC_API_URL`** (Metro compiles the value in from `.env.local` instead), so a
 static export is the only way to reliably point the app at the local test server. Your

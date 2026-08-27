@@ -17,7 +17,15 @@ test('a full session scores exactly the answers given', async ({ page }) => {
 
   await page.goto('/');
   await expect(page.getByTestId('start-button'), `home never rendered\n${report()}`).toBeVisible();
-  await page.getByTestId('start-button').click();
+  // web.output: "static" pre-renders start-button in the raw HTML before React
+  // hydrates. page.goto only waits for `load`, not hydration, so a click that
+  // lands in that window is a silent no-op. Retry the click until the session
+  // screen actually mounts. Later clicks in the loop below follow a real server
+  // round trip, so hydration is long complete by then and need no such retry.
+  await expect(async () => {
+    await page.getByTestId('start-button').click();
+    await expect(page.getByTestId('progress-label')).toBeVisible({ timeout: 2_000 });
+  }, `never reached the session screen after clicking start\n${report()}`).toPass({ timeout: 30_000 });
 
   let expectedCorrect = 0;
   const prompts: string[] = [];
@@ -72,4 +80,5 @@ test('a full session scores exactly the answers given', async ({ page }) => {
   );
 
   expect(diagnostics.failedRequests, report()).toEqual([]);
+  expect(diagnostics.pageErrors, report()).toEqual([]);
 });
