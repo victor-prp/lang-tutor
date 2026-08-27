@@ -3,11 +3,13 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "e2e"
   ],
   "scripts": {
     "mobile": "npm run start --workspace apps/mobile",
     "server": "npm run dev --workspace apps/server",
+    "e2e": "npm run e2e --workspace e2e",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

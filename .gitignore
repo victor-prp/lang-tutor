@@ -6,3 +6,5 @@ dist/
 npm-debug.*
 .env*.local
 .superpowers/
+test-results/
+playwright-report/
