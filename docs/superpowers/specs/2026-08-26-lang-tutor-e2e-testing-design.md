@@ -30,20 +30,63 @@ all; a broad suite of browser tests is slow, brittle, and would duplicate assert
 cheaper tiers already make better. Navigation edges and the error path are explicitly out
 of scope (see Out of scope).
 
-## Tooling: Playwright against the Expo web target
+## Tooling: Playwright against a static web export
 
-Playwright drives `expo start --web` in a real Chromium browser. Chosen over the
-alternatives:
+Playwright drives a **pre-built static export** (`expo export -p web`, served by
+`expo serve`) in a real Chromium browser — **not** the Metro dev server.
 
 - **vs. Maestro/Detox (native):** those drive a real simulator or device, which is closer
   to production but needs a native build pipeline and far heavier setup. Playwright reuses
-  the web target the team already develops against (`npm run mobile`, press `w`).
-- **vs. a static export (`expo export -p web`) served as files:** the static route is more
-  deterministic per run — no bundler in the loop mid-test — but adds a build step and a
-  static-server dependency. The dev server tests exactly what developers run, with no new
-  configuration. (`app.json` already sets `web.output: "static"`, so expo-router output
-  mode is *not* an obstacle to the static route; the build step and
-  tests-what-devs-run arguments carry this decision on their own.)
+  the web target the team already develops against.
+- **vs. the Metro dev server (`expo start --web`):** rejected, because **the dev server's
+  API URL cannot be controlled** — see below. This was the original choice and was reversed
+  on evidence.
+
+### Why not the dev server: `EXPO_PUBLIC_API_URL` is uncontrollable there
+
+Metro does not leave `process.env.EXPO_PUBLIC_API_URL` in place. It rewrites the read in
+`client.ts` into a **virtual env module** reference:
+
+```js
+const baseUrl = _expoVirtualEnv.env.EXPO_PUBLIC_API_URL;   // transformed
+```
+
+and generates that module from the `.env` files on disk — tagged `".env.local"` in the
+bundle, holding whatever that file says. A value injected through Playwright's
+`webServer.env` lands only in `process.env`, via a separate block Expo labels
+`/* HMR env vars from Expo CLI (dev-only) */`, which the transformed code never reads.
+`EXPO_NO_DOTENV=1` does not change this. Both were tested with `--clear`, so it is not
+cache staleness.
+
+Net effect under the dev server: the suite would silently use whatever
+`apps/mobile/.env.local` contains — a LAN IP on this machine, nothing at all on a clean
+checkout. Unfixable without either mutating a developer's `.env.local` mid-run or
+accepting a URL that breaks offline, on a new DHCP lease, and in CI.
+
+The static export instead **inlines the value at the call site** at build time:
+
+```js
+const o = await fetch(`http://localhost:3001${s}`, { method: 'POST', ... })   // exported
+```
+
+with the `.env.local` value absent from the bundle entirely. The forced env is respected,
+which is what makes the suite trustworthy.
+
+### What the export route costs, measured
+
+- **A build step of ~9 seconds** (measured, warm cache). Cheaper than the 30-60s cold
+  Metro bundle it replaces, so the suite is likely *faster* end to end.
+- **No new dependency.** `expo serve <dir> --port <n>` ships with Expo CLI.
+- **No routing configuration.** `app.json` already sets `web.output: "static"`, so each
+  route is emitted as its own HTML file (`index.html`, `session.html`, `results.html`).
+  The test only ever loads `/` and navigates client-side from there, so even a naive static
+  server suffices.
+- **It removes a whole class of flake.** Nothing bundles mid-test, so page loads are
+  instant and the timeout-tuning problem below largely disappears.
+
+**The tradeoff this accepts:** the export is a production-mode bundle, so it is *not*
+byte-identical to what developers see under `expo start`. That is a real divergence — but a
+narrower one than testing against an app pointed at the wrong server.
 
 **The tradeoff this accepts:** web-rendered RTL is not identical to native RTL — phase 1
 called this out explicitly and its plan required confirming layout on a real device. This
@@ -87,9 +130,10 @@ processes itself.
   On a fresh boot this is `start` (plain `tsx`), deliberately **not** the root
   `npm run server` script, which maps to `dev` (`tsx watch`) — a file watcher restarting
   the server mid-test is nondeterminism a harness should not invite.
-- **App:** `npm run web -w apps/mobile -- --port 8081`, with `EXPO_PUBLIC_API_URL` passed
-  explicitly in that entry's `env` (see below). Note the bare `--`: without it npm swallows
-  `--port` instead of forwarding it to `expo start`.
+- **App:** a single `webServer` entry that builds then serves — `expo export -p web`
+  followed by `expo serve --port 8081` — with `EXPO_PUBLIC_API_URL` set in that entry's
+  `env` so the export inlines it (see below). Chaining build-and-serve in one command keeps
+  the bundle and the server that hosts it from ever disagreeing.
 - **`reuseExistingServer: !process.env.CI`**, so a developer who already has both running
   gets attached to rather than hitting a port conflict.
 
@@ -101,41 +145,40 @@ local convenience run, and neither applies in CI where the flag is off. Every de
 claim in this design — here and under State isolation — is therefore scoped to **a fresh
 boot**, which is the mode that matters for a trustworthy result.
 
-### `EXPO_PUBLIC_API_URL` must be forced, not inherited
+### `EXPO_PUBLIC_API_URL` must be forced at export time
 
 This is the difference between the suite running and not running.
 `apps/mobile/src/api/client.ts:19-21` throws `'EXPO_PUBLIC_API_URL is not set'` when the
-variable is absent, and the variable's only source is `apps/mobile/.env.local` — a file
-`.gitignore` excludes. Two failure modes follow:
+variable is absent, and the variable's only committed source is nothing at all —
+`apps/mobile/.env.local` is `.gitignore`d. Two failure modes follow:
 
-- **Clean checkout:** no `.env.local`, so the app throws on the first tap and the test
-  fails with no obvious cause.
+- **Clean checkout:** no `.env.local`, so the app throws on the first tap.
 - **This machine today:** `.env.local` holds `http://192.168.1.107:3001`, a LAN IP left
-  over from phase 2's physical-device workflow. Metro inlines it into the bundle, so the
-  browser calls that address instead of `localhost`. It passes only while the router keeps
-  handing out that lease — it breaks on a new lease, another network, offline, or CI.
+  over from phase 2's physical-device workflow — so the browser would call that address
+  instead of `localhost`, passing only while that DHCP lease holds.
 
-So the Metro `webServer` entry sets `env: { EXPO_PUBLIC_API_URL: 'http://localhost:3001' }`
-explicitly. This leaves `.env.local` untouched, so the Expo Go device workflow keeps
-working exactly as phase 2 documented it.
+Setting `env: { EXPO_PUBLIC_API_URL: 'http://localhost:3001' }` on the export command fixes
+both: the value is inlined into the bundle at build time and the `.env.local` value does not
+appear in the output at all (verified). `.env.local` itself is never touched, so phase 2's
+Expo Go device workflow keeps working exactly as documented.
 
-### Timeouts: the cold bundle does not land on `webServer.timeout`
+### Timeouts
 
-`expo start --web` binds port 8081 within seconds, so `webServer.timeout` is satisfied
-almost immediately — it only ever measures *the port answering*. Metro compiles the bundle
-lazily, on the browser's first request, so the real 30-60s cold-bundle wait lands on
-`page.goto()` and the first assertion after it.
+With nothing bundling mid-test, the timeout picture is far simpler than under the dev
+server: `expo serve` answers on 8081 promptly and serves pre-built files, so page loads are
+fast and the default per-test timeout is adequate.
 
-The knobs that actually need raising are therefore `use.navigationTimeout`,
-`use.actionTimeout`, and the per-test `timeout` (default 30s — on its own, less than a cold
-bundle takes). Putting a generous number on `webServer.timeout` alone would leave the suite
-failing on a cold cache with a misleading "element not found" instead of an honest wait.
+The one entry that needs a raised `timeout` is the **export-and-serve `webServer` entry**,
+because Playwright starts counting before the ~9s build begins and only stops when the port
+answers. Allow generous headroom there (the build is slower on a cold Metro cache than the
+measured warm 9s) and leave `use.navigationTimeout` / `use.actionTimeout` near their
+defaults.
 
-### Metro's port must be pinned
+### The serve port must be pinned
 
-Metro moves to another port if 8081 is already taken, which silently breaks a config
-polling a fixed URL. Passing `--port 8081` makes a conflict fail loudly and immediately
-instead of drifting somewhere the test will never look.
+`expo serve --port 8081` pins it. Without an explicit port the server may land somewhere
+the config is not polling, which fails as a confusing timeout rather than an obvious
+conflict.
 
 ### A health endpoint is required
 
@@ -312,18 +355,19 @@ rather than assumed:
 | `seededRng` reachable from `apps/server`? | **No.** Lives in `utils/`, absent from core's `exports` map, not re-exported from any barrel. |
 | `app.json` web output mode | `web.output: "static"` already set. |
 | Port collision with the integration test | None — it binds `port: 0` (ephemeral). |
+| **Forced env under the dev server** | **Ignored.** `client.ts` is transformed to read `_expoVirtualEnv.env`, generated from `.env.local`; `webServer.env` only reaches `process.env` via a dev-only HMR block. Confirmed with `--clear`. |
+| `EXPO_NO_DOTENV=1` as a workaround | **Ineffective** — the virtual module still carried the `.env.local` value. |
+| **Forced env under `expo export`** | **Respected.** Inlined at the `fetch` call site; the `.env.local` value appears 0 times in the output. |
+| `expo export -p web` duration | **~9s** (warm cache), emitting `index.html`, `session.html`, `results.html`, `_sitemap.html`, `+not-found.html`. |
+| Static serving without a new dependency | `npx expo serve <dir> --port <n>` exists in SDK 57. |
 
-Still to verify during planning (each needs a live Metro boot, so deferred):
+Still to verify during planning:
 
-- That an inherited process `env` actually takes precedence over `.env.local` under Expo's
-  dotenv loader. **The whole `EXPO_PUBLIC_API_URL` fix depends on this**; if precedence
-  runs the other way, the fallback is a Playwright global-setup step that writes a
-  temporary env file, or committing a `.env` with the localhost default so `.env.local`
-  is the deliberate override.
-- Whether Metro's bundle cache keys on `EXPO_PUBLIC_*` values, or whether a stale bundle
-  built from the LAN IP can be served after the variable changes (a known class of Expo
-  cache bug). If it does not invalidate, the plan needs `--clear` on the first run.
-- That `page.goto()` plus generous action timeouts genuinely absorbs a cold bundle.
+- That Chromium actually loads the served export and reaches a first question end to end —
+  the one step above that no static inspection can settle, and the reason Task 1 of the plan
+  is a walking skeleton rather than the full loop.
+- Export duration on a **cold** Metro cache (the 9s figure is warm), which sets the
+  `webServer.timeout` floor.
 
 ## What this covers that unit tests cannot
 
