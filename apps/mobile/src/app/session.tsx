@@ -65,7 +65,7 @@ export default function SessionScreen() {
         <Pressable accessibilityRole="button" hitSlop={12} onPress={() => router.back()}>
           <Text style={styles.back}>{'→'}</Text>
         </Pressable>
-        <Text style={styles.counter}>
+        <Text style={styles.counter} testID="progress-label">
           {strings.progressLabel(session.position, session.total)}
         </Text>
       </View>
