@@ -32,13 +32,13 @@ export default function ResultsScreen() {
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.headline}>{headlineFor(correctCount, total)}</Text>
-        <Text style={styles.score}>{strings.scoreLabel(correctCount, total)}</Text>
+        <Text style={styles.score} testID="results-score">{strings.scoreLabel(correctCount, total)}</Text>
 
         {missedQuestions.length > 0 ? (
           <View style={styles.missed}>
             <Text style={styles.missedTitle}>{strings.resultsMissedTitle}</Text>
             {missedQuestions.map(({ question, correct_answer }) => (
-              <View key={question.id} style={styles.missedRow}>
+              <View key={question.id} style={styles.missedRow} testID="missed-row">
                 <View style={styles.missedCellStart}>
                   <Text style={styles.missedPrompt}>{question.question}</Text>
                 </View>

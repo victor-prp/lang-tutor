@@ -9,11 +9,12 @@ type Props = {
   state: OptionVisualState;
   disabled: boolean;
   minHeight?: number;
+  testID?: string;
   onPress: () => void;
   onMeasure: (height: number) => void;
 };
 
-export function OptionButton({ label, state, disabled, minHeight, onPress, onMeasure }: Props) {
+export function OptionButton({ label, state, disabled, minHeight, testID, onPress, onMeasure }: Props) {
   function handleLayout(event: LayoutChangeEvent) {
     onMeasure(event.nativeEvent.layout.height);
   }
@@ -21,6 +22,7 @@ export function OptionButton({ label, state, disabled, minHeight, onPress, onMea
   return (
     <Pressable
       accessibilityRole="button"
+      testID={testID}
       disabled={disabled}
       onPress={onPress}
       onLayout={handleLayout}

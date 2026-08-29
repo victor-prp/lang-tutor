@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useSession } from '@/hooks/useSession';
-import { SESSION_LENGTH } from '@/session';
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -24,7 +24,7 @@ export default function HomeScreen() {
         <Text style={styles.cardLabel}>{strings.homeSetLabel(SESSION_LENGTH)}</Text>
       </View>
 
-      <Pressable accessibilityRole="button" onPress={onStart} style={styles.button}>
+      <Pressable accessibilityRole="button" testID="start-button" onPress={onStart} style={styles.button}>
         <Text style={styles.buttonLabel}>{strings.start}</Text>
       </Pressable>
 

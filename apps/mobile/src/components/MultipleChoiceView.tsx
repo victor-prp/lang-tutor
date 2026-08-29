@@ -33,11 +33,12 @@ export function MultipleChoiceView({ question, selectedOption, onSelect }: Props
   return (
     <View style={styles.container}>
       <Text style={styles.instruction}>{strings.questionInstruction}</Text>
-      <Text style={styles.prompt}>{question.question}</Text>
+      <Text style={styles.prompt} testID="question-prompt">{question.question}</Text>
       <View style={styles.options}>
         {question.options.map((option, index) => (
           <OptionButton
             key={`${question.id}-${index}`}
+            testID={`option-${index}`}
             label={option}
             state={visualState(index)}
             disabled={answered}

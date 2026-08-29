@@ -30,6 +30,7 @@ export function FeedbackBanner({ isCorrect, correctAnswer, onContinue }: Props) 
 
   return (
     <Animated.View
+      testID={isCorrect ? 'feedback-correct' : 'feedback-wrong'}
       style={[
         styles.banner,
         isCorrect ? styles.bannerCorrect : styles.bannerWrong,
@@ -40,7 +41,7 @@ export function FeedbackBanner({ isCorrect, correctAnswer, onContinue }: Props) 
         {isCorrect ? strings.feedbackCorrect : strings.feedbackWrong}
       </Text>
       {isCorrect ? null : <Text style={styles.answer}>{correctAnswer}</Text>}
-      <Pressable accessibilityRole="button" onPress={onContinue} style={styles.button}>
+      <Pressable accessibilityRole="button" testID="continue-button" onPress={onContinue} style={styles.button}>
         <Text style={styles.buttonLabel}>{strings.continueLabel}</Text>
       </Pressable>
     </Animated.View>
