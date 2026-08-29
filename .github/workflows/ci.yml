@@ -35,3 +35,52 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # Browser binaries change when Playwright does, not when the lockfile does,
+      # so the cache is keyed on the resolved version. Read from the e2e workspace
+      # so it resolves whether or not npm hoists the package to the root.
+      - name: Resolve Playwright version
+        id: playwright
+        working-directory: e2e
+        run: |
+          echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # --with-deps installs Chromium's system libraries, which Ubuntu runners do
+      # not ship. Without it the browser fails to launch with a shared-library
+      # error that looks nothing like a test failure. It runs even on a cache hit:
+      # the apt packages live outside the cached directory.
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      # Starts both servers itself — the Hono server and a freshly built static web
+      # export. Nothing needs to be running first, and nothing is special-cased for
+      # CI beyond what playwright.config.ts already does via process.env.CI.
+      - run: npm run e2e
+
+      # trace: 'retain-on-failure' is already set in the config, so a green run has
+      # nothing to upload and if-no-files-found: ignore keeps that from erroring.
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
