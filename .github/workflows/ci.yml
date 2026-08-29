@@ -1,0 +1,98 @@
+name: CI
+
+# Every branch, every push. Deliberately no `pull_request` trigger: for branches in
+# this repo `push` already fires on every commit a PR would contain, so adding it
+# would run the whole suite twice per PR. Push-event check runs satisfy branch
+# protection on master exactly as pull-request-event runs do.
+on: push
+
+# npm ci runs install lifecycle scripts from the whole dependency tree on every
+# push. None of these jobs write to the repo, so pin the token to read-only rather
+# than inheriting whatever the repository default happens to be.
+permissions:
+  contents: read
+
+# A run against a commit that is no longer the branch tip is not worth finishing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job IDs are the branch-protection check contexts. Do not add `name:` keys.
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # Root install: the root package.json owns resolution for all four workspaces.
+      - run: npm ci
+      - run: npm run typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # Browser binaries change when Playwright does, not when the lockfile does,
+      # so the cache is keyed on the resolved version. Read from the e2e workspace
+      # so it resolves whether or not npm hoists the package to the root.
+      - name: Resolve Playwright version
+        id: playwright
+        working-directory: e2e
+        run: |
+          version=$(node -p 'require("@playwright/test/package.json").version')
+          [ -n "$version" ] || { echo "could not resolve @playwright/test version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # --with-deps installs Chromium's system libraries, which Ubuntu runners do
+      # not ship. Without it the browser fails to launch with a shared-library
+      # error that looks nothing like a test failure. It runs even on a cache hit:
+      # the apt packages live outside the cached directory.
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      # Starts both servers itself — the Hono server and a freshly built static web
+      # export. Nothing needs to be running first, and nothing is special-cased for
+      # CI beyond what playwright.config.ts already does via process.env.CI.
+      - run: npm run e2e
+
+      # trace: 'retain-on-failure' is already set in the config, but a failure before
+      # Playwright even runs (npm ci, or the browser install) leaves
+      # e2e/test-results/ never created, so if-no-files-found: ignore covers that case.
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
