@@ -76,8 +76,11 @@ the app broke, not that the code stopped compiling. A failing `e2e` run uploads 
 Playwright trace as a `playwright-traces` artifact; download it and open it with
 `npx playwright show-trace` rather than trying to reproduce the failure locally.
 
-Pushing again cancels the previous run for that branch. Merging to `master` requires all
-three checks to pass.
+Pushing again cancels the previous run for that branch.
+
+These three context names — `typecheck`, `test`, `e2e` — are what a branch-protection
+rule on `master` must list to gate merges on CI. No such rule is configured yet; adding
+one is a repository setting rather than a change to this repo.
 
 The Node version comes from `.nvmrc`, which is also what `nvm use` reads — keep local and
 CI on the same major version by changing that one file.
