@@ -143,7 +143,7 @@ problem in the file. GitHub's own parser reads it correctly. Do not "fix" it by 
 ```bash
 git add .nvmrc .github/workflows/ci.yml
 git commit -m "Add CI workflow running typecheck and unit tests on every push"
-git push -u origin phase-3-ci-cd
+git push -u origin phase-3-ci
 ```
 
 - [ ] **Step 5: Watch the run and confirm both jobs pass**
@@ -153,7 +153,7 @@ gh run watch --exit-status
 ```
 
 Expected: both `typecheck` and `test` conclude successfully. If `gh` picks the wrong run,
-list them with `gh run list --branch phase-3-ci-cd --limit 5` and watch by ID.
+list them with `gh run list --branch phase-3-ci --limit 5` and watch by ID.
 
 If a job fails here, read the log with `gh run view --log-failed` before changing anything.
 The two most likely first-run failures are a missing action version (`Unable to resolve
@@ -470,7 +470,7 @@ git push
 
 - [ ] **Step 5: Confirm the badge renders green**
 
-Open `https://github.com/victor-prp/lang-tutor/tree/phase-3-ci-cd` and check the badge
+Open `https://github.com/victor-prp/lang-tutor/tree/phase-3-ci` and check the badge
 shows a passing CI. A "no status" badge means the `?branch=` parameter is wrong or the
 workflow filename in the URL does not match `ci.yml`.
 

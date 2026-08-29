@@ -22,7 +22,7 @@ Out of scope, each deferred deliberately:
 | Excluded | Why |
 |---|---|
 | Lint | `apps/mobile` has an `expo lint` script but no committed ESLint config, and no other workspace has one. Making lint real means choosing rules and fixing the violations they surface — a change to the code, not to CI. Its own phase. |
-| Deployment (CD) | Needs a hosting decision for both the Hono server and the web export, plus secrets and env config. The server's in-memory session store is also a genuine obstacle to running more than one instance. The branch name `phase-3-ci-cd` is aspirational; this phase delivers the CI half. |
+| Deployment (CD) | Needs a hosting decision for both the Hono server and the web export, plus secrets and env config. The server's in-memory session store is also a genuine obstacle to running more than one instance. This phase delivers the CI half only; the branch is named `phase-3-ci` to match. |
 | Node / OS matrix | One app, one runtime, one target. A matrix would multiply cost to test a portability claim nobody is making. |
 | Splitting the Expo web export into its own job | See "Rejected: a separate build job" below. |
 
