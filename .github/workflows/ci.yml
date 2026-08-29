@@ -6,6 +6,12 @@ name: CI
 # protection on master exactly as pull-request-event runs do.
 on: push
 
+# npm ci runs install lifecycle scripts from the whole dependency tree on every
+# push. None of these jobs write to the repo, so pin the token to read-only rather
+# than inheriting whatever the repository default happens to be.
+permissions:
+  contents: read
+
 # A run against a commit that is no longer the branch tip is not worth finishing.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,6 +21,7 @@ jobs:
   # Job IDs are the branch-protection check contexts. Do not add `name:` keys.
   typecheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -27,6 +34,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -38,6 +46,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -53,7 +62,9 @@ jobs:
         id: playwright
         working-directory: e2e
         run: |
-          echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+          version=$(node -p 'require("@playwright/test/package.json").version')
+          [ -n "$version" ] || { echo "could not resolve @playwright/test version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright browsers
         uses: actions/cache@v4
@@ -74,8 +85,9 @@ jobs:
       # CI beyond what playwright.config.ts already does via process.env.CI.
       - run: npm run e2e
 
-      # trace: 'retain-on-failure' is already set in the config, so a green run has
-      # nothing to upload and if-no-files-found: ignore keeps that from erroring.
+      # trace: 'retain-on-failure' is already set in the config, but a failure before
+      # Playwright even runs (npm ci, or the browser install) leaves
+      # e2e/test-results/ never created, so if-no-files-found: ignore covers that case.
       - name: Upload Playwright traces
         if: failure()
         uses: actions/upload-artifact@v4

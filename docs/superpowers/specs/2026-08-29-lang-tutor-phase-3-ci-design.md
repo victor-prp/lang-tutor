@@ -185,11 +185,11 @@ Protection on `master` requires three check contexts, named for the jobs:
 - `test`
 - `e2e`
 
-Configured in GitHub's settings, not in this repo. Note that `origin/HEAD` currently points
-at `main`, a stale branch holding only the initial commit, while `master` carries all 46
-commits of real work. Until the default branch is repointed, new pull requests will
-propose the wrong base. Fixing that is a repository setting, outside this phase's scope,
-but it should be fixed before it causes a mis-targeted merge.
+Configured in GitHub's settings, not in this repo. The repository's default branch is
+already `master` (`gh api repos/victor-prp/lang-tutor --jq .default_branch` confirms it).
+Only this local clone's cached `refs/remotes/origin/HEAD` is stale, still pointing at
+`main`, a branch holding only the initial commit; that pointer is local-only and affects
+nothing on GitHub. Clear it with `git remote set-head origin -a`.
 
 ## Verification
 

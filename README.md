@@ -10,6 +10,7 @@ completed session — all in memory, no database yet. The learner-facing app is 
 
 - Phase 1: [design](docs/superpowers/specs/2026-08-24-lang-tutor-phase-1-design.md) · [plan](docs/superpowers/plans/2026-08-24-lang-tutor-phase-1.md)
 - Phase 2: [design](docs/superpowers/specs/2026-08-26-lang-tutor-phase-2-design.md) · [plan](docs/superpowers/plans/2026-08-26-lang-tutor-phase-2.md)
+- Phase 3: [design](docs/superpowers/specs/2026-08-29-lang-tutor-phase-3-ci-design.md) · [plan](docs/superpowers/plans/2026-08-29-lang-tutor-phase-3-ci.md)
 
 ## Layout
 
@@ -62,7 +63,7 @@ npm run typecheck # every workspace
 
 ## Continuous integration
 
-Every push, on every branch, runs all three of the above on GitHub Actions
+Every push, on every branch, runs both of the above plus the end-to-end suite below on GitHub Actions
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) as three parallel jobs:
 
 | Job | Runs | Roughly |
@@ -81,6 +82,11 @@ Pushing again cancels the previous run for that branch.
 These three context names — `typecheck`, `test`, `e2e` — are what a branch-protection
 rule on `master` must list to gate merges on CI. No such rule is configured yet; adding
 one is a repository setting rather than a change to this repo.
+
+One caveat before making them required: a pull request from a **fork** produces no check
+runs, because `on: push` only fires for branches in this repository. Requiring these
+contexts would leave such a PR permanently unmergeable. Add a `pull_request` trigger to
+the workflow first if outside contributions ever become real.
 
 The Node version comes from `.nvmrc`, which is also what `nvm use` reads — keep local and
 CI on the same major version by changing that one file.
