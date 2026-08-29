@@ -1,5 +1,7 @@
 # lang-tutor
 
+[![CI](https://github.com/victor-prp/lang-tutor/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/victor-prp/lang-tutor/actions/workflows/ci.yml)
+
 A language-learning app for Hebrew speakers memorising English words and phrases.
 
 Phase 1 ran entirely on mock data with a single multiple-choice question type. Phase 2
@@ -57,6 +59,28 @@ Phone and dev machine must be on the same Wi-Fi network.
 npm test          # every workspace, including apps/server's real-HTTP integration test
 npm run typecheck # every workspace
 ```
+
+## Continuous integration
+
+Every push, on every branch, runs all three of the above on GitHub Actions
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) as three parallel jobs:
+
+| Job | Runs | Roughly |
+|---|---|---|
+| `typecheck` | `npm run typecheck` | 1 min |
+| `test` | `npm test` | 1-2 min |
+| `e2e` | `npm run e2e` — the Playwright suite described below | 4-5 min |
+
+The jobs are independent, so a red `e2e` beside a green `typecheck` and `test` tells you
+the app broke, not that the code stopped compiling. A failing `e2e` run uploads a
+Playwright trace as a `playwright-traces` artifact; download it and open it with
+`npx playwright show-trace` rather than trying to reproduce the failure locally.
+
+Pushing again cancels the previous run for that branch. Merging to `master` requires all
+three checks to pass.
+
+The Node version comes from `.nvmrc`, which is also what `nvm use` reads — keep local and
+CI on the same major version by changing that one file.
 
 ## End-to-end test
 
