@@ -52,6 +52,3 @@ export function missed(
         : [];
     });
 }
-
-// TEMPORARY - reverted in the next commit. Proves CI's typecheck job fails.
-export const ciCanaryShouldNotCompile: number = 'not a number';
