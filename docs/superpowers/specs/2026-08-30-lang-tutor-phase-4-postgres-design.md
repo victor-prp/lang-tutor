@@ -37,6 +37,11 @@ becomes mandatory rather than aspirational.
   satisfy the dependency-injection rule below. No screen, no string, no behaviour
   changes.
 
+One behaviour change is unavoidable and deliberate: an `option_index` beyond the
+question's last option currently returns `200` with `answer_string: undefined`, counted
+as incorrect. That would now write a broken row, so it becomes a `400`. Zod bounds the
+field below but cannot bound it above, since the limit depends on the question.
+
 ## Decisions
 
 Recorded because each was a real fork, and the reasoning matters more than the outcome
@@ -135,17 +140,20 @@ export function createSessionService(db: Db) {
   return {
     startSession: (userId: string) =>
       db.transaction(async (tx) => {
-        const repo = createSessionRepo(tx);
-        const pool = await repo.loadQuestionPool(targetLanguage, userLanguage);
+        const sessions = createSessionRepo(tx);
+        const questions = createQuestionRepo(tx);
+        const user = await sessions.upsertUser(userId);
+        const pool = await questions.loadQuestionPool(
+          user.targetLanguage, user.nativeLanguage, userId);
         const record = newSessionRecord(userId, pool, Math.random);
-        const sessionId = await repo.insertSession(userId, record.questions);
+        const sessionId = await sessions.insertSession(userId, record.questions);
         return { sessionId, record };
       }),
 
     submitAnswer: (sessionId: string, questionId: string, optionIndex: number) =>
       db.transaction(async (tx) => {
         const repo = createSessionRepo(tx);
-        const record = await repo.loadSession(sessionId);
+        const record = await repo.loadSession(sessionId);   // SELECT … FOR UPDATE
         …
       }),
   };
@@ -433,6 +441,7 @@ service that composes them inside a transaction.
 
 ```ts
 // repo/sessions.ts — createSessionRepo(db) returns these, closing over the handle
+upsertUser(userId): Promise<{ nativeLanguage: string; targetLanguage: string }>
 loadSession(sessionId): Promise<SessionRecord | undefined>
 insertSession(userId, picked): Promise<string>
 insertAnswer(sessionId, position, questionId, selectedPosition): Promise<void>
@@ -470,7 +479,10 @@ job is to reconstitute exactly today's `SessionRecord` on read:
 | `complete` | `sessions.completed_at IS NOT NULL` |
 | `completed_at` | `sessions.completed_at.getTime()` |
 
-One Drizzle relational query with two `with:` levels loads the whole aggregate.
+Three small queries inside the transaction load the aggregate: the `sessions` row
+(`FOR UPDATE`), then `session_questions` joined to `questions` and `term_variants`, then
+`answers`. Explicit joins rather than Drizzle's relational `with:`, which would require
+a `relations()` declaration for every table to buy nothing here.
 
 Because `step()` stays a pure function over `SessionRecord`, all of `session.test.ts`
 passes unmodified (only its import path moves). The trickiest behaviour in the codebase — replay, desync, completion —
