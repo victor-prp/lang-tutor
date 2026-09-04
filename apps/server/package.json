@@ -25,7 +25,10 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
+    "db:migrate": "tsx src/db/cli.ts"
   },
   "jest": {
     "testEnvironment": "node"
