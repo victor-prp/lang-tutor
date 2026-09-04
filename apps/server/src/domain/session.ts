@@ -14,7 +14,7 @@ export type SessionRecord = {
 export function newSessionRecord(
   userId: string,
   pool: readonly Question[],
-  rng: () => number = Math.random,
+  rng: () => number,
 ): SessionRecord {
   return {
     user_id: userId,
