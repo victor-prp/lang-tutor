@@ -5,10 +5,11 @@
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@types/node": "^22.0.0",
+    "tsx": "^4.23.12",
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "e2e": "playwright test",
+    "e2e": "tsx globalSetup.ts && playwright test",
     "typecheck": "tsc --noEmit"
   }
 }

@@ -2,15 +2,22 @@ import path from 'node:path';
 
 import { defineConfig, devices } from '@playwright/test';
 
+import { E2E_DATABASE_URL } from './globalSetup';
 import { API_URL, APP_URL } from './urls';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
 export default defineConfig({
   testDir: './tests',
-  // One worker, no parallelism: the server keeps sessions in a shared in-memory
-  // Map, so concurrent specs would interleave against the same store. There is
-  // also only one spec.
+  // Not wired as Playwright's `globalSetup` hook: that hook runs after
+  // `webServer` entries are already started and polled healthy, which is too
+  // late for a server whose `/health` depends on the e2e database existing
+  // (verified empirically — see the comment atop globalSetup.ts). Instead the
+  // `e2e` npm script runs it directly before `playwright test` starts.
+  // One worker, no parallelism: the server is a single process against a single
+  // e2e database, so concurrent specs would interleave against shared session
+  // rows. (Before phase 4 the shared state was an in-memory Map; the reason
+  // changed, the setting did not.) There is also only one spec.
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
@@ -30,6 +37,7 @@ export default defineConfig({
     {
       command: 'npm run start -w apps/server',
       cwd: REPO_ROOT,
+      env: { DATABASE_URL: E2E_DATABASE_URL },
       url: `${API_URL}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
