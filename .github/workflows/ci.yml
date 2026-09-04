@@ -35,6 +35,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -42,11 +54,27 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # schema.ts and the committed migrations can silently diverge when someone
+      # edits the schema and forgets to generate. Without this it fails at deploy
+      # time; with it, it is a red check on the pull request.
+      - run: npm run db:check -w apps/server
       - run: npm test
 
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
