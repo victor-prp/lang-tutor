@@ -16,7 +16,7 @@ function makeQuestion(n: number): Question {
   return {
     id: `q${n}`,
     type: 'multiple_choice',
-    vocab_entry_id: `v${n}`,
+    vocab_term_id: `v${n}`,
     question: `word ${n}`,
     options: [`a${n}`, `b${n}`, `c${n}`, `d${n}`],
     correct_option: 0,

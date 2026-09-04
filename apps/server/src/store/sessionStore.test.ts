@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import type { SessionRecord } from '../session';
+import type { SessionRecord } from '../domain/session';
 import { STALE_AFTER_MS, createSessionStore } from './sessionStore';
 
 function makeRecord(overrides: Partial<SessionRecord> = {}): SessionRecord {

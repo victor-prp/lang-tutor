@@ -4,7 +4,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-window',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-window',
+    vocab_term_id: 'v-window',
     question: 'window',
     options: ['דלת', 'חלון', 'שולחן', 'קיר'],
     correct_option: 1,
@@ -12,7 +12,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-book',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-book',
+    vocab_term_id: 'v-book',
     question: 'book',
     options: ['ספר', 'עיפרון', 'מחשב', 'כיסא'],
     correct_option: 0,
@@ -20,7 +20,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-water',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-water',
+    vocab_term_id: 'v-water',
     question: 'water',
     options: ['לחם', 'חלב', 'מים', 'קפה'],
     correct_option: 2,
@@ -28,7 +28,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-friend',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-friend',
+    vocab_term_id: 'v-friend',
     question: 'friend',
     options: ['שכן', 'מורה', 'רופא', 'חבר'],
     correct_option: 3,
@@ -36,7 +36,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-difficult',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-difficult',
+    vocab_term_id: 'v-difficult',
     question: 'difficult',
     options: ['קל', 'קשה', 'חשוב', 'מהיר'],
     correct_option: 1,
@@ -44,7 +44,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-remember',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-remember',
+    vocab_term_id: 'v-remember',
     question: 'to remember',
     options: ['לשכוח', 'לזכור', 'ללמוד', 'לחשוב'],
     correct_option: 1,
@@ -52,7 +52,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-excuse-me',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-excuse-me',
+    vocab_term_id: 'v-excuse-me',
     question: 'excuse me',
     options: ['שלום', 'תודה', 'סליחה', 'בבקשה'],
     correct_option: 2,
@@ -60,7 +60,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-good-morning',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-good-morning',
+    vocab_term_id: 'v-good-morning',
     question: 'good morning',
     options: ['לילה טוב', 'בוקר טוב', 'ערב טוב', 'שבוע טוב'],
     correct_option: 1,
@@ -68,7 +68,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-thank-you-very-much',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-thank-you-very-much',
+    vocab_term_id: 'v-thank-you-very-much',
     question: 'thank you very much',
     options: ['תודה רבה', 'בבקשה רבה', 'סליחה רבה', 'שלום רב'],
     correct_option: 0,
@@ -76,7 +76,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-how-do-you-do',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-how-do-you-do',
+    vocab_term_id: 'v-how-do-you-do',
     question: 'How do you do?',
     options: ['מה השעה?', 'מה נשמע?', 'מה קרה?', 'מה זה?'],
     correct_option: 1,
@@ -84,7 +84,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-see-you-later',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-see-you-later',
+    vocab_term_id: 'v-see-you-later',
     question: 'see you later',
     options: ['נתראה מחר', 'נתראה אחר כך', 'ניפגש בבוקר', 'נדבר בהמשך'],
     correct_option: 1,
@@ -92,7 +92,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-i-dont-understand',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-i-dont-understand',
+    vocab_term_id: 'v-i-dont-understand',
     question: "I don't understand",
     options: ['אני לא יודע', 'אני לא שומע', 'אני לא מבין', 'אני לא זוכר'],
     correct_option: 2,
@@ -100,7 +100,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-what-is-your-name',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-what-is-your-name',
+    vocab_term_id: 'v-what-is-your-name',
     question: 'What is your name?',
     options: ['מאיפה אתה?', 'איך קוראים לך?', 'בן כמה אתה?', 'מה אתה עושה?'],
     correct_option: 1,
@@ -108,7 +108,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-have-a-nice-day',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-have-a-nice-day',
+    vocab_term_id: 'v-have-a-nice-day',
     question: 'Have a nice day!',
     options: [
       'שיהיה לך יום נעים!',
@@ -121,7 +121,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-where-is-the-station',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-where-is-the-station',
+    vocab_term_id: 'v-where-is-the-station',
     question: 'Where is the station?',
     options: ['איפה הבית?', 'איפה השוק?', 'איפה התחנה?', 'איפה הרחוב?'],
     correct_option: 2,
@@ -129,7 +129,7 @@ export const mockQuestions: Question[] = [
   {
     id: 'q-nice-to-meet-you',
     type: 'multiple_choice',
-    vocab_entry_id: 'v-nice-to-meet-you',
+    vocab_term_id: 'v-nice-to-meet-you',
     question: 'Nice to meet you',
     options: ['נעים להכיר', 'טוב לראות אותך', 'נתראה בקרוב', 'תודה שבאת'],
     correct_option: 0,

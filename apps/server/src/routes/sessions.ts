@@ -9,7 +9,7 @@ import {
   sessionScore,
   step,
   type SessionRecord,
-} from '../session';
+} from '../domain/session';
 import type { SessionStore } from '../store/sessionStore';
 import { CreateSessionRequestSchema, NextStepRequestSchema } from './schemas';
 

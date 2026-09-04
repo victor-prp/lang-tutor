@@ -1,7 +1,7 @@
 export type MultipleChoiceQuestion = {
   id: string;
   type: 'multiple_choice';
-  vocab_entry_id: string;
+  vocab_term_id: string;
   question: string;
   options: string[];
   correct_option: number;

@@ -1,4 +1,4 @@
-import type { SessionRecord } from '../session';
+import type { SessionRecord } from '../domain/session';
 
 export const STALE_AFTER_MS = 5 * 60 * 1000;
 
