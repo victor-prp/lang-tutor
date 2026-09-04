@@ -139,7 +139,7 @@ Every push, on every branch, runs both of the above plus the end-to-end suite be
 | Job | Runs | Roughly |
 |---|---|---|
 | `typecheck` | `npm run typecheck` — database-free, `tsc` reads `db/schema.ts` directly | 1 min |
-| `test` | `npm run db:check -w apps/server` (drift check), then `npm test`, both against a `postgres:17` service container | 1-2 min |
+| `test` | `npm run db:check -w apps/server` (migration-history consistency check), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift check), then `npm test`, all against a `postgres:17` service container | 1-2 min |
 | `e2e` | `npm run e2e` — the Playwright suite described below, against its own `postgres:17` service container | 4-5 min |
 
 The jobs are independent, so a red `e2e` beside a green `typecheck` and `test` tells you

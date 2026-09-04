@@ -54,10 +54,26 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      # schema.ts and the committed migrations can silently diverge when someone
-      # edits the schema and forgets to generate. Without this it fails at deploy
-      # time; with it, it is a red check on the pull request.
+      # db:check only validates that the migrations folder's own snapshot/journal
+      # are internally consistent (e.g. two branches both generating a migration
+      # against the same prior state) — it never compares schema.ts against the
+      # committed migrations, so an edited schema.ts with no `generate` run passes
+      # it silently. Regenerating and diffing is what actually catches that drift:
+      # if schema.ts and the migrations folder disagree, `generate` produces a new
+      # file and/or rewrites the journal, and the diff step fails the build.
       - run: npm run db:check -w apps/server
+      - run: npm run db:generate -w apps/server
+      - name: Fail if schema.ts and the committed migrations have drifted
+        run: |
+          # git diff alone would miss a brand-new, still-untracked migration file;
+          # git status --porcelain catches both a rewritten journal/snapshot and a
+          # new file that generate produced but nobody committed.
+          if [ -n "$(git status --porcelain apps/server/src/db/migrations)" ]; then
+            echo "schema.ts and the committed migrations have drifted." >&2
+            echo "Run 'npm run db:generate -w apps/server' and commit the result." >&2
+            git status --porcelain apps/server/src/db/migrations >&2
+            exit 1
+          fi
       - run: npm test
 
   e2e:
