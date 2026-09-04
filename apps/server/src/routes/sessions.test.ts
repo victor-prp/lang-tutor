@@ -58,6 +58,20 @@ describe('POST /api/sessions/:id/next-step', () => {
     expect(res.status).toBe(404);
   });
 
+  // `sessions.id` is a `uuid` column: before the id reaches the query, a
+  // malformed string must 404 like any other unknown id, not 500 with a raw
+  // driver error (Postgres would otherwise reject it at the SQL level with
+  // 22P02 "invalid input syntax for type uuid").
+  it('404s for a malformed (non-UUID) session id, not 500', async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, '/api/sessions/not-a-uuid/next-step', {
+      user_id: 'u1',
+      question_id: 'q0',
+      option_index: 0,
+    });
+    expect(res.status).toBe(404);
+  });
+
   it('advances to the next question on a fresh answer', async () => {
     const app = buildTestApp();
     const created = await (await postJson(app, '/api/sessions', { user_id: 'u1' })).json();

@@ -14,6 +14,13 @@ import {
 } from '../db/schema';
 import { canonicalOptions, questionFrom } from './questions';
 
+// `sessions.id` is a `uuid` column: a malformed value makes Postgres raise
+// 22P02 (invalid input syntax for type uuid) before a WHERE clause can even
+// run, which would otherwise surface as an uncaught 500 rather than the
+// "not found" a bad id actually means. Reject the shape first so a malformed
+// id is indistinguishable from an id that is merely absent.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export type LoadedSession = {
   record: SessionRecord;
   /** `optionOrders[i][displayIndex]` is the canonical option position shown at that index. */
@@ -83,6 +90,8 @@ export function createSessionRepo(db: Db) {
      * `FOR UPDATE` on the session row serialises concurrent next-step requests.
      */
     loadSession: async (sessionId: string): Promise<LoadedSession | undefined> => {
+      if (!UUID_RE.test(sessionId)) return undefined;
+
       const [session] = await db
         .select({
           id: sessions.id,

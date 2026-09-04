@@ -89,6 +89,14 @@ describe('insertSession then loadSession', () => {
     expect(await repo.loadSession('00000000-0000-0000-0000-000000000000')).toBeUndefined();
   });
 
+  // `sessions.id` is a `uuid` column, so a malformed id would otherwise reach
+  // Postgres and raise 22P02 (invalid input syntax for type uuid) rather than
+  // simply finding no row. Treat it the same as "not found".
+  it('returns undefined for a malformed (non-UUID) session id, without querying the database', async () => {
+    const repo = createSessionRepo(t.db);
+    expect(await repo.loadSession('not-a-uuid')).toBeUndefined();
+  });
+
   it('exposes an option order parallel to the questions', async () => {
     const { sessionRepo, sessionId } = await startSession(t.db);
     const loaded = await sessionRepo.loadSession(sessionId);
