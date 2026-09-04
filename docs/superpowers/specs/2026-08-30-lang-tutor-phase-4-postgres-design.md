@@ -4,9 +4,10 @@ Phase 2 gave the app a server that creates sessions, scores answers, and tracks
 progress — all in a `Map`, wiped on every restart. Phase 4 replaces that `Map` with
 Postgres.
 
-The learner-facing behaviour does not change. The HTTP contract does not change. The
-mobile app is not touched. What changes is where session state lives, and the arrival
-of a real content model underneath the question pool.
+The learner-facing behaviour does not change and the HTTP contract does not change.
+What changes is where session state lives, the arrival of a real content model
+underneath the question pool, and — across both apps — a dependency-injection rule that
+becomes mandatory rather than aspirational.
 
 ## Goals
 
@@ -15,6 +16,8 @@ of a real content model underneath the question pool.
 - The content model supports more than one language pair from day one, so adding a
   second native or target language is data entry rather than a migration.
 - Every test runs against real Postgres, in parallel, against isolated data.
+- One dependency-injection pattern across both apps, applied without exception, so
+  nothing in the codebase reaches for a collaborator it was not given.
 
 ## Non-goals
 
@@ -30,6 +33,9 @@ of a real content model underneath the question pool.
   Compose and CI only.
 - **API changes.** `packages/core/api/types.ts` is unchanged apart from one field
   rename (below).
+- **Any change to what the learner sees.** `apps/mobile` *is* edited, but only to
+  satisfy the dependency-injection rule below. No screen, no string, no behaviour
+  changes.
 
 ## Decisions
 
@@ -45,8 +51,195 @@ if any of them needs revisiting.
 | Question ownership | Shared (`user_id IS NULL`), nullable for later | Copy-per-user meant 80 rows on a learner's first request and a seed fix that never reaches existing learners. Shared rows keep the seed small and tests fast. |
 | Option storage | Embedded `jsonb` on `questions` | One row per question, no join, already in the shape `packages/core` expects. |
 | Multi-language | In the dictionary tables, not in `questions` | Senses and per-L1 translations carry the weight; a question is a rendered artifact stamped with its language pair. |
+| Dependency injection | Closure-based, mandatory everywhere | One pattern, no exceptions to remember. Removes `jest.mock` from the codebase and is what makes a database per test possible at all. |
+| Classes | Only where the language requires one | `class` earns its place for `Error` subclasses and for instances we consume (`pg.Pool`). A class holding stateless methods is a module with extra ceremony. |
 | Completed-session stdout log | Kept | Redundant as storage, still useful as output you can tail without opening `psql`. |
 | Stale-session sweep | Removed | A table has no memory pressure, and deleting completed sessions destroys exactly the history these tables exist to hold. |
+
+## Architecture
+
+### Layers
+
+Five, with a strict inward dependency rule. Nothing points outward.
+
+```
+  index.ts          process        config, pg.Pool, serve, SIGTERM
+  app.ts            composition    createApp(db) — wires everything, holds no logic
+        │
+        ▼
+  routes/           transport      Hono. Parse, validate, map outcome → status code
+        │
+        ▼
+  services/         application    use cases. Owns the transaction boundary
+        │
+        ├──────────────────────┐
+        ▼                      ▼
+  domain/           domain     repo/ + db/     persistence
+  packages/core                               Drizzle, SQL
+  pure functions, no I/O
+```
+
+| Layer | May depend on | Must not touch |
+|---|---|---|
+| `routes/` | services, domain types, zod schemas | Drizzle, SQL, `db/` |
+| `services/` | domain, repositories | Hono, `Context`, status codes |
+| `domain/` | `packages/core/api` types only | pg, Hono, the clock, `Math.random` |
+| `repo/` + `db/` | Drizzle, domain *types* (to return them) | services, routes, domain *logic* |
+
+`packages/core/domain` and the server's `domain/` are both the domain layer, split by
+audience rather than role: core holds rules either side might need (`pickQuestions`,
+`evaluate`, `score`), the server's holds the session state machine only a server has
+(`step`, `SessionRecord`). That split is why phase 1 could run the quiz client-side.
+
+Phase 2 put the orchestration in the route handler, which was harmless while
+persistence was a `Map`. It stops being harmless here: the handler would own
+`db.transaction()`, the `SELECT … FOR UPDATE`, and the insert-then-maybe-complete
+sequence. A transport layer owning transaction boundaries is what layering exists to
+prevent, and it degrades "one transaction per use case" from a structural guarantee
+into a convention someone has to remember. Hence `services/`.
+
+### Closure-based dependency injection is mandatory
+
+**Every dependency is received, never reached for. This is a requirement, not a
+preference, and it has no opt-out.**
+
+A dependency is anything with I/O, state, or a lifecycle: a database handle, an HTTP
+client, a key-value store, a clock, a source of randomness. The rule for each of them:
+
+1. **Construct at the composition root.** `apps/server/src/index.ts` for the server,
+   `apps/mobile/src/app/_layout.tsx` for the app. Nowhere else calls a constructor.
+2. **Capture it in a `createX` factory** that returns an object of closures, and derive
+   the type with `ReturnType<typeof createX>`.
+3. **Pass the resulting object down.** A consumer names what it needs in its
+   parameters.
+4. **No module-level mutable state.** No `export const db = …`, no `process.env` read
+   at import time, no singleton caches.
+5. **No `jest.mock`, anywhere.** A test supplies a fake by passing one. If a test needs
+   `jest.mock`, that is the signal a seam is missing — fix the seam, not the test.
+
+```ts
+// repo/sessions.ts — captures the handle, exposes primitives
+export function createSessionRepo(db: Db) {
+  return {
+    loadSession:     (id: string) => …,
+    insertSession:   (userId: string, picked: Question[]) => …,
+    insertAnswer:    (id: string, position: number, questionId: string, selected: number) => …,
+    completeSession: (id: string) => …,
+  };
+}
+export type SessionRepo = ReturnType<typeof createSessionRepo>;
+
+// services/sessions.ts — captures db, owns the transaction, injects a per-tx repo
+export function createSessionService(db: Db) {
+  return {
+    startSession: (userId: string) =>
+      db.transaction((tx) => startSession(createSessionRepo(tx), userId)),
+    submitAnswer: (sessionId: string, questionId: string, optionIndex: number) =>
+      db.transaction((tx) =>
+        submitAnswer(createSessionRepo(tx), sessionId, questionId, optionIndex)),
+  };
+}
+export type SessionService = ReturnType<typeof createSessionService>;
+
+// the use cases themselves take a repo, so a test needs no database and no jest.mock
+export async function submitAnswer(repo: SessionRepo, sessionId: string, …) { … }
+```
+
+`createSessionRepo` is constructed per transaction because the handle genuinely varies
+per transaction. That is the one dependency passed at call time rather than captured,
+and it is deliberate: it makes the transaction boundary visible at the only place that
+can get it wrong.
+
+The layer above never sees a `Db`. `routes/` does not know a database exists.
+
+### Existing violations, all fixed in this phase
+
+The codebase uses closure DI in exactly one place — `createSessionsRouter(store, pool)`.
+Everywhere else it either constructs its own dependencies or imports them. All of it is
+brought in line here:
+
+| Site | Violation | Fix |
+|---|---|---|
+| `apps/server/src/app.ts` | `createApp()` builds its own `createSessionStore()` and imports `mockQuestions` | `createApp(db)`; the service is constructed from the injected handle |
+| `apps/server/src/store/sessionStore.ts` | `insert(record, now = Date.now())` — a defaulted clock, the thing `quiz.ts` forbids for `rng` | File deleted |
+| `apps/mobile/src/api/client.ts` | `createSession` / `nextStep` are bare module functions reading `process.env` inside themselves | `createApiClient({ baseUrl, fetch })` returning closures |
+| `apps/mobile/src/userId.ts` | `getOrCreateUserId` imports `AsyncStorage` and `expo-crypto` directly — no seam, which is why it is the only file in the repo needing `jest.mock` | `createUserIdStore({ storage, randomUUID })` |
+| `apps/mobile/src/hooks/useSession.tsx` | imports `createSession`, `nextStep`, `getOrCreateUserId` directly | `SessionProvider` receives `api` and `userIdStore`; `app/_layout.tsx` constructs them |
+
+`EXPO_PUBLIC_API_URL` must stay a literal `process.env.EXPO_PUBLIC_API_URL` reference
+somewhere, because Metro only inlines `EXPO_PUBLIC_*` when it sees one — see the comment
+in `client.ts`. The rule is satisfied by moving that literal to `app/_layout.tsx`, the
+composition root, and passing the value in. The constraint is respected; the read just
+happens where every other dependency is constructed.
+
+Two consequences of finishing this:
+
+- The repo's only two `jest.mock` calls, both in `apps/mobile/src/userId.test.ts`,
+  disappear — the fakes become arguments. `client.test.ts` stops swapping `global.fetch`
+  and injects one instead, so it no longer mutates process-global state that leaks
+  across test files in a worker.
+- `apps/mobile` is edited in a phase otherwise about the server. No behaviour changes;
+  see the non-goals.
+
+### What is not dependency injection
+
+Pure functions take their inputs as parameters. That is not DI and the rule does not
+apply to them: `pickQuestions(pool, count, rng)` and `newSessionRecord(userId, pool, rng)`
+keep their signatures. `rng` there is a domain input, not a collaborator — and
+`packages/core` is consumed by both apps as source, so wrapping it in a factory would
+change a shared contract to no benefit. `quiz.ts`'s existing rule (no default argument
+for `rng`, so a server cannot inherit `Math.random` by accident) is the same principle
+enforced one level down.
+
+### Classes
+
+Used only where the language requires one or where we consume an instance we did not
+write:
+
+- `Error` subclasses. `ApiError` in `client.ts` stays as-is, and any typed server error
+  (`SessionNotFound`) is a class, because `instanceof` in Hono's `onError` is the
+  cleanest way to map a domain failure to a status code.
+- `pg.Pool` — real lifecycle, real mutable state. Constructed in `index.ts`.
+
+Nothing else. A class holding only stateless methods is a module with extra ceremony,
+and `this` breaks when a method is passed as a callback, which a closure cannot do.
+
+### Naming
+
+Named imports are the house style — one namespace import exists in the whole codebase —
+so the module path is erased at the call site. Which gives the rule:
+
+> **An export name must read correctly with its file path stripped away.**
+
+That is why `session.ts` exports `sessionScore` and `missedQuestions` rather than
+`score` and `missed`: the bare verbs are taken by `packages/core/domain`.
+
+| Layer | File | Exports |
+|---|---|---|
+| routes | `routes/sessions.ts` | `createSessionsRouter(sessions: SessionService)` |
+| services | `services/sessions.ts` | `createSessionService`, `startSession`, `submitAnswer`, type `SessionService` |
+| domain | `domain/session.ts` | `step`, `positionOf`, `currentQuestion`, `sessionScore`, `missedQuestions`, `newSessionRecord` — unchanged, file moved |
+| repo | `repo/sessions.ts` | `createSessionRepo`, type `SessionRepo` |
+| repo | `repo/questions.ts` | `createQuestionRepo` with `loadQuestionPool`, type `QuestionRepo` |
+| db | `db/client.ts` | `createDb`, type `Db` |
+| db | `db/migrate.ts` | `runMigrations`, `seedContent` |
+
+`loadQuestionPool`, not `loadPool`: `pg.Pool` now exists in this codebase, and
+`loadPool` would read like it returns a connection pool.
+
+One type for the Drizzle handle, not two. `Db` covers both a database and a
+transaction, which are structurally compatible, so a service passes its `tx` wherever a
+`Db` is expected.
+
+Avoided: `SessionService` / `SessionRepo` as *class* names (there are no such classes);
+`SessionAPI` (in this repo `api` already means the wire contract in
+`packages/core/api`); `I` prefixes and `Impl` suffixes; and `utils/` or `helpers/` in
+any new layer.
+
+Files are camelCase, matching `sessionStore.ts` and `mockQuestions.ts`. The directory
+names the layer, the file names the subject — plural in `repo/`, `services/`, `routes/`
+where the module acts over a collection, singular in `domain/session.ts` for the rules
+of one session.
 
 ## Data model
 
@@ -218,27 +411,40 @@ Content is deliberately **not** a migration: keeping it in TypeScript keeps it r
 and diffable, and avoids 80 hand-written `INSERT` statements going stale against the
 schema.
 
-## Server architecture
+## The session flow
 
 ### The seam
 
 `SessionStore`'s `get` / `set` shape does not survive normalisation — `set(record)`
-would have to diff a whole record against three tables to work out what changed. It is
-replaced by a repository whose methods are the operations the routes actually perform:
+would have to diff a whole record against three tables to work out what changed. It
+splits in two, along the layer boundary: a repository of persistence primitives, and a
+service that composes them inside a transaction.
 
 ```ts
-createSession(userId): Promise<{ sessionId: string; record: SessionRecord }>
+// repo/sessions.ts — createSessionRepo(db) returns these, closing over the handle
 loadSession(sessionId): Promise<SessionRecord | undefined>
-recordAnswer(sessionId, position, questionId, selectedPosition, completed): Promise<void>
+insertSession(userId, picked): Promise<string>
+insertAnswer(sessionId, position, questionId, selectedPosition): Promise<void>
+completeSession(sessionId): Promise<void>
+
+// services/sessions.ts — the use cases, each taking an injected repo
+startSession(repo, userId): Promise<{ sessionId: string; record: SessionRecord }>
+submitAnswer(repo, sessionId, questionId, optionIndex): Promise<StepOutcome>
 ```
+
+Primitives rather than use-case-shaped methods, because a repository that opens its own
+transaction cannot be composed — nothing above it could make two writes atomic. Since
+`createSessionRepo` is handed a transaction, the same functions work inside or outside
+one.
 
 `apps/server/src/store/sessionStore.ts` and its test are deleted.
 
-### What does not change
+### Reconstituting `SessionRecord`
 
-`apps/server/src/session.ts` is untouched — not `SessionRecord`, not `step()`, not its
-replay and desync logic, not `newSessionRecord`. `packages/core/domain` is untouched.
-The repository's job is to reconstitute exactly today's `SessionRecord` on read:
+`session.ts` moves to `domain/session.ts` so the layer is visible in the path, and its
+*contents* are untouched — not `SessionRecord`, not `step()`, not its replay and desync
+logic, not `newSessionRecord`. `packages/core/domain` is untouched too. The repository's
+job is to reconstitute exactly today's `SessionRecord` on read:
 
 | `SessionRecord` field | Reconstituted from |
 |---|---|
@@ -256,7 +462,7 @@ The repository's job is to reconstitute exactly today's `SessionRecord` on read:
 One Drizzle relational query with two `with:` levels loads the whole aggregate.
 
 Because `step()` stays a pure function over `SessionRecord`, all of `session.test.ts`
-passes unmodified. The trickiest behaviour in the codebase — replay, desync, completion —
+passes unmodified (only its import path moves). The trickiest behaviour in the codebase — replay, desync, completion —
 keeps its fast, database-free tests.
 
 **The one contract change:** `Question.vocab_entry_id` is renamed to `vocab_term_id` in
@@ -267,7 +473,9 @@ that no longer exists.
 
 ### Transaction boundaries
 
-`POST /api/sessions` — one transaction:
+Both boundaries live in `services/sessions.ts`. A route handler never opens one.
+
+`POST /api/sessions` — `createSessionService(db).startSession`, one transaction:
 
 ```
 INSERT INTO users (id) VALUES ($1) ON CONFLICT DO NOTHING
@@ -286,7 +494,7 @@ today's behaviour exactly.
 its canonical position — unambiguous because `question_options_valid` guarantees
 distinct texts.
 
-`POST /api/sessions/:id/next-step` — one transaction:
+`POST /api/sessions/:id/next-step` — `submitAnswer`, one transaction:
 
 ```
 SELECT ... FROM sessions WHERE id = $1 FOR UPDATE      -- serialises concurrent next-steps
@@ -316,25 +524,43 @@ A Hono `onError` maps an unreachable database to `500` rather than an unhandled
 rejection. `404` for an unknown session and `409` for a desynced `question_id` are
 unchanged.
 
-### Layout
+### Resulting layout
 
 ```
 apps/server/src/
-  app.ts                  createApp(db)
-  index.ts                pool, graceful shutdown
-  db/
+  index.ts                process — pool, createDb, serve, graceful shutdown
+  app.ts                  composition root — createApp(db)
+
+  routes/                 transport
+    sessions.ts           createSessionsRouter(sessions: SessionService)
+    schemas.ts            zod — UNCHANGED
+
+  services/               application — NEW
+    sessions.ts           createSessionService; startSession, submitAnswer
+
+  domain/                 pure
+    session.ts            moved from src/session.ts, contents UNCHANGED
+
+  repo/                   persistence primitives, closing over a Db
+    sessions.ts           createSessionRepo
+    questions.ts          createQuestionRepo
+
+  db/                     infrastructure
     schema.ts             the nine tables, Drizzle
-    client.ts             Pool + drizzle(pool, { schema })
+    client.ts             createDb — Pool + drizzle(pool, { schema })
     content.ts            was data/mockQuestions.ts
     seed.ts               five layers of shared content
-    migrate.ts            drizzle migrator, then seed
+    migrate.ts            runMigrations, seedContent
     migrations/0000_init.sql
-  repo/
-    sessions.ts           createSession / loadSession / recordAnswer
-  routes/sessions.ts      async, against the repository
-  session.ts              UNCHANGED
-  routes/schemas.ts       UNCHANGED
+
+apps/mobile/src/
+  app/_layout.tsx         composition root — constructs api + userIdStore
+  api/client.ts           createApiClient({ baseUrl, fetch })
+  userId.ts               createUserIdStore({ storage, randomUUID })
+  hooks/useSession.tsx    SessionProvider receives its dependencies
 ```
+
+`apps/server/src/data/` and `apps/server/src/store/` are both removed.
 
 ## Testing
 
@@ -364,17 +590,45 @@ One mechanism covers every kind of test — repository tests, route tests, the r
 integration test, and any future test of concurrent `next-step` behaviour. There is no
 category needing different setup and no rule about which applies.
 
+### Constraints the isolation strategy puts on the architecture
+
+These are not testing details; they are why the dependency-injection rule is mandatory.
+
+- **No module-level mutable state.** An `export const db = drizzle(new Pool(…))` in
+  `db/client.ts` would give every test in a worker one connection to one database, and
+  the per-test clone becomes unreachable. `createDb(url)` plus `createApp(db)` is what
+  makes per-test databases possible.
+- **No `process.env` read at import time.** A test resolves its own URL and passes it
+  in. Nothing rewrites the environment to point somewhere else.
+- **No `jest.mock`.** Jest resets the module registry per test *file*, so module mocks
+  cannot leak between parallel tests — but they are also unnecessary here, because every
+  dependency arrives as an argument. A hand-written fake satisfies `SessionRepo`
+  structurally, so an incomplete one is a compile error rather than a runtime
+  `undefined is not a function`.
+- **Never mutate process-global state in a test.** Module registries reset per file; the
+  worker *process* does not. `process.env`, `jest.useFakeTimers()`, and a swapped
+  `global.fetch` all leak across files in the same worker. This is why
+  `client.test.ts` injects `fetch` instead of replacing the global.
+
+Time comes from `NOW()` in SQL and randomness from an injected `rng`, so phase 4 has no
+reason to fake a clock — normally the largest single source of cross-test interference.
+
 ### Existing test files
 
 | File | Fate |
 |---|---|
-| `src/session.test.ts` | **Unchanged.** Pure functions over `SessionRecord` |
+| `src/session.test.ts` | Moves to `src/domain/session.test.ts`; **contents unchanged.** Pure functions over `SessionRecord` |
 | `src/store/sessionStore.test.ts` | **Deleted**, replaced by `repo/sessions.test.ts` |
 | `src/data/mockQuestions.test.ts` | Moves to `db/content.test.ts`; shape assertions survive, plus new ones tying each entry to a lemma, variant, sense, and translation |
 | `src/routes/sessions.test.ts` | Database-backed via `createApp(db)`; the synthetic 12-question pool gives way to the seeded 16. Every assertion survives — 409 on desync, replay, full ten-question run |
 | `src/app.test.ts` | Gains a case: `/health` returns 503 against a broken pool |
 | `tests/integration/session-flow.test.ts` | Real HTTP over a real database; otherwise as-is |
-| `packages/core`, `apps/mobile` | Unchanged apart from the `vocab_term_id` fixture rename |
+| `packages/core` | Unchanged apart from the `vocab_term_id` fixture rename |
+| `apps/mobile/src/userId.test.ts` | Both `jest.mock` calls deleted; `createUserIdStore` receives fake `storage` and `randomUUID` as arguments |
+| `apps/mobile/src/api/client.test.ts` | Stops swapping `global.fetch`; `createApiClient` receives a fake `fetch` and `baseUrl` |
+
+New: `src/services/sessions.test.ts`. Whether the use cases are tested against a real
+database or an injected fake `SessionRepo` is left open — see Open questions.
 
 ### New coverage
 
@@ -454,6 +708,27 @@ The README gains Docker as a prerequisite, `db:up` and `db:migrate` in the run
 instructions, a note that tests require the database, and a short data-model section
 describing the nine tables and the shared-versus-per-learner split.
 
+It also gains a short statement of the layering and the closure-DI rule, since that rule
+now governs both apps and is the kind of convention a contributor has to be told rather
+than infer.
+
+## Open questions
+
+One, deliberately left for the implementation plan rather than guessed at here:
+
+**Are the use cases in `services/` tested against a real database, or against an
+injected fake `SessionRepo`?** Both are available at no structural cost, because
+`startSession` and `submitAnswer` take a repo rather than a `Db` — switching is one
+line in the test. The trade-off: a fake makes those tests microseconds instead of tens
+of milliseconds, but the services are three lines of orchestration over a pure domain,
+so a fake-based test largely asserts that the service called the repository, and passes
+while the SQL is wrong.
+
+The estimate favouring a real database — roughly 80ms per clone across perhaps 25
+tests, a few hundred milliseconds of wall clock once spread across workers — is an
+estimate, not a measurement. The plan's first step measures the real per-clone cost and
+settles this on the number.
+
 ## Risks
 
 - **`npm test` now requires Docker.** The largest change to how this repo feels to work
@@ -463,6 +738,10 @@ describing the nine tables and the shared-versus-per-learner split.
 - **`CREATE DATABASE` privileges.** The per-test isolation strategy needs them. Fine
   against local and CI Postgres; a hosted provider that forbids it would force a
   schema-per-test fallback.
+- **`apps/mobile` is refactored in a server phase.** Four files change to satisfy the
+  DI rule, including the `SessionProvider` that every screen consumes. No behaviour
+  changes, and the e2e suite drives the real app end to end, so a regression here fails
+  a check rather than reaching a learner.
 - **The seed is Hebrew/English only.** The schema supports more, but nothing proves the
   multi-language paths work until a second pair exists. The pick query filters on both
   language columns from day one, so at least the query is not accidentally correct.
