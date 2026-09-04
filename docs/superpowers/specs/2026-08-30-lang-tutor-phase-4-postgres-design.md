@@ -82,7 +82,7 @@ Five, with a strict inward dependency rule. Nothing points outward.
 | Layer | May depend on | Must not touch |
 |---|---|---|
 | `routes/` | services, domain types, zod schemas | Drizzle, SQL, `db/` |
-| `services/` | domain, repositories | Hono, `Context`, status codes |
+| `services/` | domain, repositories, the `Db` handle for transaction scope | Hono, `Context`, status codes, SQL |
 | `domain/` | `packages/core/api` types only | pg, Hono, the clock, `Math.random` |
 | `repo/` + `db/` | Drizzle, domain *types* (to return them) | services, routes, domain *logic* |
 
@@ -129,28 +129,39 @@ export function createSessionRepo(db: Db) {
 }
 export type SessionRepo = ReturnType<typeof createSessionRepo>;
 
-// services/sessions.ts — captures db, owns the transaction, injects a per-tx repo
+// services/sessions.ts — captures db, owns the transaction, derives the repo inside.
+// Exports one factory and one type. Nothing else.
 export function createSessionService(db: Db) {
   return {
     startSession: (userId: string) =>
-      db.transaction((tx) => startSession(createSessionRepo(tx), userId)),
+      db.transaction(async (tx) => {
+        const repo = createSessionRepo(tx);
+        const pool = await repo.loadQuestionPool(targetLanguage, userLanguage);
+        const record = newSessionRecord(userId, pool, Math.random);
+        const sessionId = await repo.insertSession(userId, record.questions);
+        return { sessionId, record };
+      }),
+
     submitAnswer: (sessionId: string, questionId: string, optionIndex: number) =>
-      db.transaction((tx) =>
-        submitAnswer(createSessionRepo(tx), sessionId, questionId, optionIndex)),
+      db.transaction(async (tx) => {
+        const repo = createSessionRepo(tx);
+        const record = await repo.loadSession(sessionId);
+        …
+      }),
   };
 }
 export type SessionService = ReturnType<typeof createSessionService>;
-
-// the use cases themselves take a repo, so a test needs no database and no jest.mock
-export async function submitAnswer(repo: SessionRepo, sessionId: string, …) { … }
 ```
 
-`createSessionRepo` is constructed per transaction because the handle genuinely varies
-per transaction. That is the one dependency passed at call time rather than captured,
-and it is deliberate: it makes the transaction boundary visible at the only place that
-can get it wrong.
+A use case takes only its own arguments — `startSession(userId)`, not
+`startSession(repo, userId)`. The repository is created *inside*, from the transaction,
+because the handle genuinely varies per transaction and does not exist when
+`createSessionService(db)` runs. Exporting a second `startSession(repo, …)` as a test
+seam is explicitly not done: it would be parameter injection wearing this rule's
+clothes, and it would give routes a function they must never call.
 
-The layer above never sees a `Db`. `routes/` does not know a database exists.
+The layer above never sees a `Db` or a repository. `routes/` does not know a database
+exists.
 
 ### Existing violations, all fixed in this phase
 
@@ -217,7 +228,7 @@ That is why `session.ts` exports `sessionScore` and `missedQuestions` rather tha
 | Layer | File | Exports |
 |---|---|---|
 | routes | `routes/sessions.ts` | `createSessionsRouter(sessions: SessionService)` |
-| services | `services/sessions.ts` | `createSessionService`, `startSession`, `submitAnswer`, type `SessionService` |
+| services | `services/sessions.ts` | `createSessionService`, type `SessionService` — and nothing else |
 | domain | `domain/session.ts` | `step`, `positionOf`, `currentQuestion`, `sessionScore`, `missedQuestions`, `newSessionRecord` — unchanged, file moved |
 | repo | `repo/sessions.ts` | `createSessionRepo`, type `SessionRepo` |
 | repo | `repo/questions.ts` | `createQuestionRepo` with `loadQuestionPool`, type `QuestionRepo` |
@@ -427,9 +438,9 @@ insertSession(userId, picked): Promise<string>
 insertAnswer(sessionId, position, questionId, selectedPosition): Promise<void>
 completeSession(sessionId): Promise<void>
 
-// services/sessions.ts — the use cases, each taking an injected repo
-startSession(repo, userId): Promise<{ sessionId: string; record: SessionRecord }>
-submitAnswer(repo, sessionId, questionId, optionIndex): Promise<StepOutcome>
+// services/sessions.ts — createSessionService(db) returns these
+startSession(userId): Promise<{ sessionId: string; record: SessionRecord }>
+submitAnswer(sessionId, questionId, optionIndex): Promise<StepOutcome>
 ```
 
 Primitives rather than use-case-shaped methods, because a repository that opens its own
@@ -627,8 +638,12 @@ reason to fake a clock — normally the largest single source of cross-test inte
 | `apps/mobile/src/userId.test.ts` | Both `jest.mock` calls deleted; `createUserIdStore` receives fake `storage` and `randomUUID` as arguments |
 | `apps/mobile/src/api/client.test.ts` | Stops swapping `global.fetch`; `createApiClient` receives a fake `fetch` and `baseUrl` |
 
-New: `src/services/sessions.test.ts`. Whether the use cases are tested against a real
-database or an injected fake `SessionRepo` is left open — see Open questions.
+New: `src/services/sessions.test.ts`, against the per-test database like every other
+database-backed test. There is no fake-repository option, by construction: a service
+receives only a `Db`, so the only way to substitute the repository would be an exported
+seam this design rules out. The services are three lines of orchestration over a pure
+domain — the logic worth testing in isolation already lives in `domain/session.ts` and
+needs no database at all.
 
 ### New coverage
 
@@ -711,23 +726,6 @@ describing the nine tables and the shared-versus-per-learner split.
 It also gains a short statement of the layering and the closure-DI rule, since that rule
 now governs both apps and is the kind of convention a contributor has to be told rather
 than infer.
-
-## Open questions
-
-One, deliberately left for the implementation plan rather than guessed at here:
-
-**Are the use cases in `services/` tested against a real database, or against an
-injected fake `SessionRepo`?** Both are available at no structural cost, because
-`startSession` and `submitAnswer` take a repo rather than a `Db` — switching is one
-line in the test. The trade-off: a fake makes those tests microseconds instead of tens
-of milliseconds, but the services are three lines of orchestration over a pure domain,
-so a fake-based test largely asserts that the service called the repository, and passes
-while the SQL is wrong.
-
-The estimate favouring a real database — roughly 80ms per clone across perhaps 25
-tests, a few hundred milliseconds of wall clock once spread across workers — is an
-estimate, not a measurement. The plan's first step measures the real per-clone cost and
-settles this on the number.
 
 ## Risks
 
