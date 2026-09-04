@@ -31,6 +31,11 @@
     "db:migrate": "tsx src/db/cli.ts"
   },
   "jest": {
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "globalSetup": "<rootDir>/tests/support/globalSetup.ts",
+    "globalTeardown": "<rootDir>/tests/support/globalTeardown.ts",
+    "restoreMocks": true,
+    "resetMocks": true,
+    "testTimeout": 30000
   }
 }
