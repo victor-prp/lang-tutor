@@ -6,8 +6,8 @@ import { eq } from 'drizzle-orm';
 import { createDb, type Db } from './client';
 import { runMigrations } from './migrate';
 import { sessions, users } from './schema';
+import { ADMIN_URL, urlFor } from '../../tests/support/dbNames';
 
-const ADMIN_URL = 'postgres://postgres:postgres@localhost:5432/postgres';
 const DB_NAME = 'lang_tutor_schema_test';
 
 let admin: ReturnType<typeof createDb>;
@@ -18,7 +18,7 @@ beforeAll(async () => {
   admin = createDb(ADMIN_URL, 1);
   await admin.db.execute(sql.raw(`drop database if exists ${DB_NAME} with (force)`));
   await admin.db.execute(sql.raw(`create database ${DB_NAME}`));
-  handle = createDb(`postgres://postgres:postgres@localhost:5432/${DB_NAME}`);
+  handle = createDb(urlFor(DB_NAME));
   db = handle.db;
   await runMigrations(db);
 }, 60_000);
@@ -54,16 +54,12 @@ async function seedOneTerm(db: Db): Promise<void> {
   `);
 }
 
-function optionsOf(overrides: unknown): string {
-  return JSON.stringify(overrides);
-}
-
 async function insertQuestion(db: Db, id: string, options: unknown): Promise<unknown> {
   return db.execute(sql`
     insert into questions (id, user_id, sense_id, prompt_variant_id,
                            target_language, user_language_code, type, options)
     values (${id}, null, 'sense-window-default', 'tv-en-window-base',
-            'en', 'he', 'multiple_choice', ${sql.raw(`'${optionsOf(options)}'::jsonb`)})
+            'en', 'he', 'multiple_choice', ${JSON.stringify(options)}::jsonb)
   `);
 }
 

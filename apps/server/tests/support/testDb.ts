@@ -1,9 +1,9 @@
+import { randomUUID } from 'node:crypto';
+
 import { sql } from 'drizzle-orm';
 
 import { createDb, type Db } from '../../src/db/client';
 import { ADMIN_URL, currentWorkerId, templateName, urlFor } from './dbNames';
-
-let counter = 0;
 
 export type TestDb = { db: Db; name: string; close: () => Promise<void> };
 
@@ -13,7 +13,7 @@ export type TestDb = { db: Db; name: string; close: () => Promise<void> };
  */
 export async function createTestDb(): Promise<TestDb> {
   const worker = currentWorkerId();
-  const name = `lang_tutor_test_${worker}_${counter++}`;
+  const name = `lang_tutor_test_${worker}_${randomUUID().slice(0, 8)}`;
   const admin = createDb(ADMIN_URL, 1);
 
   try {

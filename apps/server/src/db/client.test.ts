@@ -2,12 +2,11 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
 import { createDb } from './client';
+import { ADMIN_URL } from '../../tests/support/dbNames';
 
 // Deliberately the maintenance database: this test proves connectivity only,
 // and must not depend on lang_tutor having been migrated yet.
-const URL = 'postgres://postgres:postgres@localhost:5432/postgres';
-
-const handle = createDb(URL);
+const handle = createDb(ADMIN_URL);
 
 afterAll(() => handle.close());
 
