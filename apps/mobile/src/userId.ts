@@ -1,16 +1,27 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Crypto from 'expo-crypto';
-
 const STORAGE_KEY = 'lang-tutor:user-id';
 
+export type UserIdStoreDeps = {
+  storage: {
+    getItem(key: string): Promise<string | null>;
+    setItem(key: string, value: string): Promise<void>;
+  };
+  randomUUID: () => string;
+};
+
 // A client-generated placeholder — no auth exists yet. Persisted so the same
-// install keeps the same id across app restarts; unused server-side beyond
-// appearing in the completion log line, groundwork for a future phase that
-// ties sessions to a real identity.
-export async function getOrCreateUserId(): Promise<string> {
-  const existing = await AsyncStorage.getItem(STORAGE_KEY);
-  if (existing) return existing;
-  const created = Crypto.randomUUID();
-  await AsyncStorage.setItem(STORAGE_KEY, created);
-  return created;
+// install keeps the same id across app restarts. Storage and the id generator
+// are received rather than imported, which is why this file no longer needs
+// jest.mock to be testable.
+export function createUserIdStore({ storage, randomUUID }: UserIdStoreDeps) {
+  return {
+    getOrCreateUserId: async (): Promise<string> => {
+      const existing = await storage.getItem(STORAGE_KEY);
+      if (existing) return existing;
+      const created = randomUUID();
+      await storage.setItem(STORAGE_KEY, created);
+      return created;
+    },
+  };
 }
+
+export type UserIdStore = ReturnType<typeof createUserIdStore>;
