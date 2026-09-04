@@ -9,6 +9,9 @@ import * as schema from './schema';
 // database, and the per-test cloned database would be unreachable.
 export function createDb(connectionString: string, max = 5) {
   const pool = new Pool({ connectionString, max });
+  pool.on('error', (err) => {
+    console.error('Unexpected error on idle Postgres client', err);
+  });
   const db = drizzle(pool, { schema });
   return {
     db,
