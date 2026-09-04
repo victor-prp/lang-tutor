@@ -42,6 +42,9 @@ question's last option currently returns `200` with `answer_string: undefined`, 
 as incorrect. That would now write a broken row, so it becomes a `400`. Zod bounds the
 field below but cannot bound it above, since the limit depends on the question.
 
+This behaviour change landed in Task 7: the service layer rejects such an `option_index`
+as `OptionOutOfRange` before the repository can write it.
+
 ## Decisions
 
 Recorded because each was a real fork, and the reasoning matters more than the outcome

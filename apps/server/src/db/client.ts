@@ -1,4 +1,5 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 
 import * as schema from './schema';
@@ -22,5 +23,9 @@ export function createDb(connectionString: string, max = 5) {
 
 // One type for both a database and a transaction handle: Drizzle's transaction
 // object is structurally compatible, so a service can pass its `tx` wherever a
-// `Db` is expected.
-export type Db = ReturnType<typeof createDb>['db'];
+// `Db` is expected. Named as `NodePgDatabase<schema>` rather than
+// `ReturnType<typeof createDb>['db']`: `drizzle()`'s return type is that plus a
+// `$client: Pool` intersection member, which a `PgTransaction` does not have —
+// keeping that member out of `Db` is what makes the "pass `tx` as `Db`" claim
+// above actually typecheck.
+export type Db = NodePgDatabase<typeof schema>;
