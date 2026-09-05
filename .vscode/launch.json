@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // `npm run server` uses `tsx watch`, which runs the code in a child
+      // process — a debugger attached to it never lands in your breakpoints.
+      // So launch the entrypoint directly with tsx as a Node loader instead.
+      // Requires the database: `npm run db:up` (and `npm run db:migrate` once).
+      "type": "node",
+      "request": "launch",
+      "name": "Debug server",
+      "program": "${workspaceFolder}/apps/server/src/index.ts",
+      "runtimeArgs": ["--import", "tsx"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    },
+    {
+      // For a server already started by hand:
+      //   node --inspect --import tsx apps/server/src/index.ts
+      "type": "node",
+      "request": "attach",
+      "name": "Attach to running server",
+      "port": 9229,
+      "restart": true,
+      "skipFiles": ["<node_internals>/**", "${workspaceFolder}/node_modules/**"]
+    }
+  ]
+}
