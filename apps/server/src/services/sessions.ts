@@ -3,8 +3,8 @@ import { newSessionRecord, sessionScore, step } from '../domain/session';
 import type { Db } from '../db/client';
 import { OptionOutOfRange, QuestionDesynced, SessionNotFound } from '../errors';
 import type { Logger } from '../logger';
-import { createQuestionRepo } from '../repo/questions';
-import { createSessionRepo } from '../repo/sessions';
+import type { CreateQuestionRepo } from '../repo/questions';
+import type { CreateSessionRepo } from '../repo/sessions';
 
 // The one place a completed session is logged. Redundant with the database, kept
 // because it is output you can tail without opening psql — structured, so you
@@ -31,16 +31,18 @@ export function createSessionService({
   db,
   rng,
   logger,
+  repos,
 }: {
   db: Db;
   rng: () => number;
   logger: Logger;
+  repos: { session: CreateSessionRepo; question: CreateQuestionRepo };
 }) {
   return {
     startSession: (userId: string): Promise<{ sessionId: string; record: SessionRecord }> =>
       db.transaction(async (tx) => {
-        const sessionRepo = createSessionRepo(tx);
-        const questionRepo = createQuestionRepo(tx);
+        const sessionRepo = repos.session(tx);
+        const questionRepo = repos.question(tx);
 
         const user = await sessionRepo.upsertUser(userId);
         const pool = await questionRepo.loadQuestionPool(
@@ -62,7 +64,7 @@ export function createSessionService({
       // a commit that fails after completeSession must not leave a log claiming a
       // session the database never recorded.
       const { record, justCompleted } = await db.transaction(async (tx) => {
-        const repo = createSessionRepo(tx);
+        const repo = repos.session(tx);
         const loaded = await repo.loadSession(sessionId);
         if (!loaded) throw new SessionNotFound(sessionId);
 

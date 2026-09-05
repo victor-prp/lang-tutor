@@ -1,7 +1,7 @@
 import type { Question } from '@lang-tutor/core/api';
 import { and, eq, isNull, or } from 'drizzle-orm';
 
-import type { Db } from '../db/client';
+import type { Tx } from '../db/client';
 import { questions, termVariants, type QuestionOption } from '../db/schema';
 
 /** Options as authored, ordered by their canonical position. */
@@ -29,7 +29,7 @@ export function questionFrom(
   };
 }
 
-export function createQuestionRepo(db: Db) {
+export function createQuestionRepo(tx: Tx) {
   return {
     /**
      * The pool a session draws from: shared questions plus any belonging to
@@ -41,7 +41,7 @@ export function createQuestionRepo(db: Db) {
       userLanguageCode: string,
       userId: string,
     ): Promise<Question[]> => {
-      const rows = await db
+      const rows = await tx
         .select({
           id: questions.id,
           options: questions.options,
@@ -64,3 +64,4 @@ export function createQuestionRepo(db: Db) {
 }
 
 export type QuestionRepo = ReturnType<typeof createQuestionRepo>;
+export type CreateQuestionRepo = (tx: Tx) => QuestionRepo;

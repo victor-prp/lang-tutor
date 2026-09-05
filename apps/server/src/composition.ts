@@ -1,6 +1,8 @@
 import type { Db } from './db/client';
 import type { Logger } from './logger';
 import { createHealthRepo, type HealthRepo } from './repo/health';
+import { createQuestionRepo } from './repo/questions';
+import { createSessionRepo } from './repo/sessions';
 import { createSessionService, type SessionService } from './services/sessions';
 
 export type AppDeps = {
@@ -15,7 +17,12 @@ export type AppDeps = {
 // a pure function a test can call.
 export function createServerDeps(io: { db: Db; logger: Logger; rng: () => number }): AppDeps {
   return {
-    sessions: createSessionService({ db: io.db, rng: io.rng, logger: io.logger }),
+    sessions: createSessionService({
+      db: io.db,
+      rng: io.rng,
+      logger: io.logger,
+      repos: { session: createSessionRepo, question: createQuestionRepo },
+    }),
     health: createHealthRepo(io.db),
     logger: io.logger,
   };

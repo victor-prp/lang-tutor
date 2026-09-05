@@ -32,3 +32,9 @@ export function createDb(
 // keeping that member out of `Db` is what makes the "pass `tx` as `Db`" claim
 // above actually typecheck.
 export type Db = NodePgDatabase<typeof schema>;
+
+// A transaction handle, derived from what Drizzle actually hands the transaction
+// callback rather than hand-written from its generics. `Db` accepts a `Tx`, but
+// not the reverse — which is what makes "one transaction per use case" a
+// compile error instead of a convention someone has to remember.
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];

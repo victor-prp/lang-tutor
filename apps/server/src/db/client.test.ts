@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
-import { createDb } from './client';
+import { createDb, type Tx } from './client';
 import { ADMIN_URL } from '../../tests/support/dbNames';
 
 // Deliberately the maintenance database: this test proves connectivity only,
@@ -9,6 +9,13 @@ import { ADMIN_URL } from '../../tests/support/dbNames';
 // policy is what a short-lived test handle wants — there is no logger here to
 // route an idle-client error to, and nothing to do about one.
 const handle = createDb(ADMIN_URL, { max: 1, onError: () => {} });
+
+// A compile-time assertion, not a runtime one: the pool handle must not satisfy
+// `Tx`. If this ever compiles, tsc fails on the unused directive — so the
+// asymmetry cannot silently regress.
+// @ts-expect-error a pool handle is not a transaction handle
+const notATransaction: Tx = handle.db;
+void notATransaction;
 
 afterAll(() => handle.close());
 
