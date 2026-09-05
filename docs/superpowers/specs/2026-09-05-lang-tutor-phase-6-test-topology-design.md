@@ -46,7 +46,7 @@ into `tests/integration/`, and phase 5 would then move several of them back.
 | Bare `npm test` at the root | Unit only; `test:integration` and `test:all` alongside | Chosen over the safer "everything by default". The trade — the obvious command can go green while database-backed tests never ran — is real, is mitigated in *Scripts*, and is recorded under Risks rather than treated as solved. |
 | Jest config location | A new `apps/server/jest.config.js` | Two projects with per-project setup need comments to explain *why* (which JSON cannot carry). `.js` rather than `.ts` because Jest needs `ts-node` for a TypeScript config and it is not installed — adding a dependency to parse config is not worth it. |
 | `tests/support/isolation.test.ts` | Moves to `tests/integration/support/` | It tests the harness rather than the app, which argues for keeping it separate — but it needs Postgres, and one allowlisted exception is how the allowlist this design removes comes back. |
-| Template databases | Renamed `lang_tutor_tmpl_<worker>` → `t_tmpl_<worker>`; sweep widened from `t_test_%` to `t_%` | Fixes an existing orphan bug, not only tidiness: templates are dropped by exact name for `worker in 1..maxWorkers`, so a 4-worker run followed by a 2-worker run leaks templates 3 and 4 permanently. |
+| Template databases | Renamed `lang_tutor_tmpl_<worker>` → `t_tmpl_<worker>`; sweep widened from `t_test_%` to `t_%` (**amended — see Amendments**) | Fixes an existing orphan bug, not only tidiness: templates are dropped by exact name for `worker in 1..maxWorkers`, so a 4-worker run followed by a 2-worker run leaks templates 3 and 4 permanently. |
 | CI job ids | `test-unit` and `test-integration`, named for what they do | An earlier draft kept the imprecise id `test` to avoid breaking a required status check. Verified against the API: `master` has no legacy branch protection, and its active ruleset ("protect muster") contains only `deletion`, `non_fast_forward` and `pull_request` — **no** `required_status_checks`. No job name is load-bearing, so accuracy wins. |
 
 ## Architecture
@@ -131,7 +131,8 @@ Naming, cleanup timing and metadata are decision 4 of the PR review, unchanged:
   `SELECT datname, shobj_description(oid, 'pg_database') FROM pg_database;`.
 - **Cleanup:** `close()` still ends the connection pool — that part is load-bearing
   against Postgres's `max_connections` — but no longer drops the database. Dropping
-  moves to a `t_%` sweep at the top of `globalSetup`, before templates are recreated.
+  moves to a sweep at the top of `globalSetup`, before templates are recreated
+  (`^t_(test|tmpl)_` — see Amendments).
 
 Two consequences of running under two projects rather than one:
 
@@ -142,7 +143,7 @@ next *integration* run. That is the intended inspect-afterwards behaviour, state
 so it is not rediscovered as a leak.
 
 **The sweep runs before template creation and covers templates too.** Because it
-matches `t_%` rather than dropping templates by exact worker number, a run started with
+matches by pattern rather than dropping templates by exact worker number, a run started with
 fewer workers than the last one no longer strands the extra templates.
 
 ### Scripts
@@ -240,12 +241,48 @@ real and accepted as the cost of a fast bucket that can grow.
 `tests/integration/app.test.ts` because that file was already open". Nothing structural
 prevents it; only review does.
 
-**`t_%` sweeps wider than `t_test_%`.** Widened deliberately to self-heal orphaned
+**~~`t_%` sweeps wider than `t_test_%`.~~** ~~Widened deliberately to self-heal orphaned
 templates, it now drops anything in this Postgres instance whose name begins with
 `t_`. Near-zero risk in a dedicated `docker-compose.yml` container, but worth knowing
-before someone hand-creates a `t_scratch` database and loses it to a test run.
+before someone hand-creates a `t_scratch` database and loses it to a test run.~~
+**Retired by amendment 1** — the sweep no longer matches `t_` broadly, so there is no
+longer a bystander to lose.
 
 **The split table depends on phase 5 landing as specified.** If a case phase 5 was
 expected to make database-free turns out not to be, *File topology*'s table is wrong
 for that row. Mitigated by the implementation note there: re-derive the split from the
 real tree, treat the table as the expected shape.
+
+## Amendments
+
+Changes agreed after this document was written and before implementation began. The
+sections above are left as originally written; where one is superseded it is marked.
+
+### 1. The sweep matches `^t_(test|tmpl)_`, not `t_%` (2026-09-06)
+
+**What changed.** `globalSetup`'s sweep drops databases matching the POSIX regex
+`^t_(test|tmpl)_` — the two prefixes this harness creates, named explicitly — rather than
+everything matching `LIKE 't_%'`.
+
+**Why.** The decision table weighed two options and picked the better of them, but the
+pair was a false binary. `t_test_%` was rejected because it misses `t_tmpl_<worker>` and
+therefore does not fix the orphaned-template bug, which is the entire reason for
+widening. `t_%` fixes that, at the cost recorded under Risks: it drops anything in the
+instance whose name begins with `t_`. Naming both prefixes is a third option neither row
+considered. It self-heals orphaned templates exactly as well as `t_%`, and its blast
+radius is limited to names the harness actually creates — so the Risks entry is retired
+rather than accepted.
+
+A regex rather than two `LIKE` clauses for a second reason: `_` is a `LIKE` wildcard, so
+the correct `LIKE` form needs escaping (`t\_test\_%`) and the natural-looking `'t_%'`
+silently also matches `taxes` and `todo`. In a POSIX regex `_` is literal, so there is no
+escape to get wrong.
+
+**What did not change.** The `lang_tutor_tmpl_<worker>` → `t_tmpl_<worker>` rename
+stands. It no longer carries the sweep — the pattern names it directly — but it still
+groups the harness's databases together in `\l` output, which is what the short prefix
+was worth on its own.
+
+**Cost of a future third category.** A new kind of test database has to be added to this
+pattern deliberately. That is the intended trade: `t_%` would have swept it
+automatically, and would have swept a hand-made `t_scratch` just as automatically.
