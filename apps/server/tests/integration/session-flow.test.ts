@@ -2,6 +2,8 @@ import { serve } from '@hono/node-server';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { createApp } from '../../src/app';
+import { createServerDeps } from '../../src/composition';
+import { createFakeLogger } from '../support/fakes';
 import { createTestDb, type TestDb } from '../support/testDb';
 
 let server: ReturnType<typeof serve>;
@@ -13,10 +15,13 @@ beforeAll(async () => {
   // in it needs the database to outlive the request/response cycle.
   t = await createTestDb();
   await new Promise<void>((resolve) => {
-    server = serve({ fetch: createApp(t.db).fetch, port: 0 }, (info) => {
-      baseUrl = `http://localhost:${info.port}`;
-      resolve();
-    });
+    server = serve(
+      { fetch: createApp(createServerDeps({ db: t.db, logger: createFakeLogger() })).fetch, port: 0 },
+      (info) => {
+        baseUrl = `http://localhost:${info.port}`;
+        resolve();
+      },
+    );
   });
 });
 

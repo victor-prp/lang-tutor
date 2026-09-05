@@ -9,6 +9,11 @@ What changes is where session state lives, the arrival of a real content model
 underneath the question pool, and — across both apps — a dependency-injection rule that
 becomes mandatory rather than aspirational.
 
+> **Superseded in part:** `createApp(db)` — prescribed below in *Existing violations* and
+> *Wiring, health, errors* — is replaced by `createApp(deps)` in
+> [phase 5](2026-09-05-lang-tutor-phase-5-di-corrections-design.md). The rest of this
+> document stands.
+
 ## Goals
 
 - Session state survives a server restart.

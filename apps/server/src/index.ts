@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 
 import { createApp } from './app';
 import { loadConfig } from './config';
+import { createServerDeps } from './composition';
 import { createDb } from './db/client';
 import { createConsoleLogger } from './logger';
 
@@ -19,8 +20,10 @@ export function main(): void {
     onError: (error) => logger.error('idle postgres client', error),
   });
 
+  const deps = createServerDeps({ db, logger });
+
   const server = serve(
-    { fetch: createApp(db).fetch, port: config.port, hostname: '0.0.0.0' },
+    { fetch: createApp(deps).fetch, port: config.port, hostname: '0.0.0.0' },
     (info) => {
       console.log(`lang-tutor server listening on http://0.0.0.0:${info.port}`);
     },

@@ -1,34 +1,27 @@
-import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import type { Db } from './db/client';
+import type { AppDeps } from './composition';
 import { createSessionsRouter } from './routes/sessions';
-import { createSessionService } from './services/sessions';
 
-// The composition root: receives the database handle, constructs the service,
-// wires the router. It holds no logic and creates no connection of its own —
-// which is what lets a test hand it a per-test database.
-export function createApp(db: Db) {
+// Wires everything, holds no logic — and after this phase it does not know a
+// database exists: no drizzle import, no Db, no SQL, no console. Every
+// collaborator arrives in `deps`.
+export function createApp(deps: AppDeps) {
   const app = new Hono();
   app.use('*', cors());
 
-  // Readiness, not just liveness, now that a database has to be up first: the
-  // e2e suite waits on this before starting the app, and a 503 here is what
-  // distinguishes "server booting" from "server broken".
+  // Readiness, not just liveness: the e2e suite waits on this before starting the
+  // app, and a 503 here is what distinguishes "server booting" from "broken".
   app.get('/health', async (c) => {
-    try {
-      await db.execute(sql`select 1`);
-      return c.json({ ok: true });
-    } catch {
-      return c.json({ ok: false }, 503);
-    }
+    const ok = await deps.health.ping();
+    return ok ? c.json({ ok: true }) : c.json({ ok: false }, 503);
   });
 
-  app.route('/api/sessions', createSessionsRouter(createSessionService(db)));
+  app.route('/api/sessions', createSessionsRouter(deps.sessions));
 
   app.onError((error, c) => {
-    console.error(error);
+    deps.logger.error('unhandled request error', error);
     return c.json({ error: 'internal error' }, 500);
   });
 
