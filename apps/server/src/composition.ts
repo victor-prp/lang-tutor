@@ -13,9 +13,9 @@ export type AppDeps = {
 // implementation. `db` and `logger` are received rather than built here because
 // createDb opens a real pool — that stays in main(), and everything above it is
 // a pure function a test can call.
-export function createServerDeps(io: { db: Db; logger: Logger }): AppDeps {
+export function createServerDeps(io: { db: Db; logger: Logger; rng: () => number }): AppDeps {
   return {
-    sessions: createSessionService(io.db),
+    sessions: createSessionService({ db: io.db, rng: io.rng, logger: io.logger }),
     health: createHealthRepo(io.db),
     logger: io.logger,
   };

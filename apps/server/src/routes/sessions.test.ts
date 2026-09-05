@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
 import { createTestDb, type TestDb } from '../../tests/support/testDb';
+import { createFakeLogger } from '../../tests/support/fakes';
+import { testRng } from '../../tests/support/testRng';
 import { createSessionService } from '../services/sessions';
 import { createSessionsRouter } from './sessions';
 
@@ -17,7 +19,12 @@ afterEach(async () => {
 
 function buildTestApp() {
   const app = new Hono();
-  app.route('/api/sessions', createSessionsRouter(createSessionService(t.db)));
+  app.route(
+    '/api/sessions',
+    createSessionsRouter(
+      createSessionService({ db: t.db, rng: testRng(7), logger: createFakeLogger() }),
+    ),
+  );
   return app;
 }
 

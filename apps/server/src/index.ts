@@ -20,7 +20,7 @@ export function main(): void {
     onError: (error) => logger.error('idle postgres client', error),
   });
 
-  const deps = createServerDeps({ db, logger });
+  const deps = createServerDeps({ db, logger, rng: Math.random });
 
   const server = serve(
     { fetch: createApp(deps).fetch, port: config.port, hostname: '0.0.0.0' },

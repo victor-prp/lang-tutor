@@ -5,6 +5,7 @@ import { createApp } from '../../src/app';
 import { createServerDeps } from '../../src/composition';
 import { createFakeLogger } from '../support/fakes';
 import { createTestDb, type TestDb } from '../support/testDb';
+import { testRng } from '../support/testRng';
 
 let server: ReturnType<typeof serve>;
 let baseUrl: string;
@@ -16,7 +17,12 @@ beforeAll(async () => {
   t = await createTestDb();
   await new Promise<void>((resolve) => {
     server = serve(
-      { fetch: createApp(createServerDeps({ db: t.db, logger: createFakeLogger() })).fetch, port: 0 },
+      {
+        fetch: createApp(
+          createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+        ).fetch,
+        port: 0,
+      },
       (info) => {
         baseUrl = `http://localhost:${info.port}`;
         resolve();

@@ -6,6 +6,7 @@ import { createServerDeps } from './composition';
 import type { SessionService } from './services/sessions';
 import { createFakeLogger } from '../tests/support/fakes';
 import { createTestDb, type TestDb } from '../tests/support/testDb';
+import { testRng } from '../tests/support/testRng';
 
 // A service that fails if it is called at all. Passing it alongside a health fake
 // proves the health route never reaches the service, rather than assuming it.
@@ -56,7 +57,9 @@ describe('the app as production assembles it', () => {
   });
 
   it('does not create a session as a side effect of a health check', async () => {
-    const app = createApp(createServerDeps({ db: t.db, logger: createFakeLogger() }));
+    const app = createApp(
+      createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+    );
     await app.request('/health');
     const res = await app.request('/api/sessions/00000000-0000-0000-0000-000000000000/next-step', {
       method: 'POST',

@@ -3,6 +3,7 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { eq } from 'drizzle-orm';
 
 import { createTestDb, type TestDb } from '../../tests/support/testDb';
+import { testRng } from '../../tests/support/testRng';
 import { newSessionRecord } from '../domain/session';
 import { sessions } from '../db/schema';
 import { createQuestionRepo } from './questions';
@@ -17,17 +18,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await t.close();
 });
-
-// A local deterministic rng. `packages/core`'s seededRng is deliberately
-// unreachable — `utils` is absent from both core's index.ts and its exports
-// map — and this plan does not change that.
-function testRng(seed: number): () => number {
-  let value = seed;
-  return () => {
-    value = (value * 1103515245 + 12345) % 2147483648;
-    return value / 2147483648;
-  };
-}
 
 /** Creates a session the way the service will, and returns everything about it. */
 async function startSession(db: TestDb['db'], userId = 'u1') {
