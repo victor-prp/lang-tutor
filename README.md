@@ -54,6 +54,17 @@ network namespace. Edit the `apps/mobile/.env.local` created above:
 
 Phone and dev machine must be on the same Wi-Fi network.
 
+## Browsing the database
+
+Postgres has no cross-database `USE` — a connection is bound to one database for its
+whole lifetime, so a GUI client like the SQLTools VS Code extension needs one
+connection entry per database, not a single connection that lists them all (this is a
+longstanding [SQLTools limitation](https://github.com/mtxr/vscode-sqltools/discussions/760),
+not something this repo's config controls). A connection with no `database` field set
+falls back to the `postgres` maintenance database — that is one specific database, not
+"all of them." `.vscode/settings.json` already defines a dedicated connection for
+`lang_tutor`.
+
 ## Checks
 
 ```bash
