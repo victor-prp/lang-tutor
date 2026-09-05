@@ -186,7 +186,10 @@ Nothing accumulates: before `globalSetup` rebuilds the templates it drops every 
 matching `^t_(test|tmpl)_`, so the *next* integration run reclaims the last one's. That
 the sweep covers `t_tmpl_<worker>` too is what stops a 4-worker run followed by a
 2-worker run from stranding templates 3 and 4 forever — they used to be dropped by exact
-worker number, so nothing ever went looking for them.
+worker number, so nothing ever went looking for them. That reclaiming is tied to the
+*next* run, not to a timer: a run's databases sit on disk untouched for as long as you
+go without running `npm run test:integration` again, and running it again is what
+reclaims them — there is no separate script for it.
 
 The pattern names both prefixes rather than matching `t_` broadly, so a database of your
 own is safe from it as long as it is not called `t_test_…` or `t_tmpl_…`.
