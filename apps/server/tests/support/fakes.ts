@@ -5,8 +5,8 @@ export type FakeLogger = Logger & {
   errors: { message: string; cause?: unknown }[];
 };
 
-// A capturing Logger. This is what replaces jest.spyOn(console, 'log'): a fake
-// passed in, rather than process-global state mutated inside a Jest worker.
+// A capturing Logger: a fake passed in, rather than a spy patched onto
+// process-global `console` and mutated inside a Jest worker.
 export function createFakeLogger(): FakeLogger {
   const events: Record<string, unknown>[] = [];
   const errors: { message: string; cause?: unknown }[] = [];

@@ -5,8 +5,8 @@ import type { AppDeps } from './composition';
 import { createSessionsRouter } from './routes/sessions';
 
 // Wires everything, holds no logic — and after this phase it does not know a
-// database exists: no drizzle import, no Db, no SQL, no console. Every
-// collaborator arrives in `deps`.
+// database exists: no drizzle import, no Db, no SQL, and it never touches the
+// console; every collaborator arrives in `deps`.
 export function createApp(deps: AppDeps) {
   const app = new Hono();
   app.use('*', cors());
