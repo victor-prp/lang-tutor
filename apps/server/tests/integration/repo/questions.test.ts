@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
-import { createTestDb, type TestDb } from '../../tests/support/testDb';
-import { withTx } from '../../tests/support/withTx';
-import { content } from '../db/content';
-import { users } from '../db/schema';
-import { createQuestionRepo } from './questions';
+import { createTestDb, type TestDb } from '../../support/testDb';
+import { withTx } from '../../support/withTx';
+import { content } from '../../../src/db/content';
+import { users } from '../../../src/db/schema';
+import { createQuestionRepo } from '../../../src/repo/questions';
 
 let t: TestDb;
 

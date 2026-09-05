@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
-import { createDb, type Tx } from './client';
-import { ADMIN_URL } from '../../tests/support/dbNames';
+import { createDb, type Tx } from '../../../src/db/client';
+import { ADMIN_URL } from '../../support/dbNames';
 
 // Deliberately the maintenance database: this test proves connectivity only,
 // and must not depend on lang_tutor having been migrated yet. A no-op error

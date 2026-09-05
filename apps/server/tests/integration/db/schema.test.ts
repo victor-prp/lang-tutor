@@ -3,10 +3,10 @@ import { sql } from 'drizzle-orm';
 
 import { eq } from 'drizzle-orm';
 
-import { createDb, type Db } from './client';
-import { runMigrations } from './migrate';
-import { sessions, users } from './schema';
-import { ADMIN_URL, urlFor } from '../../tests/support/dbNames';
+import { createDb, type Db } from '../../../src/db/client';
+import { runMigrations } from '../../../src/db/migrate';
+import { sessions, users } from '../../../src/db/schema';
+import { ADMIN_URL, urlFor } from '../../support/dbNames';
 
 const DB_NAME = 'lang_tutor_schema_test';
 

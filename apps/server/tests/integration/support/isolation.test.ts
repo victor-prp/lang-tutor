@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
-import { createDb } from '../../src/db/client';
-import { users } from '../../src/db/schema';
-import { ADMIN_URL } from './dbNames';
-import { createTestDb, type TestDb } from './testDb';
+import { createDb } from '../../../src/db/client';
+import { users } from '../../../src/db/schema';
+import { ADMIN_URL } from '../../support/dbNames';
+import { createTestDb, type TestDb } from '../../support/testDb';
 
 let current: TestDb;
 

@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { eq } from 'drizzle-orm';
 
-import { createTestDb, type TestDb } from '../../tests/support/testDb';
-import { content } from './content';
-import { seedContent } from './seed';
-import { questions, termSenseTranslations, termVariants, vocabTerms, vocabTermSenses } from './schema';
+import { createTestDb, type TestDb } from '../../support/testDb';
+import { content } from '../../../src/db/content';
+import { seedContent } from '../../../src/db/seed';
+import {
+  questions,
+  termSenseTranslations,
+  termVariants,
+  vocabTerms,
+  vocabTermSenses,
+} from '../../../src/db/schema';
 
 let t: TestDb;
 
