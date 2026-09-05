@@ -18,7 +18,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Job IDs are the branch-protection check contexts. Do not add `name:` keys.
+  # Job IDs are the branch-protection check contexts, so keep them stable once a
+  # ruleset lists them — and do not add `name:` keys, which would rename the
+  # context out from under it. `master`'s ruleset currently requires no status
+  # checks at all, which is why renaming `test` below was free. See the README.
   typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -32,21 +35,26 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
 
-  test:
+  # No database, deliberately. A "unit" test that secretly needs Postgres fails
+  # here, loudly, instead of passing because a database happened to be reachable.
+  # This is what makes the src/ vs tests/integration/ boundary a fact rather than
+  # a convention.
+  test-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # Root install: the root package.json owns resolution for all four workspaces.
+      - run: npm ci
+      - run: npm test
+
+  test-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -54,6 +62,15 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # Must come after checkout: it reads docker-compose.yml from the tree. The
+      # `services:` block this replaces duplicated the postgres:17 image and its
+      # healthcheck; `--wait` blocks on the compose healthcheck exactly as that
+      # block's `options: --health-cmd` did.
+      - run: docker compose up -d --wait db
+      # The drift steps need no database — drizzle-kit generate and check never
+      # connect — but they belong with the other database concerns rather than
+      # muddying test-unit's single purpose.
+      #
       # db:check only validates that the migrations folder's own snapshot/journal
       # are internally consistent (e.g. two branches both generating a migration
       # against the same prior state) — it never compares schema.ts against the
@@ -74,23 +91,11 @@ jobs:
             git status --porcelain apps/server/src/db/migrations >&2
             exit 1
           fi
-      - run: npm test
+      - run: npm run test:integration
 
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -98,6 +103,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - run: docker compose up -d --wait db
 
       # Browser binaries change when Playwright does, not when the lockfile does,
       # so the cache is keyed on the resolved version. Read from the e2e workspace
