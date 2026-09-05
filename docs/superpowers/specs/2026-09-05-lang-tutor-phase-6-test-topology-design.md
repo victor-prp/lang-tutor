@@ -1,10 +1,9 @@
 # Phase 6: Test topology
 
-Implements decisions 1, 2 and 4 of
-[`docs/superpowers/phase-4-pr-review.md`](../phase-4-pr-review.md): unit tests that
-need no infrastructure and stay fast, database-backed tests gathered under one folder,
-per-test databases that say which test they served, and a CI file that stops
-duplicating the Postgres definition.
+Implements three decisions recorded while reviewing the phase-4 pull request: unit
+tests that need no infrastructure and stay fast, database-backed tests gathered under
+one folder, per-test databases that say which test they served, and a CI file that
+stops duplicating the Postgres definition.
 
 Nothing here changes what is tested. This phase moves tests, re-buckets them, and
 changes the lifecycle of the databases they run against.
