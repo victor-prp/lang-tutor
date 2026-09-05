@@ -1,9 +1,8 @@
 # Phase 7: OpenAPI documentation generated from the wire contract
 
-Implements decision 3 of
-[`docs/superpowers/phase-4-pr-review.md`](../phase-4-pr-review.md): a machine-readable
-API description that cannot drift from the code, because the route definition and the
-documentation are the same artifact.
+Implements a decision recorded while reviewing the phase-4 pull request: a
+machine-readable API description that cannot drift from the code, because the route
+definition and the documentation are the same artifact.
 
 Nothing here changes what the API does. The HTTP contract is preserved exactly — this
 phase changes how routes are *declared* and adds documentation surface.

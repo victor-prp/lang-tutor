@@ -1,13 +1,11 @@
 # Phase 5: Dependency-injection corrections
 
-Corrects the eight dependency-injection violations catalogued in
-[`docs/superpowers/phase-4-di-review.md`](../phase-4-di-review.md), so that every
-collaborator in `apps/server` is *received* rather than reached for, and so the seams
-that makes possible actually exist and are used.
+Corrects the eight dependency-injection violations catalogued under *The findings*
+below, so that every collaborator in `apps/server` is *received* rather than reached
+for, and so the seams that receiving them makes possible actually exist and are used.
 
-The findings themselves are not restated here — that document is the catalogue. This
-spec decides *how* they are fixed, what the resulting shape is, and how each fix is
-proven.
+The findings came from a review of `apps/server/src` conducted after phase 4 landed.
+This spec carries the catalogue as well as the design, so it stands on its own.
 
 ## Goals
 
@@ -34,10 +32,111 @@ proven.
   route tests off Postgres — is deliberately deferred, and constrained by the drift
   risk recorded under Risks.
 - **The unit/integration test split, per-test database naming and cleanup, CI
-  `docker compose` reuse, and OpenAPI generation.** These are decisions 1–4 in
-  [`phase-4-pr-review.md`](../phase-4-pr-review.md) and belong to later phases. The
+  `docker compose` reuse, and OpenAPI generation.** These belong to
+  [phase 6](2026-09-05-lang-tutor-phase-6-test-topology-design.md) and
+  [phase 7](2026-09-05-lang-tutor-phase-7-openapi-design.md). The
   test split in particular depends on this phase landing first: findings 4 and 8 change
   *which* tests need a database, so splitting before them would move files twice.
+
+## The findings
+
+From a dependency-injection review of every file under `apps/server/src`, against the
+rule phase 4's spec makes mandatory (*"Closure-based dependency injection is
+mandatory"*). Line references are to the tree at commit `0e1f344`.
+
+The structure was already largely right — factories return closures, types derive from
+`ReturnType`, no `jest.mock` in the server, `routes/` never sees a `Db`. Each finding
+below is a place where something is still *reached for* rather than received.
+
+| # | Severity | Site | Issue |
+|---|---|---|---|
+| 1 | Critical | `services/sessions.ts:42` | `Math.random` reached for inside the service |
+| 2 | Critical | `services/sessions.ts:11`, `app.ts:31`, `db/client.ts:14` | Logger reached for; the completed-session log is emitted inside the transaction |
+| 3 | High | `app.ts:1,19-26` | The composition root imports `sql` and executes SQL |
+| 4 | High | `app.ts:28` | `createApp(db)` builds the service itself, closing the one good seam |
+| 5 | Medium | `db/client.ts:31` | A transaction handle and a pool handle share one type |
+| 6 | Medium | `index.ts:6-8`, `db/cli.ts:5` | Two composition roots with the connection string copy-pasted into both |
+| 7 | Medium | `index.ts:6-13` | No `main()` — env read and connection opened at import time |
+| 8 | Medium | `services/sessions.ts:5-6,31-32,53` | The service imports the repository factories concretely — no seam |
+
+The concrete costs, which are what make these more than style points:
+
+- **1** — no test can pin which ten questions a session draws. `services/sessions.test.ts`
+  can only assert `toHaveLength(SESSION_LENGTH)`; pool exhaustion, duplicate avoidance
+  and deterministic ordering are all untestable without a seeded `rng`.
+- **2** — `jest.spyOn(console, 'log')` at `services/sessions.test.ts:79` and `:106` is the
+  same signal phase 4's spec names for `jest.mock`: a missing seam. It also mutates
+  process-global state across a Jest worker. Separately, `logCompletedSession` is called
+  at `services/sessions.ts:69`, *inside* `db.transaction` — if the commit fails after
+  `completeSession`, stdout has already claimed a session the database never recorded.
+- **3** — `app.test.ts:35-46` has to open a real pool against `localhost:1`, a port nothing
+  listens on, to reach the 503 branch.
+- **4** — every app-, route- and integration-level test clones a real Postgres database,
+  including tests that touch no data: `routes/sessions.test.ts:43-47` asserts a 400 on a
+  malformed body and still pays for a `create database … template …`.
+- **5** — the shared type is one-directional in the wrong direction: a repository handed
+  the *pool* instead of `tx` compiles and silently runs outside the transaction.
+  `repo/sessions.test.ts:45` already does exactly that, so "one transaction per use
+  case" holds only because the service happens to be the sole caller of the repository
+  factories — a convention, which is what `services/` exists to stop it from being.
+- **6** — `postgres://postgres:postgres@localhost:5432/lang_tutor` is written out twice,
+  and `createDb`'s pool `max = 5` cannot be overridden from the environment. A separate
+  process is a legitimate second composition root; the config being copy-pasted into it
+  is not.
+- **7** — the env read, `createDb` and `serve` all run on import, so the file cannot be
+  imported without starting a listening server against a real database. Nothing in the
+  suite references it. `db/cli.ts` gets this right with an explicit `main()`.
+- **8** — with no seam, **every service test is a database test**. `services/sessions.test.ts`
+  clones a Postgres database to assert three error branches that touch no data.
+
+### Finding 8: two framings to discard first
+
+Both are tempting and both push toward the wrong fix:
+
+- *"Unit testing is impossible without module-level mocks."* Not so — nothing in the
+  server uses a mock today. Service tests are merely forced to be database tests.
+- *"Repetitive instantiation / boilerplate."* Not a real cost. `createSessionRepo(tx)`
+  allocates a plain object of four closures, twice per request.
+
+The single legitimate driver is the missing seam.
+
+### The alternative rejected for finding 8
+
+Stateless repositories whose every method takes the handle as its first parameter —
+`loadSession(db, id)` — with the repository objects injected into
+`createSessionService`.
+
+This re-opens finding 5 and widens it. `PgTransaction extends PgDatabase`, so a
+parameter typed `Db` accepts both handles. Today `createSessionRepo(tx)` binds the
+handle **once** and every subsequent method is structurally guaranteed to be on that
+transaction. With a first argument, each of `submitAnswer`'s three repository calls can
+independently receive the pool and still compile:
+
+```ts
+const loaded = await sessionRepo.loadSession(tx, sessionId);   // FOR UPDATE, in the tx
+await sessionRepo.insertAnswer(db, sessionId, …);              // typechecks. Not in the tx.
+```
+
+That is a partially-transactional use case that passes `tsc` and drops the
+`SELECT … FOR UPDATE` serialisation the design rests on. It also converts closure
+injection into parameter injection, which phase 4's spec names and rejects — and here
+that instinct is protecting the transaction boundary, not merely a house style.
+
+### Why finding 4 comes first
+
+Every other fix adds a constructed collaborator — an `rng`, a `Logger`, a
+`HealthRepo`, a pair of repository factories — and all of them have to reach the
+service through `createApp`. Fix finding 4 first and each of the others is a
+one-parameter addition; fix it last and the wiring gets rewritten four times. This is
+also why the spec tension in *Supersedes* is not optional to resolve: the prescribed
+`createApp(db)` shape cannot accommodate findings 1, 2, 3, 5 or 8 without `createApp`
+constructing them itself, which is the "holds no logic" line it exists to respect.
+
+A workable order, for the implementation plan to start from: `config.ts` and `main()`
+(6, 7) first, as the smallest independent piece; then `createApp(deps)` (4), the
+keystone; then the `rng` and `Logger` parameters (1, 2) with the log moved outside the
+transaction; then `HealthRepo` (3); then the `Tx` type and repository-factory
+injection (5, 8) as one change, since the factory type is `(tx: Tx) => SessionRepo`.
 
 ## Supersedes
 
