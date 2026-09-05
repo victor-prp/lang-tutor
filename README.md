@@ -137,45 +137,116 @@ falls back to the `postgres` maintenance database — that is one specific datab
 ## Checks
 
 ```bash
-npm run db:up     # docker compose up -d --wait db  (requires Docker) — npm test needs it running
-npm test          # every workspace, including apps/server's real-HTTP integration test
-npm run typecheck # every workspace
+npm test            # unit tests only — no Docker, no database, whole monorepo
+npm run db:up       # docker compose up -d --wait db  (requires Docker)
+npm run test:integration  # apps/server's database-backed tests; needs db:up
+npm run test:all    # both buckets — run this before pushing
+npm run typecheck   # every workspace
 ```
 
-`npm test` needs the database up: `apps/server`'s tests connect to real Postgres, one
-database per test, cloned from a per-worker template built in `globalSetup`. Run it
-against a fresh clone with the database down and you get a readable instruction
+**Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go
+green while every database-backed test sat out; it prints a reminder saying so. CI runs
+both buckets on every push either way, but no ruleset on `master` requires those checks
+yet, so nothing structurally stops a merge that breaks them — see *Continuous
+integration*.
+
+Which bucket a test is in is decided by the folder its file is in, not by an allowlist:
+
+| Folder | Bucket | Rule |
+|---|---|---|
+| `apps/server/src/**/*.test.ts` | `unit` | Touches no infrastructure. No `globalSetup`. Importing `createTestDb` or `createDb` here is the bug. |
+| `apps/server/tests/integration/**/*.test.ts` | `integration` | Needs real Postgres. Path mirrors the `src/` path of what it tests. |
+| `apps/server/tests/support/**` | neither | The harness itself — `globalSetup`, `globalTeardown`, `testDb`, `dbNames`, and the fakes. Not matched by either project. |
+
+Two files are deliberately split across both buckets — `app.test.ts` and
+`services/sessions.test.ts` — because sending a whole mixed file to `integration` creates
+a gravity well: new fast tests get written into the already-slow file out of convenience
+and the fast bucket never grows. The mirrored paths are what make the other half
+findable. The cost is real: opening `src/app.test.ts` shows you half the app's tests.
+
+`npm run test:integration` with the database down fails with a readable instruction
 pointing at `npm run db:up`, not a bare `ECONNREFUSED` — see `globalSetup.ts`.
+
+### Inspecting what a test ran against
+
+Each database-backed test gets its own database, cloned from a per-worker template that
+`globalSetup` migrates and seeds once. They are **not** dropped when the test ends —
+`close()` only ends the connection pool — so after a run you can look at exactly what a
+test left behind:
+
+```bash
+docker compose exec -T db psql -U postgres -c '\l+' | grep t_test_
+```
+
+The name is `t_test_<slug of the test name>_<random>`; the `COMMENT` carries what the
+63-byte identifier could not — the full untruncated test name, the file, the Jest worker
+id and a creation timestamp.
+
+Nothing accumulates: before `globalSetup` rebuilds the templates it drops every database
+matching `^t_(test|tmpl)_`, so the *next* integration run reclaims the last one's. That
+the sweep covers `t_tmpl_<worker>` too is what stops a 4-worker run followed by a
+2-worker run from stranding templates 3 and 4 forever — they used to be dropped by exact
+worker number, so nothing ever went looking for them.
+
+The pattern names both prefixes rather than matching `t_` broadly, so a database of your
+own is safe from it as long as it is not called `t_test_…` or `t_tmpl_…`.
+
+A unit run creates no databases at all, which is the property CI's `test-unit` job
+enforces.
+
+Design and plan for this layout:
+[design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-6-test-topology-design.md) ·
+[plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-6-test-topology.md)
 
 ## Continuous integration
 
-Every push, on every branch, runs both of the above plus the end-to-end suite below on GitHub Actions
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) as three parallel jobs:
+Every push, on every branch, runs four parallel jobs on GitHub Actions
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
 
-| Job | Runs | Roughly |
-|---|---|---|
-| `typecheck` | `npm run typecheck` — database-free, `tsc` reads `db/schema.ts` directly | 1 min |
-| `test` | `npm run db:check -w apps/server` (migration-history consistency check), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift check), then `npm test`, all against a `postgres:17` service container | 1-2 min |
-| `e2e` | `npm run e2e` — the Playwright suite described below, against its own `postgres:17` service container | 4-5 min |
+| Job | Database | Runs | Roughly |
+|---|---|---|---|
+| `typecheck` | none | `npm run typecheck` — `tsc` reads `db/schema.ts` directly | 1 min |
+| `test-unit` | **none, deliberately** | `npm test` | 1 min |
+| `test-integration` | `docker compose up -d --wait db` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
+| `e2e` | `docker compose up -d --wait db` | `npm run e2e` — the Playwright suite described below | 4-5 min |
 
-The jobs are independent, so a red `e2e` beside a green `typecheck` and `test` tells you
-the app broke, not that the code stopped compiling. A failing `e2e` run uploads a
-Playwright trace as a `playwright-traces` artifact; download it and open it with
+`test-unit` has no database available at all. That is the point: it *proves* the
+unit/integration boundary rather than assuming it, because a "unit" test that secretly
+needs Postgres fails there loudly instead of passing because a database happened to be
+reachable.
+
+The two jobs that need a database bring it up from `docker-compose.yml` rather than
+declaring a `services:` container, so the `postgres:17` image and its healthcheck are
+defined in exactly one place in the repo. `docker compose up -d --wait db` has to come
+after `actions/checkout` — it reads the compose file out of the tree — and `--wait`
+blocks on the healthcheck, which is what the removed `services:` block's
+`options: --health-cmd` was doing.
+
+The jobs are independent, so a red `e2e` beside a green `typecheck` and `test-unit`
+tells you the app broke, not that the code stopped compiling. A failing `e2e` run uploads
+a Playwright trace as a `playwright-traces` artifact; download it and open it with
 `npx playwright show-trace` rather than trying to reproduce the failure locally.
 
 Pushing again cancels the previous run for that branch.
 
-These three context names — `typecheck`, `test`, `e2e` — are what a branch-protection
-rule on `master` must list to gate merges on CI. No such rule is configured yet; adding
-one is a repository setting rather than a change to this repo.
+### Nothing gates a merge yet
+
+These four context names — `typecheck`, `test-unit`, `test-integration`, `e2e` — are what
+a branch-protection rule on `master` must list. **No such rule exists.** `master` has no
+legacy branch protection, and its active ruleset ("protect muster") contains only
+`deletion`, `non_fast_forward` and `pull_request` — no `required_status_checks`. A pull
+request with a failing `test-integration` job is mergeable today.
+
+That matters more now that bare `npm test` is unit-only: the two facts are individually
+survivable and jointly leave no structural point at which a change that breaks the
+database-backed tests is stopped before it reaches `master`. Fixing it is one ruleset
+edit; it is a repository setting rather than a change to this repo, which is the only
+reason it is not in the diff that introduced this section.
 
 One caveat before making them required: a pull request from a **fork** produces no check
 runs, because `on: push` only fires for branches in this repository. Requiring these
 contexts would leave such a PR permanently unmergeable. Add a `pull_request` trigger to
 the workflow first if outside contributions ever become real.
-
-The Node version comes from `.nvmrc`, which is also what `nvm use` reads — keep local and
-CI on the same major version by changing that one file.
 
 ## End-to-end test
 
@@ -195,8 +266,9 @@ static export is the only way to reliably point the app at the local test server
 `apps/mobile/.env.local` is never read or modified by the suite, so the Expo Go device
 workflow above is unaffected.
 
-`npm test` deliberately does **not** run this — the workspace's script is named `e2e`, not
-`test`, to keep the unit loop fast.
+`npm test` and `npm run test:all` deliberately do **not** run this — the workspace's
+script is named `e2e`, not `test`, so neither the root fan-out nor `--if-present` picks
+it up, and the unit loop stays fast.
 
 Design and plan:
 [design](docs/superpowers/specs/2026-08-26-lang-tutor-e2e-testing-design.md) ·
