@@ -50,8 +50,12 @@ transaction could leak across.
 Every dependency with I/O, state, or a lifecycle — a database handle, an HTTP client, a
 clock, a source of randomness — follows one rule, with no opt-out:
 
-1. **Construct at the composition root.** `apps/server/src/index.ts` for the server,
-   `apps/mobile/src/app/_layout.tsx` for the app. Nowhere else calls a constructor.
+1. **Construct at the composition root.** `apps/server/src/index.ts` for the server — it
+   reads its `Config` from `apps/server/src/config.ts` and hands the pieces it opens (a
+   pool, a logger, `Math.random`) to `apps/server/src/composition.ts`, which is assembly
+   only: no I/O, no logic. `apps/server/src/db/cli.ts` is a second server-side root, for
+   the migration process. `apps/mobile/src/app/_layout.tsx` is the app's. Nowhere else
+   calls a constructor.
 2. **Capture it in a `createX` factory** that returns an object of closures, and derive
    the type with `ReturnType<typeof createX>`.
 3. **Pass the resulting object down.** A consumer names what it needs in its
@@ -63,7 +67,8 @@ clock, a source of randomness — follows one rule, with no opt-out:
 
 A contributor cannot infer this from reading any single file, so it is written down
 here rather than left implicit. See the [phase 4 design doc](docs/superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
-for the reasoning and the violations it fixed.
+for the reasoning and the violations it fixed, and the [phase 5 design doc](docs/superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md)
+for the eight it corrected afterwards.
 
 ## Data model
 
