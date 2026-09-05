@@ -14,7 +14,9 @@ export type TestDb = { db: Db; name: string; close: () => Promise<void> };
 export async function createTestDb(): Promise<TestDb> {
   const worker = currentWorkerId();
   const name = `lang_tutor_test_${worker}_${randomUUID().slice(0, 8)}`;
-  const admin = createDb(ADMIN_URL, 1);
+  // A no-op error policy: a per-test handle lives for one test and has no logger
+  // to route an idle-client error to.
+  const admin = createDb(ADMIN_URL, { max: 1, onError: () => {} });
 
   try {
     await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
@@ -25,7 +27,7 @@ export async function createTestDb(): Promise<TestDb> {
     await admin.close();
   }
 
-  const handle = createDb(urlFor(name));
+  const handle = createDb(urlFor(name), { onError: () => {} });
 
   return {
     db: handle.db,
@@ -33,7 +35,7 @@ export async function createTestDb(): Promise<TestDb> {
     close: async () => {
       // DROP DATABASE fails while any connection remains, so end the pool first.
       await handle.close();
-      const dropper = createDb(ADMIN_URL, 1);
+      const dropper = createDb(ADMIN_URL, { max: 1, onError: () => {} });
       try {
         await dropper.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
       } finally {

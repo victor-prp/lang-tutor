@@ -4,7 +4,7 @@ import { createDb } from '../../src/db/client';
 import { ADMIN_URL, templateName } from './dbNames';
 
 export default async function globalTeardown(config: { maxWorkers: number }): Promise<void> {
-  const admin = createDb(ADMIN_URL, 1);
+  const admin = createDb(ADMIN_URL, { max: 1, onError: () => {} });
   try {
     for (let worker = 1; worker <= config.maxWorkers; worker++) {
       await admin.db.execute(

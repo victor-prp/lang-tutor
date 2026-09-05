@@ -17,7 +17,7 @@ export const E2E_DATABASE_URL = `postgres://postgres:postgres@${HOST}:${PORT}/${
  * per run, keeps the suite reproducible without needing a retention rule.
  */
 export default async function globalSetup(): Promise<void> {
-  const admin = createDb(ADMIN_URL, 1);
+  const admin = createDb(ADMIN_URL, { max: 1, onError: () => {} });
   try {
     await admin.db.execute(sql.raw(`drop database if exists ${E2E_DATABASE} with (force)`));
     await admin.db.execute(sql.raw(`create database ${E2E_DATABASE}`));
@@ -25,7 +25,7 @@ export default async function globalSetup(): Promise<void> {
     await admin.close();
   }
 
-  const handle = createDb(E2E_DATABASE_URL, 1);
+  const handle = createDb(E2E_DATABASE_URL, { max: 1, onError: () => {} });
   try {
     await runMigrations(handle.db);
     await seedContent(handle.db);

@@ -15,10 +15,10 @@ let handle: ReturnType<typeof createDb>;
 let db: Db;
 
 beforeAll(async () => {
-  admin = createDb(ADMIN_URL, 1);
+  admin = createDb(ADMIN_URL, { max: 1, onError: () => {} });
   await admin.db.execute(sql.raw(`drop database if exists ${DB_NAME} with (force)`));
   await admin.db.execute(sql.raw(`create database ${DB_NAME}`));
-  handle = createDb(urlFor(DB_NAME));
+  handle = createDb(urlFor(DB_NAME), { onError: () => {} });
   db = handle.db;
   await runMigrations(db);
 }, 60_000);

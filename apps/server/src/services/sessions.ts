@@ -2,34 +2,47 @@ import type { SessionRecord } from '../domain/session';
 import { newSessionRecord, sessionScore, step } from '../domain/session';
 import type { Db } from '../db/client';
 import { OptionOutOfRange, QuestionDesynced, SessionNotFound } from '../errors';
-import { createQuestionRepo } from '../repo/questions';
-import { createSessionRepo } from '../repo/sessions';
+import type { Logger } from '../logger';
+import type { CreateQuestionRepo } from '../repo/questions';
+import type { CreateSessionRepo } from '../repo/sessions';
 
-// The one place a completed session is logged. Redundant with the database,
-// kept because it is output you can tail without opening psql.
-function logCompletedSession(sessionId: string, record: SessionRecord): void {
-  console.log(
-    JSON.stringify({
-      session_id: sessionId,
-      user_id: record.user_id,
-      questions: record.questions,
-      answers: record.answers,
-      score: sessionScore(record),
-    }),
-  );
+// The one place a completed session is logged. Redundant with the database, kept
+// because it is output you can tail without opening psql — structured, so you
+// can grep it.
+function logCompletedSession(logger: Logger, sessionId: string, record: SessionRecord): void {
+  logger.info({
+    session_id: sessionId,
+    user_id: record.user_id,
+    questions: record.questions,
+    answers: record.answers,
+    score: sessionScore(record),
+  });
 }
 
 /**
  * The application layer. Each use case is one transaction, opened here — a route
  * handler never opens one. The repositories are created from the transaction
  * handle inside, because that handle does not exist until the transaction does.
+ *
+ * Every collaborator arrives in one deps object: nothing here reaches for a
+ * source of randomness or an output stream.
  */
-export function createSessionService(db: Db) {
+export function createSessionService({
+  db,
+  rng,
+  logger,
+  repos,
+}: {
+  db: Db;
+  rng: () => number;
+  logger: Logger;
+  repos: { session: CreateSessionRepo; question: CreateQuestionRepo };
+}) {
   return {
     startSession: (userId: string): Promise<{ sessionId: string; record: SessionRecord }> =>
       db.transaction(async (tx) => {
-        const sessionRepo = createSessionRepo(tx);
-        const questionRepo = createQuestionRepo(tx);
+        const sessionRepo = repos.session(tx);
+        const questionRepo = repos.question(tx);
 
         const user = await sessionRepo.upsertUser(userId);
         const pool = await questionRepo.loadQuestionPool(
@@ -37,26 +50,31 @@ export function createSessionService(db: Db) {
           user.nativeLanguage,
           userId,
         );
-        // No default rng: a server must not inherit Math.random by accident, so
-        // this is the one place that names it.
-        const record = newSessionRecord(userId, pool, Math.random);
+        const record = newSessionRecord(userId, pool, rng);
         const sessionId = await sessionRepo.insertSession(userId, record.questions);
         return { sessionId, record };
       }),
 
-    submitAnswer: (
+    submitAnswer: async (
       sessionId: string,
       questionId: string,
       optionIndex: number,
-    ): Promise<SessionRecord> =>
-      db.transaction(async (tx) => {
-        const repo = createSessionRepo(tx);
+    ): Promise<SessionRecord> => {
+      // The transaction returns its outcome and the log fires after it resolves:
+      // a commit that fails after completeSession must not leave a log claiming a
+      // session the database never recorded.
+      const { record, justCompleted } = await db.transaction(async (tx) => {
+        const repo = repos.session(tx);
         const loaded = await repo.loadSession(sessionId);
         if (!loaded) throw new SessionNotFound(sessionId);
 
         const outcome = step(loaded.record, questionId, optionIndex);
         if (outcome.status === 'invalid_question') throw new QuestionDesynced(questionId);
-        if (outcome.status === 'replayed') return outcome.record;
+        // A replay reports justCompleted: false, so retrying a completed session
+        // logs nothing — exactly today's behaviour.
+        if (outcome.status === 'replayed') {
+          return { record: outcome.record, justCompleted: false };
+        }
 
         const position = loaded.record.answers.length;
         const order = loaded.optionOrders[position];
@@ -66,11 +84,17 @@ export function createSessionService(db: Db) {
 
         if (outcome.justCompleted) {
           await repo.completeSession(sessionId);
-          logCompletedSession(sessionId, outcome.record);
         }
 
-        return outcome.record;
-      }),
+        return { record: outcome.record, justCompleted: outcome.justCompleted };
+      });
+
+      if (justCompleted) {
+        logCompletedSession(logger, sessionId, record);
+      }
+
+      return record;
+    },
   };
 }
 

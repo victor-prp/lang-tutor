@@ -1,7 +1,7 @@
 import type { AnswerRecord, Question } from '@lang-tutor/core/api';
 import { asc, eq, inArray, sql } from 'drizzle-orm';
 
-import type { Db } from '../db/client';
+import type { Tx } from '../db/client';
 import type { SessionRecord } from '../domain/session';
 import {
   answers,
@@ -27,15 +27,15 @@ export type LoadedSession = {
   optionOrders: number[][];
 };
 
-export function createSessionRepo(db: Db) {
+export function createSessionRepo(tx: Tx) {
   return {
     /**
      * `user_id` is an unvalidated client UUID and there is no auth, so first
      * sight creates the row. Returns the language pair the session draws from.
      */
     upsertUser: async (userId: string) => {
-      await db.insert(users).values({ id: userId }).onConflictDoNothing();
-      const [row] = await db
+      await tx.insert(users).values({ id: userId }).onConflictDoNothing();
+      const [row] = await tx
         .select({ nativeLanguage: users.nativeLanguage, targetLanguage: users.targetLanguage })
         .from(users)
         .where(eq(users.id, userId));
@@ -49,7 +49,7 @@ export function createSessionRepo(db: Db) {
      * distinct texts within a question.
      */
     insertSession: async (userId: string, picked: Question[]): Promise<string> => {
-      const rows = await db
+      const rows = await tx
         .select({ id: questions.id, options: questions.options })
         .from(questions)
         .where(
@@ -62,9 +62,9 @@ export function createSessionRepo(db: Db) {
         rows.map((row) => [row.id, canonicalOptions(row.options)]),
       );
 
-      const [session] = await db.insert(sessions).values({ userId }).returning({ id: sessions.id });
+      const [session] = await tx.insert(sessions).values({ userId }).returning({ id: sessions.id });
 
-      await db.insert(sessionQuestions).values(
+      await tx.insert(sessionQuestions).values(
         picked.map((question, position) => {
           const canonical = canonicalById.get(question.id);
           if (!canonical) throw new Error(`question ${question.id} is not in the database`);
@@ -92,7 +92,7 @@ export function createSessionRepo(db: Db) {
     loadSession: async (sessionId: string): Promise<LoadedSession | undefined> => {
       if (!UUID_RE.test(sessionId)) return undefined;
 
-      const [session] = await db
+      const [session] = await tx
         .select({
           id: sessions.id,
           userId: sessions.userId,
@@ -103,7 +103,7 @@ export function createSessionRepo(db: Db) {
         .for('update');
       if (!session) return undefined;
 
-      const questionRows = await db
+      const questionRows = await tx
         .select({
           id: questions.id,
           options: questions.options,
@@ -117,7 +117,7 @@ export function createSessionRepo(db: Db) {
         .where(eq(sessionQuestions.sessionId, sessionId))
         .orderBy(asc(sessionQuestions.position));
 
-      const answerRows = await db
+      const answerRows = await tx
         .select({
           position: answers.position,
           questionId: answers.questionId,
@@ -159,7 +159,7 @@ export function createSessionRepo(db: Db) {
       questionId: string,
       canonicalPosition: number,
     ): Promise<unknown> =>
-      db.insert(answers).values({
+      tx.insert(answers).values({
         sessionId,
         position,
         questionId,
@@ -167,8 +167,13 @@ export function createSessionRepo(db: Db) {
       }),
 
     completeSession: (sessionId: string): Promise<unknown> =>
-      db.update(sessions).set({ completedAt: sql`now()` }).where(eq(sessions.id, sessionId)),
+      tx.update(sessions).set({ completedAt: sql`now()` }).where(eq(sessions.id, sessionId)),
   };
 }
 
 export type SessionRepo = ReturnType<typeof createSessionRepo>;
+
+// The injected factory's type. Typing only this would leave the hole open: since
+// `Tx` is assignable to `Db`, a `Db`-taking factory still satisfies it by
+// parameter contravariance — so `createSessionRepo` itself must take a `Tx`.
+export type CreateSessionRepo = (tx: Tx) => SessionRepo;
