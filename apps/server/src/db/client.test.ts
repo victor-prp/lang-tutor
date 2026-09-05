@@ -5,8 +5,10 @@ import { createDb } from './client';
 import { ADMIN_URL } from '../../tests/support/dbNames';
 
 // Deliberately the maintenance database: this test proves connectivity only,
-// and must not depend on lang_tutor having been migrated yet.
-const handle = createDb(ADMIN_URL);
+// and must not depend on lang_tutor having been migrated yet. A no-op error
+// policy is what a short-lived test handle wants — there is no logger here to
+// route an idle-client error to, and nothing to do about one.
+const handle = createDb(ADMIN_URL, { max: 1, onError: () => {} });
 
 afterAll(() => handle.close());
 
@@ -19,5 +21,11 @@ describe('createDb', () => {
   it('reports the server version, proving a real connection', async () => {
     const result = await handle.db.execute<{ server_version: string }>(sql`show server_version`);
     expect(result.rows[0].server_version).toMatch(/^17\./);
+  });
+
+  // The options object is the point of the new signature: under the old
+  // positional `max` it lands in the pool config as an object, not a number.
+  it('applies the pool size it is given', () => {
+    expect(handle.pool.options.max).toBe(1);
   });
 });

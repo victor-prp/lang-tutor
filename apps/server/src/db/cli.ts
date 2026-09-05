@@ -5,7 +5,9 @@ import { seedContent } from './seed';
 const url = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/lang_tutor';
 
 async function main(): Promise<void> {
-  const { db, close } = createDb(url);
+  const { db, close } = createDb(url, {
+    onError: (error) => console.error('unexpected error on idle Postgres client', error),
+  });
   try {
     await runMigrations(db);
     await seedContent(db);

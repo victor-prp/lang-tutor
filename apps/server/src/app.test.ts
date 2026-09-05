@@ -35,7 +35,7 @@ describe('GET /health', () => {
   it('returns 503 when the database is unreachable', async () => {
     // A pool pointed at a port nothing listens on: a real connection failure,
     // with no global state touched and nothing mocked.
-    const dead = createDb('postgres://postgres:postgres@localhost:1/none');
+    const dead = createDb('postgres://postgres:postgres@localhost:1/none', { onError: () => {} });
     try {
       const res = await createApp(dead.db).request('/health');
       expect(res.status).toBe(503);

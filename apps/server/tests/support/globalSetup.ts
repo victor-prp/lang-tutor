@@ -11,7 +11,7 @@ import { ADMIN_URL, templateName, urlFor } from './dbNames';
  * copy — tens of milliseconds, and parallel across workers.
  */
 export default async function globalSetup(config: { maxWorkers: number }): Promise<void> {
-  const admin = createDb(ADMIN_URL, 1);
+  const admin = createDb(ADMIN_URL, { max: 1, onError: () => {} });
 
   try {
     await admin.db.execute(sql`select 1`);
@@ -31,7 +31,7 @@ export default async function globalSetup(config: { maxWorkers: number }): Promi
       await admin.db.execute(sql.raw(`drop database if exists ${name} with (force)`));
       await admin.db.execute(sql.raw(`create database ${name}`));
 
-      const handle = createDb(urlFor(name), 1);
+      const handle = createDb(urlFor(name), { max: 1, onError: () => {} });
       try {
         await runMigrations(handle.db);
         await seedContent(handle.db);

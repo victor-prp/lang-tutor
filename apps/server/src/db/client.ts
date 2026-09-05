@@ -8,11 +8,14 @@ import * as schema from './schema';
 // handle it returns — see the DI rule in the spec. A module-level `export const
 // db` here would give every test in a Jest worker one connection to one
 // database, and the per-test cloned database would be unreachable.
-export function createDb(connectionString: string, max = 5) {
-  const pool = new Pool({ connectionString, max });
-  pool.on('error', (err) => {
-    console.error('Unexpected error on idle Postgres client', err);
-  });
+export function createDb(
+  connectionString: string,
+  options: { max?: number; onError: (error: Error) => void },
+) {
+  const pool = new Pool({ connectionString, max: options.max ?? 5 });
+  // The policy is received, not decided here: `db/` does not get to choose what
+  // an idle-client failure means to the process it is running in.
+  pool.on('error', options.onError);
   const db = drizzle(pool, { schema });
   return {
     db,
