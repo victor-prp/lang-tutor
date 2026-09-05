@@ -1,0 +1,21 @@
+# Phase 4 runs every test against real Postgres, so this is a prerequisite for
+# `npm test`, not just for `npm run server`. The healthcheck is what lets
+# `npm run db:up` block until the server actually accepts connections.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: lang_tutor
+    ports:
+      - '5432:5432'
+    volumes:
+      - lang-tutor-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  lang-tutor-pgdata:

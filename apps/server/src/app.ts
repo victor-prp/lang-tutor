@@ -1,18 +1,36 @@
+import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 
-import { mockQuestions } from './data/mockQuestions';
+import type { Db } from './db/client';
 import { createSessionsRouter } from './routes/sessions';
-import { createSessionStore } from './store/sessionStore';
+import { createSessionService } from './services/sessions';
 
-export function createApp() {
+// The composition root: receives the database handle, constructs the service,
+// wires the router. It holds no logic and creates no connection of its own —
+// which is what lets a test hand it a per-test database.
+export function createApp(db: Db) {
   const app = new Hono();
   app.use('*', cors());
-  // Liveness probe. Deliberately reads no session state and takes no
-  // parameters, so a readiness poll cannot perturb the store. When storage
-  // lands this is where a DB-connectivity check belongs.
-  app.get('/health', (c) => c.json({ ok: true }));
-  const store = createSessionStore();
-  app.route('/api/sessions', createSessionsRouter(store, mockQuestions));
+
+  // Readiness, not just liveness, now that a database has to be up first: the
+  // e2e suite waits on this before starting the app, and a 503 here is what
+  // distinguishes "server booting" from "server broken".
+  app.get('/health', async (c) => {
+    try {
+      await db.execute(sql`select 1`);
+      return c.json({ ok: true });
+    } catch {
+      return c.json({ ok: false }, 503);
+    }
+  });
+
+  app.route('/api/sessions', createSessionsRouter(createSessionService(db)));
+
+  app.onError((error, c) => {
+    console.error(error);
+    return c.json({ error: 'internal error' }, 500);
+  });
+
   return app;
 }

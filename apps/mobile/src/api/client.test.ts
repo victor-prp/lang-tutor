@@ -1,20 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 
-import { ApiError, createSession, nextStep } from './client';
+import { ApiError, createApiClient } from './client';
+
+function buildClient(mockFetch: jest.Mock) {
+  return createApiClient({
+    baseUrl: 'http://test.local',
+    fetch: mockFetch as unknown as typeof globalThis.fetch,
+  });
+}
 
 describe('api/client', () => {
-  const originalFetch = global.fetch;
-  const originalBaseUrl = process.env.EXPO_PUBLIC_API_URL;
-
-  beforeEach(() => {
-    process.env.EXPO_PUBLIC_API_URL = 'http://example.test';
-  });
-
-  afterEach(() => {
-    global.fetch = originalFetch;
-    process.env.EXPO_PUBLIC_API_URL = originalBaseUrl;
-  });
-
   it('createSession posts to /api/sessions with the request body', async () => {
     const mockFetch = jest.fn(async () => ({
       ok: true,
@@ -25,12 +20,12 @@ describe('api/client', () => {
         position: { position: 1, total: 10 },
       }),
     }));
-    global.fetch = mockFetch as unknown as typeof fetch;
+    const client = buildClient(mockFetch);
 
-    const result = await createSession({ user_id: 'u1' });
+    const result = await client.createSession({ user_id: 'u1' });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://example.test/api/sessions',
+      'http://test.local/api/sessions',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -50,12 +45,12 @@ describe('api/client', () => {
       missed_questions: [],
     };
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => responseBody }));
-    global.fetch = mockFetch as unknown as typeof fetch;
+    const client = buildClient(mockFetch);
 
-    const result = await nextStep('s1', { user_id: 'u1', question_id: 'q1', option_index: 0 });
+    const result = await client.nextStep('s1', { user_id: 'u1', question_id: 'q1', option_index: 0 });
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://example.test/api/sessions/s1/next-step',
+      'http://test.local/api/sessions/s1/next-step',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -67,14 +62,9 @@ describe('api/client', () => {
 
   it('throws an ApiError carrying the response status when the request fails', async () => {
     const mockFetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }));
-    global.fetch = mockFetch as unknown as typeof fetch;
+    const client = buildClient(mockFetch);
 
-    await expect(createSession({ user_id: 'u1' })).rejects.toBeInstanceOf(ApiError);
-    await expect(createSession({ user_id: 'u1' })).rejects.toMatchObject({ status: 404 });
-  });
-
-  it('throws when EXPO_PUBLIC_API_URL is not set', async () => {
-    delete process.env.EXPO_PUBLIC_API_URL;
-    await expect(createSession({ user_id: 'u1' })).rejects.toThrow('EXPO_PUBLIC_API_URL');
+    await expect(client.createSession({ user_id: 'u1' })).rejects.toBeInstanceOf(ApiError);
+    await expect(client.createSession({ user_id: 'u1' })).rejects.toMatchObject({ status: 404 });
   });
 });

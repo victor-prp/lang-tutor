@@ -13,9 +13,9 @@ import {
 } from 'react';
 import { Alert } from 'react-native';
 
-import { createSession, nextStep } from '@/api/client';
+import type { ApiClient } from '@/api/client';
 import { strings } from '@/strings';
-import { getOrCreateUserId } from '@/userId';
+import type { UserIdStore } from '@/userId';
 
 export type SessionValue = {
   hasSession: boolean;
@@ -93,7 +93,15 @@ function applyQueued(current: QuizState, queued: Queued): QuizState {
   };
 }
 
-export function SessionProvider({ children }: { children: ReactNode }) {
+export function SessionProvider({
+  api,
+  userIdStore,
+  children,
+}: {
+  api: ApiClient;
+  userIdStore: UserIdStore;
+  children: ReactNode;
+}) {
   // Phase 2 still keeps a client-side copy of the current step for rendering,
   // but the server is now the source of truth for progress and scoring.
   const [state, setState] = useState<QuizState | null>(null);
@@ -134,8 +142,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
     void (async () => {
       try {
-        const userId = await getOrCreateUserId();
-        const response = await createSession({ user_id: userId });
+        const userId = await userIdStore.getOrCreateUserId();
+        const response = await api.createSession({ user_id: userId });
         setState({
           sessionId: response.session_id,
           userId,
@@ -171,7 +179,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // learner from `question.correct_option` the moment this returns
       // (see MultipleChoiceView), so this call only has to register the
       // answer server-side and fetch what's next before Continue is tapped.
-      void nextStep(sessionId, {
+      void api.nextStep(sessionId, {
         user_id: userId,
         question_id: question.id,
         option_index: optionIndex,

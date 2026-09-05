@@ -1,26 +1,23 @@
-import { describe, expect, it } from '@jest/globals';
-import type { Question } from '@lang-tutor/core/api';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
-import { createSessionStore } from '../store/sessionStore';
+import { createTestDb, type TestDb } from '../../tests/support/testDb';
+import { createSessionService } from '../services/sessions';
 import { createSessionsRouter } from './sessions';
 
-function makeQuestion(n: number): Question {
-  return {
-    id: `q${n}`,
-    type: 'multiple_choice',
-    vocab_entry_id: `v${n}`,
-    question: `word ${n}`,
-    options: [`a${n}`, `b${n}`, `c${n}`, `d${n}`],
-    correct_option: 0,
-  };
-}
+let t: TestDb;
 
-const POOL: Question[] = Array.from({ length: 16 }, (_, i) => makeQuestion(i));
+beforeEach(async () => {
+  t = await createTestDb();
+});
+
+afterEach(async () => {
+  await t.close();
+});
 
 function buildTestApp() {
   const app = new Hono();
-  app.route('/api/sessions', createSessionsRouter(createSessionStore(), POOL));
+  app.route('/api/sessions', createSessionsRouter(createSessionService(t.db)));
   return app;
 }
 
@@ -53,7 +50,21 @@ describe('POST /api/sessions', () => {
 describe('POST /api/sessions/:id/next-step', () => {
   it('404s for an unknown session id', async () => {
     const app = buildTestApp();
-    const res = await postJson(app, '/api/sessions/does-not-exist/next-step', {
+    const res = await postJson(app, '/api/sessions/00000000-0000-0000-0000-000000000000/next-step', {
+      user_id: 'u1',
+      question_id: 'q0',
+      option_index: 0,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  // `sessions.id` is a `uuid` column: before the id reaches the query, a
+  // malformed string must 404 like any other unknown id, not 500 with a raw
+  // driver error (Postgres would otherwise reject it at the SQL level with
+  // 22P02 "invalid input syntax for type uuid").
+  it('404s for a malformed (non-UUID) session id, not 500', async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, '/api/sessions/not-a-uuid/next-step', {
       user_id: 'u1',
       question_id: 'q0',
       option_index: 0,
@@ -162,5 +173,16 @@ describe('POST /api/sessions/:id/next-step', () => {
         correct_answer: firstQuestion.options[firstQuestion.correct_option],
       },
     ]);
+  });
+
+  it('400s when option_index is past the last option', async () => {
+    const app = buildTestApp();
+    const created = await (await postJson(app, '/api/sessions', { user_id: 'u1' })).json();
+    const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
+      user_id: 'u1',
+      question_id: created.question.id,
+      option_index: 99,
+    });
+    expect(res.status).toBe(400);
   });
 });

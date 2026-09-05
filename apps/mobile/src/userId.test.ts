@@ -1,33 +1,48 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { describe, expect, it } from '@jest/globals';
 
-jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
-);
+import { createUserIdStore } from './userId';
 
-// expo-crypto's own auto-generated Jest mock (expo-crypto/mocks/ExpoCrypto.ts)
-// ships `randomUUID(): any {}` — an empty stub that always returns
-// `undefined` — so it must be overridden here to get a real string back.
-// Each call returns a distinct value so the "second call" test below actually
-// proves persistence (that AsyncStorage is consulted) rather than passing
-// vacuously because the mock always returns the same string.
-let mockCallCount = 0;
-jest.mock('expo-crypto', () => ({ randomUUID: () => `test-uuid-${++mockCallCount}` }));
-
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-import { getOrCreateUserId } from './userId';
+function fakeStorage(initial: Record<string, string> = {}) {
+  const values = { ...initial };
+  return {
+    values,
+    getItem: async (key: string) => values[key] ?? null,
+    setItem: async (key: string, value: string) => {
+      values[key] = value;
+    },
+  };
+}
 
 describe('getOrCreateUserId', () => {
-  it('creates and persists a UUID the first time it is called', async () => {
-    const id = await getOrCreateUserId();
-    expect(typeof id).toBe('string');
-    expect(id.length).toBeGreaterThan(0);
-    expect(await AsyncStorage.getItem('lang-tutor:user-id')).toBe(id);
+  it('generates and persists an id on first call', async () => {
+    const storage = fakeStorage();
+    let n = 0;
+    const store = createUserIdStore({ storage, randomUUID: () => `test-uuid-${++n}` });
+
+    expect(await store.getOrCreateUserId()).toBe('test-uuid-1');
+    expect(storage.values['lang-tutor:user-id']).toBe('test-uuid-1');
+  });
+
+  it('returns the persisted id on later calls without generating a new one', async () => {
+    const storage = fakeStorage({ 'lang-tutor:user-id': 'existing-id' });
+    const store = createUserIdStore({
+      storage,
+      randomUUID: () => {
+        throw new Error('must not generate when an id is already stored');
+      },
+    });
+
+    expect(await store.getOrCreateUserId()).toBe('existing-id');
+    expect(await store.getOrCreateUserId()).toBe('existing-id');
   });
 
   it('returns the same id on a second call instead of generating a new one', async () => {
-    const first = await getOrCreateUserId();
-    const second = await getOrCreateUserId();
+    const storage = fakeStorage();
+    let n = 0;
+    const store = createUserIdStore({ storage, randomUUID: () => `test-uuid-${++n}` });
+
+    const first = await store.getOrCreateUserId();
+    const second = await store.getOrCreateUserId();
     expect(second).toBe(first);
   });
 });
