@@ -24,13 +24,13 @@ export function createDb(
   };
 }
 
-// One type for both a database and a transaction handle: Drizzle's transaction
-// object is structurally compatible, so a service can pass its `tx` wherever a
-// `Db` is expected. Named as `NodePgDatabase<schema>` rather than
+// Two types, assignable in one direction only: a `Tx` (below) satisfies `Db`,
+// but a `Db` does not satisfy `Tx` — a pool handle cannot be passed where a
+// transaction is required. Named as `NodePgDatabase<schema>` rather than
 // `ReturnType<typeof createDb>['db']`: `drizzle()`'s return type is that plus a
 // `$client: Pool` intersection member, which a `PgTransaction` does not have —
-// keeping that member out of `Db` is what makes the "pass `tx` as `Db`" claim
-// above actually typecheck.
+// keeping that member out of `Db` is what makes a `Tx` assignable to `Db`
+// actually typecheck.
 export type Db = NodePgDatabase<typeof schema>;
 
 // A transaction handle, derived from what Drizzle actually hands the transaction

@@ -1,5 +1,5 @@
 import type { Question } from '@lang-tutor/core/api';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, isNull, or } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { questions, termVariants, type QuestionOption } from '../db/schema';
@@ -56,7 +56,11 @@ export function createQuestionRepo(tx: Tx) {
             eq(questions.targetLanguage, targetLanguage),
             eq(questions.userLanguageCode, userLanguageCode),
           ),
-        );
+        )
+        // A stable pool order is what makes a seeded rng reproducible: the rng
+        // draws by index, so two services sharing a seed only draw the same
+        // question ids if the pool arrives in the same order both times.
+        .orderBy(asc(questions.id));
 
       return rows.map((row) => questionFrom(row, null));
     },

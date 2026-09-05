@@ -266,8 +266,9 @@ export type HealthRepo = ReturnType<typeof createHealthRepo>;
 ```
 
 `app.ts` then maps an outcome to a status code with no `try`/`catch` and no knowledge
-of Drizzle. The cost is that *why* health failed is swallowed; acceptable because a
-genuinely broken pool already surfaces through `onError` above.
+of Drizzle. The cost is that *why* health failed is swallowed; acceptable because an
+idle-client failure still surfaces through `onError` above, while a connection or
+query failure during the health check itself is visible only as the 503.
 
 **The defect.** `logCompletedSession` currently runs inside `db.transaction`, so a
 commit that fails after `completeSession` leaves stdout claiming a completed session
