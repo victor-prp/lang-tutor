@@ -70,8 +70,8 @@ Two rules that are not import rules:
 ## How to detect a violation
 
 `npm run lint:arch` runs all fifteen checks below and fails on the first violation;
-CI runs it in the `typecheck` job, before `npm ci`, so a layering violation is
-reported in seconds. The commands live in `scripts/check-architecture.sh` verbatim
+CI runs it in the `check-adrs` job, needing no `npm ci` at all, so a layering violation
+is reported in seconds. The commands live in `scripts/check-architecture.sh` verbatim
 — that file is the enforcement, this section is the explanation, and the two must
 stay in sync.
 

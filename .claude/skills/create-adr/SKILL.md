@@ -15,11 +15,16 @@ ADR links to it and does not restate it.
 **One ADR is two files, always:**
 
 1. `docs/adr/adr-NNNN-<kebab-title>.md` — the decision and its rules
-2. `scripts/check-adr-NNNN-<kebab-title>.sh` — those same rules as commands, wired into
-   `npm run lint:arch` and the CI `typecheck` job
+2. `scripts/check-adr-NNNN-<kebab-title>.sh` — those same rules as commands
 
 Writing only the first file is not creating an ADR. One script per ADR, so the pairing stays
 one-to-one; ADR 0001's script keeps its historical name, `scripts/check-architecture.sh`.
+
+Naming the script correctly *is* the wiring: `scripts/check-adrs.sh` discovers
+`scripts/check-adr-*.sh` (plus `check-architecture.sh`, ADR 0001's historical exception) by
+glob and runs all of them, and that one script is what `npm run lint:arch`, the CI
+`check-adrs` job, and the agent-facing Stop hook all call. Get the filename right and none of
+those three need touching.
 
 `NNNN` is the next free number, zero-padded to four digits.
 
@@ -125,17 +130,18 @@ Copy the frame from `scripts/check-architecture.sh`: `cd "$(dirname "$0")/.."`, 
 that prints `ok` / `VIOLATION` per rule and sets `status=1`, one function per rule, and a
 footer pointing at the ADR for what each rule protects.
 
-## Wiring (all four, or it does not run)
+## Wiring (all three, or it does not run)
 
-1. `package.json` → `lint:arch` runs the new script as well as the existing ones, and fails if
-   any fails. Not `&&`: that stops at the first failure, so a layering violation hides every DI
-   result. Run each, keep the statuses, and combine them (`exit $((a | b))`).
-2. `.github/workflows/ci.yml` → the `typecheck` job's architecture step, which runs **before
-   `npm ci`**: these checks are grep over the tree, so they need no dependencies and no
-   database, and a violation is reported in seconds rather than after an install.
-3. README's ADR index row — create the index under `## Architecture` if none exists yet
+`package.json`'s `lint:arch`, `.github/workflows/ci.yml`'s architecture step, and the
+agent-facing Stop hook in `.claude/settings.json` all call `scripts/check-adrs.sh`, which
+discovers `scripts/check-adr-*.sh` by glob and runs every one of them, combining exit statuses
+so one ADR's violation never hides another's (`&&` would stop at the first failure). None of
+those three call sites need editing for a new ADR — only these:
+
+1. The script itself, named `scripts/check-adr-NNNN-<kebab-title>.sh` so the glob finds it.
+2. README's ADR index row — create the index under `## Architecture` if none exists yet
    (today nothing in the repo links `docs/adr/` at all) — and its `npm run lint:arch` line.
-4. The rule count, if the ADR or script states one, in both places.
+3. The rule count, if the ADR or script states one, in both places.
 
 ## Verify before claiming it is done
 
@@ -199,6 +205,7 @@ Create a todo per item.
 - [ ] Every rule is `Rn`, one line, independently checkable
 - [ ] Non-greppable rules under their own heading, each naming its real enforcement
 - [ ] `scripts/check-adr-NNNN-<slug>.sh`, one function per rule, commands verbatim from the ADR
-- [ ] Wired: `lint:arch`, CI `typecheck` step before `npm ci`, README index, rule counts
+- [ ] Filename matches the glob `check-adrs.sh` discovers (no edit needed to `lint:arch`, CI, or
+      the Stop hook); README index and rule counts updated
 - [ ] Each rule watched failing against a planted violation, then restored
 - [ ] `npm run lint:arch` green on a clean tree; `git status` clean of test violations

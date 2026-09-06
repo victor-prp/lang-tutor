@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "paths=$(git status --porcelain -- apps/server/src apps/mobile/src 2>/dev/null); if [ -n \"$paths\" ]; then out=$(./scripts/check-adrs.sh 2>&1); s=$?; if [ $s -ne 0 ]; then jq -n --arg reason \"$out\" '{decision:\"block\", reason:$reason}'; fi; fi",
+            "statusMessage": "Checking ADR compliance..."
+          }
+        ]
+      }
+    ]
+  }
+}
