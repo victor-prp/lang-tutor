@@ -10,10 +10,18 @@ completed session — all in memory, no database yet. Phase 4 moves that session
 and the question pool it draws from, into Postgres: the in-memory store and the mock
 question data are both gone. The learner-facing app is unchanged.
 
+Phase 7 changes how the server's routes are *declared*: one definition per endpoint now
+serves as routing, validation, response typing and OpenAPI generation at once, and the
+wire contract lives in `packages/core` as Zod schemas that every API type is inferred
+from. The HTTP contract itself is untouched.
+
 - Phase 1: [design](docs/superpowers/specs/2026-08-24-lang-tutor-phase-1-design.md) · [plan](docs/superpowers/plans/2026-08-24-lang-tutor-phase-1.md)
 - Phase 2: [design](docs/superpowers/specs/2026-08-26-lang-tutor-phase-2-design.md) · [plan](docs/superpowers/plans/2026-08-26-lang-tutor-phase-2.md)
 - Phase 3: [design](docs/superpowers/specs/2026-08-29-lang-tutor-phase-3-ci-design.md) · [plan](docs/superpowers/plans/2026-08-29-lang-tutor-phase-3-ci.md)
 - Phase 4: [design](docs/superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md) · [plan](docs/superpowers/plans/2026-09-04-lang-tutor-phase-4-postgres.md)
+- Phase 5: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md) · [plan](docs/superpowers/plans/2026-09-05-lang-tutor-phase-5-di-corrections.md)
+- Phase 6: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-6-test-topology-design.md) · [plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-6-test-topology.md)
+- Phase 7: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-7-openapi-design.md) · [plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-7-openapi.md)
 
 ## Layout
 
@@ -21,7 +29,7 @@ An npm-workspace monorepo.
 
 | Path | What it is |
 |---|---|
-| `packages/core` | `@lang-tutor/core` — the API contract (`api/`), quiz rules (`domain/`), internal helpers (`utils/`). No runtime dependencies. Consumed as TypeScript source, so there is no build step. Unchanged by phase 4: both apps still import only `api/` and `domain/` from it. |
+| `packages/core` | `@lang-tutor/core` — the API contract (`api/`), quiz rules (`domain/`), internal helpers (`utils/`). One runtime dependency, `zod`: since phase 7 the wire contract *is* a set of Zod schemas, and every type in `api/types.ts` is inferred from one. Consumed as TypeScript source, so there is no build step. |
 | `apps/mobile` | The Expo app. Screens, components, theme, Hebrew copy, and the API client. |
 | `apps/server` | A Hono server on `@hono/node-server`. Session state and the question pool live in Postgres, reached only through Drizzle: `routes/` (Hono handlers) call `services/` (use cases, each one transaction), which call `repo/` (query functions) and the server's own `domain/` (the session state machine), backed by `db/` (schema, migrations, the connection). The app talks to the server over HTTP; the server never lets SQL leak above `repo/`. Also consumed as TypeScript source via `tsx`, no build step. |
 
@@ -29,13 +37,19 @@ An npm-workspace monorepo.
 design. Anything a consumer needs comes from `@lang-tutor/core/api` (types) or
 `@lang-tutor/core/domain` (rules) — both `apps/mobile` and `apps/server` import them.
 
+`@lang-tutor/core/api/schemas` is a third entry point, and deliberately separate: it
+exports the Zod schemas those types are inferred from. `apps/server` imports it to build
+its route definitions; `apps/mobile` never does. Keeping the schemas out of `./api` is
+what makes that enforceable — `./api` is type-only, so a mobile import that forgets the
+`type` keyword fails loudly instead of quietly pulling Zod into the app bundle.
+
 ## Architecture
 
 `apps/server` is layered, and the dependency arrow points one way only:
 
 | Layer | May depend on | Must not touch |
 |---|---|---|
-| `routes/` | services, domain types, zod schemas | Drizzle, SQL, `db/` |
+| `routes/` | services, the wire schemas from `@lang-tutor/core/api/schemas`, `@hono/zod-openapi` | Drizzle, SQL, `db/` |
 | `services/` | domain, repositories, the `Db` handle for transaction scope | Hono, `Context`, status codes, SQL |
 | `domain/` | `packages/core/api` types only | pg, Hono, the clock, `Math.random` |
 | `repo/` + `db/` | Drizzle, domain *types* (to return them) | services, routes, domain *logic* |
@@ -46,6 +60,11 @@ database exists. `services/` owns transaction boundaries: each use case is exact
 convention. This is why the store and the mock question pool from earlier phases are
 gone rather than kept as a fallback: a second data source would mean a second place a
 transaction could leak across.
+
+Since phase 7 a route is one `createRoute` definition plus its handler, and that
+definition is simultaneously the routing entry, the request validator, the response type
+and the published OpenAPI description. There is no second document to keep in step,
+which is the point: a response that stops matching its declared schema stops compiling.
 
 Every dependency with I/O, state, or a lifecycle — a database handle, an HTTP client, a
 clock, a source of randomness — follows one rule, with no opt-out:
@@ -122,6 +141,27 @@ network namespace. Edit the `apps/mobile/.env.local` created above:
 ```
 
 Phone and dev machine must be on the same Wi-Fi network.
+
+## Reading the API
+
+The server describes itself. With `npm run server` running:
+
+| URL | What it is |
+|---|---|
+| <http://localhost:3001/openapi.json> | The generated OpenAPI 3.1 document |
+| <http://localhost:3001/docs> | [Scalar](https://github.com/scalar/scalar) — reads the document and sends real requests from the page |
+
+Both are always on. There is no auth and no secret here, and the API surface is already
+fully described by an open-source client that calls it, so gating them would add
+configuration and remove no risk.
+
+Neither is hand-written. Every endpoint is one `createRoute` definition in
+`apps/server/src/` — routing, request validation, response typing and documentation at
+once — built from the Zod schemas in `packages/core/src/api/schemas.ts`. Documentation
+that drifts is documentation that was written twice; this is written once.
+
+`/docs` loads Scalar's client bundle from `cdn.jsdelivr.net`, so that page needs network
+access. `/openapi.json` is generated in-process and works offline.
 
 ## Browsing the database
 
