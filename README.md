@@ -80,8 +80,9 @@ enforced.
 | [0001](docs/adr/adr-0001-layered-architecture.md) | Layered architecture in `apps/server` — the import rules between `routes/`, `services/`, `domain/`, `repo/`, `db/` |
 | [0002](docs/adr/adr-0002-di-with-closures.md) | Dependency injection via closures, constructed only at a composition root |
 | [0003](docs/adr/adr-0003-openapi-wire-contract.md) | OpenAPI generated from the wire contract — one `createRoute` definition per endpoint, schemas live in `packages/core` |
+| [0004](docs/adr/adr-0004-test-topology.md) | Test topology — which folder a test file is in decides whether it may touch infrastructure |
 
-All three are enforced by `npm run lint:arch` (15 + 7 + 6 = 28 checks, grep only, no deps,
+All four are enforced by `npm run lint:arch` (15 + 7 + 6 + 5 = 33 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
