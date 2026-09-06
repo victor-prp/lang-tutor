@@ -28,18 +28,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # First, and before npm ci: the architecture check is grep over the tree,
-      # so it needs no dependencies and no database, and a layering violation is
-      # reported in seconds rather than after an install. Until this step
-      # existed, ADR 0001's rules were a checklist in a document that only ran if
-      # someone remembered to run it — every other invariant in this repo
-      # (schema drift, the unit/integration split) is enforced by a job.
-      - name: Check layering rules (ADR 0001)
-        run: ./scripts/check-architecture.sh
-
-      # Same reasoning as ADR 0001's step above: grep, no deps, runs before npm ci.
-      - name: Check DI-via-closures rules (ADR 0002)
-        run: ./scripts/check-adr-0002-di-with-closures.sh
+      # First, and before npm ci: every ADR check is grep over the tree, so it
+      # needs no dependencies and no database, and a violation is reported in
+      # seconds rather than after an install. Until ADR 0001's step existed,
+      # its rules were a checklist in a document that only ran if someone
+      # remembered to run it — every other invariant in this repo (schema
+      # drift, the unit/integration split) is enforced by a job.
+      #
+      # check-adrs.sh discovers scripts/check-adr-*.sh by naming convention,
+      # so a new ADR's script needs no edit here — see the create-adr skill.
+      - name: Check ADR compliance
+        run: ./scripts/check-adrs.sh
 
       - uses: actions/setup-node@v5
         with:
