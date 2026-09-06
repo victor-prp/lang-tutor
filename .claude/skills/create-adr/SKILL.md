@@ -18,13 +18,12 @@ ADR links to it and does not restate it.
 2. `scripts/check-adr-NNNN-<kebab-title>.sh` — those same rules as commands
 
 Writing only the first file is not creating an ADR. One script per ADR, so the pairing stays
-one-to-one; ADR 0001's script keeps its historical name, `scripts/check-architecture.sh`.
+one-to-one.
 
 Naming the script correctly *is* the wiring: `scripts/check-adrs.sh` discovers
-`scripts/check-adr-*.sh` (plus `check-architecture.sh`, ADR 0001's historical exception) by
-glob and runs all of them, and that one script is what `npm run lint:arch`, the CI
-`check-adrs` job, and the agent-facing Stop hook all call. Get the filename right and none of
-those three need touching.
+`scripts/check-adr-*.sh` by glob and runs all of them, and that one script is what
+`npm run lint:arch`, the CI `check-adrs` job, and the agent-facing Stop hook all call. Get the
+filename right and none of those three need touching.
 
 `NNNN` is the next free number, zero-padded to four digits.
 
@@ -126,7 +125,7 @@ the enforcement, and a rule living in only one of them is a rule nobody keeps.
 - Every exclusion (`grep -v -e …`) is an exception the ADR names in `### What the rules cover`,
   with the reason, in the script as a comment.
 
-Copy the frame from `scripts/check-architecture.sh`: `cd "$(dirname "$0")/.."`, a `check()`
+Copy the frame from `scripts/check-adr-0001-layered-architecture.sh`: `cd "$(dirname "$0")/.."`, a `check()`
 that prints `ok` / `VIOLATION` per rule and sets `status=1`, one function per rule, and a
 footer pointing at the ADR for what each rule protects.
 
