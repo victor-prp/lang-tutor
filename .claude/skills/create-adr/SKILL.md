@@ -37,6 +37,33 @@ before drafting:
 
 The user decides how conflicts resolve. Do not resolve them yourself.
 
+## Then ask, before writing any file
+
+A one-line decision does not contain an ADR's worth of rules. Ask these four, **batched in
+one round**, after the conflict scan and before the ADR, the script, or the wiring exists.
+Fold any conflicts from the scan into the same round.
+
+| Ask | Why it cannot be inferred |
+|---|---|
+| **Scope** — which trees do these rules govern (`apps/server/src` only? `apps/mobile/src`? `packages/core`?), and are test files in or out? | Two agents given the same sentence chose opposite coverage: production-source-only versus both apps plus core, with the mock rules applying to tests *above all*. |
+| **The corollaries** — list the rules you would add that the user did not state, as one list to accept or trim. | "No `class` outside `Error` subclasses", "no `rng = Math.random` default", "no `jest.spyOn` on globals" are all inferred. They are probably right, and they are about to block every push. |
+| **Exceptions and roots** — which files are composition roots or otherwise excluded, and is there a known exception to carve out? | Every `grep -v` is a policy decision. `_layout.tsx` reading `process.env` at module scope is required by Metro's inliner — not something to grant yourself. |
+| **Status and Source** — `Accepted` or `Proposed`, and which design doc the header links (or none, if the decision was made in conversation). | The header has a `Source` line; guessing which spec justifies a rule misattributes it. |
+
+Ask once, in one batch — not a question per rule, and not a drip across the task.
+
+If the questions cannot be asked — the user declined, said "you decide", or the session is
+non-interactive — proceed on your own answers and put **all four** in your final report under
+their own heading, the corollaries named individually: *these rules are inferred, you did not
+state them, and they now block every push.* That list is the user's only chance to trim a rule
+before CI enforces it, so it is the one part of the report that cannot be summarised away.
+
+**Do not ask about** the filename slug, section order, rule-ID scheme, the script's frame, or
+where the wiring goes. This skill fixes all of those; there is no decision there.
+
+Approved rules are the user's rules. Do not annotate the ADR with which ones were inferred —
+the document records the decision, not its provenance.
+
 ## The ADR's shape
 
 These sections, in this order, and no others. **No Options, no Alternatives Considered, no
@@ -142,6 +169,8 @@ Every excuse below was recorded from an agent doing this task without this skill
 | "The check passes, so the rule works" | It has never failed. Plant the violation and watch it fail. |
 | "The decision needs its rationale to be understood" | The rationale is in the design doc the header links. `Why` is 5 bullets, for rules that look stylistic and are not. |
 | "An ADR should record the options considered" | Not here. Options are the design doc's job; this file is the decision and the check. |
+| "The decision is clear enough to write the rules from" | One sentence yielded two agents inventing nine rules each, disagreeing on scope and on three of the rules. Ask. |
+| "I'll write it and the user can correct the rules in review" | The rules ship wired into CI. A wrong one blocks every push on the branch, which is not a review comment. |
 | "It's a small rule, one more grep in the existing script is simpler" | One script per ADR keeps the pairing one-to-one. A shared script makes "which ADR is this rule from?" unanswerable. |
 
 ## Red flags — stop
@@ -154,12 +183,16 @@ Every excuse below was recorded from an agent doing this task without this skill
 - Claiming a tree is covered without a command that scans it
 - Never having seen the new check fail
 - A new rule that contradicts an accepted ADR and you are drafting around it instead of asking
+- Writing the rules table without having asked about scope, corollaries, exceptions or status
+- A rule in the table the user never stated and never approved
 
 ## Checklist
 
 Create a todo per item.
 
 - [ ] Conflict scan over `docs/adr/*.md` + README; contradictions and stale prose reported to the user
+- [ ] Scope, corollaries, exceptions/roots, status/source asked in one batch — before any file exists
+- [ ] If they could not be asked: all four answered in the report, inferred rules named one by one
 - [ ] Next free `NNNN`; ADR at `docs/adr/adr-NNNN-<slug>.md`
 - [ ] Sections exactly as tabled above; `Why` ≤ 5 bullets; no Options/Consequences
 - [ ] Every rule is `Rn`, one line, independently checkable
