@@ -6,6 +6,9 @@
     "packages/*",
     "e2e"
   ],
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "scripts": {
     "mobile": "npm run start --workspace apps/mobile",
     "server": "npm run dev --workspace apps/server",

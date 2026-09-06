@@ -2,6 +2,8 @@ export type {
   AnswerRecord,
   CreateSessionRequest,
   CreateSessionResponse,
+  ErrorResponse,
+  HealthResponse,
   MissedQuestion,
   MultipleChoiceQuestion,
   NextStepRequest,
