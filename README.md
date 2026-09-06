@@ -211,7 +211,7 @@ Every push, on every branch, runs four parallel jobs on GitHub Actions
 | `typecheck` | none | `npm run typecheck` — `tsc` reads `db/schema.ts` directly | 1 min |
 | `test-unit` | **none, deliberately** | `npm test` | 1 min |
 | `test-integration` | `docker compose up -d --wait db` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
-| `e2e` | `docker compose up -d --wait db` | `npm run e2e` — the Playwright suite described below | 4-5 min |
+| `test-e2e` | `docker compose up -d --wait db` | `npm run e2e` — the Playwright suite described below | 4-5 min |
 
 `test-unit` has no database available at all. That is the point: it *proves* the
 unit/integration boundary rather than assuming it, because a "unit" test that secretly
@@ -225,8 +225,8 @@ after `actions/checkout` — it reads the compose file out of the tree — and `
 blocks on the healthcheck, which is what the removed `services:` block's
 `options: --health-cmd` was doing.
 
-The jobs are independent, so a red `e2e` beside a green `typecheck` and `test-unit`
-tells you the app broke, not that the code stopped compiling. A failing `e2e` run uploads
+The jobs are independent, so a red `test-e2e` beside a green `typecheck` and `test-unit`
+tells you the app broke, not that the code stopped compiling. A failing `test-e2e` run uploads
 a Playwright trace as a `playwright-traces` artifact; download it and open it with
 `npx playwright show-trace` rather than trying to reproduce the failure locally.
 
@@ -234,7 +234,7 @@ Pushing again cancels the previous run for that branch.
 
 ### Nothing gates a merge yet
 
-These four context names — `typecheck`, `test-unit`, `test-integration`, `e2e` — are what
+These four context names — `typecheck`, `test-unit`, `test-integration`, `test-e2e` — are what
 a branch-protection rule on `master` must list. **No such rule exists.** `master` has no
 legacy branch protection, and its active ruleset ("protect muster") contains only
 `deletion`, `non_fast_forward` and `pull_request` — no `required_status_checks`. A pull
