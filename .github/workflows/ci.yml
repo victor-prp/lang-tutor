@@ -37,6 +37,10 @@ jobs:
       - name: Check layering rules (ADR 0001)
         run: ./scripts/check-architecture.sh
 
+      # Same reasoning as ADR 0001's step above: grep, no deps, runs before npm ci.
+      - name: Check DI-via-closures rules (ADR 0002)
+        run: ./scripts/check-adr-0002-di-with-closures.sh
+
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
