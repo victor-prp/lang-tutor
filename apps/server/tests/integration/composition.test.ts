@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
-import { createServerDeps } from './composition';
-import { createFakeLogger } from '../tests/support/fakes';
-import { createTestDb, type TestDb } from '../tests/support/testDb';
-import { testRng } from '../tests/support/testRng';
+import { createServerDeps } from '../../src/composition';
+import { createFakeLogger } from '../support/fakes';
+import { createTestDb, type TestDb } from '../support/testDb';
+import { testRng } from '../support/testRng';
 
 let t: TestDb;
 

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
-import { createDb } from '../db/client';
-import { createHealthRepo } from './health';
-import { createTestDb, type TestDb } from '../../tests/support/testDb';
+import { createDb } from '../../../src/db/client';
+import { createHealthRepo } from '../../../src/repo/health';
+import { createTestDb, type TestDb } from '../../support/testDb';
 
 let t: TestDb;
 
@@ -21,8 +21,8 @@ describe('createHealthRepo', () => {
 
   it('reports false when the connection fails, instead of throwing', async () => {
     // A pool pointed at a port nothing listens on: a real connection failure,
-    // with no global state touched and nothing mocked. This case moves here from
-    // app.test.ts, which after Task 4 reaches its 503 branch with a fake.
+    // with no global state touched and nothing mocked. app.test.ts reaches its
+    // own 503 branch with a fake ping instead, which is why it stays fast.
     const dead = createDb('postgres://postgres:postgres@localhost:1/none', {
       onError: () => {},
     });

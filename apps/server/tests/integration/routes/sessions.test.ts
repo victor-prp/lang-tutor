@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
-import { createTestDb, type TestDb } from '../../tests/support/testDb';
-import { createFakeLogger } from '../../tests/support/fakes';
-import { testRng } from '../../tests/support/testRng';
-import { createQuestionRepo } from '../repo/questions';
-import { createSessionRepo } from '../repo/sessions';
-import { createSessionService } from '../services/sessions';
-import { createSessionsRouter } from './sessions';
+import { createTestDb, type TestDb } from '../../support/testDb';
+import { createFakeLogger } from '../../support/fakes';
+import { testRng } from '../../support/testRng';
+import { createQuestionRepo } from '../../../src/repo/questions';
+import { createSessionRepo } from '../../../src/repo/sessions';
+import { createSessionService } from '../../../src/services/sessions';
+import { createSessionsRouter } from '../../../src/routes/sessions';
 
 let t: TestDb;
 

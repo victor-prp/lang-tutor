@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { eq } from 'drizzle-orm';
 
-import { createTestDb, type TestDb } from '../../tests/support/testDb';
-import { testRng } from '../../tests/support/testRng';
-import { withTx } from '../../tests/support/withTx';
-import type { Tx } from '../db/client';
-import { newSessionRecord } from '../domain/session';
-import { sessions } from '../db/schema';
-import { createQuestionRepo } from './questions';
-import { createSessionRepo } from './sessions';
+import { createTestDb, type TestDb } from '../../support/testDb';
+import { testRng } from '../../support/testRng';
+import { withTx } from '../../support/withTx';
+import type { Tx } from '../../../src/db/client';
+import { newSessionRecord } from '../../../src/domain/session';
+import { sessions } from '../../../src/db/schema';
+import { createQuestionRepo } from '../../../src/repo/questions';
+import { createSessionRepo } from '../../../src/repo/sessions';
 
 let t: TestDb;
 

@@ -1,5 +1,6 @@
-# Phase 4 runs every test against real Postgres, so this is a prerequisite for
-# `npm test`, not just for `npm run server`. The healthcheck is what lets
+# Bare `npm test` is unit-only and needs no database. This compose file is a
+# prerequisite for `npm run test:integration` / `npm run test:all` and for
+# `npm run server`, not for `npm test`. The healthcheck is what lets
 # `npm run db:up` block until the server actually accepts connections.
 services:
   db:

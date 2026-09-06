@@ -24,18 +24,11 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "test": "jest",
+    "test": "jest --selectProjects unit",
+    "test:integration": "jest --selectProjects integration",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
     "db:migrate": "tsx src/db/cli.ts"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "globalSetup": "<rootDir>/tests/support/globalSetup.ts",
-    "globalTeardown": "<rootDir>/tests/support/globalTeardown.ts",
-    "restoreMocks": true,
-    "resetMocks": true,
-    "testTimeout": 30000
   }
 }
