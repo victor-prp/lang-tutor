@@ -67,27 +67,21 @@ and the published OpenAPI description. There is no second document to keep in st
 which is the point: a response that stops matching its declared schema stops compiling.
 
 Every dependency with I/O, state, or a lifecycle — a database handle, an HTTP client, a
-clock, a source of randomness — follows one rule, with no opt-out:
+clock, a source of randomness — follows one rule, with no opt-out: construct it only at
+a composition root (`apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
+`apps/mobile/src/app/_layout.tsx`) and pass it down as a closure. See
+[ADR 0002](docs/adr/adr-0002-di-with-closures.md) for the rules and why each one is
+enforced.
 
-1. **Construct at the composition root.** `apps/server/src/index.ts` for the server — it
-   reads its `Config` from `apps/server/src/config.ts` and hands the pieces it opens (a
-   pool, a logger, `Math.random`) to `apps/server/src/composition.ts`, which is assembly
-   only: no I/O, no logic. `apps/server/src/db/cli.ts` is a second server-side root, for
-   the migration process. `apps/mobile/src/app/_layout.tsx` is the app's. Nowhere else
-   calls a constructor.
-2. **Capture it in a `createX` factory** that returns an object of closures, and derive
-   the type with `ReturnType<typeof createX>`.
-3. **Pass the resulting object down.** A consumer names what it needs in its
-   parameters.
-4. **No module-level mutable state.** No `export const db = …`, no `process.env` read
-   at import time, no singleton caches.
-5. **No `jest.mock`, anywhere.** A test supplies a fake by passing one. If a test needs
-   `jest.mock`, that is the signal a seam is missing — fix the seam, not the test.
+### Architecture decision records
 
-A contributor cannot infer this from reading any single file, so it is written down
-here rather than left implicit. See the [phase 4 design doc](docs/superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
-for the reasoning and the violations it fixed, and the [phase 5 design doc](docs/superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md)
-for the eight it corrected afterwards.
+| ADR | Decision |
+|---|---|
+| [0001](docs/adr/adr-0001-layered-architecture.md) | Layered architecture in `apps/server` — the import rules between `routes/`, `services/`, `domain/`, `repo/`, `db/` |
+| [0002](docs/adr/adr-0002-di-with-closures.md) | Dependency injection via closures, constructed only at a composition root |
+
+Both are enforced by `npm run lint:arch` (15 + 7 = 22 checks, grep only, no deps, no
+database) — see *Checks* below.
 
 ## Data model
 
@@ -182,7 +176,7 @@ npm run db:up       # docker compose up -d --wait db  (requires Docker)
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # ADR 0001's layering rules — grep only, no deps, no database
+npm run lint:arch   # ADR 0001's layering rules + ADR 0002's DI rules — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go
