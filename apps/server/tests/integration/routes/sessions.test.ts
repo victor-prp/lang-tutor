@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
+import { createTransaction } from '../../../src/db/transaction';
 import { createQuestionRepo } from '../../../src/repo/questions';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { createSessionService } from '../../../src/services/sessions';
@@ -25,10 +26,12 @@ function buildTestApp() {
     '/api/sessions',
     createSessionsRouter(
       createSessionService({
-        db: t.db,
+        transaction: createTransaction(t.db, (tx) => ({
+          session: createSessionRepo(tx),
+          question: createQuestionRepo(tx),
+        })),
         rng: testRng(7),
         logger: createFakeLogger(),
-        repos: { session: createSessionRepo, question: createQuestionRepo },
       }),
     ),
   );

@@ -1,4 +1,5 @@
 import type { Db } from './db/client';
+import { createTransaction } from './db/transaction';
 import type { Logger } from './logger';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createQuestionRepo } from './repo/questions';
@@ -16,13 +17,16 @@ export type AppDeps = {
 // createDb opens a real pool — that stays in main(), and everything above it is
 // a pure function a test can call.
 export function createServerDeps(io: { db: Db; logger: Logger; rng: () => number }): AppDeps {
+  // Binding the repositories to a transaction is assembly, which is what this
+  // file is for. Doing it here is what lets services/ take a transaction rather
+  // than a database.
+  const transaction = createTransaction(io.db, (tx) => ({
+    session: createSessionRepo(tx),
+    question: createQuestionRepo(tx),
+  }));
+
   return {
-    sessions: createSessionService({
-      db: io.db,
-      rng: io.rng,
-      logger: io.logger,
-      repos: { session: createSessionRepo, question: createQuestionRepo },
-    }),
+    sessions: createSessionService({ transaction, rng: io.rng, logger: io.logger }),
     health: createHealthRepo(io.db),
     logger: io.logger,
   };

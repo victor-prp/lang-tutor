@@ -2,26 +2,21 @@ import { describe, expect, it } from '@jest/globals';
 
 import { createFakeLogger } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
-import type { Db, Tx } from '../db/client';
 import { SessionNotFound } from '../errors';
+import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
-import { createSessionService } from './sessions';
+import { createSessionService, type Transaction } from './sessions';
 
-// The repository factories are the seam, so a handle that only knows how to run
-// a transaction callback is enough — no Postgres, no clone, no globalSetup. The
-// service's database-backed cases live in
-// tests/integration/services/sessions.test.ts.
+// The transaction seam is the repositories, so running the callback against
+// stubs is enough — no Postgres, no clone, no globalSetup. Note that no cast is
+// needed to build this: the service asks for exactly what it uses. The service's
+// database-backed cases live in tests/integration/services/sessions.test.ts.
 describe('repos', () => {
-  function fakeDb(): Db {
-    return {
-      transaction: (run: (tx: Tx) => Promise<unknown>) => run({} as Tx),
-    } as unknown as Db;
-  }
+  const notStubbed = () => {
+    throw new Error('this repository method should not have been called');
+  };
 
   function sessionRepoWith(overrides: Partial<SessionRepo>): SessionRepo {
-    const notStubbed = () => {
-      throw new Error('this repository method should not have been called');
-    };
     return {
       upsertUser: notStubbed,
       insertSession: notStubbed,
@@ -32,17 +27,21 @@ describe('repos', () => {
     };
   }
 
+  const questionRepo: QuestionRepo = {
+    loadQuestionPool: () => {
+      throw new Error('submitAnswer must not load the question pool');
+    },
+  };
+
+  function fakeTransaction(session: SessionRepo): Transaction {
+    return (run) => run({ session, question: questionRepo });
+  }
+
   it('throws SessionNotFound when the repository reports no such session', async () => {
     const service = createSessionService({
-      db: fakeDb(),
+      transaction: fakeTransaction(sessionRepoWith({ loadSession: async () => undefined })),
       rng: testRng(7),
       logger: createFakeLogger(),
-      repos: {
-        session: () => sessionRepoWith({ loadSession: async () => undefined }),
-        question: () => {
-          throw new Error('submitAnswer must not load the question pool');
-        },
-      },
     });
 
     await expect(

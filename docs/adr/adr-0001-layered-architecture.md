@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); rules updated to match the tree as of 2026-09-06
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -39,18 +39,30 @@ the server's holds the session state machine only a server has (`step`, `Session
 | # | Layer | May import | Must not import |
 |---|---|---|---|
 | R1 | `routes/` | `services/` (types only), `domain/`, `errors`, `@lang-tutor/core/api*`, Hono, zod | `db/`, `repo/`, `drizzle-orm`, `pg` |
-| R2 | `services/` | `domain/`, `repo/` (**types only**), `db/client` (the `Db`/`Tx` handle), `errors`, `logger` | Hono, `hono/*`, `@hono/*`, HTTP status codes, `db/schema`, `drizzle-orm`, `pg` |
+| R2 | `services/` | `domain/`, `repo/` (**types only**), `errors`, `logger` | **anything under `db/`**, Hono, `hono/*`, `@hono/*`, HTTP status codes, `drizzle-orm`, `pg` |
 | R3 | `domain/` | `@lang-tutor/core/*` only | anything else in `apps/server/src`, `pg`, `drizzle-orm`, Hono, `Date.now`, `Math.random` |
 | R4 | `repo/` + `db/` | `drizzle-orm`, `pg`, `db/*`, domain **types** | `routes/`, `services/`, `app.ts`, `composition.ts` |
 | R5 | `app.ts` | `composition` (type `AppDeps`), `routes/`, Hono | `db/`, `repo/`, `services/`, `drizzle-orm`, `pg` |
 | R6 | `composition.ts` | every factory it wires | nothing that performs I/O at call time (no `createDb`, no `new Pool`) |
 | R7 | anywhere | — | `console` outside `logger.ts` and `index.ts`/`db/cli.ts` |
 
+R2 forbids `db/` outright, including the handle types. This is stricter than it
+looks and the reason is not stylistic: `Db` is `NodePgDatabase<typeof schema>`, so
+a service holding one can call `db.query.<table>.findMany(...)` — an arbitrary
+filtered read of any table — with **no import at all**, because the schema arrives
+through the type parameter and the operators arrive as callback arguments. No
+import rule can see that. A service therefore receives a `Transaction` (see R8),
+which closes over the handle and yields only repositories.
+
 Two rules that are not import rules:
 
-- **R8 — Transactions belong to `services/`.** `db.transaction(...)` appears only in
-  `apps/server/src/services/`. A route handler never opens one; a repository never opens
-  its own (it is handed a `Tx`, so the same primitive composes inside or outside one).
+- **R8 — `services/` owns the transaction boundary; `db/transaction.ts` owns the
+  mechanism.** Each use case is exactly one `transaction(...)` call in
+  `apps/server/src/services/`, and `db.transaction(...)` itself appears only in
+  `apps/server/src/db/transaction.ts`. A route handler never opens one; a repository
+  never opens its own (it is handed a `Tx`, so the same primitive composes inside or
+  outside one). `createTransaction(db, bind)` is generic in what it binds, so `db/`
+  does not learn that `repo/` exists — `composition.ts` supplies `bind`.
 - **R9 — Repositories expose primitives, services expose use cases.** A repository
   function is one persistence step (`loadSession`, `insertAnswer`); a service function is
   one use case (`startSession`, `submitAnswer`) taking only its own arguments.
@@ -64,7 +76,10 @@ Run from the repo root. Each command must print nothing.
 grep -rnE "from '\.\./(db|repo)/|from 'drizzle-orm|from 'pg'" apps/server/src/routes/
 
 # R2 — services must not touch transport
-grep -rnE "from '(hono|@hono)/|from 'hono'|from '\.\./db/schema'|from 'drizzle-orm" apps/server/src/services/
+grep -rnE "from '(hono|@hono)/|from 'hono'|from 'drizzle-orm|from 'pg'" apps/server/src/services/
+# R2 — services must not hold a database handle at all. Not style: a `Db` grants
+# db.query.<table>, an arbitrary read of any table that needs no import to detect.
+grep -rn "from '\.\./db/" apps/server/src/services/
 # R2 — services may reference repo modules only as types
 grep -rn "from '\.\./repo/" apps/server/src/services/ | grep -v 'import type'
 
@@ -85,9 +100,9 @@ grep -nE "createDb|new Pool|await " apps/server/src/composition.ts | grep -vE '^
 grep -rn "console\." apps/server/src --include='*.ts' \
   | grep -v -e '/logger.ts' -e '/index.ts' -e '/db/cli.ts' -e '\.test\.ts'
 
-# R8 — transaction boundaries live in services/
+# R8 — the transaction primitive has exactly one call site
 grep -rn "\.transaction(" apps/server/src --include='*.ts' \
-  | grep -v -e '/services/' -e '\.test\.ts'
+  | grep -v -e '/db/transaction.ts' -e '\.test\.ts'
 ```
 
 Tests are excluded from R7/R8 only; R1–R6 apply to test files too, since a test that
@@ -103,6 +118,11 @@ reaches across a layer is evidence the seam is missing.
   desync, completion — covered by fast, database-free tests. It is also where option-range
   validation belongs: the question knows how many options it has, so `step` answers it
   before `evaluate` runs, and a record carrying `answer_string: undefined` is never built.
+- R2's ban on `db/` came from finding that the rules were literally satisfied and
+  substantively not: a service could read any table through `db.query` while every
+  detection command stayed silent. A rule enforced by grep is only as strong as the
+  narrowest type the layer is handed, which is why the fix was a narrower seam rather
+  than a sharper pattern.
 - R5/R6 are what make a per-test database possible: `createApp(deps)` over module-level
   state is the difference between injecting a clone and being stuck with a singleton.
 
