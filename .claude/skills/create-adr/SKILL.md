@@ -128,7 +128,8 @@ footer pointing at the ADR for what each rule protects.
 ## Wiring (all four, or it does not run)
 
 1. `package.json` → `lint:arch` runs the new script as well as the existing ones, and fails if
-   any fails.
+   any fails. Not `&&`: that stops at the first failure, so a layering violation hides every DI
+   result. Run each, keep the statuses, and combine them (`exit $((a | b))`).
 2. `.github/workflows/ci.yml` → the `typecheck` job's architecture step, which runs **before
    `npm ci`**: these checks are grep over the tree, so they need no dependencies and no
    database, and a violation is reported in seconds rather than after an install.
