@@ -4,10 +4,7 @@ import { Hono } from 'hono';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
-import { createTransaction } from '../../../src/db/transaction';
-import { createQuestionRepo } from '../../../src/repo/questions';
-import { createSessionRepo } from '../../../src/repo/sessions';
-import { createSessionService } from '../../../src/services/sessions';
+import { createServerDeps } from '../../../src/composition';
 import { createSessionsRouter } from '../../../src/routes/sessions';
 
 let t: TestDb;
@@ -20,21 +17,14 @@ afterEach(async () => {
   await t.close();
 });
 
+// Production's assembly, called with a per-test database — this test mounts the
+// router alone, but it does not hand-wire the graph behind it. Reaching past
+// composition for the repositories is what R1 forbids of routes, and a route
+// test that does it anyway is not testing the seam it claims to.
 function buildTestApp() {
   const app = new Hono();
-  app.route(
-    '/api/sessions',
-    createSessionsRouter(
-      createSessionService({
-        transaction: createTransaction(t.db, (tx) => ({
-          session: createSessionRepo(tx),
-          question: createQuestionRepo(tx),
-        })),
-        rng: testRng(7),
-        logger: createFakeLogger(),
-      }),
-    ),
-  );
+  const deps = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+  app.route('/api/sessions', createSessionsRouter(deps.sessions));
   return app;
 }
 

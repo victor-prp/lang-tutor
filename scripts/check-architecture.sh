@@ -57,6 +57,29 @@ r8() {
     | grep -v -e '/db/transaction.ts' -e '\.test\.ts'
 }
 
+# The same rules over apps/server/tests/integration. Unit tests live inside the
+# directories scanned above and are already covered; the integration tree was
+# not, which is what made "R1-R6 apply to test files too" untrue for two years'
+# worth of nothing checking it.
+#
+# tests/support/ is deliberately unscanned: it is the test composition root, and
+# may reach anywhere exactly as composition.ts may. A layer test that needs the
+# graph assembled calls createServerDeps rather than wiring repositories itself
+# — reaching past composition is precisely what these rules forbid of the layer
+# under test.
+r1_tests() { grep -rnE "from '.*src/(db|repo)/|from 'drizzle-orm|from 'pg'" apps/server/tests/integration/routes/; }
+
+r2_tests() {
+  grep -rnE "from '(hono|@hono)/|from 'hono'|from 'drizzle-orm|from 'pg'|from '.*src/db/" \
+    apps/server/tests/integration/services/
+}
+r2_tests_repo() { grep -rn "from '.*src/repo/" apps/server/tests/integration/services/ | grep -v 'import type'; }
+
+r4_tests() {
+  grep -rnE "from '.*src/(routes|services)/|from '.*src/(app|composition)'" \
+    apps/server/tests/integration/repo/ apps/server/tests/integration/db/
+}
+
 echo "Checking apps/server against ADR 0001 (layered architecture)"
 echo
 
@@ -71,13 +94,17 @@ check "R5  app.ts wires, it does not know a database exists"       r5
 check "R6  composition performs no I/O"                            r6
 check "R7  console outside the logger"                             r7
 check "R8  the transaction primitive has exactly one call site"    r8
+check "R1  route tests must not reach past composition"            r1_tests
+check "R2  service tests must not touch transport or a database"   r2_tests
+check "R2  service tests may reference repo modules only as types" r2_tests_repo
+check "R4  persistence tests must not reach upward"                r4_tests
 
 echo
 if [ "$status" -ne 0 ]; then
   echo "Architecture check FAILED. See docs/adr/adr-0001-layered-architecture.md" >&2
   echo "for what each rule protects and why." >&2
 else
-  echo "Architecture check passed: 11 rules, no violations."
+  echo "Architecture check passed: 15 rules, no violations."
 fi
 
 exit "$status"
