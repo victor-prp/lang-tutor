@@ -5,20 +5,8 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
 import { OptionOutOfRange, QuestionDesynced, SessionNotFound } from '../../../src/errors';
-import { createTransaction } from '../../../src/db/transaction';
-import { createQuestionRepo } from '../../../src/repo/questions';
-import { createSessionRepo } from '../../../src/repo/sessions';
-import { createSessionService, type SessionService } from '../../../src/services/sessions';
-import type { Db } from '../../../src/db/client';
-
-// Production's binding, called with a per-test database — the same call
-// composition.ts makes.
-function transactionOn(db: Db) {
-  return createTransaction(db, (tx) => ({
-    session: createSessionRepo(tx),
-    question: createQuestionRepo(tx),
-  }));
-}
+import { createServerDeps } from '../../../src/composition';
+import type { SessionService } from '../../../src/services/sessions';
 
 // The other half of this file's tests is src/services/sessions.test.ts, which
 // covers the cases the repository-factory seam makes reachable without Postgres.
@@ -30,7 +18,7 @@ let service: SessionService;
 beforeEach(async () => {
   t = await createTestDb();
   logger = createFakeLogger();
-  service = createSessionService({ transaction: transactionOn(t.db), rng: testRng(7), logger });
+  service = createServerDeps({ db: t.db, logger, rng: testRng(7) }).sessions;
 });
 
 afterEach(async () => {
@@ -131,16 +119,10 @@ describe('submitAnswer', () => {
 
 describe('rng', () => {
   it('draws the same ten questions for two services sharing a seed', async () => {
-    const first = createSessionService({
-      transaction: transactionOn(t.db),
-      rng: testRng(7),
-      logger: createFakeLogger(),
-    });
-    const second = createSessionService({
-      transaction: transactionOn(t.db),
-      rng: testRng(7),
-      logger: createFakeLogger(),
-    });
+    const first = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
+      .sessions;
+    const second = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
+      .sessions;
 
     const a = await first.startSession('u1');
     const b = await second.startSession('u2');

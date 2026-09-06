@@ -42,7 +42,7 @@ the server's holds the session state machine only a server has (`step`, `Session
 | R2 | `services/` | `domain/`, `repo/` (**types only**), `errors`, `logger` | **anything under `db/`**, Hono, `hono/*`, `@hono/*`, HTTP status codes, `drizzle-orm`, `pg` |
 | R3 | `domain/` | `@lang-tutor/core/*` only | anything else in `apps/server/src`, `pg`, `drizzle-orm`, Hono, `Date.now`, `Math.random` |
 | R4 | `repo/` + `db/` | `drizzle-orm`, `pg`, `db/*`, domain **types** | `routes/`, `services/`, `app.ts`, `composition.ts` |
-| R5 | `app.ts` | `composition` (type `AppDeps`), `routes/`, Hono | `db/`, `repo/`, `services/`, `drizzle-orm`, `pg` |
+| R5 | `app.ts` | `composition` (type `AppDeps`), `routes/`, Hono and `@hono/zod-openapi`, `@lang-tutor/core/api*`, the docs UI (`@scalar/hono-api-reference`) | `db/`, `repo/`, `services/`, `drizzle-orm`, `pg` |
 | R6 | `composition.ts` | every factory it wires | nothing that performs I/O at call time (no `createDb`, no `new Pool`) |
 | R7 | anywhere | — | `console` outside `logger.ts` and `index.ts`/`db/cli.ts` |
 
@@ -69,7 +69,13 @@ Two rules that are not import rules:
 
 ## How to detect a violation
 
-Run from the repo root. Each command must print nothing.
+`npm run lint:arch` runs all fifteen checks below and fails on the first violation;
+CI runs it in the `typecheck` job, before `npm ci`, so a layering violation is
+reported in seconds. The commands live in `scripts/check-architecture.sh` verbatim
+— that file is the enforcement, this section is the explanation, and the two must
+stay in sync.
+
+To run one by hand, from the repo root — each must print nothing.
 
 ```bash
 # R1 — routes must not touch persistence
@@ -103,10 +109,38 @@ grep -rn "console\." apps/server/src --include='*.ts' \
 # R8 — the transaction primitive has exactly one call site
 grep -rn "\.transaction(" apps/server/src --include='*.ts' \
   | grep -v -e '/db/transaction.ts' -e '\.test\.ts'
+
+# R1 — route tests must not reach past composition
+grep -rnE "from '.*src/(db|repo)/|from 'drizzle-orm|from 'pg'" apps/server/tests/integration/routes/
+
+# R2 — service tests must not touch transport or a database
+grep -rnE "from '(hono|@hono)/|from 'hono'|from 'drizzle-orm|from 'pg'|from '.*src/db/" \
+  apps/server/tests/integration/services/
+# R2 — service tests may reference repo modules only as types
+grep -rn "from '.*src/repo/" apps/server/tests/integration/services/ | grep -v 'import type'
+
+# R4 — persistence tests must not reach upward
+grep -rnE "from '.*src/(routes|services)/|from '.*src/(app|composition)'" \
+  apps/server/tests/integration/repo/ apps/server/tests/integration/db/
 ```
 
-Tests are excluded from R7/R8 only; R1–R6 apply to test files too, since a test that
-reaches across a layer is evidence the seam is missing.
+### What the rules cover
+
+Tests are excluded from R7 and R8 only. R1–R6 apply to test files too, since a test
+that reaches across a layer is evidence the seam is missing — and, as of the four
+commands above, that is enforced rather than asserted:
+
+- **Unit tests** live inside the directories R1–R6 already scan (`src/domain/*.test.ts`
+  is covered by R3, and so on). They were never the gap.
+- **Integration tests** sit outside `src/`, so until those four commands existed the
+  claim above was simply untrue there. `tests/integration/routes/` and
+  `tests/integration/services/` had both hand-wired the repositories they were
+  forbidden to know about.
+- **`tests/support/` is deliberately unscanned.** It is the test composition root and
+  may reach anywhere, exactly as `composition.ts` may. A layer test that needs the
+  graph assembled calls `createServerDeps` — production's own assembly, handed a
+  per-test database — rather than rebuilding it. That is also why a change to the
+  wiring now touches one file instead of three.
 
 ## Why
 

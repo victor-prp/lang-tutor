@@ -27,6 +27,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+
+      # First, and before npm ci: the architecture check is grep over the tree,
+      # so it needs no dependencies and no database, and a layering violation is
+      # reported in seconds rather than after an install. Until this step
+      # existed, ADR 0001's rules were a checklist in a document that only ran if
+      # someone remembered to run it — every other invariant in this repo
+      # (schema drift, the unit/integration split) is enforced by a job.
+      - name: Check layering rules (ADR 0001)
+        run: ./scripts/check-architecture.sh
+
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc

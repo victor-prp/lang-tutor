@@ -182,6 +182,7 @@ npm run db:up       # docker compose up -d --wait db  (requires Docker)
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
+npm run lint:arch   # ADR 0001's layering rules — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go
@@ -248,7 +249,7 @@ Every push, on every branch, runs four parallel jobs on GitHub Actions
 
 | Job | Database | Runs | Roughly |
 |---|---|---|---|
-| `typecheck` | none | `npm run typecheck` — `tsc` reads `db/schema.ts` directly | 1 min |
+| `typecheck` | none | `./scripts/check-architecture.sh` (ADR 0001's layering rules, before `npm ci` — it is grep, so it fails in seconds), then `npm run typecheck` — `tsc` reads `db/schema.ts` directly | 1 min |
 | `test-unit` | **none, deliberately** | `npm test` | 1 min |
 | `test-integration` | `docker compose up -d --wait db` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
 | `test-e2e` | `docker compose up -d --wait db` | `npm run e2e` — the Playwright suite described below | 4-5 min |
