@@ -1,5 +1,10 @@
-import type { CreateSessionResponse, NextStepResponse } from '@lang-tutor/core/api';
-import { Hono } from 'hono';
+import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
+import {
+  CreateSessionRequestSchema,
+  CreateSessionResponseSchema,
+  ErrorSchema,
+} from '@lang-tutor/core/api/schemas';
+import type { NextStepResponse } from '@lang-tutor/core/api';
 
 import {
   currentQuestion,
@@ -10,7 +15,7 @@ import {
 } from '../domain/session';
 import { OptionOutOfRange, QuestionDesynced, SessionNotFound } from '../errors';
 import type { SessionService } from '../services/sessions';
-import { CreateSessionRequestSchema, NextStepRequestSchema } from './schemas';
+import { NextStepRequestSchema } from './schemas';
 
 function buildNextStepResponse(sessionId: string, record: SessionRecord): NextStepResponse {
   if (record.complete) {
@@ -31,22 +36,51 @@ function buildNextStepResponse(sessionId: string, record: SessionRecord): NextSt
   };
 }
 
+const createSessionRoute = createRoute({
+  method: 'post',
+  path: '/',
+  tags: ['sessions'],
+  summary: 'Start a session',
+  description: 'Draws ten questions and returns the first one.',
+  request: {
+    body: { content: { 'application/json': { schema: CreateSessionRequestSchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: CreateSessionResponseSchema } },
+      description: 'The session was created. `question` is its first question.',
+    },
+    400: {
+      content: { 'application/json': { schema: ErrorSchema } },
+      description: 'The request body did not validate.',
+    },
+  },
+});
+
 // Transport only: parse, validate, and map an outcome to a status code. No SQL,
-// no transaction, no knowledge that a database exists.
+// no transaction, no knowledge that a database exists. The route definitions are
+// also this API's published description — there is no second document to update.
 export function createSessionsRouter(sessions: SessionService) {
-  const router = new Hono();
+  // Without this hook the adapter's own 400 carries a Zod issue payload. The
+  // contract says `{ error: 'invalid request' }`, and this is the only thing
+  // that keeps it saying so.
+  const router = new OpenAPIHono({
+    defaultHook: (result, c) => {
+      if (!result.success) return c.json({ error: 'invalid request' }, 400);
+    },
+  });
 
-  router.post('/', async (c) => {
-    const parsed = CreateSessionRequestSchema.safeParse(await c.req.json());
-    if (!parsed.success) return c.json({ error: 'invalid request' }, 400);
-
-    const { sessionId, record } = await sessions.startSession(parsed.data.user_id);
-    const response: CreateSessionResponse = {
-      session_id: sessionId,
-      question: currentQuestion(record)!,
-      position: positionOf(record),
-    };
-    return c.json(response);
+  router.openapi(createSessionRoute, async (c) => {
+    const { user_id } = c.req.valid('json');
+    const { sessionId, record } = await sessions.startSession(user_id);
+    return c.json(
+      {
+        session_id: sessionId,
+        question: currentQuestion(record)!,
+        position: positionOf(record),
+      },
+      200,
+    );
   });
 
   router.post('/:id/next-step', async (c) => {

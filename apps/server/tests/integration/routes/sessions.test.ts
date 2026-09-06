@@ -59,6 +59,19 @@ describe('POST /api/sessions', () => {
     const res = await postJson(app, '/api/sessions', {});
     expect(res.status).toBe(400);
   });
+
+  // A characterisation test, added precisely because nothing asserted this
+  // before. @hono/zod-openapi's built-in 400 carries a Zod issue payload
+  // instead; the defaultHook restoring this body is the only thing between this
+  // phase and a silent contract change. The other route tests assert
+  // `res.status` only, and apps/mobile's client does `throw new
+  // ApiError(res.status)` — so nothing else in this repository would notice.
+  it('returns { error: "invalid request" } as the validation body', async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, '/api/sessions', {});
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
 });
 
 describe('POST /api/sessions/:id/next-step', () => {
