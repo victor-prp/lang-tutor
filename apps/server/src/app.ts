@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { HealthResponseSchema } from '@lang-tutor/core/api/schemas';
 import { Scalar } from '@scalar/hono-api-reference';
 import { cors } from 'hono/cors';
+import { HTTPException } from 'hono/http-exception';
 
 import type { AppDeps } from './composition';
 import { createSessionsRouter } from './routes/sessions';
@@ -57,6 +58,7 @@ export function createApp(deps: AppDeps) {
   app.get('/docs', Scalar({ url: '/openapi.json', pageTitle: 'lang-tutor API' }));
 
   app.onError((error, c) => {
+    if (error instanceof HTTPException) return c.json({ error: 'invalid request' }, error.status);
     deps.logger.error('unhandled request error', error);
     return c.json({ error: 'internal error' }, 500);
   });

@@ -47,7 +47,7 @@ const createSessionRoute = createRoute({
   summary: 'Start a session',
   description: 'Draws ten questions and returns the first one.',
   request: {
-    body: { content: { 'application/json': { schema: CreateSessionRequestSchema } } },
+    body: { required: true, content: { 'application/json': { schema: CreateSessionRequestSchema } } },
   },
   responses: {
     200: {
@@ -74,7 +74,7 @@ const nextStepRoute = createRoute({
     'Records an answer and returns the next question, or the final score once ten are answered. Re-sending the same answer replays the same response.',
   request: {
     params: z.object({ id: z.string() }),
-    body: { content: { 'application/json': { schema: NextStepRequestSchema } } },
+    body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
   },
   responses: {
     200: {
