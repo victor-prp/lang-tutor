@@ -1,5 +1,5 @@
 import type { AnswerRecord, Question } from '@lang-tutor/core/api';
-import { asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import type { SessionRecord } from '../domain/session';
@@ -20,12 +20,6 @@ import { canonicalOptions, questionFrom } from './questions';
 // "not found" a bad id actually means. Reject the shape first so a malformed
 // id is indistinguishable from an id that is merely absent.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export type LoadedSession = {
-  record: SessionRecord;
-  /** `optionOrders[i][displayIndex]` is the canonical option position shown at that index. */
-  optionOrders: number[][];
-};
 
 export function createSessionRepo(tx: Tx) {
   return {
@@ -89,7 +83,7 @@ export function createSessionRepo(tx: Tx) {
      * `with:` (which would need a `relations()` declaration per table). The
      * `FOR UPDATE` on the session row serialises concurrent next-step requests.
      */
-    loadSession: async (sessionId: string): Promise<LoadedSession | undefined> => {
+    loadSession: async (sessionId: string): Promise<SessionRecord | undefined> => {
       if (!UUID_RE.test(sessionId)) return undefined;
 
       const [session] = await tx
@@ -127,8 +121,6 @@ export function createSessionRepo(tx: Tx) {
         .where(eq(answers.sessionId, sessionId))
         .orderBy(asc(answers.position));
 
-      const optionOrders = questionRows.map((row) => row.optionOrder);
-
       const answerRecords: AnswerRecord[] = answerRows.map((answer) => {
         const chosen = canonicalOptions(questionRows[answer.position].options)[
           answer.selectedOptionPosition
@@ -141,30 +133,42 @@ export function createSessionRepo(tx: Tx) {
       });
 
       return {
-        record: {
-          user_id: session.userId,
-          questions: questionRows.map((row) => questionFrom(row, row.optionOrder)),
-          answers: answerRecords,
-          complete: session.completedAt !== null,
-          completed_at: session.completedAt === null ? null : session.completedAt.getTime(),
-        },
-        optionOrders,
+        user_id: session.userId,
+        questions: questionRows.map((row) => questionFrom(row, row.optionOrder)),
+        answers: answerRecords,
+        complete: session.completedAt !== null,
+        completed_at: session.completedAt === null ? null : session.completedAt.getTime(),
       };
     },
 
-    /** `canonicalPosition` is the option's authored position, not its display index. */
-    insertAnswer: (
+    /**
+     * `displayIndex` is the index the learner saw. Translating it to the option's
+     * authored position is this module's own business — `option_order` is the
+     * encoding `insertSession` wrote, so nothing above needs to know it exists.
+     * The extra lookup is one primary-key read inside a transaction that is
+     * already holding this session's row.
+     */
+    insertAnswer: async (
       sessionId: string,
       position: number,
       questionId: string,
-      canonicalPosition: number,
-    ): Promise<unknown> =>
-      tx.insert(answers).values({
+      displayIndex: number,
+    ): Promise<void> => {
+      const [row] = await tx
+        .select({ optionOrder: sessionQuestions.optionOrder })
+        .from(sessionQuestions)
+        .where(
+          and(eq(sessionQuestions.sessionId, sessionId), eq(sessionQuestions.position, position)),
+        );
+      if (!row) throw new Error(`session ${sessionId} has no question at position ${position}`);
+
+      await tx.insert(answers).values({
         sessionId,
         position,
         questionId,
-        selectedOptionPosition: canonicalPosition,
-      }),
+        selectedOptionPosition: row.optionOrder[displayIndex],
+      });
+    },
 
     completeSession: (sessionId: string): Promise<unknown> =>
       tx.update(sessions).set({ completedAt: sql`now()` }).where(eq(sessions.id, sessionId)),

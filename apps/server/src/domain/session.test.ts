@@ -122,6 +122,31 @@ describe('step', () => {
     const outcome = step(done, 'not-a-real-id', 0);
     expect(outcome).toEqual({ status: 'invalid_question' });
   });
+
+  it('rejects an option index past the last option, without evaluating it', () => {
+    const q0 = makeQuestion(0);
+    expect(step(makeRecord([q0]), q0.id, q0.options.length)).toEqual({ status: 'out_of_range' });
+  });
+
+  it('rejects a negative option index', () => {
+    const q0 = makeQuestion(0);
+    expect(step(makeRecord([q0]), q0.id, -1)).toEqual({ status: 'out_of_range' });
+  });
+
+  // The range check must not fire on a replay: the record comes back unchanged,
+  // so there is no answer to evaluate and nothing to be out of range for.
+  it('replays a just-answered question regardless of the option index', () => {
+    const [q0, q1] = [makeQuestion(0), makeQuestion(1)];
+    const answered = makeRecord(
+      [q0, q1],
+      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
+    );
+    expect(step(answered, q0.id, 99)).toEqual({
+      status: 'replayed',
+      record: answered,
+      justCompleted: false,
+    });
+  });
 });
 
 describe('sessionScore and missedQuestions', () => {

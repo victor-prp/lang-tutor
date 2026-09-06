@@ -38,6 +38,7 @@ export function positionOf(record: SessionRecord): Position {
 
 export type StepOutcome =
   | { status: 'invalid_question' }
+  | { status: 'out_of_range' }
   | { status: 'advanced' | 'replayed'; record: SessionRecord; justCompleted: boolean };
 
 // Records the answer to `questionId` if it is the session's current question,
@@ -45,6 +46,11 @@ export type StepOutcome =
 // just answered by the previous call, this is a retried request: the record
 // is returned unchanged rather than double-counting the answer. Any other
 // `questionId` means the client and server have desynced.
+//
+// An `optionIndex` outside the current question's options is `out_of_range`.
+// That check belongs here rather than in a caller: the question knows how many
+// options it has, and answering it before `evaluate` runs is what keeps a record
+// carrying `answer_string: undefined` from ever being constructed.
 export function step(record: SessionRecord, questionId: string, optionIndex: number): StepOutcome {
   if (record.complete) {
     const lastQuestion = record.questions[record.questions.length - 1];
@@ -55,6 +61,9 @@ export function step(record: SessionRecord, questionId: string, optionIndex: num
 
   const expected = currentQuestion(record);
   if (expected && questionId === expected.id) {
+    if (optionIndex < 0 || optionIndex >= expected.options.length) {
+      return { status: 'out_of_range' };
+    }
     const answers = [...record.answers, evaluate(expected, optionIndex)];
     const complete = answers.length === record.questions.length;
     const updated: SessionRecord = { ...record, answers, complete };

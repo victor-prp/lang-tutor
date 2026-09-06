@@ -68,19 +68,18 @@ export function createSessionService({
         const loaded = await repo.loadSession(sessionId);
         if (!loaded) throw new SessionNotFound(sessionId);
 
-        const outcome = step(loaded.record, questionId, optionIndex);
+        // Three failure modes, three domain outcomes, three errors — the domain
+        // decides what is wrong, this layer only names it.
+        const outcome = step(loaded, questionId, optionIndex);
         if (outcome.status === 'invalid_question') throw new QuestionDesynced(questionId);
+        if (outcome.status === 'out_of_range') throw new OptionOutOfRange(optionIndex);
         // A replay reports justCompleted: false, so retrying a completed session
         // logs nothing — exactly today's behaviour.
         if (outcome.status === 'replayed') {
           return { record: outcome.record, justCompleted: false };
         }
 
-        const position = loaded.record.answers.length;
-        const order = loaded.optionOrders[position];
-        if (optionIndex >= order.length) throw new OptionOutOfRange(optionIndex);
-
-        await repo.insertAnswer(sessionId, position, questionId, order[optionIndex]);
+        await repo.insertAnswer(sessionId, loaded.answers.length, questionId, optionIndex);
 
         if (outcome.justCompleted) {
           await repo.completeSession(sessionId);
