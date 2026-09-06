@@ -5,9 +5,20 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
 import { OptionOutOfRange, QuestionDesynced, SessionNotFound } from '../../../src/errors';
+import { createTransaction } from '../../../src/db/transaction';
 import { createQuestionRepo } from '../../../src/repo/questions';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { createSessionService, type SessionService } from '../../../src/services/sessions';
+import type { Db } from '../../../src/db/client';
+
+// Production's binding, called with a per-test database — the same call
+// composition.ts makes.
+function transactionOn(db: Db) {
+  return createTransaction(db, (tx) => ({
+    session: createSessionRepo(tx),
+    question: createQuestionRepo(tx),
+  }));
+}
 
 // The other half of this file's tests is src/services/sessions.test.ts, which
 // covers the cases the repository-factory seam makes reachable without Postgres.
@@ -19,12 +30,7 @@ let service: SessionService;
 beforeEach(async () => {
   t = await createTestDb();
   logger = createFakeLogger();
-  service = createSessionService({
-    db: t.db,
-    rng: testRng(7),
-    logger,
-    repos: { session: createSessionRepo, question: createQuestionRepo },
-  });
+  service = createSessionService({ transaction: transactionOn(t.db), rng: testRng(7), logger });
 });
 
 afterEach(async () => {
@@ -126,16 +132,14 @@ describe('submitAnswer', () => {
 describe('rng', () => {
   it('draws the same ten questions for two services sharing a seed', async () => {
     const first = createSessionService({
-      db: t.db,
+      transaction: transactionOn(t.db),
       rng: testRng(7),
       logger: createFakeLogger(),
-      repos: { session: createSessionRepo, question: createQuestionRepo },
     });
     const second = createSessionService({
-      db: t.db,
+      transaction: transactionOn(t.db),
       rng: testRng(7),
       logger: createFakeLogger(),
-      repos: { session: createSessionRepo, question: createQuestionRepo },
     });
 
     const a = await first.startSession('u1');

@@ -61,8 +61,8 @@ describe('insertSession then loadSession', () => {
       const { sessionRepo, sessionId, record } = await startSession(tx);
       const loaded = await sessionRepo.loadSession(sessionId);
       expect(loaded).toBeDefined();
-      expect(loaded!.record.questions).toHaveLength(SESSION_LENGTH);
-      expect(loaded!.record.questions.map((q) => q.id)).toEqual(record.questions.map((q) => q.id));
+      expect(loaded!.questions).toHaveLength(SESSION_LENGTH);
+      expect(loaded!.questions.map((q) => q.id)).toEqual(record.questions.map((q) => q.id));
     });
   });
 
@@ -72,7 +72,7 @@ describe('insertSession then loadSession', () => {
       const loaded = await sessionRepo.loadSession(sessionId);
       // The shuffled option text and the correct index must survive storage; this
       // is what option_order exists for.
-      expect(loaded!.record.questions).toEqual(record.questions);
+      expect(loaded!.questions).toEqual(record.questions);
     });
   });
 
@@ -80,9 +80,9 @@ describe('insertSession then loadSession', () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const loaded = await sessionRepo.loadSession(sessionId);
-      expect(loaded!.record.answers).toEqual([]);
-      expect(loaded!.record.complete).toBe(false);
-      expect(loaded!.record.completed_at).toBeNull();
+      expect(loaded!.answers).toEqual([]);
+      expect(loaded!.complete).toBe(false);
+      expect(loaded!.completed_at).toBeNull();
     });
   });
 
@@ -102,17 +102,6 @@ describe('insertSession then loadSession', () => {
       expect(await repo.loadSession('not-a-uuid')).toBeUndefined();
     });
   });
-
-  it('exposes an option order parallel to the questions', async () => {
-    await withTx(t.db, async (tx) => {
-      const { sessionRepo, sessionId } = await startSession(tx);
-      const loaded = await sessionRepo.loadSession(sessionId);
-      expect(loaded!.optionOrders).toHaveLength(SESSION_LENGTH);
-      for (const order of loaded!.optionOrders) {
-        expect([...order].sort()).toEqual([0, 1, 2, 3]);
-      }
-    });
-  });
 });
 
 describe('insertAnswer', () => {
@@ -120,14 +109,13 @@ describe('insertAnswer', () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const before = await sessionRepo.loadSession(sessionId);
-      const question = before!.record.questions[0];
+      const question = before!.questions[0];
       const displayIndex = question.correct_option;
-      const canonical = before!.optionOrders[0][displayIndex];
 
-      await sessionRepo.insertAnswer(sessionId, 0, question.id, canonical);
+      await sessionRepo.insertAnswer(sessionId, 0, question.id, displayIndex);
 
       const after = await sessionRepo.loadSession(sessionId);
-      expect(after!.record.answers).toEqual([
+      expect(after!.answers).toEqual([
         {
           question_id: question.id,
           is_correct: true,
@@ -141,15 +129,14 @@ describe('insertAnswer', () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const before = await sessionRepo.loadSession(sessionId);
-      const question = before!.record.questions[0];
+      const question = before!.questions[0];
       const wrongDisplay = (question.correct_option + 1) % question.options.length;
-      const canonical = before!.optionOrders[0][wrongDisplay];
 
-      await sessionRepo.insertAnswer(sessionId, 0, question.id, canonical);
+      await sessionRepo.insertAnswer(sessionId, 0, question.id, wrongDisplay);
 
       const after = await sessionRepo.loadSession(sessionId);
-      expect(after!.record.answers[0].is_correct).toBe(false);
-      expect(after!.record.answers[0].answer_string).toBe(question.options[wrongDisplay]);
+      expect(after!.answers[0].is_correct).toBe(false);
+      expect(after!.answers[0].answer_string).toBe(question.options[wrongDisplay]);
     });
   });
 
@@ -160,7 +147,7 @@ describe('insertAnswer', () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const loaded = await sessionRepo.loadSession(sessionId);
-      const question = loaded!.record.questions[0];
+      const question = loaded!.questions[0];
       await sessionRepo.insertAnswer(sessionId, 0, question.id, 0);
       await expect(sessionRepo.insertAnswer(sessionId, 0, question.id, 1)).rejects.toThrow();
     });
@@ -170,7 +157,7 @@ describe('insertAnswer', () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const loaded = await sessionRepo.loadSession(sessionId);
-      const notFirst = loaded!.record.questions[1];
+      const notFirst = loaded!.questions[1];
       await expect(sessionRepo.insertAnswer(sessionId, 0, notFirst.id, 0)).rejects.toThrow();
     });
   });
@@ -183,8 +170,8 @@ describe('completeSession', () => {
       await sessionRepo.completeSession(sessionId);
 
       const loaded = await sessionRepo.loadSession(sessionId);
-      expect(loaded!.record.complete).toBe(true);
-      expect(typeof loaded!.record.completed_at).toBe('number');
+      expect(loaded!.complete).toBe(true);
+      expect(typeof loaded!.completed_at).toBe('number');
 
       // Read through `tx`, not `t.db`: a pool connection would not see this
       // transaction's uncommitted write, and the assertion would fail for a
