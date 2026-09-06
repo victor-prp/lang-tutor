@@ -69,7 +69,13 @@ Two rules that are not import rules:
 
 ## How to detect a violation
 
-Run from the repo root. Each command must print nothing.
+`npm run lint:arch` runs all eleven checks below and fails on the first violation;
+CI runs it in the `typecheck` job, before `npm ci`, so a layering violation is
+reported in seconds. The commands live in `scripts/check-architecture.sh` verbatim
+— that file is the enforcement, this section is the explanation, and the two must
+stay in sync.
+
+To run one by hand, from the repo root — each must print nothing.
 
 ```bash
 # R1 — routes must not touch persistence
