@@ -21,25 +21,28 @@ jobs:
   # Job IDs are the branch-protection check contexts, so keep them stable once a
   # ruleset lists them — and do not add `name:` keys, which would rename the
   # context out from under it. `master`'s ruleset currently requires no status
-  # checks at all, which is why renaming `test` below was free. See the README.
-  typecheck:
+  # checks at all, which is why renaming `test` (and splitting `typecheck` into
+  # these two) below was free. See the README.
+  #
+  # Grep over the tree: no dependencies, no database, no npm ci, so it needs no
+  # setup step at all and reports a violation in seconds. Until ADR 0001's check
+  # existed, its rules were a checklist in a document that only ran if someone
+  # remembered to run it — every other invariant in this repo (schema drift, the
+  # unit/integration split) is enforced by a job. check-adrs.sh discovers
+  # scripts/check-adr-*.sh by naming convention, so a new ADR's script needs no
+  # edit here — see the create-adr skill.
+  check-adrs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - run: ./scripts/check-adrs.sh
 
-      # First, and before npm ci: every ADR check is grep over the tree, so it
-      # needs no dependencies and no database, and a violation is reported in
-      # seconds rather than after an install. Until ADR 0001's step existed,
-      # its rules were a checklist in a document that only ran if someone
-      # remembered to run it — every other invariant in this repo (schema
-      # drift, the unit/integration split) is enforced by a job.
-      #
-      # check-adrs.sh discovers scripts/check-adr-*.sh by naming convention,
-      # so a new ADR's script needs no edit here — see the create-adr skill.
-      - name: Check ADR compliance
-        run: ./scripts/check-adrs.sh
-
+  check-types:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc

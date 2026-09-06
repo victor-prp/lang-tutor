@@ -23,7 +23,7 @@ one-to-one; ADR 0001's script keeps its historical name, `scripts/check-architec
 Naming the script correctly *is* the wiring: `scripts/check-adrs.sh` discovers
 `scripts/check-adr-*.sh` (plus `check-architecture.sh`, ADR 0001's historical exception) by
 glob and runs all of them, and that one script is what `npm run lint:arch`, the CI
-`typecheck` job, and the agent-facing Stop hook all call. Get the filename right and none of
+`check-adrs` job, and the agent-facing Stop hook all call. Get the filename right and none of
 those three need touching.
 
 `NNNN` is the next free number, zero-padded to four digits.
