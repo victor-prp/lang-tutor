@@ -47,4 +47,9 @@ export const strings = {
   onboardingRejected: 'אחד הפרטים אינו תקין',
   onboardingFailed: 'היצירה נכשלה, נסו שוב',
   languageName: (code: string) => (code === 'he' ? 'עברית' : code === 'en' ? 'אנגלית' : code),
+  profileTitle: 'הפרופיל שלי',
+  profileNameLabel: 'שם',
+  profileAgeLabel: 'גיל',
+  switchUser: 'החלפת משתמש',
+  back: 'חזרה',
 } as const;
