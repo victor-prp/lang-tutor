@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { stripIsolates } from './support/text';
+import { createLearner, logIn } from './support/users';
 
 const SESSION_LENGTH = 10;
 const CHOSEN_OPTION = 0;
@@ -11,11 +12,12 @@ const CHOSEN_OPTION = 0;
 // but well above the 30s default.
 test.setTimeout(120_000);
 
-test('a full session scores exactly the answers given', async ({ page }) => {
+test('a full session scores exactly the answers given', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
 
-  await page.goto('/');
+  await createLearner(request, 'e2e_session');
+  await logIn(page, 'e2e_session');
   await expect(page.getByTestId('start-button'), `home never rendered\n${report()}`).toBeVisible();
   // web.output: "static" pre-renders start-button in the raw HTML before React
   // hydrates. page.goto only waits for `load`, not hydration, so a click that
