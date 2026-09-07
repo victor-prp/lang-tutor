@@ -15,6 +15,14 @@ serves as routing, validation, response typing and OpenAPI generation at once, a
 wire contract lives in `packages/core` as Zod schemas that every API type is inferred
 from. The HTTP contract itself is untouched.
 
+Phase 8 gives the learner a name. The anonymous UUID the app used to generate on the
+device is replaced by a username they choose, a display name, an age and a language pair,
+collected once at onboarding and stored server-side. The app opens on a login screen that
+remembers the last username, and a session can only be started by a learner who exists —
+the server no longer creates one on first sight. None of this is authentication: there is
+no password, and a username proves nothing. See
+[ADR 0005](docs/adr/adr-0005-identity-without-authentication.md).
+
 - Phase 1: [design](docs/superpowers/specs/2026-08-24-lang-tutor-phase-1-design.md) · [plan](docs/superpowers/plans/2026-08-24-lang-tutor-phase-1.md)
 - Phase 2: [design](docs/superpowers/specs/2026-08-26-lang-tutor-phase-2-design.md) · [plan](docs/superpowers/plans/2026-08-26-lang-tutor-phase-2.md)
 - Phase 3: [design](docs/superpowers/specs/2026-08-29-lang-tutor-phase-3-ci-design.md) · [plan](docs/superpowers/plans/2026-08-29-lang-tutor-phase-3-ci.md)
@@ -22,6 +30,7 @@ from. The HTTP contract itself is untouched.
 - Phase 5: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md) · [plan](docs/superpowers/plans/2026-09-05-lang-tutor-phase-5-di-corrections.md)
 - Phase 6: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-6-test-topology-design.md) · [plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-6-test-topology.md)
 - Phase 7: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-7-openapi-design.md) · [plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-7-openapi.md)
+- Phase 8: [design](docs/superpowers/specs/2026-09-07-lang-tutor-phase-8-onboarding-design.md) · [plan](docs/superpowers/plans/2026-09-07-lang-tutor-phase-8-onboarding.md)
 
 ## Layout
 
@@ -30,7 +39,7 @@ An npm-workspace monorepo.
 | Path | What it is |
 |---|---|
 | `packages/core` | `@lang-tutor/core` — the API contract (`api/`), quiz rules (`domain/`), internal helpers (`utils/`). One runtime dependency, `zod`: since phase 7 the wire contract *is* a set of Zod schemas, and every type in `api/types.ts` is inferred from one. Consumed as TypeScript source, so there is no build step. |
-| `apps/mobile` | The Expo app. Screens, components, theme, Hebrew copy, and the API client. |
+| `apps/mobile` | The Expo app. Screens — login, onboarding, home, session, results and profile — plus components, theme, Hebrew copy, and the API client. |
 | `apps/server` | A Hono server on `@hono/node-server`. Session state and the question pool live in Postgres, reached only through Drizzle: `routes/` (Hono handlers) call `services/` (use cases, each one transaction), which call `repo/` (query functions) and the server's own `domain/` (the session state machine), backed by `db/` (schema, migrations, the connection). The app talks to the server over HTTP; the server never lets SQL leak above `repo/`. Also consumed as TypeScript source via `tsx`, no build step. |
 
 `utils/` is not in core's `exports` map, so it is unreachable from either app by
@@ -81,8 +90,9 @@ enforced.
 | [0002](docs/adr/adr-0002-di-with-closures.md) | Dependency injection via closures, constructed only at a composition root |
 | [0003](docs/adr/adr-0003-openapi-wire-contract.md) | OpenAPI generated from the wire contract — one `createRoute` definition per endpoint, schemas live in `packages/core` |
 | [0004](docs/adr/adr-0004-test-topology.md) | Test topology — which folder a test file is in decides whether it may touch infrastructure |
+| [0005](docs/adr/adr-0005-identity-without-authentication.md) | Identity without authentication — a username identifies, it authorizes nothing |
 
-All four are enforced by `npm run lint:arch` (15 + 7 + 6 + 5 = 33 checks, grep only, no deps,
+All five are enforced by `npm run lint:arch` (15 + 7 + 6 + 5 + 3 = 36 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
@@ -91,7 +101,7 @@ Nine tables, all in `apps/server/src/db/schema.ts`:
 
 | Table | Holds |
 |---|---|
-| `users` | One row per learner id, with their native/target language pair. |
+| `users` | One row per learner: a unique `username` they log in with, a `display_name`, an `age`, and their native/target language pair. The id is issued by the database, never by a client. |
 | `vocab_terms` | A lemma in a language (e.g. English "run"), unique per `(language_code, lemma)`. |
 | `term_variants` | Inflected forms of a term (e.g. "run", "ran", "running") — one of them is a question's prompt. |
 | `vocab_term_senses` | A distinct meaning of a term, since one lemma can have several. |
@@ -147,9 +157,12 @@ The server describes itself. With `npm run server` running:
 | <http://localhost:3001/openapi.json> | The generated OpenAPI 3.1 document |
 | <http://localhost:3001/docs> | [Scalar](https://github.com/scalar/scalar) — reads the document and sends real requests from the page |
 
-Both are always on. There is no auth and no secret here, and the API surface is already
-fully described by an open-source client that calls it, so gating them would add
-configuration and remove no risk.
+Both are always on. There is no auth here, and the API surface is already fully described
+by an open-source client that calls it, so gating the documentation would add configuration
+and remove no risk. What *has* changed since phase 8 is that this API now carries personal
+data: a display name and an age. `POST /api/login` takes a username and no password — it
+identifies a learner, it does not authenticate one, and nothing may treat it as proof of
+anything. See [ADR 0005](docs/adr/adr-0005-identity-without-authentication.md).
 
 Neither is hand-written. Every endpoint is one `createRoute` definition in
 `apps/server/src/` — routing, request validation, response typing and documentation at

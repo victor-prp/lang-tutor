@@ -51,8 +51,9 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   factory's return shape still satisfies `tsc` at every call site, so a regex can't
   distinguish "derived" from "coincidentally identical." Enforced by review; the list of
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
-  `createHealthRepo`, `createTransaction`, `createSessionService`, `createServerDeps`,
-  `createApiClient`, `createUserIdStore`) is short enough to spot-check.
+  `createHealthRepo`, `createUserRepo`, `createTransaction`, `createSessionService`,
+  `createUserService`, `createServerDeps`, `createApiClient`,
+  `createRememberedUsernameStore`) is short enough to spot-check.
 - **R7 — Importing a composition root performs no I/O.** `apps/server/src/index.ts` guards
   its construction behind `require.main === module`, so `main()` runs only when the file is
   executed directly. Enforced by `apps/server/src/index.test.ts`, which imports the module
