@@ -203,9 +203,9 @@ typing over it.
 - Native and target language are two-option toggles (he/en) defaulting to he→en, with a
   client-side check that they differ. The server and the database enforce it too.
 
-`api/client.ts` gains `login`, `createUser` and `getUser`; the last needs a `getJson`
-helper alongside the existing `postJson`. `strings.ts` gains the Hebrew copy for all three
-new screens.
+`api/client.ts` gains `login` and `createUser`. Both are POSTs, so the existing `postJson`
+helper covers them and no `getJson` is needed. `strings.ts` gains the Hebrew copy for all
+three new screens.
 
 ## Testing
 
