@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { createApp } from './app';
 import type { AppDeps } from './composition';
 import type { SessionService } from './services/sessions';
+import type { UserService } from './services/users';
 import { createFakeLogger } from '../tests/support/fakes';
 
 // A service that fails if it is called at all. Passing it alongside a health fake
@@ -16,9 +17,19 @@ const unreachableSessions: SessionService = {
   },
 };
 
+const unreachableUsers: UserService = {
+  register: () => {
+    throw new Error('the health route must not reach the user service');
+  },
+  login: () => {
+    throw new Error('the health route must not reach the user service');
+  },
+};
+
 function depsWithPing(ok: boolean): AppDeps {
   return {
     sessions: unreachableSessions,
+    users: unreachableUsers,
     health: { ping: async () => ok },
     logger: createFakeLogger(),
   };

@@ -29,3 +29,20 @@ export class UsernameTaken extends Error {
     this.name = 'UsernameTaken';
   }
 }
+
+// `identifier` is a username when a login fails and a user id when a session is
+// started for someone who does not exist. One error, because the transport
+// answer is the same 404 either way.
+export class UserNotFound extends Error {
+  constructor(readonly identifier: string) {
+    super(`no user matches ${identifier}`);
+    this.name = 'UserNotFound';
+  }
+}
+
+export class InvalidLanguagePair extends Error {
+  constructor(readonly languageCode: string) {
+    super(`native and target language are both ${languageCode}`);
+    this.name = 'InvalidLanguagePair';
+  }
+}

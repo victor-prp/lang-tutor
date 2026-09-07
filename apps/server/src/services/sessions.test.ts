@@ -5,6 +5,7 @@ import { testRng } from '../../tests/support/testRng';
 import { SessionNotFound } from '../errors';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
+import type { UserRepo } from '../repo/users';
 import { createSessionService, type Transaction } from './sessions';
 
 // The transaction seam is the repositories, so running the callback against
@@ -33,8 +34,22 @@ describe('repos', () => {
     },
   };
 
+  // Bound into the same transaction since phase 8, and untouched by these use
+  // cases: reaching it here would mean the session service grew a second job.
+  const userRepo: UserRepo = {
+    insertUser: () => {
+      throw new Error('the session service must not register a user');
+    },
+    findByUsername: () => {
+      throw new Error('the session service must not look a username up');
+    },
+    findById: () => {
+      throw new Error('the session service must not read the users table');
+    },
+  };
+
   function fakeTransaction(session: SessionRepo): Transaction {
-    return (run) => run({ session, question: questionRepo });
+    return (run) => run({ session, question: questionRepo, user: userRepo });
   }
 
   it('throws SessionNotFound when the repository reports no such session', async () => {

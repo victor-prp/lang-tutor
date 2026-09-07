@@ -2,8 +2,9 @@ import type { SessionRecord } from '../domain/session';
 import { newSessionRecord, sessionScore, step } from '../domain/session';
 import { OptionOutOfRange, QuestionDesynced, SessionNotFound } from '../errors';
 import type { Logger } from '../logger';
-import type { QuestionRepo } from '../repo/questions';
-import type { SessionRepo } from '../repo/sessions';
+import type { Transaction } from './transaction';
+
+export type { Transaction } from './transaction';
 
 // The one place a completed session is logged. Redundant with the database, kept
 // because it is output you can tail without opening psql — structured, so you
@@ -17,15 +18,6 @@ function logCompletedSession(logger: Logger, sessionId: string, record: SessionR
     score: sessionScore(record),
   });
 }
-
-type Repos = { session: SessionRepo; question: QuestionRepo };
-
-/**
- * One use case, one transaction — R8's boundary, expressed without a database
- * handle. The repositories arrive already bound to the transaction, so nothing
- * in this file names Drizzle, a pool, or a `Tx`.
- */
-export type Transaction = <T>(run: (repos: Repos) => Promise<T>) => Promise<T>;
 
 /**
  * The application layer. Each use case is one `transaction(...)` call, opened

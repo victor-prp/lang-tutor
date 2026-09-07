@@ -4,10 +4,13 @@ import type { Logger } from './logger';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
+import { createUserRepo } from './repo/users';
 import { createSessionService, type SessionService } from './services/sessions';
+import { createUserService, type UserService } from './services/users';
 
 export type AppDeps = {
   sessions: SessionService;
+  users: UserService;
   health: HealthRepo;
   logger: Logger;
 };
@@ -23,10 +26,12 @@ export function createServerDeps(io: { db: Db; logger: Logger; rng: () => number
   const transaction = createTransaction(io.db, (tx) => ({
     session: createSessionRepo(tx),
     question: createQuestionRepo(tx),
+    user: createUserRepo(tx),
   }));
 
   return {
     sessions: createSessionService({ transaction, rng: io.rng, logger: io.logger }),
+    users: createUserService({ transaction, logger: io.logger }),
     health: createHealthRepo(io.db),
     logger: io.logger,
   };
