@@ -798,6 +798,8 @@ Then re-export it so existing importers keep working:
 export type { Transaction } from './transaction';
 ```
 
+`QuestionRepo` and `SessionRepo` were imported into `sessions.ts` only to build the deleted `Repos` type, so both imports are now dead. Remove them — no tsconfig in this repo sets `noUnusedLocals`, so `npm run typecheck` will not tell you. Confirm with `grep -n "QuestionRepo\|SessionRepo" apps/server/src/services/sessions.ts` before deleting, in case something else picked them up.
+
 - [ ] **Step 4: Add the two errors**
 
 Append to `apps/server/src/errors.ts`:
