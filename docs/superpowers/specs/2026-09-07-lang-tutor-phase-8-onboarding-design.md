@@ -213,7 +213,10 @@ The problem that motivated this phase's hardest question — "how does a test sk
 onboarding without running it" — has no machinery in the answer. Username login means
 every consumer reaches an onboarded user through the same production endpoint:
 
-- **e2e** creates its learner with a real `POST /api/users` call in `globalSetup.ts`.
+- **e2e** creates its learner with a real `POST /api/users` call, made from the spec via
+  Playwright's `request` fixture. Not from `globalSetup.ts`: that file runs *before*
+  Playwright starts the server (its own comment explains why it is invoked directly rather
+  than wired in as Playwright's own hook), so no HTTP call is possible there.
 - **Integration** tests create users through the repo or service under test, as they
   already do for sessions.
 - **Manual** onboards once; after that the username is prefilled and it is one tap.
