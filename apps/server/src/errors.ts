@@ -22,3 +22,10 @@ export class OptionOutOfRange extends Error {
     this.name = 'OptionOutOfRange';
   }
 }
+
+export class UsernameTaken extends Error {
+  constructor(readonly username: string) {
+    super(`username ${username} is already taken`);
+    this.name = 'UsernameTaken';
+  }
+}

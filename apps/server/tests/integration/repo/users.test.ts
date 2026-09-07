@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { users } from '../../../src/db/schema';
+import { UsernameTaken } from '../../../src/errors';
+import { createUserRepo } from '../../../src/repo/users';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 
@@ -56,5 +58,56 @@ describe('the users table', () => {
       tx.insert(users).values({ id: 'legacy-1' }).returning(),
     );
     expect(row.username).toBeNull();
+  });
+});
+
+const REQUEST = {
+  username: 'dana',
+  display_name: 'דנה',
+  age: 34,
+  native_language: 'he' as const,
+  target_language: 'en' as const,
+};
+
+describe('createUserRepo', () => {
+  it('inserts a user and returns it with a generated id', async () => {
+    const user = await withTx(t.db, (tx) => createUserRepo(tx).insertUser(REQUEST));
+
+    expect(user).toEqual({
+      id: expect.any(String),
+      username: 'dana',
+      display_name: 'דנה',
+      age: 34,
+      native_language: 'he',
+      target_language: 'en',
+    });
+    expect(user.id.length).toBeGreaterThan(0);
+  });
+
+  it('throws UsernameTaken rather than a raw driver error on a duplicate', async () => {
+    await withTx(t.db, (tx) => createUserRepo(tx).insertUser(REQUEST));
+
+    await expect(
+      withTx(t.db, (tx) => createUserRepo(tx).insertUser({ ...REQUEST, display_name: 'אחרת' })),
+    ).rejects.toBeInstanceOf(UsernameTaken);
+  });
+
+  it('finds a user by username', async () => {
+    const created = await withTx(t.db, (tx) => createUserRepo(tx).insertUser(REQUEST));
+    const found = await withTx(t.db, (tx) => createUserRepo(tx).findByUsername('dana'));
+    expect(found).toEqual(created);
+  });
+
+  it('returns undefined for a username nobody has', async () => {
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findByUsername('nobody'))).toBeUndefined();
+  });
+
+  it('finds a user by id', async () => {
+    const created = await withTx(t.db, (tx) => createUserRepo(tx).insertUser(REQUEST));
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findById(created.id))).toEqual(created);
+  });
+
+  it('returns undefined for an id nobody has', async () => {
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findById('no-such-id'))).toBeUndefined();
   });
 });
