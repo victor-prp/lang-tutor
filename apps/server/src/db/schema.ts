@@ -26,12 +26,13 @@ export const users = pgTable(
     id: text('id')
       .primaryKey()
       .default(sql`gen_random_uuid()::text`),
-    // Nullable until task 10: upsertUser still writes a bare row.
-    username: text('username').unique(),
-    displayName: text('display_name'),
-    age: integer('age'),
-    nativeLanguage: varchar('native_language', { length: 10 }).notNull().default('he'),
-    targetLanguage: varchar('target_language', { length: 10 }).notNull().default('en'),
+    username: text('username').notNull().unique(),
+    displayName: text('display_name').notNull(),
+    age: integer('age').notNull(),
+    // No default on either language: onboarding always supplies both, so a
+    // default could only mask a bug.
+    nativeLanguage: varchar('native_language', { length: 10 }).notNull(),
+    targetLanguage: varchar('target_language', { length: 10 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

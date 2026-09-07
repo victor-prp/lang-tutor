@@ -1,6 +1,6 @@
 import type { SessionRecord } from '../domain/session';
 import { newSessionRecord, sessionScore, step } from '../domain/session';
-import { OptionOutOfRange, QuestionDesynced, SessionNotFound } from '../errors';
+import { OptionOutOfRange, QuestionDesynced, SessionNotFound, UserNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { Transaction } from './transaction';
 
@@ -37,11 +37,15 @@ export function createSessionService({
 }) {
   return {
     startSession: (userId: string): Promise<{ sessionId: string; record: SessionRecord }> =>
-      transaction(async ({ session, question }) => {
-        const user = await session.upsertUser(userId);
+      transaction(async ({ session, question, user }) => {
+        const learner = await user.findById(userId);
+        // No implicit creation. A session for an id nobody onboarded is a bug,
+        // and the route turns this into a 404.
+        if (!learner) throw new UserNotFound(userId);
+
         const pool = await question.loadQuestionPool(
-          user.targetLanguage,
-          user.nativeLanguage,
+          learner.target_language,
+          learner.native_language,
           userId,
         );
         const record = newSessionRecord(userId, pool, rng);

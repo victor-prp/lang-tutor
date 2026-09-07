@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { createApp } from '../../src/app';
 import { createServerDeps } from '../../src/composition';
 import { createFakeLogger } from '../support/fakes';
+import { seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
 
@@ -15,6 +16,8 @@ beforeAll(async () => {
   // beforeAll, not beforeEach: this file starts a real server, and the one test
   // in it needs the database to outlive the request/response cycle.
   t = await createTestDb();
+  await seedUser(t.db, 'integration_user');
+  await seedUser(t.db, 'restart_user');
   await new Promise<void>((resolve) => {
     server = serve(
       {
@@ -47,7 +50,7 @@ async function postJson(path: string, body: unknown) {
 
 describe('integration: a full session over real HTTP', () => {
   it('creates a session, answers all 10 questions correctly, and completes with a perfect score', async () => {
-    const created = await postJson('/api/sessions', { user_id: 'integration-user' });
+    const created = await postJson('/api/sessions', { user_id: 'integration_user' });
     expect(created.status).toBe(200);
     expect(created.body.position).toEqual({ position: 1, total: 10 });
 
@@ -55,7 +58,7 @@ describe('integration: a full session over real HTTP', () => {
     let last;
     for (let i = 0; i < 10; i++) {
       const res = await postJson(`/api/sessions/${current.session_id}/next-step`, {
-        user_id: 'integration-user',
+        user_id: 'integration_user',
         question_id: current.question.id,
         option_index: current.question.correct_option,
       });
@@ -71,7 +74,7 @@ describe('integration: a full session over real HTTP', () => {
   });
 
   it('keeps a completed session readable, so a retry replays instead of 404ing', async () => {
-    const created = await postJson('/api/sessions', { user_id: 'restart-user' });
+    const created = await postJson('/api/sessions', { user_id: 'restart_user' });
     const sessionId = created.body.session_id;
 
     let current = created.body;
@@ -83,7 +86,7 @@ describe('integration: a full session over real HTTP', () => {
       lastQuestionId = current.question.id;
       lastOptionIndex = current.question.correct_option;
       const res = await postJson(`/api/sessions/${sessionId}/next-step`, {
-        user_id: 'restart-user',
+        user_id: 'restart_user',
         question_id: lastQuestionId,
         option_index: lastOptionIndex,
       });
@@ -96,7 +99,7 @@ describe('integration: a full session over real HTTP', () => {
     // finished, so this would have 404ed. A table has no such sweep, so
     // retrying the tenth answer replays the completed response indefinitely.
     const replay = await postJson(`/api/sessions/${sessionId}/next-step`, {
-      user_id: 'restart-user',
+      user_id: 'restart_user',
       question_id: lastQuestionId,
       option_index: lastOptionIndex,
     });

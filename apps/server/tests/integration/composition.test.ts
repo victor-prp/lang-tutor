@@ -3,6 +3,7 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { createServerDeps } from '../../src/composition';
 import { createFakeLogger } from '../support/fakes';
+import { seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
 
@@ -10,6 +11,7 @@ let t: TestDb;
 
 beforeEach(async () => {
   t = await createTestDb();
+  await seedUser(t.db, 'u_1');
 });
 
 afterEach(async () => {
@@ -31,7 +33,7 @@ describe('createServerDeps', () => {
 
   it('assembles a session service that works against that database', async () => {
     const deps = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
-    const { record } = await deps.sessions.startSession('u1');
+    const { record } = await deps.sessions.startSession('u_1');
     expect(record.questions).toHaveLength(SESSION_LENGTH);
   });
 });

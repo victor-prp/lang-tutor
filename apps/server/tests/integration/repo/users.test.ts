@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import { sql } from 'drizzle-orm';
 
 import { users } from '../../../src/db/schema';
 import { UsernameTaken } from '../../../src/errors';
@@ -51,13 +52,13 @@ describe('the users table', () => {
     ).rejects.toThrow();
   });
 
-  // Transitional: upsertUser still writes a bare row until task 10 tightens
-  // these columns to NOT NULL. Delete this test in task 10.
-  it('still accepts a row with no profile, until task 10', async () => {
-    const [row] = await withTx(t.db, (tx) =>
-      tx.insert(users).values({ id: 'legacy-1' }).returning(),
-    );
-    expect(row.username).toBeNull();
+  // Raw SQL on purpose: the columns are NOT NULL, so Drizzle's types already
+  // refuse this. The point is that the database refuses it too, for anything
+  // that reaches the table without passing through them.
+  it('refuses a row with no profile', async () => {
+    await expect(
+      withTx(t.db, (tx) => tx.execute(sql`insert into users (id) values ('bare')`)),
+    ).rejects.toThrow();
   });
 });
 

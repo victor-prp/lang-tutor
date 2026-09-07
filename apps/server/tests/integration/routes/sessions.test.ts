@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
+import { seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
@@ -11,6 +12,8 @@ let t: TestDb;
 
 beforeEach(async () => {
   t = await createTestDb();
+  await seedUser(t.db, 'u_1');
+  await seedUser(t.db, 'u_2');
 });
 
 afterEach(async () => {
@@ -39,7 +42,7 @@ function postJson(app: Hono, path: string, body: unknown) {
 describe('POST /api/sessions', () => {
   it('creates a session and returns the first question', async () => {
     const app = buildTestApp();
-    const res = await postJson(app, '/api/sessions', { user_id: 'u1' });
+    const res = await postJson(app, '/api/sessions', { user_id: 'u_1' });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(typeof body.session_id).toBe('string');
@@ -65,13 +68,19 @@ describe('POST /api/sessions', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid request' });
   });
+  it('returns 404 for a user id that was never onboarded', async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, '/api/sessions', { user_id: 'u_nobody' });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'user not found' });
+  });
 });
 
 describe('POST /api/sessions/:id/next-step', () => {
   it('404s for an unknown session id', async () => {
     const app = buildTestApp();
     const res = await postJson(app, '/api/sessions/00000000-0000-0000-0000-000000000000/next-step', {
-      user_id: 'u1',
+      user_id: 'u_1',
       question_id: 'q0',
       option_index: 0,
     });
@@ -85,7 +94,7 @@ describe('POST /api/sessions/:id/next-step', () => {
   it('404s for a malformed (non-UUID) session id, not 500', async () => {
     const app = buildTestApp();
     const res = await postJson(app, '/api/sessions/not-a-uuid/next-step', {
-      user_id: 'u1',
+      user_id: 'u_1',
       question_id: 'q0',
       option_index: 0,
     });
@@ -94,10 +103,10 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('advances to the next question on a fresh answer', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { user_id: 'u1' })).json();
+    const created = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
 
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
-      user_id: 'u1',
+      user_id: 'u_1',
       question_id: created.question.id,
       option_index: created.question.correct_option,
     });
@@ -110,9 +119,9 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('replays the same response when the same step is retried', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { user_id: 'u1' })).json();
+    const created = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
     const stepBody = {
-      user_id: 'u1',
+      user_id: 'u_1',
       question_id: created.question.id,
       option_index: created.question.correct_option,
     };
@@ -128,10 +137,10 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it("409s when question_id does not match the session's current question", async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { user_id: 'u1' })).json();
+    const created = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
 
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
-      user_id: 'u1',
+      user_id: 'u_1',
       question_id: 'not-the-current-question',
       option_index: 0,
     });
@@ -140,13 +149,13 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('completes the session on the 10th answer, returning score and missed_questions', async () => {
     const app = buildTestApp();
-    let current = await (await postJson(app, '/api/sessions', { user_id: 'u1' })).json();
+    let current = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
 
     let last;
     for (let i = 0; i < 10; i++) {
       last = await (
         await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
-          user_id: 'u1',
+          user_id: 'u_1',
           question_id: current.question.id,
           option_index: current.question.correct_option,
         })
@@ -162,13 +171,13 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('tracks an incorrect answer in the final score and missed_questions', async () => {
     const app = buildTestApp();
-    let current = await (await postJson(app, '/api/sessions', { user_id: 'u1' })).json();
+    let current = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
     const firstQuestion = current.question;
     const wrongIndex = (firstQuestion.correct_option + 1) % firstQuestion.options.length;
 
     let last = await (
       await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
-        user_id: 'u1',
+        user_id: 'u_1',
         question_id: current.question.id,
         option_index: wrongIndex,
       })
@@ -178,7 +187,7 @@ describe('POST /api/sessions/:id/next-step', () => {
     for (let i = 1; i < 10; i++) {
       last = await (
         await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
-          user_id: 'u1',
+          user_id: 'u_1',
           question_id: current.question.id,
           option_index: current.question.correct_option,
         })
@@ -197,9 +206,9 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('400s when option_index is past the last option', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { user_id: 'u1' })).json();
+    const created = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
-      user_id: 'u1',
+      user_id: 'u_1',
       question_id: created.question.id,
       option_index: 99,
     });

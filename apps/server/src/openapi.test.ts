@@ -18,9 +18,13 @@ describe('POST /api/sessions in the published document', () => {
     expect(doc.paths['/api/sessions'].post).toBeDefined();
   });
 
-  it('declares its 200 and its 400', async () => {
+  it('declares its 200, 400 and 404', async () => {
     const doc = await openApiDocument();
-    expect(Object.keys(doc.paths['/api/sessions'].post.responses).sort()).toEqual(['200', '400']);
+    expect(Object.keys(doc.paths['/api/sessions'].post.responses).sort()).toEqual([
+      '200',
+      '400',
+      '404',
+    ]);
   });
 
   it('declares a JSON request body', async () => {

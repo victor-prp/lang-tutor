@@ -15,7 +15,7 @@ import {
   sessionScore,
   type SessionRecord,
 } from '../domain/session';
-import { OptionOutOfRange, QuestionDesynced, SessionNotFound } from '../errors';
+import { OptionOutOfRange, QuestionDesynced, SessionNotFound, UserNotFound } from '../errors';
 import type { SessionService } from '../services/sessions';
 
 function buildNextStepResponse(
@@ -57,6 +57,10 @@ const createSessionRoute = createRoute({
     400: {
       content: { 'application/json': { schema: ErrorSchema } },
       description: 'The request body did not validate.',
+    },
+    404: {
+      content: { 'application/json': { schema: ErrorSchema } },
+      description: 'No user has this `user_id`. Create one with POST /api/users first.',
     },
   },
 });
@@ -112,15 +116,20 @@ export function createSessionsRouter(sessions: SessionService) {
 
   router.openapi(createSessionRoute, async (c) => {
     const { user_id } = c.req.valid('json');
-    const { sessionId, record } = await sessions.startSession(user_id);
-    return c.json(
-      {
-        session_id: sessionId,
-        question: currentQuestion(record)!,
-        position: positionOf(record),
-      },
-      200,
-    );
+    try {
+      const { sessionId, record } = await sessions.startSession(user_id);
+      return c.json(
+        {
+          session_id: sessionId,
+          question: currentQuestion(record)!,
+          position: positionOf(record),
+        },
+        200,
+      );
+    } catch (error) {
+      if (error instanceof UserNotFound) return c.json({ error: 'user not found' }, 404);
+      throw error;
+    }
   });
 
   router.openapi(nextStepRoute, async (c) => {

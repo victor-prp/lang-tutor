@@ -19,7 +19,6 @@ describe('repos', () => {
 
   function sessionRepoWith(overrides: Partial<SessionRepo>): SessionRepo {
     return {
-      upsertUser: notStubbed,
       insertSession: notStubbed,
       loadSession: notStubbed,
       insertAnswer: notStubbed,
