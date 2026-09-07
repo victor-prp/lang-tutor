@@ -92,12 +92,60 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all three paths and nothing else', async () => {
+  it('contains all five paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
+      '/api/login',
       '/api/sessions',
       NEXT_STEP,
+      '/api/users',
       '/health',
     ]);
+  });
+});
+
+describe('the user endpoints in the published document', () => {
+  it('publishes /api/users, not /users', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths)).toContain('/api/users');
+    expect(Object.keys(doc.paths)).not.toContain('/users');
+  });
+
+  it('publishes /api/login, not /login', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths)).toContain('/api/login');
+    expect(Object.keys(doc.paths)).not.toContain('/login');
+  });
+
+  it('declares every status POST /api/users can return', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths['/api/users'].post.responses).sort()).toEqual([
+      '201',
+      '400',
+      '409',
+    ]);
+  });
+
+  it('declares every status POST /api/login can return', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths['/api/login'].post.responses).sort()).toEqual([
+      '200',
+      '400',
+      '404',
+    ]);
+  });
+
+  it('declares the error body the user endpoints actually return', async () => {
+    const doc = await openApiDocument();
+    const schema =
+      doc.paths['/api/users'].post.responses['409'].content['application/json'].schema;
+    expect(schema.required).toEqual(['error']);
+    expect(schema.properties.error.type).toBe('string');
+  });
+
+  // The one place a reader is most likely to assume otherwise.
+  it('says in the document that login authenticates nothing', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths['/api/login'].post.description).toMatch(/NO authentication/);
   });
 });
