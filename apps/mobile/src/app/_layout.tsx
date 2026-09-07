@@ -1,14 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Crypto from 'expo-crypto';
 import { Stack } from 'expo-router';
 import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { createApiClient } from '@/api/client';
 import { requireEnvValue } from '@/config/requireEnvValue';
+import { createRememberedUsernameStore } from '@/currentUser';
+import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { SessionProvider } from '@/hooks/useSession';
 import { colors } from '@/theme';
-import { createUserIdStore } from '@/userId';
 
 // Read directly off process.env.EXPO_PUBLIC_API_URL (not via an indirection)
 // so Metro's build-time inlining for EXPO_PUBLIC_* variables recognizes and
@@ -20,10 +20,7 @@ import { createUserIdStore } from '@/userId';
 const baseUrl = requireEnvValue(process.env.EXPO_PUBLIC_API_URL, 'EXPO_PUBLIC_API_URL');
 
 const api = createApiClient({ baseUrl, fetch: globalThis.fetch });
-const userIdStore = createUserIdStore({
-  storage: AsyncStorage,
-  randomUUID: Crypto.randomUUID,
-});
+const usernameStore = createRememberedUsernameStore({ storage: AsyncStorage });
 
 // RTL is set two different ways because the platforms disagree about how.
 //
@@ -47,11 +44,13 @@ export default function RootLayout() {
     // fallback provider, but relying on that is relying on an internal detail —
     // and on web the insets are zero without an explicit provider.
     <SafeAreaProvider>
-      <SessionProvider api={api} userIdStore={userIdStore}>
-        <View style={styles.root} {...rtlProps}>
-          <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-        </View>
-      </SessionProvider>
+      <CurrentUserProvider api={api} usernameStore={usernameStore}>
+        <SessionProvider api={api}>
+          <View style={styles.root} {...rtlProps}>
+            <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+          </View>
+        </SessionProvider>
+      </CurrentUserProvider>
     </SafeAreaProvider>
   );
 }
