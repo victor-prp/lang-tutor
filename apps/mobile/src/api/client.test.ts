@@ -67,4 +67,76 @@ describe('api/client', () => {
     await expect(client.createSession({ user_id: 'u1' })).rejects.toBeInstanceOf(ApiError);
     await expect(client.createSession({ user_id: 'u1' })).rejects.toMatchObject({ status: 404 });
   });
+
+  it('login posts the username to /api/login', async () => {
+    const user = {
+      id: 'u1',
+      username: 'dana',
+      display_name: 'דנה',
+      age: 34,
+      native_language: 'he',
+      target_language: 'en',
+    };
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => user }));
+    const client = buildClient(mockFetch);
+
+    const result = await client.login({ username: 'dana' });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/login',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'dana' }),
+      }),
+    );
+    expect(result).toEqual(user);
+  });
+
+  it('login throws ApiError with the status when the username is unknown', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }));
+    const client = buildClient(mockFetch);
+
+    await expect(client.login({ username: 'nobody' })).rejects.toMatchObject({ status: 404 });
+    await expect(client.login({ username: 'nobody' })).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('createUser posts the profile to /api/users', async () => {
+    const request = {
+      username: 'dana',
+      display_name: 'דנה',
+      age: 34,
+      native_language: 'he' as const,
+      target_language: 'en' as const,
+    };
+    const mockFetch = jest.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'u1', ...request }),
+    }));
+    const client = buildClient(mockFetch);
+
+    const result = await client.createUser(request);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/users',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(request) }),
+    );
+    expect(result.id).toBe('u1');
+  });
+
+  it('createUser throws ApiError with 409 when the username is taken', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 409, json: async () => ({}) }));
+    const client = buildClient(mockFetch);
+
+    await expect(
+      client.createUser({
+        username: 'dana',
+        display_name: 'דנה',
+        age: 34,
+        native_language: 'he',
+        target_language: 'en',
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
 });

@@ -8,6 +8,20 @@
       "when": 1788545059058,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788786926294,
+      "tag": "0001_slow_omega_sentinel",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788787899938,
+      "tag": "0002_hard_starjammers",
+      "breakpoints": true
     }
   ]
 }

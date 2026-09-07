@@ -29,7 +29,7 @@ describe('the app as production assembles it', () => {
     const res = await app.request('/api/sessions/00000000-0000-0000-0000-000000000000/next-step', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: 'u1', question_id: 'q-window', option_index: 0 }),
+      body: JSON.stringify({ user_id: 'u_1', question_id: 'q-window', option_index: 0 }),
     });
     expect(res.status).toBe(404);
   });

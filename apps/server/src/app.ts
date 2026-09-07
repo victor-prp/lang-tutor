@@ -6,6 +6,7 @@ import { HTTPException } from 'hono/http-exception';
 
 import type { AppDeps } from './composition';
 import { createSessionsRouter } from './routes/sessions';
+import { createUsersRouter } from './routes/users';
 
 // Readiness, not just liveness: the e2e suite waits on this before starting the
 // app, and a 503 here is what distinguishes "server booting" from "broken".
@@ -40,6 +41,7 @@ export function createApp(deps: AppDeps) {
     return ok ? c.json({ ok: true }, 200) : c.json({ ok: false }, 503);
   });
 
+  app.route('/api', createUsersRouter(deps.users));
   app.route('/api/sessions', createSessionsRouter(deps.sessions));
 
   // Registered after the routes they describe, so the document is generated

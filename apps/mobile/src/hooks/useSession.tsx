@@ -14,8 +14,8 @@ import {
 import { Alert } from 'react-native';
 
 import type { ApiClient } from '@/api/client';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { strings } from '@/strings';
-import type { UserIdStore } from '@/userId';
 
 export type SessionValue = {
   hasSession: boolean;
@@ -93,18 +93,20 @@ function applyQueued(current: QuizState, queued: Queued): QuizState {
   };
 }
 
-export function SessionProvider({
-  api,
-  userIdStore,
-  children,
-}: {
-  api: ApiClient;
-  userIdStore: UserIdStore;
-  children: ReactNode;
-}) {
+export function SessionProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
   // Phase 2 still keeps a client-side copy of the current step for rendering,
   // but the server is now the source of truth for progress and scoring.
   const [state, setState] = useState<QuizState | null>(null);
+
+  const { user } = useCurrentUser();
+
+  // A ref, matching this file's existing stateRef idiom, so start()'s empty
+  // dependency array stays correct: the callback must read the user who is
+  // logged in when it fires, not the one captured when it was created.
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Mirrors `state` for use inside async callbacks that resolve after a
   // render has moved on (e.g. select()'s nextStep().catch()), where the
@@ -142,7 +144,11 @@ export function SessionProvider({
     });
     void (async () => {
       try {
-        const userId = await userIdStore.getOrCreateUserId();
+        const currentUser = userRef.current;
+        // Unreachable in practice — Home redirects to /login when logged out —
+        // but a session with no learner must fail loudly, not invent an id.
+        if (!currentUser) throw new Error('cannot start a session with no current user');
+        const userId = currentUser.id;
         const response = await api.createSession({ user_id: userId });
         setState({
           sessionId: response.session_id,

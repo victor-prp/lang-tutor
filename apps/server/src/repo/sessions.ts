@@ -9,7 +9,6 @@ import {
   sessionQuestions,
   sessions,
   termVariants,
-  users,
   type QuestionOption,
 } from '../db/schema';
 import { canonicalOptions, questionFrom } from './questions';
@@ -23,19 +22,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export function createSessionRepo(tx: Tx) {
   return {
-    /**
-     * `user_id` is an unvalidated client UUID and there is no auth, so first
-     * sight creates the row. Returns the language pair the session draws from.
-     */
-    upsertUser: async (userId: string) => {
-      await tx.insert(users).values({ id: userId }).onConflictDoNothing();
-      const [row] = await tx
-        .select({ nativeLanguage: users.nativeLanguage, targetLanguage: users.targetLanguage })
-        .from(users)
-        .where(eq(users.id, userId));
-      return row;
-    },
-
     /**
      * `picked` comes from `pickQuestions`, so its options are already shuffled.
      * Each option's text is mapped back to its canonical position to build

@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 
 import { createDb } from '../../../src/db/client';
 import { users } from '../../../src/db/schema';
+import { seedUser } from '../../support/seedUser';
 import { ADMIN_URL } from '../../support/dbNames';
 import { createTestDb, type TestDb } from '../../support/testDb';
 
@@ -19,7 +20,7 @@ afterEach(async () => {
 describe('per-test database isolation', () => {
   it('starts with no users and writes one', async () => {
     expect(await current.db.select().from(users)).toEqual([]);
-    await current.db.insert(users).values({ id: 'written-by-test-one' });
+    await seedUser(current.db, 'written_by_test_one');
     expect(await current.db.select().from(users)).toHaveLength(1);
   });
 

@@ -1,7 +1,8 @@
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSession } from '@/hooks/useSession';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
@@ -9,6 +10,8 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 export default function HomeScreen() {
   const { start } = useSession();
+  const { user } = useCurrentUser();
+  if (!user) return <Redirect href="/login" />;
 
   function onStart() {
     start();
@@ -19,6 +22,15 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <Text style={styles.title}>{strings.appTitle}</Text>
       <Text style={styles.subtitle}>{strings.homeSubtitle}</Text>
+
+      <Pressable
+        accessibilityRole="button"
+        testID="profile-button"
+        onPress={() => router.push('/profile')}
+        style={styles.profileLink}
+      >
+        <Text style={styles.profileLinkLabel}>{user.display_name}</Text>
+      </Pressable>
 
       <View style={styles.card}>
         <Text style={styles.cardLabel}>{strings.homeSetLabel(SESSION_LENGTH)}</Text>
@@ -75,5 +87,7 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.md,
     fontWeight: '700',
   },
+  profileLink: { alignSelf: 'flex-start', paddingVertical: spacing.xs },
+  profileLinkLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   futureSpace: { flex: 1 },
 });

@@ -1,0 +1,362 @@
+# Phase 8 — User onboarding and username identity
+
+- **Status:** Approved, ready for an implementation plan
+- **Date:** 2026-09-07
+- **Supersedes:** the client-generated-UUID identity introduced in phase 2
+
+## Summary
+
+Phase 8 replaces the anonymous device identity with a named user. A learner types a
+username to log in, or creates an account by answering five questions: a username,
+a display name, age, native language and target language. The app gains a login screen, an onboarding
+screen and a read-only profile screen — the first user-facing surface the app has ever
+had for identity.
+
+The phase deliberately ships **no credentials**. A username identifies; it authenticates
+nothing. That is a smaller claim than the app makes today, not a larger one: the current
+identity is a client-generated UUID that anyone could forge just as easily, with the
+added property that nobody — including its owner — can move it to another device.
+
+## What this replaces
+
+| Before | After |
+|---|---|
+| `apps/mobile/src/userId.ts` generates a UUID and stores it in AsyncStorage | The server issues an id; the client remembers a **username** |
+| `repo/sessions.ts` `upsertUser` creates a user row on first session | A session for an unknown user is a 404 |
+| A `users` row means "some device once started a session" | A `users` row means "an onboarded person" |
+| No user-facing identity surface at all | Login, onboarding and profile screens |
+
+The wire shape of the existing endpoints is unchanged — `POST /api/sessions` and
+`/next-step` still take `user_id` in the body. The blast radius on phases 4–7 is one new
+failure mode, not a contract change.
+
+## Decisions settled during design
+
+**No credentials in this phase, built or bought.** Building them means password hashing,
+token issue and refresh, auth middleware on every route, `expo-secure-store` on the
+client, and a reset flow that needs a mail provider — a phase of its own that would
+swallow the onboarding work. Buying them (Clerk, Supabase, Firebase) breaks the property
+the whole test topology rests on: every CI job today runs against local Docker with no
+network and no secrets, so a hosted provider would require either network in CI or a
+fake auth provider, which is a larger change than the feature being added. And a password
+with no email delivery produces an *unrecoverable* account — strictly worse than a device
+id, not better.
+
+**Login is by username, with no dev-only apparatus.** An earlier draft of this design
+proposed seeded fixture users, a `__DEV__` user picker and an `EXPO_PUBLIC_DEV_USER_ID`
+escape hatch, all to answer "how does a test skip onboarding". Username login dissolves
+that problem: every consumer — integration, e2e, and a person at a keyboard — reaches an
+onboarded user through the same production endpoint. There is no fixture seed, no
+config-gated route, and no `__DEV__` branch anywhere in this phase.
+
+**The login handle and the display name are separate fields.** Onboarding collects five
+values, not four. A unique lowercase-ASCII `username` is the handle; `display_name` is
+the Hebrew name shown in the UI. Sharing one field would make two learners named דנה
+collide on a human's real name, and would put Hebrew text in the field the e2e suite
+types into.
+
+**An unknown username fails the login rather than starting onboarding.** The login screen
+has a separate *New user* button. A typo can therefore never silently create an account,
+and the two paths stay separately testable — which matters because this screen is now the
+e2e suite's entry point.
+
+**No role column.** See *Why `users` has no role column* below.
+
+## Data model
+
+`users` gains four columns, loses two defaults, and changes how its primary key is
+produced. No other table is touched.
+
+| Column | Change | Notes |
+|---|---|---|
+| `id` | `text PRIMARY KEY DEFAULT gen_random_uuid()::text` | Was client-supplied. Now server-issued and non-enumerable — see below. Stays `text` so `questions.user_id` and `sessions.user_id` need no migration. |
+| `username` | **new** — `text NOT NULL UNIQUE` | `CHECK (username ~ '^[a-z0-9_]{3,30}$')` |
+| `display_name` | **new** — `text NOT NULL` | Hebrew, not unique. `CHECK (length(display_name) BETWEEN 1 AND 60)` |
+| `age` | **new** — `integer NOT NULL` | `CHECK (age BETWEEN 3 AND 120)` |
+| `native_language` | drop the `'he'` default | Onboarding always supplies it |
+| `target_language` | drop the `'en'` default | Onboarding always supplies it |
+| — | **new** — `CHECK (native_language <> target_language)` | Enforced in the database as well as the wire schema |
+
+**Why the id becomes server-issued.** Once a username is the client-facing handle, the
+client has no business minting the durable identity behind it: a client-chosen id can
+collide, can be forged to impersonate an existing row, and is the only reason the current
+code has to tolerate a user id it has never seen. The id is generated by a **database
+default**, mirroring how `sessions.id` already avoids application-level randomness — which
+also means no new injected `randomUUID` collaborator and no new surface for ADR 0002 R1.
+A UUID is also unguessable, which keeps the door open for a future profile read without
+that endpoint being enumerable from day one.
+
+**Why the defaults come off.** A column default is what allowed a `users` row to exist
+without anyone having decided its language pair. Once onboarding always supplies both, a
+default can only mask a bug.
+
+**On storing `age`.** It rots: a 9-year-old is 10 next year and the row still says 9.
+`birth_year` would not rot, but deriving it from an age answer is off by up to a year, so
+it trades a known-stale value for a quietly-wrong one. This phase stores `age` as asked.
+`created_at` is already on the row if a later phase wants to correct for drift.
+
+**Migration shape.** The three new columns are `NOT NULL` on a table that may already
+hold rows in a developer's local database. Each is added nullable, backfilled, then set
+`NOT NULL`, so `npm run db:migrate` succeeds on an existing database instead of erroring.
+`username` cannot be backfilled with a constant — it is `UNIQUE`, so a second existing row
+would collide — and is instead derived per row from the id (`'u_' || left(id, 8)`), which
+is unique because the id is. `display_name` backfills to the same value and `age` to a
+sentinel; the rows are pre-onboarding artefacts of a developer's own database, not people.
+There is no production database to consider.
+
+**`upsertUser` is deleted.** `repo/sessions.ts` currently creates a user on first sight,
+which was correct when a UUID arrived from nowhere. With onboarding, a session for a
+nonexistent user is a bug: `startSession` looks the user up and throws `UserNotFound`,
+which the route maps to 404. This is what makes "a `users` row is an onboarded person"
+true rather than aspirational.
+
+## Wire contract
+
+Three new endpoints. Each is one `createRoute` definition backed by a Zod schema in
+`packages/core/src/api/schemas.ts`, per ADR 0003 — routing, validation, response typing
+and OpenAPI generation from a single declaration.
+
+| Endpoint | Request | Responses |
+|---|---|---|
+| `POST /api/users` | `{ username, display_name, age, native_language, target_language }` | `201` + `User` · `409` username taken · `400` invalid |
+| `POST /api/login` | `{ username }` | `200` + `User` · `404` no such user · `400` invalid |
+
+There is deliberately **no** `GET /api/users/{id}`. Both endpoints above already return
+the full `User`, so the profile screen renders from the object the app is holding and
+never needs to fetch. A read endpoint nobody calls would be dead surface — and it would be
+the one route serving a display name and an age to any caller holding an id.
+
+```
+UserSchema = { id, username, display_name, age, native_language, target_language }
+```
+
+Every type in `packages/core/src/api/types.ts` remains a `z.infer` (ADR 0003 R3), and
+`api/index.ts` still exports types only (R4). Each router validating a body supplies the
+`defaultHook` that keeps the failure body `{ error: 'invalid request' }` (R7).
+
+**On the name `POST /api/login`.** It authenticates nothing — it is a lookup by username
+returning a profile. The alternative, `GET /api/users?username=…`, is more literal but
+hides the intent from the client and the e2e suite. The endpoint keeps the honest name and
+carries the correction where a reader is most likely to need it: its `description` states
+in the published OpenAPI document that it performs no authentication.
+
+## Server layers
+
+Following the existing shape exactly (ADR 0001):
+
+```
+routes/users.ts      createUsersRouter(users: UserService)
+                     transport only — parse, validate, map outcome to status
+services/users.ts    createUserService({ transaction, logger })
+                     register / login — one transaction each (R8)
+repo/users.ts        createUserRepo(tx) — insertUser, findByUsername, findById
+errors.ts            + UserNotFound, UsernameTaken
+composition.ts       binds userRepo into the transaction's `bind`
+```
+
+`repo/sessions.ts` loses `upsertUser`. `services/sessions.ts` gains a user lookup and
+throws `UserNotFound`; `routes/sessions.ts` maps it to 404 alongside the existing
+`SessionNotFound`.
+
+`UsernameTaken` is raised from the unique-violation the database returns, not from a
+pre-flight `SELECT` — a check-then-insert has a race between the two statements, and the
+constraint is the only thing that actually holds.
+
+## Mobile app
+
+**The identity seam is replaced.** `apps/mobile/src/userId.ts` is deleted. In its place,
+`src/currentUser.tsx` holds two things with deliberately different lifetimes:
+
+- `createRememberedUsernameStore({ storage })` — `read()` / `write()` / `clear()`. It
+  persists **only the username**. A cached profile would go stale the moment anything
+  server-side changed it; the username is the one fact that belongs to the device.
+- `CurrentUserProvider` — a React context holding the logged-in `User | null` in memory,
+  exposing `login(username)`, `register(profile)` and `signOut()`.
+
+`_layout.tsx` constructs the store from `AsyncStorage` and wraps `SessionProvider`,
+exactly as it does today. `expo-crypto` leaves the composition root — the server issues
+ids now — so ADR 0002 R1's mobile grep has one less thing to find.
+
+`useSession` stops taking a `userIdStore` and reads the id off the current user: a
+smaller dependency, not a bigger one.
+
+### Screens
+
+| Route | Behaviour |
+|---|---|
+| `app/index.tsx` | Home. Renders `<Redirect href="/login" />` when there is no current user; gains a profile affordance in its header. Otherwise unchanged. |
+| `app/login.tsx` | Username field, prefilled from the remembered value. **Login** is one tap. **New user** navigates to onboarding. A 404 shows "no such user" inline. |
+| `app/onboarding.tsx` | One screen, five fields. Not a wizard — five fields do not earn a multi-step flow. A 409 shows "that username is taken" on the username field. |
+| `app/profile.tsx` | Read-only rows — username, display name, age, language pair — and **switch user**, which calls `signOut()` and returns to login. |
+
+`signOut` clears the in-memory user but **keeps** the remembered username, so the login
+field stays prefilled. That is the "just push the button" behaviour; switching users means
+typing over it.
+
+### Three details that would otherwise be discovered late
+
+- The app is force-RTL (`_layout.tsx`), but the username is lowercase ASCII. That one
+  `TextInput` needs `writingDirection: 'ltr'` and left alignment, or its text and caret
+  render on the wrong side.
+- Age gets a numeric keyboard and is parsed, not trusted. The wire schema is the real
+  validator.
+- Native and target language are two-option toggles (he/en) defaulting to he→en, with a
+  client-side check that they differ. The server and the database enforce it too.
+
+`api/client.ts` gains `login` and `createUser`. Both are POSTs, so the existing `postJson`
+helper covers them and no `getJson` is needed. `strings.ts` gains the Hebrew copy for all
+three new screens.
+
+## Testing
+
+The problem that motivated this phase's hardest question — "how does a test skip
+onboarding without running it" — has no machinery in the answer. Username login means
+every consumer reaches an onboarded user through the same production endpoint:
+
+- **e2e** creates its learner with a real `POST /api/users` call, made from the spec via
+  Playwright's `request` fixture. Not from `globalSetup.ts`: that file runs *before*
+  Playwright starts the server (its own comment explains why it is invoked directly rather
+  than wired in as Playwright's own hook), so no HTTP call is possible there.
+- **Integration** tests create users through the repo or service under test, as they
+  already do for sessions.
+- **Manual** onboards once; after that the username is prefilled and it is one tap.
+
+There is no fixture seed, no dev route, and no `__DEV__` branch. `db/seed.ts` stays
+content-only.
+
+Placement follows ADR 0004 — the folder decides the bucket.
+
+**Unit** (`src/**/*.test.ts`, runs with Docker stopped)
+
+| File | Covers |
+|---|---|
+| `packages/core/src/api/schemas.test.ts` | username pattern, age bounds, native ≠ target |
+| `apps/server/src/services/users.test.ts` | register / login against fakes from `tests/support/fakes.ts` — the only support import R3 permits |
+| `apps/mobile/src/currentUser.test.ts` | remembered-username read / write / clear |
+| `apps/mobile/src/api/client.test.ts` | the three new calls, extended |
+
+**Integration** (`tests/integration/**`, mirroring the `src/` path)
+
+| File | Covers |
+|---|---|
+| `repo/users.test.ts` | the unique constraint and every `CHECK` actually reject — not just the Zod schema |
+| `services/users.test.ts` | `UsernameTaken` on a duplicate, `UserNotFound` on an unknown login, `InvalidLanguagePair` when the two match |
+| `routes/users.test.ts` | 201 / 409 / 404 / 400, including the `{ error: 'invalid request' }` body ADR 0003 R7 requires |
+| `services/sessions.test.ts`, `routes/sessions.test.ts` | **extended:** starting a session for a nonexistent user throws `UserNotFound` / returns 404 |
+
+That last row is the regression test for deleting `upsertUser`, and it is the one place
+this phase could silently undo phase 4 behaviour.
+
+**e2e**
+
+- `session.spec.ts` gains a login step; the rest is unchanged.
+- New `onboarding.spec.ts` — *New user* → five fields → home; and logging in as an unknown
+  username shows the error rather than proceeding.
+
+## Why `users` has no role column
+
+Student, teacher and parent are coming. The natural move is a `role` column on `users`,
+added now so a later phase does not need a migration — the same forward-compatibility bet
+`questions.user_id` already makes. That bet does not pay here, and the reason is worth
+recording, because the failure is invisible at the moment you would make it.
+
+Take one concrete person. Dana learns English herself, and she adds words for her kid
+Yoni to learn. What is `Dana.role`?
+
+- `'parent'` — any code gating learning on `role = 'student'` locks Dana out of her own
+  sessions. So parents-can-also-learn becomes a special case, and the column stops
+  controlling anything.
+- `'student'` — nothing grants her the word-adding capability, so a second mechanism is
+  needed anyway.
+- `['student','parent']` — multi-valued, and it still fails the next test.
+
+The next test is the real one. The question the application must answer is not *what is
+Dana*, it is **may Dana add words to Yoni's list**. No value stored on Dana's row can
+answer that, because it names no target. `role = 'parent'` says Dana is a parent of
+*somebody*; if she is Yoni's parent but not Maya's, a role check grants her the same power
+over Maya.
+
+So a `(guardian, learner, relation)` relationship is needed regardless — and once it
+exists, the column is derivable from it. **The column is therefore either wrong or
+redundant:** wrong if authorization is built on it, since it cannot name the target;
+redundant if the relationship exists, since it is a query.
+
+Separately, "student" is not a role at all. Every account can learn; there is no user for
+whom learning is switched off. A field whose value is `'student'` for everyone who is not
+something else classifies nothing.
+
+**What this phase does about it: nothing.** No `role` column, and no relationship table
+either — a table with no feature behind it is dead weight, and the shape above is
+reasoning, not a design that has been validated against a real requirement. The phase that
+builds guardianships designs it then, and writes its own ADR then, when there is code for
+that ADR to constrain. This section exists so the absence of the column reads as a
+decision rather than an oversight.
+
+## ADR 0005 — identity without authentication
+
+One structural decision from this phase constrains code that will exist afterwards, and is
+easy to violate by accident: someone touching `users` will reasonably think "we are
+already here, let us add a password field."
+
+- Identification is not authentication. A username identifies; it authorizes nothing. No
+  access-control decision may be built on it.
+- No credential machinery enters the repo until a phase deliberately adds it.
+- Users are created in exactly one place. There is no implicit creation.
+
+Written with the `create-adr` skill, which requires the decision to carry its own
+`scripts/check-adr-0005-*.sh`, discovered automatically by `check-adrs.sh`. Both rules are
+greppable:
+
+```bash
+# no credential machinery anywhere
+grep -rniE "bcrypt|argon2|jsonwebtoken|password_hash|expo-secure-store" \
+  apps/server/src packages/core/src apps/mobile/src
+
+# users are inserted in exactly one place
+grep -rn "insert(users)" apps/server/src --include='*.ts' | grep -v 'repo/users.ts'
+```
+
+The roles reasoning above is deliberately **not** in this ADR. It constrains no code yet,
+and giving a speculative table the authority of an accepted decision means amending an ADR
+later instead of simply designing.
+
+## Documents this phase edits
+
+| Document | Edit |
+|---|---|
+| `docs/adr/adr-0002-di-with-closures.md` | R6's factory list gains `createUserRepo`, `createUserService`, `createRememberedUsernameStore`, and loses `createUserIdStore` |
+| `README.md` | data-model table (the new `users` columns), architecture, the phase index |
+| `README.md`, *Reading the API* | "There is no auth and no secret here" becomes honest: after this phase the open API serves personal data — a display name and an age — to anyone holding a user id |
+
+## Out of scope
+
+Named so they are not mistaken for oversights:
+
+- **Passwords, tokens, sessions, password reset.** Deferred with reasons, above.
+- **Roles and guardianships.** No column, no table. See above.
+- **Editing a profile.** The profile screen is read-only. Changing the language pair
+  silently changes which question pool future sessions draw from, which deserves its own
+  thought rather than arriving as a side effect of an edit form.
+- **Deleting a user.** No endpoint. `sessions` and `answers` reference `users`, so a
+  delete needs a cascade policy this phase has no reason to choose.
+- **Listing users.** No `GET /api/users`. It would return every learner's name and age on
+  an unauthenticated API.
+- **Reading a profile by id.** No `GET /api/users/{id}` either — login and register both
+  return the full `User`, so nothing would call it.
+- **Auto-login on launch.** The login screen is always shown, prefilled. One deliberate
+  tap keeps the e2e entry point deterministic and makes switching users obvious.
+- **Multiple profiles under one login.** Yoni is his own account with his own username.
+
+## Success criteria
+
+1. A new learner can create an account from the app and start a session in the same run,
+   with no database access and no `curl`.
+2. A returning learner reaches the home screen in one tap, with the username prefilled.
+3. `POST /api/sessions` for a username that was never onboarded returns 404 — proving
+   `upsertUser` is gone rather than bypassed.
+4. `users.id` is issued by the database, not accepted from the client: creating a user
+   never reads an id from the request body.
+5. The e2e suite creates its learner through the public API, and no file in the repo
+   contains a fixture user, a dev-only route, or a `__DEV__` identity branch.
+6. `npm run lint:arch` passes, including the new ADR 0005 checks, and `npm run test:all`
+   plus `npm run e2e` are green.

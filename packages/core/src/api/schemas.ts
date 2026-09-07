@@ -90,3 +90,38 @@ export const ErrorSchema = z.object({
 export const HealthResponseSchema = z.object({
   ok: z.boolean(),
 });
+
+// Identity, phase 8. A username identifies a learner; it authenticates nothing.
+// Lowercase ASCII so it is unambiguous to type on an RTL keyboard, in a URL,
+// and in a test. The display name carries the Hebrew.
+export const UsernameSchema = z.string().regex(/^[a-z0-9_]{3,30}$/);
+
+// The pair this app supports today. Narrow on the way in only — see UserSchema.
+export const LanguageCodeSchema = z.enum(['he', 'en']);
+
+// A response shape, so the language fields are plain strings: they are read from
+// a varchar(10) column, and narrowing them here would turn a future third
+// language into a validation failure inside clients that shipped before it.
+export const UserSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  display_name: z.string(),
+  age: z.number().int(),
+  native_language: z.string(),
+  target_language: z.string(),
+});
+
+// No .refine() for native !== target. The server's OpenAPI adapter converts
+// this to JSON Schema, which cannot express a cross-field rule; the service
+// raises InvalidLanguagePair and a database CHECK is the backstop.
+export const CreateUserRequestSchema = z.object({
+  username: UsernameSchema,
+  display_name: z.string().min(1).max(60),
+  age: z.number().int().min(3).max(120),
+  native_language: LanguageCodeSchema,
+  target_language: LanguageCodeSchema,
+});
+
+export const LoginRequestSchema = z.object({
+  username: UsernameSchema,
+});

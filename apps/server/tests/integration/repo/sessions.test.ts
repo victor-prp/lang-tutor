@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { eq } from 'drizzle-orm';
 
+import { seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { withTx } from '../../support/withTx';
@@ -15,6 +16,7 @@ let t: TestDb;
 
 beforeEach(async () => {
   t = await createTestDb();
+  await seedUser(t.db, 'u_1');
 });
 
 afterEach(async () => {
@@ -22,38 +24,14 @@ afterEach(async () => {
 });
 
 /** Creates a session the way the service does — inside the caller's transaction. */
-async function startSession(tx: Tx, userId = 'u1') {
+async function startSession(tx: Tx, userId = 'u_1') {
   const sessionRepo = createSessionRepo(tx);
   const questionRepo = createQuestionRepo(tx);
-  const user = await sessionRepo.upsertUser(userId);
-  const pool = await questionRepo.loadQuestionPool(user.targetLanguage, user.nativeLanguage, userId);
+  const pool = await questionRepo.loadQuestionPool('en', 'he', userId);
   const record = newSessionRecord(userId, pool, testRng(7));
   const sessionId = await sessionRepo.insertSession(userId, record.questions);
   return { sessionRepo, sessionId, record };
 }
-
-describe('upsertUser', () => {
-  it('creates an unknown user with Hebrew/English defaults', async () => {
-    await withTx(t.db, async (tx) => {
-      const repo = createSessionRepo(tx);
-      expect(await repo.upsertUser('brand-new')).toEqual({
-        nativeLanguage: 'he',
-        targetLanguage: 'en',
-      });
-    });
-  });
-
-  it('is idempotent for a user that already exists', async () => {
-    await withTx(t.db, async (tx) => {
-      const repo = createSessionRepo(tx);
-      await repo.upsertUser('twice');
-      expect(await repo.upsertUser('twice')).toEqual({
-        nativeLanguage: 'he',
-        targetLanguage: 'en',
-      });
-    });
-  });
-});
 
 describe('insertSession then loadSession', () => {
   it('round-trips the ten questions in presentation order', async () => {

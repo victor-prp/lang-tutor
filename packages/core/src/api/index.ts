@@ -2,8 +2,10 @@ export type {
   AnswerRecord,
   CreateSessionRequest,
   CreateSessionResponse,
+  CreateUserRequest,
   ErrorResponse,
   HealthResponse,
+  LoginRequest,
   MissedQuestion,
   MultipleChoiceQuestion,
   NextStepRequest,
@@ -11,4 +13,5 @@ export type {
   Position,
   Question,
   Score,
+  User,
 } from './types';
