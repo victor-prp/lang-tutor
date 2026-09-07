@@ -1,8 +1,11 @@
 import type {
   CreateSessionRequest,
   CreateSessionResponse,
+  CreateUserRequest,
+  LoginRequest,
   NextStepRequest,
   NextStepResponse,
+  User,
 } from '@lang-tutor/core/api';
 
 export class ApiError extends Error {
@@ -31,6 +34,9 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
   }
 
   return {
+    // Identification, not authentication: there is no password to send.
+    login: (request: LoginRequest) => postJson<User>('/api/login', request),
+    createUser: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>
       postJson<CreateSessionResponse>('/api/sessions', request),
     nextStep: (sessionId: string, request: NextStepRequest) =>
