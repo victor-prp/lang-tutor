@@ -9,3 +9,17 @@ review time. `check-adrs.sh` discovers every `scripts/check-adr-*.sh` automatica
 adding a new ADR never means updating this wiring.
 
 Use the `create-adr` skill when a new structural decision needs recording.
+
+# Worktrees
+
+`git worktree add` brings tracked files and nothing else, so a new worktree is missing
+exactly what `.gitignore` covers — `apps/mobile/.env.local` and `node_modules`. Run
+`./scripts/setup-worktree.sh` before running the app, the tests or the e2e suite; it is
+idempotent, and a SessionStart hook (`.claude/settings.json`) says so when either is
+absent. Skipping it makes the app throw `EXPO_PUBLIC_API_URL is not set` at module scope,
+which surfaces as three misleading expo-router errors about a missing default export.
+
+**Never run `npm run db:up` from a worktree** while another checkout's Postgres holds port
+5432: compose derives its project name from the directory, so it starts a second container
+and fails. Reuse the running one — integration tests clone a per-test database off it
+either way.

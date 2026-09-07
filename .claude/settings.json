@@ -1,5 +1,19 @@
 {
+  "worktree": {
+    "baseRef": "head"
+  },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ ! -f apps/mobile/.env.local ] || [ ! -d node_modules ]; then jq -n '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:\"This worktree is not set up: apps/mobile/.env.local or node_modules is missing, because git worktree add brings only tracked files. Run ./scripts/setup-worktree.sh before running the app, the tests or the e2e suite. Without .env.local the app throws EXPO_PUBLIC_API_URL is not set at module scope, which surfaces as three misleading expo-router errors.\"}}'; fi",
+            "statusMessage": "Checking worktree setup..."
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
