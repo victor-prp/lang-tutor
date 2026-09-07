@@ -4,8 +4,10 @@ import type {
   AnswerRecordSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
+  CreateUserRequestSchema,
   ErrorSchema,
   HealthResponseSchema,
+  LoginRequestSchema,
   MissedQuestionSchema,
   MultipleChoiceQuestionSchema,
   NextStepRequestSchema,
@@ -13,6 +15,7 @@ import type {
   PositionSchema,
   QuestionSchema,
   ScoreSchema,
+  UserSchema,
 } from './schemas';
 
 // Every type here is inferred. The alternative — schemas on the server and
@@ -36,3 +39,6 @@ export type NextStepRequest = z.infer<typeof NextStepRequestSchema>;
 export type NextStepResponse = z.infer<typeof NextStepResponseSchema>;
 export type ErrorResponse = z.infer<typeof ErrorSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
+export type User = z.infer<typeof UserSchema>;
+export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
+export type LoginRequest = z.infer<typeof LoginRequestSchema>;

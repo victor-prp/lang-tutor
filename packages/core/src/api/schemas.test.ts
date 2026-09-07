@@ -2,8 +2,12 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   CreateSessionRequestSchema,
+  CreateUserRequestSchema,
+  LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
+  UserSchema,
+  UsernameSchema,
 } from './schemas';
 import type { MissedQuestion, NextStepResponse, Position, Question, Score } from './types';
 
@@ -122,3 +126,78 @@ const nextStepShapeIsPinned: Exact<
     }
 > = true;
 void nextStepShapeIsPinned;
+
+describe('UsernameSchema', () => {
+  it.each(['abc', 'a_b_c', 'user_123', 'a'.repeat(30)])('accepts %s', (value) => {
+    expect(UsernameSchema.safeParse(value).success).toBe(true);
+  });
+
+  it.each([
+    ['too short', 'ab'],
+    ['too long', 'a'.repeat(31)],
+    ['uppercase', 'Alice'],
+    ['a space', 'a b'],
+    ['a hyphen', 'a-b'],
+    ['Hebrew', 'דנה'],
+  ])('rejects %s', (_label, value) => {
+    expect(UsernameSchema.safeParse(value).success).toBe(false);
+  });
+});
+
+describe('CreateUserRequestSchema', () => {
+  const valid = {
+    username: 'dana',
+    display_name: 'דנה',
+    age: 34,
+    native_language: 'he',
+    target_language: 'en',
+  };
+
+  it('accepts a well-formed request', () => {
+    expect(CreateUserRequestSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it.each([
+    ['an empty display_name', { display_name: '' }],
+    ['a display_name over 60 characters', { display_name: 'א'.repeat(61) }],
+    ['an age below 3', { age: 2 }],
+    ['an age above 120', { age: 121 }],
+    ['a fractional age', { age: 9.5 }],
+    ['an unsupported language', { target_language: 'fr' }],
+    ['a malformed username', { username: 'Dana' }],
+  ])('rejects %s', (_label, override) => {
+    expect(CreateUserRequestSchema.safeParse({ ...valid, ...override }).success).toBe(false);
+  });
+
+  // Deliberately accepted at the schema level: the service and a database
+  // CHECK reject it. A refinement here would not survive JSON Schema output.
+  it('does not itself reject a matching language pair', () => {
+    expect(
+      CreateUserRequestSchema.safeParse({ ...valid, target_language: 'he' }).success,
+    ).toBe(true);
+  });
+});
+
+describe('LoginRequestSchema', () => {
+  it('accepts a well-formed username', () => {
+    expect(LoginRequestSchema.safeParse({ username: 'dana' }).success).toBe(true);
+  });
+
+  it('rejects a malformed username', () => {
+    expect(LoginRequestSchema.safeParse({ username: 'D' }).success).toBe(false);
+  });
+});
+
+describe('UserSchema', () => {
+  it('accepts a language code it does not narrow', () => {
+    const parsed = UserSchema.safeParse({
+      id: 'u1',
+      username: 'dana',
+      display_name: 'דנה',
+      age: 34,
+      native_language: 'he',
+      target_language: 'fr',
+    });
+    expect(parsed.success).toBe(true);
+  });
+});
