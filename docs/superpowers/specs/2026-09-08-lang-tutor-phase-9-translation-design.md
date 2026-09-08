@@ -28,7 +28,7 @@ answer — which is where most of the design below goes.
 | Mobile | `app/translate.tsx` and an entry point on the home screen |
 | Tests | A fourth bucket: prompt evals against the real model |
 | Tests | `packages/gemini-mock` — a black-box HTTP stand-in for the provider |
-| Docs | ADR 0006, plus amendments to ADR 0001 R8 and ADR 0004 R4 |
+| Docs | ADR 0001 gains R10/R11 for `providers/` and an amended R8; ADR 0004 R4 gains the eval bucket. No new ADR |
 
 No table is created, altered or dropped. There is no migration in this phase.
 
@@ -87,8 +87,8 @@ across providers for a comparison between them to mean anything.
 
 Two words in this spec are easy to conflate, so they are used precisely: the **provider
 abstraction** is the type `LlmClient`, declared in `services/llm.ts`; the **provider layer**
-is the folder `providers/`, governed by ADR 0006. The first is the contract, the second is
-the address.
+is the folder `providers/`, governed by ADR 0001 R10 and R11. The first is the contract,
+the second is the address.
 
 **No `LLM_PROVIDER` switch.** With one provider it is a branch with one arm. The
 composition root names `createGeminiClient` directly; the branch arrives with the second
@@ -184,7 +184,7 @@ repository is handed a `Tx` it composes inside a transaction — a Gemini client
 transaction to join and no SQL to write. Filing an HTTP client under `repo/` would make
 R4's own detection commands meaningless, since they exist to keep Drizzle *in* that
 folder. `providers/` is the layer for outbound third-party I/O, sits at the same depth as
-`repo/`, and is reachable only from `services/`. ADR 0006 records this.
+`repo/`, and is imported only by `composition.ts`. ADR 0001's new R10 and R11 record this.
 
 **This is the first use case with no transaction at all**, which makes ADR 0001 R8's
 wording false as written: "each use case is exactly one `transaction(...)` call" — this
@@ -541,29 +541,67 @@ revisiting if Tier 2 proves too blunt.
 
 ## ADR consequences
 
-Three changes, written with the `create-adr` skill. Each carries its own
-`scripts/check-adr-*.sh`, discovered automatically by `check-adrs.sh` — adding one never
-means editing the wiring.
+**No new ADR.** Two existing ones are amended and no `create-adr` invocation is needed.
+That is a reversal of this design's first draft, which proposed an ADR 0006 for outbound
+providers, and the reasoning is worth recording because the reversal is the interesting
+part.
 
-### ADR 0006 — outbound providers (new)
+### Why this is not a new ADR
 
-The structural decision this phase makes, and one easy to violate by accident: the next
-person needing an HTTP call will reasonably reach for `fetch` from wherever they happen to
-be standing.
+ADR 0001's own header records the precedent: *"R2/R8 revised 2026-09-06 when the
+transaction seam landed."* The last time a new seam appeared in this server it was absorbed
+into ADR 0001 in place. `providers/` is the same kind of event.
 
-- Outbound third-party I/O lives only in `apps/server/src/providers/`.
-- **`providers/` has exactly one importer: `composition.ts`.** Every consumer — `services/`
-  included — depends on a contract type declared in `services/` (`LlmClient` is the first),
-  and only the composition root knows which provider satisfies it. `routes/`, `domain/`,
-  `repo/` and `app.ts` may not import the folder either.
-- A provider receives `fetch`, a base URL, a key and a model; it reads no environment and
-  constructs no client of its own.
-- A provider maps every failure of its own to an error in `errors.ts`. A provider-specific
-  error shape must not escape the layer.
-- `domain/` stays pure: prompts are built and responses parsed there, and no `fetch`
-  appears in that folder.
+Decomposing the five rules a separate ADR would have carried, three of them are not new:
 
-Both halves are greppable:
+| Rule | Home |
+|---|---|
+| Outbound I/O lives only in `providers/` | **ADR 0001** — a layer rule; needs a diagram row |
+| `providers/` has one importer; consumers depend on a contract in `services/` | **ADR 0001** — structurally identical to R2/R8's `db/` → `Transaction` treatment |
+| A provider maps its failures into `errors.ts` | **ADR 0001** — the same flavour as R9, a rule that is not an import rule |
+| A provider receives `fetch`, a URL, a key and a model, and reads no environment | **already ADR 0002** R1/R2/R5 — needs only `createGeminiClient` on R6's factory list |
+| `domain/` stays pure, no `fetch` there | **already ADR 0001 R3** — needs nothing |
+
+A separate ADR would therefore have been two genuinely new rules wrapped in three
+restatements, and it would have split "which layer may import what" across two documents —
+exactly the drift ADR 0003 R2 forbids for the wire contract, which has one home for the
+same reason.
+
+ADR 0005 is the counter-precedent and it does not apply here: it earned its own document
+because it constrained code that did not yet exist against a temptation no existing ADR
+mentioned. `providers/` is not like that. A reader asking who may import whom already knows
+to open ADR 0001, and that is where the answer belongs.
+
+### ADR 0001 — amended: R8, plus two rules for `providers/`
+
+The layer diagram gains `providers/` beside `repo/`, and the rule table gains two entries.
+They are **appended as R10 and R11 rather than renumbered**, because the existing numbers
+are cited by `scripts/check-adr-0001-layered-architecture.sh`, the README and three earlier
+specs.
+
+| # | Layer | May import | Must not import |
+|---|---|---|---|
+| R10 | `providers/` | `fetch`, its own transport types, `errors`, `logger` | `routes/`, `services/`, `domain/`, `repo/`, `db/`, `app.ts`, `composition.ts` |
+| R11 | `providers/` | — | **anything, from anywhere except `composition.ts`** — every consumer depends on a contract type declared in `services/` (`LlmClient` is the first), and only the composition root knows which provider satisfies it |
+
+**R8 is amended.** It currently reads "each use case is exactly one `transaction(...)`
+call". This phase adds a use case with **zero**, because it touches no table. R8's detection
+command greps for *excess* `.transaction(` call sites, so nothing would have flagged the
+mismatch and the ADR's prose would have quietly stopped describing the code. Amended
+wording: *a use case **that touches the database** is exactly one `transaction(...)` call.*
+No detection command changes.
+
+**One new rule that is not an import rule.** A provider maps every failure of its own into
+`errors.ts`; a provider-specific error shape must not escape the layer. Not greppable — the
+absence of a leaked type is invisible to a regex — so it sits alongside R9, enforced by
+review.
+
+The header's date line gains a second revision note, exactly as the transaction seam got
+one.
+
+Both new rules are greppable, and the two commands go into the **existing**
+`scripts/check-adr-0001-layered-architecture.sh`, taking it from fifteen checks to
+seventeen:
 
 ```bash
 # no outbound HTTP outside providers/
@@ -595,30 +633,11 @@ was wrong:
   business importing a provider, while `providers/gemini.test.ts` is already covered by
   `--exclude-dir`.
 
-**Every check script this phase adds must be shown to fail on a planted violation before
-it is trusted.** The bug above passed a "run it, it prints nothing" review, because a
-vacuous check and a satisfied one are indistinguishable by that test. The plan carries this
-as an explicit step: plant a violation of each rule, confirm the script reports it, remove
-it. That discipline applies to `scripts/check-adr-*.sh` generally, not only to ADR 0006 —
-`check-adrs.sh` is the repo's enforcement backbone, and an inert check inside it is worse
-than a missing one, because it reads as coverage.
-
 It also does **not** exempt `services/`. An earlier draft did, by analogy with ADR 0001
 R2's type-only allowance for `repo/` — but the analogy does not hold, because a service
 needs no import from `providers/` at all when its contract lives in `services/`. Exempting
 the folder would have whitelisted the precise thing the rule exists to catch: a service
 reaching for a collaborator instead of receiving one, which is also an ADR 0002 violation.
-
-### ADR 0001 R8 — amended
-
-R8 currently reads "each use case is exactly one `transaction(...)` call". This phase adds
-a use case with **zero**, because it touches no table. R8's detection command greps for
-excess `.transaction(` call sites, so nothing would have flagged the mismatch and the ADR's
-prose would have quietly stopped describing the code.
-
-Amended wording: *a use case **that touches the database** is exactly one
-`transaction(...)` call.* No detection command changes. ADR 0001's layer table also gains a
-row for `providers/` pointing at ADR 0006.
 
 ### ADR 0004 R4 — amended
 
@@ -636,17 +655,41 @@ grep -rn "eval" apps/server/jest.config.js
 grep -rn "tests/eval" apps/server/src --include='*.ts'
 ```
 
-## Documents this phase edits
+### The check discipline — deliberately not an ADR
 
-| Document | Edit |
+**Every check added to a `scripts/check-adr-*.sh` must be shown to fail on a planted
+violation before it is trusted.** The R11 command above shipped in an earlier draft of this
+spec in a form that could never report anything, and it passed a "run it, it prints nothing"
+review — because a vacuous check and a satisfied one are indistinguishable by that test.
+`check-adrs.sh` is this repo's enforcement backbone, and an inert check inside it is worse
+than a missing one, because it reads as coverage.
+
+This is a rule about process, not about code structure, so it belongs in neither ADR. It
+goes in `check-adrs.sh`'s header comment — beside the discovery convention already
+documented there — and as a line in `CLAUDE.md`. The implementation plan carries it as an
+explicit step for R10 and R11: plant a violation, confirm the script reports it, remove it.
+
+Worth noting and **out of scope**: the five existing check scripts have never been verified
+this way either. A pass over them is real work with its own risk of finding more inert
+commands, and it is not phase 9's job.
+
+## Documents this phase adds and edits
+
+| Document | Change |
 |---|---|
-| `docs/adr/adr-0001-layered-architecture.md` | R8's wording; a `providers/` row in the layer table |
+| `docs/adr/adr-0001-layered-architecture.md` | **R10 and R11** for `providers/`, R8's wording, a `providers/` row in the layer diagram and table, the new non-import rule beside R9, and a second revision note in the header |
+| `scripts/check-adr-0001-layered-architecture.sh` | The two verified commands for R10 and R11 — fifteen checks becomes seventeen |
 | `docs/adr/adr-0002-di-with-closures.md` | R6's factory list gains `createGeminiClient`, `createTranslationService` |
 | `docs/adr/adr-0004-test-topology.md` | R4's third-bucket clause and its two new checks |
+| `scripts/check-adr-0004-test-topology.sh` | The two new R4 commands |
+| `scripts/check-adrs.sh` | Header comment: a new check must be shown to fail on a planted violation |
 | `README.md` | The phase index, the architecture section's layer table, and the new environment variables |
 | `README.md`, *Reading the API* | The open API now spends money when called: `POST /api/translations` reaches a paid third party with no rate limit in front of it |
 | `scripts/setup-worktree.sh` | Report a missing `GEMINI_API_KEY` the way it already reports a missing `.env.local` |
-| `CLAUDE.md` | A line on the eval bucket: opt-in, real model, never in CI |
+| `CLAUDE.md` | A line on the eval bucket (opt-in, real model, never in CI) and one on the planted-violation rule |
+
+**No file is created in `docs/adr/`, and no new `check-adr-*.sh` is added.** Both new rules
+land in the ADR that already governs layering, and in the script that already enforces it.
 
 ## Out of scope
 
@@ -702,8 +745,9 @@ Named so they are not mistaken for oversights:
    between a test run and production is `GEMINI_BASE_URL`.
 7. `npm run eval` scores the real model against the golden set and prints a per-case
    scorecard; it is absent from every CI job that runs on a pull request.
-8. `npm run lint:arch` passes, including ADR 0006's new checks — **and each new check has
-   been demonstrated to fail on a planted violation**, so "it printed nothing" is evidence
-   of compliance rather than of an inert command.
+8. `npm run lint:arch` passes and reports **seventeen** ADR 0001 rules rather than fifteen
+   — **and R10 and R11 have each been demonstrated to fail on a planted violation**, so "it
+   printed nothing" is evidence of compliance rather than of an inert command. No file was
+   added to `docs/adr/` and no new `check-adr-*.sh` exists.
 9. Switching provider is demonstrably one file: `services/translations.ts`, `domain/` and
    every test above compile and pass without edits when `createGeminiClient` is replaced.
