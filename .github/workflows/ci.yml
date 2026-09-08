@@ -208,10 +208,19 @@ jobs:
       # The scorecard is the artifact, not the exit code: a tier 2 drop needs the
       # per-case output to diagnose, and on a pass it is the baseline the next
       # run gets diffed against. Hence always(), not failure().
+      #
+      # include-hidden-files is required, not optional: .results/ is a dot
+      # directory, upload-artifact treats that as hidden and skips it by
+      # default, and the first run of this job proved it — the report was
+      # written and nothing was uploaded. `warn` rather than `ignore` for the
+      # same reason: `ignore` is what made that silent. It stays a warning
+      # rather than an error because always() also fires when the eval died
+      # before scoring anything, and a config failure should report once.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: eval-report
           path: apps/server/tests/eval/.results/
-          if-no-files-found: ignore
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 7
