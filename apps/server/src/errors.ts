@@ -46,3 +46,23 @@ export class InvalidLanguagePair extends Error {
     this.name = 'InvalidLanguagePair';
   }
 }
+
+/** The provider could not be reached, refused the request, or ran out of time.
+ *  One error for every cause the learner can do nothing different about; the
+ *  distinguishing detail goes in the log, not the status. */
+export class LlmUnavailable extends Error {
+  constructor(readonly detail: string) {
+    super(`language model unavailable: ${detail}`);
+    this.name = 'LlmUnavailable';
+  }
+}
+
+/** The provider answered, but not with something that satisfies the schema.
+ *  Separate from LlmUnavailable because the operator needs to know whether the
+ *  provider failed or the prompt did, even though both map to 502. */
+export class TranslationUnreadable extends Error {
+  constructor(readonly rawExcerpt: string) {
+    super('the model response did not match the expected shape');
+    this.name = 'TranslationUnreadable';
+  }
+}
