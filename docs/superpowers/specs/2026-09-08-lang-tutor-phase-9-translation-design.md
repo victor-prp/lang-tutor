@@ -566,22 +566,48 @@ be standing.
 Both halves are greppable:
 
 ```bash
-# no direct outbound HTTP outside providers/
-grep -rnE "\bfetch\(|generativelanguage|api\.openai\.com" apps/server/src \
-  --include='*.ts' | grep -v -e '/providers/' -e '/index.ts:' -e '\.test\.ts:'
+# no outbound HTTP outside providers/
+grep -rnE "\bfetch\(|generativelanguage|api\.openai\.com" \
+  apps/server/src --include='*.ts' --exclude-dir=providers \
+  | grep -vE "^[^:]*(index\.ts|\.test\.ts):"
 
 # providers are constructed only at the composition root
-grep -rn "from '.*providers/" apps/server/src --include='*.ts' \
-  | grep -v -e 'composition.ts:' -e '/providers/' -e '\.test\.ts:'
+grep -rnE "(from|require\(|import\()[[:space:]]*'[^']*providers/" \
+  apps/server/src apps/server/tests --include='*.ts' --exclude-dir=providers \
+  | grep -vE "^[^:]*(composition\.ts|tests/support/)"
 ```
 
-The second command deliberately does **not** exempt `services/`. An earlier draft of this
-ADR did, by analogy with ADR 0001 R2's type-only allowance for `repo/` — but the analogy
-does not hold, because a service needs no import from `providers/` at all when its contract
-lives in `services/`. Exempting the folder would have whitelisted the precise thing the rule
-exists to catch: a service reaching for a collaborator instead of receiving one, which is
-also an ADR 0002 violation. A check that permits its own central case is worse than no
-check, because it reads as enforcement.
+Three things about the second command are deliberate, and each replaces a version that
+was wrong:
+
+- **The directory is skipped with `--exclude-dir`, not with `grep -v '/providers/'`.** An
+  earlier draft filtered the *line content*, and every violation's import path contains
+  `/providers/` — so the exclusion deleted precisely the lines the check was hunting, and
+  the command could never report anything. All the remaining `-v` filters are anchored to
+  the path with `^[^:]*` for the same reason.
+- **It matches `require(` and `import(` as well as `from`,** so a dynamic import or a
+  `require` cannot launder the dependency. A barrel that re-exports a provider is caught at
+  the re-export itself, since `export … from '…providers/…'` matches too.
+- **It scans `apps/server/tests` as well as `src`,** exempting only `tests/support/` — the
+  test composition root, per ADR 0001 and ADR 0004's precedent. Without this, an integration
+  test could construct a Gemini client directly and be black-box in name only. There is no
+  blanket `*.test.ts` exemption: a service's unit test has a fake `LlmClient` and has no
+  business importing a provider, while `providers/gemini.test.ts` is already covered by
+  `--exclude-dir`.
+
+**Every check script this phase adds must be shown to fail on a planted violation before
+it is trusted.** The bug above passed a "run it, it prints nothing" review, because a
+vacuous check and a satisfied one are indistinguishable by that test. The plan carries this
+as an explicit step: plant a violation of each rule, confirm the script reports it, remove
+it. That discipline applies to `scripts/check-adr-*.sh` generally, not only to ADR 0006 —
+`check-adrs.sh` is the repo's enforcement backbone, and an inert check inside it is worse
+than a missing one, because it reads as coverage.
+
+It also does **not** exempt `services/`. An earlier draft did, by analogy with ADR 0001
+R2's type-only allowance for `repo/` — but the analogy does not hold, because a service
+needs no import from `providers/` at all when its contract lives in `services/`. Exempting
+the folder would have whitelisted the precise thing the rule exists to catch: a service
+reaching for a collaborator instead of receiving one, which is also an ADR 0002 violation.
 
 ### ADR 0001 R8 — amended
 
@@ -676,6 +702,8 @@ Named so they are not mistaken for oversights:
    between a test run and production is `GEMINI_BASE_URL`.
 7. `npm run eval` scores the real model against the golden set and prints a per-case
    scorecard; it is absent from every CI job that runs on a pull request.
-8. `npm run lint:arch` passes, including ADR 0006's new checks.
+8. `npm run lint:arch` passes, including ADR 0006's new checks — **and each new check has
+   been demonstrated to fail on a planted violation**, so "it printed nothing" is evidence
+   of compliance rather than of an inert command.
 9. Switching provider is demonstrably one file: `services/translations.ts`, `domain/` and
    every test above compile and pass without edits when `createGeminiClient` is replaced.
