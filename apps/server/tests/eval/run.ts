@@ -1,11 +1,14 @@
 /**
- * Scores the real prompt against the real model. A signal, never a gate: a
- * model update can turn this red with no change to this repository, so it does
- * not run on pull requests and is not a required check.
+ * Scores the real prompt against the real model. Runs in CI as the `test-eval`
+ * job, so a prompt regression surfaces at the commit that caused it — at the
+ * cost of the one failure mode no other job has: a provider's model update can
+ * turn this red with nothing in the diff to blame. Read the scorecard before
+ * reading the diff.
  *
  * A standalone tsx script rather than a third Jest project, for two reasons: a
- * Jest project sits one --selectProjects mistake away from being swept into CI,
- * and pass/fail per case is the wrong output — what a prompt change needs is a
+ * Jest project sits one --selectProjects mistake away from being swept into
+ * `npm test`, which must make no network call at all (ADR 0004 R4), and
+ * pass/fail per case is the wrong output — what a prompt change needs is a
  * scorecard.
  *
  * It exercises the real artifact: the same prompt builder, parser and provider
@@ -27,7 +30,59 @@ const TIER2_THRESHOLD = 0.85;
 const TIMEOUT_MS = 30_000;
 const HEBREW = /[֐-׿]/;
 
+/**
+ * Cases run concurrently, not in parallel: each one is a single HTTP call this
+ * script spends seconds waiting on, so one event loop with several requests in
+ * flight is the whole win — worker threads would add process overhead to work
+ * that is never on the CPU.
+ *
+ * Bounded rather than a bare Promise.all over every case. `providers/gemini.ts`
+ * has no retry by design, so a burst that trips a per-minute quota returns 429,
+ * which surfaces here as a tier 1 failure that says nothing about the prompt.
+ * Four is comfortable on a modest quota; raise it with EVAL_CONCURRENCY, and
+ * lower it to 1 if a run reports `responded 429`.
+ */
+const CONCURRENCY = Math.max(1, Number(process.env.EVAL_CONCURRENCY) || 4);
+
 type Check = { name: string; ok: boolean; detail?: string };
+
+type Row = {
+  label: string;
+  text: string;
+  tier1: Check[];
+  tier2: Check[];
+  result?: TranslationResponse;
+  error?: string;
+};
+
+/**
+ * A fixed pool of `limit` workers pulling from one shared cursor, rather than a
+ * Promise.all over every case at once — see CONCURRENCY above for why the fan-out
+ * is bounded.
+ *
+ * Results are written by index and never pushed. Responses come back in whatever
+ * order the model answers, but the scorecard has to print in CASES order or two
+ * runs cannot be diffed against each other, which is the whole point of keeping
+ * the reports.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (let index = cursor++; index < items.length; index = cursor++) {
+        results[index] = await run(items[index]);
+      }
+    }),
+  );
+
+  return results;
+}
 
 function tier1(kase: EvalCase, result: TranslationResponse): Check[] {
   const checks: Check[] = [];
@@ -147,37 +202,36 @@ async function main(): Promise<void> {
     logger: { info: () => {}, error: () => {} },
   });
 
-  const rows: {
-    label: string;
-    text: string;
-    tier1: Check[];
-    tier2: Check[];
-    result?: TranslationResponse;
-    error?: string;
-  }[] = [];
-
-  for (const kase of CASES) {
+  // One case, scored. Every failure is caught and becomes a tier 1 row rather
+  // than rejecting: one case that cannot reach the model must not abandon the
+  // other nine, and with several requests in flight an escaping rejection would
+  // take the run down mid-flight.
+  const scoreCase = async (kase: EvalCase): Promise<Row> => {
     try {
       const result = await service.translate(
         kase.direction ? { text: kase.text, direction: kase.direction } : { text: kase.text },
       );
-      rows.push({
+      return {
         label: kase.label,
         text: kase.text,
         tier1: tier1(kase, result),
         tier2: tier2(kase, result),
         result,
-      });
+      };
     } catch (error) {
-      rows.push({
+      return {
         label: kase.label,
         text: kase.text,
         tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
         tier2: [],
         error: (error as Error).message,
-      });
+      };
     }
-  }
+  };
+
+  const started = Date.now();
+  const rows = await mapWithConcurrency(CASES, CONCURRENCY, scoreCase);
+  const elapsedMs = Date.now() - started;
 
   // Scorecard. Every case prints its actual output, so a drop is diagnosable
   // rather than merely red.
@@ -211,7 +265,9 @@ async function main(): Promise<void> {
   console.log(
     `\ntier 1: ${tier1Failures} failure(s) (must be 0)\n` +
       `tier 2: ${tier2Passed}/${tier2Total} = ${(score * 100).toFixed(1)}% ` +
-      `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)`,
+      `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
+      `${CASES.length} cases in ${(elapsedMs / 1000).toFixed(1)}s ` +
+      `at concurrency ${CONCURRENCY}`,
   );
 
   // Gitignored, so a prompt change can be diffed against the previous run

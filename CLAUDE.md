@@ -16,12 +16,17 @@ Use the `create-adr` skill when a new structural decision needs recording.
 
 # Prompt evals
 
-`apps/server/tests/eval/` is an opt-in fourth test bucket, run by `npm run eval`, and the
-only code here that calls a real language model. Nothing in it is named `*.test.ts`, which
-is what keeps both Jest projects off it. It is never part of `npm run test:all` and never
-runs on a pull request: a model update can turn it red with no change to this repo, so it
-is a signal rather than a gate. It needs `GEMINI_API_KEY` and `GEMINI_MODEL`, and refuses
-to run against MockServer.
+`apps/server/tests/eval/` is a fourth test bucket, run by `npm run eval`, and the only
+code here that calls a real language model. Nothing in it is named `*.test.ts`, which is
+what keeps both Jest projects off it, and it is part of neither `npm test` nor
+`npm run test:all` — a real network call belongs in neither. CI runs it as its own
+`test-eval` job, in parallel with the rest. It needs `GEMINI_API_KEY` and `GEMINI_MODEL`,
+and refuses to run against MockServer.
+
+Because it calls a third party, `test-eval` is the one job that can go red with nothing
+wrong in the diff — a model update alone will do it. Read the run's `eval-report` artifact
+before assuming the commit broke something, and never answer a tier 2 drop by lowering
+`TIER2_THRESHOLD`.
 
 # Worktrees
 

@@ -4,7 +4,13 @@ name: CI
 # this repo `push` already fires on every commit a PR would contain, so adding it
 # would run the whole suite twice per PR. Push-event check runs satisfy branch
 # protection on master exactly as pull-request-event runs do.
-on: push
+#
+# workflow_dispatch is inherited from the separate eval workflow this absorbed.
+# test-eval is the one job here whose result can change with no commit of ours,
+# so re-running the suite by hand against an unchanged tree has to stay possible.
+on:
+  push:
+  workflow_dispatch:
 
 # npm ci runs install lifecycle scripts from the whole dependency tree on every
 # push. None of these jobs write to the repo, so pin the token to read-only rather
@@ -165,4 +171,56 @@ jobs:
           name: playwright-traces
           path: e2e/test-results/
           if-no-files-found: ignore
+          retention-days: 7
+
+  # The prompt eval bucket, calling the real paid model. It lived in its own
+  # workflow (nightly + workflow_dispatch) precisely so a vendor's model update
+  # could not turn a branch red with no commit of ours; moving it here accepts
+  # that trade deliberately, in exchange for learning about a prompt regression
+  # at the commit that caused it rather than at 03:17 the next morning. Two
+  # consequences to keep in mind when this job is the only red one: it can fail
+  # without anything in the diff being wrong, and every push spends real quota.
+  # See ADR 0004 R4.
+  #
+  # No database and no MockServer, unlike every other job that touches the
+  # Gemini client: the eval calls the real API and refuses to run against a
+  # localhost base URL. The 10 cases run concurrently (EVAL_CONCURRENCY,
+  # default 4), so the call itself is ~15s and npm ci dominates the job.
+  test-eval:
+    # Never on a fork: secrets are not exposed to fork workflows, so the job
+    # would fail on a missing key for a reason no outside contributor can fix.
+    # A skipped job is neutral to branch protection; a failing one is not.
+    if: github.repository_owner == 'victor-prp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run eval
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+
+      # The scorecard is the artifact, not the exit code: a tier 2 drop needs the
+      # per-case output to diagnose, and on a pass it is the baseline the next
+      # run gets diffed against. Hence always(), not failure().
+      #
+      # include-hidden-files is required, not optional: .results/ is a dot
+      # directory, upload-artifact treats that as hidden and skips it by
+      # default, and the first run of this job proved it — the report was
+      # written and nothing was uploaded. `warn` rather than `ignore` for the
+      # same reason: `ignore` is what made that silent. It stays a warning
+      # rather than an error because always() also fires when the eval died
+      # before scoring anything, and a config failure should report once.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: apps/server/tests/eval/.results/
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 7
