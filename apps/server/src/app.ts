@@ -6,6 +6,7 @@ import { HTTPException } from 'hono/http-exception';
 
 import type { AppDeps } from './composition';
 import { createSessionsRouter } from './routes/sessions';
+import { createTranslationsRouter } from './routes/translations';
 import { createUsersRouter } from './routes/users';
 
 // Readiness, not just liveness: the e2e suite waits on this before starting the
@@ -42,6 +43,7 @@ export function createApp(deps: AppDeps) {
   });
 
   app.route('/api', createUsersRouter(deps.users));
+  app.route('/api', createTranslationsRouter(deps.translations));
   app.route('/api/sessions', createSessionsRouter(deps.sessions));
 
   // Registered after the routes they describe, so the document is generated

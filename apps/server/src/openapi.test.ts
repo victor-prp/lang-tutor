@@ -96,15 +96,41 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all five paths and nothing else', async () => {
+  it('contains all six paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/login',
       '/api/sessions',
       NEXT_STEP,
+      '/api/translations',
       '/api/users',
       '/health',
     ]);
+  });
+});
+
+describe('the translation endpoint in the published document', () => {
+  it('publishes the translation endpoint with all three statuses', async () => {
+    const doc = await openApiDocument();
+    const path = doc.paths['/api/translations']?.post;
+    expect(path).toBeDefined();
+    expect(Object.keys(path.responses).sort()).toEqual(['200', '400', '502']);
+  });
+
+  it('declares the error body it actually returns for a translation failure', async () => {
+    const doc = await openApiDocument();
+    const responses = doc.paths['/api/translations'].post.responses;
+    for (const status of ['400', '502']) {
+      const schema = responses[status].content['application/json'].schema;
+      expect(schema.properties).toHaveProperty('error');
+    }
+  });
+
+  // The endpoint costs money on every call and nothing rate-limits it. A reader
+  // of the document is the person most likely to point a script at it.
+  it('warns in the published description that the endpoint costs money', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths['/api/translations'].post.description).toMatch(/rate limit/i);
   });
 });
 
