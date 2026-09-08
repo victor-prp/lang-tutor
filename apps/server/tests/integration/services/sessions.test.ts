@@ -11,7 +11,7 @@ import {
   SessionNotFound,
   UserNotFound,
 } from '../../../src/errors';
-import { createServerDeps } from '../../../src/composition';
+import { createTestServerDeps } from '../../support/serverDeps';
 import type { SessionService } from '../../../src/services/sessions';
 
 // The other half of this file's tests is src/services/sessions.test.ts, which
@@ -26,7 +26,7 @@ beforeEach(async () => {
   await seedUser(t.db, 'u_1');
   await seedUser(t.db, 'u_2');
   logger = createFakeLogger();
-  service = createServerDeps({ db: t.db, logger, rng: testRng(7) }).sessions;
+  service = createTestServerDeps({ db: t.db, logger, rng: testRng(7) }).sessions;
 });
 
 afterEach(async () => {
@@ -133,9 +133,9 @@ describe('submitAnswer', () => {
 
 describe('rng', () => {
   it('draws the same ten questions for two services sharing a seed', async () => {
-    const first = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
+    const first = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
       .sessions;
-    const second = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
+    const second = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
       .sessions;
 
     const a = await first.startSession('u_1');

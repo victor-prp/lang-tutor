@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
-import { createServerDeps } from '../../../src/composition';
+import { createTestServerDeps } from '../../support/serverDeps';
 import { InvalidLanguagePair, UsernameTaken, UserNotFound } from '../../../src/errors';
 import type { UserService } from '../../../src/services/users';
 import { createFakeLogger } from '../../support/fakes';
@@ -15,7 +15,7 @@ let service: UserService;
 
 beforeEach(async () => {
   t = await createTestDb();
-  service = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }).users;
+  service = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }).users;
 });
 
 afterEach(async () => {

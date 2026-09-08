@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { createApp } from '../../src/app';
-import { createServerDeps } from '../../src/composition';
+import { createTestServerDeps } from '../support/serverDeps';
 import { createFakeLogger } from '../support/fakes';
 import { seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
@@ -22,7 +22,7 @@ beforeAll(async () => {
     server = serve(
       {
         fetch: createApp(
-          createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+          createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
         ).fetch,
         port: 0,
       },

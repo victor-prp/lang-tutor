@@ -127,7 +127,7 @@ server URL from `apps/mobile/.env.local`, which Expo auto-loads and git ignores 
 ```bash
 npm install
 cp apps/mobile/.env.example apps/mobile/.env.local
-npm run db:up        # docker compose up -d --wait db  (requires Docker)
+npm run db:up        # Postgres + MockServer  (requires Docker)
 npm run db:migrate   # schema + shared vocabulary seed
 npm run server       # terminal 1
 npm run mobile       # terminal 2
@@ -147,6 +147,24 @@ network namespace. Edit the `apps/mobile/.env.local` created above:
 ```
 
 Phone and dev machine must be on the same Wi-Fi network.
+
+### Environment variables
+
+Since phase 9 the server calls a third-party model, so it needs credentials to start:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GEMINI_API_KEY` | none — the server refuses to start | Never logged. |
+| `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Pointed at a MockServer namespace by every test bucket. |
+| `GEMINI_MODEL` | none — the server refuses to start | A current Gemini Flash model id. |
+
+`npm run db:migrate` needs none of these: migrations read `loadConfig` only.
+
+For local work with no real key, point the server at MockServer and use any dummy value:
+
+```bash
+export GEMINI_BASE_URL=http://localhost:1080/dev GEMINI_API_KEY=dev GEMINI_MODEL=dev
+```
 
 ## Reading the API
 

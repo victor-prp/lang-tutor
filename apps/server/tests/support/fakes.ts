@@ -7,6 +7,7 @@ import type { UserRepo } from '../../src/repo/users';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
+import type { TranslationService } from '../../src/services/translations';
 import type { UserService } from '../../src/services/users';
 
 export type FakeLogger = Logger & {
@@ -47,9 +48,13 @@ export function createFakeAppDeps(): AppDeps {
     register: unreachable,
     login: unreachable,
   };
+  const translations: TranslationService = {
+    translate: unreachable,
+  };
   return {
     sessions,
     users,
+    translations,
     health: { ping: unreachable },
     logger: createFakeLogger(),
   };

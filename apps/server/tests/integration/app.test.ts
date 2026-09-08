@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { createApp } from '../../src/app';
-import { createServerDeps } from '../../src/composition';
+import { createTestServerDeps } from '../support/serverDeps';
 import { createFakeLogger } from '../support/fakes';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
@@ -23,7 +23,7 @@ describe('the app as production assembles it', () => {
 
   it('does not create a session as a side effect of a health check', async () => {
     const app = createApp(
-      createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+      createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
     );
     await app.request('/health');
     const res = await app.request('/api/sessions/00000000-0000-0000-0000-000000000000/next-step', {
@@ -41,7 +41,7 @@ describe('the app as production assembles it', () => {
   describe('request body edge cases', () => {
     it('400s with { error: "invalid request" } for a bodyless request with no Content-Type', async () => {
       const app = createApp(
-        createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+        createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
       );
       const res = await app.request('/api/sessions', { method: 'POST' });
       expect(res.status).toBe(400);
@@ -50,7 +50,7 @@ describe('the app as production assembles it', () => {
 
     it('415s with { error: "invalid request" } for a non-JSON Content-Type', async () => {
       const app = createApp(
-        createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+        createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
       );
       const res = await app.request('/api/sessions', {
         method: 'POST',
@@ -63,7 +63,7 @@ describe('the app as production assembles it', () => {
 
     it('400s with { error: "invalid request" } for malformed JSON, not 500', async () => {
       const app = createApp(
-        createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+        createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
       );
       const res = await app.request('/api/sessions', {
         method: 'POST',
@@ -78,7 +78,7 @@ describe('the app as production assembles it', () => {
     // isn't specific to createSessionRoute's body declaration.
     it('400s /next-step for a bodyless request with no Content-Type', async () => {
       const app = createApp(
-        createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+        createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
       );
       const res = await app.request(
         '/api/sessions/00000000-0000-0000-0000-000000000000/next-step',
@@ -90,7 +90,7 @@ describe('the app as production assembles it', () => {
 
     it('415s /next-step for a non-JSON Content-Type', async () => {
       const app = createApp(
-        createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+        createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
       );
       const res = await app.request(
         '/api/sessions/00000000-0000-0000-0000-000000000000/next-step',
@@ -106,7 +106,7 @@ describe('the app as production assembles it', () => {
 
     it('400s /next-step for malformed JSON, not 500', async () => {
       const app = createApp(
-        createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
+        createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) }),
       );
       const res = await app.request(
         '/api/sessions/00000000-0000-0000-0000-000000000000/next-step',

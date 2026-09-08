@@ -5,7 +5,7 @@ import { seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
-import { createServerDeps } from '../../../src/composition';
+import { createTestServerDeps } from '../../support/serverDeps';
 import { createSessionsRouter } from '../../../src/routes/sessions';
 
 let t: TestDb;
@@ -26,7 +26,7 @@ afterEach(async () => {
 // test that does it anyway is not testing the seam it claims to.
 function buildTestApp() {
   const app = new Hono();
-  const deps = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+  const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
   app.route('/api/sessions', createSessionsRouter(deps.sessions));
   return app;
 }
