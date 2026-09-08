@@ -27,7 +27,7 @@ answer — which is where most of the design below goes.
 | Server | `domain/translation.ts` — direction detection, prompt building, parsing. Pure |
 | Mobile | `app/translate.tsx` and an entry point on the home screen |
 | Tests | A fourth bucket: prompt evals against the real model |
-| Tests | `packages/gemini-mock` — a black-box HTTP stand-in for the provider |
+| Tests | A MockServer compose service standing in for Gemini, driven per test |
 | Docs | ADR 0001 gains R10/R11 for `providers/` and an amended R8; ADR 0004 R4 gains the eval bucket. No new ADR |
 
 No table is created, altered or dropped. There is no migration in this phase.
@@ -446,7 +446,7 @@ argument, so it remains not a composition root.
 | Variable | Default | Notes |
 |---|---|---|
 | `GEMINI_API_KEY` | **none — `loadConfig` throws** | The secret. Never logged. |
-| `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Pointed at the mock by every test bucket. |
+| `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Pointed at a MockServer namespace by every test bucket. |
 | `GEMINI_MODEL` | none in code; supplied by environment | Confirmed against the live API during implementation. |
 
 **A missing key fails at startup, not at the moment a learner taps the button.** This is
@@ -454,7 +454,7 @@ the same reasoning phase 8 used to drop the `native_language` and `target_langua
 defaults: a default can only mask a bug. The cost is real and worth naming — `npm run
 server` now needs a value in the environment, so `scripts/setup-worktree.sh`, the
 SessionStart hook's advice and the README all gain a line, and a developer working only on
-sessions must still supply something. Pointing `GEMINI_BASE_URL` at the local mock with any
+sessions must still supply something. Pointing `GEMINI_BASE_URL` at local MockServer with any
 dummy key is the answer for local work.
 
 **There is no fake code path inside the server.** The only thing that differs between a
@@ -490,14 +490,19 @@ A unit test must not open a listener.
 
 ### Integration (`tests/integration/**`, mirroring the `src/` path)
 
-The real `createServerDeps` and `createApp`, with `geminiBaseUrl` pointed at a mock HTTP
-server the test starts on a loopback port. Real route, real service, real domain, real
-provider, real socket.
+The real `createServerDeps` and `createApp`, with `geminiBaseUrl` pointed at this test's own
+namespace on the shared MockServer. Real route, real service, real domain, real provider,
+real socket — the test starts nothing and injects nothing into the server.
+
+Each test registers its expectations in `beforeEach`, clears them in `afterEach`, and
+derives its namespace from a uuid so parallel Jest workers cannot collide. This mirrors what
+the database side already does: `globalSetup` gives each worker a template, each test clones
+its own database, and now each test owns its own mock namespace too.
 
 | File | Covers |
 |---|---|
-| `routes/translations.test.ts` | `200` for a word, a phrase and a sentence; `senses: []`; `400` and its `{ error: 'invalid request' }` body (ADR 0003 R7); `502` when the mock fails, times out, and returns unreadable JSON. |
-| `services/translations.test.ts` | The use case against a mock-backed client, including that no transaction is opened. |
+| `routes/translations.test.ts` | `200` for a word, a phrase and a sentence; `senses: []`; `400` and its `{ error: 'invalid request' }` body (ADR 0003 R7); `502` for an expectation returning 500, one delayed past the timeout, and one returning unreadable JSON. Plus a MockServer `verify` that the request carried `x-goog-api-key`. |
+| `services/translations.test.ts` | The use case against a real client pointed at MockServer, including that no transaction is opened. |
 | `openapi.test.ts` | **extended:** the new endpoint and its three statuses appear in the published document. |
 | `composition.test.ts` | **extended:** `createServerDeps` now takes `fetch` and the Gemini settings and returns a `translations` service. |
 
@@ -511,29 +516,87 @@ because neither is a translation test:
 - `src/app.test.ts` — constructs an app from fake deps; it compiles against the new shape
   without asserting anything new.
 
-### The provider mock — `packages/gemini-mock`
+### The provider stand-in — MockServer as a compose service
 
-A private, test-only workspace package, so `apps/server/tests` and `e2e` share one
-implementation instead of two that drift. It exports `startGeminiMock()` for Jest and has a
-CLI entry so Playwright can boot it as a process.
+**One shared MockServer container serves every bucket and every checkout.** It joins
+`docker-compose.yml` beside Postgres, on its default port **1080**, and each test tells it
+what to return before driving the flow:
 
-It imitates `POST /v1beta/models/{model}:generateContent` — the real path, the real request
-body, the real response envelope — and **derives its answer deterministically from the
-requested text**. That is the design decision that matters: with a pure function from input
-to response, e2e needs no control plane at all, so there is no admin endpoint, no per-test
-scripting, and no shared mutable state between specs. Failure paths are driven by reserved
-inputs (`__unavailable`, `__slow`, `__unreadable`, `__empty`), which keeps the mock's whole
-contract readable in one file.
+```
+1. PUT  localhost:1080/mockserver/expectation
+        when  POST /<ns>/v1beta/models/{model}:generateContent  with body matching "book"
+        then  200 { candidates: [ { content: { parts: [ { text: "{...}" } ] } } ] }
+
+2. run the flow with  GEMINI_BASE_URL = http://localhost:1080/<ns>
+```
+
+`<ns>` is a per-test namespace, and it must be **per test rather than per checkout**:
+`/worktree-a` alone would collide between parallel Jest workers inside one checkout. A uuid
+per test is enough, and integration gets it free because each test already builds its own
+`createServerDeps`. Each test clears its own expectations afterwards, so a long-lived shared
+container does not accumulate them run after run.
+
+**Why a shared instance is safe here, when an earlier draft said it wasn't.** That draft
+specified a first-party mock deriving its answer from the requested text — behaviour
+compiled into the server. A shared container would then have run *whichever checkout
+started it* for everyone: worktree A expecting three senses for `book` while the container
+ran worktree B's two-sense version, failing in a way that reads like a code bug, and no URL
+prefix could fix it because a URL selects arguments, not which function body is running.
+
+MockServer removes that failure mode at the root, and the reason is exactly why Postgres is
+safely shared: **the container is a generic engine holding no repo-specific behaviour, and
+each run pushes its own behaviour in at runtime.** `globalSetup` runs *its* migrations into
+*its* database; a test registers *its* expectations under *its* namespace. Sharing needs
+both halves — a namespace and runtime-supplied behaviour — and a pinned third-party image
+supplies the second by construction, since there is no first-party code inside it to skew.
+
+**Failure paths become expectations rather than reserved inputs.** The `__unavailable`,
+`__slow`, `__unreadable` and `__empty` magic strings are gone: a `502` is an expectation
+returning 500, the ten-second timeout is a response `delay`, unreadable output is an
+expectation returning `not json`, and a dropped connection is MockServer's `error` action.
+That is strictly better than magic inputs — the failure is declared in the test that cares
+about it instead of encoded in a string the mock has to know about.
+
+**Request verification replaces the header trick.** An earlier draft had the mock return
+`401` when `x-goog-api-key` was missing, to prove the client sends it. MockServer's verify
+endpoint does this directly: assert the request arrived with the expected header, so a
+regression that drops it fails integration rather than passing everything but a unit test.
+
+Two consequences of the shared instance:
+
+- **A Gemini-envelope helper is needed** — `geminiResponse({ kind, senses })` in
+  `tests/support/` and `e2e/tests/support/` — so a test declares senses rather than
+  hand-writing `candidates[0].content.parts[0].text`. It is repo code, but it runs in the
+  *test*, so it cannot skew.
+- **`npm run test:integration` and `npm run e2e` gain a prerequisite.** Both already require
+  `npm run db:up`; the compose service means the same command now brings up MockServer too.
+  Unreachability must produce the same kind of clear message `globalSetup` already gives for
+  Postgres — *"MockServer unreachable at …, run `npm run db:up`"* — not a driver stack trace.
+
+The image tag is pinned and confirmed during implementation, alongside the model id. The
+`clear` and `verify` endpoint paths are likewise confirmed then: `PUT
+/mockserver/expectation` and port 1080 were verified during design, the rest were not.
 
 ### e2e
 
-A third `webServer` entry for the mock, ordered before the server, whose `env` gains
-`GEMINI_BASE_URL` pointing at it and a dummy `GEMINI_API_KEY`. New `translate.spec.ts`:
+**No new `webServer` entry** — MockServer is a compose service, already running, so
+Playwright starts nothing extra. The existing server entry's `env` gains
+`GEMINI_BASE_URL: http://localhost:1080/e2e` and a dummy `GEMINI_API_KEY`. The namespace is
+fixed for the run rather than per test, because the server is one long-lived process with
+one environment; specs share it and each clears its own expectations, which is safe given
+Playwright already runs `workers: 1` with `fullyParallel: false`.
+
+Each spec registers its expectations through Playwright's `request` fixture before driving
+the UI — the pattern phase 8 established for creating its learner via `POST /api/users`, so
+no new machinery. `globalSetup.ts` gains a MockServer reachability check beside its Postgres
+one. New `translate.spec.ts`:
 
 - A word → the top sense → **more** → choose → the confirmation.
 - A sentence → one translation, **no** `more` control and **no** save button.
-- Gibberish → `לא מצאנו תרגום`.
-- `__unavailable` → the error state and a working retry.
+- An empty sense list → `לא מצאנו תרגום`.
+- An expectation returning `500` → the error state, and a retry that succeeds once a good
+  expectation replaces it. Testing the retry *working* is the point; a permanently failing
+  mock would only prove the error state renders.
 
 `session.spec.ts` and `onboarding.spec.ts` are untouched.
 
@@ -751,6 +814,9 @@ commands, and it is not phase 9's job.
 | `README.md`, *Reading the API* | The open API now spends money when called: `POST /api/translations` reaches a paid third party with no rate limit in front of it |
 | `scripts/setup-worktree.sh` | Report a missing `GEMINI_API_KEY` the way it already reports a missing `.env.local` |
 | `CLAUDE.md` | A line on the eval bucket (opt-in, real model, never in CI) and one on the planted-violation rule |
+| `docker-compose.yml` | **new service** — MockServer on 1080, pinned tag, with a healthcheck so `--wait` blocks until it accepts connections |
+| `package.json` | `db:up` brings up MockServer alongside Postgres, so the integration and e2e prerequisite stays one command |
+| `e2e/globalSetup.ts` | A MockServer reachability check beside the Postgres one, with the same style of actionable error |
 
 **No file is created in `docs/adr/`, and no new `check-adr-*.sh` is added.** Both new rules
 land in the ADR that already governs layering, and in the script that already enforces it.
@@ -808,7 +874,7 @@ Named so they are not mistaken for oversights:
 4. Gibberish shows `לא מצאנו תרגום`, and a dead provider shows `התרגום לא זמין` with a
    retry that works.
 5. `npm run test:all` and `npm run e2e` are green with **no network access and no API
-   key**, because every bucket points at `packages/gemini-mock`.
+   key**, because every bucket points at the MockServer container.
 6. No fake, stub or `__DEV__` branch exists inside `apps/server/src`: the only difference
    between a test run and production is `GEMINI_BASE_URL`.
 7. `npm run eval` scores the real model against the golden set and prints a per-case
