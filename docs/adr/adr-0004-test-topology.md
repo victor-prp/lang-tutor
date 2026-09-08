@@ -32,11 +32,17 @@ infrastructure. `apps/server/tests/integration/**/*.test.ts` is the database buc
 create a database, open a pool, or hold Jest's `globalSetup`/`globalTeardown` — and it
 holds no test files of its own.
 
-`apps/server/tests/eval/` is the third bucket: opt-in, run by `npm run eval`, and the only
-code in the repo that calls a real language model. It is a **signal, not a gate** — a
-provider's model update can turn it red with no change to this repository — so it runs on
-`workflow_dispatch` and a nightly schedule, never on a pull request, and is not a required
-check.
+`apps/server/tests/eval/` is the third bucket: run by `npm run eval`, and the only code in
+the repo that calls a real language model.
+
+**Amended.** It was introduced as a *signal, not a gate* — its own workflow on
+`workflow_dispatch` and a nightly schedule, never on a pull request — on the grounds that a
+provider's model update can turn it red with no change to this repository. That is now
+reversed: it is a `test-eval` job in `ci.yml`, in the same parallel fan-out as the others.
+The trade is deliberate. A prompt regression is caught at the commit that caused it rather
+than at 03:17 the next morning, and the cost is a failure mode no other job has — CI red
+with an innocent diff, plus real API spend on every push. The `eval-report` artifact is
+what tells the two apart, so the job uploads it on success as well as on failure.
 
 Nothing in it is named `*.test.ts`, and that is the whole mechanism: `run.ts` and `cases.ts`
 are plain modules, so neither Jest project's `testMatch` can pick them up and R4's `find`

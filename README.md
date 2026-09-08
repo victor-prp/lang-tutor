@@ -182,6 +182,12 @@ Since phase 9 the server calls a third-party model, so it needs credentials to s
 
 `npm run db:migrate` needs none of these: migrations read `loadConfig` only.
 
+CI's `test-eval` job reads the first from the `GEMINI_API_KEY` repository secret and the
+third from the `GEMINI_MODEL` repository variable, and leaves `GEMINI_BASE_URL` unset so it
+takes the default. Changing the model in CI is therefore a repository-variable edit, with
+no commit involved — which is also why a `test-eval` result is not fully determined by the
+tree it ran against.
+
 `gemini-2.5-flash` was chosen by measurement, not by taking the highest version number.
 The newer thinking-class Flash models were tried first and are not usable here as the
 provider is currently configured: `gemini-3.8-flash` writes its reasoning into the
@@ -306,28 +312,41 @@ Design and plan for this layout:
 
 ## Continuous integration
 
-Every push, on every branch, runs five parallel jobs on GitHub Actions
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
+Every push, on every branch, runs six parallel jobs on GitHub Actions
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). `workflow_dispatch` runs the same
+six by hand, which matters for the one job whose result can change without a commit.
 
 | Job | Database | Runs | Roughly |
 |---|---|---|---|
 | `check-adrs` | none | `./scripts/check-adrs.sh` — every ADR's rules (ADR 0001's layering, ADR 0002's DI). Grep over the tree, so no `npm ci`, no setup step, fails in seconds | <10s |
 | `check-types` | none | `npm ci`, then `npm run typecheck` — `tsc` reads `db/schema.ts` directly | 1 min |
 | `test-unit` | **none, deliberately** | `npm test` | 1 min |
-| `test-integration` | `docker compose up -d --wait db` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
-| `test-e2e` | `docker compose up -d --wait db` | `npm run e2e` — the Playwright suite described below | 4-5 min |
+| `test-integration` | `npm run db:up` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
+| `test-e2e` | `npm run db:up` | `npm run e2e` — the Playwright suite described below | 4-5 min |
+| `test-eval` | **none, and no MockServer either** | `npm run eval` — the golden set against the real Gemini API, keyed by the `GEMINI_API_KEY` secret and the `GEMINI_MODEL` variable | 1 min |
 
 `test-unit` has no database available at all. That is the point: it *proves* the
 unit/integration boundary rather than assuming it, because a "unit" test that secretly
 needs Postgres fails there loudly instead of passing because a database happened to be
 reachable.
 
-The two jobs that need a database bring it up from `docker-compose.yml` rather than
+The two jobs that need infrastructure bring it up from `docker-compose.yml` rather than
 declaring a `services:` container, so the `postgres:17` image and its healthcheck are
-defined in exactly one place in the repo. `docker compose up -d --wait db` has to come
-after `actions/checkout` — it reads the compose file out of the tree — and `--wait`
-blocks on the healthcheck, which is what the removed `services:` block's
-`options: --health-cmd` was doing.
+defined in exactly one place in the repo. They go through `npm run db:up` rather than
+`docker compose` directly, for the same reason: since phase 9 that is two containers, and
+MockServer's readiness has to be waited for from the host because its image is distroless
+and cannot run a healthcheck of its own. Either way it has to come after
+`actions/checkout` — it reads the compose file out of the tree.
+
+`test-eval` is the odd one out, and worth understanding before you trust its colour. It
+calls the real, paid Gemini API — no database, and pointedly no MockServer; the runner
+refuses to start against a localhost base URL. It is therefore the only job that can fail
+because a vendor shipped a model update, with nothing wrong in the diff. It uploads its
+scorecard as an `eval-report` artifact on success as well as failure, which is what lets
+you tell a prompt regression from a provider change; the two `npm ci` minutes dominate it,
+since the ten cases themselves run concurrently in about 15 seconds. It was a separate
+nightly workflow until it was folded in here — see
+[ADR 0004](docs/adr/adr-0004-test-topology.md) for why that was reversed.
 
 The jobs are independent, so a red `test-e2e` beside a green `check-types` and `test-unit`
 tells you the app broke, not that the code stopped compiling. A failing `test-e2e` run uploads
@@ -338,8 +357,8 @@ Pushing again cancels the previous run for that branch.
 
 ### Nothing gates a merge yet
 
-These five context names — `check-adrs`, `check-types`, `test-unit`, `test-integration`,
-`test-e2e` — are what
+These six context names — `check-adrs`, `check-types`, `test-unit`, `test-integration`,
+`test-e2e`, `test-eval` — are what
 a branch-protection rule on `master` must list. **No such rule exists.** `master` has no
 legacy branch protection, and its active ruleset ("protect muster") contains only
 `deletion`, `non_fast_forward` and `pull_request` — no `required_status_checks`. A pull
@@ -351,10 +370,18 @@ database-backed tests is stopped before it reaches `master`. Fixing it is one ru
 edit; it is a repository setting rather than a change to this repo, which is the only
 reason it is not in the diff that introduced this section.
 
-One caveat before making them required: a pull request from a **fork** produces no check
-runs, because `on: push` only fires for branches in this repository. Requiring these
-contexts would leave such a PR permanently unmergeable. Add a `pull_request` trigger to
-the workflow first if outside contributions ever become real.
+Two caveats before making them required. A pull request from a **fork** produces no check
+runs at all, because `on: push` only fires for branches in this repository; requiring these
+contexts would leave such a PR permanently unmergeable. Add a `pull_request` trigger to the
+workflow first if outside contributions ever become real — and note that `test-eval` is
+guarded by `if: github.repository_owner == 'victor-prp'`, because secrets are not exposed
+to fork workflows and the job would otherwise fail on a missing key for a reason no outside
+contributor could fix. A skipped job satisfies a required check; a failing one does not.
+
+And `test-eval` is a third party's uptime and release schedule on the merge path. Requiring
+it means an outage or a model update can block a merge that has nothing to do with either.
+That is a defensible trade — it is the reason the job exists here rather than in a nightly
+— but make it knowingly, and leave `test-eval` off the required list if it is not.
 
 ## End-to-end test
 

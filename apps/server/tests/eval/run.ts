@@ -1,11 +1,14 @@
 /**
- * Scores the real prompt against the real model. A signal, never a gate: a
- * model update can turn this red with no change to this repository, so it does
- * not run on pull requests and is not a required check.
+ * Scores the real prompt against the real model. Runs in CI as the `test-eval`
+ * job, so a prompt regression surfaces at the commit that caused it — at the
+ * cost of the one failure mode no other job has: a provider's model update can
+ * turn this red with nothing in the diff to blame. Read the scorecard before
+ * reading the diff.
  *
  * A standalone tsx script rather than a third Jest project, for two reasons: a
- * Jest project sits one --selectProjects mistake away from being swept into CI,
- * and pass/fail per case is the wrong output — what a prompt change needs is a
+ * Jest project sits one --selectProjects mistake away from being swept into
+ * `npm test`, which must make no network call at all (ADR 0004 R4), and
+ * pass/fail per case is the wrong output — what a prompt change needs is a
  * scorecard.
  *
  * It exercises the real artifact: the same prompt builder, parser and provider
