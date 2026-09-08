@@ -40,6 +40,15 @@ export default function HomeScreen() {
         <Text style={styles.buttonLabel}>{strings.start}</Text>
       </Pressable>
 
+      <Pressable
+        accessibilityRole="button"
+        testID="translate-entry"
+        onPress={() => router.push('/translate')}
+        style={styles.secondaryButton}
+      >
+        <Text style={styles.secondaryButtonLabel}>{strings.translateEntry}</Text>
+      </Pressable>
+
       {/* Deliberately empty. Streak, points and daily-target widgets land here. */}
       <View style={styles.futureSpace} />
     </SafeAreaView>
@@ -83,6 +92,20 @@ const styles = StyleSheet.create({
   },
   buttonLabel: {
     color: colors.onPrimary,
+    fontSize: fontSizes.md,
+    lineHeight: lineHeights.md,
+    fontWeight: '700',
+  },
+  secondaryButton: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  secondaryButtonLabel: {
+    color: colors.primary,
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     fontWeight: '700',
