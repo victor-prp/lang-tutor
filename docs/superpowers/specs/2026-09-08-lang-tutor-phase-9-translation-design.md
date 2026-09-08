@@ -136,10 +136,12 @@ the whole answer, so an example would restate it. Both fields are therefore abse
 than rendering empty ones. Making them optional in the schema rather than empty strings is
 what keeps "no part of speech" distinguishable from "the model forgot".
 
-**`LlmTranslationSchema` is what `z.toJSONSchema` converts** into the provider's structured
-output schema. It is the response schema minus `text` and `direction`: both are decided in
-code before the call is made, so including them would invite the model to disagree with the
-server about which direction it was translating.
+**`LlmTranslationSchema` is what the model is asked to satisfy.** It is the response schema
+minus `text` and `direction`: both are decided in code before the call is made, so including
+them would invite the model to disagree with the server about which direction it was
+translating. It travels to the provider **as a Zod schema**, not as a JSON Schema document —
+each provider converts it to its own dialect, for reasons measured in *The LLM abstraction*
+below.
 
 **`part_of_speech` is a plain string on the wire, not an enum.** This follows the
 precedent `UserSchema` already sets for the language fields: narrowing a *response* field
@@ -202,7 +204,9 @@ persistence, and now cannot reach a provider either.
 The entire seam, in `services/llm.ts`:
 
 ```ts
-export type LlmJsonRequest = { system: string; user: string; schema: object };
+import type { ZodType } from 'zod';
+
+export type LlmJsonRequest = { system: string; user: string; schema: ZodType };
 export type LlmClient = (request: LlmJsonRequest) => Promise<string>;
 ```
 
@@ -239,17 +243,75 @@ once, in `domain/translation.ts`, so a model that returns malformed output fails
 identically whoever served it. A provider's whole job becomes: shape a request, extract one
 text field, and map its own failures to `LlmUnavailable`.
 
-**The response schema is generated from the wire schema.** `z.toJSONSchema` over the same
-`TranslationSenseSchema` that types the API response produces the `schema` field above, so
-the model's output contract and the app's input contract cannot drift apart. Zod 4's native
-JSON Schema output — already the reason `packages/core` needs no Hono adapter — is what
-makes this a one-liner. The schema object is exported as a value from
-`packages/core/src/api/schemas.ts` so `domain/` can import it without importing Zod
-directly, keeping ADR 0001 R3's "core only" rule intact.
+### `schema` carries the Zod schema, not a JSON Schema document
 
-**Adding OpenAI later** means one new file implementing `LlmClient`
-(`response_format: json_schema`, `choices[0].message.content`) and one changed line in
-`index.ts`. Nothing in `domain/`, `services/`, `routes/` or the tests moves.
+This is the one field where the seam's placement is load-bearing, and an earlier draft got
+it wrong by typing it `object`. `object` says nothing — it admits `{}`, `[]`, a function —
+but the real problem is that a *JSON Schema document* cannot be provider-neutral.
+
+Measured, not assumed. `z.toJSONSchema` over the sense shape (zod resolves to **4.5.4**
+here, not the `^4.4.3` in `package.json`) emits:
+
+```json
+{ "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": { "kind": { "type": "string", "enum": ["word","phrase","sentence"] },
+                  "senses": { "type": "array", "maxItems": 5, "items": {
+                      "properties": { "translation": {}, "part_of_speech": {}, "example": {} },
+                      "required": ["translation"],
+                      "additionalProperties": false }}},
+  "required": ["kind","senses"],
+  "additionalProperties": false }
+```
+
+Usefully, it **inlines** the sense shape — no `$ref`/`$defs`, which Gemini rejects — and
+`maxItems` survives. But the last two keys are where portability dies:
+
+| Emitted | Gemini `responseSchema` | OpenAI strict `json_schema` |
+|---|---|---|
+| `$schema` | not in its Schema type — strip | strip |
+| `additionalProperties: false` | not in its Schema type — **strip** | **required on every object** — keep |
+| optionals omitted from `required` | correct: omission means optional | **illegal** — all properties must be required; optional is `type: ["string","null"]` |
+
+The two providers want **opposite things about the same key**, and they disagree precisely
+about the fields this design deliberately made optional. So a JSON Schema document in the
+request can satisfy at most one provider — and whoever produced it has already chosen a
+dialect. That producer would be `domain/`, which is the purest layer in the server: dialect
+knowledge would have leaked upward, past the seam built to contain it.
+
+Typing the field `ZodType` fixes this at the root. `domain/` hands over its own contract in
+its own language and makes no dialect decision; each provider converts on arrival:
+
+- `providers/gemini.ts` → `toGeminiSchema()`: `z.toJSONSchema`, then drop `$schema` and
+  `additionalProperties`.
+- `providers/openai.ts`, later → `toOpenAiStrictSchema()`: keep `additionalProperties`, and
+  promote every optional into `required` as a nullable type.
+
+Each is a small pure function with its own unit test, living in the only layer permitted to
+be provider-specific. Zod is the neutral form here by construction: under ADR 0003 it is
+already this repo's schema language and the source of truth for the whole wire contract, so
+it predates every provider and each one converts *from* it.
+
+Two consequences, decided here rather than discovered during implementation:
+
+- **`parseSenses` must treat `null` and absent identically** (`.optional().nullable()` on
+  the parse side). Under OpenAI strict, `part_of_speech` returns as `null` rather than
+  missing; a parser tolerating only absence would break on the provider swap — the exact
+  coupling this seam exists to prevent.
+- **A provider now holds the schema, and must still not validate with it.** Parsing stays in
+  `domain/`. The temptation is created by this very change, so it is worth naming as a rule
+  rather than trusting to taste.
+
+The Gemini and OpenAI columns above are from knowledge, not verified this session — the
+structured-output docs page timed out. The conclusion does not depend on the details: Zod
+expresses optional by omission from `required` and OpenAI strict forbids that, so at least
+one provider needs a transformation regardless. The plan carries confirming the exact
+supported key lists, alongside confirming the model id.
+
+**Adding OpenAI later** therefore means one new file implementing `LlmClient` — its request
+shape, `choices[0].message.content`, and its own `toOpenAiStrictSchema` — plus one changed
+line in `index.ts`. Nothing in `domain/`, `services/`, `routes/` or the existing tests
+moves.
 
 What the abstraction deliberately does **not** cover: streaming, tool calls, multi-turn
 conversations, embeddings, and token accounting. One JSON-shaped completion is the only
@@ -264,7 +326,9 @@ Verified against the current API reference rather than from memory:
 - The key travels in an **`x-goog-api-key` header**, never as a `?key=` query parameter — a
   query parameter puts the secret into URLs, access logs and any intermediary proxy.
 - Structured output via `generationConfig.responseMimeType: 'application/json'` plus
-  `generationConfig.responseSchema`, with `temperature: 0`.
+  `generationConfig.responseSchema`, with `temperature: 0`. The schema sent there is
+  `toGeminiSchema(request.schema)`, not `z.toJSONSchema`'s output verbatim — see
+  *`schema` carries the Zod schema* above.
 - The answer is at `candidates[0].content.parts[0].text`.
 - A safety block arrives as `promptFeedback.blockReason` with no candidate, and maps to an
   empty sense list rather than an error — the input was refused, the server was not broken.
@@ -414,9 +478,9 @@ at any point.** What varies for them is `GEMINI_BASE_URL`, nothing else.
 | File | Covers |
 |---|---|
 | `apps/server/src/domain/translation.test.ts` | Direction detection either way and on mixed input; the single-token `kind` override; prompt shape; parsing; schema-invalid and non-JSON model output; the five-sense cap. All pure — this file carries most of the phase's logic. |
-| `apps/server/src/providers/gemini.test.ts` | Request shape, the `x-goog-api-key` header, extraction from `candidates[0]`, a safety block, and mapping every failure to `LlmUnavailable`. |
+| `apps/server/src/providers/gemini.test.ts` | Request shape, the `x-goog-api-key` header, extraction from `candidates[0]`, a safety block, and mapping every failure to `LlmUnavailable`. Plus `toGeminiSchema`: `$schema` and `additionalProperties` are stripped, `maxItems` and partial `required` survive. |
 | `apps/server/src/services/translations.test.ts` | Orchestration against a fake `LlmClient` from `tests/support/fakes.ts` — the only support import R3 permits. |
-| `packages/core/src/api/schemas.test.ts` | `text` bounds, the `direction` and `kind` enums, and that `z.toJSONSchema` produces the schema the provider sends. |
+| `packages/core/src/api/schemas.test.ts` | `text` bounds, the `direction` and `kind` enums, and that a `sentence` sense parses with `part_of_speech` and `example` both absent **and** both `null`. |
 | `apps/mobile/src/api/client.test.ts` | The new call, extended. |
 
 `providers/gemini.test.ts` passes a fake `fetch` to the client. That is a unit test of an
@@ -716,6 +780,10 @@ Named so they are not mistaken for oversights:
 
 - **The model id is unconfirmed.** Public sources disagreed about the current Gemini Flash
   generation. Config-valued, with a plan step to verify against the live model list.
+- **`responseSchema`'s exact supported key list is unconfirmed.** The docs page timed out
+  during design, so `toGeminiSchema`'s strip list comes from knowledge rather than
+  measurement. Wrong in either direction is cheap to detect — a rejected schema is a `400`
+  on the first real call — and the plan verifies it before the eval bucket runs.
 - **"Most common sense first" is a model-quality property no test can assert.** The eval
   set scores it against accepted answers; the play-test is what actually validates it.
 - **Every lookup costs money and nothing caps it.** The endpoint is unauthenticated, like
