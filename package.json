@@ -21,6 +21,7 @@
     "lint:arch": "bash scripts/check-adrs.sh",
     "db:up": "docker compose up -d --wait db mockserver && bash scripts/wait-for-mockserver.sh",
     "db:down": "docker compose down",
-    "db:migrate": "npm run db:migrate --workspace apps/server"
+    "db:migrate": "npm run db:migrate --workspace apps/server",
+    "eval": "npm run eval --workspace apps/server"
   }
 }

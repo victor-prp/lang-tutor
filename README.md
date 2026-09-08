@@ -156,9 +156,17 @@ Since phase 9 the server calls a third-party model, so it needs credentials to s
 |---|---|---|
 | `GEMINI_API_KEY` | none — the server refuses to start | Never logged. |
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Pointed at a MockServer namespace by every test bucket. |
-| `GEMINI_MODEL` | none — the server refuses to start | A current Gemini Flash model id. |
+| `GEMINI_MODEL` | none — the server refuses to start | `gemini-2.5-flash` is the id phase 9 was scored against. |
 
 `npm run db:migrate` needs none of these: migrations read `loadConfig` only.
+
+`gemini-2.5-flash` was chosen by measurement, not by taking the highest version number.
+The newer thinking-class Flash models were tried first and are not usable here as the
+provider is currently configured: `gemini-3.8-flash` writes its reasoning into the
+`part_of_speech` string and omits `example` entirely, and `gemini-3.5-flash` did not answer
+inside 60s. `gemini-2.5-flash` returns the contracted shape in around 4.5s and scores
+100% on `npm run eval`. It is a config value, never hardcoded — a later model is a
+variable change plus an eval run, not a code change.
 
 For local work with no real key, point the server at MockServer and use any dummy value:
 
