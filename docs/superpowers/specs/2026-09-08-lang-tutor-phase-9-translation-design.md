@@ -739,7 +739,7 @@ grep -rnE "\bfetch\(|generativelanguage|api\.openai\.com" \
 # providers are constructed only at the composition root
 grep -rnE "(from|require\(|import\()[[:space:]]*'[^']*providers/" \
   apps/server/src apps/server/tests --include='*.ts' --exclude-dir=providers \
-  | grep -vE "^[^:]*(composition\.ts|tests/support/)"
+  | grep -vE "^[^:]*(composition\.ts|tests/support/|tests/eval/)"
 ```
 
 Three things about the second command are deliberate, and each replaces a version that
@@ -759,6 +759,9 @@ was wrong:
   blanket `*.test.ts` exemption: a service's unit test has a fake `LlmClient` and has no
   business importing a provider, while `providers/gemini.test.ts` is already covered by
   `--exclude-dir`.
+- **`tests/eval/` is exempt alongside `tests/support/`**, because it is a second test
+  composition root and naming `createGeminiClient` is the whole point of it — the eval bucket
+  is the only code in the repo that calls the real provider.
 
 It also does **not** exempt `services/`. An earlier draft did, by analogy with ADR 0001
 R2's type-only allowance for `repo/` — but the analogy does not hold, because a service
