@@ -8,7 +8,20 @@ turn touched files under those trees, and CI enforces the same script (also runn
 review time. `check-adrs.sh` discovers every `scripts/check-adr-*.sh` automatically, so
 adding a new ADR never means updating this wiring.
 
+When adding a check to any `scripts/check-adr-*.sh`, plant a violation of the rule first
+and confirm the script reports it. A check that cannot fire prints nothing, exactly like a
+check that passes, so "it printed nothing" is not evidence on its own.
+
 Use the `create-adr` skill when a new structural decision needs recording.
+
+# Prompt evals
+
+`apps/server/tests/eval/` is an opt-in fourth test bucket, run by `npm run eval`, and the
+only code here that calls a real language model. Nothing in it is named `*.test.ts`, which
+is what keeps both Jest projects off it. It is never part of `npm run test:all` and never
+runs on a pull request: a model update can turn it red with no change to this repo, so it
+is a signal rather than a gate. It needs `GEMINI_API_KEY` and `GEMINI_MODEL`, and refuses
+to run against MockServer.
 
 # Worktrees
 

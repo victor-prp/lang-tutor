@@ -8,6 +8,7 @@ import { requireEnvValue } from '@/config/requireEnvValue';
 import { createRememberedUsernameStore } from '@/currentUser';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { SessionProvider } from '@/hooks/useSession';
+import { TranslationProvider } from '@/hooks/useTranslation';
 import { colors } from '@/theme';
 
 // Read directly off process.env.EXPO_PUBLIC_API_URL (not via an indirection)
@@ -46,9 +47,11 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <CurrentUserProvider api={api} usernameStore={usernameStore}>
         <SessionProvider api={api}>
-          <View style={styles.root} {...rtlProps}>
-            <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-          </View>
+          <TranslationProvider api={api}>
+            <View style={styles.root} {...rtlProps}>
+              <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+            </View>
+          </TranslationProvider>
         </SessionProvider>
       </CurrentUserProvider>
     </SafeAreaProvider>

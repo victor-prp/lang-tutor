@@ -52,8 +52,11 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   distinguish "derived" from "coincidentally identical." Enforced by review; the list of
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
   `createHealthRepo`, `createUserRepo`, `createTransaction`, `createSessionService`,
-  `createUserService`, `createServerDeps`, `createApiClient`,
-  `createRememberedUsernameStore`) is short enough to spot-check.
+  `createUserService`, `createGeminiClient`, `createTranslationService`, `createServerDeps`,
+  `createApiClient`, `createRememberedUsernameStore`) is short enough to spot-check.
+  `createGeminiClient` is annotated at its call site in `composition.ts` rather than at its
+  definition, because ADR 0001 R10 forbids `providers/` from importing the contract it
+  satisfies — the same arrangement as `createTransaction` and `Transaction`.
 - **R7 — Importing a composition root performs no I/O.** `apps/server/src/index.ts` guards
   its construction behind `require.main === module`, so `main()` runs only when the file is
   executed directly. Enforced by `apps/server/src/index.test.ts`, which imports the module

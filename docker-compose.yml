@@ -18,5 +18,26 @@ services:
       timeout: 3s
       retries: 30
 
+  # A generic, pinned mock HTTP server standing in for the Gemini API in every
+  # test bucket. Deliberately third-party and behaviour-free: each test pushes
+  # its own expectations in at runtime, which is what makes one shared instance
+  # safe across several checkouts — the same reason the Postgres container is
+  # safe to share while a first-party mock would not be.
+  mockserver:
+    image: mockserver/mockserver:5.15.0
+    ports:
+      - '1080:1080'
+    environment:
+      MOCKSERVER_LIVENESS_HTTP_GET_PATH: /liveness/probe
+    # No healthcheck, unlike db above, and not an oversight: this image is
+    # distroless. Its whole filesystem under bin/ is java, openssl and
+    # c_rehash — no shell, so CMD-SHELL cannot run, and no curl or wget for a
+    # CMD exec form either. A Docker healthcheck can only probe from inside the
+    # container, so readiness is waited for from the host instead, in
+    # scripts/wait-for-mockserver.sh, which `npm run db:up` runs. Mounting a
+    # probe script in would work and is deliberately not done: a bind mount
+    # this container needs is a first-party file every checkout must have,
+    # which is exactly the coupling that makes one shared instance unsafe.
+
 volumes:
   lang-tutor-pgdata:

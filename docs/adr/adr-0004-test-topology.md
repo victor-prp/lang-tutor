@@ -32,6 +32,22 @@ infrastructure. `apps/server/tests/integration/**/*.test.ts` is the database buc
 create a database, open a pool, or hold Jest's `globalSetup`/`globalTeardown` — and it
 holds no test files of its own.
 
+`apps/server/tests/eval/` is the third bucket: opt-in, run by `npm run eval`, and the only
+code in the repo that calls a real language model. It is a **signal, not a gate** — a
+provider's model update can turn it red with no change to this repository — so it runs on
+`workflow_dispatch` and a nightly schedule, never on a pull request, and is not a required
+check.
+
+Nothing in it is named `*.test.ts`, and that is the whole mechanism: `run.ts` and `cases.ts`
+are plain modules, so neither Jest project's `testMatch` can pick them up and R4's `find`
+has nothing to report. Naming them `*.test.ts` would have swept them into a bucket that must
+never make a network call — which is exactly what R4 exists to prevent, so the rule protects
+this bucket rather than needing an exception for it.
+
+`tests/eval/` is a second test composition root, alongside `tests/support/`: it names
+`createGeminiClient` directly, which is why [ADR 0001](adr-0001-layered-architecture.md)
+R11's command exempts it.
+
 ## Rules
 
 | # | Subject | May import | Must not import |
@@ -39,7 +55,7 @@ holds no test files of its own.
 | R1 | `apps/server/src/**/*.test.ts` | anything from `src/` | `pg`, `drizzle-orm` |
 | R2 | `apps/server/src/**/*.test.ts` | `src/db/content.ts` (pure data) | `src/db/client.ts`, `db/migrate.ts`, `db/seed.ts`, `db/cli.ts` |
 | R3 | `apps/server/src/**/*.test.ts` | `tests/support/fakes.ts`, `tests/support/testRng.ts` | `tests/support/testDb.ts`, `dbNames.ts`, `withTx.ts`, `globalSetup.ts`, `globalTeardown.ts` |
-| R4 | `apps/server/tests/` | test files under `tests/integration/` | a `*.test.ts` anywhere else under `tests/` |
+| R4 | `apps/server/tests/` | test files under `tests/integration/`; the eval bucket's plain modules under `tests/eval/` | a `*.test.ts` anywhere else under `tests/` |
 | R5 | `apps/server/jest.config.js`'s `unit` project | `testMatch`, `restoreMocks`, `resetMocks`, `transformIgnorePatterns` | a `globalSetup` (or `globalTeardown`) key |
 
 ## Rules that are not import rules
@@ -57,7 +73,7 @@ holds no test files of its own.
 
 ## How to detect a violation
 
-`npm run lint:arch` runs the five commands below alongside the other ADRs';
+`npm run lint:arch` runs the seven commands below alongside the other ADRs';
 `scripts/check-adr-0004-test-topology.sh` mirrors this block verbatim. Each command
 must print nothing.
 
@@ -78,6 +94,12 @@ find apps/server/tests -name '*.test.ts' | grep -v '^apps/server/tests/integrati
 # R5 — the unit Jest project declares no globalSetup
 awk '/displayName: .unit./,/^    \},/' apps/server/jest.config.js \
   | grep -vE '^\s*(//|\*)' | grep -n "globalSetup"
+
+# R4 — no Jest project may pick up an eval file
+grep -n "eval" apps/server/jest.config.js
+
+# R4 — nothing under tests/eval/ is imported by src/
+grep -rn "tests/eval" apps/server/src --include='*.ts'
 ```
 
 ### What the rules cover

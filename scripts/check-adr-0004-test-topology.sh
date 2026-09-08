@@ -48,6 +48,13 @@ r5() {
     | grep -vE '^\s*(//|\*)' | grep -n "globalSetup"
 }
 
+# The eval bucket is kept out of both Jest projects by naming alone: nothing
+# under tests/eval/ is a *.test.ts. These two guard that from either direction —
+# a project that started matching on "eval", and src/ reaching into the bucket.
+r4_jest() { grep -n 'eval' apps/server/jest.config.js; }
+
+r4_src() { grep -rn 'tests/eval' apps/server/src --include='*.ts'; }
+
 echo "Checking apps/server against ADR 0004 (test topology)"
 echo
 
@@ -56,13 +63,15 @@ check "R2  unit tests must not import a connecting src/db/ module"    r2
 check "R3  unit tests may take only fakes.ts/testRng.ts from support" r3
 check "R4  no *.test.ts under tests/ outside tests/integration/"      r4
 check "R5  the unit Jest project declares no globalSetup"             r5
+check "R4  no Jest project picks up an eval file"                     r4_jest
+check "R4  nothing under tests/eval/ is imported by src/"             r4_src
 
 echo
 if [ "$status" -ne 0 ]; then
   echo "Test topology check FAILED. See docs/adr/adr-0004-test-topology.md" >&2
   echo "for what each rule protects and why." >&2
 else
-  echo "Test topology check passed: 5 rules, no violations."
+  echo "Test topology check passed: 7 rules, no violations."
 fi
 
 exit "$status"

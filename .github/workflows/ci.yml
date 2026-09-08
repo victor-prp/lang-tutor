@@ -81,8 +81,12 @@ jobs:
       # Must come after checkout: it reads docker-compose.yml from the tree. The
       # `services:` block this replaces duplicated the postgres:17 image and its
       # healthcheck; `--wait` blocks on the compose healthcheck exactly as that
-      # block's `options: --health-cmd` did.
-      - run: docker compose up -d --wait db
+      # block's `options: --health-cmd` did. Invoked through `npm run db:up`
+      # rather than `docker compose` directly so there is one definition of the
+      # prerequisites: since phase 9 that is two containers, and MockServer's
+      # readiness is waited for from the host because its image is distroless
+      # and cannot run a healthcheck of its own.
+      - run: npm run db:up
       # The drift steps need no database — drizzle-kit generate and check never
       # connect — but they belong with the other database concerns rather than
       # muddying test-unit's single purpose.
@@ -119,7 +123,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: docker compose up -d --wait db
+      - run: npm run db:up
 
       # Browser binaries change when Playwright does, not when the lockfile does,
       # so the cache is keyed on the resolved version. Read from the e2e workspace

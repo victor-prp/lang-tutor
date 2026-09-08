@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { createDb } from '../apps/server/src/db/client';
 import { runMigrations } from '../apps/server/src/db/migrate';
 import { seedContent } from '../apps/server/src/db/seed';
+import { MOCKSERVER_URL } from './urls';
 
 const HOST = process.env.PGHOST ?? 'localhost';
 const PORT = process.env.PGPORT ?? '5432';
@@ -17,6 +18,19 @@ export const E2E_DATABASE_URL = `postgres://postgres:postgres@${HOST}:${PORT}/${
  * per run, keeps the suite reproducible without needing a retention rule.
  */
 export default async function globalSetup(): Promise<void> {
+  // A read-only liveness GET, not `PUT /mockserver/reset`: the container is
+  // shared, and a developer may have an integration run in flight against it.
+  // Each spec clears only the /e2e namespace.
+  const probe = await fetch(`${MOCKSERVER_URL}/liveness/probe`).catch(
+    (error: unknown) => error as Error,
+  );
+  if (probe instanceof Error || !probe.ok) {
+    throw new Error(
+      `MockServer unreachable at ${MOCKSERVER_URL}\n` +
+        'Run `npm run db:up` first (requires Docker).',
+    );
+  }
+
   const admin = createDb(ADMIN_URL, { max: 1, onError: () => {} });
   try {
     await admin.db.execute(sql.raw(`drop database if exists ${E2E_DATABASE} with (force)`));

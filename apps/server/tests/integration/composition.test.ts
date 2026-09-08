@@ -3,6 +3,7 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { createServerDeps } from '../../src/composition';
 import { createFakeLogger } from '../support/fakes';
+import { createTestServerDeps } from '../support/serverDeps';
 import { seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
@@ -21,18 +22,29 @@ afterEach(async () => {
 // The seam proof for the wiring layer itself: production's assembly, called with
 // a per-test database and a fake logger — no socket, no environment.
 describe('createServerDeps', () => {
+  // The one call in the suite that names createServerDeps directly, with its
+  // real argument list. Everywhere else goes through createTestServerDeps, so
+  // without this the helper would be the only thing the signature is checked
+  // against — and a parameter it stopped passing would go unnoticed.
   it('passes the logger it is given straight through', () => {
     const logger = createFakeLogger();
-    expect(createServerDeps({ db: t.db, logger, rng: testRng(7) }).logger).toBe(logger);
+    const deps = createServerDeps({
+      db: t.db,
+      logger,
+      rng: testRng(7),
+      fetch: globalThis.fetch,
+      gemini: { apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/never-registered', model: 'm' },
+    });
+    expect(deps.logger).toBe(logger);
   });
 
   it('assembles a health repo bound to the database it is given', async () => {
-    const deps = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+    const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
     expect(await deps.health.ping()).toBe(true);
   });
 
   it('assembles a session service that works against that database', async () => {
-    const deps = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+    const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
     const { record } = await deps.sessions.startSession('u_1');
     expect(record.questions).toHaveLength(SESSION_LENGTH);
   });

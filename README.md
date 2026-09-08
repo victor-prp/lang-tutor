@@ -23,6 +23,14 @@ the server no longer creates one on first sight. None of this is authentication:
 no password, and a username proves nothing. See
 [ADR 0005](docs/adr/adr-0005-identity-without-authentication.md).
 
+Phase 9 gives the learner a dictionary. Typing a word, a phrase or a sentence returns its
+meanings from a language model, ranked with the most common first, each with an example
+sentence in both languages; a **more** button reveals the rest and a button on each meaning
+confirms the one that fits. Nothing is saved yet — this phase exists to validate the
+experience, and the confirmation it shows is deliberately ahead of the storage that arrives
+next. It is also the first time the server calls a third party, holds a secret, or depends
+on a non-deterministic answer.
+
 - Phase 1: [design](docs/superpowers/specs/2026-08-24-lang-tutor-phase-1-design.md) · [plan](docs/superpowers/plans/2026-08-24-lang-tutor-phase-1.md)
 - Phase 2: [design](docs/superpowers/specs/2026-08-26-lang-tutor-phase-2-design.md) · [plan](docs/superpowers/plans/2026-08-26-lang-tutor-phase-2.md)
 - Phase 3: [design](docs/superpowers/specs/2026-08-29-lang-tutor-phase-3-ci-design.md) · [plan](docs/superpowers/plans/2026-08-29-lang-tutor-phase-3-ci.md)
@@ -31,6 +39,7 @@ no password, and a username proves nothing. See
 - Phase 6: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-6-test-topology-design.md) · [plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-6-test-topology.md)
 - Phase 7: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-7-openapi-design.md) · [plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-7-openapi.md)
 - Phase 8: [design](docs/superpowers/specs/2026-09-07-lang-tutor-phase-8-onboarding-design.md) · [plan](docs/superpowers/plans/2026-09-07-lang-tutor-phase-8-onboarding.md)
+- Phase 9: [design](docs/superpowers/specs/2026-09-08-lang-tutor-phase-9-translation-design.md) · [plan](docs/superpowers/plans/2026-09-08-lang-tutor-phase-9-translation.md)
 
 ## Layout
 
@@ -62,11 +71,14 @@ what makes that enforceable — `./api` is type-only, so a mobile import that fo
 | `services/` | domain, repositories, the `Db` handle for transaction scope | Hono, `Context`, status codes, SQL |
 | `domain/` | `packages/core/api` types only | pg, Hono, the clock, `Math.random` |
 | `repo/` + `db/` | Drizzle, domain *types* (to return them) | services, routes, domain *logic* |
+| `providers/` | `fetch`, its own transport types, `errors`, `logger` | services, routes, domain, repo, db — and nothing but `composition.ts` may import it |
 
 `routes/` (Hono handlers) never sees a `Db` or a repository — it does not know a
-database exists. `services/` owns transaction boundaries: each use case is exactly one
-`db.transaction(...)`, so "one transaction per use case" is structural, not a
-convention. This is why the store and the mock question pool from earlier phases are
+database exists. `services/` owns transaction boundaries: a use case that touches the database is
+exactly one `db.transaction(...)`, so "one transaction per use case" is structural, not
+a convention. (Since phase 9 a use case may touch no table at all — translation calls a
+model and nothing else — which is why that rule is worded around the database rather
+than around use cases.) This is why the store and the mock question pool from earlier phases are
 gone rather than kept as a fallback: a second data source would mean a second place a
 transaction could leak across.
 
@@ -74,6 +86,12 @@ Since phase 7 a route is one `createRoute` definition plus its handler, and that
 definition is simultaneously the routing entry, the request validator, the response type
 and the published OpenAPI description. There is no second document to keep in step,
 which is the point: a response that stops matching its declared schema stops compiling.
+
+Since phase 9 there is one more layer: `providers/` holds outbound third-party I/O behind a
+two-line `LlmClient` contract declared in `services/`. A service depends on that contract and
+never learns which provider satisfies it, so switching from Gemini to another vendor is one
+new file in `providers/` and one changed line in `index.ts` — the same shape the
+`Transaction` seam already gives the database.
 
 Every dependency with I/O, state, or a lifecycle — a database handle, an HTTP client, a
 clock, a source of randomness — follows one rule, with no opt-out: construct it only at
@@ -86,13 +104,13 @@ enforced.
 
 | ADR | Decision |
 |---|---|
-| [0001](docs/adr/adr-0001-layered-architecture.md) | Layered architecture in `apps/server` — the import rules between `routes/`, `services/`, `domain/`, `repo/`, `db/` |
+| [0001](docs/adr/adr-0001-layered-architecture.md) | Layered architecture in `apps/server` — the import rules between `routes/`, `services/`, `domain/`, `repo/`, `db/`, `providers/` |
 | [0002](docs/adr/adr-0002-di-with-closures.md) | Dependency injection via closures, constructed only at a composition root |
 | [0003](docs/adr/adr-0003-openapi-wire-contract.md) | OpenAPI generated from the wire contract — one `createRoute` definition per endpoint, schemas live in `packages/core` |
 | [0004](docs/adr/adr-0004-test-topology.md) | Test topology — which folder a test file is in decides whether it may touch infrastructure |
 | [0005](docs/adr/adr-0005-identity-without-authentication.md) | Identity without authentication — a username identifies, it authorizes nothing |
 
-All five are enforced by `npm run lint:arch` (15 + 7 + 6 + 5 + 3 = 36 checks, grep only, no deps,
+All five are enforced by `npm run lint:arch` (17 + 7 + 6 + 7 + 3 = 40 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
@@ -127,11 +145,15 @@ server URL from `apps/mobile/.env.local`, which Expo auto-loads and git ignores 
 ```bash
 npm install
 cp apps/mobile/.env.example apps/mobile/.env.local
-npm run db:up        # docker compose up -d --wait db  (requires Docker)
+npm run db:up        # Postgres + MockServer  (requires Docker)
 npm run db:migrate   # schema + shared vocabulary seed
 npm run server       # terminal 1
 npm run mobile       # terminal 2
 ```
+
+`npm run db:up` starts two containers: Postgres, and a MockServer instance that stands in for
+the Gemini API in every test bucket. Integration and e2e tests register their own expectations
+against it per test, so no test needs network access or an API key.
 
 Then press `w` for the browser, or scan the QR code with Expo Go on a phone. The
 interface is Hebrew and right-to-left; browser and native RTL are not identical, so
@@ -148,6 +170,32 @@ network namespace. Edit the `apps/mobile/.env.local` created above:
 
 Phone and dev machine must be on the same Wi-Fi network.
 
+### Environment variables
+
+Since phase 9 the server calls a third-party model, so it needs credentials to start:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GEMINI_API_KEY` | none — the server refuses to start | Never logged. |
+| `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Pointed at a MockServer namespace by every test bucket. |
+| `GEMINI_MODEL` | none — the server refuses to start | `gemini-2.5-flash` is the id phase 9 was scored against. |
+
+`npm run db:migrate` needs none of these: migrations read `loadConfig` only.
+
+`gemini-2.5-flash` was chosen by measurement, not by taking the highest version number.
+The newer thinking-class Flash models were tried first and are not usable here as the
+provider is currently configured: `gemini-3.8-flash` writes its reasoning into the
+`part_of_speech` string and omits `example` entirely, and `gemini-3.5-flash` did not answer
+inside 60s. `gemini-2.5-flash` returns the contracted shape in around 4.5s and scores
+100% on `npm run eval`. It is a config value, never hardcoded — a later model is a
+variable change plus an eval run, not a code change.
+
+For local work with no real key, point the server at MockServer and use any dummy value:
+
+```bash
+export GEMINI_BASE_URL=http://localhost:1080/dev GEMINI_API_KEY=dev GEMINI_MODEL=dev
+```
+
 ## Reading the API
 
 The server describes itself. With `npm run server` running:
@@ -163,6 +211,11 @@ and remove no risk. What *has* changed since phase 8 is that this API now carrie
 data: a display name and an age. `POST /api/login` takes a username and no password — it
 identifies a learner, it does not authenticate one, and nothing may treat it as proof of
 anything. See [ADR 0005](docs/adr/adr-0005-identity-without-authentication.md).
+
+As of phase 9 one endpoint on this open API also costs money to call: `POST
+/api/translations` reaches a paid third-party model on every request, with no
+authentication and no rate limit in front of it. That is acceptable for a play-test on a
+local network and **must not** reach a public host in this state.
 
 Neither is hand-written. Every endpoint is one `createRoute` definition in
 `apps/server/src/` — routing, request validation, response typing and documentation at

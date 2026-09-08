@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
-import { createServerDeps } from '../../../src/composition';
+import { createTestServerDeps } from '../../support/serverDeps';
 import { createUsersRouter } from '../../../src/routes/users';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
@@ -22,7 +22,7 @@ afterEach(async () => {
 // graph this server never builds.
 function buildTestApp() {
   const app = new Hono();
-  const deps = createServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+  const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
   app.route('/api', createUsersRouter(deps.users));
   return app;
 }

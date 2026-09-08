@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
 
 import { createApp } from './app';
-import { loadConfig } from './config';
+import { loadConfig, loadGeminiConfig } from './config';
 import { createServerDeps } from './composition';
 import { createDb } from './db/client';
 import { createConsoleLogger } from './logger';
@@ -12,6 +12,9 @@ import { createConsoleLogger } from './logger';
 // function a test can call with fakes.
 export function main(): void {
   const config = loadConfig(process.env);
+  // Before the pool: a misconfigured server should fail without having opened
+  // a connection it will never use.
+  const gemini = loadGeminiConfig(process.env);
   // Constructed before the pool, because the pool's error policy closes over it.
   const logger = createConsoleLogger();
 
@@ -20,7 +23,13 @@ export function main(): void {
     onError: (error) => logger.error('idle postgres client', error),
   });
 
-  const deps = createServerDeps({ db, logger, rng: Math.random });
+  const deps = createServerDeps({
+    db,
+    logger,
+    rng: Math.random,
+    fetch: globalThis.fetch,
+    gemini,
+  });
 
   const server = serve(
     { fetch: createApp(deps).fetch, port: config.port, hostname: '0.0.0.0' },

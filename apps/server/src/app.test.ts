@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { createApp } from './app';
 import type { AppDeps } from './composition';
 import type { SessionService } from './services/sessions';
+import type { TranslationService } from './services/translations';
 import type { UserService } from './services/users';
 import { createFakeLogger } from '../tests/support/fakes';
 
@@ -26,10 +27,17 @@ const unreachableUsers: UserService = {
   },
 };
 
+const unreachableTranslations: TranslationService = {
+  translate: () => {
+    throw new Error('the health route must not reach the translation service');
+  },
+};
+
 function depsWithPing(ok: boolean): AppDeps {
   return {
     sessions: unreachableSessions,
     users: unreachableUsers,
+    translations: unreachableTranslations,
     health: { ping: async () => ok },
     logger: createFakeLogger(),
   };

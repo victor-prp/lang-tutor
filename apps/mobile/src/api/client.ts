@@ -5,6 +5,8 @@ import type {
   LoginRequest,
   NextStepRequest,
   NextStepResponse,
+  TranslationRequest,
+  TranslationResponse,
   User,
 } from '@lang-tutor/core/api';
 
@@ -41,6 +43,8 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       postJson<CreateSessionResponse>('/api/sessions', request),
     nextStep: (sessionId: string, request: NextStepRequest) =>
       postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request),
+    translate: (request: TranslationRequest) =>
+      postJson<TranslationResponse>('/api/translations', request),
   };
 }
 

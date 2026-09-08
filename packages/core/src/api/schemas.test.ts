@@ -3,9 +3,13 @@ import { describe, expect, it } from '@jest/globals';
 import {
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
+  LlmTranslationSchema,
   LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
+  TranslationRequestSchema,
+  TranslationResponseSchema,
+  TranslationSenseSchema,
   UserSchema,
   UsernameSchema,
 } from './schemas';
@@ -199,5 +203,105 @@ describe('UserSchema', () => {
       target_language: 'fr',
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe('TranslationRequestSchema', () => {
+  it('accepts a word and a phrase', () => {
+    expect(TranslationRequestSchema.safeParse({ text: 'book' }).success).toBe(true);
+    expect(TranslationRequestSchema.safeParse({ text: 'break a leg' }).success).toBe(true);
+  });
+
+  it('rejects empty, blank and over-long text', () => {
+    expect(TranslationRequestSchema.safeParse({ text: '' }).success).toBe(false);
+    expect(TranslationRequestSchema.safeParse({ text: '   ' }).success).toBe(false);
+    expect(TranslationRequestSchema.safeParse({ text: 'a'.repeat(101) }).success).toBe(false);
+  });
+
+  it('accepts text at exactly the 100-character limit', () => {
+    expect(TranslationRequestSchema.safeParse({ text: 'a'.repeat(100) }).success).toBe(true);
+  });
+
+  it('treats direction as an optional override with two values', () => {
+    expect(TranslationRequestSchema.safeParse({ text: 'book' }).success).toBe(true);
+    expect(TranslationRequestSchema.safeParse({ text: 'book', direction: 'he_en' }).success).toBe(
+      true,
+    );
+    expect(TranslationRequestSchema.safeParse({ text: 'book', direction: 'fr_he' }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('TranslationSenseSchema', () => {
+  it('accepts a sense with no part of speech and no example — the sentence case', () => {
+    expect(TranslationSenseSchema.safeParse({ translation: 'קראתי ספר על החלל.' }).success).toBe(
+      true,
+    );
+  });
+
+  it('accepts a full sense', () => {
+    const result = TranslationSenseSchema.safeParse({
+      translation: 'ספר',
+      part_of_speech: 'noun',
+      example: { source: 'I read a book.', target: 'קראתי ספר.' },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an empty translation', () => {
+    expect(TranslationSenseSchema.safeParse({ translation: '' }).success).toBe(false);
+  });
+
+  it('rejects a half-filled example', () => {
+    expect(
+      TranslationSenseSchema.safeParse({ translation: 'ספר', example: { source: 'x' } }).success,
+    ).toBe(false);
+  });
+});
+
+describe('TranslationResponseSchema', () => {
+  it('caps senses at five', () => {
+    const sense = { translation: 'ספר' };
+    const base = { text: 'book', direction: 'en_he', kind: 'word' } as const;
+    expect(
+      TranslationResponseSchema.safeParse({ ...base, senses: Array(5).fill(sense) }).success,
+    ).toBe(true);
+    expect(
+      TranslationResponseSchema.safeParse({ ...base, senses: Array(6).fill(sense) }).success,
+    ).toBe(false);
+  });
+
+  it('accepts an empty sense list', () => {
+    expect(
+      TranslationResponseSchema.safeParse({
+        text: 'asdkjhasd',
+        direction: 'en_he',
+        kind: 'word',
+        senses: [],
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe('LlmTranslationSchema', () => {
+  it('is the response shape minus text and direction', () => {
+    const result = LlmTranslationSchema.safeParse({
+      kind: 'word',
+      senses: [{ translation: 'ספר', part_of_speech: 'noun' }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a model that invents its own direction', () => {
+    const result = LlmTranslationSchema.safeParse({
+      kind: 'word',
+      direction: 'he_en',
+      senses: [{ translation: 'ספר' }],
+    });
+    // Extra keys are stripped rather than rejected; what matters is that the
+    // server's own direction is never overwritten by the model's.
+    expect(result.success).toBe(true);
+    expect(result.data).not.toHaveProperty('direction');
   });
 });

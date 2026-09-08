@@ -139,4 +139,52 @@ describe('api/client', () => {
       }),
     ).rejects.toMatchObject({ status: 409 });
   });
+
+  describe('translate', () => {
+    it('posts the text to /api/translations and returns the parsed body', async () => {
+      const response = {
+        text: 'book',
+        direction: 'en_he',
+        kind: 'word',
+        senses: [{ translation: 'ספר', part_of_speech: 'noun' }],
+      };
+      const mockFetch = jest.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => response,
+      }));
+      const client = buildClient(mockFetch);
+
+      await expect(client.translate({ text: 'book' })).resolves.toEqual(response);
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test.local/api/translations',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'book' }),
+        }),
+      );
+    });
+
+    // The flip control is the only thing that sends this: absent means "detect
+    // from the script", so an always-present field would silently disable it.
+    it('sends an explicit direction when one is given', async () => {
+      const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+      const client = buildClient(mockFetch);
+
+      await client.translate({ text: 'book', direction: 'he_en' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'http://test.local/api/translations',
+        expect.objectContaining({ body: JSON.stringify({ text: 'book', direction: 'he_en' }) }),
+      );
+    });
+
+    it('raises ApiError with the status, so the screen can tell 400 from 502', async () => {
+      const mockFetch = jest.fn(async () => ({ ok: false, status: 502, json: async () => ({}) }));
+      const client = buildClient(mockFetch);
+
+      await expect(client.translate({ text: 'book' })).rejects.toMatchObject({ status: 502 });
+    });
+  });
 });

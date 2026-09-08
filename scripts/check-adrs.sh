@@ -10,6 +10,13 @@
 # long as it is named scripts/check-adr-NNNN-<slug>.sh; nothing here needs
 # editing.
 #
+# Every check added here must be shown to FAIL on a deliberately planted
+# violation before it is trusted. A check that can never fire prints nothing,
+# which is indistinguishable from a check that passes — one shipped that way
+# once, excluding its target directory with `grep -v '/providers/'`, which
+# matched every violation's own import path and deleted the lines it was
+# hunting. Plant a violation, confirm it is reported, remove it.
+#
 # Runs every script even if an earlier one fails: `&&` would stop at the
 # first failure and hide every other ADR's result.
 

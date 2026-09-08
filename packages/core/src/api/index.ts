@@ -5,6 +5,7 @@ export type {
   CreateUserRequest,
   ErrorResponse,
   HealthResponse,
+  LlmTranslation,
   LoginRequest,
   MissedQuestion,
   MultipleChoiceQuestion,
@@ -13,5 +14,10 @@ export type {
   Position,
   Question,
   Score,
+  TranslationDirection,
+  TranslationKind,
+  TranslationRequest,
+  TranslationResponse,
+  TranslationSense,
   User,
 } from './types';

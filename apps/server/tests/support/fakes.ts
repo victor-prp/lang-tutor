@@ -4,8 +4,10 @@ import type { AppDeps } from '../../src/composition';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
+import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
+import type { TranslationService } from '../../src/services/translations';
 import type { UserService } from '../../src/services/users';
 
 export type FakeLogger = Logger & {
@@ -46,12 +48,36 @@ export function createFakeAppDeps(): AppDeps {
     register: unreachable,
     login: unreachable,
   };
+  const translations: TranslationService = {
+    translate: unreachable,
+  };
   return {
     sessions,
     users,
+    translations,
     health: { ping: unreachable },
     logger: createFakeLogger(),
   };
+}
+
+/**
+ * Replies in order; the last reply repeats once the queue is down to one, so a
+ * test that calls twice does not have to say so. An Error in the queue is
+ * thrown rather than returned, which is how a provider failure is simulated
+ * without a socket.
+ */
+export function createFakeLlmClient(...replies: (string | Error)[]) {
+  const calls: LlmJsonRequest[] = [];
+  const queue = [...replies];
+
+  const client: LlmClient = async (request) => {
+    calls.push(request);
+    const next = queue.length > 1 ? queue.shift()! : queue[0];
+    if (next instanceof Error) throw next;
+    return next;
+  };
+
+  return Object.assign(client, { calls });
 }
 
 // A repository a unit test can hold in its head: the same contract, backed by

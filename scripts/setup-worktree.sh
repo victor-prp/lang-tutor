@@ -43,6 +43,18 @@ else
   status=1
 fi
 
+# --- 1b. the provider key ----------------------------------------------------
+# Not copied from the main checkout the way .env.local is: this one is a secret
+# and lives in the shell, not in a file the script can find. Reported rather
+# than failed, because the tests do not need it — only `npm run server` does.
+if [ -z "${GEMINI_API_KEY:-}" ]; then
+  echo "  note       GEMINI_API_KEY is not set — 'npm run server' will refuse to start."
+  echo "             For local work, point GEMINI_BASE_URL at MockServer and use any dummy key:"
+  echo "               export GEMINI_BASE_URL=http://localhost:1080/dev GEMINI_API_KEY=dev GEMINI_MODEL=dev"
+else
+  echo "  ok         GEMINI_API_KEY set"
+fi
+
 # --- 2. dependencies ---------------------------------------------------------
 # A worktree gets its own node_modules; there is no sharing with the main
 # checkout. Roughly 700MB per worktree.

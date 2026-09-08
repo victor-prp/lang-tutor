@@ -7,4 +7,5 @@ npm-debug.*
 .env*.local
 .superpowers/
 test-results/
+apps/server/tests/eval/.results/
 playwright-report/

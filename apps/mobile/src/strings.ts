@@ -52,4 +52,36 @@ export const strings = {
   profileAgeLabel: 'גיל',
   switchUser: 'החלפת משתמש',
   back: 'חזרה',
+  translateEntry: 'תרגום מלה או ביטוי',
+  translateTitle: 'תרגום',
+  translatePlaceholder: 'מלה או ביטוי…',
+  translateAction: 'תרגם',
+  translateDirection: (direction: string) =>
+    direction === 'he_en' ? 'מעברית לאנגלית' : 'מאנגלית לעברית',
+  translateFlip: '⇄ החלף',
+  translateTopSense: 'המשמעות הנפוצה',
+  translateMore: (count: number) => `עוד משמעויות (${count})`,
+  translateChoose: 'זו המשמעות שחיפשתי',
+  translateChosen: 'התרגום נשמר לאוצר המילים שלך',
+  translateNewWord: 'מלה חדשה',
+  translateEmpty: 'לא מצאנו תרגום',
+  translateUnavailable: 'התרגום לא זמין',
+  translateRetry: 'נסה שוב',
+  translateTooLong: 'עד 100 תווים',
+  // Known parts of speech only. An unfamiliar value returns undefined and the
+  // screen omits the line, so a value the model invents tomorrow degrades to a
+  // missing label rather than a broken card — the same reason the wire keeps
+  // this field a plain string.
+  partOfSpeech: (value: string): string | undefined =>
+    ({
+      noun: 'שם עצם',
+      verb: 'פועל',
+      adjective: 'שם תואר',
+      adverb: 'תואר הפועל',
+      preposition: 'מלת יחס',
+      pronoun: 'כינוי גוף',
+      conjunction: 'מלת חיבור',
+      interjection: 'מלת קריאה',
+      phrase: 'ביטוי',
+    })[value.toLowerCase()],
 } as const;
