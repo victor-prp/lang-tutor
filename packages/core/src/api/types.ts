@@ -7,6 +7,7 @@ import type {
   CreateUserRequestSchema,
   ErrorSchema,
   HealthResponseSchema,
+  LlmTranslationSchema,
   LoginRequestSchema,
   MissedQuestionSchema,
   MultipleChoiceQuestionSchema,
@@ -15,6 +16,11 @@ import type {
   PositionSchema,
   QuestionSchema,
   ScoreSchema,
+  TranslationDirectionSchema,
+  TranslationKindSchema,
+  TranslationRequestSchema,
+  TranslationResponseSchema,
+  TranslationSenseSchema,
   UserSchema,
 } from './schemas';
 
@@ -42,3 +48,9 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type User = z.infer<typeof UserSchema>;
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
+export type TranslationDirection = z.infer<typeof TranslationDirectionSchema>;
+export type TranslationKind = z.infer<typeof TranslationKindSchema>;
+export type TranslationSense = z.infer<typeof TranslationSenseSchema>;
+export type TranslationRequest = z.infer<typeof TranslationRequestSchema>;
+export type TranslationResponse = z.infer<typeof TranslationResponseSchema>;
+export type LlmTranslation = z.infer<typeof LlmTranslationSchema>;

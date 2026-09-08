@@ -125,3 +125,48 @@ export const CreateUserRequestSchema = z.object({
 export const LoginRequestSchema = z.object({
   username: UsernameSchema,
 });
+
+// Translation, phase 9. Two directions only; a third language would need more
+// than an enum entry, so narrowing here is honest rather than limiting.
+export const TranslationDirectionSchema = z.enum(['en_he', 'he_en']);
+
+// Describes the input, not a meaning, so it sits at the top level of the
+// response. `word` is decided in code for a single token; the model answers the
+// phrase/sentence distinction, which no token count can settle.
+export const TranslationKindSchema = z.enum(['word', 'phrase', 'sentence']);
+
+// `part_of_speech` and `example` are optional because a sentence has neither: a
+// part of speech classifies a lexical item, and an example restates an input
+// that is already a sentence. Optional rather than empty strings keeps "none"
+// distinguishable from "the model forgot".
+export const TranslationSenseSchema = z.object({
+  translation: z.string().min(1),
+  part_of_speech: z.string().optional(),
+  example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
+});
+
+export const TranslationRequestSchema = z.object({
+  // Trimmed before length is judged, so "   " is empty rather than three chars.
+  // The 100-character ceiling is also the cap on how much untrusted text can
+  // reach the model in one call.
+  text: z.string().trim().min(1).max(100),
+  // Absent means "detect from the script". Present only when the learner taps
+  // the flip control, so a wrong detection is recoverable.
+  direction: TranslationDirectionSchema.optional(),
+});
+
+export const TranslationResponseSchema = z.object({
+  text: z.string(),
+  direction: TranslationDirectionSchema,
+  kind: TranslationKindSchema,
+  senses: z.array(TranslationSenseSchema).max(5),
+});
+
+// What the model is asked to return, and the schema each provider converts into
+// its own structured-output dialect. Deliberately the response shape *minus*
+// `text` and `direction`: both are decided in code before the call, so offering
+// them to the model would only invite it to disagree with the server.
+export const LlmTranslationSchema = z.object({
+  kind: TranslationKindSchema,
+  senses: z.array(TranslationSenseSchema).max(5),
+});
