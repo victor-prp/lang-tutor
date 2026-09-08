@@ -3,7 +3,8 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 import { E2E_DATABASE_URL } from './globalSetup';
-import { API_URL, APP_URL } from './urls';
+import { E2E_MOCK_NAMESPACE } from './tests/support/mockServer';
+import { API_URL, APP_URL, MOCKSERVER_URL } from './urls';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
@@ -37,7 +38,14 @@ export default defineConfig({
     {
       command: 'npm run start -w apps/server',
       cwd: REPO_ROOT,
-      env: { DATABASE_URL: E2E_DATABASE_URL },
+      env: {
+        DATABASE_URL: E2E_DATABASE_URL,
+        // Only the base URL differs from production. There is no stub mode
+        // inside the server.
+        GEMINI_BASE_URL: `${MOCKSERVER_URL}/${E2E_MOCK_NAMESPACE}`,
+        GEMINI_API_KEY: 'e2e',
+        GEMINI_MODEL: 'e2e-model',
+      },
       url: `${API_URL}/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
