@@ -13,19 +13,24 @@ depend on layers below it and on shared leaf modules, never on layers above it.
   index.ts          process        config, pool, serve, SIGTERM
   composition.ts    wiring         createServerDeps(io) -> AppDeps
   app.ts            wiring         createApp(deps) — mounts routes, no logic
-        │
-        ▼
-  routes/           transport      Hono. Parse, validate, map outcome -> status code
-        │
-        ▼
-  services/         application    use cases. Owns the transaction boundary
-        │
-        ├──────────────────────┐
-        ▼                      ▼
-  domain/           domain      repo/ + db/    persistence
-  packages/core                                Drizzle, SQL
-  pure functions, no I/O
+        │       └──────────────────────────────────────────────┐
+        ▼                                                      │
+  routes/           transport      Hono. Parse, validate,      │
+        │                          map outcome -> status code  │
+        ▼                                                      │
+  services/         application    use cases. Owns the         │
+        │                          transaction boundary        │
+        ├──────────────────────┐                               ▼
+        ▼                      ▼                        providers/
+  domain/           domain      repo/ + db/              outbound HTTP
+  packages/core                 Drizzle, SQL             one importer:
+  pure functions, no I/O        persistence              composition.ts
 ```
+
+`providers/` is drawn off `composition.ts` rather than off `services/` on purpose. A
+service depends on a *contract type* declared in `services/` — `LlmClient` — and never on
+the module that satisfies it; the composition root is the only place the two meet. That is
+the same shape `Transaction` already gives the database, and R11 is what keeps it true.
 
 `errors.ts` and `logger.ts` are leaf modules: any layer may import them, they import
 nothing from the server.
@@ -45,6 +50,8 @@ the server's holds the session state machine only a server has (`step`, `Session
 | R5 | `app.ts` | `composition` (type `AppDeps`), `routes/`, Hono and `@hono/zod-openapi`, `@lang-tutor/core/api*`, the docs UI (`@scalar/hono-api-reference`) | `db/`, `repo/`, `services/`, `drizzle-orm`, `pg` |
 | R6 | `composition.ts` | every factory it wires | nothing that performs I/O at call time (no `createDb`, no `new Pool`) |
 | R7 | anywhere | — | `console` outside `logger.ts` and `index.ts`/`db/cli.ts` |
+| R10 | `providers/` | `fetch`, its own transport types, `errors`, `logger` | `routes/`, `services/`, `domain/`, `repo/`, `db/`, `app.ts`, `composition.ts` |
+| R11 | `providers/` | — | **anything, from anywhere but `composition.ts`** — every consumer depends on a contract type declared in `services/` (`LlmClient` is the first), and only the composition root knows which provider satisfies it |
 
 R2 forbids `db/` outright, including the handle types. This is stricter than it
 looks and the reason is not stylistic: `Db` is `NodePgDatabase<typeof schema>`, so
@@ -54,22 +61,32 @@ through the type parameter and the operators arrive as callback arguments. No
 import rule can see that. A service therefore receives a `Transaction` (see R8),
 which closes over the handle and yields only repositories.
 
-Two rules that are not import rules:
+Three rules that are not import rules:
 
-- **R8 — `services/` owns the transaction boundary; `db/transaction.ts` owns the
-  mechanism.** Each use case is exactly one `transaction(...)` call in
+- **R8 — A use case *that touches the database* is exactly one `transaction(...)` call;
+  `db/transaction.ts` owns the mechanism.** That call lives in
   `apps/server/src/services/`, and `db.transaction(...)` itself appears only in
   `apps/server/src/db/transaction.ts`. A route handler never opens one; a repository
   never opens its own (it is handed a `Tx`, so the same primitive composes inside or
   outside one). `createTransaction(db, bind)` is generic in what it binds, so `db/`
   does not learn that `repo/` exists — `composition.ts` supplies `bind`.
+
+  The qualifier matters as of phase 9: `services/translations.ts` is a use case with
+  **zero** transactions, because it touches no table. R8's detection command greps for
+  *excess* `.transaction(` call sites, so nothing would have flagged the mismatch and this
+  prose would have quietly stopped describing the code.
 - **R9 — Repositories expose primitives, services expose use cases.** A repository
   function is one persistence step (`loadSession`, `insertAnswer`); a service function is
   one use case (`startSession`, `submitAnswer`) taking only its own arguments.
+- **R12 — A provider maps every failure of its own into `errors.ts`.** A provider-specific
+  error shape must not escape the layer: `services/` and `routes/` handle `LlmUnavailable`
+  and `TranslationUnreadable`, never a Gemini status object. Not greppable — the *absence*
+  of a leaked type is invisible to a regex — so this is enforced by review, alongside R6
+  and R9.
 
 ## How to detect a violation
 
-`npm run lint:arch` runs all fifteen checks below and fails on the first violation;
+`npm run lint:arch` runs all seventeen checks below and fails on the first violation;
 CI runs it in the `check-adrs` job, needing no `npm ci` at all, so a layering violation
 is reported in seconds. The commands live in
 `scripts/check-adr-0001-layered-architecture.sh` verbatim — that file is the
@@ -110,6 +127,15 @@ grep -rn "console\." apps/server/src --include='*.ts' \
 grep -rn "\.transaction(" apps/server/src --include='*.ts' \
   | grep -v -e '/db/transaction.ts' -e '\.test\.ts'
 
+# R10 — providers must not reach upward
+grep -rnE "from '\.\./(routes|services|domain|repo|db)/|from '\.\./(app|composition)'" \
+  apps/server/src/providers/
+
+# R11 — providers are constructed only at the composition root
+grep -rnE "(from|require\(|import\()[[:space:]]*'[^']*providers/" \
+  apps/server/src apps/server/tests --include='*.ts' --exclude-dir=providers \
+  | grep -vE "^[^:]*(composition\.ts|tests/support/|tests/eval/)"
+
 # R1 — route tests must not reach past composition
 grep -rnE "from '.*src/(db|repo)/|from 'drizzle-orm|from 'pg'" apps/server/tests/integration/routes/
 
@@ -123,6 +149,21 @@ grep -rn "from '.*src/repo/" apps/server/tests/integration/services/ | grep -v '
 grep -rnE "from '.*src/(routes|services)/|from '.*src/(app|composition)'" \
   apps/server/tests/integration/repo/ apps/server/tests/integration/db/
 ```
+
+**Three things about the R11 command are deliberate and must not be "simplified":**
+
+- The directory is skipped with `--exclude-dir`, **not** with `grep -v '/providers/'`.
+  A content filter would match every violation's own import path and delete exactly the
+  lines the check is hunting, leaving a command that can never report anything. Every
+  remaining `-v` filter is anchored to the path with `^[^:]*` for the same reason.
+- It matches `require(` and `import(` as well as `from`, so a dynamic import cannot launder
+  the dependency, and it scans `apps/server/tests` so an integration test cannot construct
+  a provider directly and be black-box in name only. `tests/support/` is exempt as the test
+  composition root; there is no blanket `*.test.ts` exemption, because a service's unit test
+  has a fake `LlmClient` and no reason to import a provider.
+- `tests/eval/` is exempt for the same reason `tests/support/` is: it is a second test
+  composition root, and naming `createGeminiClient` is its entire purpose — it is the only
+  code here that calls the real provider.
 
 ### What the rules cover
 

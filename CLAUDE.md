@@ -8,6 +8,10 @@ turn touched files under those trees, and CI enforces the same script (also runn
 review time. `check-adrs.sh` discovers every `scripts/check-adr-*.sh` automatically, so
 adding a new ADR never means updating this wiring.
 
+When adding a check to any `scripts/check-adr-*.sh`, plant a violation of the rule first
+and confirm the script reports it. A check that cannot fire prints nothing, exactly like a
+check that passes, so "it printed nothing" is not evidence on its own.
+
 Use the `create-adr` skill when a new structural decision needs recording.
 
 # Worktrees
