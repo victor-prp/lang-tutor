@@ -77,12 +77,18 @@ save there would train testers to expect the one behaviour known not to be comin
 to *do* with sentences is the next phase's question; refusing to lie about them is this
 phase's answer.
 
-**The provider abstraction sits below translation, not at it.** `LlmClient` is a
-JSON-in/JSON-out completion call, so the prompt, the response schema, the parsing and the
-ranking live once in `domain/`. Had the seam been `Translator` — "give me senses for this
-word" — each provider would carry its own copy of the prompt, which is both the thing that
-will actually be tuned and the thing that must be *identical* across providers for a
-comparison between them to mean anything.
+**`LlmClient` is the provider abstraction, and it is a JSON completion call rather than a
+translation call.** The seam is drawn one level *below* the feature: a provider is asked for
+a JSON-shaped completion, not for the meanings of a word, so the prompt, the response
+schema, the parsing and the ranking live once in `domain/`. Had the seam been `Translator`
+— "give me senses for this word" — each provider would carry its own copy of the prompt,
+which is both the thing that will actually be tuned and the thing that must be *identical*
+across providers for a comparison between them to mean anything.
+
+Two words in this spec are easy to conflate, so they are used precisely: the **provider
+abstraction** is the type `LlmClient`, declared in `services/llm.ts`; the **provider layer**
+is the folder `providers/`, governed by ADR 0006. The first is the contract, the second is
+the address.
 
 **No `LLM_PROVIDER` switch.** With one provider it is a branch with one arm. The
 composition root names `createGeminiClient` directly; the branch arrives with the second
@@ -202,6 +208,31 @@ export type LlmClient = (request: LlmJsonRequest) => Promise<string>;
 
 Types only, exactly as `services/transaction.ts` holds `Transaction` — which is what keeps
 a provider's name out of the service layer without an interface file or a base class.
+
+Where it sits, and who may see what:
+
+```
+routes/translations.ts        transport
+  services/translations.ts    orchestration
+    domain/translation.ts     prompt · schema · parse · rank    ▲ above: shared
+    ═════ LlmClient ═════     the provider abstraction
+    providers/gemini.ts       HTTP envelope only                ▼ below: swappable
+
+composition.ts                the only file that imports providers/
+```
+
+**A service depends on the contract, not on a provider reached through it.**
+`services/translations.ts` never imports `providers/` — not even as a type, since the type
+is declared locally in `services/llm.ts`. It therefore never learns that a provider exists:
+the same service, unmodified, is satisfied by a fake `LlmClient` in its unit test, by
+`createGeminiClient` in production, and by an in-process model later. This is stricter than
+ADR 0001 R2's treatment of `repo/`, which does permit a type-only import — here the folder
+is invisible above the composition root entirely.
+
+That is the same shape ADR 0002 already imposes on the database: `services/` holds
+`Transaction`, `composition.ts` binds the real repositories into it, and no service can name
+Drizzle. `LlmClient` applies the pattern to outbound HTTP, which is why the rule should read
+as familiar rather than new.
 
 **It returns the raw JSON text, not a parsed object.** Parsing and validation then happen
 once, in `domain/translation.ts`, so a model that returns malformed output fails
@@ -521,7 +552,10 @@ person needing an HTTP call will reasonably reach for `fetch` from wherever they
 be standing.
 
 - Outbound third-party I/O lives only in `apps/server/src/providers/`.
-- A provider is reached only from `services/`, never from `routes/`, `domain/` or `repo/`.
+- **`providers/` has exactly one importer: `composition.ts`.** Every consumer — `services/`
+  included — depends on a contract type declared in `services/` (`LlmClient` is the first),
+  and only the composition root knows which provider satisfies it. `routes/`, `domain/`,
+  `repo/` and `app.ts` may not import the folder either.
 - A provider receives `fetch`, a base URL, a key and a model; it reads no environment and
   constructs no client of its own.
 - A provider maps every failure of its own to an error in `errors.ts`. A provider-specific
@@ -536,10 +570,18 @@ Both halves are greppable:
 grep -rnE "\bfetch\(|generativelanguage|api\.openai\.com" apps/server/src \
   --include='*.ts' | grep -v -e '/providers/' -e '/index.ts:' -e '\.test\.ts:'
 
-# providers are reached only from services/ (and composition, which assembles them)
-grep -rn "from '\.\./providers/" apps/server/src \
-  | grep -v -e '/services/' -e 'composition.ts'
+# providers are constructed only at the composition root
+grep -rn "from '.*providers/" apps/server/src --include='*.ts' \
+  | grep -v -e 'composition.ts:' -e '/providers/' -e '\.test\.ts:'
 ```
+
+The second command deliberately does **not** exempt `services/`. An earlier draft of this
+ADR did, by analogy with ADR 0001 R2's type-only allowance for `repo/` — but the analogy
+does not hold, because a service needs no import from `providers/` at all when its contract
+lives in `services/`. Exempting the folder would have whitelisted the precise thing the rule
+exists to catch: a service reaching for a collaborator instead of receiving one, which is
+also an ADR 0002 violation. A check that permits its own central case is worse than no
+check, because it reads as enforcement.
 
 ### ADR 0001 R8 — amended
 
