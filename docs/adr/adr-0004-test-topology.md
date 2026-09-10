@@ -32,8 +32,13 @@ infrastructure. `apps/server/tests/integration/**/*.test.ts` is the database buc
 create a database, open a pool, or hold Jest's `globalSetup`/`globalTeardown` — and it
 holds no test files of its own.
 
-`apps/server/tests/eval/` is the third bucket: run by `npm run eval`, and the only code in
-the repo that calls a real language model.
+`apps/server/tests/eval/` is the third bucket: the opt-in real-model code. Two things live
+there — `npm run eval`, which scores the prompt, and `npm run content:generate`, the
+recorder that produces `src/db/content.generated.ts`. The bucket is defined by *calling a
+real language model*, which describes both; the recorder is not an eval and is not scored,
+it shares the bucket because it shares the provider client, and putting it in `scripts/`
+instead would have meant a third exemption in [ADR 0001](adr-0001-layered-architecture.md)
+R11's grep, whose whole value is being short.
 
 **Amended.** It was introduced as a *signal, not a gate* — its own workflow on
 `workflow_dispatch` and a nightly schedule, never on a pull request — on the grounds that a
@@ -44,11 +49,12 @@ than at 03:17 the next morning, and the cost is a failure mode no other job has 
 with an innocent diff, plus real API spend on every push. The `eval-report` artifact is
 what tells the two apart, so the job uploads it on success as well as on failure.
 
-Nothing in it is named `*.test.ts`, and that is the whole mechanism: `run.ts` and `cases.ts`
-are plain modules, so neither Jest project's `testMatch` can pick them up and R4's `find`
-has nothing to report. Naming them `*.test.ts` would have swept them into a bucket that must
-never make a network call — which is exactly what R4 exists to prevent, so the rule protects
-this bucket rather than needing an exception for it.
+Nothing in it is named `*.test.ts`, and that is the whole mechanism: `run.ts`, `cases.ts`,
+`askModel.ts` and `generate-content.ts` are plain modules, so neither Jest project's
+`testMatch` can pick them up and R4's `find` has nothing to report. Naming them
+`*.test.ts` would have swept them into a bucket that must never make a network call —
+which is exactly what R4 exists to prevent, so the rule protects this bucket rather than
+needing an exception for it.
 
 `tests/eval/` is a second test composition root, alongside `tests/support/`: it names
 `createGeminiClient` directly, which is why [ADR 0001](adr-0001-layered-architecture.md)
@@ -59,7 +65,7 @@ R11's command exempts it.
 | # | Subject | May import | Must not import |
 |---|---|---|---|
 | R1 | `apps/server/src/**/*.test.ts` | anything from `src/` | `pg`, `drizzle-orm` |
-| R2 | `apps/server/src/**/*.test.ts` | `src/db/content.ts` (pure data) | `src/db/client.ts`, `db/migrate.ts`, `db/seed.ts`, `db/cli.ts` |
+| R2 | `apps/server/src/**/*.test.ts` | `src/db/content.ts` and `src/db/content.generated.ts` (pure data) | `src/db/client.ts`, `db/migrate.ts`, `db/seed.ts`, `db/cli.ts` (`db/reseed.ts` opens no connection of its own — it takes a `Db` — so its absence here is deliberate, not an oversight) |
 | R3 | `apps/server/src/**/*.test.ts` | `tests/support/fakes.ts`, `tests/support/testRng.ts` | `tests/support/testDb.ts`, `dbNames.ts`, `withTx.ts`, `globalSetup.ts`, `globalTeardown.ts` |
 | R4 | `apps/server/tests/` | test files under `tests/integration/`; the eval bucket's plain modules under `tests/eval/` | a `*.test.ts` anywhere else under `tests/` |
 | R5 | `apps/server/jest.config.js`'s `unit` project | `testMatch`, `restoreMocks`, `resetMocks`, `transformIgnorePatterns` | a `globalSetup` (or `globalTeardown`) key |

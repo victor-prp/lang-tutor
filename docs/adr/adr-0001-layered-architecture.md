@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -46,7 +46,7 @@ the server's holds the session state machine only a server has (`step`, `Session
 | R1 | `routes/` | `services/` (types only), `domain/`, `errors`, `@lang-tutor/core/api*`, Hono, zod | `db/`, `repo/`, `drizzle-orm`, `pg` |
 | R2 | `services/` | `domain/`, `repo/` (**types only**), `errors`, `logger` | **anything under `db/`**, Hono, `hono/*`, `@hono/*`, HTTP status codes, `drizzle-orm`, `pg` |
 | R3 | `domain/` | `@lang-tutor/core/*` only | anything else in `apps/server/src`, `pg`, `drizzle-orm`, Hono, `Date.now`, `Math.random` |
-| R4 | `repo/` + `db/` | `drizzle-orm`, `pg`, `db/*`, domain **types** | `routes/`, `services/`, `app.ts`, `composition.ts` |
+| R4 | `repo/` + `db/` | `drizzle-orm`, `pg`, `db/*`, **`repo/*`**, domain **types** | `routes/`, `services/`, `app.ts`, `composition.ts` |
 | R5 | `app.ts` | `composition` (type `AppDeps`), `routes/`, Hono and `@hono/zod-openapi`, `@lang-tutor/core/api*`, the docs UI (`@scalar/hono-api-reference`) | `db/`, `repo/`, `services/`, `drizzle-orm`, `pg` |
 | R6 | `composition.ts` | every factory it wires | nothing that performs I/O at call time (no `createDb`, no `new Pool`) |
 | R7 | anywhere | — | `console` outside `logger.ts` and `index.ts`/`db/cli.ts` |
@@ -61,6 +61,13 @@ through the type parameter and the operators arrive as callback arguments. No
 import rule can see that. A service therefore receives a `Transaction` (see R8),
 which closes over the handle and yields only repositories.
 
+R4's diagram draws `repo/` and `db/` as **one** layer in one box under one rule, but its
+"may import" list originally omitted the sibling — so `db/seed.ts` calling
+`persistEntries` was uncovered prose rather than a violation, since the detection grep
+only looks upward. Phase 10 added `repo/*` to the list, which makes the prose match the
+diagram rather than granting anything new. No detection command changed, because the rule
+that matters — *persistence must not reach upward* — is unaffected.
+
 Three rules that are not import rules:
 
 - **R8 — A use case *that touches the database* is exactly one `transaction(...)` call;
@@ -71,10 +78,31 @@ Three rules that are not import rules:
   outside one). `createTransaction(db, bind)` is generic in what it binds, so `db/`
   does not learn that `repo/` exists — `composition.ts` supplies `bind`.
 
-  The qualifier matters as of phase 9: `services/translations.ts` is a use case with
-  **zero** transactions, because it touches no table. R8's detection command greps for
-  *excess* `.transaction(` call sites, so nothing would have flagged the mismatch and this
-  prose would have quietly stopped describing the code.
+  **Amended twice.** Phase 9 added *"that touches the database"*, because
+  `services/translations.ts` was a use case with **zero** transactions. Phase 10 made that
+  same use case have **two**: normalize, read, call the provider for one to three seconds,
+  write, respond. The rule now reads: *a use case opens at most one **write** transaction;
+  a read preceding third-party I/O may be its own.*
+
+  Holding one transaction open across the provider call was rejected outright: ten seconds
+  of an idle pooled connection per lookup, one per concurrent learner. Two short
+  transactions with the call between them hold nothing and race harmlessly, because the
+  write is idempotent against `UNIQUE(language_code, lemma)` and `UNIQUE(term_id, form)`.
+
+  R8's detection command greps for `\.transaction(` — the mechanism, `db.transaction(`,
+  which still has exactly one call site. The "how many per use case" half was never
+  machine-checked and is not now. `db/seed.ts` reaches a transaction through
+  `createTransaction` for exactly this reason.
+
+  **A read-only `Query` seam is the alternative, recorded rather than taken.**
+  `createQuery(db, bind)` beside `createTransaction`, bound to a read-only projection of
+  the repositories, would keep this wording untouched and make "one write transaction per
+  use case" a type-level guarantee rather than prose — the way `Transaction` already makes
+  it impossible for a service to hold a `Db` — and would save a `BEGIN`/`COMMIT` round trip
+  on a cache hit. Declined for simplicity while one use case needs it: a new type, factory,
+  bind and read-only projection, plus a decision about `login`, a pure read that opens a
+  transaction today. **Revisit it for the performance gain**, or the second time a use case
+  wants a read outside its write.
 - **R9 — Repositories expose primitives, services expose use cases.** A repository
   function is one persistence step (`loadSession`, `insertAnswer`); a service function is
   one use case (`startSession`, `submitAnswer`) taking only its own arguments.
