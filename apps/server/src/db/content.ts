@@ -9,6 +9,9 @@ export type ContentEntry = {
   part_of_speech: string;
   prompt: string;
   prompt_kind: string;
+  /** What a learner would type. The recorder's input, the variant's form, and
+   *  the quiz prompt — one string doing all three, honestly. */
+  query: string;
   translation: string;
   options: string[];
   correct_option: number;
@@ -22,6 +25,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'noun',
     prompt: 'window',
     prompt_kind: 'base',
+    query: 'window',
     translation: 'חלון',
     options: ['דלת', 'חלון', 'שולחן', 'קיר'],
     correct_option: 1,
@@ -33,6 +37,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'noun',
     prompt: 'book',
     prompt_kind: 'base',
+    query: 'book',
     translation: 'ספר',
     options: ['ספר', 'עיפרון', 'מחשב', 'כיסא'],
     correct_option: 0,
@@ -44,6 +49,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'noun',
     prompt: 'water',
     prompt_kind: 'base',
+    query: 'water',
     translation: 'מים',
     options: ['לחם', 'חלב', 'מים', 'קפה'],
     correct_option: 2,
@@ -55,6 +61,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'noun',
     prompt: 'friend',
     prompt_kind: 'base',
+    query: 'friend',
     translation: 'חבר',
     options: ['שכן', 'מורה', 'רופא', 'חבר'],
     correct_option: 3,
@@ -66,6 +73,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'adjective',
     prompt: 'difficult',
     prompt_kind: 'base',
+    query: 'difficult',
     translation: 'קשה',
     options: ['קל', 'קשה', 'חשוב', 'מהיר'],
     correct_option: 1,
@@ -77,6 +85,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'verb',
     prompt: 'to remember',
     prompt_kind: 'infinitive',
+    query: 'to remember',
     translation: 'לזכור',
     options: ['לשכוח', 'לזכור', 'ללמוד', 'לחשוב'],
     correct_option: 1,
@@ -88,6 +97,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'excuse me',
     prompt_kind: 'base',
+    query: 'excuse me',
     translation: 'סליחה',
     options: ['שלום', 'תודה', 'סליחה', 'בבקשה'],
     correct_option: 2,
@@ -99,6 +109,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'good morning',
     prompt_kind: 'base',
+    query: 'good morning',
     translation: 'בוקר טוב',
     options: ['לילה טוב', 'בוקר טוב', 'ערב טוב', 'שבוע טוב'],
     correct_option: 1,
@@ -110,6 +121,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'thank you very much',
     prompt_kind: 'base',
+    query: 'thank you very much',
     translation: 'תודה רבה',
     options: ['תודה רבה', 'בבקשה רבה', 'סליחה רבה', 'שלום רב'],
     correct_option: 0,
@@ -121,6 +133,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'How do you do?',
     prompt_kind: 'base',
+    query: 'How do you do?',
     translation: 'מה נשמע?',
     options: ['מה השעה?', 'מה נשמע?', 'מה קרה?', 'מה זה?'],
     correct_option: 1,
@@ -132,6 +145,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'see you later',
     prompt_kind: 'base',
+    query: 'see you later',
     translation: 'נתראה אחר כך',
     options: ['נתראה מחר', 'נתראה אחר כך', 'ניפגש בבוקר', 'נדבר בהמשך'],
     correct_option: 1,
@@ -143,6 +157,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: "I don't understand",
     prompt_kind: 'base',
+    query: "I don't understand",
     translation: 'אני לא מבין',
     options: ['אני לא יודע', 'אני לא שומע', 'אני לא מבין', 'אני לא זוכר'],
     correct_option: 2,
@@ -154,6 +169,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'What is your name?',
     prompt_kind: 'base',
+    query: 'What is your name?',
     translation: 'איך קוראים לך?',
     options: ['מאיפה אתה?', 'איך קוראים לך?', 'בן כמה אתה?', 'מה אתה עושה?'],
     correct_option: 1,
@@ -165,6 +181,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'Have a nice day!',
     prompt_kind: 'base',
+    query: 'Have a nice day!',
     translation: 'שיהיה לך יום נעים!',
     options: [
       'שיהיה לך יום נעים!',
@@ -181,6 +198,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'Where is the station?',
     prompt_kind: 'base',
+    query: 'Where is the station?',
     translation: 'איפה התחנה?',
     options: ['איפה הבית?', 'איפה השוק?', 'איפה התחנה?', 'איפה הרחוב?'],
     correct_option: 2,
@@ -192,6 +210,7 @@ export const content: ContentEntry[] = [
     part_of_speech: 'phrase',
     prompt: 'Nice to meet you',
     prompt_kind: 'base',
+    query: 'Nice to meet you',
     translation: 'נעים להכיר',
     options: ['נעים להכיר', 'טוב לראות אותך', 'נתראה בקרוב', 'תודה שבאת'],
     correct_option: 0,

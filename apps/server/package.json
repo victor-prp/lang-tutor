@@ -32,6 +32,7 @@
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
     "db:migrate": "tsx src/db/cli.ts",
-    "eval": "tsx tests/eval/run.ts"
+    "eval": "tsx tests/eval/run.ts",
+    "content:generate": "tsx tests/eval/generate-content.ts"
   }
 }
