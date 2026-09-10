@@ -17,6 +17,11 @@ import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 
+// Every test here that expects a provider call uses a string the seed does not
+// contain. As of phase 10 a seeded string answers from Postgres and never
+// reaches MockServer — which is the whole point, and would otherwise turn the
+// 502 and timeout tests into silent 200s.
+
 let t: TestDb;
 let ns: string;
 
@@ -60,34 +65,34 @@ describe('POST /api/translations', () => {
       kind: 'word',
       entries: [
         {
-          lemma: 'book',
+          lemma: 'ladder',
           senses: [
             {
-              translation: 'ספר',
+              translation: 'סולם',
               part_of_speech: 'noun',
-              example: { source: 'I read a book.', target: 'קראתי ספר.' },
-              sense_code: 'printed_book',
+              example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
+              sense_code: 'climbing_frame',
             },
-            { translation: 'להזמין', part_of_speech: 'verb', sense_code: 'reserve' },
+            { translation: 'דירוג', part_of_speech: 'noun', sense_code: 'ranking' },
           ],
         },
       ],
     });
 
-    const res = await translate({ text: 'book' });
+    const res = await translate({ text: 'ladder' });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      text: 'book',
+      text: 'ladder',
       direction: 'en_he',
       kind: 'word',
       senses: [
         {
-          translation: 'ספר',
+          translation: 'סולם',
           part_of_speech: 'noun',
-          example: { source: 'I read a book.', target: 'קראתי ספר.' },
+          example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
         },
-        { translation: 'להזמין', part_of_speech: 'verb' },
+        { translation: 'דירוג', part_of_speech: 'noun' },
       ],
     });
   });
@@ -110,7 +115,7 @@ describe('POST /api/translations', () => {
       entries: [{ lemma: 'x', senses: [{ translation: 'x', sense_code: 'x' }] }],
     });
 
-    const res = await translate({ text: 'book', direction: 'he_en' });
+    const res = await translate({ text: 'ladder', direction: 'he_en' });
 
     expect(await res.json()).toMatchObject({ direction: 'he_en' });
   });
@@ -153,7 +158,7 @@ describe('POST /api/translations', () => {
   it('sends the API key as a header', async () => {
     await expectGeminiJson(ns, { kind: 'word', entries: [] });
 
-    await translate({ text: 'book' });
+    await translate({ text: 'ladder' });
 
     // The unit test asserts this against a fake fetch; this asserts the real
     // client actually put it on the wire.
@@ -169,14 +174,14 @@ describe('POST /api/translations', () => {
   });
 
   it('rejects an unknown direction', async () => {
-    const res = await translate({ text: 'book', direction: 'fr_he' });
+    const res = await translate({ text: 'ladder', direction: 'fr_he' });
     expect(res.status).toBe(400);
   });
 
   it('returns 502 when the provider fails', async () => {
     await expectGeminiStatus(ns, 500);
 
-    const res = await translate({ text: 'book' });
+    const res = await translate({ text: 'ladder' });
 
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: 'translation unavailable' });
@@ -184,7 +189,7 @@ describe('POST /api/translations', () => {
 
   it('returns 502 when the provider rate-limits', async () => {
     await expectGeminiStatus(ns, 429);
-    expect((await translate({ text: 'book' })).status).toBe(502);
+    expect((await translate({ text: 'ladder' })).status).toBe(502);
   });
 
   it('returns 502 when the model answers with unreadable output', async () => {
@@ -195,7 +200,7 @@ describe('POST /api/translations', () => {
       }),
     );
 
-    const res = await translate({ text: 'book' });
+    const res = await translate({ text: 'ladder' });
 
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: 'translation unavailable' });
@@ -204,7 +209,7 @@ describe('POST /api/translations', () => {
   it('returns 200 with no senses when the model is safety-blocked', async () => {
     await expectGeminiRawBody(ns, JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } }));
 
-    const res = await translate({ text: 'book' });
+    const res = await translate({ text: 'ladder' });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ senses: [] });
@@ -214,7 +219,7 @@ describe('POST /api/translations', () => {
     // The client's budget is 10s; 11s is past it. Jest's testTimeout is 30s.
     await expectGeminiDelayedJson(ns, { kind: 'word', entries: [], delayMs: 11_000 });
 
-    const res = await translate({ text: 'book' });
+    const res = await translate({ text: 'ladder' });
 
     expect(res.status).toBe(502);
   }, 25_000);
