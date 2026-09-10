@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { LlmEntry } from '@lang-tutor/core/api';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 import { termVariants, vocabTermSenses } from '../../../src/db/schema';
 import { createVocabRepo } from '../../../src/repo/vocabulary';
@@ -273,6 +273,18 @@ describe('persistEntries', () => {
       release = resolve;
     });
 
+    // Signalled by tx1 once it has actually written its rows (term, variant,
+    // senses) and is holding them uncommitted — not on a timer, which proves
+    // nothing about whether tx1 got there first. tx2 awaits this before it
+    // attempts its own insert, which is what makes tx1 provably hold the
+    // conflicting row when tx2 arrives: a bare `setTimeout` gates only wall
+    // time, not the fact that tx1 wrote anything, so tx2 could still win the
+    // insert race and never contend at all.
+    let signalWritten = (): void => {};
+    const written = new Promise<void>((resolve) => {
+      signalWritten = resolve;
+    });
+
     const first = withTx(t.db, async (tx) => {
       const out = await createVocabRepo(tx).persistEntries({
         form: 'kite',
@@ -281,44 +293,85 @@ describe('persistEntries', () => {
         kind: 'word',
         entries: [entry('kite', ['עפיפון'])],
       });
+      signalWritten(); // tx1 has written; tx2 may now attempt its own insert
       await held; // keep the transaction open so the second one has to block
       return out;
     });
 
-    // Long enough for the second transaction to reach the unique index and
-    // block there. It cannot proceed until `first` commits.
-    //
-    // `releasedAt`/`secondSettledAt` turn "the second transaction blocked"
-    // into an observable fact rather than a timing coincidence: every other
-    // assertion below (matching termId, created: false, one sense set) would
-    // be equally satisfied if `second` simply started after `first` had
-    // already committed on its own. Recording when `second`'s own write
-    // settles, independent of when the wrapping IIFE returns, and requiring
-    // that to be no earlier than the moment `release()` ran is what would
-    // actually fail if the two transactions had merely run one after another
-    // instead of genuinely racing on the unique index.
-    let releasedAt = 0;
-    let secondSettledAt = 0;
-    const second = (async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const out = persist('kite', [entry('kite', ['משהו אחר'])]);
-      out.then(
-        () => {
-          secondSettledAt = Date.now();
-        },
-        () => {
-          secondSettledAt = Date.now();
-        },
-      );
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      releasedAt = Date.now();
+    // tx2 opened by hand, exactly like `first` above, rather than through the
+    // `persist` helper: its backend pid has to be captured *inside* its own
+    // transaction, before it attempts the insert that contends with tx1's
+    // uncommitted row, or there is nothing to poll for. It then waits for
+    // `written` before calling `persistEntries`, so its insert is only ever
+    // attempted after tx1's row already exists (uncommitted) under the same
+    // unique key — the block is therefore guaranteed, not merely likely.
+    let secondPid = 0;
+    const second = withTx(t.db, async (tx) => {
+      const { rows } = await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`);
+      secondPid = rows[0].pid;
+      await written;
+      return createVocabRepo(tx).persistEntries({
+        form: 'kite',
+        languageCode: 'en',
+        userLanguageCode: 'he',
+        kind: 'word',
+        entries: [entry('kite', ['משהו אחר'])],
+      });
+    });
+
+    // Overlap made observable, not inferred from timing: poll Postgres itself
+    // for tx2's backend actually waiting on another backend's lock.
+    // `pg_blocking_pids(pid)` returning a non-empty array *is* Postgres's own
+    // answer to "is this session blocked on someone else" — scoped to this
+    // test's own cloned database so a pid from another worker's database
+    // could never satisfy it. A timer proves only that tx2 didn't finish
+    // early; it cannot prove tx2 ever reached the conflicting insert at all,
+    // so it would pass just as green if tx2 started late and never truly
+    // contended with tx1. This poll cannot: if tx2 never shows as blocked
+    // within the deadline, it throws and the test fails loudly, which is
+    // exactly what accidental serialization (no real race) looks like.
+    let pollError: Error | undefined;
+    try {
+      const deadline = Date.now() + 5000;
+      let blocked = false;
+      while (!blocked && Date.now() < deadline) {
+        if (secondPid) {
+          const { rows } = await t.db.execute<{ blocked: boolean }>(sql`
+            select cardinality(pg_blocking_pids(pid)) > 0 as blocked
+            from pg_stat_activity
+            where pid = ${secondPid} and datname = current_database()
+          `);
+          blocked = rows[0]?.blocked === true;
+        }
+        if (!blocked) await new Promise((resolve) => setTimeout(resolve, 15));
+      }
+      if (!blocked) {
+        pollError = new Error(
+          `tx2 (backend pid ${secondPid || 'not yet captured'}) never showed as blocked on ` +
+            'another backend within 5000ms — the unique-index race this test exists to prove ' +
+            'never happened.',
+        );
+      }
+    } finally {
+      // Unconditionally, whether the poll observed the block, timed out, or
+      // threw: `first`'s transaction is still open on `await held` and must
+      // never be left that way. Skipping this on the timeout path was the bug
+      // in the previous attempt — it left `first`'s pooled connection open
+      // forever, which then hung `afterEach`'s `t.close()` for the rest of the
+      // suite's 30s Jest timeout instead of failing this test promptly.
       release();
-      return out;
-    })();
+    }
 
-    const [a, b] = await Promise.all([first, second]);
-
-    expect(secondSettledAt).toBeGreaterThanOrEqual(releasedAt);
+    // Let both transactions actually finish — and their connections return to
+    // the pool — before this test decides its outcome, whatever that outcome
+    // is; `pollError`, not a rejection here, is the expected shape of a real
+    // failure, so it takes priority once both settle.
+    const [firstResult, secondResult] = await Promise.allSettled([first, second]);
+    if (pollError) throw pollError;
+    if (firstResult.status === 'rejected') throw firstResult.reason;
+    if (secondResult.status === 'rejected') throw secondResult.reason;
+    const a = firstResult.value;
+    const b = secondResult.value;
 
     expect(b.written[0].termId).toBe(a.written[0].termId);
     expect(b.written[0].created).toBe(false);
