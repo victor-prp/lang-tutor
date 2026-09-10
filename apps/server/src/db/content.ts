@@ -1,218 +1,70 @@
-// Authoring source for the shared content the seed inserts. Not runtime data:
-// nothing reads this at request time — `repo/questions.ts` reads the database.
-// Moved here from src/data/mockQuestions.ts in phase 4.
+// Authoring source for the shared content the seed inserts, split by who
+// writes it: the quiz is authored here by hand, the answers are recorded into
+// ./content.generated.ts by `npm run content:generate`.
+//
+// Not runtime data: nothing reads this at request time — `repo/questions.ts`
+// reads the database.
+
+import type { QuestionOption } from './schema';
+import { recorded } from './content.generated';
 
 export type ContentEntry = {
-  question_id: string;
-  term_id: string;
-  lemma: string;
-  part_of_speech: string;
-  prompt: string;
-  prompt_kind: string;
-  /** What a learner would type. The recorder's input, the variant's form, and
-   *  the quiz prompt — one string doing all three, honestly. */
+  /** What a learner would type. The recorder's input, the variant's form,
+   *  and the quiz prompt — one string doing all three, honestly. */
   query: string;
-  translation: string;
-  options: string[];
+  question_id: string;
+  /** Three wrong answers. The right one is the recorded sense's translation,
+   *  spliced in at `correct_option`, so the two can never drift apart. */
+  distractors: [string, string, string];
   correct_option: number;
 };
 
+/**
+ * The right answer, derived rather than authored. It used to be a fourth
+ * literal in `options`, duplicating the translation; splicing it in from the
+ * recording removes the duplicate and the drift it invites — a regeneration
+ * that changes ספר cannot leave a quiz asking for a word the dictionary no
+ * longer holds.
+ *
+ * The question tests entry 0, sense 0 of its query's recording. Nothing selects
+ * a different one today, and a field for it would be a guess about a need
+ * nobody has.
+ */
+export function correctAnswerFor(entry: ContentEntry): string {
+  const sense = recorded[entry.query]?.entries[0]?.senses[0];
+  if (!sense) {
+    throw new Error(
+      `no recording for "${entry.query}". Run \`npm run content:generate -- ${entry.query}\`.`,
+    );
+  }
+  return sense.translation;
+}
+
+export function optionsFor(entry: ContentEntry): QuestionOption[] {
+  const texts: string[] = [...entry.distractors];
+  texts.splice(entry.correct_option, 0, correctAnswerFor(entry));
+  return texts.map((text, position) => ({
+    position,
+    text,
+    is_correct: position === entry.correct_option,
+  }));
+}
+
 export const content: ContentEntry[] = [
-  {
-    question_id: 'q-window',
-    term_id: 'vt-en-window',
-    lemma: 'window',
-    part_of_speech: 'noun',
-    prompt: 'window',
-    prompt_kind: 'base',
-    query: 'window',
-    translation: 'חלון',
-    options: ['דלת', 'חלון', 'שולחן', 'קיר'],
-    correct_option: 1,
-  },
-  {
-    question_id: 'q-book',
-    term_id: 'vt-en-book',
-    lemma: 'book',
-    part_of_speech: 'noun',
-    prompt: 'book',
-    prompt_kind: 'base',
-    query: 'book',
-    translation: 'ספר',
-    options: ['ספר', 'עיפרון', 'מחשב', 'כיסא'],
-    correct_option: 0,
-  },
-  {
-    question_id: 'q-water',
-    term_id: 'vt-en-water',
-    lemma: 'water',
-    part_of_speech: 'noun',
-    prompt: 'water',
-    prompt_kind: 'base',
-    query: 'water',
-    translation: 'מים',
-    options: ['לחם', 'חלב', 'מים', 'קפה'],
-    correct_option: 2,
-  },
-  {
-    question_id: 'q-friend',
-    term_id: 'vt-en-friend',
-    lemma: 'friend',
-    part_of_speech: 'noun',
-    prompt: 'friend',
-    prompt_kind: 'base',
-    query: 'friend',
-    translation: 'חבר',
-    options: ['שכן', 'מורה', 'רופא', 'חבר'],
-    correct_option: 3,
-  },
-  {
-    question_id: 'q-difficult',
-    term_id: 'vt-en-difficult',
-    lemma: 'difficult',
-    part_of_speech: 'adjective',
-    prompt: 'difficult',
-    prompt_kind: 'base',
-    query: 'difficult',
-    translation: 'קשה',
-    options: ['קל', 'קשה', 'חשוב', 'מהיר'],
-    correct_option: 1,
-  },
-  {
-    question_id: 'q-remember',
-    term_id: 'vt-en-remember',
-    lemma: 'remember',
-    part_of_speech: 'verb',
-    prompt: 'to remember',
-    prompt_kind: 'infinitive',
-    query: 'to remember',
-    translation: 'לזכור',
-    options: ['לשכוח', 'לזכור', 'ללמוד', 'לחשוב'],
-    correct_option: 1,
-  },
-  {
-    question_id: 'q-excuse-me',
-    term_id: 'vt-en-excuse-me',
-    lemma: 'excuse me',
-    part_of_speech: 'phrase',
-    prompt: 'excuse me',
-    prompt_kind: 'base',
-    query: 'excuse me',
-    translation: 'סליחה',
-    options: ['שלום', 'תודה', 'סליחה', 'בבקשה'],
-    correct_option: 2,
-  },
-  {
-    question_id: 'q-good-morning',
-    term_id: 'vt-en-good-morning',
-    lemma: 'good morning',
-    part_of_speech: 'phrase',
-    prompt: 'good morning',
-    prompt_kind: 'base',
-    query: 'good morning',
-    translation: 'בוקר טוב',
-    options: ['לילה טוב', 'בוקר טוב', 'ערב טוב', 'שבוע טוב'],
-    correct_option: 1,
-  },
-  {
-    question_id: 'q-thank-you-very-much',
-    term_id: 'vt-en-thank-you-very-much',
-    lemma: 'thank you very much',
-    part_of_speech: 'phrase',
-    prompt: 'thank you very much',
-    prompt_kind: 'base',
-    query: 'thank you very much',
-    translation: 'תודה רבה',
-    options: ['תודה רבה', 'בבקשה רבה', 'סליחה רבה', 'שלום רב'],
-    correct_option: 0,
-  },
-  {
-    question_id: 'q-how-do-you-do',
-    term_id: 'vt-en-how-do-you-do',
-    lemma: 'How do you do?',
-    part_of_speech: 'phrase',
-    prompt: 'How do you do?',
-    prompt_kind: 'base',
-    query: 'How do you do?',
-    translation: 'מה נשמע?',
-    options: ['מה השעה?', 'מה נשמע?', 'מה קרה?', 'מה זה?'],
-    correct_option: 1,
-  },
-  {
-    question_id: 'q-see-you-later',
-    term_id: 'vt-en-see-you-later',
-    lemma: 'see you later',
-    part_of_speech: 'phrase',
-    prompt: 'see you later',
-    prompt_kind: 'base',
-    query: 'see you later',
-    translation: 'נתראה אחר כך',
-    options: ['נתראה מחר', 'נתראה אחר כך', 'ניפגש בבוקר', 'נדבר בהמשך'],
-    correct_option: 1,
-  },
-  {
-    question_id: 'q-i-dont-understand',
-    term_id: 'vt-en-i-dont-understand',
-    lemma: "I don't understand",
-    part_of_speech: 'phrase',
-    prompt: "I don't understand",
-    prompt_kind: 'base',
-    query: "I don't understand",
-    translation: 'אני לא מבין',
-    options: ['אני לא יודע', 'אני לא שומע', 'אני לא מבין', 'אני לא זוכר'],
-    correct_option: 2,
-  },
-  {
-    question_id: 'q-what-is-your-name',
-    term_id: 'vt-en-what-is-your-name',
-    lemma: 'What is your name?',
-    part_of_speech: 'phrase',
-    prompt: 'What is your name?',
-    prompt_kind: 'base',
-    query: 'What is your name?',
-    translation: 'איך קוראים לך?',
-    options: ['מאיפה אתה?', 'איך קוראים לך?', 'בן כמה אתה?', 'מה אתה עושה?'],
-    correct_option: 1,
-  },
-  {
-    question_id: 'q-have-a-nice-day',
-    term_id: 'vt-en-have-a-nice-day',
-    lemma: 'Have a nice day!',
-    part_of_speech: 'phrase',
-    prompt: 'Have a nice day!',
-    prompt_kind: 'base',
-    query: 'Have a nice day!',
-    translation: 'שיהיה לך יום נעים!',
-    options: [
-      'שיהיה לך יום נעים!',
-      'שיהיה לך בוקר טוב!',
-      'שיהיה לך שבוע טוב!',
-      'שיהיה לך לילה טוב!',
-    ],
-    correct_option: 0,
-  },
-  {
-    question_id: 'q-where-is-the-station',
-    term_id: 'vt-en-where-is-the-station',
-    lemma: 'Where is the station?',
-    part_of_speech: 'phrase',
-    prompt: 'Where is the station?',
-    prompt_kind: 'base',
-    query: 'Where is the station?',
-    translation: 'איפה התחנה?',
-    options: ['איפה הבית?', 'איפה השוק?', 'איפה התחנה?', 'איפה הרחוב?'],
-    correct_option: 2,
-  },
-  {
-    question_id: 'q-nice-to-meet-you',
-    term_id: 'vt-en-nice-to-meet-you',
-    lemma: 'Nice to meet you',
-    part_of_speech: 'phrase',
-    prompt: 'Nice to meet you',
-    prompt_kind: 'base',
-    query: 'Nice to meet you',
-    translation: 'נעים להכיר',
-    options: ['נעים להכיר', 'טוב לראות אותך', 'נתראה בקרוב', 'תודה שבאת'],
-    correct_option: 0,
-  },
+  { query: 'window', question_id: 'q-window', distractors: ['דלת', 'שולחן', 'קיר'], correct_option: 1 },
+  { query: 'book', question_id: 'q-book', distractors: ['עיפרון', 'מחשב', 'כיסא'], correct_option: 0 },
+  { query: 'water', question_id: 'q-water', distractors: ['לחם', 'חלב', 'קפה'], correct_option: 2 },
+  { query: 'friend', question_id: 'q-friend', distractors: ['שכן', 'מורה', 'רופא'], correct_option: 3 },
+  { query: 'difficult', question_id: 'q-difficult', distractors: ['קל', 'חשוב', 'מהיר'], correct_option: 1 },
+  { query: 'to remember', question_id: 'q-remember', distractors: ['לשכוח', 'ללמוד', 'לחשוב'], correct_option: 1 },
+  { query: 'excuse me', question_id: 'q-excuse-me', distractors: ['שלום', 'תודה', 'בבקשה'], correct_option: 2 },
+  { query: 'good morning', question_id: 'q-good-morning', distractors: ['לילה טוב', 'ערב טוב', 'שבוע טוב'], correct_option: 1 },
+  { query: 'thank you very much', question_id: 'q-thank-you-very-much', distractors: ['בבקשה רבה', 'סליחה רבה', 'שלום רב'], correct_option: 0 },
+  { query: 'How do you do?', question_id: 'q-how-do-you-do', distractors: ['מה השעה?', 'מה קרה?', 'מה זה?'], correct_option: 1 },
+  { query: 'see you later', question_id: 'q-see-you-later', distractors: ['נתראה מחר', 'ניפגש בבוקר', 'נדבר בהמשך'], correct_option: 1 },
+  { query: "I don't understand", question_id: 'q-i-dont-understand', distractors: ['אני לא יודע', 'אני לא שומע', 'אני לא זוכר'], correct_option: 2 },
+  { query: 'What is your name?', question_id: 'q-what-is-your-name', distractors: ['מאיפה אתה?', 'בן כמה אתה?', 'מה אתה עושה?'], correct_option: 1 },
+  { query: 'Have a nice day!', question_id: 'q-have-a-nice-day', distractors: ['שיהיה לך בוקר טוב!', 'שיהיה לך שבוע טוב!', 'שיהיה לך לילה טוב!'], correct_option: 0 },
+  { query: 'Where is the station?', question_id: 'q-where-is-the-station', distractors: ['איפה הבית?', 'איפה השוק?', 'איפה הרחוב?'], correct_option: 2 },
+  { query: 'Nice to meet you', question_id: 'q-nice-to-meet-you', distractors: ['טוב לראות אותך', 'נתראה בקרוב', 'תודה שבאת'], correct_option: 0 },
 ];
