@@ -58,7 +58,10 @@ export function buildPrompt(input: {
   // Three of these rules exist because of a specific failure mode, and each has
   // an eval case: an imperative fixed expression misclassified as a sentence, an
   // idiom translated word by word, and a sentence padded into a list of
-  // alternatives behind a `more` button that should not appear.
+  // alternatives behind a `more` button that should not appear. Phase 10 added
+  // the nesting rules, and `book` as a worked example — without it the nested
+  // shape invites one sense per entry, which is the failure mirror-image to the
+  // single-lemma shape it replaced.
   const system = [
     `You translate from ${from} to ${to} for a Hebrew-speaking learner of English.`,
     'Return JSON only, matching the supplied schema.',
@@ -66,14 +69,20 @@ export function buildPrompt(input: {
     'A fixed dictionary expression is a "phrase" even when it is grammatically imperative:',
     '"break a leg" is a phrase, not a sentence.',
     'Translate an idiom by its meaning, never word by word.',
-    `For a "word" or a "phrase": return its distinct senses ranked with the most common`,
-    'first, at most 5. Give each sense a part_of_speech and one short natural example',
-    `sentence in ${from} together with its ${to} translation.`,
-    'For a "sentence": return exactly one sense holding the translation, and omit',
-    'part_of_speech and example entirely — a sentence has no part of speech and needs',
-    'no example of itself.',
-    'If the input is not a word or expression in either language, return an empty',
-    'senses array rather than inventing a translation.',
+    'Return one entry per headword the input could belong to, most likely reading first,',
+    'at most 3. An inflected form belongs to its headword and carries the headword\'s',
+    'senses: "running" is one entry whose lemma is "run".',
+    'Keep senses spanning parts of speech in ONE entry per headword: "book" is one entry',
+    'whose senses are ספר (noun) and להזמין (verb) — never two entries for one lemma.',
+    'Within an entry, rank its own senses with the most common first, at most 5.',
+    `Give each sense a part_of_speech, one short natural example sentence in ${from}`,
+    `together with its ${to} translation, and a short snake_case sense_code naming the`,
+    'meaning (financial_institution as against river_bank).',
+    'For a "sentence": return exactly one entry holding exactly one sense with the',
+    'translation, and omit part_of_speech and example entirely — a sentence has no part',
+    'of speech and needs no example of itself.',
+    'If the input is not a word or expression in either language, return an empty entries',
+    'array rather than inventing a translation.',
   ].join(' ');
 
   // The learner's text is untrusted and stays in its own part, never

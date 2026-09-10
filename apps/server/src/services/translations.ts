@@ -7,6 +7,7 @@ import {
   parseLlmTranslation,
   resolveKind,
 } from '../domain/translation';
+import { flattenEntries, mergeEntries } from '../domain/vocabulary';
 import { TranslationUnreadable } from '../errors';
 import type { Logger } from '../logger';
 import type { LlmClient } from './llm';
@@ -45,7 +46,9 @@ export function createTranslationService({ llm, logger }: { llm: LlmClient; logg
       if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
 
       const kind = resolveKind(text, parsed.kind);
-      const senses = normalizeSenses(kind, parsed.senses);
+      // mergeEntries before flattening, so a model that split one lemma across
+      // two entries does not get its senses interleaved with its own.
+      const senses = normalizeSenses(kind, flattenEntries(mergeEntries(parsed.entries)));
 
       logger.info({ event: 'translated', direction, kind, sense_count: senses.length });
       return { text, direction, kind, senses };

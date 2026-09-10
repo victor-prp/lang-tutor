@@ -285,23 +285,81 @@ describe('TranslationResponseSchema', () => {
 });
 
 describe('LlmTranslationSchema', () => {
-  it('is the response shape minus text and direction', () => {
+  const sense = { translation: 'ספר', part_of_speech: 'noun', sense_code: 'printed_book' };
+
+  it('is a list of entries, each a lemma with its own ranked senses', () => {
     const result = LlmTranslationSchema.safeParse({
       kind: 'word',
-      senses: [{ translation: 'ספר', part_of_speech: 'noun' }],
+      entries: [{ lemma: 'book', senses: [sense] }],
     });
     expect(result.success).toBe(true);
   });
 
-  it('rejects a model that invents its own direction', () => {
+  it('accepts two entries — the reason the shape is nested at all', () => {
     const result = LlmTranslationSchema.safeParse({
       kind: 'word',
-      direction: 'he_en',
-      senses: [{ translation: 'ספר' }],
+      entries: [
+        { lemma: 'see', senses: [{ translation: 'לראות', sense_code: 'perceive' }] },
+        { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+      ],
     });
-    // Extra keys are stripped rather than rejected; what matters is that the
-    // server's own direction is never overwritten by the model's.
     expect(result.success).toBe(true);
-    expect(result.data).not.toHaveProperty('direction');
+  });
+
+  it('treats an empty entry list as the "no translation" answer, not as malformed', () => {
+    expect(LlmTranslationSchema.safeParse({ kind: 'word', entries: [] }).success).toBe(true);
+  });
+
+  it('rejects an entry with no lemma', () => {
+    expect(
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ senses: [sense] }] }).success,
+    ).toBe(false);
+    expect(
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: '', senses: [sense] }] })
+        .success,
+    ).toBe(false);
+  });
+
+  it('rejects an entry with an empty sense list — meaningless, not empty', () => {
+    expect(
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: 'book', senses: [] }] })
+        .success,
+    ).toBe(false);
+  });
+
+  it('requires a sense_code on every sense', () => {
+    expect(
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [{ lemma: 'book', senses: [{ translation: 'ספר' }] }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('caps entries at three and senses at five within an entry', () => {
+    const entry = { lemma: 'x', senses: [sense] };
+    expect(
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(3).fill(entry) }).success,
+    ).toBe(true);
+    expect(
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(4).fill(entry) }).success,
+    ).toBe(false);
+    expect(
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [{ lemma: 'x', senses: Array(6).fill(sense) }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('keeps sense_code off the response shape, which is shared with the wire', () => {
+    const result = TranslationResponseSchema.safeParse({
+      text: 'book',
+      direction: 'en_he',
+      kind: 'word',
+      senses: [{ translation: 'ספר', sense_code: 'printed_book' }],
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.senses[0]).not.toHaveProperty('sense_code');
   });
 });

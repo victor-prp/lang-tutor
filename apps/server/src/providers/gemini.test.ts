@@ -30,15 +30,20 @@ function clientWith(fetchImpl: typeof globalThis.fetch) {
 describe('toGeminiSchema', () => {
   it('strips the keys Gemini rejects and keeps the ones it needs', () => {
     const schema = toGeminiSchema(LlmTranslationSchema) as Record<string, unknown>;
-    const senses = (schema.properties as Record<string, Record<string, unknown>>).senses;
-    const item = senses.items as Record<string, unknown>;
+    const entries = (schema.properties as Record<string, Record<string, unknown>>).entries;
+    const entryItem = entries.items as Record<string, unknown>;
+    const senses = (entryItem.properties as Record<string, Record<string, unknown>>).senses;
+    const senseItem = senses.items as Record<string, unknown>;
 
     expect(schema).not.toHaveProperty('$schema');
     expect(schema).not.toHaveProperty('additionalProperties');
-    expect(item).not.toHaveProperty('additionalProperties');
+    expect(entryItem).not.toHaveProperty('additionalProperties');
+    expect(senseItem).not.toHaveProperty('additionalProperties');
+    expect(entries.maxItems).toBe(3);
     expect(senses.maxItems).toBe(5);
-    expect(item.required).toEqual(['translation']);
-    expect(schema.required).toEqual(['kind', 'senses']);
+    expect(entryItem.required).toEqual(['lemma', 'senses']);
+    expect(senseItem.required).toEqual(['translation', 'sense_code']);
+    expect(schema.required).toEqual(['kind', 'entries']);
   });
 
   it('leaves no $schema or additionalProperties at any depth', () => {

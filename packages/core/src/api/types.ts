@@ -7,6 +7,8 @@ import type {
   CreateUserRequestSchema,
   ErrorSchema,
   HealthResponseSchema,
+  LlmEntrySchema,
+  LlmSenseSchema,
   LlmTranslationSchema,
   LoginRequestSchema,
   MissedQuestionSchema,
@@ -54,3 +56,5 @@ export type TranslationSense = z.infer<typeof TranslationSenseSchema>;
 export type TranslationRequest = z.infer<typeof TranslationRequestSchema>;
 export type TranslationResponse = z.infer<typeof TranslationResponseSchema>;
 export type LlmTranslation = z.infer<typeof LlmTranslationSchema>;
+export type LlmSense = z.infer<typeof LlmSenseSchema>;
+export type LlmEntry = z.infer<typeof LlmEntrySchema>;

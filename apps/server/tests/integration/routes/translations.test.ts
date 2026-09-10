@@ -58,13 +58,19 @@ describe('POST /api/translations', () => {
   it('returns ranked senses for a word', async () => {
     await expectGeminiJson(ns, {
       kind: 'word',
-      senses: [
+      entries: [
         {
-          translation: 'ספר',
-          part_of_speech: 'noun',
-          example: { source: 'I read a book.', target: 'קראתי ספר.' },
+          lemma: 'book',
+          senses: [
+            {
+              translation: 'ספר',
+              part_of_speech: 'noun',
+              example: { source: 'I read a book.', target: 'קראתי ספר.' },
+              sense_code: 'printed_book',
+            },
+            { translation: 'להזמין', part_of_speech: 'verb', sense_code: 'reserve' },
+          ],
         },
-        { translation: 'להזמין', part_of_speech: 'verb' },
       ],
     });
 
@@ -87,7 +93,10 @@ describe('POST /api/translations', () => {
   });
 
   it('detects Hebrew input without being told', async () => {
-    await expectGeminiJson(ns, { kind: 'word', senses: [{ translation: 'fork' }] });
+    await expectGeminiJson(ns, {
+      kind: 'word',
+      entries: [{ lemma: 'fork', senses: [{ translation: 'fork', sense_code: 'utensil' }] }],
+    });
 
     const res = await translate({ text: 'מזלג' });
 
@@ -96,7 +105,10 @@ describe('POST /api/translations', () => {
   });
 
   it('honours an explicit direction', async () => {
-    await expectGeminiJson(ns, { kind: 'word', senses: [{ translation: 'x' }] });
+    await expectGeminiJson(ns, {
+      kind: 'word',
+      entries: [{ lemma: 'x', senses: [{ translation: 'x', sense_code: 'x' }] }],
+    });
 
     const res = await translate({ text: 'book', direction: 'he_en' });
 
@@ -106,11 +118,17 @@ describe('POST /api/translations', () => {
   it('reduces a sentence to one bare sense', async () => {
     await expectGeminiJson(ns, {
       kind: 'sentence',
-      senses: [
+      entries: [
         {
-          translation: 'קראתי ספר.',
-          part_of_speech: 'verb',
-          example: { source: 'a', target: 'b' },
+          lemma: 'I read a book',
+          senses: [
+            {
+              translation: 'קראתי ספר.',
+              part_of_speech: 'verb',
+              example: { source: 'a', target: 'b' },
+              sense_code: 'the_sentence',
+            },
+          ],
         },
       ],
     });
@@ -124,7 +142,7 @@ describe('POST /api/translations', () => {
   });
 
   it('returns 200 with an empty sense list for gibberish', async () => {
-    await expectGeminiJson(ns, { kind: 'word', senses: [] });
+    await expectGeminiJson(ns, { kind: 'word', entries: [] });
 
     const res = await translate({ text: 'asdkjhasd' });
 
@@ -133,7 +151,7 @@ describe('POST /api/translations', () => {
   });
 
   it('sends the API key as a header', async () => {
-    await expectGeminiJson(ns, { kind: 'word', senses: [] });
+    await expectGeminiJson(ns, { kind: 'word', entries: [] });
 
     await translate({ text: 'book' });
 
@@ -194,7 +212,7 @@ describe('POST /api/translations', () => {
 
   it('gives up on a provider that exceeds the timeout budget', async () => {
     // The client's budget is 10s; 11s is past it. Jest's testTimeout is 30s.
-    await expectGeminiDelayedJson(ns, { kind: 'word', senses: [], delayMs: 11_000 });
+    await expectGeminiDelayedJson(ns, { kind: 'word', entries: [], delayMs: 11_000 });
 
     const res = await translate({ text: 'book' });
 

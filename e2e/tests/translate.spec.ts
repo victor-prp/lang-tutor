@@ -7,21 +7,29 @@ import { createLearner, logIn } from './support/users';
 // above Playwright's 30s default.
 test.setTimeout(120_000);
 
-const BOOK_SENSES = [
+const BOOK_ENTRIES = [
   {
-    translation: 'ספר',
-    part_of_speech: 'noun',
-    example: { source: 'I read a book about space.', target: 'קראתי ספר על החלל.' },
-  },
-  {
-    translation: 'להזמין',
-    part_of_speech: 'verb',
-    example: { source: "I'd like to book a table.", target: 'אני רוצה להזמין שולחן.' },
-  },
-  {
-    translation: 'לרשום',
-    part_of_speech: 'verb',
-    example: { source: 'The referee booked him.', target: 'השופט רשם לו כרטיס.' },
+    lemma: 'book',
+    senses: [
+      {
+        translation: 'ספר',
+        part_of_speech: 'noun',
+        example: { source: 'I read a book about space.', target: 'קראתי ספר על החלל.' },
+        sense_code: 'printed_book',
+      },
+      {
+        translation: 'להזמין',
+        part_of_speech: 'verb',
+        example: { source: "I'd like to book a table.", target: 'אני רוצה להזמין שולחן.' },
+        sense_code: 'reserve',
+      },
+      {
+        translation: 'לרשום',
+        part_of_speech: 'verb',
+        example: { source: 'The referee booked him.', target: 'השופט רשם לו כרטיס.' },
+        sense_code: 'caution',
+      },
+    ],
   },
 ];
 
@@ -52,7 +60,7 @@ test('a word shows its most common meaning, reveals the rest, and confirms a cho
   page,
   request,
 }) => {
-  await expectGemini(request, { kind: 'word', senses: BOOK_SENSES });
+  await expectGemini(request, { kind: 'word', entries: BOOK_ENTRIES });
   await openTranslate(page, request, 'e2e_translate_word');
 
   await page.getByTestId('translate-input').fill('book');
@@ -78,7 +86,12 @@ test('a sentence gets one translation, with neither more nor a save button', asy
 }) => {
   await expectGemini(request, {
     kind: 'sentence',
-    senses: [{ translation: 'אני מצפה לראות אותך.' }],
+    entries: [
+      {
+        lemma: "I'm looking forward to seeing you",
+        senses: [{ translation: 'אני מצפה לראות אותך.', sense_code: 'the_sentence' }],
+      },
+    ],
   });
   await openTranslate(page, request, 'e2e_translate_sentence');
 
@@ -91,7 +104,7 @@ test('a sentence gets one translation, with neither more nor a save button', asy
 });
 
 test('gibberish says so instead of inventing a translation', async ({ page, request }) => {
-  await expectGemini(request, { kind: 'word', senses: [] });
+  await expectGemini(request, { kind: 'word', entries: [] });
   await openTranslate(page, request, 'e2e_translate_empty');
 
   await page.getByTestId('translate-input').fill('asdkjhasd');
@@ -114,7 +127,7 @@ test('a failing provider shows the error, and retry works once it recovers', asy
   // Replacing the expectation is what makes this a test of retry *working*
   // rather than of the error state rendering.
   await clearGemini(request);
-  await expectGemini(request, { kind: 'word', senses: BOOK_SENSES });
+  await expectGemini(request, { kind: 'word', entries: BOOK_ENTRIES });
 
   await page.getByTestId('translate-retry').click();
   await expect(sense(page, 'ספר')).toBeVisible();

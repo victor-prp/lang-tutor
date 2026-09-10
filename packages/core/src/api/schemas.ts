@@ -162,11 +162,31 @@ export const TranslationResponseSchema = z.object({
   senses: z.array(TranslationSenseSchema).max(5),
 });
 
-// What the model is asked to return, and the schema each provider converts into
-// its own structured-output dialect. Deliberately the response shape *minus*
-// `text` and `direction`: both are decided in code before the call, so offering
-// them to the model would only invite it to disagree with the server.
+// What the model is asked to return. Phase 10 made it a list of **entries**,
+// because a string can be more than one word: `saw` is the verb `see` and the
+// noun `saw`, and an earlier single-lemma shape could only ever answer one of
+// them. Deliberately still the response shape *minus* `text` and `direction`:
+// both are decided in code before the call, so offering them to the model would
+// only invite it to disagree with the server.
+//
+// `sense_code` goes on an extension rather than on TranslationSenseSchema,
+// which is shared with the wire. It is model-supplied, has no functional role —
+// senses are never merged within a term — and exists so a row reads as
+// financial_institution rather than s0 during a play-test.
+export const LlmSenseSchema = TranslationSenseSchema.extend({
+  sense_code: z.string().min(1).max(60),
+});
+
+// min(1): an entry with no senses is meaningless, and a model returning one is
+// malformed rather than empty — the empty answer is `entries: []`.
+export const LlmEntrySchema = z.object({
+  lemma: z.string().min(1),
+  senses: z.array(LlmSenseSchema).min(1).max(5),
+});
+
 export const LlmTranslationSchema = z.object({
   kind: TranslationKindSchema,
-  senses: z.array(TranslationSenseSchema).max(5),
+  // Ranked: the likeliest reading of the typed form first. Most strings have
+  // one entry, so the typical answer is the size phase 9 already returned.
+  entries: z.array(LlmEntrySchema).max(3),
 });

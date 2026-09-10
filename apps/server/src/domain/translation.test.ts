@@ -67,22 +67,77 @@ describe('buildPrompt', () => {
     const { schema } = buildPrompt({ text: 'book', direction: 'en_he' });
     expect(typeof schema.safeParse).toBe('function');
   });
+
+  it('asks for entries, one per headword, ranked', () => {
+    const { system } = buildPrompt({ text: 'saw', direction: 'en_he' });
+    expect(system).toMatch(/entry per headword/i);
+    expect(system).toMatch(/at most 3/i);
+  });
+
+  it('gives book as the worked example, since the nested shape invites splitting', () => {
+    const { system } = buildPrompt({ text: 'book', direction: 'en_he' });
+    expect(system).toContain('book');
+    expect(system).toContain('ספר');
+    expect(system).toContain('להזמין');
+  });
+
+  it('asks for a sense_code on every sense', () => {
+    expect(buildPrompt({ text: 'bank', direction: 'en_he' }).system).toMatch(/sense_code/);
+  });
+
+  it('says senses belong to the headword, not to the typed form', () => {
+    expect(buildPrompt({ text: 'running', direction: 'en_he' }).system).toMatch(/inflected/i);
+  });
 });
 
 describe('parseLlmTranslation', () => {
+  const sense = { translation: 'ספר', sense_code: 'printed_book' };
+
   it('parses a well-formed response', () => {
-    const raw = JSON.stringify({ kind: 'word', senses: [{ translation: 'ספר' }] });
-    expect(parseLlmTranslation(raw)).toEqual({ kind: 'word', senses: [{ translation: 'ספר' }] });
+    const raw = JSON.stringify({ kind: 'word', entries: [{ lemma: 'book', senses: [sense] }] });
+    expect(parseLlmTranslation(raw)).toEqual({
+      kind: 'word',
+      entries: [{ lemma: 'book', senses: [sense] }],
+    });
+  });
+
+  it('parses a two-entry payload — the answer the entries model exists for', () => {
+    const raw = JSON.stringify({
+      kind: 'word',
+      entries: [
+        { lemma: 'see', senses: [{ translation: 'לראות', sense_code: 'perceive' }] },
+        { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+      ],
+    });
+    expect(parseLlmTranslation(raw)?.entries).toHaveLength(2);
   });
 
   it('treats null and absent identically, so an OpenAI-style response still parses', () => {
     const raw = JSON.stringify({
       kind: 'sentence',
-      senses: [{ translation: 'קראתי ספר.', part_of_speech: null, example: null }],
+      entries: [
+        {
+          lemma: 'I read a book',
+          senses: [
+            {
+              translation: 'קראתי ספר.',
+              part_of_speech: null,
+              example: null,
+              sense_code: 'the_sentence',
+            },
+          ],
+        },
+      ],
     });
     const parsed = parseLlmTranslation(raw);
-    expect(parsed).toEqual({ kind: 'sentence', senses: [{ translation: 'קראתי ספר.' }] });
-    expect(parsed?.senses[0]).not.toHaveProperty('part_of_speech');
+    expect(parsed?.entries[0].senses[0]).not.toHaveProperty('part_of_speech');
+  });
+
+  it('treats an empty entry list as the empty answer rather than as unreadable', () => {
+    expect(parseLlmTranslation(JSON.stringify({ kind: 'word', entries: [] }))).toEqual({
+      kind: 'word',
+      entries: [],
+    });
   });
 
   it('returns null for output that is not JSON', () => {
@@ -91,19 +146,42 @@ describe('parseLlmTranslation', () => {
   });
 
   it('returns null for JSON of the wrong shape', () => {
-    expect(parseLlmTranslation(JSON.stringify({ senses: [] }))).toBeNull();
-    expect(parseLlmTranslation(JSON.stringify({ kind: 'clause', senses: [] }))).toBeNull();
-    expect(parseLlmTranslation(JSON.stringify({ kind: 'word', senses: [{}] }))).toBeNull();
+    expect(parseLlmTranslation(JSON.stringify({ entries: [] }))).toBeNull();
+    expect(parseLlmTranslation(JSON.stringify({ kind: 'clause', entries: [] }))).toBeNull();
+    // The phase 9 shape is now the wrong shape.
+    expect(parseLlmTranslation(JSON.stringify({ kind: 'word', senses: [sense] }))).toBeNull();
   });
 
-  it('returns null when the model exceeds the five-sense cap', () => {
-    const senses = Array(6).fill({ translation: 'x' });
-    expect(parseLlmTranslation(JSON.stringify({ kind: 'word', senses }))).toBeNull();
+  it('returns null for an entry missing its lemma, or holding no senses', () => {
+    expect(
+      parseLlmTranslation(JSON.stringify({ kind: 'word', entries: [{ senses: [sense] }] })),
+    ).toBeNull();
+    expect(
+      parseLlmTranslation(JSON.stringify({ kind: 'word', entries: [{ lemma: 'book', senses: [] }] })),
+    ).toBeNull();
+  });
+
+  it('returns null when a sense carries no sense_code', () => {
+    const raw = JSON.stringify({
+      kind: 'word',
+      entries: [{ lemma: 'book', senses: [{ translation: 'ספר' }] }],
+    });
+    expect(parseLlmTranslation(raw)).toBeNull();
+  });
+
+  it('returns null when the model exceeds the caps', () => {
+    const many = Array(6).fill(sense);
+    expect(
+      parseLlmTranslation(JSON.stringify({ kind: 'word', entries: [{ lemma: 'x', senses: many }] })),
+    ).toBeNull();
+    const entries = Array(4).fill({ lemma: 'x', senses: [sense] });
+    expect(parseLlmTranslation(JSON.stringify({ kind: 'word', entries }))).toBeNull();
   });
 
   it('accepts a fenced code block, which models emit even when told not to', () => {
-    const raw = '```json\n{"kind":"word","senses":[{"translation":"ספר"}]}\n```';
-    expect(parseLlmTranslation(raw)).toEqual({ kind: 'word', senses: [{ translation: 'ספר' }] });
+    const raw =
+      '```json\n{"kind":"word","entries":[{"lemma":"book","senses":[{"translation":"ספר","sense_code":"printed_book"}]}]}\n```';
+    expect(parseLlmTranslation(raw)?.entries[0].lemma).toBe('book');
   });
 });
 

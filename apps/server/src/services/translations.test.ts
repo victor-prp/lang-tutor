@@ -6,6 +6,11 @@ import { createTranslationService } from './translations';
 
 const reply = (payload: unknown) => JSON.stringify(payload);
 
+/** One entry, for the many tests that do not care about the nesting. */
+const oneEntry = (lemma: string, senses: Record<string, unknown>[]) => ({
+  entries: [{ lemma, senses }],
+});
+
 function serviceWith(...replies: (string | Error)[]) {
   const llm = createFakeLlmClient(...replies);
   const logger = createFakeLogger();
@@ -14,7 +19,12 @@ function serviceWith(...replies: (string | Error)[]) {
 
 describe('translate', () => {
   it('detects the direction and echoes the trimmed text back', async () => {
-    const { service } = serviceWith(reply({ kind: 'word', senses: [{ translation: 'ספר' }] }));
+    const { service } = serviceWith(
+      reply({
+        kind: 'word',
+        ...oneEntry('book', [{ translation: 'ספר', sense_code: 'printed_book' }]),
+      }),
+    );
 
     const result = await service.translate({ text: '  book  ' });
 
@@ -23,7 +33,7 @@ describe('translate', () => {
   });
 
   it('honours an explicit direction, which is what the flip control sends', async () => {
-    const { service, llm } = serviceWith(reply({ kind: 'word', senses: [] }));
+    const { service, llm } = serviceWith(reply({ kind: 'word', entries: [] }));
 
     const result = await service.translate({ text: 'book', direction: 'he_en' });
 
@@ -32,7 +42,7 @@ describe('translate', () => {
   });
 
   it('passes the prompt straight through to the client', async () => {
-    const { service, llm } = serviceWith(reply({ kind: 'word', senses: [] }));
+    const { service, llm } = serviceWith(reply({ kind: 'word', entries: [] }));
 
     await service.translate({ text: 'book' });
 
@@ -42,7 +52,12 @@ describe('translate', () => {
   });
 
   it('overrides the model when a single token is called a sentence', async () => {
-    const { service } = serviceWith(reply({ kind: 'sentence', senses: [{ translation: 'ספר' }] }));
+    const { service } = serviceWith(
+      reply({
+        kind: 'sentence',
+        ...oneEntry('book', [{ translation: 'ספר', sense_code: 'printed_book' }]),
+      }),
+    );
 
     const result = await service.translate({ text: 'book' });
 
@@ -53,14 +68,15 @@ describe('translate', () => {
     const { service } = serviceWith(
       reply({
         kind: 'sentence',
-        senses: [
+        ...oneEntry('I read a book', [
           {
             translation: 'קראתי ספר.',
             part_of_speech: 'verb',
             example: { source: 'a', target: 'b' },
+            sense_code: 's',
           },
-          { translation: 'אחר' },
-        ],
+          { translation: 'אחר', sense_code: 't' },
+        ]),
       }),
     );
 
@@ -80,7 +96,7 @@ describe('translate', () => {
   });
 
   it('treats an empty sense list from the model as an empty result', async () => {
-    const { service } = serviceWith(reply({ kind: 'word', senses: [] }));
+    const { service } = serviceWith(reply({ kind: 'word', entries: [] }));
     await expect(service.translate({ text: 'asdkjhasd' })).resolves.toMatchObject({ senses: [] });
   });
 
@@ -105,7 +121,10 @@ describe('translate', () => {
 
   it('logs one event per successful translation', async () => {
     const { service, logger } = serviceWith(
-      reply({ kind: 'word', senses: [{ translation: 'ספר' }] }),
+      reply({
+        kind: 'word',
+        ...oneEntry('book', [{ translation: 'ספר', sense_code: 'printed_book' }]),
+      }),
     );
 
     await service.translate({ text: 'book' });
@@ -113,5 +132,28 @@ describe('translate', () => {
     expect(logger.events).toEqual([
       { event: 'translated', direction: 'en_he', kind: 'word', sense_count: 1 },
     ]);
+  });
+
+  it('flattens two entries into one ranked list, round-robin by rank', async () => {
+    const { service } = serviceWith(
+      reply({
+        kind: 'word',
+        entries: [
+          {
+            lemma: 'see',
+            senses: [
+              { translation: 'לראות', sense_code: 'perceive' },
+              { translation: 'להבין', sense_code: 'understand' },
+            ],
+          },
+          { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+        ],
+      }),
+    );
+
+    const result = await service.translate({ text: 'saw' });
+
+    expect(result.senses.map((sense) => sense.translation)).toEqual(['לראות', 'מסור', 'להבין']);
+    expect(result.senses[0]).not.toHaveProperty('sense_code');
   });
 });
