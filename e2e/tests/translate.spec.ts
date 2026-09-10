@@ -155,3 +155,55 @@ test('a failing provider shows the error, and retry works once it recovers', asy
   await page.getByTestId('translate-retry').click();
   await expect(sense(page, 'עוגן')).toBeVisible();
 });
+
+test('a word looked up twice is answered without the provider the second time', async ({
+  page,
+  request,
+}) => {
+  const KITE_ENTRIES = [
+    {
+      lemma: 'kite',
+      senses: [
+        {
+          translation: 'עפיפון',
+          part_of_speech: 'noun',
+          example: { source: 'The kite flew over the beach.', target: 'העפיפון עף מעל החוף.' },
+          sense_code: 'flying_toy',
+        },
+        {
+          translation: 'דיה',
+          part_of_speech: 'noun',
+          example: { source: 'A kite circled above the field.', target: 'דיה חגה מעל השדה.' },
+          sense_code: 'bird_of_prey',
+        },
+      ],
+    },
+  ];
+
+  await expectGemini(request, { kind: 'word', entries: KITE_ENTRIES });
+  await openTranslate(page, request, 'e2e_translate_reuse');
+
+  await page.getByTestId('translate-input').fill('kite');
+  await page.getByTestId('translate-submit').click();
+  await expect(sense(page, 'עפיפון')).toBeVisible();
+
+  // Choosing is what reveals the "new word" control. It records nothing — as of
+  // phase 10 the rows were written when the answer arrived, so the tap confirms
+  // something that already happened.
+  await page.getByTestId('translate-choose').first().click();
+  await expect(page.getByTestId('translate-chosen')).toHaveText('התרגום נשמר לאוצר המילים שלך');
+  await page.getByTestId('translate-new-word').click();
+
+  // Nothing is left for the provider to answer with. An answer now can only
+  // have come from Postgres.
+  await clearGemini(request);
+
+  await page.getByTestId('translate-input').fill('kite');
+  await page.getByTestId('translate-submit').click();
+
+  await expect(sense(page, 'עפיפון')).toBeVisible();
+  await expect(page.getByTestId('translate-more')).toContainText('1');
+  await page.getByTestId('translate-more').click();
+  await expect(sense(page, 'דיה')).toBeVisible();
+  await expect(page.getByTestId('translate-error')).toHaveCount(0);
+});
