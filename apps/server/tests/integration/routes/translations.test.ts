@@ -5,6 +5,7 @@ import { createTranslationsRouter } from '../../../src/routes/translations';
 import { createFakeLogger } from '../../support/fakes';
 import {
   clearNamespace,
+  countGeminiRequests,
   expectGeminiDelayedJson,
   expectGeminiJson,
   expectGeminiRawBody,
@@ -223,4 +224,58 @@ describe('POST /api/translations', () => {
 
     expect(res.status).toBe(502);
   }, 25_000);
+
+  it('answers the same string twice over HTTP with one provider request', async () => {
+    await expectGeminiJson(ns, {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'ladder',
+          senses: [
+            {
+              translation: 'סולם',
+              part_of_speech: 'noun',
+              example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
+              sense_code: 'climbing_frame',
+            },
+          ],
+        },
+      ],
+    });
+
+    const first = await translate({ text: 'ladder' });
+    const second = await translate({ text: 'ladder' });
+
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(await first.json());
+    expect(await countGeminiRequests(ns, 'ladder')).toBe(1);
+  });
+
+  it('flattens a two-entry answer into one ranked list on the wire', async () => {
+    await expectGeminiJson(ns, {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'see',
+          senses: [
+            { translation: 'לראות', part_of_speech: 'verb', sense_code: 'perceive' },
+            { translation: 'להבין', part_of_speech: 'verb', sense_code: 'understand' },
+          ],
+        },
+        {
+          lemma: 'saw',
+          senses: [{ translation: 'מסור', part_of_speech: 'noun', sense_code: 'tool' }],
+        },
+      ],
+    });
+
+    const res = await translate({ text: 'saw' });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { senses: { translation: string }[] };
+    // One flat list, with no sign that two headwords are in it — the per-sense
+    // part_of_speech is the only hint. Grouping is out of scope for this phase.
+    expect(body.senses.map((sense) => sense.translation)).toEqual(['לראות', 'מסור', 'להבין']);
+    expect(body.senses[0]).not.toHaveProperty('sense_code');
+  });
 });

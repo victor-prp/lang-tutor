@@ -163,3 +163,27 @@ export async function assertMockServerReachable(): Promise<void> {
     );
   }
 }
+
+/**
+ * How many generateContent requests this namespace actually received.
+ *
+ * `verify` answers matched/not-matched; a count is what "exactly one provider
+ * request for two lookups" needs. `matchText` narrows to requests whose body
+ * carries a given string, so one test's traffic cannot be confused with
+ * another's inside the same namespace.
+ */
+export async function countGeminiRequests(ns: string, matchText?: string): Promise<number> {
+  const res = await fetch(`${ADMIN_URL}/mockserver/retrieve?type=REQUESTS&format=JSON`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      method: 'POST',
+      path: generateContentPath(ns),
+      ...(matchText ? { body: { type: 'REGEX', regex: `[\\s\\S]*${matchText}[\\s\\S]*` } } : {}),
+    }),
+  });
+  if (res.status !== 200) {
+    throw new Error(`MockServer retrieve returned ${res.status}: ${await res.text()}`);
+  }
+  return ((await res.json()) as unknown[]).length;
+}
