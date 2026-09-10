@@ -273,27 +273,40 @@ describe('persistEntries', () => {
       release = resolve;
     });
 
-    // Signalled by tx1 once it has actually written its rows (term, variant,
-    // senses) and is holding them uncommitted — not on a timer, which proves
-    // nothing about whether tx1 got there first. tx2 awaits this before it
-    // attempts its own insert, which is what makes tx1 provably hold the
-    // conflicting row when tx2 arrives: a bare `setTimeout` gates only wall
-    // time, not the fact that tx1 wrote anything, so tx2 could still win the
-    // insert race and never contend at all.
+    // Signalled by tx1 once its `persistEntries` call has settled — not on a
+    // timer, which proves nothing about whether tx1 got there first. tx2
+    // awaits this before it attempts its own insert, which is what makes tx1
+    // provably hold the conflicting row when tx2 arrives: a bare `setTimeout`
+    // gates only wall time, not the fact that tx1 wrote anything, so tx2
+    // could still win the insert race and never contend at all.
+    //
+    // Fired from a `finally`, not only after a successful `await`, so a
+    // future regression that makes `persistEntries` throw can't leave tx2
+    // hanging forever on `await written` below (and, transitively, hang
+    // `afterEach`'s `t.close()` — `pool.end()` never resolves while a client
+    // is still checked out). The throw itself is not caught here: nothing
+    // returns or swallows it, so it still propagates out of the IIFE and
+    // rejects `first`, which is what must happen for the test to fail fast
+    // and name the real error instead of timing out opaquely.
     let signalWritten = (): void => {};
     const written = new Promise<void>((resolve) => {
       signalWritten = resolve;
     });
 
     const first = withTx(t.db, async (tx) => {
-      const out = await createVocabRepo(tx).persistEntries({
-        form: 'kite',
-        languageCode: 'en',
-        userLanguageCode: 'he',
-        kind: 'word',
-        entries: [entry('kite', ['עפיפון'])],
-      });
-      signalWritten(); // tx1 has written; tx2 may now attempt its own insert
+      const out = await (async () => {
+        try {
+          return await createVocabRepo(tx).persistEntries({
+            form: 'kite',
+            languageCode: 'en',
+            userLanguageCode: 'he',
+            kind: 'word',
+            entries: [entry('kite', ['עפיפון'])],
+          });
+        } finally {
+          signalWritten(); // tx2 may now attempt its own insert, success or not
+        }
+      })();
       await held; // keep the transaction open so the second one has to block
       return out;
     });
