@@ -39,7 +39,6 @@ export async function seedContent(db: Db): Promise<void> {
         id: entry.term_id,
         languageCode: TARGET_LANGUAGE,
         lemma: entry.lemma,
-        partOfSpeech: entry.part_of_speech,
       })),
     )
     .onConflictDoNothing();
@@ -50,8 +49,10 @@ export async function seedContent(db: Db): Promise<void> {
       content.map((entry) => ({
         id: variantId(entry),
         termId: entry.term_id,
+        languageCode: TARGET_LANGUAGE,
         form: entry.prompt,
         kind: entry.prompt_kind,
+        entryRank: 0,
       })),
     )
     .onConflictDoNothing();
@@ -63,6 +64,8 @@ export async function seedContent(db: Db): Promise<void> {
         id: senseId(entry),
         termId: entry.term_id,
         senseCode: 'default',
+        rank: 0,
+        partOfSpeech: entry.part_of_speech,
       })),
     )
     .onConflictDoNothing();
