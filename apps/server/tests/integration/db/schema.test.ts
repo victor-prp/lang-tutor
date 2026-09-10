@@ -203,4 +203,43 @@ describe('the migrated schema', () => {
                      values ('vt-dup', 'en', 'dup', 'word', -1)`),
     ).rejects.toThrow();
   });
+
+  // The unique index that doubles as the lookup index: one reading of one form,
+  // per language, wins. Two different terms and a form that differs only by
+  // case, so this also proves lower(form) — not form — is what the index
+  // compares.
+  it('refuses two term_variants for the same language_code, lower(form) and entry_rank', async () => {
+    await db.execute(sql`
+      insert into vocab_terms (id, language_code, lemma) values ('vt-idx-a', 'en', 'idx-a');
+      insert into vocab_terms (id, language_code, lemma) values ('vt-idx-b', 'en', 'idx-b');
+      insert into term_variants (term_id, language_code, form, kind, entry_rank)
+        values ('vt-idx-a', 'en', 'Case', 'word', 0);
+    `);
+    await expect(
+      db.execute(sql`insert into term_variants (term_id, language_code, form, kind, entry_rank)
+                     values ('vt-idx-b', 'en', 'CASE', 'word', 0)`),
+    ).rejects.toThrow(
+      expect.objectContaining({
+        cause: expect.objectContaining({
+          message: expect.stringContaining('term_variants_form_entry_rank_key'),
+        }),
+      }),
+    );
+  });
+
+  it('refuses a term_variants insert that omits entry_rank', async () => {
+    await db.execute(
+      sql`insert into vocab_terms (id, language_code, lemma) values ('vt-no-rank', 'en', 'no-rank')`,
+    );
+    await expect(
+      db.execute(sql`insert into term_variants (term_id, language_code, form, kind)
+                     values ('vt-no-rank', 'en', 'no-rank', 'word')`),
+    ).rejects.toThrow(
+      expect.objectContaining({
+        cause: expect.objectContaining({
+          message: expect.stringContaining('entry_rank'),
+        }),
+      }),
+    );
+  });
 });
