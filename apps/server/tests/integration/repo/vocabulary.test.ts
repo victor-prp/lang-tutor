@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { LlmEntry } from '@lang-tutor/core/api';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 
 import { termVariants, vocabTermSenses } from '../../../src/db/schema';
 import { createVocabRepo } from '../../../src/repo/vocabulary';
@@ -221,6 +221,17 @@ describe('persistEntries', () => {
     ]);
     // Its contribution was the variant, and nothing else.
     expect((await find('saw')).map((row) => row.translation)).toContain('לראות');
+
+    // written[0] is the found path: 'see' already had senses before this call.
+    // Checked against an independent, freshly-ordered query rather than the
+    // first call's own senseIds, so a wrong-order regression on the found path
+    // is caught even if it happened to match some other array by coincidence.
+    const seeSenses = await t.db
+      .select({ id: vocabTermSenses.id })
+      .from(vocabTermSenses)
+      .where(eq(vocabTermSenses.termId, written[0].termId))
+      .orderBy(asc(vocabTermSenses.rank));
+    expect(written[0].senseIds).toEqual(seeSenses.map((row) => row.id));
   });
 
   it('is idempotent: the same call twice writes nothing the second time', async () => {
@@ -230,6 +241,10 @@ describe('persistEntries', () => {
     expect(second.written[0].termId).toBe(first.written[0].termId);
     expect(second.written[0].variantId).toBe(first.written[0].variantId);
     expect(second.written[0].created).toBe(false);
+    // The first call wrote the senses; the second only found them. Equal,
+    // order included, is what would break if the found path ever returned
+    // `[]` or a different order than the write did.
+    expect(second.written[0].senseIds).toEqual(first.written[0].senseIds);
     // Scoped to this term rather than the whole table: the shared content seed
     // (db/seed.ts) already populates term_variants with 16 rows for the other
     // integration suites, so an unscoped count could never read 1 regardless of
@@ -272,18 +287,45 @@ describe('persistEntries', () => {
 
     // Long enough for the second transaction to reach the unique index and
     // block there. It cannot proceed until `first` commits.
+    //
+    // `releasedAt`/`secondSettledAt` turn "the second transaction blocked"
+    // into an observable fact rather than a timing coincidence: every other
+    // assertion below (matching termId, created: false, one sense set) would
+    // be equally satisfied if `second` simply started after `first` had
+    // already committed on its own. Recording when `second`'s own write
+    // settles, independent of when the wrapping IIFE returns, and requiring
+    // that to be no earlier than the moment `release()` ran is what would
+    // actually fail if the two transactions had merely run one after another
+    // instead of genuinely racing on the unique index.
+    let releasedAt = 0;
+    let secondSettledAt = 0;
     const second = (async () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const out = persist('kite', [entry('kite', ['משהו אחר'])]);
+      out.then(
+        () => {
+          secondSettledAt = Date.now();
+        },
+        () => {
+          secondSettledAt = Date.now();
+        },
+      );
       await new Promise((resolve) => setTimeout(resolve, 100));
+      releasedAt = Date.now();
       release();
       return out;
     })();
 
     const [a, b] = await Promise.all([first, second]);
 
+    expect(secondSettledAt).toBeGreaterThanOrEqual(releasedAt);
+
     expect(b.written[0].termId).toBe(a.written[0].termId);
     expect(b.written[0].created).toBe(false);
+    // `a` wrote the senses; `b` only found them — same order-sensitive check
+    // as the idempotent test, here under an actual concurrent race rather
+    // than two sequential calls.
+    expect(b.written[0].senseIds).toEqual(a.written[0].senseIds);
     expect(b.senses.map((sense) => sense.translation)).toEqual(['עפיפון']);
     expect(
       await t.db
