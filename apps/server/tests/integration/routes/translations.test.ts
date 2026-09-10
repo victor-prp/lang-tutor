@@ -278,4 +278,25 @@ describe('POST /api/translations', () => {
     expect(body.senses.map((sense) => sense.translation)).toEqual(['לראות', 'מסור', 'להבין']);
     expect(body.senses[0]).not.toHaveProperty('sense_code');
   });
+
+  it('answers a recorded string from the seed, with no provider request at all', async () => {
+    // No expectation is registered: this namespace has nothing to answer with,
+    // so a 200 here can only have come from Postgres.
+    //
+    // Containment, not an exact list: how many senses `book` has, and whether
+    // any carry an example, is a property of whatever `content:generate`
+    // recorded — richer today or later — not a property of this phase.
+    // "Exactly as recorded" for all sixteen seeded queries, including `book`,
+    // is already proven in tests/integration/db/seed.test.ts ("leaves every
+    // recorded string servable, as exactly the merge persistEntries
+    // produces"), which may import `recorded` because it sits in the `db/`
+    // bucket. This test only proves the one thing that check cannot: that the
+    // HTTP boundary serves it too, without reaching the provider.
+    const res = await translate({ text: 'book' });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { senses: { translation: string }[] };
+    expect(body.senses.map((sense) => sense.translation)).toContain('ספר');
+    expect(await countGeminiRequests(ns)).toBe(0);
+  });
 });
