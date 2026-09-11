@@ -239,31 +239,40 @@ three distractors, and where the right answer is spliced in — and
 `persistEntries`, the same write path a lookup uses, so a seeded row and a looked-up row
 are indistinguishable — that is the design.
 
-As committed today, `content.generated.ts` holds placeholders, not recordings: this
-environment has no `GEMINI_API_KEY`, so `npm run content:generate` has never been run
-against the real model. Each of the sixteen entries is derived mechanically from the
-authored content in `content.ts` instead — one entry, one sense, a translation, a part of
-speech and a sense code, and no example. The file's own header says so.
+`content.generated.ts` now holds a real recording, not placeholders: thirteen strings, generated
+once against Gemini by `npm run content:generate` and reviewed by hand. Together they carry
+seventeen senses (`window` has three, `book` and `water` two each, the rest one), fourteen of
+which carry an `example`. The file's own header — "Recorded provider answers… reviewed by
+hand… DO NOT EDIT BY HAND" — is therefore true; do not hand-edit it.
+
+The seed teaches thirteen strings rather than sixteen on purpose. Three — `I don't
+understand`, `What is your name?`, `Where is the station?` — were dropped from
+`content.ts`: the real model classifies them as sentences, and a sentence is never
+persisted by a real lookup (`assertSeedable`, `services/translations.ts`), so seeding one
+would create a dictionary row no lookup could ever have produced.
 
 ```bash
-npm run content:generate            # re-record all sixteen. Needs a real key; spends money
-npm run content:generate -- book    # re-record one, leaving the other fifteen untouched
+npm run content:generate            # re-record all thirteen. Needs a real key; spends money
+npm run content:generate -- book    # re-record one, leaving the other twelve untouched
 npm run db:reseed                   # clear the dictionary and replay the recording
 ```
 
-> **The first real recording run must be unfiltered.** The recorder stamps its header —
-> "Recorded provider answers… reviewed by hand… DO NOT EDIT BY HAND" — on every run it
-> makes, filtered or not. Running `npm run content:generate -- book` against today's
-> placeholder file would re-record that one entry for real and stamp that header over the
-> whole file, falsely marking the other fifteen placeholders as reviewed recordings. Run it
-> unfiltered first, so the header becomes true of all sixteen at once. After that, the
-> filter is the right tool, for the reason below.
+> **A filtered run refuses to touch a file that is still all placeholders.** The recorder
+> stamps its "DO NOT EDIT BY HAND" header on every run it makes, filtered or not, so
+> recording one query for real against an unrecorded file would falsely mark every other
+> entry as a reviewed recording; `content:generate` detects that case and refuses to run
+> filtered until an unfiltered run has recorded everything for real. That bootstrap no
+> longer describes this repo — every entry already carries a genuine recording — but the
+> guard stays in place for the next one. An unfiltered run also prunes: it starts the
+> recorded map empty and refills it only from `content.ts`'s current query list, so a query
+> removed from the seed (like the three above) drops out of `content.generated.ts` too
+> instead of lingering as a stale entry.
 
 `content:generate` needs `GEMINI_API_KEY` and `GEMINI_MODEL` and refuses to run against
 MockServer. It is absent from every CI job, so a stale `content.generated.ts` is invisible
 until someone looks. Always read the diff before committing one: regeneration is
 non-deterministic enough at `temperature: 0` that a filterless re-record produces a
-sixteen-entry diff nobody reads carefully, which is why the filter exists once every entry
+thirteen-entry diff nobody reads carefully, which is why the filter exists once every entry
 is a genuine recording.
 
 `db:reseed` is needed because `persistEntries` is first-writer-wins — running the seed
