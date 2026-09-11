@@ -7,6 +7,7 @@ import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
 import { createUserRepo } from './repo/users';
+import { createVocabRepo } from './repo/vocabulary';
 import type { LlmClient } from './services/llm';
 import { createSessionService, type SessionService } from './services/sessions';
 import { createTranslationService, type TranslationService } from './services/translations';
@@ -20,10 +21,6 @@ export type AppDeps = {
   logger: Logger;
 };
 
-// The provider's whole budget for one call. Ten seconds because a learner is
-// waiting on it: no retry, no backoff — a learner who taps retry *is* the retry.
-const TRANSLATION_TIMEOUT_MS = 10_000;
-
 // Assembly only: no I/O, no logic, no conditionals beyond choosing an
 // implementation. `db` and `logger` are received rather than built here because
 // createDb opens a real pool — that stays in main(), and everything above it is
@@ -34,6 +31,11 @@ export function createServerDeps(io: {
   rng: () => number;
   fetch: typeof globalThis.fetch;
   gemini: GeminiConfig;
+  // The provider's whole budget for one call. No retry: a learner who taps
+  // retry *is* the retry. Received rather than a module constant so a test can
+  // inject a short budget instead of paying a slow provider's delay in
+  // wall-clock time — see config.ts's TRANSLATION_TIMEOUT_MS default.
+  translationTimeoutMs: number;
 }): AppDeps {
   // Binding the repositories to a transaction is assembly, which is what this
   // file is for. Doing it here is what lets services/ take a transaction rather
@@ -42,6 +44,7 @@ export function createServerDeps(io: {
     session: createSessionRepo(tx),
     question: createQuestionRepo(tx),
     user: createUserRepo(tx),
+    vocab: createVocabRepo(tx),
   }));
 
   // The one place in the repo that names both `createGeminiClient` and
@@ -53,14 +56,14 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
-    timeoutMs: TRANSLATION_TIMEOUT_MS,
+    timeoutMs: io.translationTimeoutMs,
   });
 
   return {
     sessions: createSessionService({ transaction, rng: io.rng, logger: io.logger }),
     users: createUserService({ transaction, logger: io.logger }),
-    translations: createTranslationService({ llm, logger: io.logger }),
-    health: createHealthRepo(io.db),
+    translations: createTranslationService({ llm, transaction, logger: io.logger }),
+    health: createHealthRepo(io.db, io.logger),
     logger: io.logger,
   };
 }

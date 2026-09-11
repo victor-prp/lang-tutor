@@ -31,6 +31,14 @@ experience, and the confirmation it shows is deliberately ahead of the storage t
 next. It is also the first time the server calls a third party, holds a secret, or depends
 on a non-deterministic answer.
 
+Phase 10 makes that dictionary real. A translation the model answers is written to
+Postgres, and the next lookup of that string — by anyone — is served without reaching the
+provider. The model is now asked for *entries*, one per headword, so typing `saw` returns
+the verb `see` and the noun `saw` in one answer and writes both. The dictionary is shared
+and records no learner: there is no `user_id` anywhere near it, so "my words" is not what
+this builds — the second learner to ask a word benefits from the first. Nothing on the
+wire changed, and `apps/mobile` has no changed file.
+
 - Phase 1: [design](docs/superpowers/specs/2026-08-24-lang-tutor-phase-1-design.md) · [plan](docs/superpowers/plans/2026-08-24-lang-tutor-phase-1.md)
 - Phase 2: [design](docs/superpowers/specs/2026-08-26-lang-tutor-phase-2-design.md) · [plan](docs/superpowers/plans/2026-08-26-lang-tutor-phase-2.md)
 - Phase 3: [design](docs/superpowers/specs/2026-08-29-lang-tutor-phase-3-ci-design.md) · [plan](docs/superpowers/plans/2026-08-29-lang-tutor-phase-3-ci.md)
@@ -40,6 +48,7 @@ on a non-deterministic answer.
 - Phase 7: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-7-openapi-design.md) · [plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-7-openapi.md)
 - Phase 8: [design](docs/superpowers/specs/2026-09-07-lang-tutor-phase-8-onboarding-design.md) · [plan](docs/superpowers/plans/2026-09-07-lang-tutor-phase-8-onboarding.md)
 - Phase 9: [design](docs/superpowers/specs/2026-09-08-lang-tutor-phase-9-translation-design.md) · [plan](docs/superpowers/plans/2026-09-08-lang-tutor-phase-9-translation.md)
+- Phase 10: [plan](docs/superpowers/plans/2026-09-10-lang-tutor-phase-10-vocabulary-persistence.md) — this phase's plan carries its design; no separate design doc was written.
 
 ## Layout
 
@@ -120,21 +129,33 @@ Nine tables, all in `apps/server/src/db/schema.ts`:
 | Table | Holds |
 |---|---|
 | `users` | One row per learner: a unique `username` they log in with, a `display_name`, an `age`, and their native/target language pair. The id is issued by the database, never by a client. |
-| `vocab_terms` | A lemma in a language (e.g. English "run"), unique per `(language_code, lemma)`. |
-| `term_variants` | Inflected forms of a term (e.g. "run", "ran", "running") — one of them is a question's prompt. |
-| `vocab_term_senses` | A distinct meaning of a term, since one lemma can have several. |
-| `term_sense_translations` | A sense's translation into a learner's native language, one row per `(sense, user_language_code)`. |
+| `vocab_terms` | A lemma in a language (e.g. English "run"), unique per `(language_code, lemma)`. The id is issued by the database. |
+| `term_variants` | A surface form somebody actually queried — `run`, `running`, `saw` — with the language it is in and `entry_rank`, this term's position among the readings the model returned *for that form*. `UNIQUE(language_code, lower(form), entry_rank)` is both the lookup index and the guarantee that no two terms claim one reading. |
+| `vocab_term_senses` | A distinct meaning of a term, with its `part_of_speech`, its source-language `example_source`, and `rank` — "most common first", within that term. |
+| `term_sense_translations` | A sense's translation into a learner's native language, with the target half of the example, one row per `(sense, user_language_code)`. |
 | `questions` | A generated multiple-choice question: a sense, a prompt variant, and its shuffled `options` (jsonb). |
 | `sessions` | One learner's attempt at a ten-question run; `completed_at IS NULL` means still in progress. |
 | `session_questions` | The ten questions assigned to a session, in order, with the per-session option shuffle. |
 | `answers` | The option the learner picked for one `(session, position)`, constrained to reference a question actually assigned there. |
 
-The vocabulary and sense tables are shared content, seeded once and never written to at
-request time. `questions` is split down the middle by `user_id`: **`user_id IS NULL`
-means the question is shared** — part of the common pool every learner can be given —
-while a non-null `user_id` would mean a question generated for that learner alone.
-Phase 4 only ever writes shared rows (`user_id IS NULL`); the column exists now so a
-later phase can add personalised questions without a migration.
+Since phase 10 the vocabulary tables **are** written at request time: `POST
+/api/translations` writes every entry the model returned, and the next lookup of that
+string is served from Postgres. The dictionary is shared and records no learner — there is
+no `user_id` near these tables — so a save enriches the global dictionary rather than
+anybody's word list. It is first-writer-wins and permanent: a term that has senses is never
+rewritten, there is no TTL, and the only supported way to change stored content is
+`npm run db:reseed`.
+
+Two ranks, two scopes, and they are not the same number. `vocab_term_senses.rank` orders
+senses *within one headword*; `term_variants.entry_rank` orders headwords *within one
+form*. A lookup sorts by rank first, so a form belonging to two headwords returns them
+interleaved and neither one's top sense is crowded out.
+
+`questions` is split down the middle by `user_id`: **`user_id IS NULL` means the question
+is shared** — part of the common pool every learner can be given — while a non-null
+`user_id` would mean a question generated for that learner alone. Nothing writes a
+per-learner question yet; the column exists so a later phase can add them without a
+migration.
 
 ## Running it
 
@@ -150,6 +171,13 @@ npm run db:migrate   # schema + shared vocabulary seed
 npm run server       # terminal 1
 npm run mobile       # terminal 2
 ```
+
+> **Migration `0003` clears the dictionary and the quiz.** It runs `TRUNCATE vocab_terms,
+> sessions CASCADE` before adding its columns, so applying it drops every seeded and
+> looked-up word, every question, and all session history — `answers`, `session_questions`
+> and `sessions`. `users` survives. That is the deliberate price of one data shape instead
+> of two, and it happens once, the first time `npm run db:migrate` runs on an existing
+> database.
 
 `npm run db:up` starts two containers: Postgres, and a MockServer instance that stands in for
 the Gemini API in every test bucket. Integration and e2e tests register their own expectations
@@ -202,6 +230,63 @@ For local work with no real key, point the server at MockServer and use any dumm
 export GEMINI_BASE_URL=http://localhost:1080/dev GEMINI_API_KEY=dev GEMINI_MODEL=dev
 ```
 
+### The recorded seed
+
+The seed is meant to hold real provider answers, generated once against Gemini and
+reviewed by hand. `src/db/content.ts` holds the quiz authoring — the string to record,
+three distractors, and where the right answer is spliced in — and
+`src/db/content.generated.ts` holds the recordings. `db/seed.ts` replays them through
+`persistEntries`, the same write path a lookup uses, so a seeded row and a looked-up row
+are indistinguishable — that is the design.
+
+`content.generated.ts` now holds a real recording, not placeholders: thirteen strings, generated
+once against Gemini by `npm run content:generate` and reviewed by hand. Together they carry
+seventeen senses (`window` has three, `book` and `water` two each, the rest one), fourteen of
+which carry an `example`. The file's own header — "Recorded provider answers… reviewed by
+hand… DO NOT EDIT BY HAND" — is therefore true; do not hand-edit it.
+
+The seed teaches thirteen strings rather than sixteen on purpose. Three — `I don't
+understand`, `What is your name?`, `Where is the station?` — were dropped from
+`content.ts`: the real model classifies them as sentences, and a sentence is never
+persisted by a real lookup (`assertSeedable`, `services/translations.ts`), so seeding one
+would create a dictionary row no lookup could ever have produced.
+
+```bash
+npm run content:generate            # re-record all thirteen. Needs a real key; spends money
+npm run content:generate -- book    # re-record one, leaving the other twelve untouched
+npm run db:reseed                   # clear the dictionary and replay the recording
+```
+
+> **A filtered run refuses to touch a file that is still all placeholders.** The recorder
+> stamps its "DO NOT EDIT BY HAND" header on every run it makes, filtered or not, so
+> recording one query for real against an unrecorded file would falsely mark every other
+> entry as a reviewed recording; `content:generate` detects that case and refuses to run
+> filtered until an unfiltered run has recorded everything for real. That bootstrap no
+> longer describes this repo — every entry already carries a genuine recording — but the
+> guard stays in place for the next one. An unfiltered run also prunes: it starts the
+> recorded map empty and refills it only from `content.ts`'s current query list, so a query
+> removed from the seed (like the three above) drops out of `content.generated.ts` too
+> instead of lingering as a stale entry.
+
+`content:generate` needs `GEMINI_API_KEY` and `GEMINI_MODEL` and refuses to run against
+MockServer. It is absent from every CI job, so a stale `content.generated.ts` is invisible
+until someone looks. Always read the diff before committing one: regeneration is
+non-deterministic enough at `temperature: 0` that a filterless re-record produces a
+thirteen-entry diff nobody reads carefully, which is why the filter exists once every entry
+is a genuine recording.
+
+`db:reseed` is needed because `persistEntries` is first-writer-wins — running the seed
+alone against a populated database writes nothing, so a re-recording would never reach it.
+
+> **`db:reseed` drops looked-up words as well as recorded ones**, and takes session history
+> with them. Nothing distinguishes a recorded row from a written one — that is the whole
+> point of recording the seed — so "re-record one word" is really "reset the dictionary and
+> re-record". The loss is provider calls rather than data.
+
+To remove one bad entry during a play-test without resetting everything, delete it by hand:
+`DELETE FROM vocab_terms WHERE lemma = 'whatever';` cascades to its variants, senses and
+translations.
+
 ## Reading the API
 
 The server describes itself. With `npm run server` running:
@@ -218,10 +303,11 @@ data: a display name and an age. `POST /api/login` takes a username and no passw
 identifies a learner, it does not authenticate one, and nothing may treat it as proof of
 anything. See [ADR 0005](docs/adr/adr-0005-identity-without-authentication.md).
 
-As of phase 9 one endpoint on this open API also costs money to call: `POST
-/api/translations` reaches a paid third-party model on every request, with no
-authentication and no rate limit in front of it. That is acceptable for a play-test on a
-local network and **must not** reach a public host in this state.
+`POST /api/translations` reaches a paid third-party model **on a miss** — a string already
+in the dictionary is answered from Postgres in milliseconds and costs nothing. Since phase
+10 that is most repeat traffic, but there is still no authentication and no rate limit in
+front of the endpoint, and every *new* string is a paid call. That is acceptable for a
+play-test on a local network and **must not** reach a public host in this state.
 
 Neither is hand-written. Every endpoint is one `createRoute` definition in
 `apps/server/src/` — routing, request validation, response typing and documentation at

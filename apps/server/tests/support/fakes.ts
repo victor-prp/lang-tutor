@@ -1,9 +1,11 @@
 import type { User } from '@lang-tutor/core/api';
 
 import type { AppDeps } from '../../src/composition';
+import { flattenEntries, rowsToSenses, type SenseRow } from '../../src/domain/vocabulary';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
+import type { PersistEntriesInput, VocabRepo } from '../../src/repo/vocabulary';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
@@ -120,14 +122,58 @@ function unreachableRepo<T extends object>(name: string): T {
   });
 }
 
-/** Runs `run` immediately with the supplied user repo. No rollback, by design:
- *  a fake that pretended to roll back would be asserting a database behaviour
- *  it cannot actually provide. */
-export function createFakeTransaction(user: UserRepo): Transaction {
-  const repos: Repos = {
-    user,
-    session: unreachableRepo('session repo'),
-    question: unreachableRepo('question repo'),
+/** Runs `run` immediately with whichever repositories the test named; every
+ *  other one throws with the method that was reached for. No rollback, by
+ *  design: a fake that pretended to roll back would be asserting a database
+ *  behaviour it cannot actually provide. */
+export function createFakeTransaction(repos: Partial<Repos>): Transaction {
+  const bound: Repos = {
+    user: repos.user ?? unreachableRepo('user repo'),
+    session: repos.session ?? unreachableRepo('session repo'),
+    question: repos.question ?? unreachableRepo('question repo'),
+    vocab: repos.vocab ?? unreachableRepo('vocab repo'),
   };
-  return (run) => run(repos);
+  return (run) => run(bound);
+}
+
+export type FakeVocabRepo = VocabRepo & {
+  /** What the next read answers with. Empty is a miss. */
+  hit: SenseRow[];
+  /** What the write's re-read answers with. Left empty, the fake answers with
+   *  the entries it was handed, flattened by the real domain function — which
+   *  is what the real re-read would produce for a form nobody else claims. */
+  reread: SenseRow[];
+  /** Set to make the write throw. */
+  persistError: Error | null;
+  persisted: PersistEntriesInput[];
+  reads: { form: string; languageCode: string; userLanguageCode: string }[];
+};
+
+export function createFakeVocabRepo(): FakeVocabRepo {
+  const repo: FakeVocabRepo = {
+    hit: [],
+    reread: [],
+    persistError: null,
+    persisted: [],
+    reads: [],
+    findSensesByForm: async (input) => {
+      repo.reads.push(input);
+      return repo.hit;
+    },
+    persistEntries: async (input) => {
+      repo.persisted.push(input);
+      if (repo.persistError) throw repo.persistError;
+      return {
+        written: input.entries.map((entry, index) => ({
+          lemma: entry.lemma,
+          termId: `t-${index}`,
+          variantId: `v-${index}`,
+          senseIds: entry.senses.map((_, rank) => `s-${index}-${rank}`),
+          created: true,
+        })),
+        senses: repo.reread.length > 0 ? rowsToSenses(repo.reread) : flattenEntries(input.entries),
+      };
+    },
+  };
+  return repo;
 }

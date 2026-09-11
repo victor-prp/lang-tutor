@@ -19,11 +19,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { TranslationResponse } from '@lang-tutor/core/api';
-
 import { loadGeminiConfig } from '../../src/config';
 import { createGeminiClient } from '../../src/providers/gemini';
-import { createTranslationService } from '../../src/services/translations';
+import { askModel, type ModelAnswer } from './askModel';
 import { CASES, type EvalCase } from './cases';
 
 const TIER2_THRESHOLD = 0.85;
@@ -51,7 +49,7 @@ type Row = {
   text: string;
   tier1: Check[];
   tier2: Check[];
-  result?: TranslationResponse;
+  result?: ModelAnswer;
   error?: string;
 };
 
@@ -84,7 +82,7 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-function tier1(kase: EvalCase, result: TranslationResponse): Check[] {
+function tier1(kase: EvalCase, result: ModelAnswer): Check[] {
   const checks: Check[] = [];
   const senses = result.senses;
 
@@ -96,11 +94,38 @@ function tier1(kase: EvalCase, result: TranslationResponse): Check[] {
 
   if (kase.expectEmpty) {
     checks.push({ name: 'no senses', ok: senses.length === 0, detail: `${senses.length}` });
+    checks.push({
+      name: 'no entries',
+      ok: result.entries.length === 0,
+      detail: `${result.entries.length}`,
+    });
     return checks;
   }
 
   checks.push({ name: 'at least one sense', ok: senses.length >= 1 });
   if (senses.length === 0) return checks;
+
+  checks.push({
+    name: 'at least one entry',
+    ok: result.entries.length >= 1,
+    detail: `${result.entries.length}`,
+  });
+  // The schema already requires a non-empty lemma and sense_code, so this is
+  // not a restatement of it: it catches a whitespace lemma, a sense_code that
+  // is prose rather than a code, and two senses of one headword sharing a code
+  // — all of which parse and all of which make a row unreadable in psql.
+  checks.push({
+    name: "every entry has a real lemma and distinct snake_case sense codes",
+    ok: result.entries.every(
+      (entry) =>
+        entry.lemma.trim().length > 0 &&
+        entry.senses.every((sense) => /^[a-z0-9]+(_[a-z0-9]+)*$/.test(sense.sense_code)) &&
+        new Set(entry.senses.map((sense) => sense.sense_code)).size === entry.senses.length,
+    ),
+    detail: result.entries
+      .map((entry) => `${entry.lemma}: ${entry.senses.map((s) => s.sense_code).join(',')}`)
+      .join(' | '),
+  });
 
   if (result.direction === 'en_he') {
     checks.push({
@@ -122,14 +147,22 @@ function tier1(kase: EvalCase, result: TranslationResponse): Check[] {
       name: 'every sense has a part of speech',
       ok: senses.every((sense) => Boolean(sense.part_of_speech)),
     });
+    // "Names its entry's lemma or an inflection of it" used to live here as a
+    // stem check, but a stem check cannot work for English irregular
+    // inflections: they share no stem with their lemma at all. A real run
+    // failed two structurally-correct examples on exactly this —
+    // lemma `see` / example "I saw him yesterday." (stem "see" is not in
+    // "saw"), and lemma `light` / example "He lit a candle." (stem "ligh" is
+    // not in "lit"). Tier 1 must be zero-failures, so a heuristic that can be
+    // wrong about correct output cannot live here; it is scored as a tier 2
+    // axis instead, below.
     checks.push({
-      name: 'every example names the queried term or an inflection of it',
-      // A stem check, not equality: "booked" and "running" must both count.
-      ok: senses.every((sense) => {
-        if (!sense.example) return false;
-        const stem = kase.text.trim().toLowerCase().slice(0, Math.max(4, kase.text.length - 3));
-        return sense.example.source.toLowerCase().includes(stem);
-      }),
+      name: 'every example carries a non-empty source',
+      // A companion to the translation check below, catching what the parse
+      // schema's `min(1)` cannot: a whitespace-only source that satisfies
+      // `z.string().min(1)` character-count-wise, the same class of gap the
+      // lemma/sense_code check above closes for entries.
+      ok: senses.every((sense) => Boolean(sense.example?.source?.trim())),
     });
     checks.push({
       name: 'every example carries a non-empty translation',
@@ -140,7 +173,7 @@ function tier1(kase: EvalCase, result: TranslationResponse): Check[] {
   return checks;
 }
 
-function tier2(kase: EvalCase, result: TranslationResponse): Check[] {
+function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
   const checks: Check[] = [];
   const translations = result.senses.map((sense) => sense.translation);
   const contains = (needles: string[]) =>
@@ -159,6 +192,51 @@ function tier2(kase: EvalCase, result: TranslationResponse): Check[] {
     ok: kase.acceptTop.some((accepted) => translations[0]?.includes(accepted)),
     detail: translations[0],
   });
+
+  // Moved down from tier 1: see the comment there for why a stem check
+  // cannot be a zero-failure invariant (English irregular inflections like
+  // `see` -> "saw" or `light` -> "lit" share no stem with their lemma).
+  // Scored here instead — an occasional miss on an irregular inflection
+  // lowers this axis without failing the run, which is exactly the point of
+  // tier 2 being scored rather than pass/fail. Sentences carry no examples
+  // at all, so the axis does not apply to them.
+  if (result.kind !== 'sentence') {
+    checks.push({
+      name: "every example illustrates its entry's lemma (word or an inflection of it)",
+      // A stem check, not equality: "booked" and "running" must both count. It
+      // is the *lemma* that is checked, not the queried string: senses belong
+      // to the headword, so `saw`'s first entry carries `see`'s examples.
+      ok: result.entries.every((entry) => {
+        const stem = entry.lemma.trim().toLowerCase().slice(0, Math.max(4, entry.lemma.length - 3));
+        return entry.senses.every((sense) => sense.example?.source.toLowerCase().includes(stem));
+      }),
+      detail: result.entries.map((entry) => entry.lemma).join(' | '),
+    });
+  }
+
+  if (kase.expectEntries !== undefined) {
+    checks.push({
+      name: `${kase.expectEntries} entr${kase.expectEntries === 1 ? 'y' : 'ies'}`,
+      ok: result.entries.length === kase.expectEntries,
+      detail: result.entries.map((entry) => entry.lemma).join(' | '),
+    });
+  }
+
+  if (kase.expectEntrySenses !== undefined) {
+    checks.push({
+      name: `the first entry carries at least ${kase.expectEntrySenses} senses`,
+      ok: (result.entries[0]?.senses.length ?? 0) >= kase.expectEntrySenses,
+      detail: `${result.entries[0]?.senses.length ?? 0}`,
+    });
+  }
+
+  if (kase.expectLemma) {
+    checks.push({
+      name: `the single entry's lemma is "${kase.expectLemma}"`,
+      ok: result.entries[0]?.lemma.trim().toLowerCase() === kase.expectLemma,
+      detail: result.entries[0]?.lemma,
+    });
+  }
 
   if (kase.expectAlso) {
     checks.push({
@@ -197,10 +275,6 @@ async function main(): Promise<void> {
     model: gemini.model,
     timeoutMs: TIMEOUT_MS,
   });
-  const service = createTranslationService({
-    llm,
-    logger: { info: () => {}, error: () => {} },
-  });
 
   // One case, scored. Every failure is caught and becomes a tier 1 row rather
   // than rejecting: one case that cannot reach the model must not abandon the
@@ -208,7 +282,8 @@ async function main(): Promise<void> {
   // take the run down mid-flight.
   const scoreCase = async (kase: EvalCase): Promise<Row> => {
     try {
-      const result = await service.translate(
+      const result = await askModel(
+        llm,
         kase.direction ? { text: kase.text, direction: kase.direction } : { text: kase.text },
       );
       return {

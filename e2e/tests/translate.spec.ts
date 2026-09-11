@@ -7,26 +7,39 @@ import { createLearner, logIn } from './support/users';
 // above Playwright's 30s default.
 test.setTimeout(120_000);
 
-const BOOK_SENSES = [
+// Every spec here that expects a provider call uses a string the seed does not
+// contain. As of phase 10 a seeded string answers from Postgres and never
+// reaches MockServer — which is the whole point, and would otherwise turn the
+// 502 and timeout tests into silent 200s.
+
+const LADDER_ENTRIES = [
   {
-    translation: 'ספר',
-    part_of_speech: 'noun',
-    example: { source: 'I read a book about space.', target: 'קראתי ספר על החלל.' },
-  },
-  {
-    translation: 'להזמין',
-    part_of_speech: 'verb',
-    example: { source: "I'd like to book a table.", target: 'אני רוצה להזמין שולחן.' },
-  },
-  {
-    translation: 'לרשום',
-    part_of_speech: 'verb',
-    example: { source: 'The referee booked him.', target: 'השופט רשם לו כרטיס.' },
+    lemma: 'ladder',
+    senses: [
+      {
+        translation: 'סולם',
+        part_of_speech: 'noun',
+        example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
+        sense_code: 'climbing_frame',
+      },
+      {
+        translation: 'דירוג',
+        part_of_speech: 'noun',
+        example: { source: 'He moved up the corporate ladder.', target: 'הוא עלה בסולם הדרגות.' },
+        sense_code: 'ranking',
+      },
+      {
+        translation: 'להוביל',
+        part_of_speech: 'verb',
+        example: { source: 'The path ladders down to the beach.', target: 'השביל מוביל במדרגות לחוף.' },
+        sense_code: 'lead',
+      },
+    ],
   },
 ];
 
 // `exact: true` throughout. The top card's example target is
-// "קראתי ספר על החלל.", which *contains* "ספר" — a substring match would find
+// "היא טיפסה על הסולם.", which *contains* "סולם" — a substring match would find
 // two elements and fail Playwright's strict mode rather than the assertion.
 const sense = (page: Page, text: string) => page.getByText(text, { exact: true });
 
@@ -52,20 +65,20 @@ test('a word shows its most common meaning, reveals the rest, and confirms a cho
   page,
   request,
 }) => {
-  await expectGemini(request, { kind: 'word', senses: BOOK_SENSES });
+  await expectGemini(request, { kind: 'word', entries: LADDER_ENTRIES });
   await openTranslate(page, request, 'e2e_translate_word');
 
-  await page.getByTestId('translate-input').fill('book');
+  await page.getByTestId('translate-input').fill('ladder');
   await page.getByTestId('translate-submit').click();
 
   // The top sense only, with the other two behind `more`.
-  await expect(sense(page, 'ספר')).toBeVisible();
-  await expect(sense(page, 'להזמין')).toBeHidden();
+  await expect(sense(page, 'סולם')).toBeVisible();
+  await expect(sense(page, 'דירוג')).toBeHidden();
   await expect(page.getByTestId('translate-more')).toContainText('2');
 
   await page.getByTestId('translate-more').click();
-  await expect(sense(page, 'להזמין')).toBeVisible();
-  await expect(sense(page, 'לרשום')).toBeVisible();
+  await expect(sense(page, 'דירוג')).toBeVisible();
+  await expect(sense(page, 'להוביל')).toBeVisible();
 
   await page.getByTestId('translate-choose').nth(1).click();
   await expect(page.getByTestId('translate-chosen')).toHaveText('התרגום נשמר לאוצר המילים שלך');
@@ -78,7 +91,12 @@ test('a sentence gets one translation, with neither more nor a save button', asy
 }) => {
   await expectGemini(request, {
     kind: 'sentence',
-    senses: [{ translation: 'אני מצפה לראות אותך.' }],
+    entries: [
+      {
+        lemma: "I'm looking forward to seeing you",
+        senses: [{ translation: 'אני מצפה לראות אותך.', sense_code: 'the_sentence' }],
+      },
+    ],
   });
   await openTranslate(page, request, 'e2e_translate_sentence');
 
@@ -91,7 +109,7 @@ test('a sentence gets one translation, with neither more nor a save button', asy
 });
 
 test('gibberish says so instead of inventing a translation', async ({ page, request }) => {
-  await expectGemini(request, { kind: 'word', senses: [] });
+  await expectGemini(request, { kind: 'word', entries: [] });
   await openTranslate(page, request, 'e2e_translate_empty');
 
   await page.getByTestId('translate-input').fill('asdkjhasd');
@@ -104,18 +122,88 @@ test('a failing provider shows the error, and retry works once it recovers', asy
   page,
   request,
 }) => {
+  // A different word from the word spec above, and not `ladder`: that spec has
+  // already written `ladder` to the long-lived e2e database, and a second
+  // lookup of it would answer from Postgres and never reach MockServer, which
+  // would make this failing-provider assertion never fire.
+  const ANCHOR_ENTRIES = [
+    {
+      lemma: 'anchor',
+      senses: [
+        {
+          translation: 'עוגן',
+          part_of_speech: 'noun',
+          example: { source: 'The ship dropped anchor.', target: 'הספינה הטילה עוגן.' },
+          sense_code: 'ship_anchor',
+        },
+      ],
+    },
+  ];
+
   await expectGeminiFailure(request, 500);
   await openTranslate(page, request, 'e2e_translate_retry');
 
-  await page.getByTestId('translate-input').fill('book');
+  await page.getByTestId('translate-input').fill('anchor');
   await page.getByTestId('translate-submit').click();
   await expect(page.getByTestId('translate-error')).toBeVisible();
 
   // Replacing the expectation is what makes this a test of retry *working*
   // rather than of the error state rendering.
   await clearGemini(request);
-  await expectGemini(request, { kind: 'word', senses: BOOK_SENSES });
+  await expectGemini(request, { kind: 'word', entries: ANCHOR_ENTRIES });
 
   await page.getByTestId('translate-retry').click();
-  await expect(sense(page, 'ספר')).toBeVisible();
+  await expect(sense(page, 'עוגן')).toBeVisible();
+});
+
+test('a word looked up twice is answered without the provider the second time', async ({
+  page,
+  request,
+}) => {
+  const KITE_ENTRIES = [
+    {
+      lemma: 'kite',
+      senses: [
+        {
+          translation: 'עפיפון',
+          part_of_speech: 'noun',
+          example: { source: 'The kite flew over the beach.', target: 'העפיפון עף מעל החוף.' },
+          sense_code: 'flying_toy',
+        },
+        {
+          translation: 'דיה',
+          part_of_speech: 'noun',
+          example: { source: 'A kite circled above the field.', target: 'דיה חגה מעל השדה.' },
+          sense_code: 'bird_of_prey',
+        },
+      ],
+    },
+  ];
+
+  await expectGemini(request, { kind: 'word', entries: KITE_ENTRIES });
+  await openTranslate(page, request, 'e2e_translate_reuse');
+
+  await page.getByTestId('translate-input').fill('kite');
+  await page.getByTestId('translate-submit').click();
+  await expect(sense(page, 'עפיפון')).toBeVisible();
+
+  // Choosing is what reveals the "new word" control. It records nothing — as of
+  // phase 10 the rows were written when the answer arrived, so the tap confirms
+  // something that already happened.
+  await page.getByTestId('translate-choose').first().click();
+  await expect(page.getByTestId('translate-chosen')).toHaveText('התרגום נשמר לאוצר המילים שלך');
+  await page.getByTestId('translate-new-word').click();
+
+  // Nothing is left for the provider to answer with. An answer now can only
+  // have come from Postgres.
+  await clearGemini(request);
+
+  await page.getByTestId('translate-input').fill('kite');
+  await page.getByTestId('translate-submit').click();
+
+  await expect(sense(page, 'עפיפון')).toBeVisible();
+  await expect(page.getByTestId('translate-more')).toContainText('1');
+  await page.getByTestId('translate-more').click();
+  await expect(sense(page, 'דיה')).toBeVisible();
+  await expect(page.getByTestId('translate-error')).toHaveCount(0);
 });

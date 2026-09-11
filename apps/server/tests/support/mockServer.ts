@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { TranslationKind, TranslationSense } from '@lang-tutor/core/api';
+import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
 
 import { geminiResponse } from './geminiResponse';
 
@@ -63,7 +63,7 @@ async function expectation(ns: string, spec: ExpectationSpec): Promise<void> {
 
 export async function expectGeminiJson(
   ns: string,
-  opts: { kind: TranslationKind; senses: TranslationSense[]; matchText?: string },
+  opts: { kind: TranslationKind; entries: LlmEntry[]; matchText?: string },
 ): Promise<void> {
   await expectation(ns, {
     match: opts.matchText
@@ -73,7 +73,7 @@ export async function expectGeminiJson(
       httpResponse: {
         statusCode: 200,
         headers: { 'content-type': ['application/json'] },
-        body: JSON.stringify(geminiResponse({ kind: opts.kind, senses: opts.senses })),
+        body: JSON.stringify(geminiResponse({ kind: opts.kind, entries: opts.entries })),
       },
     },
   });
@@ -87,14 +87,14 @@ export async function expectGeminiStatus(ns: string, statusCode: number): Promis
 
 export async function expectGeminiDelayedJson(
   ns: string,
-  opts: { kind: TranslationKind; senses: TranslationSense[]; delayMs: number },
+  opts: { kind: TranslationKind; entries: LlmEntry[]; delayMs: number },
 ): Promise<void> {
   await expectation(ns, {
     action: {
       httpResponse: {
         statusCode: 200,
         headers: { 'content-type': ['application/json'] },
-        body: JSON.stringify(geminiResponse({ kind: opts.kind, senses: opts.senses })),
+        body: JSON.stringify(geminiResponse({ kind: opts.kind, entries: opts.entries })),
         delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs },
       },
     },
@@ -162,4 +162,28 @@ export async function assertMockServerReachable(): Promise<void> {
         `Underlying error: ${(error as Error).message}`,
     );
   }
+}
+
+/**
+ * How many generateContent requests this namespace actually received.
+ *
+ * `verify` answers matched/not-matched; a count is what "exactly one provider
+ * request for two lookups" needs. `matchText` narrows to requests whose body
+ * carries a given string, so one test's traffic cannot be confused with
+ * another's inside the same namespace.
+ */
+export async function countGeminiRequests(ns: string, matchText?: string): Promise<number> {
+  const res = await fetch(`${ADMIN_URL}/mockserver/retrieve?type=REQUESTS&format=JSON`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      method: 'POST',
+      path: generateContentPath(ns),
+      ...(matchText ? { body: { type: 'REGEX', regex: `[\\s\\S]*${matchText}[\\s\\S]*` } } : {}),
+    }),
+  });
+  if (res.status !== 200) {
+    throw new Error(`MockServer retrieve returned ${res.status}: ${await res.text()}`);
+  }
+  return ((await res.json()) as unknown[]).length;
 }

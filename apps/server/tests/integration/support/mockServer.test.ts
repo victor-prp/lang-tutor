@@ -32,7 +32,12 @@ describe('the MockServer helper', () => {
     const namespace = ns('serves');
     await expectGeminiJson(namespace, {
       kind: 'word',
-      senses: [{ translation: 'ספר', part_of_speech: 'noun' }],
+      entries: [
+        {
+          lemma: 'book',
+          senses: [{ translation: 'ספר', part_of_speech: 'noun', sense_code: 'printed_book' }],
+        },
+      ],
     });
 
     const res = await fetch(
@@ -44,14 +49,22 @@ describe('the MockServer helper', () => {
     const body = (await res.json()) as { candidates: { content: { parts: { text: string }[] } }[] };
     expect(JSON.parse(body.candidates[0].content.parts[0].text)).toEqual({
       kind: 'word',
-      senses: [{ translation: 'ספר', part_of_speech: 'noun' }],
+      entries: [
+        {
+          lemma: 'book',
+          senses: [{ translation: 'ספר', part_of_speech: 'noun', sense_code: 'printed_book' }],
+        },
+      ],
     });
   });
 
   it('keeps two namespaces from seeing each other', async () => {
     const a = ns('iso-a');
     const b = ns('iso-b');
-    await expectGeminiJson(a, { kind: 'word', senses: [{ translation: 'א' }] });
+    await expectGeminiJson(a, {
+      kind: 'word',
+      entries: [{ lemma: 'א', senses: [{ translation: 'א', sense_code: 'a' }] }],
+    });
     await expectGeminiStatus(b, 500);
 
     const resA = await fetch(`${geminiBaseUrlFor(a)}/v1beta/models/m:generateContent`, {
@@ -69,7 +82,7 @@ describe('the MockServer helper', () => {
 
   it('verifies which headers a request carried', async () => {
     const namespace = ns('verify');
-    await expectGeminiJson(namespace, { kind: 'word', senses: [] });
+    await expectGeminiJson(namespace, { kind: 'word', entries: [] });
 
     await fetch(`${geminiBaseUrlFor(namespace)}/v1beta/models/m:generateContent`, {
       method: 'POST',

@@ -16,6 +16,13 @@ export type EvalCase = {
   /** Must appear nowhere — a literal rendering of an idiom, for instance. */
   rejectAny?: string[];
   expectEmpty?: boolean;
+  /** Exactly this many entries. `saw` is 2 — the failure the entries model replaced. */
+  expectEntries?: number;
+  /** At least this many senses on the first entry. `book` is 2 — the failure
+   *  the nested shape invites, where a model splits one lemma by part of speech. */
+  expectEntrySenses?: number;
+  /** The lemma the first entry must resolve to. `running` is `run`. */
+  expectLemma?: string;
 };
 
 export const CASES: EvalCase[] = [
@@ -25,6 +32,8 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['ספר'],
     expectAlso: ['להזמין', 'הזמנה', 'לשריין'],
+    expectEntries: 1,
+    expectEntrySenses: 2,
   },
   {
     label: 'ranking: a homonym with an unrelated second sense',
@@ -58,6 +67,8 @@ export const CASES: EvalCase[] = [
     text: 'running',
     expectKind: 'word',
     acceptTop: ['ריצה', 'לרוץ', 'רץ'],
+    expectEntries: 1,
+    expectLemma: 'run',
   },
   {
     label: 'the reverse direction, and that script detection agreed',
@@ -77,6 +88,14 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['מגניב', 'קריר', 'נחמד'],
     expectAlso: ['קריר', 'צונן', 'מגניב'],
+  },
+  {
+    label: 'one string, two headwords: the verb see and the noun saw',
+    text: 'saw',
+    expectKind: 'word',
+    acceptTop: ['ראה', 'לראות'],
+    expectAlso: ['מסור', 'לנסר'],
+    expectEntries: 2,
   },
   {
     label: 'gibberish returns nothing rather than an invented translation',

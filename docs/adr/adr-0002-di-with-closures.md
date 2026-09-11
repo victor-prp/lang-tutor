@@ -51,7 +51,7 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   factory's return shape still satisfies `tsc` at every call site, so a regex can't
   distinguish "derived" from "coincidentally identical." Enforced by review; the list of
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
-  `createHealthRepo`, `createUserRepo`, `createTransaction`, `createSessionService`,
+  `createHealthRepo`, `createUserRepo`, `createVocabRepo`, `createTransaction`, `createSessionService`,
   `createUserService`, `createGeminiClient`, `createTranslationService`, `createServerDeps`,
   `createApiClient`, `createRememberedUsernameStore`) is short enough to spot-check.
   `createGeminiClient` is annotated at its call site in `composition.ts` rather than at its

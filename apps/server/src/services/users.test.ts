@@ -23,7 +23,7 @@ const REQUEST = {
 function build() {
   const repo = createInMemoryUserRepo();
   const logger = createFakeLogger();
-  const service = createUserService({ transaction: createFakeTransaction(repo), logger });
+  const service = createUserService({ transaction: createFakeTransaction({ user: repo }), logger });
   return { repo, logger, service };
 }
 

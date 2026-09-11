@@ -5,6 +5,8 @@ export type {
   CreateUserRequest,
   ErrorResponse,
   HealthResponse,
+  LlmEntry,
+  LlmSense,
   LlmTranslation,
   LoginRequest,
   MissedQuestion,

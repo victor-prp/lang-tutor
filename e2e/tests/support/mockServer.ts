@@ -32,7 +32,7 @@ export async function clearGemini(request: APIRequestContext): Promise<void> {
 
 export async function expectGemini(
   request: APIRequestContext,
-  payload: { kind: 'word' | 'phrase' | 'sentence'; senses: unknown[] },
+  payload: { kind: 'word' | 'phrase' | 'sentence'; entries: unknown[] },
 ): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
     data: {

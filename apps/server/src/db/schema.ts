@@ -9,6 +9,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -49,10 +50,14 @@ export const users = pgTable(
 export const vocabTerms = pgTable(
   'vocab_terms',
   {
-    id: text('id').primaryKey(),
+    // Server-issued from phase 10, as users.id has been since 0001: with the
+    // dictionary now written at request time, a client-generated id would mean
+    // randomness in a layer ADR 0002 R1 would have to police.
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
     languageCode: varchar('language_code', { length: 10 }).notNull(),
     lemma: text('lemma').notNull(),
-    partOfSpeech: varchar('part_of_speech', { length: 50 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique('vocab_terms_language_lemma_key').on(t.languageCode, t.lemma)],
@@ -61,24 +66,75 @@ export const vocabTerms = pgTable(
 export const termVariants = pgTable(
   'term_variants',
   {
-    id: text('id').primaryKey(),
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
     termId: text('term_id')
       .notNull()
       .references(() => vocabTerms.id, { onDelete: 'cascade' }),
+    // Copied from the term so the unique index below can exist: the scope that
+    // matters is one form in one language, but language lives on vocab_terms
+    // and an index reads one table. A term's language never changes, so the
+    // copy cannot go stale — and it earns its keep in the read, which no
+    // longer joins vocab_terms at all.
+    languageCode: varchar('language_code', { length: 10 }).notNull(),
+    // Stored as it was written; matching is always lower(form). One rule for a
+    // recorded `How do you do?` and for a learner who typed `BOOK`.
     form: text('form').notNull(),
     kind: text('kind').notNull(),
+    // Which reading of this form this term is, as the model ranked them. It
+    // sits on the variant rather than the term because it is a property of the
+    // pairing: `saw` ranks `see` first, while `saws` returns `saw` alone at 0.
+    entryRank: integer('entry_rank').notNull(),
   },
-  (t) => [unique('term_variants_term_form_key').on(t.termId, t.form)],
+  (t) => [
+    // Per term, so one form may belong to several terms — `saw` is a variant of
+    // `see` *and* of `saw`, which is what every lexical source does.
+    unique('term_variants_term_form_key').on(t.termId, t.form),
+    check('term_variants_entry_rank_nonneg', sql`${t.entryRank} >= 0`),
+    // Two jobs in one index. Its (language_code, lower(form)) prefix is exactly
+    // the read's predicate, so there is no separate lookup index; its third
+    // column enforces that no two terms claim the same reading of one form.
+    // That cannot currently happen — a written form thereafter hits, and ranks
+    // within one write are distinct by construction — which is the point: a
+    // safety net for a write bug, exactly like UNIQUE(term_id, rank).
+    uniqueIndex('term_variants_form_entry_rank_key').on(
+      t.languageCode,
+      sql`lower(${t.form})`,
+      t.entryRank,
+    ),
+  ],
 );
 
-export const vocabTermSenses = pgTable('vocab_term_senses', {
-  id: text('id').primaryKey(),
-  termId: text('term_id')
-    .notNull()
-    .references(() => vocabTerms.id, { onDelete: 'cascade' }),
-  senseCode: text('sense_code').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const vocabTermSenses = pgTable(
+  'vocab_term_senses',
+  {
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    termId: text('term_id')
+      .notNull()
+      .references(() => vocabTerms.id, { onDelete: 'cascade' }),
+    // Model-supplied, and there for readability alone: senses are never merged
+    // within a term, so it has no functional role. Three output tokens buys
+    // financial_institution against river_bank when reading rows in psql.
+    senseCode: text('sense_code').notNull(),
+    // Part of speech describes a meaning, not a word: `book` is a noun (ספר)
+    // and a verb (להזמין). It moved here from vocab_terms in phase 10.
+    partOfSpeech: varchar('part_of_speech', { length: 50 }),
+    // "Most common first", within a term. Contiguous 0..n, which is what lets
+    // the read sort on the raw rank rather than a computed position.
+    rank: integer('rank').notNull(),
+    // The example in the term's own language. Its other half lives on the
+    // translation, because that half is in the learner's language.
+    exampleSource: text('example_source'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('vocab_term_senses_term_rank_key').on(t.termId, t.rank),
+    check('vocab_term_senses_rank_nonneg', sql`${t.rank} >= 0`),
+  ],
+);
 
 export const termSenseTranslations = pgTable(
   'term_sense_translations',
@@ -89,6 +145,7 @@ export const termSenseTranslations = pgTable(
     userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
     translation: text('translation').notNull(),
     definitionNotes: text('definition_notes'),
+    exampleTarget: text('example_target'),
   },
   (t) => [primaryKey({ columns: [t.senseId, t.userLanguageCode] })],
 );
