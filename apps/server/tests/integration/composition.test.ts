@@ -35,6 +35,7 @@ describe('createServerDeps', () => {
       rng: testRng(7),
       fetch: globalThis.fetch,
       gemini: { apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/never-registered', model: 'm' },
+      translationTimeoutMs: 25_000,
     });
     expect(deps.logger).toBe(logger);
   });

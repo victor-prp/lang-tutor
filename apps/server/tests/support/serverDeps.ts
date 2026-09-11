@@ -11,12 +11,17 @@ import type { Logger } from '../../src/logger';
  * `geminiBaseUrl` defaults to an unroutable namespace: a test that has not
  * registered a MockServer expectation should fail loudly rather than reach a
  * real provider. Tests that translate pass their own namespace URL.
+ *
+ * `translationTimeoutMs` defaults to production's own budget; a test proving
+ * timeout behaviour overrides it to a short one rather than actually waiting
+ * out 25 seconds of MockServer delay.
  */
 export function createTestServerDeps(io: {
   db: Db;
   logger: Logger;
   rng: () => number;
   geminiBaseUrl?: string;
+  translationTimeoutMs?: number;
 }): AppDeps {
   return createServerDeps({
     db: io.db,
@@ -28,5 +33,6 @@ export function createTestServerDeps(io: {
       baseUrl: io.geminiBaseUrl ?? 'http://127.0.0.1:9/never-registered',
       model: 'test-model',
     },
+    translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
   });
 }

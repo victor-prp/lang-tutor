@@ -29,6 +29,7 @@ export function main(): void {
     rng: Math.random,
     fetch: globalThis.fetch,
     gemini,
+    translationTimeoutMs: config.translationTimeoutMs,
   });
 
   const server = serve(

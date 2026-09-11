@@ -10,6 +10,7 @@ describe('loadConfig', () => {
       databaseUrl: 'postgres://postgres:postgres@localhost:5432/lang_tutor',
       port: 3001,
       poolMax: 5,
+      translationTimeoutMs: 25_000,
     });
   });
 
@@ -19,17 +20,20 @@ describe('loadConfig', () => {
         DATABASE_URL: 'postgres://u:p@db:5432/other',
         PORT: '8080',
         PG_POOL_MAX: '20',
+        TRANSLATION_TIMEOUT_MS: '12000',
       }),
     ).toEqual({
       databaseUrl: 'postgres://u:p@db:5432/other',
       port: 8080,
       poolMax: 20,
+      translationTimeoutMs: 12_000,
     });
   });
 
   it('falls back when a numeric variable is not a number', () => {
     expect(loadConfig({ PORT: 'nonsense', PG_POOL_MAX: '' }).port).toBe(3001);
     expect(loadConfig({ PORT: 'nonsense', PG_POOL_MAX: '' }).poolMax).toBe(5);
+    expect(loadConfig({ TRANSLATION_TIMEOUT_MS: 'nonsense' }).translationTimeoutMs).toBe(25_000);
   });
 
   it('still works with no Gemini settings at all, so db:migrate is unaffected', () => {

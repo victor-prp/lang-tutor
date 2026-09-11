@@ -6,6 +6,7 @@ import {
 } from '@lang-tutor/core/api/schemas';
 
 import { LlmUnavailable, TranslationUnreadable } from '../errors';
+import type { Logger } from '../logger';
 import type { TranslationService } from '../services/translations';
 
 const translateRoute = createRoute({
@@ -48,7 +49,7 @@ const translateRoute = createRoute({
 
 // Transport only: parse, validate, map an outcome to a status code. Mounted at
 // /api, so this publishes as /api/translations.
-export function createTranslationsRouter(translations: TranslationService) {
+export function createTranslationsRouter(translations: TranslationService, logger: Logger) {
   // Without this hook the adapter's own 400 carries a Zod issue payload; the
   // contract says { error: 'invalid request' } (ADR 0003 R7).
   const router = new OpenAPIHono({
@@ -63,8 +64,10 @@ export function createTranslationsRouter(translations: TranslationService) {
       return c.json(await translations.translate(input), 200);
     } catch (error) {
       // Two errors, one status: the learner can do nothing different about
-      // either. Which one it was lives in the log, where the operator needs it.
+      // either. Which one it was lives in the log, as `cause` — never in the
+      // response, so the wire contract stays one message for both.
       if (error instanceof LlmUnavailable || error instanceof TranslationUnreadable) {
+        logger.error('translation unavailable', error);
         return c.json({ error: 'translation unavailable' }, 502);
       }
       throw error; // app.ts's onError turns anything else into a 500

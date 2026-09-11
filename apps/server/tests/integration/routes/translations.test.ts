@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
+import { LlmUnavailable, TranslationUnreadable } from '../../../src/errors';
 import { createTranslationsRouter } from '../../../src/routes/translations';
-import { createFakeLogger } from '../../support/fakes';
+import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import {
   clearNamespace,
   countGeminiRequests,
@@ -40,20 +41,25 @@ afterEach(async () => {
 // namespace. Nothing is injected into the server: the real Gemini client makes
 // a real HTTP request over a real socket, and only the base URL differs from
 // production.
-function buildTestApp() {
+function buildTestApp(opts: { translationTimeoutMs?: number } = {}): {
+  app: Hono;
+  logger: FakeLogger;
+} {
+  const logger = createFakeLogger();
   const deps = createTestServerDeps({
     db: t.db,
-    logger: createFakeLogger(),
+    logger,
     rng: testRng(7),
     geminiBaseUrl: geminiBaseUrlFor(ns),
+    translationTimeoutMs: opts.translationTimeoutMs,
   });
   const app = new Hono();
-  app.route('/api', createTranslationsRouter(deps.translations));
-  return app;
+  app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
+  return { app, logger };
 }
 
 function translate(body: unknown) {
-  return buildTestApp().request('/api/translations', {
+  return buildTestApp().app.request('/api/translations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -179,13 +185,22 @@ describe('POST /api/translations', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 502 when the provider fails', async () => {
+  it('returns 502 when the provider fails, and logs why', async () => {
     await expectGeminiStatus(ns, 500);
+    const { app, logger } = buildTestApp();
 
-    const res = await translate({ text: 'ladder' });
+    const res = await app.request('/api/translations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'ladder' }),
+    });
 
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: 'translation unavailable' });
+    // The 502 alone doesn't say why; the log is where the operator finds out.
+    expect(logger.errors).toHaveLength(1);
+    expect(logger.errors[0].cause).toBeInstanceOf(LlmUnavailable);
+    expect(String(logger.errors[0].cause)).not.toContain('test-key');
   });
 
   it('returns 502 when the provider rate-limits', async () => {
@@ -193,18 +208,28 @@ describe('POST /api/translations', () => {
     expect((await translate({ text: 'ladder' })).status).toBe(502);
   });
 
-  it('returns 502 when the model answers with unreadable output', async () => {
+  it('returns 502 when the model answers with unreadable output, and logs why', async () => {
     await expectGeminiRawBody(
       ns,
       JSON.stringify({
         candidates: [{ content: { parts: [{ text: 'I cannot help with that.' }] } }],
       }),
     );
+    const { app, logger } = buildTestApp();
 
-    const res = await translate({ text: 'ladder' });
+    const res = await app.request('/api/translations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'ladder' }),
+    });
 
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: 'translation unavailable' });
+    // Distinguishes from the provider-failure case above: an operator reading
+    // the log can tell the provider answered but the prompt (or model) is the
+    // problem, not the network or the provider's own availability.
+    expect(logger.errors).toHaveLength(1);
+    expect(logger.errors[0].cause).toBeInstanceOf(TranslationUnreadable);
   });
 
   it('returns 200 with no senses when the model is safety-blocked', async () => {
@@ -216,14 +241,26 @@ describe('POST /api/translations', () => {
     expect(await res.json()).toMatchObject({ senses: [] });
   });
 
-  it('gives up on a provider that exceeds the timeout budget', async () => {
-    // The client's budget is 10s; 11s is past it. Jest's testTimeout is 30s.
-    await expectGeminiDelayedJson(ns, { kind: 'word', entries: [], delayMs: 11_000 });
+  it('gives up on a provider that exceeds the timeout budget, and logs why', async () => {
+    // Production's budget is 25s (see config.ts) — real headroom above the
+    // 13.3s worst case measured for a many-sense word. Proving the 502 still
+    // fires when a provider is genuinely too slow does not require waiting out
+    // that budget: the timeout is injected short here instead of raising
+    // delayMs to match production, which is what keeps this test's cost in
+    // milliseconds rather than 25+ seconds on every run.
+    await expectGeminiDelayedJson(ns, { kind: 'word', entries: [], delayMs: 300 });
+    const { app, logger } = buildTestApp({ translationTimeoutMs: 100 });
 
-    const res = await translate({ text: 'ladder' });
+    const res = await app.request('/api/translations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: 'ladder' }),
+    });
 
     expect(res.status).toBe(502);
-  }, 25_000);
+    expect(logger.errors).toHaveLength(1);
+    expect(logger.errors[0].cause).toBeInstanceOf(LlmUnavailable);
+  });
 
   it('answers the same string twice over HTTP with one provider request', async () => {
     await expectGeminiJson(ns, {

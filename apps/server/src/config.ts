@@ -4,10 +4,17 @@ export type Config = {
   databaseUrl: string;
   port: number;
   poolMax: number;
+  translationTimeoutMs: number;
 };
 
 // The one place this default lives. Both composition roots read it from here.
 const DEFAULT_DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/lang_tutor';
+
+// Measured worst case for a many-sense word (`left`) is 13.3s; 25s leaves
+// real headroom above that without leaving a learner staring at a spinner
+// indefinitely. Configurable so a test can inject a short budget instead of
+// paying this in wall-clock time on every run.
+const DEFAULT_TRANSLATION_TIMEOUT_MS = 25_000;
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   return {
@@ -16,6 +23,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     // empty or malformed value all mean "use the default".
     port: Number(env.PORT) || 3001,
     poolMax: Number(env.PG_POOL_MAX) || 5,
+    translationTimeoutMs: Number(env.TRANSLATION_TIMEOUT_MS) || DEFAULT_TRANSLATION_TIMEOUT_MS,
   };
 }
 

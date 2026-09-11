@@ -43,7 +43,7 @@ export function createApp(deps: AppDeps) {
   });
 
   app.route('/api', createUsersRouter(deps.users));
-  app.route('/api', createTranslationsRouter(deps.translations));
+  app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   app.route('/api/sessions', createSessionsRouter(deps.sessions));
 
   // Registered after the routes they describe, so the document is generated
