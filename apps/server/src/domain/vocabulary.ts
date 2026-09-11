@@ -1,4 +1,10 @@
-import type { LlmEntry, LlmSense, TranslationDirection, TranslationSense } from '@lang-tutor/core/api';
+import type {
+  LlmEntry,
+  LlmSense,
+  TranslationDirection,
+  TranslationKind,
+  TranslationSense,
+} from '@lang-tutor/core/api';
 
 /**
  * The pure core of the dictionary: how a model's entries become rows, how rows
@@ -109,7 +115,23 @@ export type SenseRow = {
   exampleSource: string | null;
   translation: string;
   exampleTarget: string | null;
+  /** The queried form's own kind, copied onto every row from the
+   *  entry_rank 0 variant's `term_variants.kind` — see `kindForForm`. */
+  kind: TranslationKind;
 };
+
+/**
+ * The kind a cache hit should answer with: the entry_rank 0 variant's, never
+ * guessed. `entriesToRows` gives the query's own headword entry_rank 0, and
+ * `(language_code, lower(form), entry_rank)` is unique, so at most one row
+ * carries it. It is also never missing from a non-empty hit: the read orders
+ * by `rank` first, so that row's rank-0 sense sorts ahead of every rank-1
+ * sense from any other contributing term and can never be pushed off
+ * `READ_LIMIT` — which is why this asserts rather than falls back to a guess.
+ */
+export function kindForForm(rows: SenseRow[]): TranslationKind {
+  return rows.find((row) => row.entryRank === 0)!.kind;
+}
 
 /** One sense as the write stores it, across two tables: `exampleSource` is in
  *  the term's own language and lives on the sense, `exampleTarget` is in the

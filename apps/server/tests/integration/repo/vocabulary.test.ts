@@ -99,8 +99,21 @@ describe('findSensesByForm', () => {
         exampleSource: 'She climbed the ladder.',
         translation: 'סולם',
         exampleTarget: 'היא טיפסה על הסולם.',
+        kind: 'word',
       },
     ]);
+  });
+
+  it("selects the variant's kind, honouring what was written rather than a shape guessed later", async () => {
+    await insertTerm(t.db, {
+      lemma: 'break a leg',
+      languageCode: 'en',
+      userLanguageCode: 'he',
+      variants: [{ form: 'break a leg', kind: 'phrase', entryRank: 0 }],
+      senses: [sense(0, 'בהצלחה')],
+    });
+
+    expect((await find('break a leg')).map((row) => row.kind)).toEqual(['phrase']);
   });
 
   it('is a miss for a term with no translation in the language being asked for', async () => {

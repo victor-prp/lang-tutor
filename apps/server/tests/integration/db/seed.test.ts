@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import { content, correctAnswerFor, optionsFor } from '../../../src/db/content';
 import { recorded } from '../../../src/db/content.generated';
-import { questions, termVariants, vocabTerms, vocabTermSenses } from '../../../src/db/schema';
+import {
+  questions,
+  termSenseTranslations,
+  termVariants,
+  vocabTerms,
+  vocabTermSenses,
+} from '../../../src/db/schema';
 import { flattenEntries, mergeEntries, rowsToSenses } from '../../../src/domain/vocabulary';
-import { seedContent } from '../../../src/db/seed';
+import { assertSeedable, seedContent } from '../../../src/db/seed';
 import { createVocabRepo } from '../../../src/repo/vocabulary';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
@@ -101,6 +107,37 @@ describe('seedContent', () => {
     }
   });
 
+  it("closes the whole class, not just the enumerated case: every question's sense translates to its own correct answer", async () => {
+    // content.test.ts only proves the sixteen entry-0 lemmas are distinct — a
+    // property of the recordings, not of what a question actually points at.
+    // persistEntries is first-writer-wins per term, so if some future
+    // recording ever put one lemma at entry 0 of query A and entry 1 of
+    // query B, B's question (hung off written[0].senseIds[0], i.e. A's
+    // senses) would ask about A's headword while its correct option still
+    // came from B's own recording — silently wrong, and invisible to a check
+    // that only compares recordings to each other. Checking the row the
+    // question actually points at, against the row `optionsFor` actually
+    // spliced in, closes that whole class in one assertion instead of the
+    // single case content.test.ts enumerates.
+    for (const entry of content) {
+      const [question] = await t.db
+        .select()
+        .from(questions)
+        .where(eq(questions.id, entry.question_id));
+      const [translation] = await t.db
+        .select()
+        .from(termSenseTranslations)
+        .where(
+          and(
+            eq(termSenseTranslations.senseId, question.senseId),
+            eq(termSenseTranslations.userLanguageCode, 'he'),
+          ),
+        );
+
+      expect(translation.translation).toBe(correctAnswerFor(entry));
+    }
+  });
+
   it('makes the correct option the recorded sense translation', async () => {
     for (const entry of content) {
       const [question] = await t.db
@@ -150,5 +187,21 @@ describe('seedContent', () => {
 
     expect(term.lemma).toBe(recorded['to remember'].entries[0].lemma);
     expect(term.lemma).not.toBe('to remember');
+  });
+
+  // The primary guard is in tests/eval/generate-content.ts, which refuses to
+  // *record* a sentence in the first place — this is the cheap insurance
+  // behind it, for a sentence that reached content.generated.ts some other
+  // way (a hand edit, or a future recorder that forgets the check).
+  it('assertSeedable refuses a recording classified as a sentence, naming the query', () => {
+    expect(() => assertSeedable('Where is the station?', 'sentence')).toThrow(
+      /Where is the station\?/,
+    );
+    expect(() => assertSeedable('Where is the station?', 'sentence')).toThrow(/sentence/);
+  });
+
+  it('assertSeedable accepts a word or a phrase', () => {
+    expect(() => assertSeedable('book', 'word')).not.toThrow();
+    expect(() => assertSeedable('excuse me', 'phrase')).not.toThrow();
   });
 });

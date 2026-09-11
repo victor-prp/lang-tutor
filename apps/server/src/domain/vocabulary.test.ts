@@ -4,6 +4,7 @@ import type { LlmEntry } from '@lang-tutor/core/api';
 import {
   entriesToRows,
   flattenEntries,
+  kindForForm,
   languagesFor,
   mergeEntries,
   normalizeForm,
@@ -203,6 +204,7 @@ describe('rowsToSenses', () => {
     exampleSource: null,
     translation: 'לראות',
     exampleTarget: null,
+    kind: 'word',
     ...over,
   });
 
@@ -227,5 +229,38 @@ describe('rowsToSenses', () => {
   it('never emits sense_code or any row-only field', () => {
     const [sense] = rowsToSenses([row({ partOfSpeech: 'verb' })]);
     expect(Object.keys(sense).sort()).toEqual(['part_of_speech', 'translation']);
+  });
+});
+
+describe('kindForForm', () => {
+  const row = (over: Partial<SenseRow>): SenseRow => ({
+    termId: 't-see',
+    rank: 0,
+    entryRank: 0,
+    partOfSpeech: null,
+    exampleSource: null,
+    translation: 'לראות',
+    exampleTarget: null,
+    kind: 'word',
+    ...over,
+  });
+
+  it("reads the entry_rank 0 row's kind, not the first row's", () => {
+    // saw (entry_rank 1, phrase) merged ahead of see (entry_rank 0, word) —
+    // exactly the round-robin order `findSensesByForm` can produce.
+    const rows = [
+      row({ termId: 't-saw', entryRank: 1, kind: 'phrase', translation: 'מסור' }),
+      row({ termId: 't-see', entryRank: 0, kind: 'word', translation: 'לראות' }),
+    ];
+
+    expect(kindForForm(rows)).toBe('word');
+  });
+
+  it('is not fooled by a multi-word phrase reported as a word, or vice versa', () => {
+    // The whole point of storing `kind` rather than re-deriving it from
+    // whitespace: a two-word idiom the model called a `word`, honoured as
+    // written rather than overridden by guesswork on the read side.
+    expect(kindForForm([row({ kind: 'phrase' })])).toBe('phrase');
+    expect(kindForForm([row({ kind: 'word' })])).toBe('word');
   });
 });

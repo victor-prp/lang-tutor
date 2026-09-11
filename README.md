@@ -48,7 +48,7 @@ wire changed, and `apps/mobile` has no changed file.
 - Phase 7: [design](docs/superpowers/specs/2026-09-05-lang-tutor-phase-7-openapi-design.md) · [plan](docs/superpowers/plans/2026-09-06-lang-tutor-phase-7-openapi.md)
 - Phase 8: [design](docs/superpowers/specs/2026-09-07-lang-tutor-phase-8-onboarding-design.md) · [plan](docs/superpowers/plans/2026-09-07-lang-tutor-phase-8-onboarding.md)
 - Phase 9: [design](docs/superpowers/specs/2026-09-08-lang-tutor-phase-9-translation-design.md) · [plan](docs/superpowers/plans/2026-09-08-lang-tutor-phase-9-translation.md)
-- Phase 10: [design](docs/superpowers/specs/2026-09-10-lang-tutor-phase-10-vocabulary-persistence-design.md) · [plan](docs/superpowers/plans/2026-09-10-lang-tutor-phase-10-vocabulary-persistence.md)
+- Phase 10: [plan](docs/superpowers/plans/2026-09-10-lang-tutor-phase-10-vocabulary-persistence.md) — this phase's plan carries its design; no separate design doc was written.
 
 ## Layout
 

@@ -9,6 +9,7 @@ import {
 } from '../domain/translation';
 import {
   flattenEntries,
+  kindForForm,
   languagesFor,
   mergeEntries,
   normalizeForm,
@@ -68,9 +69,11 @@ export function createTranslationService({
           term_count: new Set(hit.map((row) => row.termId)).size,
           sense_count: senses.length,
         });
-        // Derived, not stored: sentences are never written, so anything in the
-        // dictionary is a word or a phrase.
-        return { text, direction, kind: resolveKind(text, 'phrase'), senses };
+        // Read, not guessed: `kind` is written by the persisting call
+        // (`repo/vocabulary.ts`) onto the entry_rank 0 variant and read back
+        // by `kindForForm`, so a hit answers with what was actually stored —
+        // never a re-derived guess that can disagree with it.
+        return { text, direction, kind: kindForForm(hit), senses };
       }
 
       const raw = await llm(buildPrompt({ text, direction }));

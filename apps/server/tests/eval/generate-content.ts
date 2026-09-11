@@ -69,6 +69,29 @@ async function main(): Promise<void> {
     );
   }
 
+  // Every placeholder entry has exactly one sense and no example — the
+  // authored source in `db/content.ts` never had one to record, and the
+  // prompt above always asks the model for one on a real word or phrase. So
+  // "not a single example anywhere in the file yet" is the one condition
+  // that tells a still-placeholder file apart from a genuinely recorded one,
+  // with no separate marker field needed. A filtered run against a
+  // still-placeholder file would record just `filter` for real and then
+  // stamp the "DO NOT EDIT BY HAND" header (below) over every other query,
+  // falsely marking untouched placeholders as reviewed recordings.
+  const stillPlaceholder = Object.values(recorded).every((translation) =>
+    translation.entries.every((entry) => entry.senses.every((sense) => !sense.example)),
+  );
+  if (filter && stillPlaceholder) {
+    throw new Error(
+      `content.generated.ts is still all placeholders — content:generate has never recorded ` +
+        `for real. The first run must be unfiltered ("npm run content:generate", no query ` +
+        `argument) so every one of the ${content.length} queries gets a genuine recording; ` +
+        `running it filtered right now would record only "${filter}" for real and then stamp ` +
+        'the "DO NOT EDIT BY HAND" header over the other ' +
+        `${content.length - 1} placeholders, marking them as reviewed recordings they are not.`,
+    );
+  }
+
   const llm = createGeminiClient({
     fetch: globalThis.fetch,
     baseUrl: gemini.baseUrl,
@@ -83,6 +106,20 @@ async function main(): Promise<void> {
   const next: Record<string, LlmTranslation> = { ...recorded };
   for (const query of queries) {
     const answer = await askModel(llm, { text: query });
+    // A sentence is never persisted by a real lookup
+    // (`services/translations.ts`), so recording one here would let
+    // `db/seed.ts` store a dictionary row no lookup could ever have
+    // produced — the failure mode this phase's indistinguishability claim
+    // depends on not happening. Caught here, at record time, while a human
+    // is watching the output and can fix the query rather than the data.
+    if (answer.kind === 'sentence') {
+      throw new Error(
+        `content:generate classified "${query}" as a sentence, which must never be recorded: ` +
+          'a sentence is never persisted by a real lookup, so seeding one would create a row ' +
+          'no lookup could have created. Reword the query in db/content.ts so the model reads ' +
+          'it as a word or phrase, then re-run.',
+      );
+    }
     next[query] = { kind: answer.kind, entries: answer.entries };
     const shape = answer.entries
       .map((entry) => `${entry.lemma}(${entry.senses.length})`)

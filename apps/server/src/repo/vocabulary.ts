@@ -62,6 +62,10 @@ export function createVocabRepo(tx: Tx) {
         exampleSource: vocabTermSenses.exampleSource,
         translation: termSenseTranslations.translation,
         exampleTarget: termSenseTranslations.exampleTarget,
+        // `term_variants.kind` is `text`, not a typed enum column, so it comes
+        // back untyped from Drizzle; cast rather than widen `SenseRow.kind`,
+        // since the write (below) already only ever stores a `TranslationKind`.
+        kind: sql<TranslationKind>`${termVariants.kind}`,
       })
       .from(termVariants)
       .innerJoin(vocabTermSenses, eq(vocabTermSenses.termId, termVariants.termId))

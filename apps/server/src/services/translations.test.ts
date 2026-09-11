@@ -25,7 +25,7 @@ function serviceWith(...replies: (string | Error)[]) {
   return { service: createTranslationService({ llm, transaction, logger }), llm, logger, vocab };
 }
 
-const row = (translation: string): SenseRow => ({
+const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
   termId: 't-1',
   rank: 0,
   entryRank: 0,
@@ -33,6 +33,8 @@ const row = (translation: string): SenseRow => ({
   exampleSource: null,
   translation,
   exampleTarget: null,
+  kind: 'word',
+  ...over,
 });
 
 describe('translate', () => {
@@ -174,6 +176,20 @@ describe('translate', () => {
       term_count: 1,
       sense_count: 1,
     });
+  });
+
+  it('answers a hit with the kind the row actually stored, not a re-derived guess', async () => {
+    // `to remember` has whitespace, so re-deriving from the text alone
+    // (resolveKind's single-token override never firing) would answer
+    // `phrase` regardless of what was written. The stored row says `word`,
+    // recorded that way by the entry_rank 0 variant, and the hit path must
+    // honour it rather than guess.
+    const { service, vocab } = serviceWith(reply({ kind: 'word', entries: [] }));
+    vocab.hit = [row('לזכור', { kind: 'word' })];
+
+    const result = await service.translate({ text: 'to remember' });
+
+    expect(result.kind).toBe('word');
   });
 
   it('reads with the normalized form and the direction\'s language pair', async () => {

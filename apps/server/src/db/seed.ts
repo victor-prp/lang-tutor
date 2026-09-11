@@ -1,3 +1,5 @@
+import type { TranslationKind } from '@lang-tutor/core/api';
+
 import type { Db } from './client';
 import { content, optionsFor } from './content';
 import { recorded } from './content.generated';
@@ -7,6 +9,27 @@ import { createVocabRepo } from '../repo/vocabulary';
 
 const TARGET_LANGUAGE = 'en';
 const USER_LANGUAGE = 'he';
+
+/**
+ * Cheap insurance, not the primary guard — that is the recorder (the
+ * `content:generate` script), which refuses to *record* a sentence in the
+ * first place. This is what stands between the dictionary and a sentence
+ * that slipped past it anyway (a hand-edited `content.generated.ts`, or a
+ * future recorder that forgets the check): `services/translations.ts`
+ * guarantees a sentence is never written by a real lookup, so a seeded one
+ * would be a row no lookup could ever have produced — exactly the
+ * indistinguishability this phase exists to guarantee.
+ */
+export function assertSeedable(query: string, kind: TranslationKind): void {
+  if (kind === 'sentence') {
+    throw new Error(
+      `recording for "${query}" is a sentence and cannot be seeded: a real lookup never ` +
+        'persists a sentence (services/translations.ts), so a seeded one would be a row no ' +
+        `lookup could have created. Fix the recording, then rerun ` +
+        `\`npm run content:generate -- ${query}\`.`,
+    );
+  }
+}
 
 /**
  * Replays the recorded provider answers through `persistEntries` — the same
@@ -41,6 +64,7 @@ export async function seedContent(db: Db): Promise<void> {
           `no recording for "${entry.query}". Run \`npm run content:generate -- ${entry.query}\`.`,
         );
       }
+      assertSeedable(entry.query, answer.kind);
 
       const { written } = await vocab.persistEntries({
         form: entry.query,
