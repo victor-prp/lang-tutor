@@ -103,7 +103,16 @@ async function main(): Promise<void> {
   // Sequential: thirteen calls at a few seconds each, against a modest quota.
   // A burst that trips a per-minute limit would poison the recording with a
   // 429 rather than merely slowing it down.
-  const next: Record<string, LlmTranslation> = { ...recorded };
+  //
+  // A filtered run must preserve every entry it does not touch, so it starts
+  // from the existing `recorded` map and the loop below overwrites only the
+  // named query. An unfiltered run starts empty instead: `queries` is then
+  // every query `content` currently lists, and the loop fills `next` from
+  // that list alone, so a query since removed from `content` is pruned
+  // rather than carried over from the stale `recorded` map. Do not collapse
+  // these into one `{ ...recorded }` start — that is exactly what silently
+  // reintroduces orphaned entries on an unfiltered re-record.
+  const next: Record<string, LlmTranslation> = filter ? { ...recorded } : {};
   for (const query of queries) {
     const answer = await askModel(llm, { text: query });
     // A sentence is never persisted by a real lookup
