@@ -147,16 +147,22 @@ function tier1(kase: EvalCase, result: ModelAnswer): Check[] {
       name: 'every sense has a part of speech',
       ok: senses.every((sense) => Boolean(sense.part_of_speech)),
     });
+    // "Names its entry's lemma or an inflection of it" used to live here as a
+    // stem check, but a stem check cannot work for English irregular
+    // inflections: they share no stem with their lemma at all. A real run
+    // failed two structurally-correct examples on exactly this —
+    // lemma `see` / example "I saw him yesterday." (stem "see" is not in
+    // "saw"), and lemma `light` / example "He lit a candle." (stem "ligh" is
+    // not in "lit"). Tier 1 must be zero-failures, so a heuristic that can be
+    // wrong about correct output cannot live here; it is scored as a tier 2
+    // axis instead, below.
     checks.push({
-      name: "every example names its entry's lemma or an inflection of it",
-      // A stem check, not equality: "booked" and "running" must both count. It
-      // is the *lemma* that is checked, not the queried string: senses belong
-      // to the headword, so `saw`'s first entry carries `see`'s examples.
-      ok: result.entries.every((entry) => {
-        const stem = entry.lemma.trim().toLowerCase().slice(0, Math.max(4, entry.lemma.length - 3));
-        return entry.senses.every((sense) => sense.example?.source.toLowerCase().includes(stem));
-      }),
-      detail: result.entries.map((entry) => entry.lemma).join(' | '),
+      name: 'every example carries a non-empty source',
+      // A companion to the translation check below, catching what the parse
+      // schema's `min(1)` cannot: a whitespace-only source that satisfies
+      // `z.string().min(1)` character-count-wise, the same class of gap the
+      // lemma/sense_code check above closes for entries.
+      ok: senses.every((sense) => Boolean(sense.example?.source?.trim())),
     });
     checks.push({
       name: 'every example carries a non-empty translation',
@@ -186,6 +192,27 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     ok: kase.acceptTop.some((accepted) => translations[0]?.includes(accepted)),
     detail: translations[0],
   });
+
+  // Moved down from tier 1: see the comment there for why a stem check
+  // cannot be a zero-failure invariant (English irregular inflections like
+  // `see` -> "saw" or `light` -> "lit" share no stem with their lemma).
+  // Scored here instead — an occasional miss on an irregular inflection
+  // lowers this axis without failing the run, which is exactly the point of
+  // tier 2 being scored rather than pass/fail. Sentences carry no examples
+  // at all, so the axis does not apply to them.
+  if (result.kind !== 'sentence') {
+    checks.push({
+      name: "every example illustrates its entry's lemma (word or an inflection of it)",
+      // A stem check, not equality: "booked" and "running" must both count. It
+      // is the *lemma* that is checked, not the queried string: senses belong
+      // to the headword, so `saw`'s first entry carries `see`'s examples.
+      ok: result.entries.every((entry) => {
+        const stem = entry.lemma.trim().toLowerCase().slice(0, Math.max(4, entry.lemma.length - 3));
+        return entry.senses.every((sense) => sense.example?.source.toLowerCase().includes(stem));
+      }),
+      detail: result.entries.map((entry) => entry.lemma).join(' | '),
+    });
+  }
 
   if (kase.expectEntries !== undefined) {
     checks.push({

@@ -75,7 +75,12 @@ describe('content', () => {
   });
 
   it('includes enough long prompts to exercise text wrapping', () => {
+    // Three of the six queries that used to clear LONG_PROMPT_LENGTH were the
+    // sentences dropped from the seed (a real lookup never persists a
+    // sentence, so seeding one would be indistinguishable from a row no
+    // lookup could have produced) — the remaining thirteen queries clear it
+    // with exactly three.
     const long = content.filter((entry) => entry.query.length >= LONG_PROMPT_LENGTH);
-    expect(long.length).toBeGreaterThanOrEqual(4);
+    expect(long.length).toBeGreaterThanOrEqual(3);
   });
 });

@@ -62,9 +62,6 @@ export const content: ContentEntry[] = [
   { query: 'thank you very much', question_id: 'q-thank-you-very-much', distractors: ['בבקשה רבה', 'סליחה רבה', 'שלום רב'], correct_option: 0 },
   { query: 'How do you do?', question_id: 'q-how-do-you-do', distractors: ['מה השעה?', 'מה קרה?', 'מה זה?'], correct_option: 1 },
   { query: 'see you later', question_id: 'q-see-you-later', distractors: ['נתראה מחר', 'ניפגש בבוקר', 'נדבר בהמשך'], correct_option: 1 },
-  { query: "I don't understand", question_id: 'q-i-dont-understand', distractors: ['אני לא יודע', 'אני לא שומע', 'אני לא זוכר'], correct_option: 2 },
-  { query: 'What is your name?', question_id: 'q-what-is-your-name', distractors: ['מאיפה אתה?', 'בן כמה אתה?', 'מה אתה עושה?'], correct_option: 1 },
   { query: 'Have a nice day!', question_id: 'q-have-a-nice-day', distractors: ['שיהיה לך בוקר טוב!', 'שיהיה לך שבוע טוב!', 'שיהיה לך לילה טוב!'], correct_option: 0 },
-  { query: 'Where is the station?', question_id: 'q-where-is-the-station', distractors: ['איפה הבית?', 'איפה השוק?', 'איפה הרחוב?'], correct_option: 2 },
   { query: 'Nice to meet you', question_id: 'q-nice-to-meet-you', distractors: ['טוב לראות אותך', 'נתראה בקרוב', 'תודה שבאת'], correct_option: 0 },
 ];

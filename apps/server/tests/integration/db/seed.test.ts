@@ -108,7 +108,7 @@ describe('seedContent', () => {
   });
 
   it("closes the whole class, not just the enumerated case: every question's sense translates to its own correct answer", async () => {
-    // content.test.ts only proves the sixteen entry-0 lemmas are distinct — a
+    // content.test.ts only proves the thirteen entry-0 lemmas are distinct — a
     // property of the recordings, not of what a question actually points at.
     // persistEntries is first-writer-wins per term, so if some future
     // recording ever put one lemma at entry 0 of query A and entry 1 of

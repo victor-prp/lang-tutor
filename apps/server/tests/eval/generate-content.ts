@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   }
 
   // A filter, and a merge rather than a replace. Without it every re-record
-  // produces a sixteen-entry diff that nobody reads carefully — regeneration
+  // produces a thirteen-entry diff that nobody reads carefully — regeneration
   // is non-deterministic enough at temperature 0 that wording shifts across
   // the whole file, and a reviewer skimming noise is how a bad recording gets
   // committed. With no filter it re-records everything, which is the
@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     timeoutMs: TIMEOUT_MS,
   });
 
-  // Sequential: sixteen calls at a few seconds each, against a modest quota.
+  // Sequential: thirteen calls at a few seconds each, against a modest quota.
   // A burst that trips a per-minute limit would poison the recording with a
   // 429 rather than merely slowing it down.
   const next: Record<string, LlmTranslation> = { ...recorded };

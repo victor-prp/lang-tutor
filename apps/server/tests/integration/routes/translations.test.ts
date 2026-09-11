@@ -286,7 +286,7 @@ describe('POST /api/translations', () => {
     // Containment, not an exact list: how many senses `book` has, and whether
     // any carry an example, is a property of whatever `content:generate`
     // recorded — richer today or later — not a property of this phase.
-    // "Exactly as recorded" for all sixteen seeded queries, including `book`,
+    // "Exactly as recorded" for all thirteen seeded queries, including `book`,
     // is already proven in tests/integration/db/seed.test.ts ("leaves every
     // recorded string servable, as exactly the merge persistEntries
     // produces"), which may import `recorded` because it sits in the `db/`

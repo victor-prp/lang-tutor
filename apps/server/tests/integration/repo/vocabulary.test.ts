@@ -259,7 +259,7 @@ describe('persistEntries', () => {
     // `[]` or a different order than the write did.
     expect(second.written[0].senseIds).toEqual(first.written[0].senseIds);
     // Scoped to this term rather than the whole table: the shared content seed
-    // (db/seed.ts) already populates term_variants with 16 rows for the other
+    // (db/seed.ts) already populates term_variants with 13 rows for the other
     // integration suites, so an unscoped count could never read 1 regardless of
     // whether the second call wrote a duplicate.
     expect(
