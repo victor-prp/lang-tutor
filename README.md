@@ -49,6 +49,8 @@ wire changed, and `apps/mobile` has no changed file.
 - Phase 8: [design](docs/superpowers/specs/2026-09-07-lang-tutor-phase-8-onboarding-design.md) · [plan](docs/superpowers/plans/2026-09-07-lang-tutor-phase-8-onboarding.md)
 - Phase 9: [design](docs/superpowers/specs/2026-09-08-lang-tutor-phase-9-translation-design.md) · [plan](docs/superpowers/plans/2026-09-08-lang-tutor-phase-9-translation.md)
 - Phase 10: [plan](docs/superpowers/plans/2026-09-10-lang-tutor-phase-10-vocabulary-persistence.md) — this phase's plan carries its design; no separate design doc was written.
+- Phase 11: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-11-vocabulary-backfill-sourcing.md) · [plan](docs/superpowers/plans/2026-09-13-lang-tutor-phase-11-vocabulary-backfill.md)
+- Phase 12: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-12-dict-lexemes-design.md) · [plan](docs/superpowers/plans/2026-09-13-lang-tutor-phase-12-dict-lexemes.md)
 
 ## Layout
 
@@ -129,10 +131,10 @@ Nine tables, all in `apps/server/src/db/schema.ts`:
 | Table | Holds |
 |---|---|
 | `users` | One row per learner: a unique `username` they log in with, a `display_name`, an `age`, and their native/target language pair. The id is issued by the database, never by a client. |
-| `dict_lexemes` | A lemma in a language (e.g. English "run"), unique per `(language_code, lemma)`. The id is issued by the database. |
-| `dict_variants` | A surface form somebody actually queried — `run`, `running`, `saw` — with the language it is in and `entry_rank`, this term's position among the readings the model returned *for that form*. `UNIQUE(language_code, lower(form), entry_rank)` is both the lookup index and the guarantee that no two terms claim one reading. |
-| `dict_senses` | A distinct meaning of a term, with its `part_of_speech`, its source-language `example_source`, and `rank` — "most common first", within that term. |
-| `dict_var_translations` | A sense's translation into a learner's native language, with the target half of the example, one row per `(sense, user_language_code)`. |
+| `dict_lexemes` | A **lexeme**: a lemma in a language together with its part of speech, unique per `(language_code, lemma, part_of_speech)`. `book` is therefore two rows — the noun and the verb — which is what lets `booked` attach to the verb alone. The id is issued by the database. |
+| `dict_variants` | A surface form somebody actually queried — `run`, `running`, `saw` — with the language it is in and `entry_rank`, this lexeme's position among the readings the model returned *for that form*. `UNIQUE(language_code, lower(form), entry_rank)` is both the lookup index and the guarantee that no two lexemes claim one reading. |
+| `dict_senses` | A distinct meaning of a lexeme, and nothing else: `UNIQUE(lexeme_id, sense_code)` is the whole row's purpose, because that code is how a later form's translations attach to senses the lexeme already has. A sense has no part of speech (that is on the lexeme), no rank and no example (those are on the translation, because they belong to the form that was typed). |
+| `dict_var_translations` | How **one form** renders **one sense** in a learner's native language — the translation, both halves of the example, and `rank` — one row per `(variant, sense, user_language_code)`. Keyed by the variant, so `booked` stores `הזמין` where `book` stores `להזמין` for the very same sense. |
 | `questions` | A generated multiple-choice question: a sense, a prompt variant, and its shuffled `options` (jsonb). |
 | `sessions` | One learner's attempt at a ten-question run; `completed_at IS NULL` means still in progress. |
 | `session_questions` | The ten questions assigned to a session, in order, with the per-session option shuffle. |
@@ -142,14 +144,32 @@ Since phase 10 the dictionary tables **are** written at request time: `POST
 /api/translations` writes every entry the model returned, and the next lookup of that
 string is served from Postgres. The dictionary is shared and records no learner — there is
 no `user_id` near these tables — so a save enriches the global dictionary rather than
-anybody's word list. It is first-writer-wins and permanent: a term that has senses is never
-rewritten, there is no TTL, and the only supported way to change stored content is
-`npm run db:reseed`.
+anybody's word list. It is first-writer-wins and permanent, and since phase 12 that splits in two: a
+**sense** is written once per lexeme, so two lookups of one headword never accumulate
+near-duplicate meanings, while a **translation** is written once per `(form, sense)`,
+so a second form of a known headword adds its own wording rather than inheriting the
+first form's. Neither is ever rewritten, there is no TTL, and the only supported way to
+change stored content is `npm run db:reseed`.
 
-Two ranks, two scopes, and they are not the same number. `dict_senses.rank` orders
-senses *within one headword*; `dict_variants.entry_rank` orders headwords *within one
-form*. A lookup sorts by rank first, so a form belonging to two headwords returns them
-interleaved and neither one's top sense is crowded out.
+Because a lookup of a form whose lexeme is already stored must decide which of its
+senses are the ones already recorded, it makes a **second, smaller model call** that
+reconciles them by meaning — `sense_code` is invented per call, so a lookup of `bank`
+may name a sense `river_bank` where a later `banks` names the same sense `river_edge`,
+and a string comparison would store the meaning twice. If that call fails the lookup
+fails, rather than writing rows known to be wrong into a dictionary with no TTL.
+
+Two ranks, two scopes, and they are not the same number.
+`dict_var_translations.rank` orders senses *as one form ranks them*;
+`dict_variants.entry_rank` orders lexemes *within one form*. A lookup sorts by rank
+first, so a form belonging to two lexemes returns them interleaved and neither one's
+top sense is crowded out — `book` answers ספר · להזמין · פנקס · לרשום, not both noun
+senses and then both verb senses.
+
+The sense rank sits on the translation rather than on the sense for a reason worth
+stating: it is **this form's** ordering, not the lexeme's. A sense that a later form
+introduces lands where that form ranked it, instead of being appended at `max(rank)+1`
+— arrival order wearing a rank's clothes — and the lexeme's order stops depending on
+which of its forms happened to be looked up first.
 
 `questions` is split down the middle by `user_id`: **`user_id IS NULL` means the question
 is shared** — part of the common pool every learner can be given — while a non-null
@@ -172,12 +192,16 @@ npm run server       # terminal 1
 npm run mobile       # terminal 2
 ```
 
-> **Migration `0003` clears the dictionary and the quiz.** It runs `TRUNCATE dict_lexemes,
-> sessions CASCADE` before adding its columns, so applying it drops every seeded and
-> looked-up word, every question, and all session history — `answers`, `session_questions`
-> and `sessions`. `users` survives. That is the deliberate price of one data shape instead
-> of two, and it happens once, the first time `npm run db:migrate` runs on an existing
-> database.
+> **Migrations `0003` and `0005` each clear the dictionary and the quiz.** Both run
+> `TRUNCATE dict_lexemes, sessions CASCADE` before restructuring, so applying either drops
+> every seeded and looked-up word, every question, and all session history — `answers`,
+> `session_questions` and `sessions`. `users` survives.
+>
+> `0005` clears for a different reason from `0003`. A row in `dict_lexemes` is now a
+> **lexeme** — a lemma together with a part of speech — and a translation belongs to a
+> **form** rather than to a meaning. The old rows record neither which part of speech a
+> stored form realises nor how that form should be rendered, so there is nothing to
+> migrate them from; clearing is not a shortcut here but the only honest option.
 
 `npm run db:up` starts two containers: Postgres, and a MockServer instance that stands in for
 the Gemini API in every test bucket. Integration and e2e tests register their own expectations
@@ -285,7 +309,32 @@ alone against a populated database writes nothing, so a re-recording would never
 
 To remove one bad entry during a play-test without resetting everything, delete it by hand:
 `DELETE FROM dict_lexemes WHERE lemma = 'whatever';` cascades to its variants, senses and
-translations.
+translations. Note it removes *every* part of speech of that lemma, since each is its own
+lexeme row — add `AND part_of_speech = 'verb'` to remove just one.
+
+### Backing the dictionary up, and restoring it
+
+```bash
+npm run dict:export     # rewrites data/backfill/en-he/dictionary.jsonl from the database
+npm run dict:restore    # replays that file back in
+```
+
+One exported line is one *lookup* — `{ form, kind, entries }`, which is exactly
+`persistEntries`' input minus the two language codes — so a restore replays through the
+same repository function a live lookup calls, and a restored row is indistinguishable from
+a looked-up one. Restoring is idempotent and never overwrites live content: every level is
+`ON CONFLICT DO NOTHING`, so a form already looked up keeps both its senses and its
+wording.
+
+> **`data/backfill/en-he/dictionary.jsonl` predates migration `0005` and will not restore.**
+> Its entries carry no `part_of_speech`, and the renderings it holds were stored per meaning
+> rather than per form, so restoring it would reintroduce both defects phase 12 fixes. The
+> file is kept until a fresh backfill replaces it.
+
+The backfill itself is `scripts/translation-backfills/en-he/run-backfill-daily.mjs`. After
+phase 12 it starts over from the full CSVs rather than from a `-remaining-` file. At
+Gemini's 10K/day quota the ~89K set takes roughly nine days of gradual runs, so it is run
+deliberately and is not part of any phase's build.
 
 ## Reading the API
 
