@@ -12,7 +12,7 @@ import {
   parseLlmTranslation,
   resolveKind,
 } from '../../src/domain/translation';
-import { flattenEntries, mergeEntries } from '../../src/domain/vocabulary';
+import { flattenEntries, mergeEntries } from '../../src/domain/dictionary';
 import type { LlmClient } from '../../src/services/llm';
 
 /**

@@ -6,14 +6,14 @@ import { createDb } from './client';
 import { runMigrations } from './migrate';
 import { reseedContent } from './reseed';
 import { seedContent } from './seed';
-import { exportVocabulary, fromJsonl, toJsonl } from './vocabExport';
-import { importVocabulary } from './vocabImport';
+import { exportDictionary, fromJsonl, toJsonl } from './dictExport';
+import { importDictionary } from './dictImport';
 
 // The dictionary is en->he; the checked-in dataset is scoped by that pair, the
 // same way scripts/translation-backfills/en-he/ is.
 const TARGET_LANGUAGE = 'en';
 const USER_LANGUAGE = 'he';
-const DEFAULT_DATASET = join(__dirname, '../../../../data/backfill/en-he/vocabulary.jsonl');
+const DEFAULT_DATASET = join(__dirname, '../../../../data/backfill/en-he/dictionary.jsonl');
 
 // Small enough that a failure loses little work, large enough that per-chunk
 // transaction overhead is noise against ~2ms of inserts per record.
@@ -40,14 +40,14 @@ async function main(): Promise<void> {
   // for nothing. `process.argv` is not `process.env`, and this file is a
   // composition root either way.
   const reseed = process.argv.includes('--reseed');
-  const exportTo = pathAfter('--export-vocab');
-  const importFrom = pathAfter('--import-vocab');
+  const exportTo = pathAfter('--export-dict');
+  const importFrom = pathAfter('--import-dict');
 
   try {
     if (exportTo) {
       // No migration first: an export is a read, and running migrations would
-      // make `--export-vocab` write to a database the caller only asked to read.
-      const records = await exportVocabulary(db, {
+      // make `--export-dict` write to a database the caller only asked to read.
+      const records = await exportDictionary(db, {
         languageCode: TARGET_LANGUAGE,
         userLanguageCode: USER_LANGUAGE,
       });
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     if (importFrom) {
       const records = fromJsonl(readFileSync(importFrom, 'utf8'));
       console.log(`restoring ${records.length} forms from ${importFrom}`);
-      const result = await importVocabulary(db, {
+      const result = await importDictionary(db, {
         records,
         languageCode: TARGET_LANGUAGE,
         userLanguageCode: USER_LANGUAGE,

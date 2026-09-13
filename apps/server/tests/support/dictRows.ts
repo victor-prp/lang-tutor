@@ -1,9 +1,9 @@
 import type { Db } from '../../src/db/client';
 import {
-  termSenseTranslations,
-  termVariants,
-  vocabTerms,
-  vocabTermSenses,
+  dictVarTranslations,
+  dictVariants,
+  dictLexemes,
+  dictSenses,
 } from '../../src/db/schema';
 
 /**
@@ -37,38 +37,38 @@ export type SeedTerm = {
 export async function insertTerm(
   db: Db,
   spec: SeedTerm,
-): Promise<{ termId: string; variantIds: string[]; senseIds: string[] }> {
+): Promise<{ lexemeId: string; variantIds: string[]; senseIds: string[] }> {
   const [term] = await db
-    .insert(vocabTerms)
+    .insert(dictLexemes)
     .values({ languageCode: spec.languageCode, lemma: spec.lemma })
-    .returning({ id: vocabTerms.id });
+    .returning({ id: dictLexemes.id });
 
   const variants = await db
-    .insert(termVariants)
+    .insert(dictVariants)
     .values(
       spec.variants.map((variant) => ({
-        termId: term.id,
+        lexemeId: term.id,
         languageCode: spec.languageCode,
         form: variant.form,
         kind: variant.kind,
         entryRank: variant.entryRank,
       })),
     )
-    .returning({ id: termVariants.id });
+    .returning({ id: dictVariants.id });
 
   const senseIds: string[] = [];
   for (const sense of spec.senses) {
     const [row] = await db
-      .insert(vocabTermSenses)
+      .insert(dictSenses)
       .values({
-        termId: term.id,
+        lexemeId: term.id,
         senseCode: sense.senseCode,
         rank: sense.rank,
         partOfSpeech: sense.partOfSpeech,
         exampleSource: sense.exampleSource,
       })
-      .returning({ id: vocabTermSenses.id });
-    await db.insert(termSenseTranslations).values({
+      .returning({ id: dictSenses.id });
+    await db.insert(dictVarTranslations).values({
       senseId: row.id,
       userLanguageCode: spec.userLanguageCode,
       translation: sense.translation,
@@ -77,5 +77,5 @@ export async function insertTerm(
     senseIds.push(row.id);
   }
 
-  return { termId: term.id, variantIds: variants.map((v) => v.id), senseIds };
+  return { lexemeId: term.id, variantIds: variants.map((v) => v.id), senseIds };
 }

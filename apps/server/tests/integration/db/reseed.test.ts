@@ -5,12 +5,12 @@ import { content } from '../../../src/db/content';
 import { reseedContent } from '../../../src/db/reseed';
 import { seedContent } from '../../../src/db/seed';
 import {
-  termSenseTranslations,
-  termVariants,
+  dictVarTranslations,
+  dictVariants,
   users,
-  vocabTerms,
+  dictLexemes,
 } from '../../../src/db/schema';
-import { createVocabRepo } from '../../../src/repo/vocabulary';
+import { createDictRepo } from '../../../src/repo/dictionary';
 import { seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
@@ -28,7 +28,7 @@ afterEach(async () => {
 /** A word a learner looked up, written the way a lookup writes it. */
 async function lookUp(form: string, lemma: string, translation: string): Promise<void> {
   await withTx(t.db, (tx) =>
-    createVocabRepo(tx).persistEntries({
+    createDictRepo(tx).persistEntries({
       form,
       languageCode: 'en',
       userLanguageCode: 'he',
@@ -42,16 +42,16 @@ describe('reseedContent', () => {
   it('leaves exactly the recording: the looked-up word is gone, users survive', async () => {
     await seedUser(t.db, 'u_keep');
     await lookUp('ladder', 'ladder', 'סולם');
-    expect(await t.db.select().from(vocabTerms).where(eq(vocabTerms.lemma, 'ladder'))).toHaveLength(1);
+    expect(await t.db.select().from(dictLexemes).where(eq(dictLexemes.lemma, 'ladder'))).toHaveLength(1);
 
     await reseedContent(t.db);
 
-    expect(await t.db.select().from(vocabTerms).where(eq(vocabTerms.lemma, 'ladder'))).toHaveLength(0);
-    expect(await t.db.select().from(termVariants).where(eq(termVariants.form, 'ladder'))).toHaveLength(0);
+    expect(await t.db.select().from(dictLexemes).where(eq(dictLexemes.lemma, 'ladder'))).toHaveLength(0);
+    expect(await t.db.select().from(dictVariants).where(eq(dictVariants.form, 'ladder'))).toHaveLength(0);
     // Every recorded string is back, and servable.
     for (const entry of content) {
       const rows = await withTx(t.db, (tx) =>
-        createVocabRepo(tx).findSensesByForm({
+        createDictRepo(tx).findSensesByForm({
           form: entry.query,
           languageCode: 'en',
           userLanguageCode: 'he',
@@ -68,7 +68,7 @@ describe('reseedContent', () => {
     // only thing that puts the recording back.
     const [question] = content;
     const rows = await withTx(t.db, (tx) =>
-      createVocabRepo(tx).findSensesByForm({
+      createDictRepo(tx).findSensesByForm({
         form: question.query,
         languageCode: 'en',
         userLanguageCode: 'he',
@@ -76,13 +76,13 @@ describe('reseedContent', () => {
     );
     const original = rows[0].translation;
     await t.db
-      .update(termSenseTranslations)
+      .update(dictVarTranslations)
       .set({ translation: 'משהו שגוי' })
-      .where(eq(termSenseTranslations.translation, original));
+      .where(eq(dictVarTranslations.translation, original));
 
     await seedContent(t.db);
     const afterSeed = await withTx(t.db, (tx) =>
-      createVocabRepo(tx).findSensesByForm({
+      createDictRepo(tx).findSensesByForm({
         form: question.query,
         languageCode: 'en',
         userLanguageCode: 'he',
@@ -92,7 +92,7 @@ describe('reseedContent', () => {
 
     await reseedContent(t.db);
     const afterReseed = await withTx(t.db, (tx) =>
-      createVocabRepo(tx).findSensesByForm({
+      createDictRepo(tx).findSensesByForm({
         form: question.query,
         languageCode: 'en',
         userLanguageCode: 'he',
@@ -103,8 +103,8 @@ describe('reseedContent', () => {
 
   it('is idempotent, so running it twice is not a way to lose the fixture', async () => {
     await reseedContent(t.db);
-    const first = await t.db.select().from(vocabTerms);
+    const first = await t.db.select().from(dictLexemes);
     await reseedContent(t.db);
-    expect(await t.db.select().from(vocabTerms)).toHaveLength(first.length);
+    expect(await t.db.select().from(dictLexemes)).toHaveLength(first.length);
   });
 });

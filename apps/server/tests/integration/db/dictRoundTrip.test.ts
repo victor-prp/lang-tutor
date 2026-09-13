@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { eq } from 'drizzle-orm';
 
-import { termSenseTranslations } from '../../../src/db/schema';
-import { exportVocabulary, fromJsonl, toJsonl } from '../../../src/db/vocabExport';
-import { importVocabulary } from '../../../src/db/vocabImport';
-import { createVocabRepo } from '../../../src/repo/vocabulary';
+import { dictVarTranslations } from '../../../src/db/schema';
+import { exportDictionary, fromJsonl, toJsonl } from '../../../src/db/dictExport';
+import { importDictionary } from '../../../src/db/dictImport';
+import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 
@@ -29,12 +29,12 @@ async function lookUp(
   input: { form: string; entries: { lemma: string; senses: { translation: string; sense_code: string }[] }[] },
 ): Promise<void> {
   await withTx(t.db, (tx) =>
-    createVocabRepo(tx).persistEntries({ ...EN_HE, form: input.form, kind: 'word', entries: input.entries }),
+    createDictRepo(tx).persistEntries({ ...EN_HE, form: input.form, kind: 'word', entries: input.entries }),
   );
 }
 
-async function restoreInto(t: TestDb, records: Awaited<ReturnType<typeof exportVocabulary>>) {
-  return importVocabulary(t.db, {
+async function restoreInto(t: TestDb, records: Awaited<ReturnType<typeof exportDictionary>>) {
+  return importDictionary(t.db, {
     ...EN_HE,
     records,
     chunkSize: 50,
@@ -42,7 +42,7 @@ async function restoreInto(t: TestDb, records: Awaited<ReturnType<typeof exportV
   });
 }
 
-describe('vocabulary export/restore', () => {
+describe('dictionary export/restore', () => {
   it('round-trips a form whose lookup produced two headwords, pairing intact', async () => {
     // The case the export format exists for: one lookup of `saw` writes entries
     // for both `see` and `saw`, and that pairing lives on the variant's
@@ -55,7 +55,7 @@ describe('vocabulary export/restore', () => {
       ],
     });
 
-    const exported = await exportVocabulary(source.db, EN_HE);
+    const exported = await exportDictionary(source.db, EN_HE);
     const saw = exported.find((record) => record.form === 'saw');
     expect(saw?.entries.map((entry) => entry.lemma)).toEqual(['see', 'saw']);
 
@@ -63,7 +63,7 @@ describe('vocabulary export/restore', () => {
 
     // The strongest statement available: a re-export of the restored database
     // is identical, so the format loses nothing and orders deterministically.
-    expect(await exportVocabulary(target.db, EN_HE)).toEqual(exported);
+    expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
   });
 
   it('restores into a database that already has live data without overwriting it', async () => {
@@ -71,7 +71,7 @@ describe('vocabulary export/restore', () => {
       form: 'ladder',
       entries: [{ lemma: 'ladder', senses: [{ translation: 'סולם', sense_code: 'only' }] }],
     });
-    const exported = await exportVocabulary(source.db, EN_HE);
+    const exported = await exportDictionary(source.db, EN_HE);
 
     const first = await restoreInto(target, exported);
     expect(first.termsCreated).toBeGreaterThan(0);
@@ -80,15 +80,15 @@ describe('vocabulary export/restore', () => {
     // persistEntries is first-writer-wins, so production content is never
     // replaced by a re-run.
     await target.db
-      .update(termSenseTranslations)
+      .update(dictVarTranslations)
       .set({ translation: 'סולם אחר' })
-      .where(eq(termSenseTranslations.translation, 'סולם'));
+      .where(eq(dictVarTranslations.translation, 'סולם'));
 
     const second = await restoreInto(target, exported);
     expect(second.termsCreated).toBe(0);
 
     const rows = await withTx(target.db, (tx) =>
-      createVocabRepo(tx).findSensesByForm({ ...EN_HE, form: 'ladder' }),
+      createDictRepo(tx).findSensesByForm({ ...EN_HE, form: 'ladder' }),
     );
     expect(rows[0].translation).toBe('סולם אחר');
   });
@@ -98,7 +98,7 @@ describe('vocabulary export/restore', () => {
       form: 'book',
       entries: [{ lemma: 'book', senses: [{ translation: 'ספר', sense_code: 'written_work' }] }],
     });
-    const exported = await exportVocabulary(source.db, EN_HE);
+    const exported = await exportDictionary(source.db, EN_HE);
 
     expect(fromJsonl(toJsonl(exported))).toEqual(exported);
     expect(toJsonl(exported).split('\n').filter(Boolean)).toHaveLength(exported.length);

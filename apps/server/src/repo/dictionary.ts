@@ -3,12 +3,12 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import {
-  termSenseTranslations,
-  termVariants,
-  vocabTerms,
-  vocabTermSenses,
+  dictVarTranslations,
+  dictVariants,
+  dictLexemes,
+  dictSenses,
 } from '../db/schema';
-import { entriesToRows, rowsToSenses, type SenseRow } from '../domain/vocabulary';
+import { entriesToRows, rowsToSenses, type SenseRow } from '../domain/dictionary';
 
 // The response cap. The database has no five limit — `see` keeps all its
 // senses and `saw` all of its — so this truncates the merge and nothing else,
@@ -29,23 +29,23 @@ export type PersistEntriesInput = {
  *  whether this call wrote them or found them already there. */
 export type PersistedEntry = {
   lemma: string;
-  termId: string;
+  lexemeId: string;
   variantId: string;
   senseIds: string[];
   created: boolean;
 };
 
-export function createVocabRepo(tx: Tx) {
+export function createDictRepo(tx: Tx) {
   /**
    * Three tables, driven by the unique index's (language_code, lower(form))
-   * prefix, with no join to `vocab_terms` at all — language and the ordering
+   * prefix, with no join to `dict_lexemes` at all — language and the ordering
    * key both live on the variant now.
    *
-   * The inner join to `term_sense_translations` *is* the servability test: a
+   * The inner join to `dict_var_translations` *is* the servability test: a
    * term with no translation in the language being asked for returns zero rows,
    * which the service reads as a miss. No column and no flag.
    *
-   * `(s.rank, v.entry_rank)` is unique across one form's rows and `v.term_id`
+   * `(s.rank, v.entry_rank)` is unique across one form's rows and `v.lexeme_id`
    * closes it, so identical requests return identical answers — forever.
    */
   const findSensesByForm = async (input: {
@@ -55,40 +55,40 @@ export function createVocabRepo(tx: Tx) {
   }): Promise<SenseRow[]> =>
     tx
       .select({
-        termId: termVariants.termId,
-        rank: vocabTermSenses.rank,
-        entryRank: termVariants.entryRank,
-        partOfSpeech: vocabTermSenses.partOfSpeech,
-        exampleSource: vocabTermSenses.exampleSource,
-        translation: termSenseTranslations.translation,
-        exampleTarget: termSenseTranslations.exampleTarget,
-        // `term_variants.kind` is `text`, not a typed enum column, so it comes
+        lexemeId: dictVariants.lexemeId,
+        rank: dictSenses.rank,
+        entryRank: dictVariants.entryRank,
+        partOfSpeech: dictSenses.partOfSpeech,
+        exampleSource: dictSenses.exampleSource,
+        translation: dictVarTranslations.translation,
+        exampleTarget: dictVarTranslations.exampleTarget,
+        // `dict_variants.kind` is `text`, not a typed enum column, so it comes
         // back untyped from Drizzle; cast rather than widen `SenseRow.kind`,
         // since the write (below) already only ever stores a `TranslationKind`.
-        kind: sql<TranslationKind>`${termVariants.kind}`,
+        kind: sql<TranslationKind>`${dictVariants.kind}`,
       })
-      .from(termVariants)
-      .innerJoin(vocabTermSenses, eq(vocabTermSenses.termId, termVariants.termId))
+      .from(dictVariants)
+      .innerJoin(dictSenses, eq(dictSenses.lexemeId, dictVariants.lexemeId))
       .innerJoin(
-        termSenseTranslations,
+        dictVarTranslations,
         and(
-          eq(termSenseTranslations.senseId, vocabTermSenses.id),
-          eq(termSenseTranslations.userLanguageCode, input.userLanguageCode),
+          eq(dictVarTranslations.senseId, dictSenses.id),
+          eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
         ),
       )
       .where(
         and(
-          eq(termVariants.languageCode, input.languageCode),
+          eq(dictVariants.languageCode, input.languageCode),
           // lower(form), matching the index expression exactly so the index is
           // usable. Hebrew has no case, so this is a no-op on that side.
-          sql`lower(${termVariants.form}) = ${input.form.toLowerCase()}`,
+          sql`lower(${dictVariants.form}) = ${input.form.toLowerCase()}`,
         ),
       )
       // Rank leads, so the merge across headwords is round-robin rather than
       // block-per-entry: ordering by entry first would put all of `see`'s
       // senses ahead of `saw`'s, and a five-sense `see` would push `מסור` off
       // the cap entirely.
-      .orderBy(asc(vocabTermSenses.rank), asc(termVariants.entryRank), asc(termVariants.termId))
+      .orderBy(asc(dictSenses.rank), asc(dictVariants.entryRank), asc(dictVariants.lexemeId))
       .limit(READ_LIMIT);
 
   /**
@@ -115,23 +115,23 @@ export function createVocabRepo(tx: Tx) {
       // already there" is detected; a concurrent request for the same new
       // lemma blocks here until the first commits.
       const [inserted] = await tx
-        .insert(vocabTerms)
+        .insert(dictLexemes)
         .values({ languageCode: input.languageCode, lemma: entry.lemma })
-        .onConflictDoNothing({ target: [vocabTerms.languageCode, vocabTerms.lemma] })
-        .returning({ id: vocabTerms.id });
+        .onConflictDoNothing({ target: [dictLexemes.languageCode, dictLexemes.lemma] })
+        .returning({ id: dictLexemes.id });
 
-      let termId = inserted?.id;
-      if (!termId) {
+      let lexemeId = inserted?.id;
+      if (!lexemeId) {
         const [existing] = await tx
-          .select({ id: vocabTerms.id })
-          .from(vocabTerms)
+          .select({ id: dictLexemes.id })
+          .from(dictLexemes)
           .where(
             and(
-              eq(vocabTerms.languageCode, input.languageCode),
-              eq(vocabTerms.lemma, entry.lemma),
+              eq(dictLexemes.languageCode, input.languageCode),
+              eq(dictLexemes.lemma, entry.lemma),
             ),
           );
-        termId = existing.id;
+        lexemeId = existing.id;
       }
 
       // 2 — the variant, for the queried form only. The conflict target is
@@ -139,50 +139,50 @@ export function createVocabRepo(tx: Tx) {
       // collision on (language_code, lower(form), entry_rank), which is the
       // safety net and must be allowed to raise.
       await tx
-        .insert(termVariants)
+        .insert(dictVariants)
         .values({
-          termId,
+          lexemeId,
           languageCode: input.languageCode,
           form: input.form,
           kind: input.kind,
           entryRank: entry.entryRank,
         })
-        .onConflictDoNothing({ target: [termVariants.termId, termVariants.form] });
+        .onConflictDoNothing({ target: [dictVariants.lexemeId, dictVariants.form] });
 
       const [variant] = await tx
-        .select({ id: termVariants.id })
-        .from(termVariants)
-        .where(and(eq(termVariants.termId, termId), eq(termVariants.form, input.form)));
+        .select({ id: dictVariants.id })
+        .from(dictVariants)
+        .where(and(eq(dictVariants.lexemeId, lexemeId), eq(dictVariants.form, input.form)));
 
       // 3 — this term's senses, in rank order. The seed hangs its questions
       // off senseIds[0], so the order is part of the contract.
       const existingSenses = await tx
-        .select({ id: vocabTermSenses.id })
-        .from(vocabTermSenses)
-        .where(eq(vocabTermSenses.termId, termId))
-        .orderBy(asc(vocabTermSenses.rank));
+        .select({ id: dictSenses.id })
+        .from(dictSenses)
+        .where(eq(dictSenses.lexemeId, lexemeId))
+        .orderBy(asc(dictSenses.rank));
 
       let senseIds = existingSenses.map((sense) => sense.id);
 
       // 4 — first writer wins.
       if (senseIds.length === 0) {
         const rows = await tx
-          .insert(vocabTermSenses)
+          .insert(dictSenses)
           .values(
             entry.senses.map((sense) => ({
-              termId,
+              lexemeId,
               senseCode: sense.senseCode,
               rank: sense.rank,
               partOfSpeech: sense.partOfSpeech,
               exampleSource: sense.exampleSource,
             })),
           )
-          .returning({ id: vocabTermSenses.id, rank: vocabTermSenses.rank });
+          .returning({ id: dictSenses.id, rank: dictSenses.rank });
 
         const idByRank = new Map(rows.map((row) => [row.rank, row.id]));
         senseIds = entry.senses.map((sense) => idByRank.get(sense.rank)!);
 
-        await tx.insert(termSenseTranslations).values(
+        await tx.insert(dictVarTranslations).values(
           entry.senses.map((sense) => ({
             senseId: idByRank.get(sense.rank)!,
             userLanguageCode: input.userLanguageCode,
@@ -192,7 +192,7 @@ export function createVocabRepo(tx: Tx) {
         );
       }
 
-      written.push({ lemma: entry.lemma, termId, variantId: variant.id, senseIds, created: !!inserted });
+      written.push({ lemma: entry.lemma, lexemeId, variantId: variant.id, senseIds, created: !!inserted });
     }
 
     // 5 — the re-read. Returning only what was just written would give the
@@ -214,4 +214,4 @@ export function createVocabRepo(tx: Tx) {
   return { findSensesByForm, persistEntries };
 }
 
-export type VocabRepo = ReturnType<typeof createVocabRepo>;
+export type DictRepo = ReturnType<typeof createDictRepo>;

@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10)
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -78,16 +78,20 @@ Three rules that are not import rules:
   outside one). `createTransaction(db, bind)` is generic in what it binds, so `db/`
   does not learn that `repo/` exists — `composition.ts` supplies `bind`.
 
-  **Amended twice.** Phase 9 added *"that touches the database"*, because
+  **Amended three times.** Phase 9 added *"that touches the database"*, because
   `services/translations.ts` was a use case with **zero** transactions. Phase 10 made that
   same use case have **two**: normalize, read, call the provider for one to three seconds,
-  write, respond. The rule now reads: *a use case opens at most one **write** transaction;
-  a read preceding third-party I/O may be its own.*
+  write, respond. Phase 12 gave it **three**, by putting a second model call between the
+  first one and the write: normalize, read the cache, call the provider, read the stored
+  senses of the lexemes that answer named, call again to reconcile them by meaning, write,
+  respond. The rule now reads: *a use case opens at most one **write** transaction; reads
+  preceding third-party I/O may each be their own.*
 
   Holding one transaction open across the provider call was rejected outright: ten seconds
-  of an idle pooled connection per lookup, one per concurrent learner. Two short
-  transactions with the call between them hold nothing and race harmlessly, because the
-  write is idempotent against `UNIQUE(language_code, lemma)` and `UNIQUE(term_id, form)`.
+  of an idle pooled connection per lookup, one per concurrent learner. Short transactions
+  with the calls between them hold nothing and race harmlessly, because the write is
+  idempotent against `UNIQUE(language_code, lemma, part_of_speech)` and
+  `UNIQUE(lexeme_id, form)`.
 
   R8's detection command greps for `\.transaction(` — the mechanism, `db.transaction(`,
   which still has exactly one call site. The "how many per use case" half was never
@@ -103,6 +107,11 @@ Three rules that are not import rules:
   bind and read-only projection, plus a decision about `login`, a pure read that opens a
   transaction today. **Revisit it for the performance gain**, or the second time a use case
   wants a read outside its write.
+
+  That second time arrived in phase 12, and the seam was still not built: the second read
+  belongs to the *same* use case as the first, so it buys the same one factory no new
+  caller shares. The trigger to watch is therefore a *second use case* wanting a read
+  outside its write, not a second read.
 - **R9 — Repositories expose primitives, services expose use cases.** A repository
   function is one persistence step (`loadSession`, `insertAnswer`); a service function is
   one use case (`startSession`, `submitAnswer`) taking only its own arguments.

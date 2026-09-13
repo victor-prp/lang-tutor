@@ -23,8 +23,8 @@
     "db:down": "docker compose down",
     "db:migrate": "npm run db:migrate --workspace apps/server",
     "db:reseed": "npm run db:reseed --workspace apps/server",
-    "vocab:export": "npm run vocab:export --workspace apps/server",
-    "vocab:restore": "npm run vocab:restore --workspace apps/server",
+    "dict:export": "npm run dict:export --workspace apps/server",
+    "dict:restore": "npm run dict:restore --workspace apps/server",
     "eval": "npm run eval --workspace apps/server",
     "content:generate": "npm run content:generate --workspace apps/server"
   }

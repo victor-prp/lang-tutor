@@ -13,7 +13,7 @@ import type {
  * ADR 0001 R3 forbids every cross-layer import here — no Drizzle, no `../errors`,
  * no `../repo/*` — so the row shapes this module accepts are declared locally,
  * the same arrangement `domain/translation.ts` already uses for
- * `TranslationPrompt`. `repo/vocabulary.ts` imports these types; nothing here
+ * `TranslationPrompt`. `repo/dictionary.ts` imports these types; nothing here
  * imports it.
  */
 
@@ -43,7 +43,7 @@ function toResponseSense(sense: LlmSense): TranslationSense {
  * it true regardless. Rejecting the answer instead would throw away content
  * over a formatting choice.
  *
- * Exact-string keys: `vocab_terms` is unique on the exact lemma, so anything
+ * Exact-string keys: `dict_lexemes` is unique on the exact lemma, so anything
  * looser here would merge two rows the database keeps apart.
  */
 export function mergeEntries(entries: LlmEntry[]): LlmEntry[] {
@@ -104,11 +104,11 @@ export function languagesFor(direction: TranslationDirection): {
 
 /**
  * A row of the by-form read. Declared here rather than imported from Drizzle:
- * R3 forbids this layer knowing that Drizzle exists, and `repo/vocabulary.ts`
+ * R3 forbids this layer knowing that Drizzle exists, and `repo/dictionary.ts`
  * selects exactly these columns under exactly these names.
  */
 export type SenseRow = {
-  termId: string;
+  lexemeId: string;
   rank: number;
   entryRank: number;
   partOfSpeech: string | null;
@@ -116,7 +116,7 @@ export type SenseRow = {
   translation: string;
   exampleTarget: string | null;
   /** The queried form's own kind, copied onto every row from the
-   *  entry_rank 0 variant's `term_variants.kind` — see `kindForForm`. */
+   *  entry_rank 0 variant's `dict_variants.kind` — see `kindForForm`. */
   kind: TranslationKind;
 };
 

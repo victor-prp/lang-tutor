@@ -5,7 +5,7 @@ import { content, optionsFor } from './content';
 import { recorded } from './content.generated';
 import { questions } from './schema';
 import { createTransaction } from './transaction';
-import { createVocabRepo } from '../repo/vocabulary';
+import { createDictRepo } from '../repo/dictionary';
 
 const TARGET_LANGUAGE = 'en';
 const USER_LANGUAGE = 'he';
@@ -54,7 +54,7 @@ export async function seedContent(db: Db): Promise<void> {
   const inTransaction = createTransaction(db, (tx) => tx);
 
   await inTransaction(async (tx) => {
-    const vocab = createVocabRepo(tx);
+    const dict = createDictRepo(tx);
     const rows = [];
 
     for (const entry of content) {
@@ -66,7 +66,7 @@ export async function seedContent(db: Db): Promise<void> {
       }
       assertSeedable(entry.query, answer.kind);
 
-      const { written } = await vocab.persistEntries({
+      const { written } = await dict.persistEntries({
         form: entry.query,
         languageCode: TARGET_LANGUAGE,
         userLanguageCode: USER_LANGUAGE,

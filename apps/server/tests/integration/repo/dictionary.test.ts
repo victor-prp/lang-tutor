@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { LlmEntry } from '@lang-tutor/core/api';
 import { asc, eq, sql } from 'drizzle-orm';
 
-import { termVariants, vocabTermSenses } from '../../../src/db/schema';
-import { createVocabRepo } from '../../../src/repo/vocabulary';
+import { dictVariants, dictSenses } from '../../../src/db/schema';
+import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
-import { insertTerm, type SeedSense } from '../../support/vocabRows';
+import { insertTerm, type SeedSense } from '../../support/dictRows';
 import { withTx } from '../../support/withTx';
 
 let t: TestDb;
@@ -30,7 +30,7 @@ const sense = (rank: number, translation: string, over: Partial<SeedSense> = {})
 
 const find = (form: string, languageCode = 'en', userLanguageCode = 'he') =>
   withTx(t.db, (tx) =>
-    createVocabRepo(tx).findSensesByForm({ form, languageCode, userLanguageCode }),
+    createDictRepo(tx).findSensesByForm({ form, languageCode, userLanguageCode }),
   );
 
 describe('findSensesByForm', () => {
@@ -92,7 +92,7 @@ describe('findSensesByForm', () => {
 
     expect(await find('ladder')).toEqual([
       {
-        termId: expect.any(String),
+        lexemeId: expect.any(String),
         rank: 0,
         entryRank: 0,
         partOfSpeech: 'noun',
@@ -152,7 +152,7 @@ const entry = (lemma: string, translations: string[]): LlmEntry => ({
 
 const persist = (form: string, entries: LlmEntry[]) =>
   withTx(t.db, (tx) =>
-    createVocabRepo(tx).persistEntries({
+    createDictRepo(tx).persistEntries({
       form,
       languageCode: 'en',
       userLanguageCode: 'he',
@@ -173,10 +173,10 @@ describe('persistEntries', () => {
       ['saw', true],
     ]);
 
-    const variants = await t.db.select().from(termVariants).where(eq(termVariants.form, 'saw'));
+    const variants = await t.db.select().from(dictVariants).where(eq(dictVariants.form, 'saw'));
     expect(variants).toHaveLength(2);
     expect(variants.map((v) => v.entryRank).sort()).toEqual([0, 1]);
-    expect(new Set(variants.map((v) => v.termId)).size).toBe(2);
+    expect(new Set(variants.map((v) => v.lexemeId)).size).toBe(2);
   });
 
   it('returns ids that match the rows it wrote', async () => {
@@ -185,15 +185,15 @@ describe('persistEntries', () => {
 
     const [variant] = await t.db
       .select()
-      .from(termVariants)
-      .where(eq(termVariants.id, row.variantId));
-    expect(variant.termId).toBe(row.termId);
+      .from(dictVariants)
+      .where(eq(dictVariants.id, row.variantId));
+    expect(variant.lexemeId).toBe(row.lexemeId);
     expect(variant.form).toBe('see');
 
     const senses = await t.db
       .select()
-      .from(vocabTermSenses)
-      .where(eq(vocabTermSenses.termId, row.termId));
+      .from(dictSenses)
+      .where(eq(dictSenses.lexemeId, row.lexemeId));
     expect(senses.map((sense) => sense.rank).sort()).toEqual([0, 1]);
     expect([...row.senseIds].sort()).toEqual(senses.map((sense) => sense.id).sort());
     // senseIds is in rank order, which is what the seed hangs its questions off.
@@ -240,10 +240,10 @@ describe('persistEntries', () => {
     // first call's own senseIds, so a wrong-order regression on the found path
     // is caught even if it happened to match some other array by coincidence.
     const seeSenses = await t.db
-      .select({ id: vocabTermSenses.id })
-      .from(vocabTermSenses)
-      .where(eq(vocabTermSenses.termId, written[0].termId))
-      .orderBy(asc(vocabTermSenses.rank));
+      .select({ id: dictSenses.id })
+      .from(dictSenses)
+      .where(eq(dictSenses.lexemeId, written[0].lexemeId))
+      .orderBy(asc(dictSenses.rank));
     expect(written[0].senseIds).toEqual(seeSenses.map((row) => row.id));
   });
 
@@ -251,7 +251,7 @@ describe('persistEntries', () => {
     const first = await persist('see', [entry('see', ['לראות'])]);
     const second = await persist('see', [entry('see', ['לראות'])]);
 
-    expect(second.written[0].termId).toBe(first.written[0].termId);
+    expect(second.written[0].lexemeId).toBe(first.written[0].lexemeId);
     expect(second.written[0].variantId).toBe(first.written[0].variantId);
     expect(second.written[0].created).toBe(false);
     // The first call wrote the senses; the second only found them. Equal,
@@ -259,14 +259,14 @@ describe('persistEntries', () => {
     // `[]` or a different order than the write did.
     expect(second.written[0].senseIds).toEqual(first.written[0].senseIds);
     // Scoped to this term rather than the whole table: the shared content seed
-    // (db/seed.ts) already populates term_variants with 13 rows for the other
+    // (db/seed.ts) already populates dict_variants with 13 rows for the other
     // integration suites, so an unscoped count could never read 1 regardless of
     // whether the second call wrote a duplicate.
     expect(
       await t.db
         .select()
-        .from(termVariants)
-        .where(eq(termVariants.termId, first.written[0].termId)),
+        .from(dictVariants)
+        .where(eq(dictVariants.lexemeId, first.written[0].lexemeId)),
     ).toHaveLength(1);
   });
 
@@ -309,7 +309,7 @@ describe('persistEntries', () => {
     const first = withTx(t.db, async (tx) => {
       const out = await (async () => {
         try {
-          return await createVocabRepo(tx).persistEntries({
+          return await createDictRepo(tx).persistEntries({
             form: 'kite',
             languageCode: 'en',
             userLanguageCode: 'he',
@@ -336,7 +336,7 @@ describe('persistEntries', () => {
       const { rows } = await tx.execute<{ pid: number }>(sql`select pg_backend_pid() as pid`);
       secondPid = rows[0].pid;
       await written;
-      return createVocabRepo(tx).persistEntries({
+      return createDictRepo(tx).persistEntries({
         form: 'kite',
         languageCode: 'en',
         userLanguageCode: 'he',
@@ -399,7 +399,7 @@ describe('persistEntries', () => {
     const a = firstResult.value;
     const b = secondResult.value;
 
-    expect(b.written[0].termId).toBe(a.written[0].termId);
+    expect(b.written[0].lexemeId).toBe(a.written[0].lexemeId);
     expect(b.written[0].created).toBe(false);
     // `a` wrote the senses; `b` only found them — same order-sensitive check
     // as the idempotent test, here under an actual concurrent race rather
@@ -409,8 +409,8 @@ describe('persistEntries', () => {
     expect(
       await t.db
         .select()
-        .from(vocabTermSenses)
-        .where(eq(vocabTermSenses.termId, a.written[0].termId)),
+        .from(dictSenses)
+        .where(eq(dictSenses.lexemeId, a.written[0].lexemeId)),
     ).toHaveLength(1);
   });
 });

@@ -1,7 +1,7 @@
 import type { Db } from './client';
 import { createTransaction } from './transaction';
-import type { VocabRecord } from './vocabExport';
-import { createVocabRepo } from '../repo/vocabulary';
+import type { DictRecord } from './dictExport';
+import { createDictRepo } from '../repo/dictionary';
 
 export type ImportResult = {
   /** Records replayed. */
@@ -31,10 +31,10 @@ export type ImportResult = {
  * ADR 0001 R7 forbids `console` outside `db/cli.ts`, so the caller supplies
  * reporting, and ADR 0002 R5 forbids defaulting a collaborator.
  */
-export async function importVocabulary(
+export async function importDictionary(
   db: Db,
   input: {
-    records: VocabRecord[];
+    records: DictRecord[];
     languageCode: string;
     userLanguageCode: string;
     chunkSize: number;
@@ -49,9 +49,9 @@ export async function importVocabulary(
     const chunk = input.records.slice(start, start + input.chunkSize);
 
     await inTransaction(async (tx) => {
-      const vocab = createVocabRepo(tx);
+      const dict = createDictRepo(tx);
       for (const record of chunk) {
-        const { written } = await vocab.persistEntries({
+        const { written } = await dict.persistEntries({
           form: record.form,
           languageCode: input.languageCode,
           userLanguageCode: input.userLanguageCode,

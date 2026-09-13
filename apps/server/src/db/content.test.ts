@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
-import { normalizeForm } from '../domain/vocabulary';
+import { normalizeForm } from '../domain/dictionary';
 import { content, correctAnswerFor, optionsFor } from './content';
 import { recorded } from './content.generated';
 

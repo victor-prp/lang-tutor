@@ -2,7 +2,7 @@ import type { Question } from '@lang-tutor/core/api';
 import { and, asc, eq, isNull, or } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import { questions, termVariants, type QuestionOption } from '../db/schema';
+import { questions, dictVariants, type QuestionOption } from '../db/schema';
 
 /** Options as authored, ordered by their canonical position. */
 export function canonicalOptions(options: QuestionOption[]): QuestionOption[] {
@@ -14,7 +14,7 @@ export function canonicalOptions(options: QuestionOption[]): QuestionOption[] {
  * `option_order`; without it the options come back in canonical order.
  */
 export function questionFrom(
-  row: { id: string; options: QuestionOption[]; form: string; termId: string },
+  row: { id: string; options: QuestionOption[]; form: string; lexemeId: string },
   order: number[] | null,
 ): Question {
   const canonical = canonicalOptions(row.options);
@@ -22,7 +22,7 @@ export function questionFrom(
   return {
     id: row.id,
     type: 'multiple_choice',
-    vocab_term_id: row.termId,
+    vocab_term_id: row.lexemeId,
     question: row.form,
     options: shown.map((option) => option.text),
     correct_option: shown.findIndex((option) => option.is_correct),
@@ -45,11 +45,11 @@ export function createQuestionRepo(tx: Tx) {
         .select({
           id: questions.id,
           options: questions.options,
-          form: termVariants.form,
-          termId: termVariants.termId,
+          form: dictVariants.form,
+          lexemeId: dictVariants.lexemeId,
         })
         .from(questions)
-        .innerJoin(termVariants, eq(termVariants.id, questions.promptVariantId))
+        .innerJoin(dictVariants, eq(dictVariants.id, questions.promptVariantId))
         .where(
           and(
             or(isNull(questions.userId), eq(questions.userId, userId)),

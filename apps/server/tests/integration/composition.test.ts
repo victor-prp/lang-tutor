@@ -7,7 +7,7 @@ import { createTestServerDeps } from '../support/serverDeps';
 import { seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
-import { insertTerm } from '../support/vocabRows';
+import { insertTerm } from '../support/dictRows';
 
 let t: TestDb;
 

@@ -129,16 +129,16 @@ Nine tables, all in `apps/server/src/db/schema.ts`:
 | Table | Holds |
 |---|---|
 | `users` | One row per learner: a unique `username` they log in with, a `display_name`, an `age`, and their native/target language pair. The id is issued by the database, never by a client. |
-| `vocab_terms` | A lemma in a language (e.g. English "run"), unique per `(language_code, lemma)`. The id is issued by the database. |
-| `term_variants` | A surface form somebody actually queried — `run`, `running`, `saw` — with the language it is in and `entry_rank`, this term's position among the readings the model returned *for that form*. `UNIQUE(language_code, lower(form), entry_rank)` is both the lookup index and the guarantee that no two terms claim one reading. |
-| `vocab_term_senses` | A distinct meaning of a term, with its `part_of_speech`, its source-language `example_source`, and `rank` — "most common first", within that term. |
-| `term_sense_translations` | A sense's translation into a learner's native language, with the target half of the example, one row per `(sense, user_language_code)`. |
+| `dict_lexemes` | A lemma in a language (e.g. English "run"), unique per `(language_code, lemma)`. The id is issued by the database. |
+| `dict_variants` | A surface form somebody actually queried — `run`, `running`, `saw` — with the language it is in and `entry_rank`, this term's position among the readings the model returned *for that form*. `UNIQUE(language_code, lower(form), entry_rank)` is both the lookup index and the guarantee that no two terms claim one reading. |
+| `dict_senses` | A distinct meaning of a term, with its `part_of_speech`, its source-language `example_source`, and `rank` — "most common first", within that term. |
+| `dict_var_translations` | A sense's translation into a learner's native language, with the target half of the example, one row per `(sense, user_language_code)`. |
 | `questions` | A generated multiple-choice question: a sense, a prompt variant, and its shuffled `options` (jsonb). |
 | `sessions` | One learner's attempt at a ten-question run; `completed_at IS NULL` means still in progress. |
 | `session_questions` | The ten questions assigned to a session, in order, with the per-session option shuffle. |
 | `answers` | The option the learner picked for one `(session, position)`, constrained to reference a question actually assigned there. |
 
-Since phase 10 the vocabulary tables **are** written at request time: `POST
+Since phase 10 the dictionary tables **are** written at request time: `POST
 /api/translations` writes every entry the model returned, and the next lookup of that
 string is served from Postgres. The dictionary is shared and records no learner — there is
 no `user_id` near these tables — so a save enriches the global dictionary rather than
@@ -146,8 +146,8 @@ anybody's word list. It is first-writer-wins and permanent: a term that has sens
 rewritten, there is no TTL, and the only supported way to change stored content is
 `npm run db:reseed`.
 
-Two ranks, two scopes, and they are not the same number. `vocab_term_senses.rank` orders
-senses *within one headword*; `term_variants.entry_rank` orders headwords *within one
+Two ranks, two scopes, and they are not the same number. `dict_senses.rank` orders
+senses *within one headword*; `dict_variants.entry_rank` orders headwords *within one
 form*. A lookup sorts by rank first, so a form belonging to two headwords returns them
 interleaved and neither one's top sense is crowded out.
 
@@ -167,12 +167,12 @@ server URL from `apps/mobile/.env.local`, which Expo auto-loads and git ignores 
 npm install
 cp apps/mobile/.env.example apps/mobile/.env.local
 npm run db:up        # Postgres + MockServer  (requires Docker)
-npm run db:migrate   # schema + shared vocabulary seed
+npm run db:migrate   # schema + shared dictionary seed
 npm run server       # terminal 1
 npm run mobile       # terminal 2
 ```
 
-> **Migration `0003` clears the dictionary and the quiz.** It runs `TRUNCATE vocab_terms,
+> **Migration `0003` clears the dictionary and the quiz.** It runs `TRUNCATE dict_lexemes,
 > sessions CASCADE` before adding its columns, so applying it drops every seeded and
 > looked-up word, every question, and all session history — `answers`, `session_questions`
 > and `sessions`. `users` survives. That is the deliberate price of one data shape instead
@@ -284,7 +284,7 @@ alone against a populated database writes nothing, so a re-recording would never
 > re-record". The loss is provider calls rather than data.
 
 To remove one bad entry during a play-test without resetting everything, delete it by hand:
-`DELETE FROM vocab_terms WHERE lemma = 'whatever';` cascades to its variants, senses and
+`DELETE FROM dict_lexemes WHERE lemma = 'whatever';` cascades to its variants, senses and
 translations.
 
 ## Reading the API

@@ -42,7 +42,7 @@ describe('loadQuestionPool', () => {
     });
   });
 
-  it('exposes the vocabulary term id, which the database issues', async () => {
+  it('exposes the lexeme id, which the database issues', async () => {
     await withTx(t.db, async (tx) => {
       const pool = await createQuestionRepo(tx).loadQuestionPool('en', 'he', 'u_1');
       // Server-issued since phase 10 — no layer generates randomness, so the

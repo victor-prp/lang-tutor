@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
-import { createVocabRepo } from '../../../src/repo/vocabulary';
+import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
-import { insertTerm, type SeedSense } from '../../support/vocabRows';
+import { insertTerm, type SeedSense } from '../../support/dictRows';
 import { withTx } from '../../support/withTx';
 
 // The merge across headwords: this phase's most load-bearing rule, and the one
@@ -30,7 +30,7 @@ const sense = (rank: number, translation: string): SeedSense => ({
 
 const find = (form: string) =>
   withTx(t.db, (tx) =>
-    createVocabRepo(tx).findSensesByForm({
+    createDictRepo(tx).findSensesByForm({
       form,
       languageCode: 'en',
       userLanguageCode: 'he',

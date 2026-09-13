@@ -14,7 +14,7 @@ import {
   mergeEntries,
   normalizeForm,
   rowsToSenses,
-} from '../domain/vocabulary';
+} from '../domain/dictionary';
 import { TranslationUnreadable } from '../errors';
 import type { Logger } from '../logger';
 import type { LlmClient } from './llm';
@@ -29,7 +29,7 @@ import type { Transaction } from './transaction';
  * third-party I/O may be its own. Holding one open across the provider call
  * was rejected outright: ten seconds of an idle pooled connection per lookup,
  * one per concurrent learner. The two race harmlessly, because the write is
- * idempotent against UNIQUE(language_code, lemma) and UNIQUE(term_id, form).
+ * idempotent against UNIQUE(language_code, lemma) and UNIQUE(lexeme_id, form).
  *
  * Note the calls below are written as bare `transaction(...)`, destructured
  * from the parameter list, never read off a `deps` object: R8's lint check
@@ -54,7 +54,7 @@ export function createTranslationService({
       const form = normalizeForm(text);
 
       const hit = await transaction((repos) =>
-        repos.vocab.findSensesByForm({
+        repos.dict.findSensesByForm({
           form,
           languageCode: source,
           userLanguageCode: target,
@@ -64,13 +64,13 @@ export function createTranslationService({
       if (hit.length > 0) {
         const senses = rowsToSenses(hit);
         logger.info({
-          event: 'vocab_cache_hit',
+          event: 'dict_cache_hit',
           direction,
-          term_count: new Set(hit.map((row) => row.termId)).size,
+          term_count: new Set(hit.map((row) => row.lexemeId)).size,
           sense_count: senses.length,
         });
         // Read, not guessed: `kind` is written by the persisting call
-        // (`repo/vocabulary.ts`) onto the entry_rank 0 variant and read back
+        // (`repo/dictionary.ts`) onto the entry_rank 0 variant and read back
         // by `kindForForm`, so a hit answers with what was actually stored —
         // never a re-derived guess that can disagree with it.
         return { text, direction, kind: kindForForm(hit), senses };
@@ -104,7 +104,7 @@ export function createTranslationService({
 
       try {
         const { written, senses } = await transaction((repos) =>
-          repos.vocab.persistEntries({
+          repos.dict.persistEntries({
             form,
             languageCode: source,
             userLanguageCode: target,
@@ -113,7 +113,7 @@ export function createTranslationService({
           }),
         );
         logger.info({
-          event: 'vocab_persisted',
+          event: 'dict_persisted',
           entry_count: written.length,
           terms_created: written.filter((entry) => entry.created).length,
         });
@@ -124,7 +124,7 @@ export function createTranslationService({
         // for. A broken persistence path shows up as this log line and as every
         // lookup costing a provider call — not as a 502 on a request the model
         // answered.
-        logger.error('vocab_persist_failed', error);
+        logger.error('dict_persist_failed', error);
         logger.info({ event: 'translated', direction, kind, sense_count: flattened.length });
         return { text, direction, kind, senses: flattened };
       }

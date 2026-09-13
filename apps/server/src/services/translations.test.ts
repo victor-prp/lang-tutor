@@ -4,9 +4,9 @@ import {
   createFakeLlmClient,
   createFakeLogger,
   createFakeTransaction,
-  createFakeVocabRepo,
+  createFakeDictRepo,
 } from '../../tests/support/fakes';
-import type { SenseRow } from '../domain/vocabulary';
+import type { SenseRow } from '../domain/dictionary';
 import { LlmUnavailable, TranslationUnreadable } from '../errors';
 import { createTranslationService } from './translations';
 
@@ -20,13 +20,13 @@ const oneEntry = (lemma: string, senses: Record<string, unknown>[]) => ({
 function serviceWith(...replies: (string | Error)[]) {
   const llm = createFakeLlmClient(...replies);
   const logger = createFakeLogger();
-  const vocab = createFakeVocabRepo();
-  const transaction = createFakeTransaction({ vocab });
-  return { service: createTranslationService({ llm, transaction, logger }), llm, logger, vocab };
+  const dict = createFakeDictRepo();
+  const transaction = createFakeTransaction({ dict });
+  return { service: createTranslationService({ llm, transaction, logger }), llm, logger, dict };
 }
 
 const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
-  termId: 't-1',
+  lexemeId: 't-1',
   rank: 0,
   entryRank: 0,
   partOfSpeech: null,
@@ -163,15 +163,15 @@ describe('translate', () => {
   });
 
   it('serves a hit from the database and calls the model zero times', async () => {
-    const { service, llm, vocab, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
-    vocab.hit = [row('סולם')];
+    const { service, llm, dict, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
+    dict.hit = [row('סולם')];
 
     const result = await service.translate({ text: 'ladder' });
 
     expect(llm.calls).toHaveLength(0);
     expect(result.senses).toEqual([{ translation: 'סולם' }]);
     expect(logger.events[0]).toEqual({
-      event: 'vocab_cache_hit',
+      event: 'dict_cache_hit',
       direction: 'en_he',
       term_count: 1,
       sense_count: 1,
@@ -184,8 +184,8 @@ describe('translate', () => {
     // `phrase` regardless of what was written. The stored row says `word`,
     // recorded that way by the entry_rank 0 variant, and the hit path must
     // honour it rather than guess.
-    const { service, vocab } = serviceWith(reply({ kind: 'word', entries: [] }));
-    vocab.hit = [row('לזכור', { kind: 'word' })];
+    const { service, dict } = serviceWith(reply({ kind: 'word', entries: [] }));
+    dict.hit = [row('לזכור', { kind: 'word' })];
 
     const result = await service.translate({ text: 'to remember' });
 
@@ -193,11 +193,11 @@ describe('translate', () => {
   });
 
   it('reads with the normalized form and the direction\'s language pair', async () => {
-    const { service, vocab } = serviceWith(reply({ kind: 'word', entries: [] }));
+    const { service, dict } = serviceWith(reply({ kind: 'word', entries: [] }));
 
     await service.translate({ text: '  good   morning ' });
 
-    expect(vocab.reads[0]).toEqual({
+    expect(dict.reads[0]).toEqual({
       form: 'good morning',
       languageCode: 'en',
       userLanguageCode: 'he',
@@ -205,7 +205,7 @@ describe('translate', () => {
   });
 
   it('writes every entry on a miss, with the queried form and the resolved kind', async () => {
-    const { service, llm, vocab } = serviceWith(
+    const { service, llm, dict } = serviceWith(
       reply({
         kind: 'word',
         entries: [
@@ -218,26 +218,26 @@ describe('translate', () => {
     await service.translate({ text: 'saw' });
 
     expect(llm.calls).toHaveLength(1);
-    expect(vocab.persisted).toHaveLength(1);
-    expect(vocab.persisted[0]).toMatchObject({
+    expect(dict.persisted).toHaveLength(1);
+    expect(dict.persisted[0]).toMatchObject({
       form: 'saw',
       languageCode: 'en',
       userLanguageCode: 'he',
       kind: 'word',
     });
-    expect(vocab.persisted[0].entries.map((entry) => entry.lemma)).toEqual(['see', 'saw']);
+    expect(dict.persisted[0].entries.map((entry) => entry.lemma)).toEqual(['see', 'saw']);
   });
 
   it('answers with what the write re-read, not with what the model replied', async () => {
     // The re-read is what makes the writer's answer identical to the next
     // reader's, so the service must not shortcut it.
-    const { service, vocab } = serviceWith(
+    const { service, dict } = serviceWith(
       reply({
         kind: 'word',
         entries: [{ lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] }],
       }),
     );
-    vocab.reread = [row('לראות'), row('מסור')];
+    dict.reread = [row('לראות'), row('מסור')];
 
     const result = await service.translate({ text: 'saw' });
 
@@ -245,7 +245,7 @@ describe('translate', () => {
   });
 
   it('merges two entries for one lemma before writing, so neither is dropped', async () => {
-    const { service, vocab } = serviceWith(
+    const { service, dict } = serviceWith(
       reply({
         kind: 'word',
         entries: [
@@ -257,23 +257,23 @@ describe('translate', () => {
 
     await service.translate({ text: 'book' });
 
-    expect(vocab.persisted[0].entries).toHaveLength(1);
-    expect(vocab.persisted[0].entries[0].senses).toHaveLength(2);
+    expect(dict.persisted[0].entries).toHaveLength(1);
+    expect(dict.persisted[0].entries[0].senses).toHaveLength(2);
   });
 
   it('still answers 200 with the flattened entries when the write throws', async () => {
-    const { service, vocab, logger } = serviceWith(
+    const { service, dict, logger } = serviceWith(
       reply({
         kind: 'word',
         entries: [{ lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] }],
       }),
     );
-    vocab.persistError = new Error('deadlock detected');
+    dict.persistError = new Error('deadlock detected');
 
     const result = await service.translate({ text: 'saw' });
 
     expect(result.senses).toEqual([{ translation: 'מסור' }]);
-    expect(logger.errors.map((entry) => entry.message)).toContain('vocab_persist_failed');
+    expect(logger.errors.map((entry) => entry.message)).toContain('dict_persist_failed');
   });
 
   it('writes nothing for a sentence, an empty entry list, or a provider failure', async () => {
@@ -286,19 +286,19 @@ describe('translate', () => {
       }),
     );
     await sentence.service.translate({ text: 'I read a book' });
-    expect(sentence.vocab.persisted).toHaveLength(0);
+    expect(sentence.dict.persisted).toHaveLength(0);
 
     const empty = serviceWith(reply({ kind: 'word', entries: [] }));
     await empty.service.translate({ text: 'asdkjhasd' });
-    expect(empty.vocab.persisted).toHaveLength(0);
+    expect(empty.dict.persisted).toHaveLength(0);
 
     const blocked = serviceWith('');
     await blocked.service.translate({ text: 'asdkjhasd' });
-    expect(blocked.vocab.persisted).toHaveLength(0);
+    expect(blocked.dict.persisted).toHaveLength(0);
 
     const down = serviceWith(new LlmUnavailable('responded 500'));
     await expect(down.service.translate({ text: 'saw' })).rejects.toBeInstanceOf(LlmUnavailable);
-    expect(down.vocab.persisted).toHaveLength(0);
+    expect(down.dict.persisted).toHaveLength(0);
   });
 
   it('logs what it persisted', async () => {
@@ -312,7 +312,7 @@ describe('translate', () => {
     await service.translate({ text: 'saw' });
 
     expect(logger.events).toEqual([
-      { event: 'vocab_persisted', entry_count: 1, terms_created: 1 },
+      { event: 'dict_persisted', entry_count: 1, terms_created: 1 },
       { event: 'translated', direction: 'en_he', kind: 'word', sense_count: 1 },
     ]);
   });

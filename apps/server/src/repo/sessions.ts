@@ -8,7 +8,7 @@ import {
   questions,
   sessionQuestions,
   sessions,
-  termVariants,
+  dictVariants,
   type QuestionOption,
 } from '../db/schema';
 import { canonicalOptions, questionFrom } from './questions';
@@ -87,13 +87,13 @@ export function createSessionRepo(tx: Tx) {
         .select({
           id: questions.id,
           options: questions.options,
-          form: termVariants.form,
-          termId: termVariants.termId,
+          form: dictVariants.form,
+          lexemeId: dictVariants.lexemeId,
           optionOrder: sessionQuestions.optionOrder,
         })
         .from(sessionQuestions)
         .innerJoin(questions, eq(questions.id, sessionQuestions.questionId))
-        .innerJoin(termVariants, eq(termVariants.id, questions.promptVariantId))
+        .innerJoin(dictVariants, eq(dictVariants.id, questions.promptVariantId))
         .where(eq(sessionQuestions.sessionId, sessionId))
         .orderBy(asc(sessionQuestions.position));
 

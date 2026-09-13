@@ -32,10 +32,10 @@ afterAll(async () => {
 
 const TABLES = [
   'users',
-  'vocab_terms',
-  'term_variants',
-  'vocab_term_senses',
-  'term_sense_translations',
+  'dict_lexemes',
+  'dict_variants',
+  'dict_senses',
+  'dict_var_translations',
   'questions',
   'sessions',
   'session_questions',
@@ -47,13 +47,13 @@ const TABLES = [
 // entry_rank and rank required.
 async function seedOneTerm(db: Db): Promise<void> {
   await db.execute(sql`
-    insert into vocab_terms (id, language_code, lemma) values ('vt-en-window', 'en', 'window');
-    insert into term_variants (id, term_id, language_code, form, kind, entry_rank)
+    insert into dict_lexemes (id, language_code, lemma) values ('vt-en-window', 'en', 'window');
+    insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
       values ('tv-en-window-base', 'vt-en-window', 'en', 'window', 'word', 0);
-    insert into vocab_term_senses (id, term_id, sense_code, rank, part_of_speech, example_source)
+    insert into dict_senses (id, lexeme_id, sense_code, rank, part_of_speech, example_source)
       values ('sense-window-default', 'vt-en-window', 'window_opening', 0, 'noun',
               'I opened the window.');
-    insert into term_sense_translations (sense_id, user_language_code, translation, example_target)
+    insert into dict_var_translations (sense_id, user_language_code, translation, example_target)
       values ('sense-window-default', 'he', 'חלון', 'פתחתי את החלון.');
   `);
 }
@@ -170,12 +170,12 @@ describe('the migrated schema', () => {
     await expect(insertAnswer()).rejects.toThrow();
   });
 
-  it('issues ids for the vocabulary tables, so no layer generates randomness', async () => {
+  it('issues ids for the dictionary tables, so no layer generates randomness', async () => {
     await db.execute(
-      sql`insert into vocab_terms (language_code, lemma) values ('en', 'defaulted')`,
+      sql`insert into dict_lexemes (language_code, lemma) values ('en', 'defaulted')`,
     );
     const result = await db.execute<{ id: string }>(
-      sql`select id from vocab_terms where lemma = 'defaulted'`,
+      sql`select id from dict_lexemes where lemma = 'defaulted'`,
     );
     expect(result.rows[0].id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
@@ -184,22 +184,22 @@ describe('the migrated schema', () => {
 
   it('refuses two senses of one term at the same rank', async () => {
     await db.execute(sql`
-      insert into vocab_terms (id, language_code, lemma) values ('vt-dup', 'en', 'dup');
-      insert into vocab_term_senses (term_id, sense_code, rank) values ('vt-dup', 'a', 0);
+      insert into dict_lexemes (id, language_code, lemma) values ('vt-dup', 'en', 'dup');
+      insert into dict_senses (lexeme_id, sense_code, rank) values ('vt-dup', 'a', 0);
     `);
     await expect(
-      db.execute(sql`insert into vocab_term_senses (term_id, sense_code, rank)
+      db.execute(sql`insert into dict_senses (lexeme_id, sense_code, rank)
                      values ('vt-dup', 'b', 0)`),
     ).rejects.toThrow();
   });
 
   it('refuses a negative rank or entry_rank', async () => {
     await expect(
-      db.execute(sql`insert into vocab_term_senses (term_id, sense_code, rank)
+      db.execute(sql`insert into dict_senses (lexeme_id, sense_code, rank)
                      values ('vt-dup', 'c', -1)`),
     ).rejects.toThrow();
     await expect(
-      db.execute(sql`insert into term_variants (term_id, language_code, form, kind, entry_rank)
+      db.execute(sql`insert into dict_variants (lexeme_id, language_code, form, kind, entry_rank)
                      values ('vt-dup', 'en', 'dup', 'word', -1)`),
     ).rejects.toThrow();
   });
@@ -208,31 +208,31 @@ describe('the migrated schema', () => {
   // per language, wins. Two different terms and a form that differs only by
   // case, so this also proves lower(form) — not form — is what the index
   // compares.
-  it('refuses two term_variants for the same language_code, lower(form) and entry_rank', async () => {
+  it('refuses two dict_variants for the same language_code, lower(form) and entry_rank', async () => {
     await db.execute(sql`
-      insert into vocab_terms (id, language_code, lemma) values ('vt-idx-a', 'en', 'idx-a');
-      insert into vocab_terms (id, language_code, lemma) values ('vt-idx-b', 'en', 'idx-b');
-      insert into term_variants (term_id, language_code, form, kind, entry_rank)
+      insert into dict_lexemes (id, language_code, lemma) values ('vt-idx-a', 'en', 'idx-a');
+      insert into dict_lexemes (id, language_code, lemma) values ('vt-idx-b', 'en', 'idx-b');
+      insert into dict_variants (lexeme_id, language_code, form, kind, entry_rank)
         values ('vt-idx-a', 'en', 'Case', 'word', 0);
     `);
     await expect(
-      db.execute(sql`insert into term_variants (term_id, language_code, form, kind, entry_rank)
+      db.execute(sql`insert into dict_variants (lexeme_id, language_code, form, kind, entry_rank)
                      values ('vt-idx-b', 'en', 'CASE', 'word', 0)`),
     ).rejects.toThrow(
       expect.objectContaining({
         cause: expect.objectContaining({
-          message: expect.stringContaining('term_variants_form_entry_rank_key'),
+          message: expect.stringContaining('dict_variants_form_entry_rank_key'),
         }),
       }),
     );
   });
 
-  it('refuses a term_variants insert that omits entry_rank', async () => {
+  it('refuses a dict_variants insert that omits entry_rank', async () => {
     await db.execute(
-      sql`insert into vocab_terms (id, language_code, lemma) values ('vt-no-rank', 'en', 'no-rank')`,
+      sql`insert into dict_lexemes (id, language_code, lemma) values ('vt-no-rank', 'en', 'no-rank')`,
     );
     await expect(
-      db.execute(sql`insert into term_variants (term_id, language_code, form, kind)
+      db.execute(sql`insert into dict_variants (lexeme_id, language_code, form, kind)
                      values ('vt-no-rank', 'en', 'no-rank', 'word')`),
     ).rejects.toThrow(
       expect.objectContaining({

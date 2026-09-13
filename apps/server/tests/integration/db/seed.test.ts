@@ -5,14 +5,14 @@ import { content, correctAnswerFor, optionsFor } from '../../../src/db/content';
 import { recorded } from '../../../src/db/content.generated';
 import {
   questions,
-  termSenseTranslations,
-  termVariants,
-  vocabTerms,
-  vocabTermSenses,
+  dictVarTranslations,
+  dictVariants,
+  dictLexemes,
+  dictSenses,
 } from '../../../src/db/schema';
-import { flattenEntries, mergeEntries, rowsToSenses } from '../../../src/domain/vocabulary';
+import { flattenEntries, mergeEntries, rowsToSenses } from '../../../src/domain/dictionary';
 import { assertSeedable, seedContent } from '../../../src/db/seed';
-import { createVocabRepo } from '../../../src/repo/vocabulary';
+import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 
@@ -34,9 +34,9 @@ describe('seedContent', () => {
     // the seed produced are the rows persistEntries produces, rather than a
     // shape authored twice.
     await withTx(t.db, async (tx) => {
-      const vocab = createVocabRepo(tx);
+      const dict = createDictRepo(tx);
       for (const entry of content) {
-        const rows = await vocab.findSensesByForm({
+        const rows = await dict.findSensesByForm({
           form: entry.query,
           languageCode: 'en',
           userLanguageCode: 'he',
@@ -54,11 +54,11 @@ describe('seedContent', () => {
     const lemmas = new Set(
       content.flatMap((entry) => recorded[entry.query].entries.map((e) => e.lemma)),
     );
-    expect(await t.db.select().from(vocabTerms)).toHaveLength(lemmas.size);
+    expect(await t.db.select().from(dictLexemes)).toHaveLength(lemmas.size);
   });
 
   it('gives every variant its language and its entry rank', async () => {
-    for (const variant of await t.db.select().from(termVariants)) {
+    for (const variant of await t.db.select().from(dictVariants)) {
       expect(variant.languageCode).toBe('en');
       expect(variant.entryRank).toBeGreaterThanOrEqual(0);
       expect(['word', 'phrase', 'sentence']).toContain(variant.kind);
@@ -69,12 +69,12 @@ describe('seedContent', () => {
     const [entry] = content;
     const [term] = await t.db
       .select()
-      .from(vocabTerms)
-      .where(eq(vocabTerms.lemma, recorded[entry.query].entries[0].lemma));
+      .from(dictLexemes)
+      .where(eq(dictLexemes.lemma, recorded[entry.query].entries[0].lemma));
     const senses = await t.db
       .select()
-      .from(vocabTermSenses)
-      .where(eq(vocabTermSenses.termId, term.id));
+      .from(dictSenses)
+      .where(eq(dictSenses.lexemeId, term.id));
 
     const recordedSenses = recorded[entry.query].entries[0].senses;
     expect(senses.map((sense) => sense.rank).sort()).toEqual(
@@ -94,15 +94,15 @@ describe('seedContent', () => {
         .where(eq(questions.id, entry.question_id));
       const [variant] = await t.db
         .select()
-        .from(termVariants)
-        .where(eq(termVariants.id, question.promptVariantId));
+        .from(dictVariants)
+        .where(eq(dictVariants.id, question.promptVariantId));
       const [sense] = await t.db
         .select()
-        .from(vocabTermSenses)
-        .where(eq(vocabTermSenses.id, question.senseId));
+        .from(dictSenses)
+        .where(eq(dictSenses.id, question.senseId));
 
       expect(variant.form).toBe(entry.query);
-      expect(sense.termId).toBe(variant.termId);
+      expect(sense.lexemeId).toBe(variant.lexemeId);
       expect(sense.rank).toBe(0);
     }
   });
@@ -126,11 +126,11 @@ describe('seedContent', () => {
         .where(eq(questions.id, entry.question_id));
       const [translation] = await t.db
         .select()
-        .from(termSenseTranslations)
+        .from(dictVarTranslations)
         .where(
           and(
-            eq(termSenseTranslations.senseId, question.senseId),
-            eq(termSenseTranslations.userLanguageCode, 'he'),
+            eq(dictVarTranslations.senseId, question.senseId),
+            eq(dictVarTranslations.userLanguageCode, 'he'),
           ),
         );
 
@@ -162,18 +162,18 @@ describe('seedContent', () => {
 
   it('is idempotent — a second run inserts nothing', async () => {
     const before = {
-      terms: (await t.db.select().from(vocabTerms)).length,
-      variants: (await t.db.select().from(termVariants)).length,
-      senses: (await t.db.select().from(vocabTermSenses)).length,
+      terms: (await t.db.select().from(dictLexemes)).length,
+      variants: (await t.db.select().from(dictVariants)).length,
+      senses: (await t.db.select().from(dictSenses)).length,
       questions: (await t.db.select().from(questions)).length,
     };
 
     await seedContent(t.db);
 
     expect({
-      terms: (await t.db.select().from(vocabTerms)).length,
-      variants: (await t.db.select().from(termVariants)).length,
-      senses: (await t.db.select().from(vocabTermSenses)).length,
+      terms: (await t.db.select().from(dictLexemes)).length,
+      variants: (await t.db.select().from(dictVariants)).length,
+      senses: (await t.db.select().from(dictSenses)).length,
       questions: (await t.db.select().from(questions)).length,
     }).toEqual(before);
   });
@@ -181,9 +181,9 @@ describe('seedContent', () => {
   it("stores to remember as the queried form, under the lemma the model gave it", async () => {
     const [variant] = await t.db
       .select()
-      .from(termVariants)
-      .where(eq(termVariants.form, 'to remember'));
-    const [term] = await t.db.select().from(vocabTerms).where(eq(vocabTerms.id, variant.termId));
+      .from(dictVariants)
+      .where(eq(dictVariants.form, 'to remember'));
+    const [term] = await t.db.select().from(dictLexemes).where(eq(dictLexemes.id, variant.lexemeId));
 
     expect(term.lemma).toBe(recorded['to remember'].entries[0].lemma);
     expect(term.lemma).not.toBe('to remember');

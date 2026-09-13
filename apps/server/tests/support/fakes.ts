@@ -1,11 +1,11 @@
 import type { User } from '@lang-tutor/core/api';
 
 import type { AppDeps } from '../../src/composition';
-import { flattenEntries, rowsToSenses, type SenseRow } from '../../src/domain/vocabulary';
+import { flattenEntries, rowsToSenses, type SenseRow } from '../../src/domain/dictionary';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
-import type { PersistEntriesInput, VocabRepo } from '../../src/repo/vocabulary';
+import type { PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
@@ -131,12 +131,12 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     user: repos.user ?? unreachableRepo('user repo'),
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
-    vocab: repos.vocab ?? unreachableRepo('vocab repo'),
+    dict: repos.dict ?? unreachableRepo('dict repo'),
   };
   return (run) => run(bound);
 }
 
-export type FakeVocabRepo = VocabRepo & {
+export type FakeDictRepo = DictRepo & {
   /** What the next read answers with. Empty is a miss. */
   hit: SenseRow[];
   /** What the write's re-read answers with. Left empty, the fake answers with
@@ -149,8 +149,8 @@ export type FakeVocabRepo = VocabRepo & {
   reads: { form: string; languageCode: string; userLanguageCode: string }[];
 };
 
-export function createFakeVocabRepo(): FakeVocabRepo {
-  const repo: FakeVocabRepo = {
+export function createFakeDictRepo(): FakeDictRepo {
+  const repo: FakeDictRepo = {
     hit: [],
     reread: [],
     persistError: null,
@@ -166,7 +166,7 @@ export function createFakeVocabRepo(): FakeVocabRepo {
       return {
         written: input.entries.map((entry, index) => ({
           lemma: entry.lemma,
-          termId: `t-${index}`,
+          lexemeId: `t-${index}`,
           variantId: `v-${index}`,
           senseIds: entry.senses.map((_, rank) => `s-${index}-${rank}`),
           created: true,

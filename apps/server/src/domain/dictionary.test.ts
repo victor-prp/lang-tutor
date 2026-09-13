@@ -9,8 +9,8 @@ import {
   mergeEntries,
   normalizeForm,
   rowsToSenses,
-} from './vocabulary';
-import type { SenseRow } from './vocabulary';
+} from './dictionary';
+import type { SenseRow } from './dictionary';
 
 const sense = (translation: string, sense_code: string): LlmEntry['senses'][number] => ({
   translation,
@@ -197,7 +197,7 @@ describe('entriesToRows', () => {
 
 describe('rowsToSenses', () => {
   const row = (over: Partial<SenseRow>): SenseRow => ({
-    termId: 't-see',
+    lexemeId: 't-see',
     rank: 0,
     entryRank: 0,
     partOfSpeech: null,
@@ -234,7 +234,7 @@ describe('rowsToSenses', () => {
 
 describe('kindForForm', () => {
   const row = (over: Partial<SenseRow>): SenseRow => ({
-    termId: 't-see',
+    lexemeId: 't-see',
     rank: 0,
     entryRank: 0,
     partOfSpeech: null,
@@ -249,8 +249,8 @@ describe('kindForForm', () => {
     // saw (entry_rank 1, phrase) merged ahead of see (entry_rank 0, word) —
     // exactly the round-robin order `findSensesByForm` can produce.
     const rows = [
-      row({ termId: 't-saw', entryRank: 1, kind: 'phrase', translation: 'מסור' }),
-      row({ termId: 't-see', entryRank: 0, kind: 'word', translation: 'לראות' }),
+      row({ lexemeId: 't-saw', entryRank: 1, kind: 'phrase', translation: 'מסור' }),
+      row({ lexemeId: 't-see', entryRank: 0, kind: 'word', translation: 'לראות' }),
     ];
 
     expect(kindForForm(rows)).toBe('word');
