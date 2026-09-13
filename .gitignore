@@ -9,3 +9,4 @@ npm-debug.*
 test-results/
 apps/server/tests/eval/.results/
 playwright-report/
+docs/superpowers/drafts/
