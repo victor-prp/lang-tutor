@@ -8,6 +8,8 @@ import type {
   ErrorSchema,
   HealthResponseSchema,
   LlmEntrySchema,
+  LlmReconciliationSchema,
+  LlmRenderingSchema,
   LlmSenseSchema,
   LlmTranslationSchema,
   LoginRequestSchema,
@@ -15,6 +17,7 @@ import type {
   MultipleChoiceQuestionSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
+  PartOfSpeechSchema,
   PositionSchema,
   QuestionSchema,
   ScoreSchema,
@@ -52,9 +55,12 @@ export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export type TranslationDirection = z.infer<typeof TranslationDirectionSchema>;
 export type TranslationKind = z.infer<typeof TranslationKindSchema>;
+export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;
 export type TranslationSense = z.infer<typeof TranslationSenseSchema>;
 export type TranslationRequest = z.infer<typeof TranslationRequestSchema>;
 export type TranslationResponse = z.infer<typeof TranslationResponseSchema>;
 export type LlmTranslation = z.infer<typeof LlmTranslationSchema>;
 export type LlmSense = z.infer<typeof LlmSenseSchema>;
 export type LlmEntry = z.infer<typeof LlmEntrySchema>;
+export type LlmRendering = z.infer<typeof LlmRenderingSchema>;
+export type LlmReconciliation = z.infer<typeof LlmReconciliationSchema>;

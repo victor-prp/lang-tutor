@@ -20,31 +20,41 @@ const sense = (translation: string, sense_code: string): LlmEntry['senses'][numb
 describe('mergeEntries', () => {
   it('leaves distinct lemmas alone, in order', () => {
     const entries: LlmEntry[] = [
-      { lemma: 'see', senses: [sense('לראות', 'perceive')] },
-      { lemma: 'saw', senses: [sense('מסור', 'tool')] },
+      { lemma: 'see', part_of_speech: 'verb', senses: [sense('לראות', 'perceive')] },
+      { lemma: 'saw', part_of_speech: 'noun', senses: [sense('מסור', 'tool')] },
     ];
     expect(mergeEntries(entries)).toEqual(entries);
   });
 
-  it('concatenates same-lemma entries in order, because the write cannot', () => {
+  it('concatenates same-lexeme entries in order, because the write cannot', () => {
     // Dictionaries publish `book` as book:1 and book:2, so a model may well
-    // split by part of speech. Under UNIQUE(language_code, lemma) the second
-    // entry would silently lose its senses.
+    // split one lexeme across two entries. Under
+    // UNIQUE(language_code, lemma, part_of_speech) the second would silently
+    // lose its senses. Note both entries here are the NOUN: a noun and a verb
+    // are two lexemes and must stay apart — that is the case below this one.
     const merged = mergeEntries([
-      { lemma: 'book', senses: [sense('ספר', 'printed_book')] },
-      { lemma: 'book', senses: [sense('להזמין', 'reserve')] },
+      { lemma: 'book', part_of_speech: 'noun', senses: [sense('ספר', 'printed_book')] },
+      { lemma: 'book', part_of_speech: 'noun', senses: [sense('כרך', 'volume')] },
     ]);
     expect(merged).toEqual([
       {
         lemma: 'book',
-        senses: [sense('ספר', 'printed_book'), sense('להזמין', 'reserve')],
+        part_of_speech: 'noun',
+        senses: [sense('ספר', 'printed_book'), sense('כרך', 'volume')],
       },
     ]);
   });
 
   it('does not mutate the entries it was given', () => {
-    const first: LlmEntry = { lemma: 'book', senses: [sense('ספר', 'printed_book')] };
-    mergeEntries([first, { lemma: 'book', senses: [sense('להזמין', 'reserve')] }]);
+    const first: LlmEntry = {
+      lemma: 'book',
+      part_of_speech: 'noun',
+      senses: [sense('ספר', 'printed_book')],
+    };
+    mergeEntries([
+      first,
+      { lemma: 'book', part_of_speech: 'noun', senses: [sense('כרך', 'volume')] },
+    ]);
     expect(first.senses).toHaveLength(1);
   });
 
@@ -58,9 +68,10 @@ describe('flattenEntries', () => {
     const flat = flattenEntries([
       {
         lemma: 'see',
+        part_of_speech: 'verb',
         senses: [sense('לראות', 'a'), sense('להבין', 'b'), sense('לפגוש', 'c')],
       },
-      { lemma: 'saw', senses: [sense('מסור', 'd'), sense('לנסר', 'e')] },
+      { lemma: 'saw', part_of_speech: 'noun', senses: [sense('מסור', 'd'), sense('לנסר', 'e')] },
     ]);
     expect(flat.map((s) => s.translation)).toEqual([
       'לראות',
@@ -73,27 +84,29 @@ describe('flattenEntries', () => {
 
   it('caps the flattened list at five', () => {
     const flat = flattenEntries([
-      { lemma: 'a', senses: [1, 2, 3, 4].map((n) => sense(`a${n}`, `a${n}`)) },
-      { lemma: 'b', senses: [1, 2, 3, 4].map((n) => sense(`b${n}`, `b${n}`)) },
+      { lemma: 'a', part_of_speech: 'noun', senses: [1, 2, 3, 4].map((n) => sense(`a${n}`, `a${n}`)) },
+      { lemma: 'b', part_of_speech: 'noun', senses: [1, 2, 3, 4].map((n) => sense(`b${n}`, `b${n}`)) },
     ]);
     expect(flat).toHaveLength(5);
     expect(flat.map((s) => s.translation)).toEqual(['a1', 'b1', 'a2', 'b2', 'a3']);
   });
 
   it('never emits sense_code, which must not reach a client', () => {
-    const flat = flattenEntries([{ lemma: 'book', senses: [sense('ספר', 'printed_book')] }]);
-    expect(flat[0]).toEqual({ translation: 'ספר' });
+    const flat = flattenEntries([
+      { lemma: 'book', part_of_speech: 'noun', senses: [sense('ספר', 'printed_book')] },
+    ]);
+    expect(flat[0]).toEqual({ translation: 'ספר', part_of_speech: 'noun' });
     expect(flat[0]).not.toHaveProperty('sense_code');
   });
 
-  it('carries a part of speech and a complete example through', () => {
+  it('carries the entry part of speech and a complete example through', () => {
     const flat = flattenEntries([
       {
         lemma: 'book',
+        part_of_speech: 'noun',
         senses: [
           {
             translation: 'ספר',
-            part_of_speech: 'noun',
             example: { source: 'I read a book.', target: 'קראתי ספר.' },
             sense_code: 'printed_book',
           },
@@ -144,12 +157,13 @@ describe('entriesToRows', () => {
     const rows = entriesToRows([
       {
         lemma: 'see',
+        part_of_speech: 'verb',
         senses: [
           { translation: 'לראות', sense_code: 'perceive' },
           { translation: 'להבין', sense_code: 'understand' },
         ],
       },
-      { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+      { lemma: 'saw', part_of_speech: 'noun', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
     ]);
 
     expect(rows.map((row) => [row.lemma, row.entryRank])).toEqual([
@@ -164,32 +178,33 @@ describe('entriesToRows', () => {
     const [row] = entriesToRows([
       {
         lemma: 'book',
+        part_of_speech: 'noun',
         senses: [
           {
             translation: 'ספר',
-            part_of_speech: 'noun',
             example: { source: 'I read a book.', target: 'קראתי ספר.' },
             sense_code: 'printed_book',
           },
-          { translation: 'להזמין', sense_code: 'reserve' },
+          { translation: 'כרך', sense_code: 'volume' },
         ],
       },
     ]);
 
+    // Both example halves on the sense row, and no part of speech: that is on
+    // the entry row now, because it belongs to the lexeme rather than a meaning.
+    expect(row.partOfSpeech).toBe('noun');
     expect(row.senses[0]).toEqual({
       rank: 0,
       senseCode: 'printed_book',
-      partOfSpeech: 'noun',
-      exampleSource: 'I read a book.',
       translation: 'ספר',
+      exampleSource: 'I read a book.',
       exampleTarget: 'קראתי ספר.',
     });
     expect(row.senses[1]).toEqual({
       rank: 1,
-      senseCode: 'reserve',
-      partOfSpeech: null,
+      senseCode: 'volume',
+      translation: 'כרך',
       exampleSource: null,
-      translation: 'להזמין',
       exampleTarget: null,
     });
   });
@@ -262,5 +277,58 @@ describe('kindForForm', () => {
     // written rather than overridden by guesswork on the read side.
     expect(kindForForm([row({ kind: 'phrase' })])).toBe('phrase');
     expect(kindForForm([row({ kind: 'word' })])).toBe('word');
+  });
+});
+
+// Phase 12: a lexeme is a lemma AND a part of speech. part_of_speech moved from
+// the sense up to the entry, and both halves of the example moved down onto the
+// sense row, because both land on the per-variant translation.
+describe('a lexeme is a lemma and a part of speech', () => {
+  const s = (code: string, translation: string) => ({ sense_code: code, translation });
+
+  it('keeps two parts of speech of one lemma apart', () => {
+    const merged = mergeEntries([
+      { lemma: 'book', part_of_speech: 'noun', senses: [s('printed_work', 'N1')] },
+      { lemma: 'book', part_of_speech: 'verb', senses: [s('make_reservation', 'V1')] },
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(merged.map((e) => e.part_of_speech)).toEqual(['noun', 'verb']);
+  });
+
+  it('still fuses two entries sharing a lemma AND a part of speech', () => {
+    const merged = mergeEntries([
+      { lemma: 'book', part_of_speech: 'noun', senses: [s('printed_work', 'N1')] },
+      { lemma: 'book', part_of_speech: 'noun', senses: [s('volume', 'N2')] },
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].senses).toHaveLength(2);
+  });
+
+  it('puts the part of speech on the entry row and both example halves on the sense row', () => {
+    const [row] = entriesToRows([
+      {
+        lemma: 'book',
+        part_of_speech: 'verb',
+        senses: [
+          {
+            sense_code: 'make_reservation',
+            translation: 'V1',
+            example: { source: 'I booked a table.', target: 'T' },
+          },
+        ],
+      },
+    ]);
+    expect(row.partOfSpeech).toBe('verb');
+    expect(row.senses[0]).not.toHaveProperty('partOfSpeech');
+    expect(row.senses[0].exampleSource).toBe('I booked a table.');
+    expect(row.senses[0].exampleTarget).toBe('T');
+  });
+
+  it('copies the entry part of speech onto every flattened sense', () => {
+    const flat = flattenEntries([
+      { lemma: 'book', part_of_speech: 'noun', senses: [s('printed_work', 'N1')] },
+      { lemma: 'book', part_of_speech: 'verb', senses: [s('make_reservation', 'V1')] },
+    ]);
+    expect(flat.map((x) => x.part_of_speech)).toEqual(['noun', 'verb']);
   });
 });

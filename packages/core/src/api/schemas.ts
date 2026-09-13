@@ -162,31 +162,79 @@ export const TranslationResponseSchema = z.object({
   senses: z.array(TranslationSenseSchema).max(5),
 });
 
+// A closed set, because part_of_speech is half of dict_lexemes' unique key from
+// phase 12 on: free text would make (book,"verb phrase") and (book,"verb_phrase")
+// two lexemes, and the pre-phase-12 data already held 80 spellings of ten ideas.
+// It is handed to Gemini inside responseSchema, so an eleventh is not expressible.
+// Phrase classes collapse to their head: `kind` already records phrase-ness.
+export const PartOfSpeechSchema = z.enum([
+  'noun',
+  'verb',
+  'adjective',
+  'adverb',
+  'pronoun',
+  'preposition',
+  'conjunction',
+  'determiner',
+  'interjection',
+  'numeral',
+]);
+
 // What the model is asked to return. Phase 10 made it a list of **entries**,
 // because a string can be more than one word: `saw` is the verb `see` and the
 // noun `saw`, and an earlier single-lemma shape could only ever answer one of
-// them. Deliberately still the response shape *minus* `text` and `direction`:
-// both are decided in code before the call, so offering them to the model would
-// only invite it to disagree with the server.
+// them. Phase 12 made an entry a *lexeme* — a lemma AND a part of speech —
+// because `booked` belongs to only one of `book`'s two. Deliberately still the
+// response shape *minus* `text` and `direction`: both are decided in code before
+// the call, so offering them to the model would only invite it to disagree with
+// the server.
 //
-// `sense_code` goes on an extension rather than on TranslationSenseSchema,
-// which is shared with the wire. It is model-supplied, has no functional role —
-// senses are never merged within a term — and exists so a row reads as
-// financial_institution rather than s0 during a play-test.
-export const LlmSenseSchema = TranslationSenseSchema.extend({
+// `sense_code` goes on an extension rather than on TranslationSenseSchema, which
+// is shared with the wire. It is model-supplied, and from phase 12 it is
+// load-bearing rather than decorative: it is how a later form's translations are
+// attached to senses the lexeme already has.
+//
+// `.omit` rather than a fresh object: part_of_speech moved up to the entry, and
+// omitting it here is what makes a model that still puts one on a sense lose it
+// on parse rather than smuggle it through.
+export const LlmSenseSchema = TranslationSenseSchema.omit({ part_of_speech: true }).extend({
   sense_code: z.string().min(1).max(60),
 });
 
-// min(1): an entry with no senses is meaningless, and a model returning one is
-// malformed rather than empty — the empty answer is `entries: []`.
+// One entry per (lemma, part of speech) — a lexeme. min(1) on senses: an entry
+// with no senses is meaningless, and a model returning one is malformed rather
+// than empty — the empty answer is `entries: []`.
 export const LlmEntrySchema = z.object({
   lemma: z.string().min(1),
+  part_of_speech: PartOfSpeechSchema,
   senses: z.array(LlmSenseSchema).min(1).max(5),
 });
 
 export const LlmTranslationSchema = z.object({
   kind: TranslationKindSchema,
-  // Ranked: the likeliest reading of the typed form first. Most strings have
-  // one entry, so the typical answer is the size phase 9 already returned.
-  entries: z.array(LlmEntrySchema).max(3),
+  // Ranked: the likeliest reading of the typed form first. Six, not three:
+  // `light` alone is noun, adjective and verb, and a competing lemma still has
+  // to fit beside it.
+  entries: z.array(LlmEntrySchema).max(6),
+});
+
+// The second model call, phase 12. It exists because `sense_code` is invented
+// per call: a lookup of `bank` names a sense river_bank and a later lookup of
+// `banks` names the same sense river_edge, so matching stored senses on the code
+// alone would duplicate the meaning silently. Deciding whether two glosses mean
+// the same thing is a judgement, so the model makes it.
+
+// One rendering of one stored sense for one new form. `translation: null` means
+// the form does not admit that sense at all — adjectival `booked` has no
+// record-a-charge reading — and the sense is then absent for this form.
+export const LlmRenderingSchema = z.object({
+  sense_code: z.string().min(1).max(60),
+  translation: z.string().min(1).nullable(),
+  example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
+});
+
+export const LlmReconciliationSchema = z.object({
+  // Ranked FOR THE QUERIED FORM. Stored codes reused where the meaning matches;
+  // a new code only for a reading the stored list does not contain.
+  senses: z.array(LlmRenderingSchema).max(5),
 });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import type { LlmEntry } from '@lang-tutor/core/api';
+import type { LlmEntry, PartOfSpeech } from '@lang-tutor/core/api';
 import { asc, eq, sql } from 'drizzle-orm';
 
 import { dictVariants, dictSenses } from '../../../src/db/schema';
@@ -145,8 +145,16 @@ describe('findSensesByForm', () => {
   });
 });
 
-const entry = (lemma: string, translations: string[]): LlmEntry => ({
+// An entry is a lexeme from phase 12 on, so it carries a part of speech.
+// Defaulted, because most cases here are about ranking and identity rather than
+// word class; the cases that are about it pass one.
+const entry = (
+  lemma: string,
+  translations: string[],
+  partOfSpeech: PartOfSpeech = 'noun',
+): LlmEntry => ({
   lemma,
+  part_of_speech: partOfSpeech,
   senses: translations.map((translation, n) => ({ translation, sense_code: `c${n}` })),
 });
 

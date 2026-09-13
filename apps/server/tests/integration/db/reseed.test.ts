@@ -33,7 +33,9 @@ async function lookUp(form: string, lemma: string, translation: string): Promise
       languageCode: 'en',
       userLanguageCode: 'he',
       kind: 'word',
-      entries: [{ lemma, senses: [{ translation, sense_code: 'only' }] }],
+      entries: [
+        { lemma, part_of_speech: 'noun', senses: [{ translation, sense_code: 'only' }] },
+      ],
     }),
   );
 }

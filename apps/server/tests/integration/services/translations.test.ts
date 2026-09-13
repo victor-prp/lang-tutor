@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import type { PartOfSpeech } from '@lang-tutor/core/api';
 
 import { createFakeLogger } from '../../support/fakes';
 import {
@@ -41,11 +42,13 @@ function translations() {
   }).translations;
 }
 
-const entry = (lemma: string, values: string[]) => ({
+// An entry is a lexeme from phase 12 on: the part of speech is on the entry,
+// not repeated on each of its senses.
+const entry = (lemma: string, values: string[], partOfSpeech: PartOfSpeech = 'verb') => ({
   lemma,
+  part_of_speech: partOfSpeech,
   senses: values.map((translation, n) => ({
     translation,
-    part_of_speech: 'verb',
     example: { source: `A sentence about ${lemma}.`, target: 'משפט.' },
     sense_code: `${lemma}_${n}`,
   })),
@@ -139,6 +142,7 @@ describe('translate, against a real database', () => {
       entries: [
         {
           lemma: 'I climbed the ladder',
+          part_of_speech: 'verb',
           senses: [{ translation: 'טיפסתי על הסולם.', sense_code: 'the_sentence' }],
         },
       ],

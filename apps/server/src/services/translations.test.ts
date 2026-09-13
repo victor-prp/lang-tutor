@@ -12,9 +12,11 @@ import { createTranslationService } from './translations';
 
 const reply = (payload: unknown) => JSON.stringify(payload);
 
-/** One entry, for the many tests that do not care about the nesting. */
-const oneEntry = (lemma: string, senses: Record<string, unknown>[]) => ({
-  entries: [{ lemma, senses }],
+/** One entry, for the many tests that do not care about the nesting. An entry is
+ *  a lexeme from phase 12 on, so it carries a part of speech whether or not the
+ *  test is about one. */
+const oneEntry = (lemma: string, senses: Record<string, unknown>[], pos = 'noun') => ({
+  entries: [{ lemma, part_of_speech: pos, senses }],
 });
 
 function serviceWith(...replies: (string | Error)[]) {
@@ -88,15 +90,14 @@ describe('translate', () => {
     const { service } = serviceWith(
       reply({
         kind: 'sentence',
-        ...oneEntry('I read a book', [
-          {
-            translation: 'קראתי ספר.',
-            part_of_speech: 'verb',
-            example: { source: 'a', target: 'b' },
-            sense_code: 's',
-          },
-          { translation: 'אחר', sense_code: 't' },
-        ]),
+        ...oneEntry(
+          'I read a book',
+          [
+            { translation: 'קראתי ספר.', example: { source: 'a', target: 'b' }, sense_code: 's' },
+            { translation: 'אחר', sense_code: 't' },
+          ],
+          'verb',
+        ),
       }),
     );
 
@@ -146,12 +147,17 @@ describe('translate', () => {
         entries: [
           {
             lemma: 'see',
+            part_of_speech: 'verb',
             senses: [
               { translation: 'לראות', sense_code: 'perceive' },
               { translation: 'להבין', sense_code: 'understand' },
             ],
           },
-          { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
         ],
       }),
     );
@@ -209,8 +215,16 @@ describe('translate', () => {
       reply({
         kind: 'word',
         entries: [
-          { lemma: 'see', senses: [{ translation: 'לראות', sense_code: 'perceive' }] },
-          { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+          {
+            lemma: 'see',
+            part_of_speech: 'verb',
+            senses: [{ translation: 'לראות', sense_code: 'perceive' }],
+          },
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
         ],
       }),
     );
@@ -234,7 +248,13 @@ describe('translate', () => {
     const { service, dict } = serviceWith(
       reply({
         kind: 'word',
-        entries: [{ lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] }],
+        entries: [
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
+        ],
       }),
     );
     dict.reread = [row('לראות'), row('מסור')];
@@ -249,8 +269,16 @@ describe('translate', () => {
       reply({
         kind: 'word',
         entries: [
-          { lemma: 'book', senses: [{ translation: 'ספר', sense_code: 'printed_book' }] },
-          { lemma: 'book', senses: [{ translation: 'להזמין', sense_code: 'reserve' }] },
+          {
+            lemma: 'book',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'ספר', sense_code: 'printed_book' }],
+          },
+          {
+            lemma: 'book',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'כרך', sense_code: 'volume' }],
+          },
         ],
       }),
     );
@@ -265,14 +293,20 @@ describe('translate', () => {
     const { service, dict, logger } = serviceWith(
       reply({
         kind: 'word',
-        entries: [{ lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] }],
+        entries: [
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
+        ],
       }),
     );
     dict.persistError = new Error('deadlock detected');
 
     const result = await service.translate({ text: 'saw' });
 
-    expect(result.senses).toEqual([{ translation: 'מסור' }]);
+    expect(result.senses).toEqual([{ translation: 'מסור', part_of_speech: 'noun' }]);
     expect(logger.errors.map((entry) => entry.message)).toContain('dict_persist_failed');
   });
 
@@ -281,7 +315,11 @@ describe('translate', () => {
       reply({
         kind: 'sentence',
         entries: [
-          { lemma: 'I read a book', senses: [{ translation: 'קראתי ספר.', sense_code: 's' }] },
+          {
+            lemma: 'I read a book',
+            part_of_speech: 'verb',
+            senses: [{ translation: 'קראתי ספר.', sense_code: 's' }],
+          },
         ],
       }),
     );
@@ -305,7 +343,13 @@ describe('translate', () => {
     const { service, logger } = serviceWith(
       reply({
         kind: 'word',
-        entries: [{ lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] }],
+        entries: [
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
+        ],
       }),
     );
 

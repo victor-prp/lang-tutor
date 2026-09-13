@@ -2,8 +2,10 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   buildPrompt,
+  buildRenderingPrompt,
   detectDirection,
   normalizeSenses,
+  parseLlmReconciliation,
   parseLlmTranslation,
   resolveKind,
 } from './translation';
@@ -71,14 +73,16 @@ describe('buildPrompt', () => {
   it('asks for entries, one per headword, ranked', () => {
     const { system } = buildPrompt({ text: 'saw', direction: 'en_he' });
     expect(system).toMatch(/entry per headword/i);
-    expect(system).toMatch(/at most 3/i);
+    expect(system).toMatch(/at most 6/i);
   });
 
-  it('gives book as the worked example, since the nested shape invites splitting', () => {
+  // Phase 12 inverted this. `book` is still the worked example, but it is now
+  // the example of a lemma that is TWO entries rather than one — the shape
+  // phase 10 asked for is what made an inflected verb form serve noun senses.
+  it('gives book as the worked example of two entries, not of one', () => {
     const { system } = buildPrompt({ text: 'book', direction: 'en_he' });
-    expect(system).toContain('book');
-    expect(system).toContain('ספר');
-    expect(system).toContain('להזמין');
+    expect(system).toContain('"book" is two entries, one noun and one verb');
+    expect(system).toContain('"booked" is the verb entry only, never the noun');
   });
 
   it('asks for a sense_code on every sense', () => {
@@ -94,19 +98,25 @@ describe('parseLlmTranslation', () => {
   const sense = { translation: 'ספר', sense_code: 'printed_book' };
 
   it('parses a well-formed response', () => {
-    const raw = JSON.stringify({ kind: 'word', entries: [{ lemma: 'book', senses: [sense] }] });
-    expect(parseLlmTranslation(raw)).toEqual({
-      kind: 'word',
-      entries: [{ lemma: 'book', senses: [sense] }],
-    });
+    const entry = { lemma: 'book', part_of_speech: 'noun', senses: [sense] };
+    const raw = JSON.stringify({ kind: 'word', entries: [entry] });
+    expect(parseLlmTranslation(raw)).toEqual({ kind: 'word', entries: [entry] });
   });
 
   it('parses a two-entry payload — the answer the entries model exists for', () => {
     const raw = JSON.stringify({
       kind: 'word',
       entries: [
-        { lemma: 'see', senses: [{ translation: 'לראות', sense_code: 'perceive' }] },
-        { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+        {
+          lemma: 'see',
+          part_of_speech: 'verb',
+          senses: [{ translation: 'לראות', sense_code: 'perceive' }],
+        },
+        {
+          lemma: 'saw',
+          part_of_speech: 'noun',
+          senses: [{ translation: 'מסור', sense_code: 'tool' }],
+        },
       ],
     });
     expect(parseLlmTranslation(raw)?.entries).toHaveLength(2);
@@ -118,6 +128,7 @@ describe('parseLlmTranslation', () => {
       entries: [
         {
           lemma: 'I read a book',
+          part_of_speech: 'verb',
           senses: [
             {
               translation: 'קראתי ספר.',
@@ -180,7 +191,8 @@ describe('parseLlmTranslation', () => {
 
   it('accepts a fenced code block, which models emit even when told not to', () => {
     const raw =
-      '```json\n{"kind":"word","entries":[{"lemma":"book","senses":[{"translation":"ספר","sense_code":"printed_book"}]}]}\n```';
+      '```json\n{"kind":"word","entries":[{"lemma":"book","part_of_speech":"noun",' +
+      '"senses":[{"translation":"ספר","sense_code":"printed_book"}]}]}\n```';
     expect(parseLlmTranslation(raw)?.entries[0].lemma).toBe('book');
   });
 });
@@ -206,5 +218,100 @@ describe('normalizeSenses', () => {
 
   it('handles an empty list', () => {
     expect(normalizeSenses('sentence', [])).toEqual([]);
+  });
+});
+
+// Phase 12: one entry per (headword, part of speech), and a translation that
+// agrees grammatically with the form that was typed.
+describe('buildPrompt, phase 12', () => {
+  it('asks for one entry per lemma and part of speech, with form agreement', () => {
+    const { system } = buildPrompt({ text: 'booked', direction: 'en_he' });
+    expect(system).toMatch(/one entry per headword AND part of speech/i);
+    expect(system).toMatch(/grammatical form matching the input/i);
+    expect(system).toMatch(/third-person masculine singular/i);
+    expect(system).not.toMatch(/ONE entry per headword:/);
+    expect(system).not.toMatch(/at most 3\./);
+  });
+});
+
+describe('buildRenderingPrompt', () => {
+  it('lists every stored sense with its gloss, and asks for null where inadmissible', () => {
+    const { system, user } = buildRenderingPrompt({
+      form: 'booked',
+      direction: 'en_he',
+      lemma: 'book',
+      partOfSpeech: 'verb',
+      storedSenses: [
+        {
+          senseCode: 'reserve',
+          translation: 'INF-RESERVE',
+          exampleSource: 'book a table',
+          exampleTarget: 'T',
+        },
+      ],
+    });
+    expect(system).toMatch(/reserve/);
+    expect(system).toMatch(/INF-RESERVE/);
+    expect(system).toMatch(/null/);
+    expect(user).toBe('booked');
+  });
+
+  it('names the queried form, the headword and its part of speech', () => {
+    const { system } = buildRenderingPrompt({
+      form: 'booked',
+      direction: 'en_he',
+      lemma: 'book',
+      partOfSpeech: 'verb',
+      storedSenses: [
+        { senseCode: 'reserve', translation: 'X', exampleSource: null, exampleTarget: null },
+      ],
+    });
+    expect(system).toContain('"book" (verb)');
+    expect(system).toContain('"booked"');
+    // The same form-agreement rule as the first call, or the second call would
+    // undo what the first one got right.
+    expect(system).toMatch(/third-person masculine singular/);
+  });
+
+  it('asks for the stored code back unchanged, which is the whole point', () => {
+    const { system } = buildRenderingPrompt({
+      form: 'banks',
+      direction: 'en_he',
+      lemma: 'bank',
+      partOfSpeech: 'noun',
+      storedSenses: [
+        { senseCode: 'river_bank', translation: 'גדה', exampleSource: null, exampleTarget: null },
+      ],
+    });
+    expect(system).toMatch(/reusing its sense_code EXACTLY/);
+  });
+});
+
+describe('parseLlmReconciliation', () => {
+  it('keeps a null translation through the parse', () => {
+    const parsed = parseLlmReconciliation(
+      '{"senses":[{"sense_code":"reserve","translation":null}]}',
+    );
+    expect(parsed?.senses[0].translation).toBeNull();
+  });
+
+  it('parses a rendering with an example', () => {
+    const parsed = parseLlmReconciliation(
+      JSON.stringify({
+        senses: [
+          {
+            sense_code: 'reserve',
+            translation: 'הזמין',
+            example: { source: 'I booked a table.', target: 'הזמנתי שולחן.' },
+          },
+        ],
+      }),
+    );
+    expect(parsed?.senses[0].example?.source).toBe('I booked a table.');
+  });
+
+  it('returns null for output that is not JSON, or is the wrong shape', () => {
+    expect(parseLlmReconciliation('I cannot help with that.')).toBeNull();
+    expect(parseLlmReconciliation('{"entries":[]}')).toBeNull();
   });
 });

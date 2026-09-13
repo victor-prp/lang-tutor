@@ -73,14 +73,14 @@ describe('POST /api/translations', () => {
       entries: [
         {
           lemma: 'ladder',
+          part_of_speech: 'noun',
           senses: [
             {
               translation: 'סולם',
-              part_of_speech: 'noun',
               example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
               sense_code: 'climbing_frame',
             },
-            { translation: 'דירוג', part_of_speech: 'noun', sense_code: 'ranking' },
+            { translation: 'דירוג', sense_code: 'ranking' },
           ],
         },
       ],
@@ -107,7 +107,13 @@ describe('POST /api/translations', () => {
   it('detects Hebrew input without being told', async () => {
     await expectGeminiJson(ns, {
       kind: 'word',
-      entries: [{ lemma: 'fork', senses: [{ translation: 'fork', sense_code: 'utensil' }] }],
+      entries: [
+        {
+          lemma: 'fork',
+          part_of_speech: 'noun',
+          senses: [{ translation: 'fork', sense_code: 'utensil' }],
+        },
+      ],
     });
 
     const res = await translate({ text: 'מזלג' });
@@ -119,7 +125,13 @@ describe('POST /api/translations', () => {
   it('honours an explicit direction', async () => {
     await expectGeminiJson(ns, {
       kind: 'word',
-      entries: [{ lemma: 'x', senses: [{ translation: 'x', sense_code: 'x' }] }],
+      entries: [
+        {
+          lemma: 'x',
+          part_of_speech: 'noun',
+          senses: [{ translation: 'x', sense_code: 'x' }],
+        },
+      ],
     });
 
     const res = await translate({ text: 'ladder', direction: 'he_en' });
@@ -133,10 +145,10 @@ describe('POST /api/translations', () => {
       entries: [
         {
           lemma: 'I read a book',
+          part_of_speech: 'verb',
           senses: [
             {
               translation: 'קראתי ספר.',
-              part_of_speech: 'verb',
               example: { source: 'a', target: 'b' },
               sense_code: 'the_sentence',
             },
@@ -268,10 +280,10 @@ describe('POST /api/translations', () => {
       entries: [
         {
           lemma: 'ladder',
+          part_of_speech: 'noun',
           senses: [
             {
               translation: 'סולם',
-              part_of_speech: 'noun',
               example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
               sense_code: 'climbing_frame',
             },
@@ -294,14 +306,16 @@ describe('POST /api/translations', () => {
       entries: [
         {
           lemma: 'see',
+          part_of_speech: 'verb',
           senses: [
-            { translation: 'לראות', part_of_speech: 'verb', sense_code: 'perceive' },
-            { translation: 'להבין', part_of_speech: 'verb', sense_code: 'understand' },
+            { translation: 'לראות', sense_code: 'perceive' },
+            { translation: 'להבין', sense_code: 'understand' },
           ],
         },
         {
           lemma: 'saw',
-          senses: [{ translation: 'מסור', part_of_speech: 'noun', sense_code: 'tool' }],
+          part_of_speech: 'noun',
+          senses: [{ translation: 'מסור', sense_code: 'tool' }],
         },
       ],
     });
