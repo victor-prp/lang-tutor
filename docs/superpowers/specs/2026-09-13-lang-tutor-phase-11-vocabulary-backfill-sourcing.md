@@ -1,7 +1,8 @@
-# Phase 11 — Sourcing words and phrases for bulk backfill
+# Phase 11 — Sourcing, running and keeping a bulk vocabulary backfill
 
-- **Status:** Sourcing scripts built and verified; bulk backfill started against both CSVs,
-  hit the daily rate limit — continuing gradually
+- **Status:** Sourcing scripts and the resumable runner built and verified; bulk backfill
+  started against both CSVs and hit the daily rate limit — continuing gradually. The result
+  so far is checked in and restorable (`data/backfill/en-he/vocabulary.jsonl`).
 - **Date:** 2026-09-13
 - **Source:** phase 10 (`docs/superpowers/specs/2026-09-10-lang-tutor-phase-10-vocabulary-persistence-design.md`)
   made every lookup a write to a shared, permanent dictionary. This phase asks: what should
@@ -61,6 +62,13 @@ but doubles as the actual write mechanism. A run against both CSVs was started a
 Gemini's daily rate limit partway through (see below) — the backfill is real but partial,
 to be continued gradually.
 
+`run-backfill-daily.mjs` is the driver for an actual bulk run and the one to use. Since the
+daily quota guarantees a run ends early, it detects that itself: ten consecutive failures
+(the shape of a quota cutoff or an outage, as opposed to the occasional bad row) stops it,
+and it writes `<category>-remaining-<timestamp>.csv` containing every row that did not get
+a 200 — those that failed plus those never reached — so the next day's run is just that
+file. `run-backfill.mjs` stays as the manual/small-batch tool.
+
 ## Cost and rate limit
 
 Measured against real Gemini calls: **1,100 words cost ~7 ILS.** Scaled to the full
@@ -72,10 +80,66 @@ in one go. At that ceiling, the full backfill takes **~9 days run gradually** (8
 requests ÷ 10K/day) rather than one sitting — acceptable, since this is a one-time
 offline job with no user-facing deadline.
 
+## Keeping the result: export and restore
+
+The backfill costs real money and, until this, existed only in one developer's local
+Postgres. `npm run vocab:export` writes it to `data/backfill/en-he/vocabulary.jsonl`;
+`npm run vocab:restore` loads it back — onto a fresh machine, or into production.
+
+**One line is one lookup, not one term:** `{ form, kind, entries }`, which is exactly
+`persistEntries`' input minus the two language codes. That choice does two things. It lets
+a restore replay through the same repository function a live lookup calls, so a restored
+row and a looked-up row are indistinguishable — the guarantee phase 10 built and `seed.ts`
+already depends on. And it preserves a pairing that would otherwise be lost: one lookup of
+`saw` writes entries for both `see` and `saw`, and that association lives on
+`term_variants.entry_rank`, not on either term. Grouping variants by form and ordering by
+`entry_rank` inverts `entriesToRows` exactly.
+
+**Restoring is idempotent and never overwrites.** `persistEntries` is `ON CONFLICT DO
+NOTHING` on terms and variants and first-writer-wins on senses, so re-running writes
+nothing and a form a learner already looked up keeps the senses it has. That is what makes
+it safe to point at production repeatedly. The import is chunked rather than one
+transaction for the whole file, since the full dataset is ~89K records.
+
+**Why a logical export rather than `pg_dump`** — the alternative was measured, not assumed.
+A dump restores faster (~1s vs ~36s at current size) but is an opaque artifact coupled to
+the schema version, so a future migration can make an old dump unrestorable; the logical
+form survives schema changes because it replays through the app. The cost of that
+durability was the open question, and it is small:
+
+| | 10,814 forms (measured) | ~89K (projected) |
+|---|---|---|
+| Export | 0.8 s → 5.1 MB | ~30 s → ~45 MB |
+| Restore into a fresh database | 36 s | ~5 min |
+
+Replay does **no model calls** — the translations are already in the data — so restore is
+bound by insert throughput, not the 5–15s model latency.
+
+**Stored sorted and uncompressed on purpose.** The dataset is committed after each day's
+run, so the file is rewritten repeatedly. Sorted by form, a re-export appends rather than
+reshuffles, and git's delta compression handles that nearly for free: ten simulated daily
+commits of the current file cost 1.1 MB of packed history — about one gzipped copy.
+Compressing the file would defeat this, since a gzip blob cannot be delta'd at all.
+
+**Placement.** `db/vocabExport.ts` and `db/vocabImport.ts` sit in the persistence layer
+(ADR 0001 R4 permits `db/` → `repo/`, the sibling import added in phase 10 for `seed.ts`).
+They take a `Db` and return values rather than logging, since R7 keeps `console` in
+`db/cli.ts`; the transaction comes from `createTransaction`, never `db.transaction`, per
+R8; and the commands hang off the existing `db/cli.ts` composition root as flags rather
+than adding a fourth root, which ADR 0002 would require an ADR edit to do.
+
+Verified by `tests/integration/db/vocabRoundTrip.test.ts` and by hand against the live
+database: a re-export of a restored database is byte-identical to what it was restored
+from, and row counts match across all three tables.
+
 ## Open questions / not yet done
 
 - The backfill is in progress, not complete: a run against both CSVs hit the 10K RPD limit
-  partway through, so most of the ~89K entries are still unwritten.
-- The gradual, multi-day run needs a resumable driver (skip rows already persisted, respect
-  the daily quota, pick up where the previous day left off) — `run-backfill.mjs` as it
-  stands is a single unbounded batch, not built for that yet.
+  partway through, so most of the ~89K entries are still unwritten. Progress is tracked in
+  `docs/superpowers/plans/2026-09-13-lang-tutor-phase-11-vocabulary-backfill.md`.
+- The dataset covers **en→he only**. The database also holds a handful of `he→en` terms
+  (five at the time of writing), which `vocab:export` deliberately excludes — this file is
+  the en-he pair, matching `scripts/translation-backfills/en-he/`. Backing that direction up
+  would mean a second dataset under `data/backfill/he-en/`.
+- Restore has been verified against a fresh local database, not against production. The
+  first production run is still a first run.
