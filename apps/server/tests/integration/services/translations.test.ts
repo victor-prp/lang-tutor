@@ -6,6 +6,7 @@ import {
   clearNamespace,
   countGeminiRequests,
   expectGeminiJson,
+  expectReconciliation,
   geminiBaseUrlFor,
   mockNamespace,
 } from '../../support/mockServer';
@@ -90,6 +91,31 @@ describe('translate, against a real database', () => {
   });
 
   it('walks the saw sequence end to end', async () => {
+    // Phase 12 adds a SECOND provider call wherever the lexeme an entry names
+    // already has senses, so this sequence now needs two reconciliation
+    // answers: one when `saw` reaches the `see` lexeme written at step 1, and
+    // one when `saws` reaches the `saw` lexeme written at step 2.
+    //
+    // Matched on the QUOTED form, which appears verbatim in the user part of
+    // the request body. Unquoted `saw` would also match a `saws` body — the
+    // trap the first-matching-expectation note below is about — while `"saw"`
+    // cannot, because `"saws"` has an `s` where the closing quote would be.
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'see_0', translation: 'לראות' },
+        { sense_code: 'see_1', translation: 'להבין' },
+        { sense_code: 'see_2', translation: 'לפגוש' },
+      ],
+      matchText: '"saw"',
+    });
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'saw_0', translation: 'מסור' },
+        { sense_code: 'saw_1', translation: 'לנסר' },
+      ],
+      matchText: '"saws"',
+    });
+
     // Registration order matters: MockServer takes the first matching
     // expectation, and the body for `saws` also contains `saw`.
     await expectGeminiJson(ns, {
@@ -125,7 +151,10 @@ describe('translate, against a real database', () => {
 
     // 3 — the same lookup again is free and identical.
     expect(await service.translate({ text: 'saw' })).toEqual(saw);
-    expect(await countGeminiRequests(ns, '"saw"')).toBe(1);
+    // Two, not one: step 2 cost a first call AND a reconciliation call, because
+    // the `see` lexeme it named already had senses from step 1. The point of the
+    // assertion is unchanged — this third lookup added neither.
+    expect(await countGeminiRequests(ns, '"saw"')).toBe(2);
 
     // 4 — `saws` is a second call, because no lemma alias was synthesized.
     const saws = await service.translate({ text: 'saws' });
@@ -163,5 +192,79 @@ describe('translate, against a real database', () => {
     await service.translate({ text: 'asdkjhasd' });
 
     expect(await countGeminiRequests(ns, 'asdkjhasd')).toBe(2);
+  });
+
+  // The phase's most important test. Two independent lookups of one lexeme are
+  // two independent model calls that name the same sense differently, so a
+  // string comparison on sense_code would store the meaning twice — and the
+  // dictionary has no TTL, so twice is forever.
+  //
+  // **Proved without reading a row.** ADR 0001 R2 keeps this bucket black-box,
+  // and the wire cannot tell the two outcomes apart: `banks` answers with its
+  // own two renderings either way. What differs is what the NEXT form is told.
+  // The reconciliation prompt lists the lexeme's stored senses, so a third
+  // lookup makes the stored state observable through MockServer: if `river_edge`
+  // was ever written, it appears in that prompt.
+  it('reconciles a renamed sense instead of duplicating it', async () => {
+    // Registration order matters, twice over. MockServer takes the FIRST
+    // matching expectation, and `banks` contains `bank`. Matching on the QUOTED
+    // form sidesteps it: the form appears verbatim in the request's user part,
+    // and `"bank"` cannot match `"banks"` because there is an `s` where the
+    // closing quote would be.
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'financial_institution', translation: 'BANKS-FIN' },
+        { sense_code: 'river_bank', translation: 'BANKS-RIVER' }, // the STORED code, reused
+      ],
+      matchText: '"banks"',
+    });
+    await expectReconciliation(ns, {
+      senses: [{ sense_code: 'financial_institution', translation: 'BANKED-FIN' }],
+      matchText: '"banked"',
+    });
+
+    const noun = (senses: { translation: string; sense_code: string }[]) => ({
+      kind: 'word' as const,
+      entries: [{ lemma: 'bank', part_of_speech: 'noun' as const, senses }],
+    });
+
+    // call 1 for `bank` — two senses, one of them named river_bank
+    await expectGeminiJson(ns, {
+      ...noun([
+        { translation: 'BANK-FIN', sense_code: 'financial_institution' },
+        { translation: 'BANK-RIVER', sense_code: 'river_bank' },
+      ]),
+      matchText: '"bank"',
+    });
+    // call 1 for `banks` names the SAME sense river_edge; call 2 maps it back.
+    await expectGeminiJson(ns, {
+      ...noun([
+        { translation: 'BANKS-FIN', sense_code: 'financial_institution' },
+        { translation: 'BANKS-RIVER', sense_code: 'river_edge' },
+      ]),
+      matchText: '"banks"',
+    });
+    await expectGeminiJson(ns, {
+      ...noun([{ translation: 'BANKED-FIN', sense_code: 'financial_institution' }]),
+      matchText: '"banked"',
+    });
+
+    const service = translations();
+    await service.translate({ text: 'bank' });
+    const answer = await service.translate({ text: 'banks' });
+    await service.translate({ text: 'banked' });
+
+    expect(answer.senses.map((x) => x.translation)).toEqual(['BANKS-FIN', 'BANKS-RIVER']);
+
+    // Two reconciliation prompts really were sent — one for `banks`, one for
+    // `banked` — so the second one did list this lexeme's stored senses. That
+    // is what makes the next assertion mean something rather than pass
+    // vacuously because no such prompt exists.
+    expect(await countGeminiRequests(ns, 'reusing its sense_code EXACTLY')).toBe(2);
+
+    // And it never named river_edge. The prompt lists every stored sense, so if
+    // the renaming had been taken at face value and written as a third sense, it
+    // would be in this body. The meaning is stored once.
+    expect(await countGeminiRequests(ns, 'river_edge')).toBe(0);
   });
 });

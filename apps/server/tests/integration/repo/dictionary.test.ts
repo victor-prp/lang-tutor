@@ -589,3 +589,81 @@ describe('a lexeme is a lemma and a part of speech', () => {
     expect((await find('cook')).map((r) => r.translation)).toEqual(['INF-PREPARE']);
   });
 });
+
+describe('findSensesByLexeme', () => {
+  const byLexeme = (lemma: string, partOfSpeech: string) =>
+    withTx(t.db, (tx) =>
+      createDictRepo(tx).findSensesByLexeme({
+        lemma,
+        partOfSpeech,
+        languageCode: 'en',
+        userLanguageCode: 'he',
+      }),
+    );
+
+  const lexeme = (pos: PartOfSpeech, code: string, translation: string) => ({
+    lemma: 'cook',
+    part_of_speech: pos,
+    senses: [{ sense_code: code, translation }],
+  });
+
+  // The verb lexeme of an ambiguous lemma is entry 1, never entry 0. A lookup of
+  // `cook` gives (cook,noun) entry_rank 0 and (cook,verb) entry_rank 1, so the
+  // verb lexeme owns no entry_rank 0 variant. findSensesByLexeme must still see
+  // its senses, or reconciliation silently never runs for verbs — which is what
+  // inflections mostly are.
+  it('finds a lexeme that owns no entry_rank 0 variant', async () => {
+    await persist('cook', [
+      lexeme('noun', 'kitchen_worker', 'N1'),
+      lexeme('verb', 'prepare_food', 'V1'),
+    ]);
+
+    expect((await byLexeme('cook', 'verb')).map((x) => x.senseCode)).toEqual(['prepare_food']);
+  });
+
+  // A sense whose only rendering lives on a form other than the first must still
+  // reach the prompt, or it gets a freshly invented code on the next lookup.
+  it('returns one gloss per sense, across all variants', async () => {
+    await persist('cook', [lexeme('verb', 'prepare_food', 'V1')]);
+    await persist('cooked', [lexeme('verb', 'fabricate_accounts', 'V2')]);
+
+    const senses = await byLexeme('cook', 'verb');
+    expect(senses.map((x) => x.senseCode).sort()).toEqual([
+      'fabricate_accounts',
+      'prepare_food',
+    ]);
+    // One row per sense, never one per (sense, variant).
+    expect(senses).toHaveLength(2);
+  });
+
+  it('carries the gloss and both example halves the prompt is built from', async () => {
+    await persist('cook', [
+      {
+        lemma: 'cook',
+        part_of_speech: 'verb',
+        senses: [
+          {
+            sense_code: 'prepare_food',
+            translation: 'לבשל',
+            example: { source: 'I cook dinner.', target: 'אני מבשל ארוחת ערב.' },
+          },
+        ],
+      },
+    ]);
+
+    expect(await byLexeme('cook', 'verb')).toEqual([
+      {
+        senseCode: 'prepare_food',
+        translation: 'לבשל',
+        exampleSource: 'I cook dinner.',
+        exampleTarget: 'אני מבשל ארוחת ערב.',
+      },
+    ]);
+  });
+
+  it('is empty for a lexeme nobody has stored, which is how the service skips the second call', async () => {
+    await persist('cook', [lexeme('noun', 'kitchen_worker', 'N1')]);
+    expect(await byLexeme('cook', 'verb')).toEqual([]);
+    expect(await byLexeme('sauté', 'verb')).toEqual([]);
+  });
+});

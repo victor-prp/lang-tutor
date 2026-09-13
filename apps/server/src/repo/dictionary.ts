@@ -103,6 +103,81 @@ export function createDictRepo(tx: Tx) {
       .limit(READ_LIMIT);
 
   /**
+   * The stored senses of one lexeme, for the reconciliation prompt. Keyed by
+   * (lemma, part_of_speech) rather than by id because the service has only what
+   * the first model call returned — it does not know the lexeme id, and may find
+   * there is no such lexeme at all.
+   *
+   * **One gloss per sense, taken from whichever variant has one — never from a
+   * chosen variant.** Two traps here, and both are silent:
+   *
+   * `entry_rank` is NOT a property of the lexeme. `entriesToRows` assigns it from
+   * the entry's index in the answer for one queried form, so the verb lexeme of
+   * `book` sits at entry_rank 1 and owns no entry_rank 0 variant at all.
+   * Filtering on `entryRank = 0` would return zero rows for it, the service would
+   * conclude the lexeme has no senses, and reconciliation would be skipped for
+   * exactly the lexemes it exists for — verbs, which is what inflections mostly
+   * are.
+   *
+   * And because a rendering may be absent for a form (the reconciliation call
+   * returns `translation: null` for a sense a form does not admit), no single
+   * variant is guaranteed to carry a gloss for every sense. A sense missing from
+   * the prompt gets a freshly invented code — the same duplication by another
+   * route.
+   *
+   * `DISTINCT ON (s.id)` with `ORDER BY s.id, tr.rank, v.id` is what makes the
+   * pick deterministic: the gloss from whichever form ranked that sense highest,
+   * ties broken by variant id. The outer query then re-orders for the prompt.
+   */
+  const findSensesByLexeme = async (input: {
+    lemma: string;
+    partOfSpeech: string;
+    languageCode: string;
+    userLanguageCode: string;
+  }): Promise<
+    { senseCode: string; translation: string; exampleSource: string | null;
+      exampleTarget: string | null }[]
+  > => {
+    // Drizzle has no first-class DISTINCT ON, so this is written as `sql`. The
+    // shape is the invariant, not the spelling: one row per sense, chosen
+    // deterministically, over ALL variants of the lexeme.
+    const rows = await tx.execute<{
+      sense_code: string;
+      translation: string;
+      example_source: string | null;
+      example_target: string | null;
+    }>(sql`
+      SELECT sense_code, translation, example_source, example_target
+      FROM (
+        SELECT DISTINCT ON (s.id)
+               s.id          AS sense_id,
+               s.sense_code  AS sense_code,
+               tr.translation,
+               tr.example_source,
+               tr.example_target,
+               tr.rank       AS rank
+        FROM dict_lexemes l
+        JOIN dict_senses s            ON s.lexeme_id = l.id
+        JOIN dict_var_translations tr ON tr.sense_id = s.id
+                                     AND tr.user_language_code = ${input.userLanguageCode}
+        JOIN dict_variants v          ON v.id = tr.variant_id
+        WHERE l.language_code = ${input.languageCode}
+          AND l.lemma = ${input.lemma}
+          AND l.part_of_speech = ${input.partOfSpeech}
+        ORDER BY s.id, tr.rank, v.id
+      ) picked
+      ORDER BY rank, sense_code
+    `);
+
+    return rows.rows.map((row) => ({
+      senseCode: row.sense_code,
+      translation: row.translation,
+      exampleSource: row.example_source,
+      exampleTarget: row.example_target,
+    }));
+  };
+
+  /**
    * One write, ending in a re-read.
    *
    * **First-writer-wins splits in two in phase 12.** A sense is written once per
@@ -270,7 +345,7 @@ export function createDictRepo(tx: Tx) {
     return { written, senses };
   };
 
-  return { findSensesByForm, persistEntries };
+  return { findSensesByForm, findSensesByLexeme, persistEntries };
 }
 
 export type DictRepo = ReturnType<typeof createDictRepo>;

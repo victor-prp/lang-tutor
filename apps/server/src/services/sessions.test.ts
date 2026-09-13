@@ -54,6 +54,9 @@ describe('repos', () => {
     findSensesByForm: () => {
       throw new Error('the session service must not read the dictionary tables');
     },
+    findSensesByLexeme: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
     persistEntries: () => {
       throw new Error('the session service must not write the dictionary tables');
     },

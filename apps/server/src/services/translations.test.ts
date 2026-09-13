@@ -361,3 +361,155 @@ describe('translate', () => {
     ]);
   });
 });
+
+// Phase 12's second model call. Two independent lookups of one lexeme name the
+// same sense differently — `bank` says river_bank where `banks` says river_edge
+// — so matching stored senses on the code alone would duplicate the meaning
+// silently. Where a lexeme already has senses, a second, smaller call reconciles
+// by meaning instead.
+describe('reconciliation', () => {
+  const oneVerb = reply({
+    kind: 'word',
+    entries: [
+      {
+        lemma: 'cook',
+        part_of_speech: 'verb',
+        senses: [{ translation: 'PAST-RENAMED', sense_code: 'renamed_by_this_call' }],
+      },
+    ],
+  });
+
+  const storedReserve = [
+    {
+      senseCode: 'prepare_food',
+      translation: 'INF-PREPARE',
+      exampleSource: null,
+      exampleTarget: null,
+    },
+  ];
+
+  it('makes one client call when the lexeme is new', async () => {
+    const { service, llm, dict } = serviceWith(oneVerb);
+
+    await service.translate({ text: 'cook' });
+
+    expect(llm.calls).toHaveLength(1);
+    // It still asked — "no stored senses" is an answer, not a skipped read.
+    expect(dict.lexemeReads).toEqual([{ lemma: 'cook', partOfSpeech: 'verb' }]);
+  });
+
+  it('makes a second call when the lexeme already has senses', async () => {
+    const { service, llm, dict } = serviceWith(
+      oneVerb,
+      reply({ senses: [{ sense_code: 'prepare_food', translation: 'PAST-PREPARE' }] }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    const result = await service.translate({ text: 'cooked' });
+
+    expect(llm.calls).toHaveLength(2);
+    // The stored code won, not the one call 1 invented.
+    expect(dict.persisted[0].entries[0].senses[0].sense_code).toBe('prepare_food');
+    expect(result.senses[0].translation).toBe('PAST-PREPARE');
+  });
+
+  it('does not make a second call for a sentence', async () => {
+    // The branch sits after the sentence guard: a sentence is never written to
+    // the dictionary, so a database round trip and a second model call would
+    // both be spent on an answer that is then discarded.
+    const { service, llm, dict } = serviceWith(
+      reply({
+        kind: 'sentence',
+        entries: [
+          {
+            lemma: 'I cooked dinner',
+            part_of_speech: 'verb',
+            senses: [{ translation: 'בישלתי ארוחת ערב.', sense_code: 'the_sentence' }],
+          },
+        ],
+      }),
+    );
+
+    await service.translate({ text: 'I cooked dinner' });
+
+    expect(llm.calls).toHaveLength(1);
+    expect(dict.lexemeReads).toEqual([]);
+  });
+
+  it('writes nothing and propagates the error when the second call fails', async () => {
+    const { service, dict } = serviceWith(oneVerb, new LlmUnavailable('network failure'));
+    dict.stored['cook:verb'] = storedReserve;
+
+    // Deliberately unlike the failed-WRITE path below, which still answers 200:
+    // that one protects a correct answer whose storage failed, this one prevents
+    // storing an answer known to be wrong into a dictionary with no TTL.
+    await expect(service.translate({ text: 'cooked' })).rejects.toBeInstanceOf(LlmUnavailable);
+    expect(dict.persisted).toHaveLength(0);
+  });
+
+  it('drops a sense the form does not admit, and re-sequences the ranks', async () => {
+    const { service, dict } = serviceWith(
+      oneVerb,
+      reply({
+        senses: [
+          { sense_code: 'fabricate_accounts', translation: 'PAST-FABRICATE' },
+          { sense_code: 'prepare_food', translation: null },
+        ],
+      }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    const result = await service.translate({ text: 'cooked' });
+
+    const senses = dict.persisted[0].entries[0].senses;
+    expect(senses.map((s) => s.sense_code)).toEqual(['fabricate_accounts']);
+    expect(result.senses.map((s) => s.translation)).toEqual(['PAST-FABRICATE']);
+  });
+
+  it('dedupes two renderings sharing a code, keeping the first', async () => {
+    // Not defensive tidying: two renderings with one sense_code resolve to one
+    // sense id, so they become two rows with the same
+    // (variant_id, sense_id, user_language_code) — a primary-key collision that
+    // DO NOTHING swallows, leaving a hole in the rank sequence that
+    // UNIQUE(variant_id, user_language_code, rank) then rejects.
+    const { service, dict } = serviceWith(
+      oneVerb,
+      reply({
+        senses: [
+          { sense_code: 'prepare_food', translation: 'FIRST' },
+          { sense_code: 'prepare_food', translation: 'SECOND' },
+        ],
+      }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    await service.translate({ text: 'cooked' });
+
+    expect(dict.persisted[0].entries[0].senses).toHaveLength(1);
+    expect(dict.persisted[0].entries[0].senses[0].translation).toBe('FIRST');
+  });
+
+  it('logs what was reused and what was newly named', async () => {
+    const { service, dict, logger } = serviceWith(
+      oneVerb,
+      reply({
+        senses: [
+          { sense_code: 'prepare_food', translation: 'PAST-PREPARE' },
+          { sense_code: 'fabricate_accounts', translation: 'PAST-FABRICATE' },
+        ],
+      }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    await service.translate({ text: 'cooked' });
+
+    // Drift is visible from the log alone, without reading rows: a lexeme whose
+    // senses keep growing is a prompt that keeps renaming them.
+    expect(logger.events).toContainEqual({
+      event: 'dict_reconciled',
+      entry_count: 1,
+      reused: 1,
+      newly_named: 1,
+    });
+  });
+});

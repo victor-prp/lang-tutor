@@ -2,6 +2,7 @@ import type { User } from '@lang-tutor/core/api';
 
 import type { AppDeps } from '../../src/composition';
 import { flattenEntries, rowsToSenses, type SenseRow } from '../../src/domain/dictionary';
+import type { StoredSense } from '../../src/domain/translation';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
@@ -139,6 +140,11 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
 export type FakeDictRepo = DictRepo & {
   /** What the next read answers with. Empty is a miss. */
   hit: SenseRow[];
+  /** What `findSensesByLexeme` answers with, keyed `lemma:partOfSpeech`. A
+   *  lexeme absent from this map has no stored senses, which is how a test says
+   *  "this is a new lexeme, so no second model call". */
+  stored: Record<string, StoredSense[]>;
+  lexemeReads: { lemma: string; partOfSpeech: string }[];
   /** What the write's re-read answers with. Left empty, the fake answers with
    *  the entries it was handed, flattened by the real domain function — which
    *  is what the real re-read would produce for a form nobody else claims. */
@@ -152,6 +158,8 @@ export type FakeDictRepo = DictRepo & {
 export function createFakeDictRepo(): FakeDictRepo {
   const repo: FakeDictRepo = {
     hit: [],
+    stored: {},
+    lexemeReads: [],
     reread: [],
     persistError: null,
     persisted: [],
@@ -159,6 +167,10 @@ export function createFakeDictRepo(): FakeDictRepo {
     findSensesByForm: async (input) => {
       repo.reads.push(input);
       return repo.hit;
+    },
+    findSensesByLexeme: async (input) => {
+      repo.lexemeReads.push({ lemma: input.lemma, partOfSpeech: input.partOfSpeech });
+      return repo.stored[`${input.lemma}:${input.partOfSpeech}`] ?? [];
     },
     persistEntries: async (input) => {
       repo.persisted.push(input);
