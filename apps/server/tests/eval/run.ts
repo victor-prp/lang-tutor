@@ -19,6 +19,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
+
 import { loadGeminiConfig } from '../../src/config';
 import { createGeminiClient } from '../../src/providers/gemini';
 import { askModel, type ModelAnswer } from './askModel';
@@ -125,6 +127,18 @@ function tier1(kase: EvalCase, result: ModelAnswer): Check[] {
     detail: result.entries
       .map((entry) => `${entry.lemma}: ${entry.senses.map((s) => s.sense_code).join(',')}`)
       .join(' | '),
+  });
+
+  // Phase 12: part_of_speech is half of dict_lexemes' unique key, so a value
+  // outside the ten would not merely read oddly — it would make (book,"verb
+  // phrase") a different lexeme from (book,"verb"). Gemini is handed the enum
+  // inside responseSchema, so this should be unfailable; it is tier 1 exactly
+  // because a provider that quietly stopped honouring responseSchema is the
+  // kind of thing this bucket exists to notice.
+  checks.push({
+    name: 'every entry has a part of speech from the closed set',
+    ok: result.entries.every((entry) => PartOfSpeechSchema.safeParse(entry.part_of_speech).success),
+    detail: result.entries.map((entry) => entry.part_of_speech).join(', '),
   });
 
   if (result.direction === 'en_he') {
@@ -251,6 +265,39 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
       name: 'no literal rendering of the idiom',
       ok: !contains(kase.rejectAny),
       detail: translations.join(' | '),
+    });
+  }
+
+  // The reading half of phase 12's defect: an inflected form must not bring back
+  // an entry whose part of speech it does not realise.
+  if (kase.expectEntryPos) {
+    const offenders = result.entries
+      .map((entry) => entry.part_of_speech)
+      .filter((pos) => !kase.expectEntryPos!.includes(pos));
+    checks.push({
+      name: 'entry parts of speech',
+      ok: offenders.length === 0,
+      detail: offenders.length ? `unexpected: ${offenders.join(', ')}` : undefined,
+    });
+  }
+
+  if (kase.expectPosOrder) {
+    const actual = result.entries.map((entry) => entry.part_of_speech);
+    checks.push({
+      name: 'part of speech order',
+      ok: JSON.stringify(actual) === JSON.stringify(kase.expectPosOrder),
+      detail: `got ${actual.join(', ')}`,
+    });
+  }
+
+  // The rendering half: `booked` answering with an infinitive is the defect,
+  // even though the infinitive is a perfectly good translation of `book`.
+  if (kase.rejectTop) {
+    const top = result.senses[0]?.translation ?? '';
+    checks.push({
+      name: 'top translation form',
+      ok: !kase.rejectTop.some((rejected) => top.includes(rejected)),
+      detail: `top was ${top}`,
     });
   }
 
