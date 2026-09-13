@@ -98,8 +98,29 @@ already depends on. And it preserves a pairing that would otherwise be lost: one
 **Restoring is idempotent and never overwrites.** `persistEntries` is `ON CONFLICT DO
 NOTHING` on terms and variants and first-writer-wins on senses, so re-running writes
 nothing and a form a learner already looked up keeps the senses it has. That is what makes
-it safe to point at production repeatedly. The import is chunked rather than one
-transaction for the whole file, since the full dataset is ~89K records.
+it safe to point at production repeatedly.
+
+**The restore is deliberately not atomic, and that is a departure worth naming.** The
+import opens one transaction per chunk of 500 records — about 22 for the dataset today and
+~178 at the full 89K — rather than one for the file. So a failure partway through leaves
+everything before it committed: a restore is resumable, not all-or-nothing.
+
+That is a real trade and it was taken knowingly. A single transaction over 89K records
+would hold one pooled connection and its locks for minutes and land the whole import in one
+WAL commit, and a failure at record 88,000 would discard every row before it. Because the
+replay is idempotent, partial progress costs nothing — the fix for a failed restore is to
+run the same file again, and the chunks that already landed become no-ops.
+
+ADR 0001 R8 says a use case opens at most one write transaction, so it is worth being
+explicit about why this does not contradict it. R8 scopes that sentence to `services/`
+("That call lives in `apps/server/src/services/`"), and its rationale is about a route's
+use case owning a transaction boundary and not pinning a connection across provider I/O —
+neither applies to an offline CLI import. `db/seed.ts` is the precedent for `db/` reaching
+a transaction through `createTransaction`, which this does too; it just calls it more than
+once. Note also that R8's detection command greps only for `.transaction(`, the mechanism's
+call site: ADR 0001 states outright that the "how many per use case" half "was never
+machine-checked and is not now." A green `lint:arch` is therefore not evidence either way
+here, which is exactly why it is written down instead.
 
 **Why a logical export rather than `pg_dump`** — the alternative was measured, not assumed.
 A dump restores faster (~1s vs ~36s at current size) but is an opaque artifact coupled to
@@ -125,8 +146,12 @@ Compressing the file would defeat this, since a gzip blob cannot be delta'd at a
 (ADR 0001 R4 permits `db/` → `repo/`, the sibling import added in phase 10 for `seed.ts`).
 They take a `Db` and return values rather than logging, since R7 keeps `console` in
 `db/cli.ts`; the transaction comes from `createTransaction`, never `db.transaction`, per
-R8; and the commands hang off the existing `db/cli.ts` composition root as flags rather
-than adding a fourth root, which ADR 0002 would require an ADR edit to do.
+R8's mechanism half (how many are opened is covered above); and the commands hang off the
+existing `db/cli.ts` composition root as flags rather than adding a fourth root, which
+ADR 0002 would require an ADR edit to do.
+
+Everything in this paragraph except the transaction count is machine-checked by
+`npm run lint:arch`; the count, like ADR 0001's R6, R9 and R12, is enforced by review only.
 
 **Scope: en→he only.** `vocab:export` filters on the pair, so the handful of `he→en` terms
 the database also holds (five at the time of writing) are deliberately excluded — this file
