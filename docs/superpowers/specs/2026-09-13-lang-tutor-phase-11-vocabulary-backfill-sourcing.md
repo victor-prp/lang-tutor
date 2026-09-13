@@ -128,18 +128,15 @@ They take a `Db` and return values rather than logging, since R7 keeps `console`
 R8; and the commands hang off the existing `db/cli.ts` composition root as flags rather
 than adding a fourth root, which ADR 0002 would require an ADR edit to do.
 
+**Scope: en→he only.** `vocab:export` filters on the pair, so the handful of `he→en` terms
+the database also holds (five at the time of writing) are deliberately excluded — this file
+is the en-he dataset, matching `scripts/translation-backfills/en-he/`. Backing that
+direction up would mean a second dataset under `data/backfill/he-en/`.
+
 Verified by `tests/integration/db/vocabRoundTrip.test.ts` and by hand against the live
 database: a re-export of a restored database is byte-identical to what it was restored
-from, and row counts match across all three tables.
+from, and row counts match across all three tables. Both are local — restore has not yet
+been run against production.
 
-## Open questions / not yet done
-
-- The backfill is in progress, not complete: a run against both CSVs hit the 10K RPD limit
-  partway through, so most of the ~89K entries are still unwritten. Progress is tracked in
-  `docs/superpowers/plans/2026-09-13-lang-tutor-phase-11-vocabulary-backfill.md`.
-- The dataset covers **en→he only**. The database also holds a handful of `he→en` terms
-  (five at the time of writing), which `vocab:export` deliberately excludes — this file is
-  the en-he pair, matching `scripts/translation-backfills/en-he/`. Backing that direction up
-  would mean a second dataset under `data/backfill/he-en/`.
-- Restore has been verified against a fresh local database, not against production. The
-  first production run is still a first run.
+Progress on the backfill itself is tracked in
+`docs/superpowers/plans/2026-09-13-lang-tutor-phase-11-vocabulary-backfill.md`.
