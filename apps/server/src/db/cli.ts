@@ -1,8 +1,31 @@
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+
 import { loadConfig } from '../config';
 import { createDb } from './client';
 import { runMigrations } from './migrate';
 import { reseedContent } from './reseed';
 import { seedContent } from './seed';
+import { exportVocabulary, fromJsonl, toJsonl } from './vocabExport';
+import { importVocabulary } from './vocabImport';
+
+// The dictionary is en->he; the checked-in dataset is scoped by that pair, the
+// same way scripts/translation-backfills/en-he/ is.
+const TARGET_LANGUAGE = 'en';
+const USER_LANGUAGE = 'he';
+const DEFAULT_DATASET = join(__dirname, '../../../../data/backfill/en-he/vocabulary.jsonl');
+
+// Small enough that a failure loses little work, large enough that per-chunk
+// transaction overhead is noise against ~2ms of inserts per record.
+const IMPORT_CHUNK = 500;
+
+/** `--flag value`, with the repo-standard dataset when the value is omitted. */
+function pathAfter(flag: string): string | undefined {
+  const index = process.argv.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  return value && !value.startsWith('--') ? resolve(value) : DEFAULT_DATASET;
+}
 
 // A second process is a legitimate second composition root — but it reads the
 // same config as the first rather than a copy-pasted connection string.
@@ -17,8 +40,44 @@ async function main(): Promise<void> {
   // for nothing. `process.argv` is not `process.env`, and this file is a
   // composition root either way.
   const reseed = process.argv.includes('--reseed');
+  const exportTo = pathAfter('--export-vocab');
+  const importFrom = pathAfter('--import-vocab');
+
   try {
+    if (exportTo) {
+      // No migration first: an export is a read, and running migrations would
+      // make `--export-vocab` write to a database the caller only asked to read.
+      const records = await exportVocabulary(db, {
+        languageCode: TARGET_LANGUAGE,
+        userLanguageCode: USER_LANGUAGE,
+      });
+      mkdirSync(dirname(exportTo), { recursive: true });
+      writeFileSync(exportTo, toJsonl(records));
+      console.log(`exported ${records.length} forms from ${databaseUrl}`);
+      console.log(`written to ${exportTo}`);
+      return;
+    }
+
     await runMigrations(db);
+
+    if (importFrom) {
+      const records = fromJsonl(readFileSync(importFrom, 'utf8'));
+      console.log(`restoring ${records.length} forms from ${importFrom}`);
+      const result = await importVocabulary(db, {
+        records,
+        languageCode: TARGET_LANGUAGE,
+        userLanguageCode: USER_LANGUAGE,
+        chunkSize: IMPORT_CHUNK,
+        onProgress: (done, total) => console.log(`  ${done}/${total} forms`),
+      });
+      console.log(
+        `restored ${result.records} forms into ${databaseUrl} — ` +
+          `${result.termsCreated} headwords written, the rest were already there ` +
+          '(persistEntries is first-writer-wins, so nothing was overwritten).',
+      );
+      return;
+    }
+
     if (reseed) {
       await reseedContent(db);
       console.log(`migrated and RESEEDED ${databaseUrl} — the dictionary was cleared first,`);

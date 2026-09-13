@@ -33,6 +33,8 @@
     "db:check": "drizzle-kit check",
     "db:migrate": "tsx src/db/cli.ts",
     "db:reseed": "tsx src/db/cli.ts --reseed",
+    "vocab:export": "tsx src/db/cli.ts --export-vocab",
+    "vocab:restore": "tsx src/db/cli.ts --import-vocab",
     "eval": "tsx tests/eval/run.ts",
     "content:generate": "tsx tests/eval/generate-content.ts"
   }
