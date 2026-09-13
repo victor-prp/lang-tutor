@@ -72,7 +72,7 @@ async function main(): Promise<void> {
       });
       console.log(
         `restored ${result.records} forms into ${databaseUrl} — ` +
-          `${result.termsCreated} headwords written, the rest were already there ` +
+          `${result.lexemesCreated} lexemes written, the rest were already there ` +
           '(persistEntries is first-writer-wins, so nothing was overwritten).',
       );
       return;

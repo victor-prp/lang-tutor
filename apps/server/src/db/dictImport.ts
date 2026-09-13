@@ -6,8 +6,10 @@ import { createDictRepo } from '../repo/dictionary';
 export type ImportResult = {
   /** Records replayed. */
   records: number;
-  /** Entries whose headword row this run actually inserted. */
-  termsCreated: number;
+  /** Entries whose LEXEME row this run actually inserted. One headword can be
+   *  two of them — `book` is a noun and a verb — so this is not a count of
+   *  headwords. */
+  lexemesCreated: number;
 };
 
 /**
@@ -16,10 +18,11 @@ export type ImportResult = {
  * indistinguishable from one a learner's lookup wrote.
  *
  * **Safe against a database that already has data**, which is the whole point
- * for production: `persistEntries` is ON CONFLICT DO NOTHING on terms and
- * variants and first-writer-wins on senses, so a form already looked up keeps
- * the senses it has and a re-run writes nothing. Restoring is therefore
- * idempotent and never overwrites live content.
+ * for production: `persistEntries` is ON CONFLICT DO NOTHING at every level —
+ * lexemes, variants, senses and, since phase 12, each variant's own
+ * translations — so a form already looked up keeps both the senses it has and
+ * the wording it answers with. Restoring is therefore idempotent and never
+ * overwrites live content.
  *
  * Chunked rather than one transaction for the whole file: the full backfill is
  * ~89k records, and a single transaction holding that many inserts would keep
@@ -43,7 +46,7 @@ export async function importDictionary(
 ): Promise<ImportResult> {
   const inTransaction = createTransaction(db, (tx) => tx);
   const total = input.records.length;
-  let termsCreated = 0;
+  let lexemesCreated = 0;
 
   for (let start = 0; start < total; start += input.chunkSize) {
     const chunk = input.records.slice(start, start + input.chunkSize);
@@ -58,12 +61,12 @@ export async function importDictionary(
           kind: record.kind,
           entries: record.entries,
         });
-        termsCreated += written.filter((entry) => entry.created).length;
+        lexemesCreated += written.filter((entry) => entry.created).length;
       }
     });
 
     input.onProgress(Math.min(start + input.chunkSize, total), total);
   }
 
-  return { records: total, termsCreated };
+  return { records: total, lexemesCreated };
 }

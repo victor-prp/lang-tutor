@@ -261,7 +261,7 @@ export function createTranslationService({
         logger.info({
           event: 'dict_persisted',
           entry_count: written.length,
-          terms_created: written.filter((entry) => entry.created).length,
+          lexemes_created: written.filter((entry) => entry.created).length,
         });
         logger.info({ event: 'translated', direction, kind, sense_count: senses.length });
         return { text, direction, kind, senses };

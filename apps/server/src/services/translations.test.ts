@@ -356,7 +356,7 @@ describe('translate', () => {
     await service.translate({ text: 'saw' });
 
     expect(logger.events).toEqual([
-      { event: 'dict_persisted', entry_count: 1, terms_created: 1 },
+      { event: 'dict_persisted', entry_count: 1, lexemes_created: 1 },
       { event: 'translated', direction: 'en_he', kind: 'word', sense_count: 1 },
     ]);
   });

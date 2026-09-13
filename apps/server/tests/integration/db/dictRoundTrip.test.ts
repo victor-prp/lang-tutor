@@ -96,7 +96,7 @@ describe('dictionary export/restore', () => {
     const exported = await exportDictionary(source.db, EN_HE);
 
     const first = await restoreInto(target, exported);
-    expect(first.termsCreated).toBeGreaterThan(0);
+    expect(first.lexemesCreated).toBeGreaterThan(0);
 
     // A learner's own lookup, differing from the dataset, must survive a restore:
     // persistEntries is first-writer-wins, so production content is never
@@ -107,7 +107,7 @@ describe('dictionary export/restore', () => {
       .where(eq(dictVarTranslations.translation, 'סולם'));
 
     const second = await restoreInto(target, exported);
-    expect(second.termsCreated).toBe(0);
+    expect(second.lexemesCreated).toBe(0);
 
     const rows = await withTx(target.db, (tx) =>
       createDictRepo(tx).findSensesByForm({ ...EN_HE, form: 'ladder' }),
