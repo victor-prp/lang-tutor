@@ -28,21 +28,26 @@ afterEach(async () => {
   await t.close();
 });
 
-// Pre-Task-3 shape: senses still carry part_of_speech, entries do not.
+// One entry per (lemma, part of speech): `cook` is two lexemes, and `cooked`
+// realises only the verb.
 const COOK = [
   {
     lemma: 'cook',
-    senses: [
-      { sense_code: 'kitchen_worker', translation: 'N-COOK', part_of_speech: 'noun' },
-      { sense_code: 'prepare_food', translation: 'V-COOK', part_of_speech: 'verb' },
-    ],
+    part_of_speech: 'noun',
+    senses: [{ sense_code: 'kitchen_worker', translation: 'N-COOK' }],
+  },
+  {
+    lemma: 'cook',
+    part_of_speech: 'verb',
+    senses: [{ sense_code: 'prepare_food', translation: 'V-COOK' }],
   },
 ];
 
 const COOKED = [
   {
     lemma: 'cook',
-    senses: [{ sense_code: 'prepare_food', translation: 'V-COOKED', part_of_speech: 'verb' }],
+    part_of_speech: 'verb',
+    senses: [{ sense_code: 'prepare_food', translation: 'V-COOKED' }],
   },
 ];
 
@@ -67,12 +72,16 @@ const find = (form: string) =>
   );
 
 describe('an inflected form serves only its own part of speech', () => {
-  it.failing('cooked never serves the noun sense', async () => {
+  it('cooked never serves the noun sense', async () => {
     await persist('cook', COOK);
     await persist('cooked', COOKED);
 
     const rows = await find('cooked');
     expect(rows.map((r) => r.translation)).not.toContain('N-COOK');
     expect(rows.every((r) => r.partOfSpeech === 'verb')).toBe(true);
+    // Both defects, proved fixed in one assertion: the form reaches only its own
+    // lexeme, AND it answers with the rendering IT wrote rather than the one
+    // `cook` wrote for the same sense.
+    expect(rows[0].translation).toBe('V-COOKED');
   });
 });

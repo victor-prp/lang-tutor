@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { LlmEntry, PartOfSpeech } from '@lang-tutor/core/api';
 import { asc, eq, sql } from 'drizzle-orm';
 
-import { dictVariants, dictSenses } from '../../../src/db/schema';
+import { dictLexemes, dictSenses, dictVariants } from '../../../src/db/schema';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
-import { insertTerm, type SeedSense } from '../../support/dictRows';
+import { insertLexeme, type SeedVariant } from '../../support/dictRows';
 import { withTx } from '../../support/withTx';
 
 let t: TestDb;
@@ -18,15 +18,27 @@ afterEach(async () => {
   await t.close();
 });
 
-const sense = (rank: number, translation: string, over: Partial<SeedSense> = {}): SeedSense => ({
-  rank,
-  senseCode: `s${rank}`,
-  translation,
-  partOfSpeech: null,
-  exampleSource: null,
-  exampleTarget: null,
-  ...over,
+/** One form's renderings, ranked by position. A sense is pure identity now, so
+ *  what a test describes is a variant: which senses this form serves, in which
+ *  order, worded how. */
+const variant = (
+  form: string,
+  translations: string[],
+  over: { kind?: string; entryRank?: number; exampleSource?: string; exampleTarget?: string } = {},
+): SeedVariant => ({
+  form,
+  kind: over.kind ?? 'word',
+  entryRank: over.entryRank ?? 0,
+  translations: translations.map((translation, rank) => ({
+    senseCode: `s${rank}`,
+    rank,
+    translation,
+    exampleSource: over.exampleSource ?? null,
+    exampleTarget: over.exampleTarget ?? null,
+  })),
 });
+
+const senses = (n: number) => Array.from({ length: n }, (_, i) => ({ senseCode: `s${i}` }));
 
 const find = (form: string, languageCode = 'en', userLanguageCode = 'he') =>
   withTx(t.db, (tx) =>
@@ -35,12 +47,13 @@ const find = (form: string, languageCode = 'en', userLanguageCode = 'he') =>
 
 describe('findSensesByForm', () => {
   it('matches case-insensitively, because the index is on lower(form)', async () => {
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'ladder',
       languageCode: 'en',
+      partOfSpeech: 'noun',
       userLanguageCode: 'he',
-      variants: [{ form: 'ladder', kind: 'word', entryRank: 0 }],
-      senses: [sense(0, 'סולם')],
+      senses: senses(1),
+      variants: [variant('ladder', ['סולם'])],
     });
 
     expect((await find('Ladder')).map((row) => row.translation)).toEqual(['סולם']);
@@ -48,12 +61,13 @@ describe('findSensesByForm', () => {
   });
 
   it('returns a term\'s senses in rank order', async () => {
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'see',
       languageCode: 'en',
+      partOfSpeech: 'verb',
       userLanguageCode: 'he',
-      variants: [{ form: 'see', kind: 'word', entryRank: 0 }],
-      senses: [sense(0, 'לראות'), sense(1, 'להבין'), sense(2, 'לפגוש')],
+      senses: senses(3),
+      variants: [variant('see', ['לראות', 'להבין', 'לפגוש'])],
     });
 
     expect((await find('see')).map((row) => row.translation)).toEqual([
@@ -64,26 +78,27 @@ describe('findSensesByForm', () => {
   });
 
   it('caps the read at five even though the database stores every sense', async () => {
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'light',
       languageCode: 'en',
+      partOfSpeech: 'noun',
       userLanguageCode: 'he',
-      variants: [{ form: 'light', kind: 'word', entryRank: 0 }],
-      senses: [0, 1, 2, 3, 4, 5, 6].map((n) => sense(n, `t${n}`)),
+      senses: senses(7),
+      variants: [variant('light', [0, 1, 2, 3, 4, 5, 6].map((n) => `t${n}`))],
     });
 
     expect(await find('light')).toHaveLength(5);
   });
 
   it('carries the part of speech and both halves of the example', async () => {
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'ladder',
       languageCode: 'en',
+      partOfSpeech: 'noun',
       userLanguageCode: 'he',
-      variants: [{ form: 'ladder', kind: 'word', entryRank: 0 }],
-      senses: [
-        sense(0, 'סולם', {
-          partOfSpeech: 'noun',
+      senses: senses(1),
+      variants: [
+        variant('ladder', ['סולם'], {
           exampleSource: 'She climbed the ladder.',
           exampleTarget: 'היא טיפסה על הסולם.',
         }),
@@ -105,12 +120,13 @@ describe('findSensesByForm', () => {
   });
 
   it("selects the variant's kind, honouring what was written rather than a shape guessed later", async () => {
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'break a leg',
       languageCode: 'en',
+      partOfSpeech: 'interjection',
       userLanguageCode: 'he',
-      variants: [{ form: 'break a leg', kind: 'phrase', entryRank: 0 }],
-      senses: [sense(0, 'בהצלחה')],
+      senses: senses(1),
+      variants: [variant('break a leg', ['בהצלחה'], { kind: 'phrase' })],
     });
 
     expect((await find('break a leg')).map((row) => row.kind)).toEqual(['phrase']);
@@ -120,24 +136,26 @@ describe('findSensesByForm', () => {
     // The inner join is the whole servability test: no column, no flag. An
     // earlier draft gated on the presence of an example, which would have made
     // an entry with a legally-absent example permanently unservable.
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'ladder',
       languageCode: 'en',
+      partOfSpeech: 'noun',
       userLanguageCode: 'he',
-      variants: [{ form: 'ladder', kind: 'word', entryRank: 0 }],
-      senses: [sense(0, 'סולם')],
+      senses: senses(1),
+      variants: [variant('ladder', ['סולם'])],
     });
 
     expect(await find('ladder', 'en', 'ru')).toEqual([]);
   });
 
   it('is a miss for a form nobody has queried, and for the wrong term language', async () => {
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'ladder',
       languageCode: 'en',
+      partOfSpeech: 'noun',
       userLanguageCode: 'he',
-      variants: [{ form: 'ladder', kind: 'word', entryRank: 0 }],
-      senses: [sense(0, 'סולם')],
+      senses: senses(1),
+      variants: [variant('ladder', ['סולם'])],
     });
 
     expect(await find('ladders')).toEqual([]);
@@ -202,10 +220,12 @@ describe('persistEntries', () => {
       .select()
       .from(dictSenses)
       .where(eq(dictSenses.lexemeId, row.lexemeId));
-    expect(senses.map((sense) => sense.rank).sort()).toEqual([0, 1]);
+    expect(senses.map((sense) => sense.senseCode).sort()).toEqual(['c0', 'c1']);
     expect([...row.senseIds].sort()).toEqual(senses.map((sense) => sense.id).sort());
-    // senseIds is in rank order, which is what the seed hangs its questions off.
-    expect(row.senseIds[0]).toBe(senses.find((sense) => sense.rank === 0)!.id);
+    // senseIds is in the order the ENTRY listed its senses — not a rank on the
+    // sense, which phase 12 removed. The seed hangs its questions off
+    // senseIds[0], so that order is part of the contract.
+    expect(row.senseIds[0]).toBe(senses.find((sense) => sense.senseCode === 'c0')!.id);
   });
 
   it('answers with the same merge the next lookup would produce', async () => {
@@ -222,37 +242,55 @@ describe('persistEntries', () => {
       'לפגוש',
     ]);
     expect(senses).toEqual(
-      (await find('saw')).map((row) => ({ translation: row.translation })),
+      (await find('saw')).map((row) => ({
+        translation: row.translation,
+        part_of_speech: row.partOfSpeech,
+      })),
     );
   });
 
-  it('keeps the first writer\'s senses when an entry names a lemma that exists', async () => {
-    await persist('see', [entry('see', ['לראות', 'להבין', 'לפגוש'])]);
+  // Phase 12 splits the old guarantee in two, and this is where the split shows.
+  // The lexeme's SENSES are still first-writer-wins — `see` keeps the three
+  // meanings it was created with, and a later call naming it adds none. But the
+  // later form writes its own RENDERING of the sense it named, so `saw` answers
+  // with its own wording rather than inheriting `see`'s. That inheritance was
+  // the rendering defect.
+  it("adds no senses to an existing lexeme, but does add this form's renderings", async () => {
+    await persist('see', [entry('see', ['לראות', 'להבין', 'לפגוש'], 'verb')]);
 
     const { written } = await persist('saw', [
-      entry('see', ['משהו אחר לגמרי']),
-      entry('saw', ['מסור']),
+      // sense_code c0 — the same sense `see` already has, worded for this form.
+      entry('see', ['ראה'], 'verb'),
+      entry('saw', ['מסור'], 'noun'),
     ]);
 
     expect(written[0].created).toBe(false);
+
+    // The lexeme gained no sense...
+    const seeSenses = await t.db
+      .select({ id: dictSenses.id, senseCode: dictSenses.senseCode })
+      .from(dictSenses)
+      .where(eq(dictSenses.lexemeId, written[0].lexemeId));
+    expect(seeSenses.map((row) => row.senseCode).sort()).toEqual(['c0', 'c1', 'c2']);
+
+    // ...and `see` still renders exactly what it rendered before.
     expect((await find('see')).map((row) => row.translation)).toEqual([
       'לראות',
       'להבין',
       'לפגוש',
     ]);
-    // Its contribution was the variant, and nothing else.
-    expect((await find('saw')).map((row) => row.translation)).toContain('לראות');
+
+    // `saw` renders the sense it named in ITS OWN words, and never reaches the
+    // two senses of `see` it did not name.
+    expect((await find('saw')).map((row) => row.translation)).toEqual(['ראה', 'מסור']);
 
     // written[0] is the found path: 'see' already had senses before this call.
-    // Checked against an independent, freshly-ordered query rather than the
-    // first call's own senseIds, so a wrong-order regression on the found path
-    // is caught even if it happened to match some other array by coincidence.
-    const seeSenses = await t.db
-      .select({ id: dictSenses.id })
-      .from(dictSenses)
-      .where(eq(dictSenses.lexemeId, written[0].lexemeId))
-      .orderBy(asc(dictSenses.rank));
-    expect(written[0].senseIds).toEqual(seeSenses.map((row) => row.id));
+    // Checked against an independent query rather than the first call's own
+    // senseIds, so a wrong-order regression on the found path is caught even if
+    // it happened to match some other array by coincidence.
+    expect(written[0].senseIds).toEqual([
+      seeSenses.find((row) => row.senseCode === 'c0')!.id,
+    ]);
   });
 
   it('is idempotent: the same call twice writes nothing the second time', async () => {
@@ -420,5 +458,134 @@ describe('persistEntries', () => {
         .from(dictSenses)
         .where(eq(dictSenses.lexemeId, a.written[0].lexemeId)),
     ).toHaveLength(1);
+  });
+});
+
+// Phase 12. `cook` rather than the spec's `book` throughout: `book` is one of
+// the thirteen seeded queries, so every cloned database already holds its two
+// lexemes and these writes would either collide or be swallowed by
+// first-writer-wins. `cook` is the same shape and the seed does not have it.
+describe('a lexeme is a lemma and a part of speech', () => {
+  const lexeme = (pos: PartOfSpeech, code: string, translation: string) => ({
+    lemma: 'cook',
+    part_of_speech: pos,
+    senses: [{ sense_code: code, translation }],
+  });
+
+  it('stores one lemma with two parts of speech as two lexemes', async () => {
+    const res = await persist('cook', [
+      lexeme('noun', 'kitchen_worker', 'N1'),
+      lexeme('verb', 'prepare_food', 'V1'),
+    ]);
+    expect(res.written).toHaveLength(2);
+    expect(new Set(res.written.map((e) => e.lexemeId)).size).toBe(2);
+  });
+
+  it('returns the lexeme part of speech on every sense', async () => {
+    await persist('cook', [lexeme('verb', 'prepare_food', 'V1')]);
+    const rows = await find('cook');
+    expect(rows[0].partOfSpeech).toBe('verb');
+  });
+
+  it('rejects a second lexeme with the same lemma and part of speech', async () => {
+    const ins = () =>
+      t.db
+        .insert(dictLexemes)
+        .values({ languageCode: 'en', lemma: 'cook', partOfSpeech: 'verb' });
+    await ins();
+    // The name is on the cause, not the wrapper — the idiom db/schema.test.ts
+    // already uses, and what makes this assert the RIGHT constraint fired.
+    await expect(ins()).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining('dict_lexemes_language_lemma_pos_key'),
+      }),
+    });
+  });
+
+  it('rejects a second sense of one lexeme with the same code', async () => {
+    const { written } = await persist('cook', [lexeme('verb', 'prepare_food', 'V1')]);
+    await expect(
+      t.db
+        .insert(dictSenses)
+        .values({ lexemeId: written[0].lexemeId, senseCode: 'prepare_food' }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringContaining('dict_senses_lexeme_code_key'),
+      }),
+    });
+  });
+
+  it('adds an incoming sense whose code matches nothing', async () => {
+    const { written } = await persist('cook', [lexeme('verb', 'prepare_food', 'V1')]);
+    await persist('cooked', [lexeme('verb', 'fabricate_accounts', 'V2')]);
+
+    const senses = await t.db
+      .select({ senseCode: dictSenses.senseCode })
+      .from(dictSenses)
+      .where(eq(dictSenses.lexemeId, written[0].lexemeId));
+    expect(senses.map((x) => x.senseCode).sort()).toEqual(['fabricate_accounts', 'prepare_food']);
+  });
+
+  // The reason `rank` sits on the translation. A form that ranks a brand-new
+  // sense FIRST must serve it first — under a lexeme-scoped rank it would have
+  // been appended at max(rank)+1 and served last.
+  it('ranks a new sense where THIS form put it, not where it arrived', async () => {
+    await persist('cook', [
+      {
+        lemma: 'cook',
+        part_of_speech: 'verb',
+        senses: [
+          { sense_code: 'prepare_food', translation: 'INF-PREPARE' },
+          { sense_code: 'heat_gently', translation: 'INF-HEAT' },
+        ],
+      },
+    ]);
+
+    await persist('cooked', [
+      {
+        lemma: 'cook',
+        part_of_speech: 'verb',
+        senses: [
+          { sense_code: 'fabricate_accounts', translation: 'PAST-FABRICATE' }, // new, and first
+          { sense_code: 'prepare_food', translation: 'PAST-PREPARE' },
+          { sense_code: 'heat_gently', translation: 'PAST-HEAT' },
+        ],
+      },
+    ]);
+
+    expect((await find('cooked')).map((r) => r.translation)).toEqual([
+      'PAST-FABRICATE',
+      'PAST-PREPARE',
+      'PAST-HEAT',
+    ]);
+
+    // ...and `cook` is untouched, still without the new sense.
+    expect((await find('cook')).map((r) => r.translation)).toEqual(['INF-PREPARE', 'INF-HEAT']);
+  });
+
+  // Neither order of arrival may fix an ordering for the other form.
+  it('gives the same two answers whichever form is looked up first', async () => {
+    const cookEntry = {
+      lemma: 'cook',
+      part_of_speech: 'verb' as const,
+      senses: [{ sense_code: 'prepare_food', translation: 'INF-PREPARE' }],
+    };
+    const cookedEntry = {
+      lemma: 'cook',
+      part_of_speech: 'verb' as const,
+      senses: [
+        { sense_code: 'fabricate_accounts', translation: 'PAST-FABRICATE' },
+        { sense_code: 'prepare_food', translation: 'PAST-PREPARE' },
+      ],
+    };
+
+    await persist('cooked', [cookedEntry]);
+    await persist('cook', [cookEntry]);
+
+    expect((await find('cooked')).map((r) => r.translation)).toEqual([
+      'PAST-FABRICATE',
+      'PAST-PREPARE',
+    ]);
+    expect((await find('cook')).map((r) => r.translation)).toEqual(['INF-PREPARE']);
   });
 });

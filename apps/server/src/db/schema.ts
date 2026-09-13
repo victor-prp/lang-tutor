@@ -58,9 +58,16 @@ export const dictLexemes = pgTable(
       .default(sql`gen_random_uuid()::text`),
     languageCode: varchar('language_code', { length: 10 }).notNull(),
     lemma: text('lemma').notNull(),
+    // A lexeme: the pair of a lemma and a part of speech. It moved up from the
+    // sense, where phase 10 put it. Part of speech does describe a meaning, but
+    // it also decides which forms a headword has, and only the lexeme can carry
+    // that — which is what stops `booked` reaching the noun's senses.
+    partOfSpeech: varchar('part_of_speech', { length: 50 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique('dict_lexemes_language_lemma_key').on(t.languageCode, t.lemma)],
+  (t) => [
+    unique('dict_lexemes_language_lemma_pos_key').on(t.languageCode, t.lemma, t.partOfSpeech),
+  ],
 );
 
 export const dictVariants = pgTable(
@@ -115,39 +122,56 @@ export const dictSenses = pgTable(
     lexemeId: text('lexeme_id')
       .notNull()
       .references(() => dictLexemes.id, { onDelete: 'cascade' }),
-    // Model-supplied, and there for readability alone: senses are never merged
-    // within a term, so it has no functional role. Three output tokens buys
-    // financial_institution against river_bank when reading rows in psql.
+    // Model-supplied. Phase 10 called this decoration; from phase 12 it is
+    // load-bearing, and the unique key below is why: it is the only handle a
+    // later form's translations have on senses this lexeme already holds.
     senseCode: text('sense_code').notNull(),
-    // Part of speech describes a meaning, not a word: `book` is a noun (ספר)
-    // and a verb (להזמין). It moved here from dict_lexemes in phase 10.
-    partOfSpeech: varchar('part_of_speech', { length: 50 }),
-    // "Most common first", within a term. Contiguous 0..n, which is what lets
-    // the read sort on the raw rank rather than a computed position.
-    rank: integer('rank').notNull(),
-    // The example in the term's own language. Its other half lives on the
-    // translation, because that half is in the learner's language.
-    exampleSource: text('example_source'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [
-    unique('dict_senses_lexeme_rank_key').on(t.lexemeId, t.rank),
-    check('dict_senses_rank_nonneg', sql`${t.rank} >= 0`),
-  ],
+  // The table is pure identity now. `part_of_speech` went up to the lexeme, and
+  // `rank` and `example_source` went down to the translation: a sense has no
+  // order and no example of its own, only a position and a wording within some
+  // given form's answer.
+  (t) => [unique('dict_senses_lexeme_code_key').on(t.lexemeId, t.senseCode)],
 );
 
 export const dictVarTranslations = pgTable(
   'dict_var_translations',
   {
+    // The variant joins the key in phase 12, which is what makes an answer
+    // belong to the form that was typed: `booked` renders הזמין where `book`
+    // renders להזמין, and both are the same sense of the same lexeme.
+    variantId: text('variant_id')
+      .notNull()
+      .references(() => dictVariants.id, { onDelete: 'cascade' }),
     senseId: text('sense_id')
       .notNull()
       .references(() => dictSenses.id, { onDelete: 'cascade' }),
     userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
     translation: text('translation').notNull(),
     definitionNotes: text('definition_notes'),
+    // Both halves of the example live here, because an example belongs to the
+    // form that was typed: `booked` shows "I booked a table", not "I want to
+    // book a table". The source half is duplicated per target language, which is
+    // cheaper than a fifth table to normalise it.
+    exampleSource: text('example_source'),
     exampleTarget: text('example_target'),
+    // "Most common first", scoped to THIS form. It sits here rather than on the
+    // sense so that a sense a later form introduces lands where that form ranked
+    // it, instead of at max(rank)+1 — arrival order wearing a rank's clothes —
+    // and so that the lexeme's order does not depend on which form was looked up
+    // first. Values are the sense's position in the entry the model returned.
+    rank: integer('rank').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.senseId, t.userLanguageCode] })],
+  (t) => [
+    primaryKey({ columns: [t.variantId, t.senseId, t.userLanguageCode] }),
+    unique('dict_var_translations_variant_rank_key').on(
+      t.variantId,
+      t.userLanguageCode,
+      t.rank,
+    ),
+    check('dict_var_translations_rank_nonneg', sql`${t.rank} >= 0`),
+  ],
 );
 
 export const questions = pgTable(

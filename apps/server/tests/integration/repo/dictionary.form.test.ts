@@ -24,7 +24,8 @@ afterEach(async () => {
 const verb = (translation: string) => [
   {
     lemma: 'cook',
-    senses: [{ sense_code: 'prepare_food', translation, part_of_speech: 'verb' }],
+    part_of_speech: 'verb',
+    senses: [{ sense_code: 'prepare_food', translation }],
   },
 ];
 
@@ -49,7 +50,7 @@ const find = (form: string) =>
   );
 
 describe('each form renders in its own grammatical form', () => {
-  it.failing('cook renders the infinitive and cooked the past tense', async () => {
+  it('cook renders the infinitive and cooked the past tense', async () => {
     await persist('cook', verb('INFINITIVE'));
     await persist('cooked', verb('PAST'));
 

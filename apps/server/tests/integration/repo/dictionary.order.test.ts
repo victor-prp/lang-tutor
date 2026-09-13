@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
-import { insertTerm, type SeedSense } from '../../support/dictRows';
+import { insertLexeme, type SeedVariant } from '../../support/dictRows';
 import { withTx } from '../../support/withTx';
 
 // The merge across headwords: this phase's most load-bearing rule, and the one
@@ -19,14 +19,24 @@ afterEach(async () => {
   await t.close();
 });
 
-const sense = (rank: number, translation: string): SeedSense => ({
-  rank,
-  senseCode: `s${rank}`,
-  translation,
-  partOfSpeech: null,
-  exampleSource: null,
-  exampleTarget: null,
+/** One form's own renderings, ranked by their position in `translations`. Every
+ *  variant of a lexeme carries its own, which is the phase 12 shape; here they
+ *  happen to agree, because these cases are about the merge and not about
+ *  rendering. */
+const variant = (form: string, entryRank: number, translations: string[]): SeedVariant => ({
+  form,
+  kind: 'word',
+  entryRank,
+  translations: translations.map((translation, rank) => ({
+    senseCode: `s${rank}`,
+    rank,
+    translation,
+    exampleSource: null,
+    exampleTarget: null,
+  })),
 });
+
+const senses = (n: number) => Array.from({ length: n }, (_, i) => ({ senseCode: `s${i}` }));
 
 const find = (form: string) =>
   withTx(t.db, (tx) =>
@@ -37,24 +47,26 @@ const find = (form: string) =>
     }),
   );
 
+const SEE = ['לראות', 'להבין', 'לפגוש'];
+const SAW = ['מסור', 'לנסר'];
+
 /** `saw` is a variant of `see` (entry 0) and of `saw` (entry 1). */
 async function seedSawAndSee(seeEntryRank: number, sawEntryRank: number): Promise<void> {
-  await insertTerm(t.db, {
+  await insertLexeme(t.db, {
     lemma: 'see',
     languageCode: 'en',
+    partOfSpeech: 'verb',
     userLanguageCode: 'he',
-    variants: [
-      { form: 'see', kind: 'word', entryRank: 0 },
-      { form: 'saw', kind: 'word', entryRank: seeEntryRank },
-    ],
-    senses: [sense(0, 'לראות'), sense(1, 'להבין'), sense(2, 'לפגוש')],
+    senses: senses(3),
+    variants: [variant('see', 0, SEE), variant('saw', seeEntryRank, SEE)],
   });
-  await insertTerm(t.db, {
+  await insertLexeme(t.db, {
     lemma: 'saw',
     languageCode: 'en',
+    partOfSpeech: 'noun',
     userLanguageCode: 'he',
-    variants: [{ form: 'saw', kind: 'word', entryRank: sawEntryRank }],
-    senses: [sense(0, 'מסור'), sense(1, 'לנסר')],
+    senses: senses(2),
+    variants: [variant('saw', sawEntryRank, SAW)],
   });
 }
 
@@ -80,20 +92,50 @@ describe('the by-form merge', () => {
     ]);
   });
 
-  it('cannot let a five-sense headword push another headword\'s top sense off the cap', async () => {
-    await insertTerm(t.db, {
+  // Phase 12: the two entries of `cook` are two LEXEMES of one lemma, not two
+  // lemmas. The merge must interleave them exactly as it interleaves `see` and
+  // `saw` — never both noun senses first.
+  //
+  // `cook` rather than the spec's `book` because `book` is one of the thirteen
+  // seeded queries, so every cloned database already holds its two lexemes and
+  // this insert would collide on dict_lexemes_language_lemma_pos_key.
+  it('interleaves two lexemes of ONE lemma, exactly as it does two lemmas', async () => {
+    await insertLexeme(t.db, {
+      lemma: 'cook',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: senses(2),
+      variants: [variant('cook', 0, ['N1', 'N2'])],
+    });
+    await insertLexeme(t.db, {
+      lemma: 'cook',
+      languageCode: 'en',
+      partOfSpeech: 'verb',
+      userLanguageCode: 'he',
+      senses: senses(2),
+      variants: [variant('cook', 1, ['V1', 'V2'])],
+    });
+
+    expect((await find('cook')).map((row) => row.translation)).toEqual(['N1', 'V1', 'N2', 'V2']);
+  });
+
+  it("cannot let a five-sense headword push another headword's top sense off the cap", async () => {
+    await insertLexeme(t.db, {
       lemma: 'see',
       languageCode: 'en',
+      partOfSpeech: 'verb',
       userLanguageCode: 'he',
-      variants: [{ form: 'saw', kind: 'word', entryRank: 0 }],
-      senses: [0, 1, 2, 3, 4].map((n) => sense(n, `see${n}`)),
+      senses: senses(5),
+      variants: [variant('saw', 0, [0, 1, 2, 3, 4].map((n) => `see${n}`))],
     });
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'saw',
       languageCode: 'en',
+      partOfSpeech: 'noun',
       userLanguageCode: 'he',
-      variants: [{ form: 'saw', kind: 'word', entryRank: 1 }],
-      senses: [sense(0, 'מסור')],
+      senses: senses(1),
+      variants: [variant('saw', 1, ['מסור'])],
     });
 
     const translations = (await find('saw')).map((row) => row.translation);
@@ -112,16 +154,17 @@ describe('the by-form merge', () => {
     expect(third).toEqual(first);
   });
 
-  it('refuses a second term claiming an occupied entry_rank for one form', async () => {
+  it('refuses a second lexeme claiming an occupied entry_rank for one form', async () => {
     await seedSawAndSee(0, 1);
 
     await expect(
-      insertTerm(t.db, {
+      insertLexeme(t.db, {
         lemma: 'sawn',
         languageCode: 'en',
+        partOfSpeech: 'noun',
         userLanguageCode: 'he',
-        variants: [{ form: 'saw', kind: 'word', entryRank: 1 }],
-        senses: [sense(0, 'x')],
+        senses: senses(1),
+        variants: [variant('saw', 1, ['x'])],
       }),
     ).rejects.toThrow();
   });
@@ -130,12 +173,13 @@ describe('the by-form merge', () => {
     await seedSawAndSee(0, 1);
 
     await expect(
-      insertTerm(t.db, {
+      insertLexeme(t.db, {
         lemma: 'saw',
         languageCode: 'he',
+        partOfSpeech: 'noun',
         userLanguageCode: 'en',
-        variants: [{ form: 'saw', kind: 'word', entryRank: 0 }],
-        senses: [sense(0, 'x')],
+        senses: senses(1),
+        variants: [variant('saw', 0, ['x'])],
       }),
     ).resolves.toBeDefined();
   });

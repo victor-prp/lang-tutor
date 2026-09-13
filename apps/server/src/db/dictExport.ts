@@ -1,4 +1,4 @@
-import type { LlmEntry, LlmSense, TranslationKind } from '@lang-tutor/core/api';
+import type { LlmEntry, LlmSense, PartOfSpeech, TranslationKind } from '@lang-tutor/core/api';
 import { and, asc, eq } from 'drizzle-orm';
 
 import type { Db } from './client';
@@ -34,9 +34,12 @@ type FlatRow = {
   kind: TranslationKind;
   entryRank: number;
   lemma: string;
-  rank: number;
+  // On the lexeme from phase 12, so it is an entry-level field here too.
+  partOfSpeech: PartOfSpeech;
   senseCode: string;
-  partOfSpeech: string | null;
+  // All three come off the translation now, because all three are properties of
+  // the (variant, sense) pairing rather than of the meaning.
+  rank: number;
   exampleSource: string | null;
   translation: string;
   exampleTarget: string | null;
@@ -44,13 +47,15 @@ type FlatRow = {
 
 /**
  * Rows to records. The inverse of `domain/dictionary.ts`'s `entriesToRows`:
- * `entryRank` is the entry's index, `rank` the sense's, both contiguous from
- * zero, so position in the rebuilt arrays *is* the stored rank.
+ * `entryRank` is the entry's index and `rank` the sense's position within that
+ * entry's answer, both contiguous from zero, so position in the rebuilt arrays
+ * *is* the stored rank.
  *
- * `part_of_speech` and `example` are omitted rather than emitted as null, and
- * `example` only when both halves are present — matching how `entriesToRows`
- * wrote them (`sense.example?.source ?? null`), so a re-export of a restored
- * database is byte-identical to what it was restored from.
+ * `example` is omitted rather than emitted as null, and only when both halves
+ * are present — matching how `entriesToRows` wrote them
+ * (`sense.example?.source ?? null`), so a re-export of a restored database is
+ * byte-identical to what it was restored from. `part_of_speech` can no longer
+ * be null and is always emitted: it is half of the lexeme's identity.
  */
 function groupRows(rows: FlatRow[]): DictRecord[] {
   const byForm = new Map<string, { record: DictRecord; entries: Map<number, LlmEntry> }>();
@@ -64,12 +69,11 @@ function groupRows(rows: FlatRow[]): DictRecord[] {
 
     let entry = group.entries.get(row.entryRank);
     if (!entry) {
-      entry = { lemma: row.lemma, senses: [] };
+      entry = { lemma: row.lemma, part_of_speech: row.partOfSpeech, senses: [] };
       group.entries.set(row.entryRank, entry);
     }
 
     const sense: LlmSense = { translation: row.translation, sense_code: row.senseCode };
-    if (row.partOfSpeech) sense.part_of_speech = row.partOfSpeech;
     if (row.exampleSource && row.exampleTarget) {
       sense.example = { source: row.exampleSource, target: row.exampleTarget };
     }
@@ -95,8 +99,10 @@ function groupRows(rows: FlatRow[]): DictRecord[] {
  * Every servable form in one language pair, as replayable records.
  *
  * The inner join to `dict_var_translations` is the same servability test the
- * by-form read uses: a term with no translation in `userLanguageCode`
- * contributes nothing, so the export carries exactly what a lookup could hit.
+ * by-form read uses, and from phase 12 it is keyed by variant too: a FORM with
+ * no renderings of its own in `userLanguageCode` contributes nothing, so the
+ * export carries exactly what a lookup could hit — never a form whose lexeme
+ * has senses it has never rendered.
  */
 export async function exportDictionary(
   db: Db,
@@ -108,10 +114,10 @@ export async function exportDictionary(
       kind: dictVariants.kind,
       entryRank: dictVariants.entryRank,
       lemma: dictLexemes.lemma,
-      rank: dictSenses.rank,
+      partOfSpeech: dictLexemes.partOfSpeech,
       senseCode: dictSenses.senseCode,
-      partOfSpeech: dictSenses.partOfSpeech,
-      exampleSource: dictSenses.exampleSource,
+      rank: dictVarTranslations.rank,
+      exampleSource: dictVarTranslations.exampleSource,
       translation: dictVarTranslations.translation,
       exampleTarget: dictVarTranslations.exampleTarget,
     })
@@ -121,12 +127,13 @@ export async function exportDictionary(
     .innerJoin(
       dictVarTranslations,
       and(
+        eq(dictVarTranslations.variantId, dictVariants.id),
         eq(dictVarTranslations.senseId, dictSenses.id),
         eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
       ),
     )
     .where(eq(dictVariants.languageCode, input.languageCode))
-    .orderBy(asc(dictVariants.form), asc(dictVariants.entryRank), asc(dictSenses.rank));
+    .orderBy(asc(dictVariants.form), asc(dictVariants.entryRank), asc(dictVarTranslations.rank));
 
   return groupRows(rows as FlatRow[]);
 }

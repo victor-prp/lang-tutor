@@ -1,13 +1,8 @@
 import type { Db } from '../../src/db/client';
-import {
-  dictVarTranslations,
-  dictVariants,
-  dictLexemes,
-  dictSenses,
-} from '../../src/db/schema';
+import { dictLexemes, dictSenses, dictVarTranslations, dictVariants } from '../../src/db/schema';
 
 /**
- * Writes one headword's rows directly, without going through persistEntries.
+ * Writes one lexeme's rows directly, without going through persistEntries.
  *
  * That is the point: the ordering rules this phase rests on must be provable
  * against rows a test chose, not against rows a model produced. tests/support/
@@ -17,65 +12,99 @@ import {
  * Every field is required. A defaulted language code is how a test ends up
  * asserting against a pair it never named.
  */
-export type SeedSense = {
-  rank: number;
+
+/** A sense is pure identity from phase 12 on. Its position in `senses` is not a
+ *  rank — a sense has no order of its own, only a position inside some given
+ *  form's answer, which is what `SeedVariant.translations` carries. */
+export type SeedSense = { senseCode: string };
+
+/** One rendering of one sense for one form. `senseCode` picks which sense;
+ *  `rank` is where THIS form puts it. */
+export type SeedTranslation = {
   senseCode: string;
+  rank: number;
   translation: string;
-  partOfSpeech: string | null;
   exampleSource: string | null;
   exampleTarget: string | null;
 };
 
-export type SeedTerm = {
-  lemma: string;
-  languageCode: string;
-  userLanguageCode: string;
-  variants: { form: string; kind: string; entryRank: number }[];
-  senses: SeedSense[];
+export type SeedVariant = {
+  form: string;
+  kind: string;
+  entryRank: number;
+  translations: SeedTranslation[];
 };
 
-export async function insertTerm(
+/**
+ * Note what this shape makes expressible and the pre-phase-12 one did not: two
+ * variants of one lexeme can carry different renderings of the same senses, and
+ * can rank them differently. That is the whole of the rendering defect, stated
+ * as a data shape.
+ */
+export type SeedLexeme = {
+  lemma: string;
+  languageCode: string;
+  partOfSpeech: string;
+  userLanguageCode: string;
+  senses: SeedSense[];
+  variants: SeedVariant[];
+};
+
+export async function insertLexeme(
   db: Db,
-  spec: SeedTerm,
+  spec: SeedLexeme,
 ): Promise<{ lexemeId: string; variantIds: string[]; senseIds: string[] }> {
-  const [term] = await db
+  const [lexeme] = await db
     .insert(dictLexemes)
-    .values({ languageCode: spec.languageCode, lemma: spec.lemma })
+    .values({
+      languageCode: spec.languageCode,
+      lemma: spec.lemma,
+      partOfSpeech: spec.partOfSpeech,
+    })
     .returning({ id: dictLexemes.id });
 
-  const variants = await db
-    .insert(dictVariants)
-    .values(
-      spec.variants.map((variant) => ({
-        lexemeId: term.id,
+  const senseIds: string[] = [];
+  const idByCode = new Map<string, string>();
+  for (const sense of spec.senses) {
+    const [row] = await db
+      .insert(dictSenses)
+      .values({ lexemeId: lexeme.id, senseCode: sense.senseCode })
+      .returning({ id: dictSenses.id });
+    idByCode.set(sense.senseCode, row.id);
+    senseIds.push(row.id);
+  }
+
+  const variantIds: string[] = [];
+  for (const variant of spec.variants) {
+    const [row] = await db
+      .insert(dictVariants)
+      .values({
+        lexemeId: lexeme.id,
         languageCode: spec.languageCode,
         form: variant.form,
         kind: variant.kind,
         entryRank: variant.entryRank,
-      })),
-    )
-    .returning({ id: dictVariants.id });
-
-  const senseIds: string[] = [];
-  for (const sense of spec.senses) {
-    const [row] = await db
-      .insert(dictSenses)
-      .values({
-        lexemeId: term.id,
-        senseCode: sense.senseCode,
-        rank: sense.rank,
-        partOfSpeech: sense.partOfSpeech,
-        exampleSource: sense.exampleSource,
       })
-      .returning({ id: dictSenses.id });
-    await db.insert(dictVarTranslations).values({
-      senseId: row.id,
-      userLanguageCode: spec.userLanguageCode,
-      translation: sense.translation,
-      exampleTarget: sense.exampleTarget,
-    });
-    senseIds.push(row.id);
+      .returning({ id: dictVariants.id });
+    variantIds.push(row.id);
+
+    if (variant.translations.length > 0) {
+      await db.insert(dictVarTranslations).values(
+        variant.translations.map((translation) => ({
+          variantId: row.id,
+          // Not `?? ''`: a translation naming a sense the lexeme does not have
+          // is a broken fixture, and should fail here rather than insert a row
+          // with an empty foreign key and fail somewhere less obvious.
+          senseId: idByCode.get(translation.senseCode)!,
+          userLanguageCode: spec.userLanguageCode,
+          rank: translation.rank,
+          translation: translation.translation,
+          exampleSource: translation.exampleSource,
+          exampleTarget: translation.exampleTarget,
+        })),
+      );
+    }
   }
 
-  return { lexemeId: term.id, variantIds: variants.map((v) => v.id), senseIds };
+  return { lexemeId: lexeme.id, variantIds, senseIds };
 }

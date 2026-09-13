@@ -315,3 +315,26 @@ describe('parseLlmReconciliation', () => {
     expect(parseLlmReconciliation('{"entries":[]}')).toBeNull();
   });
 });
+
+// A recording of `book` came back as סֵפֶר the first time phase 12's
+// form-agreement rule shipped: "dictionary citation form" reads as "how a
+// printed dictionary sets it", and those print nikud. Every consumer here
+// matches on unvocalised text, so both prompts say the script rule outright.
+describe('both prompts forbid nikud', () => {
+  it('buildPrompt asks for unvocalised Hebrew', () => {
+    expect(buildPrompt({ text: 'book', direction: 'en_he' }).system).toMatch(/no nikud/);
+  });
+
+  it('buildRenderingPrompt asks for unvocalised Hebrew', () => {
+    const { system } = buildRenderingPrompt({
+      form: 'booked',
+      direction: 'en_he',
+      lemma: 'book',
+      partOfSpeech: 'verb',
+      storedSenses: [
+        { senseCode: 'reserve', translation: 'X', exampleSource: null, exampleTarget: null },
+      ],
+    });
+    expect(system).toMatch(/no nikud/);
+  });
+});

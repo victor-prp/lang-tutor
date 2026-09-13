@@ -92,10 +92,16 @@ export function buildPrompt(input: {
     'translation, and a short snake_case sense_code naming the meaning',
     '(financial_institution as against river_bank).',
     `Translate into the grammatical form matching the input's: a past-tense input takes a`,
-    `past-tense translation, an infinitive an infinitive. Where ${to} offers several such`,
-    'forms, use its dictionary citation form for that category; for Hebrew past tense that is',
-    'third-person masculine singular. Build the example sentence around the input as typed,',
-    'not around its headword.',
+    'past-tense translation. A bare or "to"-marked English verb — "book", "to book" — is the',
+    `base form and takes the ${to} infinitive: להזמין, never הזמין. Where ${to} offers several`,
+    'forms for one category, use its dictionary citation form for that category; for Hebrew',
+    'past tense that is third-person masculine singular. Build the example sentence around the',
+    'input as typed, not around its headword.',
+    // "citation form" reads to the model as "how a dictionary prints it", and a
+    // printed Hebrew dictionary prints nikud. That cost a recording of סֵפֶר
+    // where every consumer here — the wire, the quiz options, the eval's
+    // substring matching — expects ספר. Say the script rule outright.
+    'Write Hebrew in plain unvocalised script, with no nikud: ספר, never סֵפֶר.',
     'For a "sentence": return exactly one entry holding exactly one sense with the',
     'translation, and omit the example entirely — a sentence needs no example of itself.',
     'Its part_of_speech is required by the schema but meaningless for a sentence, and the',
@@ -216,10 +222,13 @@ export function buildRenderingPrompt(input: {
     `Where "${input.form}" does not admit a stored sense at all, return that sense_code with`,
     'translation: null rather than forcing a translation.',
     `Translate into the grammatical form matching "${input.form}": a past-tense form takes a`,
-    `past-tense translation, an infinitive an infinitive. Where ${to} offers several such`,
-    'forms, use its dictionary citation form for that category; for Hebrew past tense that is',
-    `third-person masculine singular. Build each example sentence around "${input.form}" as`,
-    'typed, not around the headword.',
+    'past-tense translation. A bare or "to"-marked English verb — "book", "to book" — is the',
+    `base form and takes the ${to} infinitive: להזמין, never הזמין. Where ${to} offers several`,
+    'forms for one category, use its dictionary citation form for that category; for Hebrew',
+    `past tense that is third-person masculine singular. Build each example sentence around`,
+    `"${input.form}" as typed, not around the headword.`,
+    // Same rule as the first call, for the same reason — see buildPrompt.
+    'Write Hebrew in plain unvocalised script, with no nikud: ספר, never סֵפֶר.',
     `Rank the result for "${input.form}" itself, most common first — not in the order above,`,
     'which is another form\'s ranking.',
   ].join(' ');

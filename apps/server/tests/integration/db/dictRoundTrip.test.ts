@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import type { PartOfSpeech } from '@lang-tutor/core/api';
 import { eq } from 'drizzle-orm';
 
 import { dictVarTranslations } from '../../../src/db/schema';
@@ -26,7 +27,14 @@ afterEach(async () => {
 /** A lookup, written the way `services/translations.ts` writes one. */
 async function lookUp(
   t: TestDb,
-  input: { form: string; entries: { lemma: string; senses: { translation: string; sense_code: string }[] }[] },
+  input: {
+    form: string;
+    entries: {
+      lemma: string;
+      part_of_speech: PartOfSpeech;
+      senses: { translation: string; sense_code: string }[];
+    }[];
+  },
 ): Promise<void> {
   await withTx(t.db, (tx) =>
     createDictRepo(tx).persistEntries({ ...EN_HE, form: input.form, kind: 'word', entries: input.entries }),
@@ -50,8 +58,16 @@ describe('dictionary export/restore', () => {
     await lookUp(source, {
       form: 'saw',
       entries: [
-        { lemma: 'see', senses: [{ translation: 'לראות', sense_code: 'perceive' }] },
-        { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+        {
+          lemma: 'see',
+          part_of_speech: 'verb' as const,
+          senses: [{ translation: 'לראות', sense_code: 'perceive' }],
+        },
+        {
+          lemma: 'saw',
+          part_of_speech: 'noun' as const,
+          senses: [{ translation: 'מסור', sense_code: 'tool' }],
+        },
       ],
     });
 
@@ -69,7 +85,13 @@ describe('dictionary export/restore', () => {
   it('restores into a database that already has live data without overwriting it', async () => {
     await lookUp(source, {
       form: 'ladder',
-      entries: [{ lemma: 'ladder', senses: [{ translation: 'סולם', sense_code: 'only' }] }],
+      entries: [
+        {
+          lemma: 'ladder',
+          part_of_speech: 'noun' as const,
+          senses: [{ translation: 'סולם', sense_code: 'only' }],
+        },
+      ],
     });
     const exported = await exportDictionary(source.db, EN_HE);
 
@@ -94,13 +116,53 @@ describe('dictionary export/restore', () => {
   });
 
   it('survives the JSONL encoding it is stored as', async () => {
+    // `cook`, not `book`: `book` is one of the seeded queries, so its form
+    // already carries renderings and a second set would collide on
+    // UNIQUE(variant_id, user_language_code, rank).
     await lookUp(source, {
-      form: 'book',
-      entries: [{ lemma: 'book', senses: [{ translation: 'ספר', sense_code: 'written_work' }] }],
+      form: 'cook',
+      entries: [
+        {
+          lemma: 'cook',
+          part_of_speech: 'noun' as const,
+          senses: [{ translation: 'טבח', sense_code: 'kitchen_worker' }],
+        },
+      ],
     });
     const exported = await exportDictionary(source.db, EN_HE);
 
     expect(fromJsonl(toJsonl(exported))).toEqual(exported);
     expect(toJsonl(exported).split('\n').filter(Boolean)).toHaveLength(exported.length);
+  });
+
+  // Phase 12: one lemma can be two lexemes, and the format has to keep them
+  // apart on the way out and back. Without part_of_speech on the entry, a
+  // restore would fold these into one lexeme and lose a reading.
+  it('round-trips one lemma held as two lexemes', async () => {
+    await lookUp(source, {
+      form: 'cook',
+      entries: [
+        {
+          lemma: 'cook',
+          part_of_speech: 'noun' as const,
+          senses: [{ translation: 'טבח', sense_code: 'kitchen_worker' }],
+        },
+        {
+          lemma: 'cook',
+          part_of_speech: 'verb' as const,
+          senses: [{ translation: 'לבשל', sense_code: 'prepare_food' }],
+        },
+      ],
+    });
+
+    const exported = await exportDictionary(source.db, EN_HE);
+    const cook = exported.find((record) => record.form === 'cook');
+    expect(cook?.entries.map((entry) => [entry.lemma, entry.part_of_speech])).toEqual([
+      ['cook', 'noun'],
+      ['cook', 'verb'],
+    ]);
+
+    await restoreInto(target, exported);
+    expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
   });
 });

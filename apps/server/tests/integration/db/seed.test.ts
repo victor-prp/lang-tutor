@@ -48,13 +48,19 @@ describe('seedContent', () => {
     });
   });
 
-  it('writes one question per content entry, and one term per distinct lemma', async () => {
+  // One lexeme per distinct (lemma, part of speech) PAIR from phase 12 on, not
+  // per lemma: `book` is recorded as two entries and stored as two rows, which
+  // is the whole point — a set keyed on the lemma alone would count it once and
+  // this assertion would be off by exactly the phase's fix.
+  it('writes one question per content entry, and one lexeme per distinct pair', async () => {
     expect(await t.db.select().from(questions)).toHaveLength(content.length);
 
-    const lemmas = new Set(
-      content.flatMap((entry) => recorded[entry.query].entries.map((e) => e.lemma)),
+    const lexemes = new Set(
+      content.flatMap((entry) =>
+        recorded[entry.query].entries.map((e) => `${e.lemma}\u0000${e.part_of_speech}`),
+      ),
     );
-    expect(await t.db.select().from(dictLexemes)).toHaveLength(lemmas.size);
+    expect(await t.db.select().from(dictLexemes)).toHaveLength(lexemes.size);
   });
 
   it('gives every variant its language and its entry rank', async () => {
@@ -65,25 +71,49 @@ describe('seedContent', () => {
     }
   });
 
-  it('ranks every sense from zero and keeps the recorded part of speech and example', async () => {
+  // The three fields this used to check on the sense now live on either side of
+  // it: the part of speech went up to the lexeme, and the rank and both example
+  // halves went down to the per-variant translation. So the assertion follows
+  // them rather than disappearing.
+  it('puts the recorded part of speech on the lexeme and the rank and example on the rendering', async () => {
     const [entry] = content;
-    const [term] = await t.db
+    const recordedEntry = recorded[entry.query].entries[0];
+
+    const [lexeme] = await t.db
       .select()
       .from(dictLexemes)
-      .where(eq(dictLexemes.lemma, recorded[entry.query].entries[0].lemma));
+      .where(
+        and(
+          eq(dictLexemes.lemma, recordedEntry.lemma),
+          eq(dictLexemes.partOfSpeech, recordedEntry.part_of_speech),
+        ),
+      );
+    expect(lexeme.partOfSpeech).toBe(recordedEntry.part_of_speech);
+
     const senses = await t.db
       .select()
       .from(dictSenses)
-      .where(eq(dictSenses.lexemeId, term.id));
-
-    const recordedSenses = recorded[entry.query].entries[0].senses;
-    expect(senses.map((sense) => sense.rank).sort()).toEqual(
-      recordedSenses.map((_, rank) => rank),
+      .where(eq(dictSenses.lexemeId, lexeme.id));
+    expect(senses.map((sense) => sense.senseCode).sort()).toEqual(
+      recordedEntry.senses.map((sense) => sense.sense_code).sort(),
     );
-    const first = senses.find((sense) => sense.rank === 0)!;
-    expect(first.senseCode).toBe(recordedSenses[0].sense_code);
-    expect(first.partOfSpeech).toBe(recordedSenses[0].part_of_speech ?? null);
-    expect(first.exampleSource).toBe(recordedSenses[0].example?.source ?? null);
+
+    const [variant] = await t.db
+      .select()
+      .from(dictVariants)
+      .where(and(eq(dictVariants.lexemeId, lexeme.id), eq(dictVariants.form, entry.query)));
+    const renderings = await t.db
+      .select()
+      .from(dictVarTranslations)
+      .where(eq(dictVarTranslations.variantId, variant.id));
+
+    expect(renderings.map((r) => r.rank).sort()).toEqual(
+      recordedEntry.senses.map((_, rank) => rank),
+    );
+    const first = renderings.find((r) => r.rank === 0)!;
+    expect(first.translation).toBe(recordedEntry.senses[0].translation);
+    expect(first.exampleSource).toBe(recordedEntry.senses[0].example?.source ?? null);
+    expect(first.exampleTarget).toBe(recordedEntry.senses[0].example?.target ?? null);
   });
 
   it('points every question at the sense and variant its own recording wrote', async () => {
@@ -103,7 +133,13 @@ describe('seedContent', () => {
 
       expect(variant.form).toBe(entry.query);
       expect(sense.lexemeId).toBe(variant.lexemeId);
-      expect(sense.rank).toBe(0);
+      // A sense has no rank of its own now, so "entry 0, sense 0" is checked
+      // where it is actually recorded: the sense_code the recording listed
+      // first, for the entry that variant belongs to.
+      const recordedEntry = recorded[entry.query].entries.find(
+        (e) => e.senses[0].sense_code === sense.senseCode,
+      );
+      expect(recordedEntry).toBeDefined();
     }
   });
 
