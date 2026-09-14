@@ -286,6 +286,44 @@ export function createDictRepo(tx: Tx) {
         lexemeId = existing.id;
       }
 
+      // 1b — lock the lexeme row, before anything below references it as a
+      // foreign key. Required for 4b's recompute to be correct, not merely for
+      // style: under READ COMMITTED, an UPDATE that blocks on a locked row
+      // re-fetches THAT row once unblocked, but a subquery in its SET list is
+      // evaluated once, against the snapshot the statement started with —
+      // Postgres documents that the re-evaluation "does not see effects of
+      // [concurrent] commands on other rows in the database". So without a
+      // lock taken as its own, earlier statement, two overlapping writers
+      // computing `count(*) FROM dict_senses` can each miss the other's
+      // still-uncommitted insert and both write the same version — sometimes
+      // a version LOWER than an already-passed one, since neither writer's
+      // count is bounded by the other's. Taking this lock forces the second
+      // writer to block until the first commits; every statement after that
+      // point runs on a fresh snapshot, per READ COMMITTED, so the recompute
+      // at 4b then sees every commit that is not its own.
+      //
+      // Placed HERE — ahead of step 2, not merely ahead of step 4 as it would
+      // need to be for 4b alone — because step 2's variant insert and step 4's
+      // sense inserts both carry a foreign key to this row, and an FK check
+      // takes an implicit FOR KEY SHARE lock on the row it references. Two
+      // sessions can each hold FOR KEY SHARE on the same row at once — that is
+      // the point of a shared lock — so if both had already inserted their own
+      // variant (or sense) before either tried to upgrade to FOR UPDATE here,
+      // each would be waiting on a lock the other already holds: a deadlock
+      // (reproduced while building this fix — see `dictionary.stale.test.ts`,
+      // "does not deadlock..."). Taking FOR UPDATE before either session holds
+      // any FOR KEY SHARE on the row means whichever session loses the race
+      // holds nothing yet and simply waits, rather than waiting while holding
+      // something the winner needs.
+      //
+      // See `dictionary.stale.test.ts` for a test that fails on the wrong
+      // sense_version if this lock is removed.
+      await tx
+        .select({ id: dictLexemes.id })
+        .from(dictLexemes)
+        .where(eq(dictLexemes.id, lexemeId))
+        .for('update');
+
       // 2 — the variant, for the queried form only. The conflict target is
       // named rather than left bare: a bare DO NOTHING would also swallow a
       // collision on (language_code, lower(form), entry_rank), which is the
@@ -341,12 +379,16 @@ export function createDictRepo(tx: Tx) {
         senseIds.push(id);
       }
 
-      // 4b — the lexeme's sense version. A recomputed count, not `+= n`: two
-      // concurrent writers both reach this UPDATE, the second blocks on the row
-      // until the first commits, and each then recomputes the true total. An
-      // increment would double-count or drop one depending on interleaving.
-      // Senses are only ever added, never removed, so a count is monotonic and
-      // is a valid version.
+      // 4b — the lexeme's sense version. A recomputed count, not `+= n`: an
+      // increment would double-count or drop one depending on interleaving,
+      // where a count derived fresh from `dict_senses` cannot. Senses are only
+      // ever added, never removed, so that count is monotonic and is a valid
+      // version — PROVIDED it is computed after 1b's lock, not on its own.
+      // This UPDATE's own row lock is not enough by itself: were a second
+      // writer's blocked UPDATE to be what serialises them, unblocking would
+      // re-fetch the ROW but not re-evaluate this subquery, which already ran
+      // once, against the pre-block snapshot (see 1b). The lock 1b takes as a
+      // separate, earlier statement is what makes the count below trustworthy.
       await tx
         .update(dictLexemes)
         .set({

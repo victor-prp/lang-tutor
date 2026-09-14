@@ -2325,20 +2325,85 @@ describe('staleLexemes', () => {
 Run: `npx jest --selectProjects unit -t staleLexemes` — expected FAIL first (`staleLexemes is
 not a function`), then PASS once the function is in.
 
-- [ ] **Step 6: Bump the lexeme, stamp the variant**
+- [ ] **Step 6: Lock the lexeme, bump its version, stamp the variant**
 
-Both go in `persistEntries` in `apps/server/src/repo/dictionary.ts`, inside the existing loop.
+**Amended after review (round 1).** The version originally as written below the fold
+recomputed `count(*)` with no lock ahead of it, on the theory that the UPDATE's own row lock
+made two concurrent writers serialise safely. Reproduced against the real database: it does
+not. Under READ COMMITTED, a writer whose UPDATE blocks on a locked row re-fetches THAT row
+once unblocked, but a subquery in its SET list already ran, against the snapshot the
+statement started with — Postgres documents that this re-evaluation "does not see effects of
+[concurrent] commands on other rows in the database." Two overlapping writers can each miss
+the other's still-uncommitted sense and both write the same (or, with uneven batches, a
+LOWER) version. The fix is an explicit `SELECT ... FOR UPDATE` on the lexeme row, taken as
+its own, earlier statement — ahead of step 2, not merely ahead of step 4 as it would need to
+be for the recompute alone, because `dict_variants` and `dict_senses` both carry a foreign
+key to `dict_lexemes`, and an FK-referencing insert takes an implicit FOR KEY SHARE lock on
+the row it references. Two sessions can each hold FOR KEY SHARE at once — that is what makes
+it a shared lock — so a lock taken only ahead of step 4 lets both sessions insert their own
+variant first and then both try to upgrade to FOR UPDATE: a deadlock, not merely a stale
+version. Measured while building the fix: 18 of 20 fresh-lexeme attempts deadlocked with the
+lock placed ahead of step 4 only; 0 of 20 with it moved ahead of step 2.
+
+Three pieces go in `persistEntries` in `apps/server/src/repo/dictionary.ts`, inside the
+existing loop.
+
+Right after resolving `lexemeId` (before step 2's variant insert):
+
+```ts
+      // 1b — lock the lexeme row, before anything below references it as a
+      // foreign key. Required for 4b's recompute to be correct, not merely for
+      // style: under READ COMMITTED, an UPDATE that blocks on a locked row
+      // re-fetches THAT row once unblocked, but a subquery in its SET list is
+      // evaluated once, against the snapshot the statement started with —
+      // Postgres documents that the re-evaluation "does not see effects of
+      // [concurrent] commands on other rows in the database". So without a
+      // lock taken as its own, earlier statement, two overlapping writers
+      // computing `count(*) FROM dict_senses` can each miss the other's
+      // still-uncommitted insert and both write the same version — sometimes
+      // a version LOWER than an already-passed one, since neither writer's
+      // count is bounded by the other's. Taking this lock forces the second
+      // writer to block until the first commits; every statement after that
+      // point runs on a fresh snapshot, per READ COMMITTED, so the recompute
+      // at 4b then sees every commit that is not its own.
+      //
+      // Placed HERE — ahead of step 2, not merely ahead of step 4 as it would
+      // need to be for 4b alone — because step 2's variant insert and step 4's
+      // sense inserts both carry a foreign key to this row, and an FK check
+      // takes an implicit FOR KEY SHARE lock on the row it references. Two
+      // sessions can each hold FOR KEY SHARE on the same row at once — that is
+      // the point of a shared lock — so if both had already inserted their own
+      // variant (or sense) before either tried to upgrade to FOR UPDATE here,
+      // each would be waiting on a lock the other already holds: a deadlock
+      // (reproduced while building this fix — see `dictionary.stale.test.ts`,
+      // "does not deadlock..."). Taking FOR UPDATE before either session holds
+      // any FOR KEY SHARE on the row means whichever session loses the race
+      // holds nothing yet and simply waits, rather than waiting while holding
+      // something the winner needs.
+      //
+      // See `dictionary.stale.test.ts` for a test that fails on the wrong
+      // sense_version if this lock is removed.
+      await tx
+        .select({ id: dictLexemes.id })
+        .from(dictLexemes)
+        .where(eq(dictLexemes.id, lexemeId))
+        .for('update');
+```
 
 After step 4's sense loop, recompute the version from the senses themselves rather than
 incrementing a counter:
 
 ```ts
-      // 4b — the lexeme's sense version. A recomputed count, not `+= n`: two
-      // concurrent writers both reach this UPDATE, the second blocks on the row
-      // until the first commits, and each then recomputes the true total. An
-      // increment would double-count or drop one depending on interleaving.
-      // Senses are only ever added, never removed, so a count is monotonic and
-      // is a valid version.
+      // 4b — the lexeme's sense version. A recomputed count, not `+= n`: an
+      // increment would double-count or drop one depending on interleaving,
+      // where a count derived fresh from `dict_senses` cannot. Senses are only
+      // ever added, never removed, so that count is monotonic and is a valid
+      // version — PROVIDED it is computed after 1b's lock, not on its own.
+      // This UPDATE's own row lock is not enough by itself: were a second
+      // writer's blocked UPDATE to be what serialises them, unblocking would
+      // re-fetch the ROW but not re-evaluate this subquery, which already ran
+      // once, against the pre-block snapshot (see 1b). The lock 1b takes as a
+      // separate, earlier statement is what makes the count below trustworthy.
       await tx
         .update(dictLexemes)
         .set({
