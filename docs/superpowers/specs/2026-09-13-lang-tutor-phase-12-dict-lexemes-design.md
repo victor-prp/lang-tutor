@@ -881,9 +881,28 @@ every stored form for repeated translations found six, and only `pressing` was t
 | `better` | `good`/adj + `well`/adv → both טוב יותר | no, two lexemes |
 | `burning` | `burn`/adj `on_fire` + `burn`/verb `be_on_fire` → both בוער | no, two lexemes |
 
-Every one is linguistically correct: genuinely distinct English meanings that Hebrew collapses
-onto one word. `difficult` and `water` are **seed** words, so this predates this phase
-entirely and comes from call 1 and the recording, nothing to do with reconciliation.
+Four of the five are linguistically correct — genuinely distinct English meanings that Hebrew
+collapses onto one word — and the test that decides it is the **example**, not the sense code.
+`difficult` separates cleanly ("The exam was very difficult." against "He is a difficult
+child."), as do `round` ("He won the first round." against "Let's take a round around the
+park."), `better` (adjective against adverb) and `burning` (attributive adjective against
+progressive verb).
+
+`water` does not, and an earlier revision of this section wrongly cleared it. The noun's two
+senses are `liquid_substance`, "I drank some water.", and `body_of_water`, **"The water was
+cold."** — which describes the substance, not a lake, so it fails to demonstrate the sense its
+code names. A *body of water* is a real English sense; this row does not show it, and the two
+cards are indistinguishable in both languages. The sense code is model-invented free text and
+can confidently name a distinction nothing else in the row supports, so a sense is only as
+real as its example.
+
+Re-recording does not repair it: `npm run content:generate -- water` returns a byte-identical
+answer, because the provider runs at `temperature: 0` against an unchanged prompt. The lever
+would be a prompt rule requiring an example to demonstrate its specific sense rather than
+merely contain the word — eval-scorable, and out of scope here.
+
+`difficult` and `water` are **seed** words, so both predate this phase entirely and come from
+call 1 and the recording, nothing to do with reconciliation.
 
 What makes them *read* as duplicates is a gap this phase chose: *The wire does not change*
 keeps the response a flat array of `translation` + `part_of_speech` with no gloss, so a

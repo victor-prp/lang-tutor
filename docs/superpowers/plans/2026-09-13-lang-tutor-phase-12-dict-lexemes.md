@@ -1865,11 +1865,14 @@ entry then did. Making the two match is a one-line change and is not made here.
   **Run on 2026-09-14.** 54 lexemes / 69 variants / 104 senses / 141 translations went to
   15 / 15 / 20 / 20 — the 13 recorded strings, with `book` and `water` each splitting into a
   noun and a verb lexeme. No `press` or `pressing` row survives, and no punctuated single-token
-  form. The two within-lexeme duplicate translations DO survive, and correctly: `difficult`
-  (`hard_to_do` + `hard_to_please` → קשה) and `water` (`liquid_substance` + `body_of_water` →
-  מים) come from the recording itself, which is the evidence that they are Hebrew collapsing two
-  English meanings rather than anything reconciliation did. `questions` was rebuilt at 13 and
-  `users` stayed at 20.
+  form. The two within-lexeme duplicate translations DO survive, and that they come back from
+  the recording is the evidence that neither has anything to do with reconciliation. Only one of
+  them is correct, though: `difficult` (`hard_to_do` "The exam was very difficult." +
+  `hard_to_please` "He is a difficult child." → קשה) is two meanings Hebrew collapses onto one
+  word, and its examples separate them. `water` is not — `body_of_water` carries the example
+  "The water was cold.", which describes the substance rather than a lake and so never
+  demonstrates the sense its code names. Judge a sense by its example, not by its code.
+  `questions` was rebuilt at 13 and `users` stayed at 20.
 - **The service still sends the un-normalised text to the model.** `normalizeForm` fixes the
   *key*; `buildPrompt` is still handed `input.text.trim()`, so a miss on `book?` asks the model
   about `book?` and stores the answer under `book`. Harmless today, but it means examples get
