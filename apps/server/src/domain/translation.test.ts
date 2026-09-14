@@ -313,6 +313,39 @@ describe('buildRenderingPrompt', () => {
   });
 });
 
+describe('the example-disambiguation rule', () => {
+  // Phase 13. Two senses of one entry can render to the same word — Hebrew says
+  // מים for water-the-substance and water-the-lake — and the example is then the
+  // only thing that tells the two cards apart. The recorded seed carried "The
+  // water was cold.", which fits a glass and a lake equally. Measured over six
+  // words before and after, the rule left the eval suite at 98.2% and stopped
+  // `water` producing the ambiguous pair in 8 sampled answers.
+  //
+  // A wording lock on both prompts, not a behaviour test: whether an example
+  // actually disambiguates is a judgement, scored by the `water` case in the
+  // eval bucket.
+  it('buildPrompt asks for an example that rules out the word\'s other senses', () => {
+    const { system } = buildPrompt({ text: 'water', direction: 'en_he' });
+    expect(system).toContain('could not be read as any other sense of the same word');
+    // The illustration uses a headword that is in neither the seed nor the eval
+    // set, so it cannot bias anything this repo measures.
+    expect(system).toContain('spring');
+  });
+
+  it('buildRenderingPrompt asks for the same thing, since it writes examples too', () => {
+    const { system } = buildRenderingPrompt({
+      form: 'waters',
+      direction: 'en_he',
+      lemma: 'water',
+      partOfSpeech: 'noun',
+      storedSenses: [
+        { senseCode: 'liquid_h2o', translation: 'מים', exampleSource: null, exampleTarget: null },
+      ],
+    });
+    expect(system).toContain('could not be read as any other sense of the same word');
+  });
+});
+
 describe('parseLlmReconciliation', () => {
   it('keeps a null translation through the parse', () => {
     const parsed = parseLlmReconciliation(

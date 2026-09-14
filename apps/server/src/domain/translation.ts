@@ -91,6 +91,21 @@ export function buildPrompt(input: {
     `Give each sense one short natural example sentence in ${from} together with its ${to}`,
     'translation, and a short snake_case sense_code naming the meaning',
     '(financial_institution as against river_bank).',
+    // Phase 13. Where two senses of one entry render to the same word in the
+    // target language — Hebrew says מים for water-the-substance and
+    // water-the-lake — the example is the ONLY thing that can tell the two
+    // cards apart, and "The water was cold" fits a glass and a lake equally.
+    // The illustration uses `spring`, which is in neither the seed nor the eval
+    // set, so it cannot bias anything this repo measures. The illustration also
+    // avoids the words the integration bucket matches MockServer expectations
+    // on — `see`, `saw`, `saws`, `bank`, `banks` — because the system
+    // instruction is part of the request body those expectations match against.
+    // An earlier draft said "We saw the spring" and made every `see` lookup in
+    // that bucket match the `saw` expectation instead.
+    'Choose each example so that it could not be read as any other sense of the same word.',
+    'A sentence that merely contains the word is not enough — it must rule the other senses',
+    'out. For "spring": "The spring in the mattress broke" rules out the season, while "I like',
+    'the spring" rules out nothing.',
     `Translate into the grammatical form matching the input's: a past-tense input takes a`,
     'past-tense translation. A bare or "to"-marked English verb — "book", "to book" — is the',
     `base form and takes the ${to} infinitive: להזמין, never הזמין. Where ${to} offers several`,
@@ -234,6 +249,13 @@ export function buildRenderingPrompt(input: {
     `a ${input.partOfSpeech}, leave it out entirely.`,
     `Where "${input.form}" does not admit a stored sense at all, return that sense_code with`,
     'translation: null rather than forcing a translation.',
+    // The same rule as the first call, for the same reason — see buildPrompt.
+    // It belongs here too: this call writes examples for a form the first call
+    // never saw, so without it a reconciled form reintroduces exactly the
+    // ambiguity the first call now avoids.
+    'Choose each example so that it could not be read as any other sense of the same word.',
+    'A sentence that merely contains the word is not enough — it must rule the other senses',
+    'out.',
     `Translate into the grammatical form matching "${input.form}": a past-tense form takes a`,
     'past-tense translation. A bare or "to"-marked English verb — "book", "to book" — is the',
     `base form and takes the ${to} infinitive: להזמין, never הזמין. Where ${to} offers several`,
