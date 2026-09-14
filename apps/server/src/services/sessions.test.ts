@@ -51,6 +51,9 @@ describe('repos', () => {
   // Bound into the same transaction since phase 10, and untouched by these use
   // cases: reaching it here would mean the session service grew a second job.
   const dictRepo: DictRepo = {
+    findSenseVersion: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
     findSensesByForm: () => {
       throw new Error('the session service must not read the dictionary tables');
     },

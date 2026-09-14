@@ -165,26 +165,38 @@ async function repairForm({
   // connections to do N tiny reads that could share one, and serialise nothing
   // useful — the parallelism that matters is the model calls, which come after.
   //
+  // **The version is read here, beside the senses it belongs to, and BEFORE
+  // them.** It is what the write below stamps onto the variant, and it has to
+  // describe the sense list these renderings were derived from — not whatever
+  // the lexeme has reached by the time a 5-15 second model call returns. Read
+  // the other way round (senses, then version) a concurrent lookup could add a
+  // sense between the two statements — each statement takes its own snapshot
+  // under READ COMMITTED — and this form would be stamped level against a
+  // version it never rendered, leaving the new sense invisible to it forever.
+  // Version-first can only UNDER-stamp, which costs one extra repair.
+  //
   // `transaction` is destructured and called bare, never read off a `deps` or
   // `input` object — the same discipline `createTranslationService` documents
   // for itself — because R8's lint check scans this tree for any other
   // dotted call site of the primitive.
   const storedPerLexeme = await transaction((repos) =>
     Promise.all(
-      stale.map((lexeme) =>
-        repos.dict.findSensesByLexeme({
+      stale.map(async (lexeme) => {
+        const senseVersion = await repos.dict.findSenseVersion({ lexemeId: lexeme.lexemeId });
+        const senses = await repos.dict.findSensesByLexeme({
           lemma: lexeme.lemma,
           partOfSpeech: lexeme.partOfSpeech,
           languageCode: source,
           userLanguageCode: target,
-        }),
-      ),
+        });
+        return { senseVersion, senses };
+      }),
     ),
   );
 
   const rendered = await Promise.all(
     stale.map(async (lexeme, index) => {
-      const stored = storedPerLexeme[index];
+      const { senseVersion, senses: stored } = storedPerLexeme[index];
 
       const raw = await llm(
         buildRenderingPrompt({
@@ -227,7 +239,7 @@ async function repairForm({
           `repair returned no usable sense for ${lexeme.lemma} (${lexeme.partOfSpeech})`,
         );
       }
-      return { lexeme, senses };
+      return { lexeme, senseVersion, senses };
     }),
   );
 
@@ -235,11 +247,12 @@ async function repairForm({
   // re-read — the same shape `persistEntries` uses, and what keeps the answer
   // identical to what the next lookup would produce.
   return transaction(async (repos) => {
-    for (const { lexeme, senses } of rendered) {
+    for (const { lexeme, senseVersion, senses } of rendered) {
       await repos.dict.repairVariantRenderings({
         variantId: lexeme.variantId,
-        lexemeId: lexeme.lexemeId,
         userLanguageCode: target,
+        // The version read above, before the model call — never re-read here.
+        senseVersion,
         senses,
       });
     }
@@ -295,7 +308,9 @@ export function createTranslationService({
         // form" is exactly what a repair needs, and that prompt is eval-scored.
         try {
           const repaired = await repairForm({ llm, transaction, form, direction, stale, source, target });
-          logger.info({ event: 'dict_repaired', form, lexeme_count: stale.length });
+          // Counts and direction, like every other event in this file. The
+          // learner's query text stays out of the log.
+          logger.info({ event: 'dict_repaired', direction, lexeme_count: stale.length });
           return { text, direction, kind: kindForForm(repaired), senses: rowsToSenses(repaired) };
         } catch (error) {
           // Deliberately NOT the fail-closed path. A failed repair writes

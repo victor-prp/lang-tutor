@@ -1,7 +1,8 @@
 import type { LlmEntry, TranslationKind, TranslationSense } from '@lang-tutor/core/api';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
+import { RepairWouldDropSense } from '../errors';
 import {
   dictVarTranslations,
   dictVariants,
@@ -12,6 +13,7 @@ import {
   entriesToRows,
   rowsToSenses,
   staleLexemes,
+  type EntryRows,
   type SenseRow,
   type StaleLexeme,
 } from '../domain/dictionary';
@@ -253,12 +255,19 @@ export function createDictRepo(tx: Tx) {
     input: PersistEntriesInput,
   ): Promise<{ written: PersistedEntry[]; senses: TranslationSense[] }> => {
     const written: PersistedEntry[] = [];
+    const rows = entriesToRows(input.entries);
 
-    for (const entry of entriesToRows(input.entries)) {
-      // 1 — the lexeme, which is the PAIR of a lemma and a part of speech from
-      // phase 12 on. DO NOTHING returns no row, which is exactly how "it was
-      // already there" is detected; a concurrent request for the same new
-      // lexeme blocks here until the first commits.
+    // 1 — every lexeme of this answer, which is the PAIR of a lemma and a part
+    // of speech from phase 12 on. DO NOTHING returns no row, which is exactly
+    // how "it was already there" is detected; a concurrent request for the same
+    // new lexeme blocks here until the first commits.
+    //
+    // A pass of its own, ahead of the per-entry loop, so that step 1b below can
+    // lock every one of them in a single ordered statement — see the comment
+    // there for why the order is the whole point.
+    const resolved: { entry: EntryRows; lexemeId: string; created: boolean }[] = [];
+
+    for (const entry of rows) {
       const [inserted] = await tx
         .insert(dictLexemes)
         .values({
@@ -286,44 +295,66 @@ export function createDictRepo(tx: Tx) {
         lexemeId = existing.id;
       }
 
-      // 1b — lock the lexeme row, before anything below references it as a
-      // foreign key. Required for 4b's recompute to be correct, not merely for
-      // style: under READ COMMITTED, an UPDATE that blocks on a locked row
-      // re-fetches THAT row once unblocked, but a subquery in its SET list is
-      // evaluated once, against the snapshot the statement started with —
-      // Postgres documents that the re-evaluation "does not see effects of
-      // [concurrent] commands on other rows in the database". So without a
-      // lock taken as its own, earlier statement, two overlapping writers
-      // computing `count(*) FROM dict_senses` can each miss the other's
-      // still-uncommitted insert and both write the same version — sometimes
-      // a version LOWER than an already-passed one, since neither writer's
-      // count is bounded by the other's. Taking this lock forces the second
-      // writer to block until the first commits; every statement after that
-      // point runs on a fresh snapshot, per READ COMMITTED, so the recompute
-      // at 4b then sees every commit that is not its own.
-      //
-      // Placed HERE — ahead of step 2, not merely ahead of step 4 as it would
-      // need to be for 4b alone — because step 2's variant insert and step 4's
-      // sense inserts both carry a foreign key to this row, and an FK check
-      // takes an implicit FOR KEY SHARE lock on the row it references. Two
-      // sessions can each hold FOR KEY SHARE on the same row at once — that is
-      // the point of a shared lock — so if both had already inserted their own
-      // variant (or sense) before either tried to upgrade to FOR UPDATE here,
-      // each would be waiting on a lock the other already holds: a deadlock
-      // (reproduced while building this fix — see `dictionary.stale.test.ts`,
-      // "does not deadlock..."). Taking FOR UPDATE before either session holds
-      // any FOR KEY SHARE on the row means whichever session loses the race
-      // holds nothing yet and simply waits, rather than waiting while holding
-      // something the winner needs.
-      //
-      // See `dictionary.stale.test.ts` for a test that fails on the wrong
-      // sense_version if this lock is removed.
+      resolved.push({ entry, lexemeId, created: !!inserted });
+    }
+
+    // 1b — lock every lexeme this write touches, in ONE statement, ordered by
+    // id, before anything below references any of them as a foreign key.
+    //
+    // **The lock is required** for 4b's recompute to be correct, not merely for
+    // style: under READ COMMITTED, an UPDATE that blocks on a locked row
+    // re-fetches THAT row once unblocked, but a subquery in its SET list is
+    // evaluated once, against the snapshot the statement started with —
+    // Postgres documents that the re-evaluation "does not see effects of
+    // [concurrent] commands on other rows in the database". So without a lock
+    // taken as its own, earlier statement, two overlapping writers computing
+    // `count(*) FROM dict_senses` can each miss the other's still-uncommitted
+    // insert and both write the same version — sometimes a version LOWER than
+    // an already-passed one, since neither writer's count is bounded by the
+    // other's. Taking this lock forces the second writer to block until the
+    // first commits; every statement after that point runs on a fresh snapshot,
+    // per READ COMMITTED, so the recompute at 4b then sees every commit that is
+    // not its own.
+    //
+    // **It is taken BEFORE the per-entry loop** — not per entry inside it —
+    // because a lock taken inside the loop is taken in the MODEL's order. That
+    // is whatever order the answer listed the lexemes in (`mergeEntries`
+    // preserves it), so two concurrent lookups whose answers name the same two
+    // lexemes in opposite orders each hold one row the other wants: an ABBA
+    // deadlock, measured at 10 of 10 attempts. Reordering the entries is not
+    // the fix — `entry_rank` carries the model's order and the answer depends
+    // on it — but nothing downstream depends on the order the LOCKS are taken
+    // in, so they go in id order, in one statement that cannot interleave with
+    // another session's.
+    //
+    // **And ahead of step 2**, not merely ahead of step 4 as 4b alone would
+    // need, because step 2's variant insert and step 4's sense inserts both
+    // carry a foreign key to these rows, and an FK check takes an implicit
+    // FOR KEY SHARE lock on the row it references. Two sessions can each hold
+    // FOR KEY SHARE on the same row at once — that is the point of a shared
+    // lock — so if both had already inserted their own variant (or sense)
+    // before either tried to upgrade to FOR UPDATE here, each would be waiting
+    // on a lock the other already holds: a deadlock again, and one reproduced
+    // while building this fix.
+    //
+    // See `dictionary.stale.test.ts` for the tests that fail on the wrong
+    // sense_version if this lock is removed, and with a 40P01 abort if it moves
+    // back inside the loop.
+    if (resolved.length > 0) {
       await tx
         .select({ id: dictLexemes.id })
         .from(dictLexemes)
-        .where(eq(dictLexemes.id, lexemeId))
+        .where(
+          inArray(
+            dictLexemes.id,
+            resolved.map((row) => row.lexemeId),
+          ),
+        )
+        .orderBy(asc(dictLexemes.id))
         .for('update');
+    }
 
+    for (const { entry, lexemeId, created } of resolved) {
       // 2 — the variant, for the queried form only. The conflict target is
       // named rather than left bare: a bare DO NOTHING would also swallow a
       // collision on (language_code, lower(form), entry_rank), which is the
@@ -444,7 +475,7 @@ export function createDictRepo(tx: Tx) {
         lexemeId,
         variantId: variant.id,
         senseIds,
-        created: !!inserted,
+        created,
       });
     }
 
@@ -465,21 +496,75 @@ export function createDictRepo(tx: Tx) {
   };
 
   /**
+   * One lexeme's current sense version.
+   *
+   * A primitive of its own rather than a column on `findSensesByLexeme`,
+   * because the caller must read it in the SAME transaction as the sense list
+   * it is about to render and BEFORE it — a repair stamps the version its
+   * renderings were derived from, never the version the lexeme has reached by
+   * the time the write lands, which may be minutes later. See
+   * `repairVariantRenderings`.
+   */
+  const findSenseVersion = async (input: { lexemeId: string }): Promise<number> => {
+    const [lexeme] = await tx
+      .select({ senseVersion: dictLexemes.senseVersion })
+      .from(dictLexemes)
+      .where(eq(dictLexemes.id, input.lexemeId));
+    return lexeme.senseVersion;
+  };
+
+  /**
    * Replace one variant's renderings for one target language, and mark it
-   * rendered against the lexeme's current version.
+   * rendered against the version those renderings were derived from.
    *
    * DELETE then INSERT rather than UPDATE, because the repair may return fewer
    * senses than are stored (the form declined one) as well as more, and because
    * re-ranking in place would collide with
    * UNIQUE(variant_id, user_language_code, rank) partway through — the
    * constraint is checked per statement, not at commit.
+   *
+   * **`senseVersion` is a parameter, not a read.** Stamping whatever the lexeme
+   * holds at write time would be a lost update: the renderings below were
+   * derived from a sense list read before a 5-15 second model call, and a
+   * concurrent lookup that adds a sense during that call would leave this
+   * variant stamped level against a version it never rendered — the new sense
+   * invisible to this form forever, which is the exact defect this whole
+   * mechanism exists to remove. Under-stamping is the safe direction: a variant
+   * wrongly thought stale costs one repair, a variant wrongly thought level is
+   * permanent.
+   *
+   * **A repair may not drop a sense this variant already renders.** The delete
+   * below is unconditional, so a model call that returns `translation: null`
+   * for a sense the form has been serving would erase that rendering with
+   * nothing to restore it from — and if this variant were the only bearer of a
+   * rendering for that sense, `findSensesByLexeme` (an INNER JOIN through
+   * `dict_var_translations`) would stop returning the sense at all, so the next
+   * form's reconciliation would never see it, would name the meaning afresh,
+   * and would write a DUPLICATE sense: precisely what the reconciliation call
+   * exists to prevent. The dictionary has no TTL, so that duplicate is forever
+   * while a refused repair costs one retry — so this fails closed, exactly as
+   * the reconciliation path does, and the caller serves the stored answer.
    */
   const repairVariantRenderings = async (input: {
     variantId: string;
-    lexemeId: string;
     userLanguageCode: string;
+    senseVersion: number;
     senses: RepairedRendering[];
   }): Promise<void> => {
+    const current = await tx
+      .select({ senseId: dictVarTranslations.senseId })
+      .from(dictVarTranslations)
+      .where(
+        and(
+          eq(dictVarTranslations.variantId, input.variantId),
+          eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
+        ),
+      );
+
+    const keeping = new Set(input.senses.map((sense) => sense.senseId));
+    const dropped = current.filter((row) => !keeping.has(row.senseId)).map((row) => row.senseId);
+    if (dropped.length > 0) throw new RepairWouldDropSense(input.variantId, dropped);
+
     await tx
       .delete(dictVarTranslations)
       .where(
@@ -501,18 +586,14 @@ export function createDictRepo(tx: Tx) {
       })),
     );
 
-    const [lexeme] = await tx
-      .select({ senseVersion: dictLexemes.senseVersion })
-      .from(dictLexemes)
-      .where(eq(dictLexemes.id, input.lexemeId));
-
     await tx
       .update(dictVariants)
-      .set({ renderedSenseVersion: lexeme.senseVersion })
+      .set({ renderedSenseVersion: input.senseVersion })
       .where(eq(dictVariants.id, input.variantId));
   };
 
   return {
+    findSenseVersion,
     findSensesByForm,
     findSensesByLexeme,
     findStaleLexemesByForm,

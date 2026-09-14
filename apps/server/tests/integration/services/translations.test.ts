@@ -367,6 +367,124 @@ describe('translate, against a real database', () => {
     expect(await countGeminiRequests(ns)).toBe(afterRepair);
   });
 
+  // Review round 2, and the race the version-stamping rule exists for. The
+  // repair reads its lexeme's sense list, spends 5-15 seconds in a model call
+  // rendering it, and only then writes. A lookup of a DIFFERENT form that
+  // teaches the lexeme a sense inside that window is the whole defect: stamping
+  // the version found at write time marks this form level against a sense it
+  // never rendered, and with no TTL that sense is invisible to this form
+  // forever — the F5 report all over again, this time as a race.
+  //
+  // MockServer holds the repair's answer back so the window is real and the
+  // interleaving is the production one: nothing is faked inside the server, and
+  // the two lookups run against the same pool exactly as two learners would.
+  it('leaves a form stale when its lexeme grew during the repair call', async () => {
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCANS-READ' },
+        { sense_code: 'examine_closely', translation: 'SCANS-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCANS-DIGITIZE' },
+      ],
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCANS-READ', sense_code: 'read_quickly' },
+        { translation: 'SCANS-EXAMINE', sense_code: 'examine_closely' },
+        { translation: 'SCANS-DIGITIZE', sense_code: 'digitize_image' },
+      ]),
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCAN-READ', sense_code: 'read_quickly' },
+        { translation: 'SCAN-EXAMINE', sense_code: 'examine_closely' },
+      ]),
+      matchText: '"scan"',
+    });
+
+    const service = translations();
+    await service.translate({ text: 'scan' }); // two senses, rendered at version 2
+    await service.translate({ text: 'scans' }); // the lexeme learns a third
+
+    await clearNamespace(ns);
+
+    // Registration order, for the reason the `bank`/`banks` case above gives
+    // and one more: every reconciliation prompt for this lexeme names the
+    // LEMMA in quotes too, so a `scanned` prompt also contains `"scan"`. The
+    // narrower expectation therefore has to be registered first.
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCANNED-READ' },
+        { sense_code: 'examine_closely', translation: 'SCANNED-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCANNED-DIGITIZE' },
+        { sense_code: 'skim_surface', translation: 'SCANNED-SKIM' }, // learned here
+      ],
+      matchText: '"scanned"',
+    });
+    // The repair call for `scan`, held open long enough for the `scanned`
+    // lookup below to land inside it.
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCAN-READ' },
+        { sense_code: 'digitize_image', translation: 'SCAN-DIGITIZE' },
+        { sense_code: 'examine_closely', translation: 'SCAN-EXAMINE' },
+      ],
+      matchText: '"scan"',
+      delayMs: 3000,
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCANNED-READ', sense_code: 'read_quickly' },
+        { translation: 'SCANNED-EXAMINE', sense_code: 'examine_closely' },
+        { translation: 'SCANNED-DIGITIZE', sense_code: 'digitize_image' },
+        { translation: 'SCANNED-SKIM', sense_code: 'skim_surface' },
+      ]),
+      matchText: '"scanned"',
+    });
+
+    const repairing = service.translate({ text: 'scan' });
+    // Inside the repair's model call, not before it: half a second is long
+    // enough for the read transaction to have happened and short enough to be
+    // well clear of the three-second answer.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await service.translate({ text: 'scanned' }); // teaches the lexeme a fourth
+
+    const repaired = await repairing;
+    // The repair rendered the three senses it was given. Nothing wrong with
+    // this answer — it is the stamp that decides whether the fourth is ever
+    // reachable from `scan`.
+    expect(repaired.senses.map((s) => s.translation)).toEqual([
+      'SCAN-READ',
+      'SCAN-DIGITIZE',
+      'SCAN-EXAMINE',
+    ]);
+
+    await clearNamespace(ns);
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCAN-READ' },
+        { sense_code: 'examine_closely', translation: 'SCAN-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCAN-DIGITIZE' },
+        { sense_code: 'skim_surface', translation: 'SCAN-SKIM' },
+      ],
+      matchText: '"scan"',
+    });
+
+    // The proof: `scan` is still owed `skim_surface`, so this lookup repairs
+    // again and serves four. Stamped with the version read at WRITE time it
+    // would have been marked level at four while rendering three, this lookup
+    // would be a plain hit, and the fourth sense would be lost to this form for
+    // good.
+    const healed = await service.translate({ text: 'scan' });
+    expect(healed.senses.map((s) => s.translation)).toEqual([
+      'SCAN-READ',
+      'SCAN-EXAMINE',
+      'SCAN-DIGITIZE',
+      'SCAN-SKIM',
+    ]);
+  });
+
   // A failed repair must not fail the request: nothing was written, so the
   // stored answer stands. The opposite of the reconciliation call's fail-closed
   // rule, and for the opposite reason — see the spec's "When the repair fails".
@@ -417,5 +535,108 @@ describe('translate, against a real database', () => {
     expect(logger.errors).toContainEqual(
       expect.objectContaining({ message: 'dict_repair_failed' }),
     );
+
+    // **And the repair is still owed.** The assertion above is true of a
+    // regression that stamps `rendered_sense_version` level BEFORE the model
+    // call as well — it serves the same two senses either way, having quietly
+    // decided this form is finished. What separates them is what happens next:
+    // a form whose repair failed must still be stale, so the next lookup pays
+    // for it again and heals.
+    await clearNamespace(ns);
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCAN-READ' },
+        { sense_code: 'digitize_image', translation: 'SCAN-DIGITIZE' },
+        { sense_code: 'examine_closely', translation: 'SCAN-EXAMINE' },
+      ],
+      matchText: '"scan"',
+    });
+
+    const healed = await service.translate({ text: 'scan' });
+    expect(healed.senses.map((s) => s.translation)).toEqual([
+      'SCAN-READ',
+      'SCAN-DIGITIZE',
+      'SCAN-EXAMINE',
+    ]);
+  });
+
+  // Review round 2. A repair replaces a variant's renderings wholesale, so a
+  // model call that declines a sense this form is ALREADY serving would delete
+  // that rendering with nothing to restore it from — and if this variant were
+  // the only form rendering it, the sense would drop out of every future
+  // reconciliation prompt and be written again as a duplicate. The dictionary
+  // has no TTL, so that duplicate is permanent while a refused repair costs one
+  // retry: this fails closed, like every other write that would be known-wrong.
+  it('refuses a repair that would drop a sense the form already serves', async () => {
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCANS-READ' },
+        { sense_code: 'examine_closely', translation: 'SCANS-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCANS-DIGITIZE' },
+      ],
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCANS-READ', sense_code: 'read_quickly' },
+        { translation: 'SCANS-EXAMINE', sense_code: 'examine_closely' },
+        { translation: 'SCANS-DIGITIZE', sense_code: 'digitize_image' },
+      ]),
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCAN-READ', sense_code: 'read_quickly' },
+        { translation: 'SCAN-EXAMINE', sense_code: 'examine_closely' },
+      ]),
+      matchText: '"scan"',
+    });
+
+    const logger = createFakeLogger();
+    const service = createTestServerDeps({
+      db: t.db, logger, rng: testRng(7), geminiBaseUrl: geminiBaseUrlFor(ns),
+    }).translations;
+
+    await service.translate({ text: 'scan' });   // two senses, both served
+    await service.translate({ text: 'scans' });  // the lexeme learns a third
+
+    // The flaky repair: `examine_closely` comes back as `translation: null` —
+    // the model saying this form does not admit a sense it has been serving all
+    // along.
+    await clearNamespace(ns);
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCAN-READ-2' },
+        { sense_code: 'examine_closely', translation: null },
+        { sense_code: 'digitize_image', translation: 'SCAN-DIGITIZE' },
+      ],
+      matchText: '"scan"',
+    });
+
+    const answer = await service.translate({ text: 'scan' });
+
+    // The stored answer, whole. Not the two senses the repair offered.
+    expect(answer.senses.map((s) => s.translation)).toEqual(['SCAN-READ', 'SCAN-EXAMINE']);
+    expect(logger.errors).toContainEqual(
+      expect.objectContaining({ message: 'dict_repair_failed' }),
+    );
+
+    // And still repairable, because nothing was written: a later answer that
+    // renders all three heals the form.
+    await clearNamespace(ns);
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCAN-READ' },
+        { sense_code: 'examine_closely', translation: 'SCAN-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCAN-DIGITIZE' },
+      ],
+      matchText: '"scan"',
+    });
+    const healed = await service.translate({ text: 'scan' });
+    expect(healed.senses.map((s) => s.translation)).toEqual([
+      'SCAN-READ',
+      'SCAN-EXAMINE',
+      'SCAN-DIGITIZE',
+    ]);
   });
 });

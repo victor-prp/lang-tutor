@@ -93,6 +93,10 @@ export async function expectReconciliation(
   opts: {
     senses: { sense_code: string; translation: string | null; example?: { source: string; target: string } }[];
     matchText?: string;
+    /** Holds the answer back, so a test can do something else while this call is
+     *  in flight — the 5-15 seconds a real reconciliation takes is the window
+     *  every read-then-write race in this use case lives in. */
+    delayMs?: number;
   },
 ): Promise<void> {
   await expectation(ns, {
@@ -109,6 +113,7 @@ export async function expectReconciliation(
         statusCode: 200,
         headers: { 'content-type': ['application/json'] },
         body: JSON.stringify(geminiResponse({ senses: opts.senses })),
+        ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
       },
     },
   });

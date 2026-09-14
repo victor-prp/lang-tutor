@@ -11,7 +11,7 @@ import type { StoredSense } from '../../src/domain/translation';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
-import type { PersistEntriesInput, DictRepo, RepairedRendering } from '../../src/repo/dictionary';
+import type { PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
@@ -158,16 +158,6 @@ export type FakeDictRepo = DictRepo & {
    *  so an existing hit-path test that never mentions staleness keeps taking the
    *  plain-hit branch. */
   stale: StaleLexeme[];
-  staleReads: { form: string; languageCode: string }[];
-  /** Set to make the repair write throw, the same way `persistError` does for
-   *  `persistEntries`. */
-  repairError: Error | null;
-  repaired: {
-    variantId: string;
-    lexemeId: string;
-    userLanguageCode: string;
-    senses: RepairedRendering[];
-  }[];
   /** Set to make the write throw. */
   persistError: Error | null;
   persisted: PersistEntriesInput[];
@@ -181,9 +171,6 @@ export function createFakeDictRepo(): FakeDictRepo {
     lexemeReads: [],
     reread: [],
     stale: [],
-    staleReads: [],
-    repairError: null,
-    repaired: [],
     persistError: null,
     persisted: [],
     reads: [],
@@ -199,14 +186,13 @@ export function createFakeDictRepo(): FakeDictRepo {
       // from the sense_code, which is unique per lexeme, same as the real id.
       return senses.map((sense) => ({ senseId: `sense-${sense.senseCode}`, ...sense }));
     },
-    findStaleLexemesByForm: async (input) => {
-      repo.staleReads.push(input);
-      return repo.stale;
-    },
-    repairVariantRenderings: async (input) => {
-      repo.repaired.push(input);
-      if (repo.repairError) throw repo.repairError;
-    },
+    findStaleLexemesByForm: async () => repo.stale,
+    // The two repair-path methods are bare stubs, present because `DictRepo` names
+    // them and for no other reason: `stale` is empty by default, so no unit test
+    // reaches the repair branch at all. A recorder here would be written by the
+    // fake and read by nobody.
+    findSenseVersion: async () => 0,
+    repairVariantRenderings: async () => {},
     persistEntries: async (input) => {
       repo.persisted.push(input);
       if (repo.persistError) throw repo.persistError;

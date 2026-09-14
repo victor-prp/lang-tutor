@@ -60,6 +60,22 @@ const COOKS_PLUS_ONE = [
     senses: [{ sense_code: 'prepare_food', translation: 'V-COOKS' }] },
 ];
 
+/**
+ * What `repairForm` reads before its model call: the version FIRST, then the
+ * senses, both in one transaction. The version is what the repair stamps, so a
+ * test that re-read it after the write would be pinning the bug rather than the
+ * behaviour.
+ */
+const renderableSenses = (lexemeId: string) =>
+  withTx(t.db, async (tx) => {
+    const repo = createDictRepo(tx);
+    const senseVersion = await repo.findSenseVersion({ lexemeId });
+    const stored = await repo.findSensesByLexeme({
+      lemma: 'cook', partOfSpeech: 'noun', languageCode: 'en', userLanguageCode: 'he',
+    });
+    return { senseVersion, stored };
+  });
+
 /** The variant id and its sense ids, as `persistEntries` reported them. */
 const variantOf = async (form: string, partOfSpeech: string) => {
   const { written } = await persist(form, partOfSpeech === 'noun' ? [COOK[0]] : [COOK[1]]);
@@ -84,15 +100,13 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
     const [stale] = await withTx(t.db, (tx) =>
       createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
 
-    const stored = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findSensesByLexeme({
-        lemma: 'cook', partOfSpeech: 'noun', languageCode: 'en', userLanguageCode: 'he',
-      }));
+    const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
     const idOf = (code: string) => stored.find((s) => s.senseCode === code)!.senseId;
 
     await withTx(t.db, (tx) =>
       createDictRepo(tx).repairVariantRenderings({
-        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        variantId: stale.variantId, userLanguageCode: 'he',
+        senseVersion,
         senses: [
           // The NEWLY learned sense placed FIRST — which is the whole point.
           { senseId: idOf('cookery_writer'), rank: 0, translation: 'NEW-FIRST',  exampleSource: null, exampleTarget: null },
@@ -108,20 +122,64 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
     expect(noun.variantId).toBe(stale.variantId);
   });
 
+  // Review round 2. The version a repair stamps is the one its renderings were
+  // derived FROM, handed in by the caller — never re-read at write time. The
+  // two are minutes apart: the sense list is read, a 5-15 second model call
+  // renders it, and only then does the write land. A lookup of another form
+  // that teaches the lexeme a sense during that window is exactly the case
+  // here, and stamping the version found at write time would mark this variant
+  // level against a sense it never rendered — invisible to this form forever,
+  // which is the defect the whole mechanism exists to remove.
+  it('stamps the version the repair rendered, not the one the lexeme reached meanwhile', async () => {
+    await variantOf('cook', 'noun');                 // one sense, rank 0
+    await persist('cooks', COOKS_PLUS_ONE);          // the lexeme gains a second
+    const [stale] = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+
+    // What `repairForm` reads before its model call.
+    const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
+    expect(stored).toHaveLength(2);
+
+    // ...and what a concurrent lookup of a third form does DURING that call.
+    await persist('cooking', [
+      { lemma: 'cook', part_of_speech: 'noun',
+        senses: [
+          { sense_code: 'kitchen_worker', translation: 'N-COOKING' },
+          { sense_code: 'cookery_writer', translation: 'N-COOKING-2' },
+          { sense_code: 'ships_cook',     translation: 'N-COOKING-3' }, // learned here
+        ] },
+    ]);
+
+    await withTx(t.db, (tx) =>
+      createDictRepo(tx).repairVariantRenderings({
+        variantId: stale.variantId, userLanguageCode: 'he',
+        senseVersion,
+        senses: stored.map((sense, rank) => ({
+          senseId: sense.senseId, rank, translation: `R-${rank}`,
+          exampleSource: null, exampleTarget: null,
+        })),
+      }));
+
+    // Still stale, and it must be: this repair rendered two of the lexeme's
+    // three senses. Re-reading the version inside the write would have stamped
+    // 3 here and closed the door on `ships_cook` permanently.
+    const after = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+    expect(after.map((row) => row.partOfSpeech)).toEqual(['noun']);
+  });
+
   it('marks the variant level again, so a second lookup is not a second repair', async () => {
     await variantOf('cook', 'noun');
     await persist('cooks', COOKS_PLUS_ONE);
     const [stale] = await withTx(t.db, (tx) =>
       createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
 
-    const stored = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findSensesByLexeme({
-        lemma: 'cook', partOfSpeech: 'noun', languageCode: 'en', userLanguageCode: 'he',
-      }));
+    const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
 
     await withTx(t.db, (tx) =>
       createDictRepo(tx).repairVariantRenderings({
-        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        variantId: stale.variantId, userLanguageCode: 'he',
+        senseVersion,
         senses: stored.map((sense, rank) => ({
           senseId: sense.senseId, rank, translation: `R-${rank}`,
           exampleSource: null, exampleTarget: null,
@@ -132,6 +190,95 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
       await withTx(t.db, (tx) =>
         createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' })),
     ).toEqual([]);
+  });
+});
+
+// Review round 2. The repair's DELETE is unconditional, so a model call that
+// answers `translation: null` for a sense this form has been serving would
+// erase that rendering with nothing to restore it from. And it is worse than a
+// lost rendering: `findSensesByLexeme` reaches senses through an INNER JOIN on
+// `dict_var_translations`, so if this variant were the only bearer of one, the
+// sense would stop appearing in any reconciliation prompt at all — the next
+// form would name the meaning afresh and write a DUPLICATE sense, which is
+// exactly what the reconciliation call exists to prevent, and permanent.
+describe('a repair may not drop a sense the form already renders', () => {
+  const COOK_TWO_SENSES = [
+    { lemma: 'cook', part_of_speech: 'noun',
+      senses: [
+        { sense_code: 'kitchen_worker', translation: 'N-COOK' },
+        { sense_code: 'cookery_writer', translation: 'N-COOK-2' },
+      ] },
+  ];
+
+  it('refuses the write and leaves the stored renderings untouched', async () => {
+    await persist('cook', COOK_TWO_SENSES);
+    // A third sense from another form, so the variant is genuinely stale and a
+    // repair is genuinely due.
+    await persist('cooks', [
+      { lemma: 'cook', part_of_speech: 'noun',
+        senses: [
+          { sense_code: 'kitchen_worker', translation: 'N-COOKS' },
+          { sense_code: 'cookery_writer', translation: 'N-COOKS-2' },
+          { sense_code: 'ships_cook', translation: 'N-COOKS-3' },
+        ] },
+    ]);
+    const [stale] = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+    const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
+    const idOf = (code: string) => stored.find((sense) => sense.senseCode === code)!.senseId;
+
+    // The flaky answer: `cookery_writer` came back as `translation: null`, so
+    // the service filtered it out and this repair renders two of three — one of
+    // them a sense the form is serving right now.
+    const write = withTx(t.db, (tx) =>
+      createDictRepo(tx).repairVariantRenderings({
+        variantId: stale.variantId, userLanguageCode: 'he',
+        senseVersion,
+        senses: [
+          { senseId: idOf('kitchen_worker'), rank: 0, translation: 'R-0',
+            exampleSource: null, exampleTarget: null },
+          { senseId: idOf('ships_cook'), rank: 1, translation: 'R-1',
+            exampleSource: null, exampleTarget: null },
+        ],
+      }));
+
+    await expect(write).rejects.toThrow(/would drop/);
+
+    // Fail closed: the older answer stands, whole, and the form is still marked
+    // stale so the next lookup tries again.
+    const rows = await find('cook');
+    expect(rows.map((row) => row.translation)).toEqual(['N-COOK', 'N-COOK-2']);
+    expect(
+      await withTx(t.db, (tx) =>
+        createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' })),
+    ).toHaveLength(1);
+  });
+
+  it('allows a repair that renders every sense the form already had, and more', async () => {
+    await persist('cook', COOK_TWO_SENSES);
+    await persist('cooks', [
+      { lemma: 'cook', part_of_speech: 'noun',
+        senses: [
+          { sense_code: 'kitchen_worker', translation: 'N-COOKS' },
+          { sense_code: 'cookery_writer', translation: 'N-COOKS-2' },
+          { sense_code: 'ships_cook', translation: 'N-COOKS-3' },
+        ] },
+    ]);
+    const [stale] = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+    const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
+
+    await withTx(t.db, (tx) =>
+      createDictRepo(tx).repairVariantRenderings({
+        variantId: stale.variantId, userLanguageCode: 'he',
+        senseVersion,
+        senses: stored.map((sense, rank) => ({
+          senseId: sense.senseId, rank, translation: `R-${rank}`,
+          exampleSource: null, exampleTarget: null,
+        })),
+      }));
+
+    expect((await find('cook')).map((row) => row.translation)).toEqual(['R-0', 'R-1', 'R-2']);
   });
 });
 
@@ -301,6 +448,62 @@ describe('sense_version stays correct under two concurrent writers', () => {
       const results = await Promise.allSettled([
         withTx(t.db, (tx) => createDictRepo(tx).persistEntries(newEntry(`${lemma}_a`, 'a_sense'))),
         withTx(t.db, (tx) => createDictRepo(tx).persistEntries(newEntry(`${lemma}_b`, 'b_sense'))),
+      ]);
+
+      for (const result of results) {
+        if (result.status === 'rejected') throw result.reason;
+      }
+    }
+  });
+});
+
+// Review round 2. The lock 1b takes is per-entry, inside the loop, and held to
+// commit — so a write's locks are taken in the MODEL's entry order, which is
+// whatever order the answer listed the lexemes in. `mergeEntries` preserves
+// that order, so two concurrent lookups whose answers name the same two
+// lexemes in opposite orders lock them in opposite orders: the textbook
+// ABBA deadlock, and one this change introduced (measured: 10 of 10 attempts
+// of this exact shape aborted with 40P01 before the fix, 0 of 10 after).
+//
+// The fix is not to reorder the entries — `entry_rank` carries the model's
+// order and the answer depends on it — but to resolve every lexeme id first
+// and take ALL the locks in one statement ordered by id, before the per-entry
+// loop begins. Ordered acquisition in a single statement cannot interleave
+// with another session's, so there is no cycle to detect.
+//
+// Both lexemes are seeded first, so step 1 resolves each with a plain SELECT
+// and 1b's FOR UPDATE is the only lock either session takes — the deadlock
+// this reproduces is the lock ORDER, not the lexeme insert.
+describe('two concurrent writes ordering the same lexemes differently', () => {
+  it('does not deadlock when one answer lists them A,B and the other B,A', async () => {
+    const ATTEMPTS = 6;
+
+    for (let i = 0; i < ATTEMPTS; i++) {
+      const alpha = `cook_pair_a_${i}`;
+      const beta = `cook_pair_b_${i}`;
+      const one = (lemma: string) => ({
+        lemma,
+        part_of_speech: 'noun',
+        senses: [{ sense_code: 'kitchen_worker', translation: 'X' }],
+      });
+
+      await persist(`${alpha}_seed`, [one(alpha)]);
+      await persist(`${beta}_seed`, [one(beta)]);
+
+      const write = (form: string, lemmas: string[]) =>
+        withTx(t.db, (tx) =>
+          createDictRepo(tx).persistEntries({
+            form,
+            languageCode: 'en',
+            userLanguageCode: 'he',
+            kind: 'word',
+            entries: lemmas.map(one) as never,
+          }),
+        );
+
+      const results = await Promise.allSettled([
+        write(`${alpha}_ab_${i}`, [alpha, beta]),
+        write(`${beta}_ba_${i}`, [beta, alpha]),
       ]);
 
       for (const result of results) {
