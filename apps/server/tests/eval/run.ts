@@ -295,6 +295,25 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     });
   }
 
+  // Phase 13, F2. Per part of speech, because entries[0] for an inflected form
+  // is the verb and the defect lives on the adjective.
+  if (kase.expectLemmaFor) {
+    for (const [pos, lemma] of Object.entries(kase.expectLemmaFor)) {
+      const matching = result.entries.filter((entry) => entry.part_of_speech === pos);
+      checks.push({
+        name: `the ${pos} entry's lemma is "${lemma}"`,
+        // No entry of that part of speech is a failure too: the case asserts one
+        // exists and names a particular lemma.
+        ok:
+          matching.length > 0 &&
+          matching.every((entry) => entry.lemma.trim().toLowerCase() === lemma),
+        detail: matching.length
+          ? matching.map((entry) => entry.lemma).join(', ')
+          : `no ${pos} entry`,
+      });
+    }
+  }
+
   // Phase 13. Scored against every sense's example, not only the top one: the
   // ambiguous sentence that prompted this rule sat at rank 1.
   if (kase.rejectExample) {

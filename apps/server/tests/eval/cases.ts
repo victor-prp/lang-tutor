@@ -32,6 +32,11 @@ export type EvalCase = {
   /** The top translation must NOT be any of these — the rendering defect:
    *  `booked` answering with an infinitive rather than a past tense. */
   rejectTop?: string[];
+  /** The lemma each named part of speech must resolve to. `expectLemma` reads
+   *  entries[0], which for an inflected form is usually the verb; this reaches
+   *  the entry that actually matters. Phase 13: `burnt` and `burned` are one
+   *  adjective, and must name one lemma. */
+  expectLemmaFor?: Record<string, string>;
   /** No sense's example may contain any of these. A regression lock on a
    *  specific known-bad sentence, exactly as `rejectTop` is on a known-bad
    *  translation — NOT a general claim that every other example is good.
@@ -152,6 +157,30 @@ export const CASES: EvalCase[] = [
     acceptTop: ['מים'],
     expectAlso: ['להשקות'],
     rejectExample: ['The water was cold'],
+  },
+  // Phase 13, F2. The model lemmatises verb forms to the base verb every time,
+  // but wavers on participial adjectives: `burnt` came back as the adjective
+  // `burn` while `burned` came back as the adjective `burned`. Two lexemes for
+  // one adjective — British and American spellings of a single word — each with
+  // its own sense list, neither ever able to see the other's, and reconciliation
+  // structurally unable to help because it keys on the lemma that differs.
+  //
+  // The convention is the regular -ed spelling, so both of these must name
+  // `burned`. `burning` is deliberately NOT expected to merge: an active
+  // participle adjective is a different adjective from a passive one.
+  {
+    label: 'a participial adjective names one lemma whichever spelling is typed',
+    text: 'burnt',
+    expectKind: 'word',
+    acceptTop: ['שרוף', 'שרף', 'נשרף'],
+    expectLemmaFor: { adjective: 'burned' },
+  },
+  {
+    label: 'and the other spelling names the same one',
+    text: 'burned',
+    expectKind: 'word',
+    acceptTop: ['שרף', 'שרוף', 'נשרף'],
+    expectLemmaFor: { adjective: 'burned' },
   },
   {
     label: 'gibberish returns nothing rather than an invented translation',
