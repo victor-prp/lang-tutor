@@ -265,8 +265,8 @@ are indistinguishable — that is the design.
 
 `content.generated.ts` now holds a real recording, not placeholders: thirteen strings, generated
 once against Gemini by `npm run content:generate` and reviewed by hand. Together they carry
-seventeen senses (`window` has three, `book` and `water` two each, the rest one), fourteen of
-which carry an `example`. The file's own header — "Recorded provider answers… reviewed by
+twenty-two senses across fifteen lexemes (`window` has four, `book`, `water`, `friend` and
+`difficult` more than one, the rest a single sense each), every one carrying an `example`. The file's own header — "Recorded provider answers… reviewed by
 hand… DO NOT EDIT BY HAND" — is therefore true; do not hand-edit it.
 
 The seed teaches thirteen strings rather than sixteen on purpose. Three — `I don't
