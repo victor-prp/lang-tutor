@@ -12,25 +12,38 @@ test.setTimeout(120_000);
 // reaches MockServer — which is the whole point, and would otherwise turn the
 // 502 and timeout tests into silent 200s.
 
+// Two entries, not one: since phase 12 an entry is a LEXEME — a lemma together
+// with a part of speech — so a single entry whose senses span noun and verb is
+// no longer expressible, and the schema rejects it. The senses are the same
+// three; what changed is which entry each belongs to.
+//
+// That also changes the order they arrive in, because the merge is round-robin
+// across entries by rank: noun[0], verb[0], noun[1] — סולם, להוביל, דירוג. The
+// assertions below care about the top sense and the count behind `more`, both
+// of which are unchanged.
 const LADDER_ENTRIES = [
   {
     lemma: 'ladder',
+    part_of_speech: 'noun',
     senses: [
       {
         translation: 'סולם',
-        part_of_speech: 'noun',
         example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
         sense_code: 'climbing_frame',
       },
       {
         translation: 'דירוג',
-        part_of_speech: 'noun',
         example: { source: 'He moved up the corporate ladder.', target: 'הוא עלה בסולם הדרגות.' },
         sense_code: 'ranking',
       },
+    ],
+  },
+  {
+    lemma: 'ladder',
+    part_of_speech: 'verb',
+    senses: [
       {
         translation: 'להוביל',
-        part_of_speech: 'verb',
         example: { source: 'The path ladders down to the beach.', target: 'השביל מוביל במדרגות לחוף.' },
         sense_code: 'lead',
       },
@@ -94,6 +107,9 @@ test('a sentence gets one translation, with neither more nor a save button', asy
     entries: [
       {
         lemma: "I'm looking forward to seeing you",
+        // Required by the schema and discarded for a sentence, which is never
+        // written to the dictionary — the prompt says as much.
+        part_of_speech: 'verb',
         senses: [{ translation: 'אני מצפה לראות אותך.', sense_code: 'the_sentence' }],
       },
     ],
@@ -129,10 +145,10 @@ test('a failing provider shows the error, and retry works once it recovers', asy
   const ANCHOR_ENTRIES = [
     {
       lemma: 'anchor',
+      part_of_speech: 'noun',
       senses: [
         {
           translation: 'עוגן',
-          part_of_speech: 'noun',
           example: { source: 'The ship dropped anchor.', target: 'הספינה הטילה עוגן.' },
           sense_code: 'ship_anchor',
         },
@@ -163,16 +179,15 @@ test('a word looked up twice is answered without the provider the second time', 
   const KITE_ENTRIES = [
     {
       lemma: 'kite',
+      part_of_speech: 'noun',
       senses: [
         {
           translation: 'עפיפון',
-          part_of_speech: 'noun',
           example: { source: 'The kite flew over the beach.', target: 'העפיפון עף מעל החוף.' },
           sense_code: 'flying_toy',
         },
         {
           translation: 'דיה',
-          part_of_speech: 'noun',
           example: { source: 'A kite circled above the field.', target: 'דיה חגה מעל השדה.' },
           sense_code: 'bird_of_prey',
         },
