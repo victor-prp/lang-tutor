@@ -94,7 +94,27 @@ export function flattenEntries(entries: LlmEntry[]): TranslationSense[] {
  * turns a hit into a silent miss.
  */
 export function normalizeForm(text: string): string {
-  return text.trim().replace(/\s+/g, ' ');
+  const collapsed = text.trim().replace(/\s+/g, ' ');
+
+  // A multi-word expression keeps its punctuation: it is part of the
+  // expression, and two seeded ones — `How do you do?` and `Have a nice day!` —
+  // are stored with it. Only a single token is treated as a bare key with a
+  // sentence mark stuck to it.
+  if (/\s/.test(collapsed)) return collapsed;
+
+  // Phase 13. What this function returns is a dictionary KEY — the `form` a
+  // variant is stored and matched under — and the dictionary has no TTL, so a
+  // key that differs by a keystroke is a second permanent copy of the word. The
+  // dev database held `book` with three senses and `book?` with four: two
+  // lookups, two provider calls, two divergent answers for one word.
+  //
+  // Nikud survives this: Hebrew points are combining marks, not punctuation,
+  // and they are part of the word rather than something stuck to its end.
+  const stripped = collapsed.replace(/[.,;:!?]+$/u, '');
+
+  // An input that is nothing but punctuation has no key to strip down to, and
+  // an empty form would defeat the request schema's min(1) after the fact.
+  return stripped === '' ? collapsed : stripped;
 }
 
 /** Both codes come from `direction` alone. No user id is involved, which is why

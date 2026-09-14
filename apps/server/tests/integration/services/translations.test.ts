@@ -90,6 +90,32 @@ describe('translate, against a real database', () => {
     expect(await countGeminiRequests(ns, 'ladder')).toBe(1);
   });
 
+  // Phase 13. `book?` was a different dictionary key from `book`, so a trailing
+  // keystroke bought a second provider call and a second permanent copy of the
+  // word — the dev database held `book` with three senses and `book?` with
+  // four. The sibling of the casing-and-spacing case above, and it asserts the
+  // same two things: the answer comes back, and the provider was not asked.
+  it('serves a punctuated spelling of the same word from the dictionary', async () => {
+    await expectGeminiJson(ns, { kind: 'word', entries: [entry('ladder', ['סולם'])] });
+    const service = translations();
+
+    await service.translate({ text: 'ladder' });
+    const again = await service.translate({ text: 'ladder?' });
+
+    expect(again.senses).toEqual([
+      {
+        translation: 'סולם',
+        part_of_speech: 'verb',
+        example: { source: 'A sentence about ladder.', target: 'משפט.' },
+      },
+    ]);
+    // The key is normalized; what the learner typed is still what comes back.
+    expect(again.text).toBe('ladder?');
+    // A request body for `ladder?` contains `ladder`, so a second provider call
+    // would push this to 2 — which is exactly what makes 1 the proof.
+    expect(await countGeminiRequests(ns, 'ladder')).toBe(1);
+  });
+
   it('walks the saw sequence end to end', async () => {
     // Phase 12 adds a SECOND provider call wherever the lexeme an entry names
     // already has senses, so this sequence now needs two reconciliation

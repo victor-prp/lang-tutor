@@ -136,8 +136,37 @@ describe('normalizeForm', () => {
     expect(normalizeForm('How do you do?')).toBe('How do you do?');
   });
 
-  it('leaves a Hebrew string untouched, nikud and punctuation included', () => {
-    expect(normalizeForm('שָׁלוֹם!')).toBe('שָׁלוֹם!');
+  it('leaves nikud alone — it is part of the word, not punctuation around it', () => {
+    expect(normalizeForm('שָׁלוֹם')).toBe('שָׁלוֹם');
+  });
+
+  // Phase 13. `normalizeForm` is what turns a typed string into a dictionary
+  // KEY, and it used to collapse whitespace and nothing else — so `book?` was a
+  // different key from `book`, looked up separately, paid for separately and
+  // stored forever alongside it. The dev database held exactly that: `book` with
+  // three senses and `book?` with four, divergent copies of one word.
+  it('strips trailing punctuation from a single word, which is a key and not a sentence', () => {
+    expect(normalizeForm('book?')).toBe('book');
+    expect(normalizeForm('booked.')).toBe('booked');
+    expect(normalizeForm('book!!!')).toBe('book');
+  });
+
+  it('strips it in either script — the same key collision exists in Hebrew', () => {
+    expect(normalizeForm('שלום!')).toBe('שלום');
+  });
+
+  // The narrow rule, and why it is narrow: punctuation is part of a multi-word
+  // expression, and two of the seeded ones carry it. Stripping here would split
+  // every recorded phrase away from its own seed row.
+  it('leaves a multi-word expression its punctuation', () => {
+    expect(normalizeForm('How do you do?')).toBe('How do you do?');
+    expect(normalizeForm('Have a nice day!')).toBe('Have a nice day!');
+  });
+
+  // Stripping to nothing would hand the lookup an empty form, which the request
+  // schema's min(1) had already rejected on the way in.
+  it('never strips a form away to nothing', () => {
+    expect(normalizeForm('?!')).toBe('?!');
   });
 
   it('collapses a tab and a newline the same way as a space', () => {
