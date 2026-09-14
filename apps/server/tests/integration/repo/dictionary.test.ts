@@ -651,8 +651,11 @@ describe('findSensesByLexeme', () => {
       },
     ]);
 
+    // senseId is a database-issued uuid — matched by shape (Task 13 widened
+    // this read to carry it, for the repair path's idByCode lookup).
     expect(await byLexeme('cook', 'verb')).toEqual([
       {
+        senseId: expect.any(String),
         senseCode: 'prepare_food',
         translation: 'לבשל',
         exampleSource: 'I cook dinner.',

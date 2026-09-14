@@ -64,6 +64,11 @@ export const dictLexemes = pgTable(
     // that — which is what stops `booked` reaching the noun's senses.
     partOfSpeech: varchar('part_of_speech', { length: 50 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Bumped whenever this lexeme gains a sense. A variant records the value it
+    // was rendered against, and a variant that is behind is re-rendered on its
+    // next lookup — which is what stops two forms of one word disagreeing about
+    // how many meanings it has.
+    senseVersion: integer('sense_version').notNull().default(0),
   },
   (t) => [
     unique('dict_lexemes_language_lemma_pos_key').on(t.languageCode, t.lemma, t.partOfSpeech),
@@ -93,6 +98,13 @@ export const dictVariants = pgTable(
     // sits on the variant rather than the term because it is a property of the
     // pairing: `saw` ranks `see` first, while `saws` returns `saw` alone at 0.
     entryRank: integer('entry_rank').notNull(),
+    // The lexeme's sense_version when this form's translations were last
+    // written. NOT a count of those translations: a form may legitimately
+    // render fewer senses than its lexeme holds, because the reconciliation
+    // call returns `translation: null` for a sense the form does not admit —
+    // adjectival `booked` has no record-a-charge reading. Counting would call
+    // that form permanently stale and re-render it on every single lookup.
+    renderedSenseVersion: integer('rendered_sense_version').notNull().default(0),
   },
   (t) => [
     // Per term, so one form may belong to several terms — `saw` is a variant of

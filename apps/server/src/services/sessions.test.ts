@@ -57,7 +57,13 @@ describe('repos', () => {
     findSensesByLexeme: () => {
       throw new Error('the session service must not read the dictionary tables');
     },
+    findStaleLexemesByForm: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
     persistEntries: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    repairVariantRenderings: () => {
       throw new Error('the session service must not write the dictionary tables');
     },
   };

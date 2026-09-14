@@ -9,8 +9,9 @@ import {
   mergeEntries,
   normalizeForm,
   rowsToSenses,
+  staleLexemes,
 } from './dictionary';
-import type { SenseRow } from './dictionary';
+import type { SenseRow, StaleLexemeRow } from './dictionary';
 
 const sense = (translation: string, sense_code: string): LlmEntry['senses'][number] => ({
   translation,
@@ -359,5 +360,31 @@ describe('a lexeme is a lemma and a part of speech', () => {
       { lemma: 'book', part_of_speech: 'verb', senses: [s('make_reservation', 'V1')] },
     ]);
     expect(flat.map((x) => x.part_of_speech)).toEqual(['noun', 'verb']);
+  });
+});
+
+describe('staleLexemes', () => {
+  const row = (over: Partial<StaleLexemeRow>): StaleLexemeRow => ({
+    lexemeId: 'L1', variantId: 'V1', lemma: 'book', partOfSpeech: 'noun',
+    senseVersion: 1, renderedSenseVersion: 1, ...over,
+  });
+
+  it('reports nothing when every lexeme is level', () => {
+    expect(staleLexemes([row({}), row({ lexemeId: 'L2', variantId: 'V2' })])).toEqual([]);
+  });
+
+  it('reports only the lexeme that is behind', () => {
+    const stale = staleLexemes([
+      row({}),
+      row({ lexemeId: 'L2', variantId: 'V2', partOfSpeech: 'verb', senseVersion: 3, renderedSenseVersion: 2 }),
+    ]);
+    expect(stale).toEqual([{ lexemeId: 'L2', variantId: 'V2', lemma: 'book', partOfSpeech: 'verb' }]);
+  });
+
+  // A form that legitimately declined a sense is level, not behind: the
+  // reconciliation call answered `translation: null` and the variant's version
+  // was still set to the lexeme's. Counting translations would get this wrong.
+  it('does not report a form that rendered fewer senses than its lexeme holds', () => {
+    expect(staleLexemes([row({ senseVersion: 4, renderedSenseVersion: 4 })])).toEqual([]);
   });
 });

@@ -1,5 +1,6 @@
 import type {
   LlmEntry,
+  PartOfSpeech,
   TranslationDirection,
   TranslationRequest,
   TranslationResponse,
@@ -22,9 +23,12 @@ import {
   mergeEntries,
   normalizeForm,
   rowsToSenses,
+  type SenseRow,
+  type StaleLexeme,
 } from '../domain/dictionary';
 import { TranslationUnreadable } from '../errors';
 import type { Logger } from '../logger';
+import type { RepairedRendering } from '../repo/dictionary';
 import type { LlmClient } from './llm';
 import type { Transaction } from './transaction';
 
@@ -132,6 +136,122 @@ async function reconcile(input: {
 }
 
 /**
+ * Re-render one form for every lexeme of it that has learned a sense since the
+ * form was last written. Reuses `buildRenderingPrompt` unchanged.
+ *
+ * Throws on an unreadable answer, exactly like `reconcile` — but the CALLER
+ * treats the throw differently: `reconcile` fails the lookup, this one is
+ * caught and the stored answer served, because a failure here writes nothing.
+ */
+async function repairForm({
+  llm,
+  transaction,
+  form,
+  direction,
+  stale,
+  source,
+  target,
+}: {
+  llm: LlmClient;
+  transaction: Transaction;
+  form: string;
+  direction: TranslationDirection;
+  stale: StaleLexeme[];
+  source: string;
+  target: string;
+}): Promise<SenseRow[]> {
+  // ONE transaction for every stale lexeme's senses, not one each. A
+  // transaction per lexeme inside the Promise.all below would open N pooled
+  // connections to do N tiny reads that could share one, and serialise nothing
+  // useful — the parallelism that matters is the model calls, which come after.
+  //
+  // `transaction` is destructured and called bare, never read off a `deps` or
+  // `input` object — the same discipline `createTranslationService` documents
+  // for itself — because R8's lint check scans this tree for any other
+  // dotted call site of the primitive.
+  const storedPerLexeme = await transaction((repos) =>
+    Promise.all(
+      stale.map((lexeme) =>
+        repos.dict.findSensesByLexeme({
+          lemma: lexeme.lemma,
+          partOfSpeech: lexeme.partOfSpeech,
+          languageCode: source,
+          userLanguageCode: target,
+        }),
+      ),
+    ),
+  );
+
+  const rendered = await Promise.all(
+    stale.map(async (lexeme, index) => {
+      const stored = storedPerLexeme[index];
+
+      const raw = await llm(
+        buildRenderingPrompt({
+          form,
+          direction,
+          lemma: lexeme.lemma,
+          partOfSpeech: lexeme.partOfSpeech as PartOfSpeech,
+          storedSenses: stored,
+        }),
+      );
+
+      const parsed = parseLlmReconciliation(raw);
+      if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
+
+      // Same three filters as `reconcile`, and for the same reasons: a null
+      // translation is the form declining the sense; a repeated sense_code
+      // would collide on the primary key; an unknown code names no stored
+      // sense, and a repair may not invent one — that is what a MISS is for.
+      const idByCode = new Map(stored.map((sense) => [sense.senseCode, sense.senseId]));
+      const seen = new Set<string>();
+      const senses: RepairedRendering[] = [];
+      for (const rendering of parsed.senses) {
+        if (rendering.translation === null) continue;
+        if (seen.has(rendering.sense_code)) continue;
+        if (!idByCode.has(rendering.sense_code)) continue;
+        seen.add(rendering.sense_code);
+        senses.push({
+          senseId: idByCode.get(rendering.sense_code)!,
+          // Re-sequenced from 0 and contiguous, never the model's index:
+          // UNIQUE(variant_id, user_language_code, rank) rejects a hole.
+          rank: senses.length,
+          translation: rendering.translation,
+          exampleSource: rendering.example?.source ?? null,
+          exampleTarget: rendering.example?.target ?? null,
+        });
+      }
+
+      if (senses.length === 0) {
+        throw new TranslationUnreadable(
+          `repair returned no usable sense for ${lexeme.lemma} (${lexeme.partOfSpeech})`,
+        );
+      }
+      return { lexeme, senses };
+    }),
+  );
+
+  // ONE write transaction for every stale lexeme of this form, ending in the
+  // re-read — the same shape `persistEntries` uses, and what keeps the answer
+  // identical to what the next lookup would produce.
+  return transaction(async (repos) => {
+    for (const { lexeme, senses } of rendered) {
+      await repos.dict.repairVariantRenderings({
+        variantId: lexeme.variantId,
+        lexemeId: lexeme.lexemeId,
+        userLanguageCode: target,
+        senses,
+      });
+    }
+    return repos.dict.findSensesByForm({
+      form,
+      languageCode: source,
+      userLanguageCode: target,
+    });
+  });
+}
+
+/**
  * One use case: translate a word, phrase or sentence, reusing what the
  * dictionary already holds.
  *
@@ -164,13 +284,28 @@ export function createTranslationService({
       const { source, target } = languagesFor(direction);
       const form = normalizeForm(text);
 
-      const hit = await transaction((repos) =>
-        repos.dict.findSensesByForm({
-          form,
-          languageCode: source,
-          userLanguageCode: target,
-        }),
-      );
+      const { hit, stale } = await transaction(async (repos) => ({
+        hit: await repos.dict.findSensesByForm({ form, languageCode: source, userLanguageCode: target }),
+        stale: await repos.dict.findStaleLexemesByForm({ form, languageCode: source }),
+      }));
+
+      if (hit.length > 0 && stale.length > 0) {
+        // The repair reuses buildRenderingPrompt verbatim: "here is everything
+        // this lexeme knows, render it for THIS form and rank it for THIS
+        // form" is exactly what a repair needs, and that prompt is eval-scored.
+        try {
+          const repaired = await repairForm({ llm, transaction, form, direction, stale, source, target });
+          logger.info({ event: 'dict_repaired', form, lexeme_count: stale.length });
+          return { text, direction, kind: kindForForm(repaired), senses: rowsToSenses(repaired) };
+        } catch (error) {
+          // Deliberately NOT the fail-closed path. A failed repair writes
+          // nothing, so the stored rows stand — correct when written, merely
+          // incomplete. Failing the request would deny a learner an answer the
+          // dictionary already holds, to protect them from an answer that is
+          // not wrong. See the spec's "When the repair fails".
+          logger.error('dict_repair_failed', error);
+        }
+      }
 
       if (hit.length > 0) {
         const senses = rowsToSenses(hit);

@@ -205,6 +205,37 @@ export function entriesToRows(entries: LlmEntry[]): EntryRows[] {
   }));
 }
 
+/** One row of the staleness probe: a form's variant beside the lexeme it belongs to. */
+export type StaleLexemeRow = {
+  lexemeId: string;
+  variantId: string;
+  lemma: string;
+  partOfSpeech: string;
+  senseVersion: number;
+  renderedSenseVersion: number;
+};
+
+export type StaleLexeme = Omit<StaleLexemeRow, 'senseVersion' | 'renderedSenseVersion'>;
+
+/**
+ * Which of a form's lexemes have learned a sense since this form was rendered.
+ *
+ * A form spans one variant per lexeme it belongs to — `book` is a variant of the
+ * noun lexeme AND of the verb lexeme — and they go stale independently, so this
+ * returns a list rather than a boolean. Only the stale ones are re-rendered;
+ * `reconcile` is already per-entry, so that falls out of the existing shape.
+ */
+export function staleLexemes(rows: StaleLexemeRow[]): StaleLexeme[] {
+  return rows
+    .filter((row) => row.renderedSenseVersion < row.senseVersion)
+    .map(({ lexemeId, variantId, lemma, partOfSpeech }) => ({
+      lexemeId,
+      variantId,
+      lemma,
+      partOfSpeech,
+    }));
+}
+
 /**
  * Rows to the wire, field by field. The order is the read's, untouched.
  *

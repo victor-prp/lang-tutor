@@ -8,7 +8,13 @@ import {
   dictLexemes,
   dictSenses,
 } from '../db/schema';
-import { entriesToRows, rowsToSenses, type SenseRow } from '../domain/dictionary';
+import {
+  entriesToRows,
+  rowsToSenses,
+  staleLexemes,
+  type SenseRow,
+  type StaleLexeme,
+} from '../domain/dictionary';
 
 // The response cap. The database has no five limit — `see` keeps all its
 // senses and `saw` all of its — so this truncates the merge and nothing else,
@@ -35,6 +41,15 @@ export type PersistedEntry = {
   variantId: string;
   senseIds: string[];
   created: boolean;
+};
+
+/** One rendering a repair produces. Exported beside `PersistedEntry`. */
+export type RepairedRendering = {
+  senseId: string;
+  rank: number;
+  translation: string;
+  exampleSource: string | null;
+  exampleTarget: string | null;
 };
 
 export function createDictRepo(tx: Tx) {
@@ -103,6 +118,35 @@ export function createDictRepo(tx: Tx) {
       .limit(READ_LIMIT);
 
   /**
+   * One row per lexeme this form belongs to, carrying both versions. No limit
+   * and no join to the translations: staleness is a property of the variant,
+   * not of the rows that happen to fit in an answer.
+   */
+  const findStaleLexemesByForm = async (input: {
+    form: string;
+    languageCode: string;
+  }): Promise<StaleLexeme[]> =>
+    staleLexemes(
+      await tx
+        .select({
+          lexemeId: dictVariants.lexemeId,
+          variantId: dictVariants.id,
+          lemma: dictLexemes.lemma,
+          partOfSpeech: dictLexemes.partOfSpeech,
+          senseVersion: dictLexemes.senseVersion,
+          renderedSenseVersion: dictVariants.renderedSenseVersion,
+        })
+        .from(dictVariants)
+        .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
+        .where(
+          and(
+            eq(dictVariants.languageCode, input.languageCode),
+            sql`lower(${dictVariants.form}) = ${input.form.toLowerCase()}`,
+          ),
+        ),
+    );
+
+  /**
    * The stored senses of one lexeme, for the reconciliation prompt. Keyed by
    * (lemma, part_of_speech) rather than by id because the service has only what
    * the first model call returned — it does not know the lexeme id, and may find
@@ -135,19 +179,20 @@ export function createDictRepo(tx: Tx) {
     languageCode: string;
     userLanguageCode: string;
   }): Promise<
-    { senseCode: string; translation: string; exampleSource: string | null;
+    { senseId: string; senseCode: string; translation: string; exampleSource: string | null;
       exampleTarget: string | null }[]
   > => {
     // Drizzle has no first-class DISTINCT ON, so this is written as `sql`. The
     // shape is the invariant, not the spelling: one row per sense, chosen
     // deterministically, over ALL variants of the lexeme.
     const rows = await tx.execute<{
+      sense_id: string;
       sense_code: string;
       translation: string;
       example_source: string | null;
       example_target: string | null;
     }>(sql`
-      SELECT sense_code, translation, example_source, example_target
+      SELECT sense_id, sense_code, translation, example_source, example_target
       FROM (
         SELECT DISTINCT ON (s.id)
                s.id          AS sense_id,
@@ -170,6 +215,7 @@ export function createDictRepo(tx: Tx) {
     `);
 
     return rows.rows.map((row) => ({
+      senseId: row.sense_id,
       senseCode: row.sense_code,
       translation: row.translation,
       exampleSource: row.example_source,
@@ -185,9 +231,11 @@ export function createDictRepo(tx: Tx) {
    * accumulate near-duplicate meanings. A *translation* is written once per
    * (variant, sense): step 5. So a second form of a headword the dictionary
    * already knows adds no senses but does add its own renderings of them, which
-   * is the whole of the rendering fix. Neither is ever rewritten, merged or
-   * refreshed — there is no TTL and no invalidation, which is what makes the
-   * concurrent case trivial and is also why a poor answer is served from then on.
+   * is the whole of the rendering fix. A translation is rewritten only by
+   * `repairVariantRenderings`, when its lexeme has learned a sense this form has
+   * never rendered — otherwise there is no TTL and no invalidation, which is
+   * what makes the concurrent case trivial and is also why a poor answer is
+   * served from then on.
    *
    * Which senses an entry names is decided before this function is reached: the
    * reconciliation call in services/translations.ts maps a new form's senses
@@ -290,6 +338,24 @@ export function createDictRepo(tx: Tx) {
         senseIds.push(id);
       }
 
+      // 4b — the lexeme's sense version. A recomputed count, not `+= n`: two
+      // concurrent writers both reach this UPDATE, the second blocks on the row
+      // until the first commits, and each then recomputes the true total. An
+      // increment would double-count or drop one depending on interleaving.
+      // Senses are only ever added, never removed, so a count is monotonic and
+      // is a valid version.
+      await tx
+        .update(dictLexemes)
+        .set({
+          senseVersion: sql`(SELECT count(*) FROM ${dictSenses} WHERE ${dictSenses.lexemeId} = ${lexemeId})`,
+        })
+        .where(eq(dictLexemes.id, lexemeId));
+
+      const [versioned] = await tx
+        .select({ senseVersion: dictLexemes.senseVersion })
+        .from(dictLexemes)
+        .where(eq(dictLexemes.id, lexemeId));
+
       // 5 — this variant's own renderings. DO NOTHING because a form written
       // twice keeps the answer it already gave: phase 10's guarantee, now held
       // at the level that actually decides an answer.
@@ -320,6 +386,14 @@ export function createDictRepo(tx: Tx) {
           ],
         });
 
+      // 5b — this form is now rendered against that version. Read AFTER the
+      // bump, never before: stamping the pre-bump value would leave the variant
+      // permanently one behind and re-render it on every lookup forever.
+      await tx
+        .update(dictVariants)
+        .set({ renderedSenseVersion: versioned.senseVersion })
+        .where(eq(dictVariants.id, variant.id));
+
       written.push({
         lemma: entry.lemma,
         lexemeId,
@@ -345,7 +419,61 @@ export function createDictRepo(tx: Tx) {
     return { written, senses };
   };
 
-  return { findSensesByForm, findSensesByLexeme, persistEntries };
+  /**
+   * Replace one variant's renderings for one target language, and mark it
+   * rendered against the lexeme's current version.
+   *
+   * DELETE then INSERT rather than UPDATE, because the repair may return fewer
+   * senses than are stored (the form declined one) as well as more, and because
+   * re-ranking in place would collide with
+   * UNIQUE(variant_id, user_language_code, rank) partway through — the
+   * constraint is checked per statement, not at commit.
+   */
+  const repairVariantRenderings = async (input: {
+    variantId: string;
+    lexemeId: string;
+    userLanguageCode: string;
+    senses: RepairedRendering[];
+  }): Promise<void> => {
+    await tx
+      .delete(dictVarTranslations)
+      .where(
+        and(
+          eq(dictVarTranslations.variantId, input.variantId),
+          eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
+        ),
+      );
+
+    await tx.insert(dictVarTranslations).values(
+      input.senses.map((sense) => ({
+        variantId: input.variantId,
+        senseId: sense.senseId,
+        userLanguageCode: input.userLanguageCode,
+        rank: sense.rank,
+        translation: sense.translation,
+        exampleSource: sense.exampleSource,
+        exampleTarget: sense.exampleTarget,
+      })),
+    );
+
+    const [lexeme] = await tx
+      .select({ senseVersion: dictLexemes.senseVersion })
+      .from(dictLexemes)
+      .where(eq(dictLexemes.id, input.lexemeId));
+
+    await tx
+      .update(dictVariants)
+      .set({ renderedSenseVersion: lexeme.senseVersion })
+      .where(eq(dictVariants.id, input.variantId));
+  };
+
+  return {
+    findSensesByForm,
+    findSensesByLexeme,
+    findStaleLexemesByForm,
+    persistEntries,
+    repairVariantRenderings,
+  };
 }
 
 export type DictRepo = ReturnType<typeof createDictRepo>;

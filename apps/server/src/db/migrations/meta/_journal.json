@@ -43,6 +43,13 @@
       "when": 1789328794945,
       "tag": "0005_lexemes_and_form_translations",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789421933305,
+      "tag": "0006_sense_versions",
+      "breakpoints": true
     }
   ]
 }

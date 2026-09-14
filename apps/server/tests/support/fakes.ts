@@ -1,12 +1,17 @@
 import type { User } from '@lang-tutor/core/api';
 
 import type { AppDeps } from '../../src/composition';
-import { flattenEntries, rowsToSenses, type SenseRow } from '../../src/domain/dictionary';
+import {
+  flattenEntries,
+  rowsToSenses,
+  type SenseRow,
+  type StaleLexeme,
+} from '../../src/domain/dictionary';
 import type { StoredSense } from '../../src/domain/translation';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
-import type { PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
+import type { PersistEntriesInput, DictRepo, RepairedRendering } from '../../src/repo/dictionary';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
@@ -149,6 +154,20 @@ export type FakeDictRepo = DictRepo & {
    *  the entries it was handed, flattened by the real domain function — which
    *  is what the real re-read would produce for a form nobody else claims. */
   reread: SenseRow[];
+  /** What `findStaleLexemesByForm` answers with. Empty is level — the default,
+   *  so an existing hit-path test that never mentions staleness keeps taking the
+   *  plain-hit branch. */
+  stale: StaleLexeme[];
+  staleReads: { form: string; languageCode: string }[];
+  /** Set to make the repair write throw, the same way `persistError` does for
+   *  `persistEntries`. */
+  repairError: Error | null;
+  repaired: {
+    variantId: string;
+    lexemeId: string;
+    userLanguageCode: string;
+    senses: RepairedRendering[];
+  }[];
   /** Set to make the write throw. */
   persistError: Error | null;
   persisted: PersistEntriesInput[];
@@ -161,6 +180,10 @@ export function createFakeDictRepo(): FakeDictRepo {
     stored: {},
     lexemeReads: [],
     reread: [],
+    stale: [],
+    staleReads: [],
+    repairError: null,
+    repaired: [],
     persistError: null,
     persisted: [],
     reads: [],
@@ -170,7 +193,19 @@ export function createFakeDictRepo(): FakeDictRepo {
     },
     findSensesByLexeme: async (input) => {
       repo.lexemeReads.push({ lemma: input.lemma, partOfSpeech: input.partOfSpeech });
-      return repo.stored[`${input.lemma}:${input.partOfSpeech}`] ?? [];
+      const senses = repo.stored[`${input.lemma}:${input.partOfSpeech}`] ?? [];
+      // A test builds `stored` entries without a senseId — the repository's own
+      // shape is what changed, not what a unit test needs to say. Synthesized
+      // from the sense_code, which is unique per lexeme, same as the real id.
+      return senses.map((sense) => ({ senseId: `sense-${sense.senseCode}`, ...sense }));
+    },
+    findStaleLexemesByForm: async (input) => {
+      repo.staleReads.push(input);
+      return repo.stale;
+    },
+    repairVariantRenderings: async (input) => {
+      repo.repaired.push(input);
+      if (repo.repairError) throw repo.repairError;
     },
     persistEntries: async (input) => {
       repo.persisted.push(input);

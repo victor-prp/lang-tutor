@@ -293,4 +293,76 @@ describe('translate, against a real database', () => {
     // would be in this body. The meaning is stored once.
     expect(await countGeminiRequests(ns, 'river_edge')).toBe(0);
   });
+
+  // F5. `scan` is not in the seed. Registration order matters: the
+  // reconciliation prompts also carry the quoted form, so they are registered
+  // first — see the `bank`/`banks` case above.
+  //
+  // NOT the file's `entry()` helper. That generates `sense_code: scan_0`,
+  // `scan_1`, so the first lookup would store codes the reconciliation
+  // responses below never name — reconciliation would treat all three as NEW
+  // and the lexeme would end up with five senses instead of three, quietly
+  // testing nothing.
+  const scanVerb = (senses: { translation: string; sense_code: string }[]) => ({
+    kind: 'word' as const,
+    entries: [{ lemma: 'scan', part_of_speech: 'verb' as const, senses }],
+  });
+
+  it('re-renders a form once its lexeme has learned a new sense', async () => {
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCANS-READ' },
+        { sense_code: 'examine_closely', translation: 'SCANS-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCANS-DIGITIZE' },
+      ],
+      matchText: '"scans"',
+    });
+    // The repair call for `scan`: same prompt, same shape, now listing three.
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCAN-READ' },
+        { sense_code: 'digitize_image', translation: 'SCAN-DIGITIZE' },
+        { sense_code: 'examine_closely', translation: 'SCAN-EXAMINE' },
+      ],
+      matchText: '"scan"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCANS-READ', sense_code: 'read_quickly' },
+        { translation: 'SCANS-EXAMINE', sense_code: 'examine_closely' },
+        { translation: 'SCANS-DIGITIZE', sense_code: 'digitize_image' },
+      ]),
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCAN-READ', sense_code: 'read_quickly' },
+        { translation: 'SCAN-EXAMINE', sense_code: 'examine_closely' },
+      ]),
+      matchText: '"scan"',
+    });
+
+    const service = translations();
+
+    const first = await service.translate({ text: 'scan' });
+    expect(first.senses.map((s) => s.translation)).toEqual(['SCAN-READ', 'SCAN-EXAMINE']);
+
+    await service.translate({ text: 'scans' });
+
+    // The repair: three senses, and re-RANKED by the repair call rather than
+    // appended at the end. digitize_image comes second because that is where
+    // this form ranked it, which is the whole reason rank lives on the
+    // translation.
+    const healed = await service.translate({ text: 'scan' });
+    expect(healed.senses.map((s) => s.translation)).toEqual([
+      'SCAN-READ',
+      'SCAN-DIGITIZE',
+      'SCAN-EXAMINE',
+    ]);
+
+    // And the repair is paid once. A fourth lookup is a plain hit.
+    const afterRepair = await countGeminiRequests(ns);
+    expect(await service.translate({ text: 'scan' })).toEqual(healed);
+    expect(await countGeminiRequests(ns)).toBe(afterRepair);
+  });
 });
