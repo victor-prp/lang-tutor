@@ -83,12 +83,16 @@ describe('dictionary export/restore', () => {
 
     // Versions are DERIVED on import, never carried in the file. A dump that
     // could resurrect a stale marker would make a restore re-render every form
-    // it touched, at one provider call each. `book` is unrelated to this
-    // restore's content — it comes from `target`'s own seed — so this proves
-    // the restore left it alone rather than merely that this restore had
-    // nothing stale to carry.
+    // it touched, at one provider call each.
+    //
+    // Asserted on `saw`, which this restore actually WROTE — both of its
+    // lexemes, `see` and `saw`, are created here. An assertion on `book` (as
+    // this first read) cannot fail whatever the import does: `book` comes from
+    // the target's own seed and no record in this file touches it, so a stale
+    // marker surviving a restore would leave it level regardless. A check that
+    // cannot fire prints exactly what a passing one prints.
     const stale = await withTx(target.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'book', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'saw', languageCode: 'en' }));
     expect(stale).toEqual([]);
   });
 

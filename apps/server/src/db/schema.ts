@@ -104,6 +104,15 @@ export const dictVariants = pgTable(
     // call returns `translation: null` for a sense the form does not admit —
     // adjectival `booked` has no record-a-charge reading. Counting would call
     // that form permanently stale and re-render it on every single lookup.
+    //
+    // **Caveat for the second target language.** This is one column per
+    // variant, while a rendering is per (variant, sense, user_language_code).
+    // en↔he is the only pair today, so the two are the same thing; add a
+    // second target language and they part company — a repair rendering `he`
+    // would mark the variant level and leave the other language's rows
+    // unrepairable, since nothing then records that they are behind. The fix
+    // when that day comes is to key this by user_language_code (its own table,
+    // or a column on it), not to count rows here.
     renderedSenseVersion: integer('rendered_sense_version').notNull().default(0),
   },
   (t) => [
