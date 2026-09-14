@@ -80,6 +80,16 @@ describe('dictionary export/restore', () => {
     // The strongest statement available: a re-export of the restored database
     // is identical, so the format loses nothing and orders deterministically.
     expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
+
+    // Versions are DERIVED on import, never carried in the file. A dump that
+    // could resurrect a stale marker would make a restore re-render every form
+    // it touched, at one provider call each. `book` is unrelated to this
+    // restore's content — it comes from `target`'s own seed — so this proves
+    // the restore left it alone rather than merely that this restore had
+    // nothing stale to carry.
+    const stale = await withTx(target.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'book', languageCode: 'en' }));
+    expect(stale).toEqual([]);
   });
 
   it('restores into a database that already has live data without overwriting it', async () => {

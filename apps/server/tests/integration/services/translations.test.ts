@@ -6,6 +6,7 @@ import {
   clearNamespace,
   countGeminiRequests,
   expectGeminiJson,
+  expectGeminiStatus,
   expectReconciliation,
   geminiBaseUrlFor,
   mockNamespace,
@@ -364,5 +365,57 @@ describe('translate, against a real database', () => {
     const afterRepair = await countGeminiRequests(ns);
     expect(await service.translate({ text: 'scan' })).toEqual(healed);
     expect(await countGeminiRequests(ns)).toBe(afterRepair);
+  });
+
+  // A failed repair must not fail the request: nothing was written, so the
+  // stored answer stands. The opposite of the reconciliation call's fail-closed
+  // rule, and for the opposite reason — see the spec's "When the repair fails".
+  it('serves the older answer when the repair call fails', async () => {
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCANS-READ' },
+        { sense_code: 'examine_closely', translation: 'SCANS-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCANS-DIGITIZE' },
+      ],
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCANS-READ', sense_code: 'read_quickly' },
+        { translation: 'SCANS-EXAMINE', sense_code: 'examine_closely' },
+        { translation: 'SCANS-DIGITIZE', sense_code: 'digitize_image' },
+      ]),
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCAN-READ', sense_code: 'read_quickly' },
+        { translation: 'SCAN-EXAMINE', sense_code: 'examine_closely' },
+      ]),
+      matchText: '"scan"',
+    });
+
+    // This test needs the logger it asserts on, so it builds its deps itself
+    // rather than calling the file's `translations()` helper, which makes a
+    // fresh fake logger and drops it.
+    const logger = createFakeLogger();
+    const service = createTestServerDeps({
+      db: t.db, logger, rng: testRng(7), geminiBaseUrl: geminiBaseUrlFor(ns),
+    }).translations;
+
+    await service.translate({ text: 'scan' });   // two senses
+    await service.translate({ text: 'scans' });  // the lexeme learns a third
+
+    // Now the repair is due — and the provider is down for it.
+    await clearNamespace(ns);
+    await expectGeminiStatus(ns, 503);
+
+    const answer = await service.translate({ text: 'scan' });
+
+    // 200, with the stored answer. Nothing was written, so nothing was lost.
+    expect(answer.senses.map((s) => s.translation)).toEqual(['SCAN-READ', 'SCAN-EXAMINE']);
+    expect(logger.errors).toContainEqual(
+      expect.objectContaining({ message: 'dict_repair_failed' }),
+    );
   });
 });
