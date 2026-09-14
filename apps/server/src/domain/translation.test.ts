@@ -273,6 +273,32 @@ describe('buildRenderingPrompt', () => {
     expect(system).toMatch(/third-person masculine singular/);
   });
 
+  // Phase 13. The escape hatch that lets the model name a reading the stored
+  // list lacks used to be scoped to the FORM — "a reading the list above does
+  // not contain" — while the row it produces is scoped to the LEXEME. Those two
+  // scopes differ exactly when a form spans several lexemes, which is the normal
+  // case: `pressing` is the verb `press` and the adjective `pressing`, and the
+  // verb's rendering claimed the adjective's meaning. A wording lock rather than
+  // a behaviour test — what the model actually does with it is scored by the
+  // rendering cases in the eval bucket, which ADR 0004 R4 forbids naming by
+  // path from src/ (its grep is a plain substring match, and a comment counts).
+  it('confines a newly named reading to the lexeme being rendered, not the form', () => {
+    const { system } = buildRenderingPrompt({
+      form: 'pressing',
+      direction: 'en_he',
+      lemma: 'press',
+      partOfSpeech: 'verb',
+      storedSenses: [
+        { senseCode: 'applied_force', translation: 'ללחוץ', exampleSource: null, exampleTarget: null },
+      ],
+    });
+    // The new code is licensed by the lexeme, not by the form.
+    expect(system).toContain('only for a reading that is itself "press" used as a verb');
+    // And the other lexemes of the same form are named as out of scope.
+    expect(system).toContain('"pressing" may also belong to other headwords');
+    expect(system).toMatch(/never bring their\s+readings in here/);
+  });
+
   it('asks for the stored code back unchanged, which is the whole point', () => {
     const { system } = buildRenderingPrompt({
       form: 'banks',

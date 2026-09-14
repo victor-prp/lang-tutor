@@ -215,10 +215,23 @@ export function buildRenderingPrompt(input: {
     '',
     stored,
     '',
-    `Render those senses for the form "${input.form}".`,
+    `Render those senses for the form "${input.form}" read as "${input.lemma}" used as a`,
+    `${input.partOfSpeech}.`,
     'Return one item per stored sense, reusing its sense_code EXACTLY whenever the meaning',
     'is the same one — even where you would have named it differently. Use a new',
-    'snake_case sense_code only for a reading the list above does not contain.',
+    `snake_case sense_code only for a reading that is itself "${input.lemma}" used as a`,
+    `${input.partOfSpeech} and that the list above does not contain.`,
+    // The phase 13 defect, and the reason the sentence above names the lexeme
+    // twice. This call is scoped to ONE lexeme, but the form it renders may
+    // belong to several: `pressing` is the verb `press` and, separately, the
+    // adjective `pressing`. Asked only what readings the FORM has that the
+    // stored list lacks, the model answered דחוף — truthfully, and onto the
+    // verb, where it became a permanent row duplicating a meaning the adjective
+    // entry of the same response already held.
+    `"${input.form}" may also belong to other headwords or to other parts of speech. Those`,
+    'are separate dictionary entries, answered by a separate call; never bring their',
+    `readings in here. If "${input.form}" has a meaning that is not "${input.lemma}" used as`,
+    `a ${input.partOfSpeech}, leave it out entirely.`,
     `Where "${input.form}" does not admit a stored sense at all, return that sense_code with`,
     'translation: null rather than forcing a translation.',
     `Translate into the grammatical form matching "${input.form}": a past-tense form takes a`,
