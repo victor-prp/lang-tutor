@@ -148,8 +148,11 @@ anybody's word list. It is first-writer-wins and permanent, and since phase 12 t
 **sense** is written once per lexeme, so two lookups of one headword never accumulate
 near-duplicate meanings, while a **translation** is written once per `(form, sense)`,
 so a second form of a known headword adds its own wording rather than inheriting the
-first form's. Neither is ever rewritten, there is no TTL, and the only supported way to
-change stored content is `npm run db:reseed`.
+first form's. The same string returns the same senses in the same order **until its lexeme
+learns a new sense, at which point that form re-renders and re-ranks once** — the one case a
+translation is rewritten, via a delete-and-reinsert rather than an update, because a repair
+may re-rank and cannot append into `UNIQUE(variant_id, user_language_code, rank)`. There is
+still no TTL, and the only other supported way to change stored content is `npm run db:reseed`.
 
 Because a lookup of a form whose lexeme is already stored must decide which of its
 senses are the ones already recorded, it makes a **second, smaller model call** that
