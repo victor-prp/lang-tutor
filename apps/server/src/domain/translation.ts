@@ -87,6 +87,16 @@ export function buildPrompt(input: {
     'Return one entry per headword AND part of speech: "book" is two entries, one noun and',
     'one verb. An inflected form belongs to the entry whose part of speech it realises:',
     '"booked" is the verb entry only, never the noun; "books" is legitimately both.',
+    // Phase 13, F2. The model lemmatises verb forms to the base verb every
+    // time and wavers on participial adjectives, which put two lexemes in the
+    // dictionary for one adjective — measured as `burnt` naming `burnt` and
+    // `burned` naming `burn` on the same afternoon, so it is not a wrong rule
+    // but the absence of one. Pinning to the base verb was rejected: it would
+    // merge the active and passive participles, and "a charming man" is not
+    // the same adjective as "I'm charmed".
+    'A participial adjective is its own headword rather than the base verb, and its lemma is',
+    'the participle spelled the regular way where a word has two: "burnt" and "burned" are',
+    'both the adjective "burned", while "burning" is the separate adjective "burning".',
     'Within an entry, rank its own senses with the most common first, at most 5.',
     `Give each sense one short natural example sentence in ${from} together with its ${to}`,
     'translation, and a short snake_case sense_code naming the meaning',

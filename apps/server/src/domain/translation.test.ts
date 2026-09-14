@@ -313,6 +313,22 @@ describe('buildRenderingPrompt', () => {
   });
 });
 
+describe('the participial-adjective lemma rule', () => {
+  // Phase 13, F2. Without it the model wavered — `burnt` naming the adjective
+  // `burnt` and `burned` naming `burn` in the same afternoon — which put two
+  // lexemes in the dictionary for one adjective, each with its own sense list
+  // and neither ever able to see the other's. A wording lock; the eval bucket's
+  // `burnt` and `burned` cases score what the model does with it.
+  it('pins a participial adjective to the regular -ed spelling of the participle', () => {
+    const { system } = buildPrompt({ text: 'burnt', direction: 'en_he' });
+    expect(system).toContain('A participial adjective is its own headword rather than the base verb');
+    expect(system).toContain('spelled the regular way');
+    // `burning` must NOT merge: an active participle is a different adjective
+    // from a passive one, which is why pinning to the base verb was rejected.
+    expect(system).toContain('"burning" is the separate adjective "burning"');
+  });
+});
+
 describe('the example-disambiguation rule', () => {
   // Phase 13. Two senses of one entry can render to the same word — Hebrew says
   // מים for water-the-substance and water-the-lake — and the example is then the
