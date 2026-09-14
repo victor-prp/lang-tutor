@@ -1975,3 +1975,88 @@ cannot be seen to fail is not evidence, and this one could only be seen to fail
 probabilistically. The honest summary is that six words over five runs each showed the
 offending pairs going from one ambiguous in four to none in six, and that `npm run eval` did
 not regress.
+
+### Task 12: A participial adjective names one lemma (manual-report F2)
+
+**Files:** `apps/server/src/domain/translation.ts`,
+`apps/server/src/domain/translation.test.ts`, `apps/server/tests/eval/cases.ts`,
+`apps/server/tests/eval/run.ts`.
+
+- [x] **Step 1: Decide the convention before writing anything**
+
+Pinning a participial adjective to the base verb is the obvious fix and is wrong: it merges
+the active and passive participles, which are different adjectives. The convention chosen is
+the participle itself, spelled the regular way where a word has two. Reasoning in the spec.
+
+- [x] **Step 2: `expectLemmaFor`, and the cases — RED**
+
+`expectLemma` reads `entries[0]`, which for an inflected form is the verb, so the defect on
+the adjective entry was unreachable. `expectLemmaFor` takes a part of speech and the lemma it
+must name, and treats "no entry of that part of speech" as a failure rather than a pass.
+
+```
+[warn] burnt   T2 the adjective entry's lemma is "burned": burnt
+[warn] burned  T2 the adjective entry's lemma is "burned": burn
+tier 2: 6/8 = 75.0%   exit 1
+```
+
+Note the direction: `burnt` named `burnt` and `burned` named `burn` — the opposite of the
+values the manual report recorded a day earlier, which is the inconsistency itself rather than
+a stable wrong answer. A genuine red, unlike Task 11's probabilistic lock.
+
+- [x] **Step 3: The rule, in `buildPrompt` only**
+
+`buildRenderingPrompt` is handed a lemma and a part of speech from the stored lexeme and never
+chooses one, so it needs nothing.
+
+- [x] **Step 4: GREEN, then measured over eight forms**
+
+Both cases pass, 8/8. `drafts/measure-lemmas.ts` (throwaway, gitignored) then ran `burnt`,
+`burned`, `learnt`, `learned`, `spelt`, `spelled`, `dreamt`, `dreamed`, `broken`, `frozen`,
+`pressed`, `pressing`, three runs each: every form stable across runs, `burnt`/`burned`
+agreeing, irregulars naming themselves.
+
+The harness reported `learnt`/`learned` and `spelt`/`spelled` as disagreeing. They do not — the
+model returns an adjective entry for `learned` and `spelled` and none for `learnt` and `spelt`,
+which is right, because *learned* meaning erudite is an adjective that *learnt* is not. The
+check assumed both spellings of a pair carry the same parts of speech.
+
+- [x] **Step 5: Wording lock, seen to fail**
+
+Asserts the rule names the participle rather than the base verb, pins the spelling, and keeps
+`burning` separate. Verified by reverting `translation.ts`.
+
+- [x] **Step 6: No re-record**
+
+The seed holds no participial adjective, so `content.generated.ts` is untouched — the first of
+these four fixes that does not move it.
+
+### Verification of Task 12
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint:arch` | 17 / 7 / 6 / 7 / 3 |
+| `npm run test:all` | 262 unit, 185 integration |
+| `npm run e2e` | 10 passed |
+| `npm run eval` | tier 1: 0 failures; tier 2: **63/64 = 98.4%** (was 98.2%) |
+
+**What it pins is consistency, not correctness.** Nothing verifies the model's lemma is the
+right one, only that it is the same one every time. A form filed under a wrong-but-stable
+lemma is still wrong, which is phase 12's "the model can still file a form under the wrong
+lexeme" risk, untouched by this task.
+
+## Where the manual-report findings stand after Tasks 9-12
+
+| | Finding | Status |
+|---|---|---|
+| F1 | One answer, the same word twice | **Open.** `water` fixed, but `window` now returns four cards all reading חלון. Two of those four — `architectural_opening` and `glass_pane` — are one meaning described twice, which the Task 11 rule cannot catch because both examples are vivid and unambiguous. The remaining pairs (`difficult`, `round`, `better`, `burning`) are genuinely distinct and distinguishable by example |
+| F2 | The same adjective as two lexemes | **Fixed** (Task 12) |
+| F3 | A verb lexeme holding an adjective's sense | **Fixed** (Task 9). Verified for `pressing`; the report's second instance, `burn`/verb holding `intense_urgent`, has never been run through the fixed prompt against a pre-existing lexeme |
+| F4 | Trailing punctuation creates a second entry | **Fixed** (Task 10) |
+| F5 | A form's answer frozen at its first lookup | **Open**, and a consequence of the design rather than a defect in it |
+
+**A finding the report does not contain,** surfaced by reading a live answer: a rendering can
+be unambiguous in English and ambiguous in Hebrew. `bank` returns סוללה for the
+mound-of-earth sense, whose dominant reading is *battery*. Every rule added in Tasks 9-12
+constrains the source side; nothing guards the target side, and no eval axis would catch it.

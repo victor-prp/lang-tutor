@@ -999,3 +999,49 @@ differentiate.
 miss as the only warning. The `water` case locks the specific sentence that failed — a
 regression lock in the shape `rejectTop` already had, not a general claim that every other
 example is good. Whether an example disambiguates remains a judgement read off the scorecard.
+
+### A participial adjective names one lemma, whichever spelling is typed
+
+The fourth defect, and the only one invisible to a learner. `part_of_speech` joining
+`dict_lexemes`' unique key made a lexeme a (lemma, part of speech) pair — but the *lemma* half
+is still whatever the model says it is, and for participial adjectives it says different things
+on different calls. Measured on one afternoon: `burnt` came back as the adjective `burnt` and
+`burned` as the adjective `burn`, the opposite way round from the values recorded a day
+earlier. Not a wrong rule — the absence of one.
+
+The result is two lexemes for a single adjective whose two spellings are British and American
+variants of one word. Each carries its own sense list; neither can ever see the other's; and
+the reconciliation call cannot help, because it is keyed on `(lemma, part_of_speech)` and the
+lemma is exactly what differs, so each spelling looks like a lexeme nobody has stored.
+
+**Pinning to the base verb was rejected.** It is the obvious fix — `burned`/adjective becomes
+`burn`/adjective and every spelling shares — and it merges two adjectives that are not the
+same word. An active participle is not a passive one: *a charming man* and *I'm charmed* are
+different adjectives, and filing them on one lexeme with one sense list is a worse defect than
+the one being fixed.
+
+**The rule pins the participle and its spelling instead:**
+
+> A participial adjective is its own headword rather than the base verb, and its lemma is the
+> participle spelled the regular way where a word has two: "burnt" and "burned" are both the
+> adjective "burned", while "burning" is the separate adjective "burning".
+
+Spelling variants of one adjective merge; genuinely distinct participles stay apart. The verb
+side is untouched, because it never had the defect — the model lemmatises verb forms to the
+base verb every time.
+
+**Measured over eight forms, three runs each.** Every form became stable across runs, which is
+the property that was missing; `burnt` and `burned` agree on `burned`; the irregulars `broken`
+and `frozen` name themselves, as does each of `pressed` and `pressing`.
+
+Two apparent disagreements are the measurement being wrong rather than the model. `learnt` and
+`spelt` return no adjective entry at all while `learned` and `spelled` do — and that is
+correct, because `learned` in the *erudite* sense is a genuine adjective that `learnt` never
+is. A spelling-variant check cannot assume both spellings carry the same parts of speech.
+
+Unlike the other three fixes this one needs no re-record: the seed contains no participial
+adjective. `npm run eval` scores 63/64 = 98.4%.
+
+**What it does not fix.** Nothing verifies that the model's lemma is *right*, only that it is
+consistent. A form filed under a wrong-but-stable lemma is still wrong, and is still the quiet
+failure ADR-free territory that this phase's *Risks* already names.
