@@ -32,6 +32,13 @@ export type EvalCase = {
   /** The top translation must NOT be any of these — the rendering defect:
    *  `booked` answering with an infinitive rather than a past tense. */
   rejectTop?: string[];
+  /** No sense's example may contain any of these. A regression lock on a
+   *  specific known-bad sentence, exactly as `rejectTop` is on a known-bad
+   *  translation — NOT a general claim that every other example is good.
+   *  Whether an example demonstrates its sense is a judgement, read off the
+   *  scorecard; what is mechanical is that a sentence we have already seen fail
+   *  does not come back. */
+  rejectExample?: string[];
 };
 
 export const CASES: EvalCase[] = [
@@ -131,6 +138,20 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['ראה', 'לראות'],
     expectAlso: ['מסור', 'לנסר'],
+  },
+  // Phase 13. `water` has two noun senses — the substance you drink and a body
+  // of water you swim in — and Hebrew renders both מים, so the example is the
+  // only thing that can tell the two cards apart. The recorded seed's second
+  // example was "The water was cold.", which fits a glass and a lake equally
+  // and so demonstrates neither. The prompt now requires an example that rules
+  // the other senses out; this is the lock on the sentence that did not.
+  {
+    label: 'an example must rule out the word\'s other senses, not merely contain it',
+    text: 'water',
+    expectKind: 'word',
+    acceptTop: ['מים'],
+    expectAlso: ['להשקות'],
+    rejectExample: ['The water was cold'],
   },
   {
     label: 'gibberish returns nothing rather than an invented translation',

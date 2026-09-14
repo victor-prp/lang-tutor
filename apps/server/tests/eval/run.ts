@@ -295,6 +295,23 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     });
   }
 
+  // Phase 13. Scored against every sense's example, not only the top one: the
+  // ambiguous sentence that prompted this rule sat at rank 1.
+  if (kase.rejectExample) {
+    const offenders = result.senses
+      .map((sense) => sense.example?.source ?? '')
+      .filter((source) =>
+        kase.rejectExample!.some((rejected) =>
+          source.toLowerCase().includes(rejected.toLowerCase()),
+        ),
+      );
+    checks.push({
+      name: 'no example we have already seen fail to disambiguate',
+      ok: offenders.length === 0,
+      detail: offenders.join(' | ') || undefined,
+    });
+  }
+
   // The rendering half: `booked` answering with an infinitive is the defect,
   // even though the infinitive is a perfectly good translation of `book`.
   if (kase.rejectTop) {
