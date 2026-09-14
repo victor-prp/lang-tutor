@@ -1,9 +1,16 @@
 # Phase 12 — Lexemes, per-form translations, and the `dict_*` rename
 
-- **Status:** Implemented. Amended 2026-09-14 — see *Amendments after implementation* at the
-  end, which records two defects found in the shipped phase and the decisions taken about
-  them. Everything above that section is the design as approved on 2026-09-13 and is left
-  unedited, so it still reads as what was believed at the time.
+- **Status:** Implemented. Amended 2026-09-14 and again 2026-09-15 — see *Amendments after
+  implementation* at the end, which records the defects found in the shipped phase and the
+  decisions taken about them. Everything above that section is the design as approved on
+  2026-09-13 and is left unedited, so it still reads as what was believed at the time.
+- **One claim above is now retracted.** The 2026-09-15 amendment *A form re-renders when its
+  lexeme learns more* withdraws the guarantee that *the same string returns the same senses in
+  the same order, forever*, which the sections **Appending a sense cannot change an existing
+  form's answer**, **Step 4 is unchanged by step 2** and the *Out of scope* bullet
+  **Invalidation, TTL and refresh** all state as settled. Read those three passages as
+  superseded; they are left in place because the amendment only makes sense beside the
+  reasoning it overturns.
 - **Date:** 2026-09-13
 - **Source:** phase 10
   (`docs/superpowers/specs/2026-09-10-lang-tutor-phase-10-vocabulary-persistence-design.md`)
@@ -726,6 +733,13 @@ API by hand. Both are recorded here rather than in a new spec because both are c
 of decisions taken above, and the corrections only make sense beside the reasoning they
 correct.
 
+The section grew past those two. A hand-written report of the shipped phase produced five
+findings, labelled F1-F5 in the plan, and the subsections below work through them in the order
+they were taken rather than in the order they were reported. The last of them, added
+2026-09-15, is different in kind from the rest: F1-F4 were defects in how this design was
+carried out, while F5 is this design doing exactly what it says and the design being wrong to
+say it. That is why it retracts a guarantee instead of fixing an implementation.
+
 ### The reconciliation call's escape hatch was scoped to the form, not to the lexeme
 
 **The report.** `POST /api/translations {"text":"pressing"}` returned five senses of which
@@ -1045,3 +1059,168 @@ adjective. `npm run eval` scores 63/64 = 98.4%.
 **What it does not fix.** Nothing verifies that the model's lemma is *right*, only that it is
 consistent. A form filed under a wrong-but-stable lemma is still wrong, and is still the quiet
 failure ADR-free territory that this phase's *Risks* already names.
+
+### A form re-renders when its lexeme learns more (manual-report F5)
+
+**The finding.** `book` was looked up first and answered from two senses' worth of knowledge.
+A later lookup of `books` taught the `book`/noun lexeme a third sense, `accounts_records`. The
+plural serves it; the singular does not, and never will — with no TTL, `book` is answered from
+storage forever. Two forms of one lexeme permanently disagree about how many meanings the word
+has.
+
+**Validated before anything was designed.** Reproduced at three levels against a real Postgres
+and the real seed: the row state, the repository reads (`findSensesByForm('scan')` returning 2
+rows while its lexeme holds 3 senses), and the whole use case through MockServer, where a
+repeat lookup of the stale form adds no provider request and returns a byte-identical answer. A
+control run — the later form reconciling to the *same* senses — was used to confirm the probe
+could report the opposite, since a check that cannot fire looks exactly like a check that
+passes. The live dev database no longer holds the reported rows; it has been reseeded since,
+which is why the mechanism was reproduced rather than read back.
+
+**This is not a defect in the implementation.** It is the section *Appending a sense cannot
+change an existing form's answer* working precisely as written, and that section exists to
+protect phase 10's *the same string returns the same senses in the same order, forever*. F5 and
+that guarantee are the same sentence read from opposite sides. So the question was never how to
+fix a bug; it was whether the guarantee is worth what it costs.
+
+**Decision: the guarantee is retracted.** A form's answer now changes exactly when its lexeme
+learns a sense the form has never rendered, and at no other time. The new wording, which
+replaces phase 10's everywhere it is quoted:
+
+> The same string returns the same senses in the same order until its lexeme learns a new
+> sense, at which point that form re-renders and re-ranks once.
+
+**Why not close the sense set instead.** The cheaper fix was to stop lexemes growing at all:
+have the first call for a lemma return its complete sense inventory, and let reconciliation map
+onto that set or drop, never add. No migration, no extra model call, no mutable rows, and the
+guarantee survives untouched — every form agrees because nothing can diverge. It was rejected
+because it caps the dictionary's quality at whatever one model call happened to produce. The
+seeded `book`/noun holds exactly **one** sense today, so closing the set would make
+`accounts_records` unreachable from *every* form rather than only from the singular. That
+trades a visible inconsistency for an invisible incompleteness, and the invisible one is the
+failure nobody ever reports.
+
+#### Detecting that a form is behind
+
+Two integer columns, migration `0006`:
+
+| Column | Meaning |
+|---|---|
+| `dict_lexemes.sense_version` | bumped in the same transaction that inserts a sense |
+| `dict_variants.rendered_sense_version` | the lexeme version this form's translations were written against |
+
+`findSensesByForm` already joins `dict_lexemes`, so it selects both and compares them per row:
+no second query, no correlated `COUNT`, and the hit path stays one read.
+
+**A counter rather than counting senses live**, because `READ_LIMIT = 5` truncates the read.
+The number of rows the read returns is therefore not the number of senses the form renders, and
+comparing it to anything is wrong in exactly the case that matters — a form with five or more
+senses, which is where a missing sixth is least visible.
+
+**A form spanning two lexemes is stale if *any* of them is ahead**, and only that lexeme's
+entry is re-rendered. `book` is a noun lexeme and a verb lexeme; a sense learned by `books`
+makes the noun entry stale and leaves the verb entry alone. This falls out of the existing
+shape rather than being new machinery — `reconcile` is already per-entry, and already skips an
+entry whose lexeme has no stored senses.
+
+#### Repairing
+
+A stale hit runs **the reconciliation call that already exists**. `buildRenderingPrompt` is
+handed the lexeme's full stored sense list and the queried form, and asks for exactly what a
+repair needs: render every one of these senses for *this* form, in *this* form's grammatical
+category, ranked for *this* form. No new prompt, and that prompt is already eval-scored.
+
+The variant's translation rows are then **deleted and reinserted**, not appended to. This is
+forced rather than stylistic, and it is the one genuine architectural concession in the whole
+change:
+
+- `UNIQUE(variant_id, user_language_code, rank)` means a new row needs a free rank.
+- Appending at `max(rank) + 1` is the option the section *Sense order belongs to the form, not
+  to the lexeme* already rejected, in these words: *arrival order wearing a rank's clothes — so
+  a form that ranked its new sense first would serve it last.* Re-ranking is the entire point.
+
+Delete-then-insert keeps the repository's write insert-only in shape while making rows mutable
+in fact. `repo/dictionary.ts` says today that a translation is *"never rewritten, merged or
+refreshed"*; that comment is now false and is corrected alongside the code.
+
+**ADR 0001 R8 is unaffected.** The repaired lookup is read → provider call → one write
+transaction: still at most one write, and the read precedes third-party I/O, which R8's phase 12
+amendment already permits. No ADR is amended by this change and no check count moves.
+
+#### When the repair fails
+
+**Serve the stored answer and log it. The request succeeds.**
+
+This is a deliberate departure from the rule three sections above — *a failed reconciliation
+call fails the whole lookup* — and the distinction is the one this spec already draws between
+its two failure paths. Fail-closed exists because a degraded *write* puts known-wrong rows into
+a dictionary with no TTL. A failed repair writes nothing at all: the older rows stay, and they
+were correct when written, merely incomplete. That is the *"protects a correct answer whose
+storage failed"* case, which degrades and answers 200.
+
+So the invariant is unchanged — **never write what is known to be wrong** — and only the
+consequence differs, because here the two failure modes point opposite ways.
+
+One attempt per request, no backoff and no circuit breaker. A repair that fails persistently
+means every hit on that form pays a provider call and returns the stale answer; that is a risk,
+recorded below, not a mechanism to build now.
+
+#### What it costs, and what it deliberately does not
+
+One provider call, paid once per form per growth event, by whichever learner happens to hit the
+stale form first. That learner waits the 5-15s a first lookup costs; everyone after them is back
+to an instant hit. The dictionary converges rather than drifting.
+
+**Nothing is paid during the backfill.** The backfill only writes, and staleness is detected on
+read, so a run costs exactly what it costs today. This is the decisive argument against the
+alternative considered below.
+
+**Eager fan-out was rejected.** The symmetrical fix is to re-render for every existing variant
+at the moment a lexeme learns a sense — correct, and it keeps the hit path free of provider
+calls entirely. It was rejected on cost: the fan-out fires inside the write path, which is
+where the backfill lives, so it multiplies a run already measured at roughly 570 ILS and ten
+and a half days, by a factor set by how many forms of each lemma the dataset holds (1,135
+lemmas are reached by more than one form). Lazy repair moves that cost to forms someone
+actually looks up again, which is a small fraction of what gets written.
+
+**Read-time borrowing was rejected outright.** Serving the missing sense using another variant's
+rendering is `booked` showing *"I want to book a table"* again — the defect this phase exists to
+fix, reintroduced through the read instead of the write.
+
+#### Testing
+
+| Bucket | What it pins |
+|---|---|
+| Unit (`domain/`) | the staleness comparison is a pure predicate over the two versions and belongs in `domain/`, not in the repository |
+| Integration (`repo/`) | staleness detected when one of a form's two lexemes is ahead and not when both are level; delete-and-reinsert leaves ranks contiguous from 0, which `UNIQUE(variant_id, user_language_code, rank)` would otherwise reject; a repair that re-ranks is visible in row order |
+| Integration (`services/`) | the F5 reproduction, inverted: a form that was stale **heals** to the full sense list, costs exactly one provider call to do it, and is free on every lookup after; and a repair whose provider call fails still answers 200 with the older rows intact |
+| Eval | no new case required — the repair reuses the already-scored reconciliation prompt. A case pinning re-ranking is optional and should be judged on whether it is stable across runs before it is added |
+
+The service-level test already exists as a validation harness written while reproducing F5; it
+asserts the frozen behaviour today and is inverted rather than written fresh.
+
+#### Migration numbering
+
+This takes **`0006`**, and the phase 13 misspellings spec moves its `dict_corrections`
+migration to **`0007`**. Phase 13 depends on this fix and is planned behind it; nothing past
+`0005` is on disk, so the renumber costs a line in that spec and nothing else.
+
+#### Risks
+
+- **Rows become mutable.** The first design in this tree where an existing row is replaced
+  rather than only inserted. Every reader of `dict_var_translations` now has to hold "this
+  row can be superseded" in mind, and the delete-then-insert is inside a transaction that must
+  not partially apply.
+- **A persistently failing repair is a permanent cost, invisibly.** Every hit on the stale form
+  buys a provider call and returns the old answer, and the only signal is a log line. Worth a
+  named log event so it can be counted.
+- **The repair can be worse than what it replaces.** It re-ranks from the model's current
+  judgement, so a form whose ordering was good can come back ordered differently and no better.
+  This is the reconciliation call's existing *"can get the judgement wrong"* risk, now able to
+  affect an answer that was already stored rather than only a new one.
+- **A form that is looked up rarely stays stale for a long time**, which is the intended trade —
+  cost follows use — but it means the dictionary is only eventually consistent, and two forms
+  can still disagree in the window between the growth and the next lookup.
+- **`dictImport` replays through `persistEntries`**, so both version columns have to come out
+  right on a restore. They should be *derived* during import rather than carried in the export
+  file, so a dump stays a dump of the dictionary rather than of its bookkeeping.

@@ -2063,9 +2063,793 @@ lexeme" risk, untouched by this task.
 | F2 | The same adjective as two lexemes | **Fixed** (Task 12) |
 | F3 | A verb lexeme holding an adjective's sense | **Fixed** (Task 9). Verified for `pressing`; the report's second instance, `burn`/verb holding `intense_urgent`, has never been run through the fixed prompt against a pre-existing lexeme |
 | F4 | Trailing punctuation creates a second entry | **Fixed** (Task 10) |
-| F5 | A form's answer frozen at its first lookup | **Open**, and a consequence of the design rather than a defect in it |
+| F5 | A form's answer frozen at its first lookup | **Answered by Task 13**, below. Validated as reproducing, then treated as a wrong decision rather than a defect: the guarantee it follows from is retracted |
 
 **A finding the report does not contain,** surfaced by reading a live answer: a rendering can
 be unambiguous in English and ambiguous in Hebrew. `bank` returns סוללה for the
 mound-of-earth sense, whose dominant reading is *battery*. Every rule added in Tasks 9-12
 constrains the source side; nothing guards the target side, and no eval axis would catch it.
+
+### Task 13: A form re-renders when its lexeme learns more (manual-report F5)
+
+**Files:**
+- Modify: `apps/server/src/db/schema.ts` — two integer columns
+- Create: `apps/server/src/db/migrations/0006_sense_versions.sql`
+- Modify: `apps/server/src/domain/dictionary.ts` — `SenseRow` gains `lemma`; a new `StaleLexeme` type and the pure staleness predicate
+- Modify: `apps/server/src/repo/dictionary.ts` — `findStaleLexemesByForm`, `repairVariantRenderings`, the version bump inside `persistEntries`
+- Modify: `apps/server/src/services/translations.ts` — the repair branch on the hit path
+- Modify: `apps/server/src/db/dictImport.ts` — derive both versions on restore
+- Test: `apps/server/tests/integration/repo/dictionary.stale.test.ts` (**new**)
+- Test: `apps/server/tests/integration/services/translations.test.ts` (two cases added)
+- Test: `apps/server/src/domain/dictionary.test.ts` (the predicate)
+- Docs: `apps/server/src/repo/dictionary.ts` header comment, `README.md` if it quotes the guarantee
+
+**Interfaces:**
+- Consumes: `findSensesByForm`, `findSensesByLexeme`, `persistEntries`, `buildRenderingPrompt`,
+  `parseLlmReconciliation` — all from Tasks 4 and 5, unchanged in signature except `SenseRow`.
+- Produces: `StaleLexeme = { lexemeId: string; variantId: string; lemma: string; partOfSpeech: string }`;
+  `staleLexemes(rows: StaleLexemeRow[]): StaleLexeme[]`;
+  `findStaleLexemesByForm(input: { form: string; languageCode: string }): Promise<StaleLexeme[]>`;
+  `repairVariantRenderings(input: { variantId: string; lexemeId: string; userLanguageCode: string; senses: RepairedRendering[] })`
+  `: Promise<void>`, where
+  `RepairedRendering = { senseId: string; rank: number; translation: string; exampleSource: string | null; exampleTarget: string | null }`.
+
+**This task adds a third migration.** The Global Constraints above say "Two migrations: `0004`
+renames, `0005` restructures". That is now three. `0006` is additive and takes the number the
+phase 13 misspellings spec had claimed; that spec has been amended to say `0007`. ADR check
+counts do not move — this task adds no check and no script, so `npm run lint:arch` must still
+report 17 / 7 / 6 / 7 / 3.
+
+**Read the spec section first.** *A form re-renders when its lexeme learns more (manual-report
+F5)* in the phase 12 design doc carries the reasoning, including why the guarantee is retracted
+rather than defended and why eager fan-out was rejected. This task implements it; it does not
+re-argue it.
+
+- [ ] **Step 1: Invert the F5 reproduction into a failing test**
+
+A validation harness written while reproducing F5 already asserts the **frozen** behaviour and
+passes today. Invert it: the same three lookups, asserting the form heals. Add to
+`apps/server/tests/integration/services/translations.test.ts`:
+
+```ts
+  // F5. `scan` is not in the seed. Registration order matters: the
+  // reconciliation prompts also carry the quoted form, so they are registered
+  // first — see the `bank`/`banks` case above.
+  //
+  // NOT the file's `entry()` helper. That generates `sense_code: scan_0`,
+  // `scan_1`, so the first lookup would store codes the reconciliation
+  // responses below never name — reconciliation would treat all three as NEW
+  // and the lexeme would end up with five senses instead of three, quietly
+  // testing nothing.
+  const scanVerb = (senses: { translation: string; sense_code: string }[]) => ({
+    kind: 'word' as const,
+    entries: [{ lemma: 'scan', part_of_speech: 'verb' as const, senses }],
+  });
+
+  it('re-renders a form once its lexeme has learned a new sense', async () => {
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCANS-READ' },
+        { sense_code: 'examine_closely', translation: 'SCANS-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCANS-DIGITIZE' },
+      ],
+      matchText: '"scans"',
+    });
+    // The repair call for `scan`: same prompt, same shape, now listing three.
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCAN-READ' },
+        { sense_code: 'digitize_image', translation: 'SCAN-DIGITIZE' },
+        { sense_code: 'examine_closely', translation: 'SCAN-EXAMINE' },
+      ],
+      matchText: '"scan"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCANS-READ', sense_code: 'read_quickly' },
+        { translation: 'SCANS-EXAMINE', sense_code: 'examine_closely' },
+        { translation: 'SCANS-DIGITIZE', sense_code: 'digitize_image' },
+      ]),
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCAN-READ', sense_code: 'read_quickly' },
+        { translation: 'SCAN-EXAMINE', sense_code: 'examine_closely' },
+      ]),
+      matchText: '"scan"',
+    });
+
+    const service = translations();
+
+    const first = await service.translate({ text: 'scan' });
+    expect(first.senses.map((s) => s.translation)).toEqual(['SCAN-READ', 'SCAN-EXAMINE']);
+
+    await service.translate({ text: 'scans' });
+
+    // The repair: three senses, and re-RANKED by the repair call rather than
+    // appended at the end. digitize_image comes second because that is where
+    // this form ranked it, which is the whole reason rank lives on the
+    // translation.
+    const healed = await service.translate({ text: 'scan' });
+    expect(healed.senses.map((s) => s.translation)).toEqual([
+      'SCAN-READ',
+      'SCAN-DIGITIZE',
+      'SCAN-EXAMINE',
+    ]);
+
+    // And the repair is paid once. A fourth lookup is a plain hit.
+    const afterRepair = await countGeminiRequests(ns);
+    expect(await service.translate({ text: 'scan' })).toEqual(healed);
+    expect(await countGeminiRequests(ns)).toBe(afterRepair);
+  });
+```
+
+- [ ] **Step 2: Run it and read the failure**
+
+```bash
+source ~/.zshrc && cd apps/server
+npx jest --selectProjects integration -t 're-renders a form once its lexeme'
+```
+
+Expected: FAIL, with `healed.senses` equal to `['SCAN-READ', 'SCAN-EXAMINE']` — two, not three.
+That exact difference is the defect; a failure of any other shape means the expectations were
+registered in the wrong order and MockServer answered the repair call with a first-call payload.
+
+- [ ] **Step 3: The two columns, in the schema and in migration `0006`**
+
+`apps/server/src/db/schema.ts`, inside `dictLexemes`:
+
+```ts
+    // Bumped whenever this lexeme gains a sense. A variant records the value it
+    // was rendered against, and a variant that is behind is re-rendered on its
+    // next lookup — which is what stops two forms of one word disagreeing about
+    // how many meanings it has.
+    senseVersion: integer('sense_version').notNull().default(0),
+```
+
+and inside `dictVariants`:
+
+```ts
+    // The lexeme's sense_version when this form's translations were last
+    // written. NOT a count of those translations: a form may legitimately
+    // render fewer senses than its lexeme holds, because the reconciliation
+    // call returns `translation: null` for a sense the form does not admit —
+    // adjectival `booked` has no record-a-charge reading. Counting would call
+    // that form permanently stale and re-render it on every single lookup.
+    renderedSenseVersion: integer('rendered_sense_version').notNull().default(0),
+```
+
+Then hand-write `apps/server/src/db/migrations/0006_sense_versions.sql`:
+
+```sql
+ALTER TABLE dict_lexemes  ADD COLUMN sense_version           integer NOT NULL DEFAULT 0;
+ALTER TABLE dict_variants ADD COLUMN rendered_sense_version  integer NOT NULL DEFAULT 0;
+--> statement-breakpoint
+UPDATE dict_lexemes l
+   SET sense_version = (SELECT count(*) FROM dict_senses s WHERE s.lexeme_id = l.id);
+--> statement-breakpoint
+UPDATE dict_variants v
+   SET rendered_sense_version = (SELECT l.sense_version FROM dict_lexemes l WHERE l.id = v.lexeme_id);
+```
+
+The two `UPDATE`s mark every existing row **level**, not stale. Deliberate: marking existing
+variants stale would make the first lookup of every form in the dictionary buy a provider call.
+It under-repairs rows written before this migration, and that costs nothing today because `0005`
+truncated the dictionary and the backfill has not been re-run — what is in there is the seed,
+which writes one form per lexeme and so holds no F5 instance at all.
+
+Run `npm run db:generate` once afterwards so the snapshot catches up, then `npm run db:check`.
+
+- [ ] **Step 4: Migrate and confirm the columns are level**
+
+```bash
+source ~/.zshrc && cd apps/server && npm run db:migrate
+docker exec lang-tutor-init-db-1 psql -U postgres -d lang_tutor -c "
+  SELECT count(*) AS stale_variants
+  FROM dict_variants v JOIN dict_lexemes l ON l.id = v.lexeme_id
+  WHERE v.rendered_sense_version < l.sense_version;"
+```
+
+Expected: `stale_variants = 0`. Anything else means the backfill `UPDATE`s did not run, and
+every form in the dev database is about to buy a provider call.
+
+- [ ] **Step 5: The pure predicate, with its unit test**
+
+The comparison is arithmetic over two integers and belongs in `domain/` (ADR 0001 R3), not in
+the repository. Add to `apps/server/src/domain/dictionary.ts`:
+
+```ts
+/** One row of the staleness probe: a form's variant beside the lexeme it belongs to. */
+export type StaleLexemeRow = {
+  lexemeId: string;
+  variantId: string;
+  lemma: string;
+  partOfSpeech: string;
+  senseVersion: number;
+  renderedSenseVersion: number;
+};
+
+export type StaleLexeme = Omit<StaleLexemeRow, 'senseVersion' | 'renderedSenseVersion'>;
+
+/**
+ * Which of a form's lexemes have learned a sense since this form was rendered.
+ *
+ * A form spans one variant per lexeme it belongs to — `book` is a variant of the
+ * noun lexeme AND of the verb lexeme — and they go stale independently, so this
+ * returns a list rather than a boolean. Only the stale ones are re-rendered;
+ * `reconcile` is already per-entry, so that falls out of the existing shape.
+ */
+export function staleLexemes(rows: StaleLexemeRow[]): StaleLexeme[] {
+  return rows
+    .filter((row) => row.renderedSenseVersion < row.senseVersion)
+    .map(({ lexemeId, variantId, lemma, partOfSpeech }) => ({
+      lexemeId,
+      variantId,
+      lemma,
+      partOfSpeech,
+    }));
+}
+```
+
+In `apps/server/src/domain/dictionary.test.ts`:
+
+```ts
+describe('staleLexemes', () => {
+  const row = (over: Partial<StaleLexemeRow>): StaleLexemeRow => ({
+    lexemeId: 'L1', variantId: 'V1', lemma: 'book', partOfSpeech: 'noun',
+    senseVersion: 1, renderedSenseVersion: 1, ...over,
+  });
+
+  it('reports nothing when every lexeme is level', () => {
+    expect(staleLexemes([row({}), row({ lexemeId: 'L2', variantId: 'V2' })])).toEqual([]);
+  });
+
+  it('reports only the lexeme that is behind', () => {
+    const stale = staleLexemes([
+      row({}),
+      row({ lexemeId: 'L2', variantId: 'V2', partOfSpeech: 'verb', senseVersion: 3, renderedSenseVersion: 2 }),
+    ]);
+    expect(stale).toEqual([{ lexemeId: 'L2', variantId: 'V2', lemma: 'book', partOfSpeech: 'verb' }]);
+  });
+
+  // A form that legitimately declined a sense is level, not behind: the
+  // reconciliation call answered `translation: null` and the variant's version
+  // was still set to the lexeme's. Counting translations would get this wrong.
+  it('does not report a form that rendered fewer senses than its lexeme holds', () => {
+    expect(staleLexemes([row({ senseVersion: 4, renderedSenseVersion: 4 })])).toEqual([]);
+  });
+});
+```
+
+Run: `npx jest --selectProjects unit -t staleLexemes` — expected FAIL first (`staleLexemes is
+not a function`), then PASS once the function is in.
+
+- [ ] **Step 6: Bump the lexeme, stamp the variant**
+
+Both go in `persistEntries` in `apps/server/src/repo/dictionary.ts`, inside the existing loop.
+
+After step 4's sense loop, recompute the version from the senses themselves rather than
+incrementing a counter:
+
+```ts
+      // 4b — the lexeme's sense version. A recomputed count, not `+= n`: two
+      // concurrent writers both reach this UPDATE, the second blocks on the row
+      // until the first commits, and each then recomputes the true total. An
+      // increment would double-count or drop one depending on interleaving.
+      // Senses are only ever added, never removed, so a count is monotonic and
+      // is a valid version.
+      await tx
+        .update(dictLexemes)
+        .set({
+          senseVersion: sql`(SELECT count(*) FROM ${dictSenses} WHERE ${dictSenses.lexemeId} = ${lexemeId})`,
+        })
+        .where(eq(dictLexemes.id, lexemeId));
+
+      const [versioned] = await tx
+        .select({ senseVersion: dictLexemes.senseVersion })
+        .from(dictLexemes)
+        .where(eq(dictLexemes.id, lexemeId));
+```
+
+and after step 5's translation insert:
+
+```ts
+      // 5b — this form is now rendered against that version. Read AFTER the
+      // bump, never before: stamping the pre-bump value would leave the variant
+      // permanently one behind and re-render it on every lookup forever.
+      await tx
+        .update(dictVariants)
+        .set({ renderedSenseVersion: versioned.senseVersion })
+        .where(eq(dictVariants.id, variant.id));
+```
+
+- [ ] **Step 7: The staleness probe, as its own read**
+
+A separate query, **not** a column added to `findSensesByForm`. That read carries
+`LIMIT READ_LIMIT` (5), so a form whose stale lexeme ranks below fifth would look level — and
+that is precisely the case where a missing sense is hardest to notice. The probe returns one row
+per (variant, lexeme) pair, which is at most the entries cap of 6.
+
+In `apps/server/src/repo/dictionary.ts`:
+
+```ts
+  /**
+   * One row per lexeme this form belongs to, carrying both versions. No limit
+   * and no join to the translations: staleness is a property of the variant,
+   * not of the rows that happen to fit in an answer.
+   */
+  const findStaleLexemesByForm = async (input: {
+    form: string;
+    languageCode: string;
+  }): Promise<StaleLexeme[]> =>
+    staleLexemes(
+      await tx
+        .select({
+          lexemeId: dictVariants.lexemeId,
+          variantId: dictVariants.id,
+          lemma: dictLexemes.lemma,
+          partOfSpeech: dictLexemes.partOfSpeech,
+          senseVersion: dictLexemes.senseVersion,
+          renderedSenseVersion: dictVariants.renderedSenseVersion,
+        })
+        .from(dictVariants)
+        .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
+        .where(
+          and(
+            eq(dictVariants.languageCode, input.languageCode),
+            sql`lower(${dictVariants.form}) = ${input.form.toLowerCase()}`,
+          ),
+        ),
+    );
+```
+
+- [ ] **Step 8: The repair write — delete, then reinsert**
+
+Also in `apps/server/src/repo/dictionary.ts`. This is the first place in the tree where an
+existing row is replaced rather than only inserted, and the reason is
+`UNIQUE(variant_id, user_language_code, rank)`: a repair re-ranks, so it cannot append.
+
+```ts
+/** One rendering a repair produces. Exported beside `PersistedEntry`. */
+export type RepairedRendering = {
+  senseId: string;
+  rank: number;
+  translation: string;
+  exampleSource: string | null;
+  exampleTarget: string | null;
+};
+
+  /**
+   * Replace one variant's renderings for one target language, and mark it
+   * rendered against the lexeme's current version.
+   *
+   * DELETE then INSERT rather than UPDATE, because the repair may return fewer
+   * senses than are stored (the form declined one) as well as more, and because
+   * re-ranking in place would collide with
+   * UNIQUE(variant_id, user_language_code, rank) partway through — the
+   * constraint is checked per statement, not at commit.
+   */
+  const repairVariantRenderings = async (input: {
+    variantId: string;
+    lexemeId: string;
+    userLanguageCode: string;
+    senses: RepairedRendering[];
+  }): Promise<void> => {
+    await tx
+      .delete(dictVarTranslations)
+      .where(
+        and(
+          eq(dictVarTranslations.variantId, input.variantId),
+          eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
+        ),
+      );
+
+    await tx.insert(dictVarTranslations).values(
+      input.senses.map((sense) => ({
+        variantId: input.variantId,
+        senseId: sense.senseId,
+        userLanguageCode: input.userLanguageCode,
+        rank: sense.rank,
+        translation: sense.translation,
+        exampleSource: sense.exampleSource,
+        exampleTarget: sense.exampleTarget,
+      })),
+    );
+
+    const [lexeme] = await tx
+      .select({ senseVersion: dictLexemes.senseVersion })
+      .from(dictLexemes)
+      .where(eq(dictLexemes.id, input.lexemeId));
+
+    await tx
+      .update(dictVariants)
+      .set({ renderedSenseVersion: lexeme.senseVersion })
+      .where(eq(dictVariants.id, input.variantId));
+  };
+```
+
+Correct the header comment at the top of `persistEntries` while here — it currently reads
+*"Neither is ever rewritten, merged or refreshed — there is no TTL and no invalidation"*, and
+from this task that sentence is false. Replace with: *a translation is rewritten only by
+`repairVariantRenderings`, when its lexeme has learned a sense this form has never rendered.*
+
+- [ ] **Step 9: The repair branch in the service**
+
+`apps/server/src/services/translations.ts`, on the hit path. The probe joins the existing read
+transaction, so the hit path is still one transaction and ADR 0001 R8 is untouched.
+
+```ts
+      const { hit, stale } = await transaction(async (repos) => ({
+        hit: await repos.dict.findSensesByForm({ form, languageCode: source, userLanguageCode: target }),
+        stale: await repos.dict.findStaleLexemesByForm({ form, languageCode: source }),
+      }));
+
+      if (hit.length > 0 && stale.length > 0) {
+        // The repair reuses buildRenderingPrompt verbatim: "here is everything
+        // this lexeme knows, render it for THIS form and rank it for THIS
+        // form" is exactly what a repair needs, and that prompt is eval-scored.
+        try {
+          const repaired = await repairForm({ llm, transaction, form, direction, stale, source, target });
+          logger.info({ event: 'dict_repaired', form, lexeme_count: stale.length });
+          return { text, direction, kind: kindForForm(repaired), senses: rowsToSenses(repaired) };
+        } catch (error) {
+          // Deliberately NOT the fail-closed path. A failed repair writes
+          // nothing, so the stored rows stand — correct when written, merely
+          // incomplete. Failing the request would deny a learner an answer the
+          // dictionary already holds, to protect them from an answer that is
+          // not wrong. See the spec's "When the repair fails".
+          logger.error('dict_repair_failed', error);
+        }
+      }
+
+      if (hit.length > 0) {
+        // ...unchanged: dict_cache_hit, kindForForm, rowsToSenses
+      }
+```
+
+`repairForm` is module-private beside `reconcile`, for the same reason `reconcile` is: one step
+of one use case, not a primitive (ADR 0001 R9).
+
+```ts
+/**
+ * Re-render one form for every lexeme of it that has learned a sense since the
+ * form was last written. Reuses `buildRenderingPrompt` unchanged.
+ *
+ * Throws on an unreadable answer, exactly like `reconcile` — but the CALLER
+ * treats the throw differently: `reconcile` fails the lookup, this one is
+ * caught and the stored answer served, because a failure here writes nothing.
+ */
+async function repairForm(input: {
+  llm: LlmClient;
+  transaction: Transaction;
+  form: string;
+  direction: TranslationDirection;
+  stale: StaleLexeme[];
+  source: string;
+  target: string;
+}): Promise<SenseRow[]> {
+  // ONE transaction for every stale lexeme's senses, not one each. A
+  // transaction per lexeme inside the Promise.all below would open N pooled
+  // connections to do N tiny reads that could share one, and serialise nothing
+  // useful — the parallelism that matters is the model calls, which come after.
+  const storedPerLexeme = await input.transaction((repos) =>
+    Promise.all(
+      input.stale.map((lexeme) =>
+        repos.dict.findSensesByLexeme({
+          lemma: lexeme.lemma,
+          partOfSpeech: lexeme.partOfSpeech,
+          languageCode: input.source,
+          userLanguageCode: input.target,
+        }),
+      ),
+    ),
+  );
+
+  const rendered = await Promise.all(
+    input.stale.map(async (lexeme, index) => {
+      const stored = storedPerLexeme[index];
+
+      const raw = await input.llm(
+        buildRenderingPrompt({
+          form: input.form,
+          direction: input.direction,
+          lemma: lexeme.lemma,
+          partOfSpeech: lexeme.partOfSpeech as PartOfSpeech,
+          storedSenses: stored,
+        }),
+      );
+
+      const parsed = parseLlmReconciliation(raw);
+      if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
+
+      // Same three filters as `reconcile`, and for the same reasons: a null
+      // translation is the form declining the sense; a repeated sense_code
+      // would collide on the primary key; an unknown code names no stored
+      // sense, and a repair may not invent one — that is what a MISS is for.
+      const idByCode = new Map(stored.map((sense) => [sense.senseCode, sense.senseId]));
+      const seen = new Set<string>();
+      const senses: RepairedRendering[] = [];
+      for (const rendering of parsed.senses) {
+        if (rendering.translation === null) continue;
+        if (seen.has(rendering.sense_code)) continue;
+        if (!idByCode.has(rendering.sense_code)) continue;
+        seen.add(rendering.sense_code);
+        senses.push({
+          senseId: idByCode.get(rendering.sense_code)!,
+          // Re-sequenced from 0 and contiguous, never the model's index:
+          // UNIQUE(variant_id, user_language_code, rank) rejects a hole.
+          rank: senses.length,
+          translation: rendering.translation,
+          exampleSource: rendering.example?.source ?? null,
+          exampleTarget: rendering.example?.target ?? null,
+        });
+      }
+
+      if (senses.length === 0) {
+        throw new TranslationUnreadable(
+          `repair returned no usable sense for ${lexeme.lemma} (${lexeme.partOfSpeech})`,
+        );
+      }
+      return { lexeme, senses };
+    }),
+  );
+
+  // ONE write transaction for every stale lexeme of this form, ending in the
+  // re-read — the same shape `persistEntries` uses, and what keeps the answer
+  // identical to what the next lookup would produce.
+  return input.transaction(async (repos) => {
+    for (const { lexeme, senses } of rendered) {
+      await repos.dict.repairVariantRenderings({
+        variantId: lexeme.variantId,
+        lexemeId: lexeme.lexemeId,
+        userLanguageCode: input.target,
+        senses,
+      });
+    }
+    return repos.dict.findSensesByForm({
+      form: input.form,
+      languageCode: input.source,
+      userLanguageCode: input.target,
+    });
+  });
+}
+```
+
+**`findSensesByLexeme` must be widened to return `senseId`** — it returns codes and glosses
+only, and `idByCode` above needs the id. Add `s.id AS sense_id` to its `DISTINCT ON` projection
+and to its return type. This breaks no existing caller: `reconcile` destructures the fields it
+wants and ignores the rest. Do **not** add a sibling read returning the same rows under a
+different projection; that is the duplication ADR 0001 R9 exists to prevent.
+
+- [ ] **Step 10: The repo-level regressions**
+
+`apps/server/tests/integration/repo/dictionary.stale.test.ts`, new. Follows
+`dictionary.pos.test.ts`: `cook`, not `book`, because the seed holds `book` and
+first-writer-wins would make every call below write nothing. Copy that file's `persist` and
+`find` helpers verbatim — they are four lines each and a shared helper module would couple two
+regressions that must be able to fail independently.
+
+```ts
+// `cook` is two lexemes. `cooks` realises both AND teaches the noun a second
+// sense, which is the growth event the whole task is about.
+const COOK = [
+  { lemma: 'cook', part_of_speech: 'noun',
+    senses: [{ sense_code: 'kitchen_worker', translation: 'N-COOK' }] },
+  { lemma: 'cook', part_of_speech: 'verb',
+    senses: [{ sense_code: 'prepare_food', translation: 'V-COOK' }] },
+];
+
+const COOKS_PLUS_ONE = [
+  { lemma: 'cook', part_of_speech: 'noun',
+    senses: [
+      { sense_code: 'kitchen_worker',  translation: 'N-COOKS' },
+      { sense_code: 'cookery_writer',  translation: 'N-COOKS-2' }, // learned here
+    ] },
+  { lemma: 'cook', part_of_speech: 'verb',
+    senses: [{ sense_code: 'prepare_food', translation: 'V-COOKS' }] },
+];
+
+/** The variant id and its sense ids, as `persistEntries` reported them. */
+const variantOf = async (form: string, partOfSpeech: string) => {
+  const { written } = await persist(form, partOfSpeech === 'noun' ? [COOK[0]] : [COOK[1]]);
+  return written[0];
+};
+
+describe('a form is re-rendered when its lexeme has learned more', () => {
+  it('reports only the lexeme that is behind, across a form that spans two', async () => {
+    await persist('cook', COOK);            // noun + verb, one sense each
+    await persist('cooks', COOKS_PLUS_ONE); // teaches the NOUN a second sense
+
+    const stale = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+
+    expect(stale).toHaveLength(1);
+    expect(stale[0].partOfSpeech).toBe('noun');
+  });
+
+  it('re-ranks rather than appends, and leaves ranks contiguous from zero', async () => {
+    const noun = await variantOf('cook', 'noun');          // one sense, rank 0
+    await persist('cooks', COOKS_PLUS_ONE);                // the lexeme gains a second
+    const [stale] = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+
+    const stored = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findSensesByLexeme({
+        lemma: 'cook', partOfSpeech: 'noun', languageCode: 'en', userLanguageCode: 'he',
+      }));
+    const idOf = (code: string) => stored.find((s) => s.senseCode === code)!.senseId;
+
+    await withTx(t.db, (tx) =>
+      createDictRepo(tx).repairVariantRenderings({
+        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        senses: [
+          // The NEWLY learned sense placed FIRST — which is the whole point.
+          { senseId: idOf('cookery_writer'), rank: 0, translation: 'NEW-FIRST',  exampleSource: null, exampleTarget: null },
+          { senseId: idOf('kitchen_worker'), rank: 1, translation: 'NEW-SECOND', exampleSource: null, exampleTarget: null },
+        ],
+      }));
+
+    // Appending at max(rank)+1 would have put NEW-FIRST last, which is exactly
+    // the failure the spec's "Sense order belongs to the form" describes.
+    const rows = await find('cook');
+    expect(rows.map((r) => r.translation)).toEqual(['NEW-FIRST', 'NEW-SECOND']);
+    expect(rows.map((r) => r.rank)).toEqual([0, 1]);
+    expect(noun.variantId).toBe(stale.variantId);
+  });
+
+  it('marks the variant level again, so a second lookup is not a second repair', async () => {
+    await variantOf('cook', 'noun');
+    await persist('cooks', COOKS_PLUS_ONE);
+    const [stale] = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+
+    const stored = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findSensesByLexeme({
+        lemma: 'cook', partOfSpeech: 'noun', languageCode: 'en', userLanguageCode: 'he',
+      }));
+
+    await withTx(t.db, (tx) =>
+      createDictRepo(tx).repairVariantRenderings({
+        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        senses: stored.map((sense, rank) => ({
+          senseId: sense.senseId, rank, translation: `R-${rank}`,
+          exampleSource: null, exampleTarget: null,
+        })),
+      }));
+
+    expect(
+      await withTx(t.db, (tx) =>
+        createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' })),
+    ).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 11: The degrade-and-serve case, at the service level**
+
+The behaviour most likely to be got wrong later, and invisible from the rows. In
+`apps/server/tests/integration/services/translations.test.ts`:
+
+```ts
+  // A failed repair must not fail the request: nothing was written, so the
+  // stored answer stands. The opposite of the reconciliation call's fail-closed
+  // rule, and for the opposite reason — see the spec's "When the repair fails".
+  it('serves the older answer when the repair call fails', async () => {
+    await expectReconciliation(ns, {
+      senses: [
+        { sense_code: 'read_quickly', translation: 'SCANS-READ' },
+        { sense_code: 'examine_closely', translation: 'SCANS-EXAMINE' },
+        { sense_code: 'digitize_image', translation: 'SCANS-DIGITIZE' },
+      ],
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCANS-READ', sense_code: 'read_quickly' },
+        { translation: 'SCANS-EXAMINE', sense_code: 'examine_closely' },
+        { translation: 'SCANS-DIGITIZE', sense_code: 'digitize_image' },
+      ]),
+      matchText: '"scans"',
+    });
+    await expectGeminiJson(ns, {
+      ...scanVerb([
+        { translation: 'SCAN-READ', sense_code: 'read_quickly' },
+        { translation: 'SCAN-EXAMINE', sense_code: 'examine_closely' },
+      ]),
+      matchText: '"scan"',
+    });
+
+    // This test needs the logger it asserts on, so it builds its deps itself
+    // rather than calling the file's `translations()` helper, which makes a
+    // fresh fake logger and drops it.
+    const logger = createFakeLogger();
+    const service = createTestServerDeps({
+      db: t.db, logger, rng: testRng(7), geminiBaseUrl: geminiBaseUrlFor(ns),
+    }).translations;
+
+    await service.translate({ text: 'scan' });   // two senses
+    await service.translate({ text: 'scans' });  // the lexeme learns a third
+
+    // Now the repair is due — and the provider is down for it.
+    await clearNamespace(ns);
+    await expectGeminiStatus(ns, 503);
+
+    const answer = await service.translate({ text: 'scan' });
+
+    // 200, with the stored answer. Nothing was written, so nothing was lost.
+    expect(answer.senses.map((s) => s.translation)).toEqual(['SCAN-READ', 'SCAN-EXAMINE']);
+    expect(logger.errors).toContainEqual(
+      expect.objectContaining({ message: 'dict_repair_failed' }),
+    );
+  });
+```
+
+- [ ] **Step 12: Carry both versions through restore**
+
+`apps/server/src/db/dictImport.ts` replays through `persistEntries`, so both versions are
+written by Steps 6 — confirm rather than assume, and confirm that `dictExport.ts` does **not**
+emit them. A dump is a dump of the dictionary, not of its bookkeeping; exporting a version
+would let a stale file resurrect a stale marker.
+
+Verify by reading the module and by extending the round-trip test, **not** by running
+`npm run dict:export`: with no path argument it rewrites the checked-in
+`data/backfill/en-he/dictionary.jsonl` in place.
+
+```bash
+git grep -n 'sense_version\|renderedSenseVersion' -- apps/server/src/db/dictExport.ts
+```
+
+Expected: no output. Then add one assertion to the existing
+`apps/server/tests/integration/db/dictRoundTrip.test.ts`, after its restore:
+
+```ts
+    // Versions are DERIVED on import, never carried in the file. A dump that
+    // could resurrect a stale marker would make a restore re-render every form
+    // it touched, at one provider call each.
+    const stale = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'book', languageCode: 'en' }));
+    expect(stale).toEqual([]);
+```
+
+- [ ] **Step 13: Full verification**
+
+```bash
+source ~/.zshrc && cd "$(git rev-parse --show-toplevel)"
+npm run typecheck && npm run test:all && npm run lint:arch && npm run e2e
+```
+
+Expected: green; `lint:arch` still 17 / 7 / 6 / 7 / 3; the integration count up by the cases
+added in Steps 1, 10 and 11 and the unit count up by Step 5's three. `npm run eval` needs no new
+case — the repair reuses the already-scored reconciliation prompt — but run it once to confirm
+the tier 2 figure has not moved.
+
+- [ ] **Step 14: Retract the guarantee everywhere it is quoted**
+
+```bash
+git grep -n 'same senses in the same order' -- apps packages docs README.md
+```
+
+Every hit becomes: *the same string returns the same senses in the same order **until its
+lexeme learns a new sense, at which point that form re-renders and re-ranks once***. The three
+passages in the phase 12 spec are **not** edited — that document freezes its pre-amendment text
+deliberately, and its header already marks them superseded.
+
+- [ ] **Step 15: Commit**
+
+```bash
+git add -A
+git commit -m "feat: re-render a form when its lexeme learns a new sense
+
+A form's translations were written once and never revisited, so a sense
+the lexeme learned from a later form could never reach it: book served
+two meanings while books served three, permanently.
+
+A lexeme now carries a sense_version and a variant records the version it
+was rendered against. A lookup whose variant is behind re-runs the
+existing reconciliation call for that form and replaces its renderings,
+re-ranking rather than appending. A repair whose provider call fails
+serves the stored answer and writes nothing.
+
+Retracts phase 10's 'the same senses in the same order, forever'."
+```
