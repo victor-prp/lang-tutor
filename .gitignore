@@ -10,4 +10,5 @@ test-results/
 apps/server/tests/eval/.results/
 playwright-report/
 docs/superpowers/drafts/
+/drafts/
 scripts/translation-backfills/en-he/logs/
