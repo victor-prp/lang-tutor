@@ -896,10 +896,16 @@ cards are indistinguishable in both languages. The sense code is model-invented 
 can confidently name a distinction nothing else in the row supports, so a sense is only as
 real as its example.
 
-Re-recording does not repair it: `npm run content:generate -- water` returns a byte-identical
-answer, because the provider runs at `temperature: 0` against an unchanged prompt. The lever
-would be a prompt rule requiring an example to demonstrate its specific sense rather than
-merely contain the word — eval-scorable, and out of scope here.
+**The provider is not deterministic at `temperature: 0`, and an earlier revision of this
+section said otherwise.** A single `npm run content:generate -- water` returned a
+byte-identical file, and that was read as proof that re-recording could not help. Sampling
+eight runs of the same prompt showed two different answers — the ambiguous two-noun-sense
+version in five, and a version dropping the second sense in three. One identical result was a
+coincidence, or provider-side caching, not determinism. Nothing here should be concluded from
+a single call; the eval bucket's scores have the same property, which is the deeper reason
+`test-eval` can go red on an innocent diff.
+
+The fix is the rule recorded in the next section.
 
 `difficult` and `water` are **seed** words, so both predate this phase entirely and come from
 call 1 and the recording, nothing to do with reconciliation.
@@ -931,3 +937,65 @@ downstream checks that `booked` is really a verb form."** That is the closest en
 about the *variant*. The defect was the mirror image: the form was filed under the right
 lexemes — call 1 split `pressing` into verb and adjective perfectly — and a *sense* was filed
 under the wrong one.
+
+### An example must rule out the word's other senses
+
+Follows directly from `water` above. Where two senses of one entry render to the same word in
+the target language, the example is the **only** thing that can tell the two cards apart, and
+the prompt asked merely for "one short natural example sentence" — a bar `"The water was
+cold."` clears.
+
+Both prompts now carry the rule, `buildRenderingPrompt` as well as `buildPrompt`: the second
+call writes examples for a form the first never saw, so leaving it out would let a reconciled
+form reintroduce exactly the ambiguity the first call had stopped producing.
+
+> Choose each example so that it could not be read as any other sense of the same word. A
+> sentence that merely contains the word is not enough — it must rule the other senses out.
+
+`buildPrompt` adds an illustration built on `spring`. Two constraints picked that headword.
+It appears in neither the seed nor the eval set, so it cannot bias anything this repo
+measures — phase 12 removed the `book` worked example for the opposite reason, that it was
+teaching a ranking. And the illustration must avoid the strings the integration bucket matches
+MockServer expectations on. An earlier draft read *"We saw the spring"*, which put `saw` into
+every system instruction; MockServer matches on the request body, the system instruction is
+part of it, and every `see` lookup in that bucket began matching the `saw` expectation. The
+suite caught it as one failure in `walks the saw sequence end to end`. The illustration now
+reads *"I like the spring"*.
+
+**Measured before and after, six words, five runs each** — because one word cannot show what a
+prompt rule does to the rest of the vocabulary, and one run cannot show anything at all.
+Counting answers where two senses of one entry share a translation:
+
+| | before | after |
+|---|---|---|
+| `water` | 3/5 | **0/5** |
+| `difficult` | 1/5 | 5/5 |
+| `round` | 3/5 | 5/5 |
+| `burning` | 0/5 | 3/5 |
+| `better` | 0/5 | 2/5 |
+| `pressing` | 0/5 | 0/5 |
+| total | 7/30 = 23% | 15/30 = 50% |
+
+**The rate doubled and the answers improved.** That metric counts identical translations, not
+indistinguishable cards, and the two are different — the distinction this whole section turns
+on. Before, one of the four offending pairs was genuinely ambiguous. After, none were: the
+model keeps *more* senses that share a Hebrew word because it can now tell them apart by
+example — `burn`/adjective בוער as *"The burning log in the fireplace kept us warm."* against
+*"He had a burning desire to prove himself."*
+
+**The rule's real mechanism is pruning, not better writing.** This is the part worth stating
+plainly, because it is not what the rule says it does. `water` was not fixed by the model
+producing a sharper `body_of_water` example; across eight sampled answers it never produced
+one. It drops the sense and returns three clean cards. For a bilingual dictionary where both
+readings render מים that is defensible — the learner loses nothing they could have used — but
+a sense that cannot be distinctly exemplified now disappears rather than being rendered badly,
+and that will apply elsewhere.
+
+One quality wobble was observed and is not fixed: `well`/adverb produced *"You should think
+better about your decision"*, which is not idiomatic. The model strains when pushed to
+differentiate.
+
+`npm run eval` scores 55/56 = 98.2%, against 98.0% before, with the pre-existing `saw` stem
+miss as the only warning. The `water` case locks the specific sentence that failed — a
+regression lock in the shape `rejectTop` already had, not a general claim that every other
+example is good. Whether an example disambiguates remains a judgement read off the scorecard.

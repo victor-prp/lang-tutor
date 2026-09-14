@@ -1881,3 +1881,97 @@ entry then did. Making the two match is a one-line change and is not made here.
   rejected.
 - **Nothing above is committed.** Eight files modified across the two tasks, plus this plan and
   the spec.
+
+### Task 11: An example must rule out the word's other senses
+
+**Files:** `apps/server/src/domain/translation.ts`,
+`apps/server/src/domain/translation.test.ts`, `apps/server/tests/eval/cases.ts`,
+`apps/server/tests/eval/run.ts`, `apps/server/src/db/content.generated.ts`, `README.md`.
+
+Prompted by `water`: two noun senses both rendering מים, the second exemplified by *"The water
+was cold."* — a sentence that fits a glass and a lake equally.
+
+- [x] **Step 1: Establish that the defect is intermittent, not deterministic**
+
+The first attempt at a regression case went **green on its first run with no prompt change**.
+Eight runs of `water` through the unchanged prompt returned the ambiguous answer five times and
+a clean one three times. So the red-green cycle was not available as designed, and a
+single-run eval case would have made `test-eval` randomly red — inflicting the innocent-diff
+failure mode on ourselves. This also disproved the earlier claim that `temperature: 0` made
+re-recording pointless.
+
+- [x] **Step 2: Measure, rather than assume, across six words**
+
+`drafts/measure-examples.ts` (throwaway, gitignored): six words, five runs each, counting
+answers where two senses of one entry share a translation. Before 7/30, after 15/30 — and the
+rate is the wrong thing to watch. The offending pairs are what matter, and they went from one
+ambiguous in four to none in six. Table and reasoning in the spec.
+
+- [x] **Step 3: The rule, in both prompts**
+
+`buildRenderingPrompt` as well as `buildPrompt`, since the second call writes examples for a
+form the first never saw. Illustration built on `spring` — absent from seed and eval set.
+
+- [x] **Step 4: Wording locks, seen to fail**
+
+Two unit tests, one per prompt, labelled as wording locks. Verified by reverting
+`translation.ts` and re-running: both failed, then restored.
+
+- [x] **Step 5: The eval case**
+
+`water`, with a new `rejectExample` field locking the specific sentence that failed — the same
+shape as `rejectTop`, a known-bad value rather than a general property. Stably green after the
+change: 0 occurrences across 8 sampled answers, against roughly 5-in-8 before.
+
+- [x] **Step 6: The integration bucket caught a collision the eval bucket could not**
+
+The first draft illustration read *"We saw the spring"*. MockServer matches expectations on the
+request body, the system instruction is part of that body, and the integration bucket registers
+expectations keyed on `saw`, `saws` and `see` — so every `see` lookup began matching the `saw`
+expectation, and `walks the saw sequence end to end` failed with two extra senses. Changed to
+*"I like the spring"*. The e2e bucket was never exposed: its `expectGemini` registers no
+`matchText` at all.
+
+Worth keeping: a prompt's text is part of a request body that tests match on. A prompt edit can
+break a test that has nothing to do with prompts.
+
+- [x] **Step 7: Re-record all thirteen, and read the diff**
+
+The full re-record, not a filtered one, because the rule changes every example. 73 insertions,
+61 deletions; 20 senses became 22 across the same 15 lexemes. Reviewed:
+
+- `window` 1 sense to 4, all חלון, each unmistakable — architectural opening, pane of glass,
+  window of opportunity, computer window. The rule working exactly as intended.
+- `water` 4 senses to 3: `body_of_water` gone, as measured.
+- `friend` replaced a bogus pair — חבר and חברה, masculine and feminine of one word, never two
+  senses — with חבר and ידיד, which genuinely are two.
+- `see you later` reclassified verb to interjection, which is right.
+- All thirteen quiz answers re-checked against their hand-authored distractors: every correct
+  answer still distinct from all three distractors.
+
+`README.md`'s "seventeen senses… fourteen of which carry an `example`" was already stale and is
+now twenty-two across fifteen lexemes, every one carrying an example.
+
+- [x] **Step 8: Reseed and verify**
+
+`npm run db:reseed` → 15 lexemes, 22 senses, 22 translations, 13 questions.
+
+### Verification of Task 11
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint:arch` | 17 / 7 / 6 / 7 / 3 |
+| `npm run test:all` | 261 unit, 185 integration |
+| `npm run e2e` | 10 passed |
+| `npm run eval` | tier 1: 0 failures; tier 2: **55/56 = 98.2%** (was 98.0%) |
+
+The lone tier 2 miss is the pre-existing `saw` stem heuristic, unchanged by this task.
+
+**What this task did NOT get.** The rule's effect is measured, not guaranteed. Whether an
+example disambiguates is a judgement, and the eval bucket locks one known-bad sentence rather
+than asserting the property — stated here because this repo's rule is that a check which
+cannot be seen to fail is not evidence, and this one could only be seen to fail
+probabilistically. The honest summary is that six words over five runs each showed the
+offending pairs going from one ambiguous in four to none in six, and that `npm run eval` did
+not regress.
