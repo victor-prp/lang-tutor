@@ -1854,9 +1854,13 @@ saying a stray process on its port "must fail the run loudly… rather than have
 silently reuse it and run the test against the wrong server" — which is precisely what the API
 entry then did. Making the two match is a one-line change and is not made here.
 
-### Left open
+### Left open after Tasks 9 and 10
 
-- **The bad rows are still in the dev database.** `urgent_important` → דחוף on `press`/verb,
+Written before Tasks 11 and 12 existed, and kept as the record of what was open at that
+point. Three of its items were closed by the tasks below; each is marked. For the current
+position see *Where the manual-report findings stand* at the end of this document.
+
+- **The bad rows are still in the dev database.** *(closed — reseeded, twice.)* `urgent_important` → דחוף on `press`/verb,
   and the `book?` / `booked.` duplicate keys. The fixes stop new ones; they do not remove
   these. `npm run db:reseed` clears all of them — and, by design, every other looked-up
   lexeme with them, keeping only what the recording seeds. It does not touch `users`, so the
@@ -1873,14 +1877,19 @@ entry then did. Making the two match is a one-line change and is not made here.
   "The water was cold.", which describes the substance rather than a lake and so never
   demonstrates the sense its code names. Judge a sense by its example, not by its code.
   `questions` was rebuilt at 13 and `users` stayed at 20.
+
+  **Superseded.** Task 11 changed the prompt so an example must rule out the word's other
+  senses, re-recorded all thirteen strings through it and reseeded again: 15 lexemes, **22**
+  senses, 22 translations, 13 questions. `water`'s `body_of_water` sense is gone rather than
+  better exemplified, and the `difficult` pair remains, correctly.
 - **The service still sends the un-normalised text to the model.** `normalizeForm` fixes the
   *key*; `buildPrompt` is still handed `input.text.trim()`, so a miss on `book?` asks the model
   about `book?` and stores the answer under `book`. Harmless today, but it means examples get
   built around a string that is not the stored form. Deliberately not bundled into Task 10.
 - **No structural guard in `reconcile()`** — see the spec for why it is deferred rather than
-  rejected.
-- **Nothing above is committed.** Eight files modified across the two tasks, plus this plan and
-  the spec.
+  rejected. *(Still open, and deliberately so.)*
+- **Nothing above is committed.** *(Closed.)* Tasks 9 and 10 shipped as five commits, and
+  Tasks 11 and 12 as six more; all of it is on the branch with CI green.
 
 ### Task 11: An example must rule out the word's other senses
 
