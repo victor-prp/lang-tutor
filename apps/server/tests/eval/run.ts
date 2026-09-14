@@ -23,8 +23,10 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { createGeminiClient } from '../../src/providers/gemini';
-import { askModel, type ModelAnswer } from './askModel';
-import { CASES, type EvalCase } from './cases';
+import type { LlmReconciliation } from '@lang-tutor/core/api';
+
+import { askModel, askRendering, type ModelAnswer } from './askModel';
+import { CASES, RENDERING_CASES, type EvalCase, type RenderingCase } from './cases';
 
 const TIER2_THRESHOLD = 0.85;
 const TIMEOUT_MS = 30_000;
@@ -52,6 +54,9 @@ type Row = {
   tier1: Check[];
   tier2: Check[];
   result?: ModelAnswer;
+  /** Set instead of `result` on a rendering row — the second call answers a
+   *  different shape, and the scorecard prints whichever is present. */
+  rendering?: LlmReconciliation;
   error?: string;
 };
 
@@ -304,6 +309,100 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
   return checks;
 }
 
+/**
+ * Invariants of a rendering answer: the things that must hold whatever the model
+ * decides the form means. Mirrors `tier1` above, minus everything that belongs
+ * to the entry split — a rendering answer has no entries and no `kind`.
+ */
+function renderingTier1(kase: RenderingCase, answer: LlmReconciliation): Check[] {
+  const checks: Check[] = [];
+  const senses = answer.senses;
+
+  // The schema's cap, restated for the same reason tier 1 restates it above: a
+  // provider that stopped honouring responseSchema is what this bucket notices.
+  checks.push({ name: 'at most 5 senses', ok: senses.length <= 5, detail: `${senses.length}` });
+
+  const rendered = senses.filter((sense) => sense.translation !== null);
+  checks.push({
+    name: 'at least one sense is rendered',
+    ok: rendered.length >= 1,
+    detail: `${rendered.length} of ${senses.length}`,
+  });
+
+  checks.push({
+    name: 'distinct snake_case sense codes',
+    ok:
+      senses.every((sense) => /^[a-z0-9]+(_[a-z0-9]+)*$/.test(sense.sense_code)) &&
+      new Set(senses.map((sense) => sense.sense_code)).size === senses.length,
+    detail: senses.map((sense) => sense.sense_code).join(', '),
+  });
+
+  if ((kase.direction ?? 'en_he') === 'en_he') {
+    checks.push({
+      name: 'every rendered translation is in Hebrew script',
+      ok: rendered.every((sense) => HEBREW.test(sense.translation!)),
+      detail: rendered.map((sense) => sense.translation).join(' | '),
+    });
+  }
+
+  return checks;
+}
+
+/** The scored axes of a rendering answer. */
+function renderingTier2(kase: RenderingCase, answer: LlmReconciliation): Check[] {
+  const checks: Check[] = [];
+  const rendered = answer.senses.filter((sense) => sense.translation !== null);
+  const known = new Set(kase.stored.map((sense) => sense.senseCode));
+
+  if (kase.expectReused) {
+    const missing = kase.expectReused.filter(
+      (code) => !rendered.some((sense) => sense.sense_code === code),
+    );
+    checks.push({
+      name: 'stored sense codes are reused rather than renamed',
+      ok: missing.length === 0,
+      detail: missing.length ? `missing: ${missing.join(', ')}` : undefined,
+    });
+  }
+
+  // The phase 13 defect. Scored against EVERY rendered sense, not only the
+  // invented ones: a reading that belongs to another lexeme of this form is
+  // wrong here whatever code carries it.
+  if (kase.rejectAny) {
+    const offenders = rendered.filter((sense) =>
+      kase.rejectAny!.some((rejected) => sense.translation!.includes(rejected)),
+    );
+    checks.push({
+      name: "no reading belonging to another lexeme of this form",
+      ok: offenders.length === 0,
+      detail: offenders.length
+        ? offenders
+            .map(
+              (sense) =>
+                `${sense.sense_code}=${sense.translation}` +
+                (known.has(sense.sense_code) ? ' (reused)' : ' (INVENTED)'),
+            )
+            .join(', ')
+        : undefined,
+    });
+  }
+
+  // The prompt asks for examples built around the queried form, not around the
+  // headword — that rule is what makes a stored sense readable under a form the
+  // learner actually typed.
+  checks.push({
+    name: 'every example is built around the queried form',
+    ok: rendered.every(
+      (sense) => !sense.example || sense.example.source.toLowerCase().includes(kase.form.toLowerCase()),
+    ),
+    detail: rendered
+      .map((sense) => sense.example?.source ?? '(no example)')
+      .join(' | '),
+  });
+
+  return checks;
+}
+
 async function main(): Promise<void> {
   // Exits non-zero with a clear message rather than skipping quietly: a green
   // "0 cases ran" is the one outcome worse than a red suite.
@@ -313,6 +412,23 @@ async function main(): Promise<void> {
       `GEMINI_BASE_URL points at ${gemini.baseUrl}. The eval bucket must call the real API; ` +
         'unset it to use the default.',
     );
+  }
+
+  // An optional substring filter, matching `content:generate -- book`: iterating
+  // on one prompt rule costs one call rather than fourteen. CI passes no
+  // argument and therefore runs everything; the scorecard prints the counts it
+  // actually scored, so a filtered run can never be mistaken for a full one.
+  const filter = process.argv[2]?.trim().toLowerCase();
+  const matches = (...fields: string[]) =>
+    !filter || fields.some((field) => field.toLowerCase().includes(filter));
+
+  const cases = CASES.filter((kase) => matches(kase.label, kase.text));
+  const renderingCases = RENDERING_CASES.filter((kase) =>
+    matches(kase.label, kase.form, kase.lemma),
+  );
+  if (filter) console.log(`filter "${filter}"`);
+  if (cases.length + renderingCases.length === 0) {
+    throw new Error(`filter "${filter}" matched no case`);
   }
 
   const llm = createGeminiClient({
@@ -351,8 +467,44 @@ async function main(): Promise<void> {
     }
   };
 
+  /** The same catch-and-score-as-tier-1 contract as `scoreCase`, for the
+   *  second call. */
+  const scoreRendering = async (kase: RenderingCase): Promise<Row> => {
+    try {
+      const answer = await askRendering(llm, {
+        form: kase.form,
+        direction: kase.direction ?? 'en_he',
+        lemma: kase.lemma,
+        partOfSpeech: kase.partOfSpeech,
+        storedSenses: kase.stored,
+      });
+      return {
+        label: kase.label,
+        text: `${kase.form} \u2190 ${kase.lemma}/${kase.partOfSpeech}`,
+        tier1: renderingTier1(kase, answer),
+        tier2: renderingTier2(kase, answer),
+        rendering: answer,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text: `${kase.form} \u2190 ${kase.lemma}/${kase.partOfSpeech}`,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  // Both call sites of the provider, scored in one run and one scorecard. They
+  // share the concurrency budget rather than each taking their own: the quota
+  // they compete for is the same one.
   const started = Date.now();
-  const rows = await mapWithConcurrency(CASES, CONCURRENCY, scoreCase);
+  const [translationRows, renderingRows] = await Promise.all([
+    mapWithConcurrency(cases, CONCURRENCY, scoreCase),
+    mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
+  ]);
+  const rows = [...translationRows, ...renderingRows];
   const elapsedMs = Date.now() - started;
 
   // Scorecard. Every case prints its actual output, so a drop is diagnosable
@@ -376,6 +528,15 @@ async function main(): Promise<void> {
           `senses=${row.result.senses.map((sense) => sense.translation).join(' | ') || '(none)'}`,
       );
     }
+    if (row.rendering) {
+      console.log(
+        `       senses=${
+          row.rendering.senses
+            .map((sense) => `${sense.sense_code}=${sense.translation ?? 'null'}`)
+            .join(' | ') || '(none)'
+        }`,
+      );
+    }
     for (const check of [...t1Bad, ...t2Bad]) {
       console.log(
         `       ${t1Bad.includes(check) ? 'T1' : 'T2'} ${check.name}: ${check.detail ?? ''}`,
@@ -388,7 +549,8 @@ async function main(): Promise<void> {
     `\ntier 1: ${tier1Failures} failure(s) (must be 0)\n` +
       `tier 2: ${tier2Passed}/${tier2Total} = ${(score * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
-      `${CASES.length} cases in ${(elapsedMs / 1000).toFixed(1)}s ` +
+      `${cases.length} translation + ${renderingCases.length} rendering cases in ` +
+      `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
 

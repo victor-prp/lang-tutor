@@ -1,5 +1,7 @@
 import type {
   LlmEntry,
+  LlmReconciliation,
+  PartOfSpeech,
   TranslationDirection,
   TranslationKind,
   TranslationSense,
@@ -7,10 +9,13 @@ import type {
 
 import {
   buildPrompt,
+  buildRenderingPrompt,
   detectDirection,
   normalizeSenses,
+  parseLlmReconciliation,
   parseLlmTranslation,
   resolveKind,
+  type StoredSense,
 } from '../../src/domain/translation';
 import { flattenEntries, mergeEntries } from '../../src/domain/dictionary';
 import type { LlmClient } from '../../src/services/llm';
@@ -54,4 +59,38 @@ export async function askModel(
   const kind = resolveKind(text, parsed.kind);
   const entries = mergeEntries(parsed.entries);
   return { direction, kind, entries, senses: normalizeSenses(kind, flattenEntries(entries)) };
+}
+
+/**
+ * The **second** call, which `askModel` above does not reach: the reconciliation
+ * that renders a stored lexeme's senses for a newly queried form.
+ *
+ * It was unscored until phase 13, and that is precisely how `pressing` shipped
+ * returning the same meaning twice. `askModel` stops at `buildPrompt`, so every
+ * case in this bucket was scoring the entry split — the half that was already
+ * working — while the half that invents sense codes and writes them into a
+ * dictionary with no TTL had no real-model coverage at all.
+ *
+ * It takes the stored senses as a literal rather than reading them from
+ * Postgres, for the same reason `askModel` stops short of the service: the
+ * object under test is the prompt, and this bucket has no database.
+ */
+export async function askRendering(
+  llm: LlmClient,
+  input: {
+    form: string;
+    direction: TranslationDirection;
+    lemma: string;
+    partOfSpeech: PartOfSpeech;
+    storedSenses: StoredSense[];
+  },
+): Promise<LlmReconciliation> {
+  const raw = await llm(buildRenderingPrompt(input));
+  // Unlike call 1, an empty answer here is not "the input was refused" — the
+  // input is a form the model already returned an entry for. It is a failure.
+  if (raw === '') throw new Error('the model returned no content for the rendering call');
+
+  const parsed = parseLlmReconciliation(raw);
+  if (!parsed) throw new Error('the rendering response did not match the expected shape');
+  return parsed;
 }

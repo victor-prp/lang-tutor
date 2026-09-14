@@ -1,4 +1,6 @@
-import type { TranslationDirection, TranslationKind } from '@lang-tutor/core/api';
+import type { PartOfSpeech, TranslationDirection, TranslationKind } from '@lang-tutor/core/api';
+
+import type { StoredSense } from '../../src/domain/translation';
 
 /**
  * Each case stresses one property of the prompt. `acceptTop` is a *set*, not a
@@ -136,5 +138,114 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: [],
     expectEmpty: true,
+  },
+];
+
+/**
+ * A case for the **second** call — `buildRenderingPrompt`, which renders a
+ * lexeme the dictionary already holds for a newly queried form.
+ *
+ * Separate from `EvalCase` rather than a variant of it because almost nothing
+ * transfers: there is no `kind` to classify, no entry split to score, and no
+ * ranking across lexemes. What there is instead is a lexeme fixed in advance
+ * and a list of senses already stored against it.
+ */
+export type RenderingCase = {
+  label: string;
+  /** The form a learner typed — what the stored senses must be rendered for. */
+  form: string;
+  direction?: TranslationDirection;
+  /** The lexeme being rendered: a lemma AND a part of speech, since phase 12. */
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  /** What the dictionary already holds for that lexeme, as
+   *  `repo/dictionary.ts`'s findSensesByLexeme would have returned it. */
+  stored: StoredSense[];
+  /** Stored codes that must come back reused, carrying a translation. Reuse is
+   *  the entire reason this call exists — a renamed code stores the meaning
+   *  twice, forever. */
+  expectReused?: string[];
+  /** Must appear as no translation at all. This is how a reading belonging to a
+   *  DIFFERENT lexeme of the same form is rejected: `pressing` is the verb
+   *  `press` and the adjective `pressing`, and the verb's rendering must not
+   *  claim the adjective's meaning. */
+  rejectAny?: string[];
+};
+
+export const RENDERING_CASES: RenderingCase[] = [
+  // The phase 13 defect, reduced to its two inputs. `press`/verb holds these
+  // five senses; the form `pressing` also belongs to a SEPARATE lexeme,
+  // `pressing`/adjective, which call 1 returns as its own entry. Asked what
+  // readings of "pressing" the list below lacks, the model answered דחוף
+  // (urgent) — truthfully, and onto the wrong lexeme. The stored senses are
+  // copied out of the dev database as they stood immediately before the lookup
+  // that produced the duplicate.
+  {
+    label: 'a form spanning two lexemes: the verb must not claim the adjective reading',
+    form: 'pressing',
+    lemma: 'press',
+    partOfSpeech: 'verb',
+    stored: [
+      {
+        senseCode: 'applied_force',
+        translation: 'ללחוץ',
+        exampleSource: 'Press the button firmly.',
+        exampleTarget: 'ללחוץ על הכפתור בחוזקה.',
+      },
+      {
+        senseCode: 'urged_insisted',
+        translation: 'לדחוק',
+        exampleSource: 'They will press him for details.',
+        exampleTarget: 'הם ידחקו בו לפרטים.',
+      },
+      {
+        senseCode: 'extracted_liquid',
+        translation: 'סחט',
+        exampleSource: 'He pressed the grapes for wine.',
+        exampleTarget: 'הוא סחט את הענבים ליין.',
+      },
+      {
+        senseCode: 'ironed_clothes',
+        translation: 'לגהץ',
+        exampleSource: 'She needs to press her uniform.',
+        exampleTarget: 'היא צריכה לגהץ את המדים שלה.',
+      },
+      {
+        senseCode: 'publish_print',
+        translation: 'להדפיס',
+        exampleSource: 'The publisher decided to press more copies of the book.',
+        exampleTarget: 'המוציא לאור החליט להדפיס עותקים נוספים של הספר.',
+      },
+    ],
+    expectReused: ['applied_force', 'urged_insisted', 'extracted_liquid', 'ironed_clothes'],
+    // דחוף is the adjective lexeme's reading. The verb rendering must not carry
+    // it under any code, new or reused.
+    rejectAny: ['דחוף'],
+  },
+  // The counterweight, and it must stay green. Forbidding new sense codes
+  // outright would fix the case above and break this call's actual purpose:
+  // `bank` names a sense river_bank where `banks` would have named it
+  // river_edge, and reuse is what stops the dictionary holding both. A fix that
+  // makes the model afraid to answer shows up here, not above.
+  {
+    label: 'a sense the model would name differently is reused, not stored twice',
+    form: 'banks',
+    lemma: 'bank',
+    partOfSpeech: 'noun',
+    stored: [
+      {
+        senseCode: 'financial_institution',
+        translation: 'בנק',
+        exampleSource: 'The bank approved the loan.',
+        exampleTarget: 'הבנק אישר את ההלוואה.',
+      },
+      {
+        senseCode: 'river_bank',
+        translation: 'גדה',
+        exampleSource: 'We sat on the bank of the river.',
+        exampleTarget: 'ישבנו על גדת הנהר.',
+      },
+    ],
+    expectReused: ['financial_institution', 'river_bank'],
   },
 ];
