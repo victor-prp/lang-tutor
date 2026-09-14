@@ -1677,3 +1677,195 @@ Criterion numbers match the spec's *Success criteria* list.
 | 14. `test:all` and `e2e` green with no network | 8 | Final verification step |
 | 15. `lint:arch` still 17 ADR 0001 checks | 1, 4, 8 | Run in three tasks |
 | 16. Seed answers with no provider request | 6 | `db:reseed` then `seed.test.ts` |
+
+---
+
+## Post-implementation follow-up (2026-09-14)
+
+Tasks 1-8 shipped. The day after, a hand-driven REST call surfaced a defect the plan's own
+verification could not have caught, and surveying the data for more instances of it turned up
+a second, unrelated one. Both were fixed under the same rules as the original tasks — ADRs
+binding, a failing test watched first, all four buckets green — and both are recorded here
+rather than in a new plan, because they are corrections to this plan's output.
+
+The design reasoning behind each decision is in the spec's *Amendments after implementation*;
+what follows is what was done.
+
+### Task 9: Scope the reconciliation escape hatch to the lexeme, and score the second call
+
+**Files:** `apps/server/src/domain/translation.ts`,
+`apps/server/src/domain/translation.test.ts`, `apps/server/tests/eval/askModel.ts`,
+`apps/server/tests/eval/cases.ts`, `apps/server/tests/eval/run.ts`.
+
+- [x] **Step 1: Reproduce, and find the root cause before touching anything**
+
+`POST /api/translations {"text":"pressing"}` against the dev database, with
+`GEMINI_BASE_URL` pointed at MockServer so a miss could not spend money. It was a pure cache
+hit — five senses, two pairs of them the same Hebrew word. So the bad data was already
+written; the question was by which call.
+
+`dict_senses.created_at` answered it. `urgent_important` was created in the same transaction
+as the `pressing`/adjective lexeme, and carries a translation for the `pressing` variant and
+for no other form of the verb — the signature of a sense invented while rendering one form.
+Reconstructed sequence in the spec.
+
+- [x] **Step 2: Reproduce again with prompts only, no server and no database**
+
+Both prompts built from the real builders and POSTed straight to Gemini, with the stored
+senses read back out of Postgres as they stood before the bad lookup. Call 1 assigned the
+urgent reading to `pressing`/adjective as `urgent_critical` → דחוף; call 2, reconciling
+`press`/verb in isolation, invented `urgent_important` → דחוף **with the same example
+sentence**. This is what proved the defect is in the prompt rather than in the write path.
+
+- [x] **Step 3: Add the eval bucket's second call site — RED**
+
+`askRendering` in `askModel.ts`; `RenderingCase` and `RENDERING_CASES` in `cases.ts`;
+`renderingTier1`/`renderingTier2` and a shared scorecard in `run.ts`; an optional substring
+filter so iteration costs one call.
+
+```
+npm run eval -- pressing
+[warn] pressing ← press/verb — a form spanning two lexemes: the verb must not claim the adjective reading
+       senses=urgent_important=דחוף | applied_force=לוחץ | urged_insisted=דוחק | extracted_liquid=סוחט | ironed_clothes=מגהץ
+       T2 no reading belonging to another lexeme of this form: urgent_important=דחוף (INVENTED)
+tier 1: 0 failure(s)   tier 2: 2/3 = 66.7%   exit 1
+```
+
+The counterweight case was confirmed green *before* the fix, so a later break would be
+attributable:
+
+```
+npm run eval -- banks
+[ok  ] banks ← bank/noun  senses=financial_institution=בנקים | river_bank=גדות
+```
+
+- [x] **Step 4: Change the prompt — GREEN**
+
+`buildRenderingPrompt` now licenses a new code by the lexeme (*"a reading that is itself
+'press' used as a verb"*) and names the form's other lexemes as out of scope.
+
+```
+npm run eval -- pressing
+[ok  ] pressing ← press/verb
+       senses=applied_force=לוחץ | urged_insisted=דוחק | extracted_liquid=סוחט | ironed_clothes=מגהץ | publish_print=מדפיס
+tier 2: 3/3 = 100.0%
+```
+
+Note `publish_print=מדפיס` in that list: the fabricated sense had been *displacing* a real
+stored one out of the five-sense cap. `banks` re-checked and still green.
+
+- [x] **Step 5: Lock the wording in the unit bucket**
+
+A `buildRenderingPrompt` test asserting the new-code clause names the lexeme and that the
+other lexemes of the form are called out. Labelled in the file as a wording lock rather than a
+behaviour test — what the model does with the wording is what the eval case scores.
+
+Because the production change was written before this test, it was proved capable of failing
+by reverting `translation.ts` and re-running: `Expected: "only for a reading that is itself
+"press" used as a verb"` / received the old prompt. Then restored.
+
+- [x] **Step 6: ADR 0004 R4 caught a comment, and the comment moved**
+
+`npm run lint:arch` reported `VIOLATION R4 nothing under tests/eval/ is imported by src/`
+against `translation.test.ts:283` — a *comment* saying "rendering cases in tests/eval/". The
+rule's grep is a plain substring match over `apps/server/src` and has no way to tell a comment
+from an import. The comment was reworded; the check was not touched. A crude check doing its
+job is not a broken check.
+
+### Task 10: Strip punctuation out of the dictionary key
+
+**Files:** `apps/server/src/domain/dictionary.ts`,
+`apps/server/src/domain/dictionary.test.ts`,
+`apps/server/tests/integration/services/translations.test.ts`.
+
+- [x] **Step 1: Find it**
+
+Surveying every stored form for anything that did not look like a clean dictionary key:
+
+```
+book?     lemma book  noun/verb   -- a separate key from `book`, with 4 senses to its 3
+booked.   lemma book  verb        -- a separate key from `booked`
+```
+
+`Have a nice day!` and `How do you do?` are legitimate seeded phrases carrying punctuation, so
+a blanket strip was never available.
+
+- [x] **Step 2: Unit tests — RED**
+
+Four cases added to `normalizeForm`: single word, either script, multi-word untouched, never
+strips to empty. Exactly the two stripping cases failed (`book?` → `book?`, `שלום!` → `שלום!`)
+and the two guard cases passed, which is the right shape of red.
+
+One existing assertion had to be reversed. The test titled *"leaves a Hebrew string untouched,
+nikud and punctuation included"* asserted the behaviour being fixed; it was split so nikud
+stays asserted and punctuation now strips.
+
+- [x] **Step 3: Implement — GREEN**
+
+`normalizeForm` collapses whitespace as before, returns early for anything containing a space,
+strips trailing `. , ; : ! ?` otherwise, and returns the original if that would empty it. 8
+unit tests green.
+
+- [x] **Step 4: The behaviour, black-box, in the integration bucket**
+
+A sibling of the existing casing-and-spacing case: look up `ladder`, then `ladder?`, assert the
+senses come back, that the response `text` still echoes what the learner typed, and that
+`countGeminiRequests(ns, 'ladder')` is exactly 1. A request body for `ladder?` contains
+`ladder`, so a second provider call would make it 2 — which is what makes 1 proof rather than
+coincidence.
+
+Proved capable of failing the same way as Task 9 Step 5: `dictionary.ts` reverted, test red,
+restored.
+
+### Verification of the follow-up
+
+Run at the end, on the whole tree, not per task:
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint:arch` | 17 ADR 0001 / 7 DI / 6 OpenAPI / 7 test topology / 3 identity — the counts this plan's Global Constraints fix |
+| `npm run test:all` | 259 unit, 185 integration, all passing |
+| `npm run e2e` | 10 passed in 12.4s |
+| `npm run eval` | tier 1: 0 failures; tier 2: **50/51 = 98.0%** (threshold 85%) |
+
+The single tier 2 miss is `saw` failing the example-stem heuristic, which is pre-existing and
+documented in `run.ts` as irreducible (`see` / "I saw him yesterday" shares no stem with its
+lemma). The last full run before this work scored 97.8% with that same lone miss, so the
+follow-up moved the score up rather than down.
+
+### A false alarm worth recording: e2e is not runnable beside a dev server
+
+The e2e suite failed 9 of 10 locally while CI was green. The cause was environmental and cost
+real time to find, so it belongs in the plan:
+
+`e2e/playwright.config.ts` sets `reuseExistingServer: !process.env.CI` on its API `webServer`
+entry. With a developer's own `npm run server` listening on 3001, Playwright reuses it instead
+of starting its own — so the whole suite runs against the **dev** database and the wrong
+MockServer namespace. A run on 2026-09-11 did exactly that and left nine `e2e_*` users behind
+in `lang_tutor`; every run since failed because each spec's fixed username already existed,
+user creation was rejected, and the app never left onboarding. Nine users, nine failing tests.
+
+CI sets `CI`, so `reuseExistingServer` is false there and CI never sees it. With the dev server
+stopped, the suite is green.
+
+Worth noting that the *app* `webServer` entry sets `reuseExistingServer: false` with a comment
+saying a stray process on its port "must fail the run loudly… rather than have Playwright
+silently reuse it and run the test against the wrong server" — which is precisely what the API
+entry then did. Making the two match is a one-line change and is not made here.
+
+### Left open
+
+- **The bad rows are still in the dev database.** `urgent_important` → דחוף on `press`/verb,
+  and the `book?` / `booked.` duplicate keys. The fixes stop new ones; they do not remove
+  these. `npm run db:reseed` clears all of them — and, by design, the other 43 looked-up
+  lexemes with them, keeping only the 6 the recording seeds. It does not touch `users`, so the
+  nine `e2e_*` rows survive it.
+- **The service still sends the un-normalised text to the model.** `normalizeForm` fixes the
+  *key*; `buildPrompt` is still handed `input.text.trim()`, so a miss on `book?` asks the model
+  about `book?` and stores the answer under `book`. Harmless today, but it means examples get
+  built around a string that is not the stored form. Deliberately not bundled into Task 10.
+- **No structural guard in `reconcile()`** — see the spec for why it is deferred rather than
+  rejected.
+- **Nothing above is committed.** Eight files modified across the two tasks, plus this plan and
+  the spec.

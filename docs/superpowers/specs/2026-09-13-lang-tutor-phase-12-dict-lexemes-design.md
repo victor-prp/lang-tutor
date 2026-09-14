@@ -1,6 +1,9 @@
 # Phase 12 — Lexemes, per-form translations, and the `dict_*` rename
 
-- **Status:** Approved, ready for an implementation plan
+- **Status:** Implemented. Amended 2026-09-14 — see *Amendments after implementation* at the
+  end, which records two defects found in the shipped phase and the decisions taken about
+  them. Everything above that section is the design as approved on 2026-09-13 and is left
+  unedited, so it still reads as what was believed at the time.
 - **Date:** 2026-09-13
 - **Source:** phase 10
   (`docs/superpowers/specs/2026-09-10-lang-tutor-phase-10-vocabulary-persistence-design.md`)
@@ -715,3 +718,197 @@ A survey of how existing systems attach an inflected form was run before this de
 15. `npm run lint:arch` passes and still reports seventeen ADR 0001 checks.
 16. The seed's sixteen recorded strings answer from a freshly migrated database with no provider
     request, re-recorded through the new prompt.
+
+## Amendments after implementation (2026-09-14)
+
+Two defects surfaced the day after the phase shipped, one of them reported from the REST
+API by hand. Both are recorded here rather than in a new spec because both are consequences
+of decisions taken above, and the corrections only make sense beside the reasoning they
+correct.
+
+### The reconciliation call's escape hatch was scoped to the form, not to the lexeme
+
+**The report.** `POST /api/translations {"text":"pressing"}` returned five senses of which
+two pairs were the same Hebrew word:
+
+```
+1. דחוף  [verb]       This is a pressing matter.
+2. דחוף  [adjective]  This is a pressing issue.
+3. לוחץ  [verb]       He is pressing the button.
+4. לוחץ  [adjective]  We have a pressing deadline.
+5. דוחק  [verb]       They are pressing him for answers.
+```
+
+**What was actually wrong.** `press`/verb owned a sense `urgent_important` → דחוף. *Pressing*
+meaning urgent is not a reading of the verb *press* at all; it exists only as the adjective,
+and the adjective lexeme `pressing` already held it. One meaning, written twice, to two
+lexemes, by one request.
+
+The database dated the damage precisely, because `dict_senses.created_at` timestamps each
+sense and a variant only carries translations for senses that existed when it was written:
+
+| time | lookup | what it did |
+|---|---|---|
+| 09:27:54 | `pressed` | created `press`/verb with four senses, and `pressed`/adjective. Correct |
+| 09:28:14 | `press` | `press`/verb stored → reconciliation ran, reused the four and invented `publish_print` (a genuine missing verb sense); created `press`/noun |
+| 09:28:36 | `pressing` | `press`/verb stored → reconciliation ran, reused four, nulled `publish_print`, and **invented `urgent_important` → דחוף**; call 1's second entry created `pressing`/adjective holding the same meaning |
+
+The signature is that `urgent_important` carries a translation for the `pressing` variant and
+for no other form of the verb. A real verb sense renders for `press` and `pressed` too; every
+one of the original four does. A sense that exists for exactly one form is a sense invented
+while rendering that form.
+
+**The root cause, and it is one of this document's own sentences.** *The reconciliation call*
+above specifies the escape hatch as *"plus any genuinely new sense with a new code"*, and
+`buildRenderingPrompt` implemented it as *"Use a new snake_case sense_code only for a reading
+the list above does not contain."* That question is scoped to the **form**. The row it
+produces is scoped to the **lexeme**. Those two scopes differ exactly when one form spans
+several lexemes — which is the ordinary case this phase was built to serve, not an edge one.
+
+Asked what readings of *pressing* the verb's stored list lacks, the model answered *urgent*.
+Truthfully. It was answering the question it was asked.
+
+The second contributing factor is that reconciliation runs per entry, in isolation, over
+`Promise.all`, each call seeing only its own lexeme's stored senses. Call 1 had **already
+correctly split** `pressing` into a verb entry and an adjective entry in the same response.
+The verb's reconciliation call had no way to know a sibling entry in that very answer owned
+the adjective reading.
+
+**Reproduced with prompts alone**, no server and no database, by building both prompts and
+POSTing them directly to Gemini. Call 1 assigned *urgent* to `pressing`/adjective as
+`urgent_critical` → דחוף with the example *"We have a pressing need for more resources."*
+Call 2, reconciling `press`/verb, invented `urgent_important` → דחוף with **the same example
+sentence**. At `temperature: 0` that is the stable answer to that prompt.
+
+**Decision: the escape hatch is licensed by the lexeme, and the other lexemes of the form are
+named as out of scope.** `buildRenderingPrompt` now says a new code is only for *a reading
+that is itself "press" used as a verb*, and adds that the form may belong to other headwords
+or parts of speech, that those are separate entries answered by a separate call, and that a
+meaning of the form which is not this lexeme is to be left out entirely.
+
+Deliberately a prompt change and not a filter. The judgement *"is this reading really a verb
+sense of press"* is the same kind of judgement the second call already exists to make; a
+regex over sense codes cannot make it, and a hard rule against new codes would destroy the
+call's purpose — `publish_print` is a genuinely missing verb sense and must still be
+reachable.
+
+**A side effect worth recording:** the invented sense was *displacing* a real one.
+`LlmReconciliationSchema` caps `senses` at five, and the fabricated sense took a slot. After
+the fix the same prompt renders all five stored verb senses, `publish_print` = מדפיס
+included.
+
+### `normalizeForm` produced a dictionary key but only normalised whitespace
+
+Unrelated to the above and found while surveying the data for more instances of it.
+
+`normalizeForm` trimmed and collapsed whitespace and did nothing else, so `book?` was a
+**different dictionary key** from `book`. The dev database held both, with divergent content —
+`book` with three senses, `book?` with four — each bought with its own provider call and, given
+this phase's decision that there is no TTL and no invalidation, kept forever. `booked.` and
+`booked` were a second pair.
+
+**Decision: strip trailing `. , ; : ! ?` from a single-token input only.** Two guards. A
+multi-word expression keeps its punctuation, because the punctuation is part of the
+expression and two seeded ones — `How do you do?` and `Have a nice day!` — are stored with it;
+a blanket strip would split every recorded phrase from its own seed row. And an input that is
+nothing but punctuation is returned unchanged, so no form can normalise down to an empty key.
+
+Nikud survives: Hebrew points are combining marks, not trailing punctuation. The rule works in
+both scripts, so `שלום!` and `שלום` are also one key now.
+
+This reverses an assertion this phase shipped. `domain/dictionary.test.ts` carried a test
+titled *"leaves a Hebrew string untouched, nikud and punctuation included"*; the nikud half is
+kept and the punctuation half is now the opposite. Noted because it is a deliberate reversal
+of a previously-asserted rule rather than an incidental edit.
+
+### Both provider calls are now eval-scored, because the unscored one is the one that shipped broken
+
+The *Evals* section above lists four cases, and every one of them exercises `buildPrompt`.
+`askModel` — the eval bucket's entire model-facing surface — stops at the first call. So the
+call this phase *introduced*, the one that invents sense codes and writes them into a
+dictionary with no TTL, had **no real-model coverage at all**, while the entry split it was
+built to complement had four cases. That is why `pressing` shipped.
+
+**Decision: the eval bucket covers both call sites.** `askRendering` sits beside `askModel`,
+a `RenderingCase` type sits beside `EvalCase`, and both sets run in one scorecard sharing one
+concurrency budget — the quota they compete for is the same one.
+
+`RenderingCase` is a separate type rather than a variant of `EvalCase` because almost nothing
+transfers: a rendering answer has no `kind` to classify, no entry split, and no ranking across
+lexemes. What it has instead is a lexeme fixed in advance and a list of senses already stored
+against it, passed as a literal. Stored senses are handed in rather than read from Postgres,
+for the same reason `askModel` stops short of the service: the object under test is the
+prompt, and this bucket has no database.
+
+Two cases, and the second exists to constrain the fix:
+
+- **`pressing` ← `press`/verb**, with the five stored senses copied out of the dev database as
+  they stood immediately before the bad lookup. Rejects דחוף.
+- **`banks` ← `bank`/noun**, asserting both stored codes come back reused. This is the
+  counterweight. Forbidding new codes outright would have satisfied the first case and
+  destroyed the reason the second call exists — the `bank`/`banks`, `river_bank`/`river_edge`
+  argument made at length above. A fix that makes the model afraid to answer fails here rather
+  than silently.
+
+`askRendering` went into `askModel.ts` rather than a new file on purpose: ADR 0004's prose
+enumerates this bucket as `run.ts`, `cases.ts`, `askModel.ts` and `generate-content.ts`, and a
+fifth module would have made that enumeration stale.
+
+`run.ts` also gained an optional substring filter, matching the `content:generate -- book`
+precedent, so iterating on one prompt rule costs one call rather than fourteen. CI passes no
+argument; the footer prints the counts actually scored, so a filtered run cannot be mistaken
+for a full one.
+
+### Decisions deliberately *not* taken
+
+**No structural guard in `reconcile()`.** The server still writes whatever the second call
+returns. A guard is defensible — reject an entry whose new codes duplicate a meaning a
+sibling entry in the same response already carries — and it is the natural extension of this
+phase's own *a failed second call fails the whole lookup* reasoning: if a known-wrong row is
+worth a failed request, a detectably-wrong row is too. It is not built. The prompt now asks
+the right question, and the leak detector below found exactly one instance in the live data,
+so the evidence does not yet justify the second mechanism. Recorded as deferred, not
+rejected.
+
+**Duplicate translations across lexemes are not a defect and are not being fixed.** Surveying
+every stored form for repeated translations found six, and only `pressing` was the leak:
+
+| form | what collides | same lexeme? |
+|---|---|---|
+| `difficult` | `hard_to_do` / `hard_to_please` → both קשה | yes, adjective |
+| `water` | `liquid_substance` / `body_of_water` → both מים | yes, noun |
+| `round` | `competition_stage` / `circuit_course` → both סיבוב | yes, noun |
+| `better` | `good`/adj + `well`/adv → both טוב יותר | no, two lexemes |
+| `burning` | `burn`/adj `on_fire` + `burn`/verb `be_on_fire` → both בוער | no, two lexemes |
+
+Every one is linguistically correct: genuinely distinct English meanings that Hebrew collapses
+onto one word. `difficult` and `water` are **seed** words, so this predates this phase
+entirely and comes from call 1 and the recording, nothing to do with reconciliation.
+
+What makes them *read* as duplicates is a gap this phase chose: *The wire does not change*
+keeps the response a flat array of `translation` + `part_of_speech` with no gloss, so a
+learner sees קשה twice with no way to tell the two senses apart. `sense_code` exists and is
+load-bearing, and `rowsToSenses` still deliberately never emits it. That remains the right
+call for the wire contract, but it is now a known presentation gap rather than a theoretical
+one, and it is the strongest argument yet for the *grouping the response by lexeme* item still
+sitting in *Out of scope*.
+
+**A latent consequence, not currently live.** All thirteen quiz questions are hand-authored
+from the recording with hand-picked distractors, so nothing is broken. But `difficult`'s
+question uses `hard_to_do` = קשה while `hard_to_please` is also קשה. If question generation
+were ever driven off the dictionary rather than the recording, that pair would produce two
+indistinguishable questions, or a distractor equal to the correct answer.
+
+### What the risk register got right, and what it missed
+
+*Risks* named two failure modes for the reconciliation call — **merging two senses that
+differ**, and **splitting one that does not** — and a third for `sense_code` drift. The
+observed defect is a fourth, unlisted one: **importing a reading that belongs to a different
+lexeme entirely**. It is not a merge, not a split and not a drift; the model was asked a
+question about the form and answered it correctly, and the answer landed on the wrong row.
+
+*Risks* also says **"the model can still file a form under the wrong lexeme… nothing
+downstream checks that `booked` is really a verb form."** That is the closest entry and it is
+about the *variant*. The defect was the mirror image: the form was filed under the right
+lexemes — call 1 split `pressing` into verb and adjective perfectly — and a *sense* was filed
+under the wrong one.
