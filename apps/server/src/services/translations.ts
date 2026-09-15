@@ -15,6 +15,7 @@ import {
   normalizeSenses,
   parseLlmReconciliation,
   parseLlmTranslation,
+  resolveCorrection,
   resolveKind,
   type StoredSense,
 } from '../domain/translation';
@@ -467,7 +468,18 @@ export function createTranslationService({
       // `domain/` cannot throw this itself: R3 forbids it importing ../errors.
       if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
 
-      const kind = resolveKind(text, parsed.kind);
+      // Step 4. One call, in domain/: the four guards, the empty-entries clearing,
+      // both forms normalized and tidied, the effective form, and resolveKind
+      // against that form. `null` means the answer cannot be used at all — the
+      // fourth guard — and costs the same as an answer that failed to parse.
+      const resolved = resolveCorrection(parsed, { typedForm: form, direction });
+      if (!resolved) throw new TranslationUnreadable(raw.slice(0, 200));
+
+      // Step 5. `correction` is the MODEL's, never the redirect step 2 may have
+      // found: a model that declined to correct is answered on its own terms,
+      // because its examples were built around the input as typed and filing them
+      // under the correct spelling would be worse than a variant for the typo.
+      const { correction, effectiveForm, kind } = resolved;
       let entries = mergeEntries(parsed.entries);
       let flattened = normalizeSenses(kind, flattenEntries(entries));
 
@@ -508,29 +520,51 @@ export function createTranslationService({
         // costs the learner one retry. This deliberately differs from the
         // failed-write path below, which protects a correct answer whose
         // storage failed.
-        entries = await reconcile({ llm, form, direction, entries, stored, logger });
+        entries = await reconcile({ llm, form: effectiveForm, direction, entries, stored, logger });
         // Both return paths below read `flattened`; a stale one would serve the
         // un-reconciled renderings on the failed-write path only.
         flattened = normalizeSenses(kind, flattenEntries(entries));
       }
 
       try {
-        const { written, senses } = await transaction((repos) =>
-          repos.dict.persistEntries({
-            form,
+        const { written, senses } = await transaction(async (repos) => {
+          const result = await repos.dict.persistEntries({
+            form: effectiveForm,
             languageCode: source,
             userLanguageCode: target,
             kind,
             entries,
-          }),
-        );
+          });
+          // Step 9, in the SAME transaction as step 8. These two are DEPENDENT —
+          // a redirect must not point at a form with no rows — which is what makes
+          // phase 12's fail-closed rule cover this phase for free: a failed
+          // reconciliation call writes no entries AND no redirect. (Contrast the
+          // probe at step 5b, where a repair and a redirect are independent and
+          // idempotent and may be two transactions; ADR 0001 R8, fourth amendment.)
+          if (correction) {
+            await repos.dict.persistCorrection({
+              typedForm: form,
+              correctedForm: correction.corrected_form,
+              alternatives: correction.alternatives,
+              languageCode: source,
+            });
+          }
+          return result;
+        });
         logger.info({
           event: 'dict_persisted',
           entry_count: written.length,
           lexemes_created: written.filter((entry) => entry.created).length,
         });
+        if (correction) {
+          logger.info({
+            event: 'dict_corrected',
+            direction,
+            alternative_count: correction.alternatives.length,
+          });
+        }
         logger.info({ event: 'translated', direction, kind, sense_count: senses.length });
-        return { text, direction, kind, senses };
+        return { text, direction, kind, senses, ...(correction ? { correction } : {}) };
       } catch (error) {
         // A failed write must not lose a translation the learner already paid
         // for. A broken persistence path shows up as this log line and as every
@@ -538,7 +572,11 @@ export function createTranslationService({
         // answered.
         logger.error('dict_persist_failed', error);
         logger.info({ event: 'translated', direction, kind, sense_count: flattened.length });
-        return { text, direction, kind, senses: flattened };
+        // The correction block is still attached: it describes the MODEL's answer,
+        // which is true whether or not storage succeeded — the same reasoning that
+        // keeps this path answering 200 with the senses the learner already paid
+        // for. Only the redirect ROW is lost, and the next lookup writes it.
+        return { text, direction, kind, senses: flattened, ...(correction ? { correction } : {}) };
       }
     },
   };

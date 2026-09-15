@@ -654,3 +654,164 @@ describe('the stored redirect', () => {
     expect(serialized).not.toContain('throat');
   });
 });
+
+describe('a correction on the miss path', () => {
+  const corrected = (over: Record<string, unknown> = {}) =>
+    reply({
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'book',
+          part_of_speech: 'verb',
+          senses: [{ translation: 'הזמין', sense_code: 'make_reservation' }],
+        },
+      ],
+      correction: { corrected_form: 'booked', alternatives: ['booted'] },
+      ...over,
+    });
+
+  // Criterion 4. The substitution happens ONCE, inside resolveCorrection, and
+  // every downstream use is covered by construction.
+  it('hands persistEntries the corrected form, never the typed one', async () => {
+    const { service, dict } = serviceWith(corrected());
+
+    const result = await service.translate({ text: 'bokked' });
+
+    expect(dict.persisted).toHaveLength(1);
+    expect(dict.persisted[0].form).toBe('booked');
+    expect(result.text).toBe('bokked');
+    expect(result.correction).toEqual({ corrected_form: 'booked', alternatives: ['booted'] });
+  });
+
+  // The reconciliation call phase 12 added never sees the typed string. Hand that
+  // prompt `bokked` and it renders a misspelling, permanently.
+  it('hands buildRenderingPrompt the corrected form when the lexeme already has senses', async () => {
+    const { service, llm, dict } = serviceWith(
+      corrected(),
+      reply({ senses: [{ sense_code: 'make_reservation', translation: 'הזמין' }] }),
+    );
+    dict.stored['book:verb'] = [
+      { senseCode: 'make_reservation', translation: 'להזמין', exampleSource: null, exampleTarget: null },
+    ];
+
+    await service.translate({ text: 'bokked' });
+
+    expect(llm.calls).toHaveLength(2);
+    expect(llm.calls[1].user).toBe('booked');
+    expect(llm.calls[1].system).toContain('"booked"');
+    expect(llm.calls[1].system).not.toContain('bokked');
+  });
+
+  it('writes the redirect beside the entries, and logs dict_corrected', async () => {
+    const { service, dict, logger } = serviceWith(corrected());
+
+    await service.translate({ text: 'bokked' });
+
+    expect(dict.correctionsWritten).toEqual([
+      expect.objectContaining({
+        typedForm: 'bokked',
+        correctedForm: 'booked',
+        alternatives: ['booted'],
+      }),
+    ]);
+    expect(logger.events.map((event) => event.event)).toContain('dict_corrected');
+    expect(JSON.stringify(logger.events)).not.toContain('bokked');
+  });
+
+  // Criterion 8's fourth guard, at the service level: the same path an unparseable
+  // answer takes. Nothing is written and no second call is made — the entries
+  // describe the corrected headword, so they are wrong in the same way the form is.
+  it('raises TranslationUnreadable when the corrected form is in the other script', async () => {
+    const { service, llm, dict } = serviceWith(
+      corrected({ correction: { corrected_form: 'שלום' } }),
+    );
+
+    await expect(service.translate({ text: 'shalom' })).rejects.toBeInstanceOf(
+      TranslationUnreadable,
+    );
+    expect(llm.calls).toHaveLength(1);
+    expect(dict.persisted).toHaveLength(0);
+    expect(dict.correctionsWritten).toHaveLength(0);
+  });
+
+  // Criterion 7. Both halves: no correction block, AND a kind that did not come
+  // from the corrected form.
+  it('reports no correction and no derived kind for an answer with no entries', async () => {
+    const { service, dict } = serviceWith(
+      reply({ kind: 'phrase', entries: [], correction: { corrected_form: 'zxq wbtl' } }),
+    );
+
+    const result = await service.translate({ text: 'zxqwbtl' });
+
+    expect(result.correction).toBeUndefined();
+    expect(result.kind).toBe('word');
+    expect(result.senses).toEqual([]);
+    expect(dict.persisted).toHaveLength(0);
+    expect(dict.correctionsWritten).toHaveLength(0);
+  });
+
+  // Criterion 14, and the decision this is one `if` away from reversing. A
+  // redirect exists, its target has no rows, and call 1 answers with entries and
+  // NO correction. Reusing redirect.correctedForm as the effective form would look
+  // like a free mitigation and is rejected: when no correction is present the model
+  // has been told to build its examples around the input AS TYPED, and those
+  // examples are exactly what persistEntries stores. Writing that answer under
+  // `throat` would file example sentences containing `thruot` against the correctly
+  // spelled form, permanently — the defect the third prompt rule exists to prevent,
+  // reintroduced through the one path that bypasses the rule's precondition.
+  it('answers the model on its own terms when it declines to correct', async () => {
+    const { service, dict } = serviceWith(
+      reply({
+        kind: 'word',
+        ...oneEntry('thruot', [{ translation: 'גרון', sense_code: 'body_part' }]),
+      }),
+    );
+    dict.corrections = {
+      thruot: { typedForm: 'thruot', correctedForm: 'throat', alternatives: [] },
+    };
+    dict.hit = {};
+
+    const result = await service.translate({ text: 'thruot' });
+
+    expect(dict.persisted[0].form).toBe('thruot');
+    expect(result.correction).toBeUndefined();
+  });
+
+  // Criterion 5, unit half. A failing reconciliation call writes nothing — no
+  // entries AND no redirect — because steps 8 and 9 share one transaction. Those
+  // two are DEPENDENT: a redirect must not point at a form with no rows.
+  it('writes neither entries nor a redirect when the reconciliation call fails', async () => {
+    const { service, dict } = serviceWith(corrected(), 'not json at all');
+    dict.stored['book:verb'] = [
+      { senseCode: 'make_reservation', translation: 'להזמין', exampleSource: null, exampleTarget: null },
+    ];
+
+    await expect(service.translate({ text: 'bokked' })).rejects.toBeInstanceOf(
+      TranslationUnreadable,
+    );
+    expect(dict.persisted).toHaveLength(0);
+    expect(dict.correctionsWritten).toHaveLength(0);
+  });
+
+  // A sentence carrying a correction is answered SILENTLY: the notice is
+  // suppressed and the entries kept. A judgement, not an oversight — a sentence is
+  // never written to the dictionary so nothing is poisoned, and refusing the answer
+  // would fail a request the model translated correctly over a field it was told
+  // not to send.
+  it('suppresses the notice on a sentence but keeps the translation', async () => {
+    const { service, dict } = serviceWith(
+      reply({
+        kind: 'sentence',
+        ...oneEntry('I have a sore throat', [{ translation: 'יש לי כאב גרון.', sense_code: 's' }], 'verb'),
+        correction: { corrected_form: 'I have a sore throat' },
+      }),
+    );
+
+    const result = await service.translate({ text: 'I have a sore thruot' });
+
+    expect(result.kind).toBe('sentence');
+    expect(result.senses).toEqual([{ translation: 'יש לי כאב גרון.' }]);
+    expect(result.correction).toBeUndefined();
+    expect(dict.persisted).toHaveLength(0);
+  });
+});
