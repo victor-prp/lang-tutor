@@ -815,3 +815,144 @@ describe('a correction on the miss path', () => {
     expect(dict.persisted).toHaveLength(0);
   });
 });
+
+describe('the corrected-form probe', () => {
+  const correctingReply = reply({
+    kind: 'word',
+    entries: [
+      // Deliberately ADJECTIVE FIRST, where the stored `booked` below has the verb
+      // at entry_rank 0. That is the shape that made the un-probed flow collide on
+      // dict_variants_form_entry_rank_key, answer 200 from the catch, and roll the
+      // redirect back with the write — forever.
+      { lemma: 'book', part_of_speech: 'adjective', senses: [{ translation: 'מוזמן', sense_code: 'reserved' }] },
+      { lemma: 'book', part_of_speech: 'verb', senses: [{ translation: 'הזמין', sense_code: 'make_reservation' }] },
+    ],
+    correction: { corrected_form: 'booked', alternatives: [] },
+  });
+
+  // Criterion 23, and the ordinary corrected miss once the backfill lands.
+  it('serves a target the dictionary already holds, with one call and no write to it', async () => {
+    const { service, llm, dict, logger } = serviceWith(correctingReply);
+    dict.hit = { booked: [row('הזמין', { kind: 'word', lexemeId: 't-verb' })] };
+
+    const result = await service.translate({ text: 'bokked' });
+
+    expect(llm.calls).toHaveLength(1);
+    expect(dict.persisted).toHaveLength(0);
+    expect(dict.correctionsWritten).toEqual([
+      expect.objectContaining({ typedForm: 'bokked', correctedForm: 'booked' }),
+    ]);
+    // The target's stored answer, unchanged, plus the correction block.
+    expect(result.kind).toBe('word');
+    expect(result.senses).toEqual([{ translation: 'הזמין' }]);
+    expect(result.correction).toEqual({ corrected_form: 'booked', alternatives: [] });
+    expect(logger.events.map((event) => event.event)).toContain('dict_corrected');
+  });
+
+  // The R8 amendment's "independent" claim, as a test: two writes, in this order.
+  it('repairs a stale target inside serveForm and still writes the redirect after', async () => {
+    const { service, llm, dict } = serviceWith(
+      correctingReply,
+      reply({ senses: [{ sense_code: 'make_reservation', translation: 'הזמין' }] }),
+    );
+    dict.hit = { booked: [row('להזמין', { kind: 'word', lexemeId: 't-verb' })] };
+    dict.stale = {
+      booked: [{ lexemeId: 't-verb', variantId: 'v-booked', lemma: 'book', partOfSpeech: 'verb' }],
+    };
+    // Without a known sense_code to match against, repairForm has nothing to
+    // repair TO — "an unknown code names no stored sense, and a repair may not
+    // invent one" — so it would throw, get swallowed by serveForm's catch, and
+    // this test would exercise a FAILED repair instead of the successful one it
+    // is about. Same fixture the redirect-repair test above and the cache-hit
+    // repair test use, for the same reason.
+    dict.stored['book:verb'] = [
+      { senseCode: 'make_reservation', translation: 'להזמין', exampleSource: null, exampleTarget: null },
+    ];
+
+    const result = await service.translate({ text: 'bokked' });
+
+    // Call 1 and the repair. NOT a reconciliation for the miss pipeline — that
+    // pipeline never runs.
+    expect(llm.calls).toHaveLength(2);
+    expect(dict.repaired).toHaveLength(1);
+    expect(dict.persisted).toHaveLength(0);
+    expect(dict.correctionsWritten).toHaveLength(1);
+    expect(result.correction).toEqual({ corrected_form: 'booked', alternatives: [] });
+  });
+
+  // The case the third revision traced, and the only one in which the
+  // reconciliation path is handed the corrected form.
+  it('falls through to the pipeline when the corrected form has no rows of its own', async () => {
+    const { service, dict } = serviceWith(correctingReply);
+    dict.hit = {};
+
+    await service.translate({ text: 'bokked' });
+
+    expect(dict.persisted).toHaveLength(1);
+    expect(dict.persisted[0].form).toBe('booked');
+    expect(dict.correctionsWritten).toHaveLength(1);
+  });
+
+  // Criterion 24. The model's entries described `throte`; they are discarded
+  // unwritten, and the redirect points straight at `throat`.
+  it('follows a corrected form that is itself a known typo, one hop', async () => {
+    const { service, dict } = serviceWith(
+      reply({
+        kind: 'word',
+        ...oneEntry('throte', [{ translation: 'גרון', sense_code: 'body_part' }]),
+        correction: { corrected_form: 'throte', alternatives: [] },
+      }),
+    );
+    dict.corrections = {
+      throte: { typedForm: 'throte', correctedForm: 'throat', alternatives: ['throaty'] },
+    };
+    dict.hit = { throat: [row('גרון', { kind: 'word' })] };
+
+    const result = await service.translate({ text: 'thruot' });
+
+    expect(dict.persisted).toHaveLength(0);
+    expect(dict.correctionsWritten).toEqual([
+      expect.objectContaining({ typedForm: 'thruot', correctedForm: 'throat' }),
+    ]);
+    // The correction block names the HOP's target, and carries the hop's own
+    // alternatives — the model's described `throte`, which nothing is written for.
+    expect(result.correction).toEqual({ corrected_form: 'throat', alternatives: ['throaty'] });
+    expect(result.senses).toEqual([{ translation: 'גרון' }]);
+  });
+
+  // One hop, no further. A chain AND a truncated dictionary: accepted, and it
+  // fails the lookup rather than reading on, so the number of reads never depends
+  // on data.
+  it('fails the lookup and writes nothing when the hop target has no rows either', async () => {
+    const { service, dict } = serviceWith(
+      reply({
+        kind: 'word',
+        ...oneEntry('throte', [{ translation: 'גרון', sense_code: 'body_part' }]),
+        correction: { corrected_form: 'throte', alternatives: [] },
+      }),
+    );
+    dict.corrections = {
+      throte: { typedForm: 'throte', correctedForm: 'throat', alternatives: [] },
+    };
+    dict.hit = {};
+
+    await expect(service.translate({ text: 'thruot' })).rejects.toBeInstanceOf(
+      TranslationUnreadable,
+    );
+    expect(dict.persisted).toHaveLength(0);
+    expect(dict.correctionsWritten).toHaveLength(0);
+  });
+
+  // The probe runs ONLY when a correction is present. An uncorrected miss must
+  // pay no extra read.
+  it('does not probe when the model reported no correction', async () => {
+    const { service, dict } = serviceWith(
+      reply({ kind: 'word', ...oneEntry('kite', [{ translation: 'עפיפון', sense_code: 'toy' }]) }),
+    );
+
+    await service.translate({ text: 'kite' });
+
+    expect(dict.persisted[0].form).toBe('kite');
+    expect(dict.correctionsWritten).toHaveLength(0);
+  });
+});

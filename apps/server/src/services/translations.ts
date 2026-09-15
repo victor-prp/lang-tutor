@@ -480,6 +480,107 @@ export function createTranslationService({
       // because its examples were built around the input as typed and filing them
       // under the correct spelling would be worse than a variant for the typo.
       const { correction, effectiveForm, kind } = resolved;
+
+      // Step 5b — the corrected-form probe, only when a correction is present.
+      //
+      // The SAME function steps 1 and 3 call, repair included. Once the backfill
+      // lands this is the ordinary corrected miss: corrections resolve to common
+      // words, and common words already have rows. Without it, step 7 pays a
+      // reconciliation call whose result the write discards (every insert in
+      // persistEntries is DO NOTHING for a form that already has renderings), and
+      // step 8 runs persistEntries on a form that already has rows — a path phase
+      // 12's live flow never takes, because a hit returns at step 1 first. If call
+      // 1 ranks the entries differently from the stored variant, the variant insert
+      // collides on dict_variants_form_entry_rank_key — the safety net, which must
+      // raise — the catch answers 200, and the redirect is rolled back with the
+      // write. Two calls and a failed write on every lookup of that typo, forever.
+      if (correction) {
+        const probe = await serveForm({
+          llm,
+          transaction,
+          form: effectiveForm,
+          direction,
+          source,
+          target,
+          logger,
+        });
+
+        if (probe) {
+          // A SECOND, INDEPENDENT write: the probe may already have committed the
+          // repair's transaction inside serveForm. Each is correct alone, each is
+          // idempotent, and a failure between them leaves a correct dictionary and
+          // one more provider call — ADR 0001 R8, fourth amendment. Contrast steps
+          // 8 and 9, which are dependent and share one transaction.
+          await transaction((repos) =>
+            repos.dict.persistCorrection({
+              typedForm: form,
+              correctedForm: correction.corrected_form,
+              alternatives: correction.alternatives,
+              languageCode: source,
+            }),
+          );
+          logger.info({
+            event: 'dict_corrected',
+            direction,
+            alternative_count: correction.alternatives.length,
+          });
+          // No call 2 and no persistEntries: the target already holds its own
+          // renderings.
+          return { text, direction, kind: probe.kind, senses: probe.senses, correction };
+        }
+
+        // The chain. Made ONLY when the probe missed. Without it, step 8 would
+        // write a dict_variants row for a string this very table records as not a
+        // word — which then shadows that string's own redirect forever by the
+        // "correct spellings win over redirects" rule: this phase's central defect
+        // arriving by its own machinery.
+        const hop = await transaction((repos) =>
+          repos.dict.findCorrectionByForm({ form: effectiveForm, languageCode: source }),
+        );
+        if (hop) {
+          const hopped = await serveForm({
+            llm,
+            transaction,
+            form: hop.correctedForm,
+            direction,
+            source,
+            target,
+            logger,
+          });
+          // ONE hop, no further: a chain whose second target has no rows fails the
+          // lookup rather than reading on, so the number of reads a lookup makes
+          // never depends on data. It needs a chain AND a truncated dictionary.
+          if (!hopped) throw new TranslationUnreadable(raw.slice(0, 200));
+
+          const hopCorrection = {
+            corrected_form: hop.correctedForm,
+            alternatives: hop.alternatives,
+          };
+          await transaction((repos) =>
+            repos.dict.persistCorrection({
+              typedForm: form,
+              // Straight to the hop's target, never to the typo the model named.
+              correctedForm: hop.correctedForm,
+              alternatives: hop.alternatives,
+              languageCode: source,
+            }),
+          );
+          logger.info({
+            event: 'dict_corrected',
+            direction,
+            alternative_count: hop.alternatives.length,
+          });
+          // The model's entries described the intermediate typo. Discarded unwritten.
+          return {
+            text,
+            direction,
+            kind: hopped.kind,
+            senses: hopped.senses,
+            correction: hopCorrection,
+          };
+        }
+      }
+
       let entries = mergeEntries(parsed.entries);
       let flattened = normalizeSenses(kind, flattenEntries(entries));
 
