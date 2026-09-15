@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { loadConfig } from '../config';
@@ -6,8 +6,15 @@ import { createDb } from './client';
 import { runMigrations } from './migrate';
 import { reseedContent } from './reseed';
 import { seedContent } from './seed';
-import { exportDictionary, fromJsonl, toJsonl } from './dictExport';
-import { importDictionary } from './dictImport';
+import {
+  correctionsFromJsonl,
+  correctionsToJsonl,
+  exportCorrections,
+  exportDictionary,
+  fromJsonl,
+  toJsonl,
+} from './dictExport';
+import { importCorrections, importDictionary } from './dictImport';
 
 // The dictionary is en->he; the checked-in dataset is scoped by that pair, the
 // same way scripts/translation-backfills/en-he/ is.
@@ -25,6 +32,13 @@ function pathAfter(flag: string): string | undefined {
   if (index === -1) return undefined;
   const value = process.argv[index + 1];
   return value && !value.startsWith('--') ? resolve(value) : DEFAULT_DATASET;
+}
+
+/** The corrections file sits beside whichever dictionary path was actually used,
+ *  never beside the default's: `--export-dict /tmp/mine.jsonl` must not write a
+ *  developer's ad-hoc export back into the repo's dataset folder. */
+function correctionsPathFor(dictionaryPath: string): string {
+  return join(dirname(dictionaryPath), 'corrections.jsonl');
 }
 
 // A second process is a legitimate second composition root — but it reads the
@@ -55,6 +69,12 @@ async function main(): Promise<void> {
       writeFileSync(exportTo, toJsonl(records));
       console.log(`exported ${records.length} forms from ${databaseUrl}`);
       console.log(`written to ${exportTo}`);
+
+      const corrections = await exportCorrections(db, { languageCode: TARGET_LANGUAGE });
+      const correctionsPath = correctionsPathFor(exportTo);
+      writeFileSync(correctionsPath, correctionsToJsonl(corrections));
+      console.log(`exported ${corrections.length} corrections`);
+      console.log(`written to ${correctionsPath}`);
       return;
     }
 
@@ -74,6 +94,22 @@ async function main(): Promise<void> {
         `restored ${result.records} forms into ${databaseUrl} — ` +
           `${result.lexemesCreated} lexemes written, the rest were already there ` +
           '(persistEntries is first-writer-wins, so nothing was overwritten).',
+      );
+
+      // A restore whose sibling file is absent restores the dictionary and reports
+      // zero corrections rather than failing: the file is genuinely optional, and
+      // it is empty on arrival.
+      const correctionsPath = correctionsPathFor(importFrom);
+      const correctionRecords = existsSync(correctionsPath)
+        ? correctionsFromJsonl(readFileSync(correctionsPath, 'utf8'))
+        : [];
+      const restored = await importCorrections(db, {
+        records: correctionRecords,
+        languageCode: TARGET_LANGUAGE,
+      });
+      console.log(
+        `restored ${restored.records} corrections from ${correctionsPath} ` +
+          '(persistCorrection is first-writer-wins, so nothing was re-pointed).',
       );
       return;
     }
