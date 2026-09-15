@@ -70,7 +70,7 @@ export function createDictRepo(tx: Tx) {
    * `(tr.rank, v.entry_rank)` is unique across one form's rows and `v.lexeme_id`
    * closes it, so identical requests return identical answers — the same
    * senses in the same order — until its lexeme learns a new sense, at which
-   * point that form re-renders and re-ranks once (Task 13). This read is what
+   * point that form re-renders and re-ranks once (phase 12, Task 13). This read is what
    * both the plain hit and the repaired hit answer with.
    */
   const findSensesByForm = async (input: {

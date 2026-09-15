@@ -102,7 +102,7 @@ export function normalizeForm(text: string): string {
   // sentence mark stuck to it.
   if (/\s/.test(collapsed)) return collapsed;
 
-  // Phase 13. What this function returns is a dictionary KEY — the `form` a
+  // Phase 12 follow-up. What this function returns is a dictionary KEY — the `form` a
   // variant is stored and matched under — and the dictionary has no TTL, so a
   // key that differs by a keystroke is a second permanent copy of the word. The
   // dev database held `book` with three senses and `book?` with four: two

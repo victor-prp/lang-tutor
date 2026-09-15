@@ -273,7 +273,7 @@ describe('buildRenderingPrompt', () => {
     expect(system).toMatch(/third-person masculine singular/);
   });
 
-  // Phase 13. The escape hatch that lets the model name a reading the stored
+  // Phase 12 follow-up. The escape hatch that lets the model name a reading the stored
   // list lacks used to be scoped to the FORM — "a reading the list above does
   // not contain" — while the row it produces is scoped to the LEXEME. Those two
   // scopes differ exactly when a form spans several lexemes, which is the normal
@@ -314,7 +314,7 @@ describe('buildRenderingPrompt', () => {
 });
 
 describe('the participial-adjective lemma rule', () => {
-  // Phase 13, F2. Without it the model wavered — `burnt` naming the adjective
+  // Phase 12 follow-up, F2. Without it the model wavered — `burnt` naming the adjective
   // `burnt` and `burned` naming `burn` in the same afternoon — which put two
   // lexemes in the dictionary for one adjective, each with its own sense list
   // and neither ever able to see the other's. A wording lock; the eval bucket's
@@ -330,7 +330,7 @@ describe('the participial-adjective lemma rule', () => {
 });
 
 describe('the example-disambiguation rule', () => {
-  // Phase 13. Two senses of one entry can render to the same word — Hebrew says
+  // Phase 12 follow-up. Two senses of one entry can render to the same word — Hebrew says
   // מים for water-the-substance and water-the-lake — and the example is then the
   // only thing that tells the two cards apart. The recorded seed carried "The
   // water was cold.", which fits a glass and a lake equally. Measured over six

@@ -34,7 +34,7 @@ export type EvalCase = {
   rejectTop?: string[];
   /** The lemma each named part of speech must resolve to. `expectLemma` reads
    *  entries[0], which for an inflected form is usually the verb; this reaches
-   *  the entry that actually matters. Phase 13: `burnt` and `burned` are one
+   *  the entry that actually matters. Phase 12 follow-up: `burnt` and `burned` are one
    *  adjective, and must name one lemma. */
   expectLemmaFor?: Record<string, string>;
   /** No sense's example may contain any of these. A regression lock on a
@@ -144,7 +144,7 @@ export const CASES: EvalCase[] = [
     acceptTop: ['ראה', 'לראות'],
     expectAlso: ['מסור', 'לנסר'],
   },
-  // Phase 13. `water` has two noun senses — the substance you drink and a body
+  // Phase 12 follow-up. `water` has two noun senses — the substance you drink and a body
   // of water you swim in — and Hebrew renders both מים, so the example is the
   // only thing that can tell the two cards apart. The recorded seed's second
   // example was "The water was cold.", which fits a glass and a lake equally
@@ -158,7 +158,7 @@ export const CASES: EvalCase[] = [
     expectAlso: ['להשקות'],
     rejectExample: ['The water was cold'],
   },
-  // Phase 13, F2. The model lemmatises verb forms to the base verb every time,
+  // Phase 12 follow-up, F2. The model lemmatises verb forms to the base verb every time,
   // but wavers on participial adjectives: `burnt` came back as the adjective
   // `burn` while `burned` came back as the adjective `burned`. Two lexemes for
   // one adjective — British and American spellings of a single word — each with
@@ -223,7 +223,7 @@ export type RenderingCase = {
 };
 
 export const RENDERING_CASES: RenderingCase[] = [
-  // The phase 13 defect, reduced to its two inputs. `press`/verb holds these
+  // The phase 12 follow-up defect, reduced to its two inputs. `press`/verb holds these
   // five senses; the form `pressing` also belongs to a SEPARATE lexeme,
   // `pressing`/adjective, which call 1 returns as its own entry. Asked what
   // readings of "pressing" the list below lacks, the model answered דחוף

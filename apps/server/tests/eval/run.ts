@@ -295,7 +295,7 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     });
   }
 
-  // Phase 13, F2. Per part of speech, because entries[0] for an inflected form
+  // Phase 12 follow-up, F2. Per part of speech, because entries[0] for an inflected form
   // is the verb and the defect lives on the adjective.
   if (kase.expectLemmaFor) {
     for (const [pos, lemma] of Object.entries(kase.expectLemmaFor)) {
@@ -314,7 +314,7 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     }
   }
 
-  // Phase 13. Scored against every sense's example, not only the top one: the
+  // Phase 12 follow-up. Scored against every sense's example, not only the top one: the
   // ambiguous sentence that prompted this rule sat at rank 1.
   if (kase.rejectExample) {
     const offenders = result.senses
@@ -401,7 +401,7 @@ function renderingTier2(kase: RenderingCase, answer: LlmReconciliation): Check[]
     });
   }
 
-  // The phase 13 defect. Scored against EVERY rendered sense, not only the
+  // The phase 12 follow-up defect. Scored against EVERY rendered sense, not only the
   // invented ones: a reading that belongs to another lexeme of this form is
   // wrong here whatever code carries it.
   if (kase.rejectAny) {

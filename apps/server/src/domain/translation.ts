@@ -87,7 +87,7 @@ export function buildPrompt(input: {
     'Return one entry per headword AND part of speech: "book" is two entries, one noun and',
     'one verb. An inflected form belongs to the entry whose part of speech it realises:',
     '"booked" is the verb entry only, never the noun; "books" is legitimately both.',
-    // Phase 13, F2. The model lemmatises verb forms to the base verb every
+    // Phase 12 follow-up, F2. The model lemmatises verb forms to the base verb every
     // time and wavers on participial adjectives, which put two lexemes in the
     // dictionary for one adjective — measured as `burnt` naming `burnt` and
     // `burned` naming `burn` on the same afternoon, so it is not a wrong rule
@@ -101,7 +101,7 @@ export function buildPrompt(input: {
     `Give each sense one short natural example sentence in ${from} together with its ${to}`,
     'translation, and a short snake_case sense_code naming the meaning',
     '(financial_institution as against river_bank).',
-    // Phase 13. Where two senses of one entry render to the same word in the
+    // Phase 12 follow-up. Where two senses of one entry render to the same word in the
     // target language — Hebrew says מים for water-the-substance and
     // water-the-lake — the example is the ONLY thing that can tell the two
     // cards apart, and "The water was cold" fits a glass and a lake equally.
@@ -246,7 +246,7 @@ export function buildRenderingPrompt(input: {
     'is the same one — even where you would have named it differently. Use a new',
     `snake_case sense_code only for a reading that is itself "${input.lemma}" used as a`,
     `${input.partOfSpeech} and that the list above does not contain.`,
-    // The phase 13 defect, and the reason the sentence above names the lexeme
+    // The phase 12 follow-up defect, and the reason the sentence above names the lexeme
     // twice. This call is scoped to ONE lexeme, but the form it renders may
     // belong to several: `pressing` is the verb `press` and, separately, the
     // adjective `pressing`. Asked only what readings the FORM has that the

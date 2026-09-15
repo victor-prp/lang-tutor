@@ -65,7 +65,7 @@ export async function askModel(
  * The **second** call, which `askModel` above does not reach: the reconciliation
  * that renders a stored lexeme's senses for a newly queried form.
  *
- * It was unscored until phase 13, and that is precisely how `pressing` shipped
+ * It was unscored until the phase 12 follow-ups, and that is precisely how `pressing` shipped
  * returning the same meaning twice. `askModel` stops at `buildPrompt`, so every
  * case in this bucket was scoring the entry split — the half that was already
  * working — while the half that invents sense codes and writes them into a
