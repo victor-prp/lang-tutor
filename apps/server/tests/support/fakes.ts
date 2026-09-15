@@ -193,6 +193,10 @@ export function createFakeDictRepo(): FakeDictRepo {
     // fake and read by nobody.
     findSenseVersion: async () => 0,
     repairVariantRenderings: async () => {},
+    // Stubs until Task 8, which makes this fake form-aware and gives both of
+    // these a backing map. Present now only because `DictRepo` names them.
+    findCorrectionByForm: async () => undefined,
+    persistCorrection: async () => {},
     persistEntries: async (input) => {
       repo.persisted.push(input);
       if (repo.persistError) throw repo.persistError;

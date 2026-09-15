@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
+import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
+import { withTx } from '../../support/withTx';
 
 let t: TestDb;
 
@@ -82,5 +84,90 @@ describe('the dict_corrections constraints', () => {
       sql`SELECT typed_form FROM dict_corrections`,
     );
     expect(rows.rows[0].typed_form).toBe('Thruot');
+  });
+});
+
+const EN = { languageCode: 'en' };
+
+const write = (input: { typedForm: string; correctedForm: string; alternatives: string[] }) =>
+  withTx(t.db, (tx) => createDictRepo(tx).persistCorrection({ ...EN, ...input }));
+
+const read = (form: string) =>
+  withTx(t.db, (tx) => createDictRepo(tx).findCorrectionByForm({ ...EN, form }));
+
+describe('persistCorrection and findCorrectionByForm', () => {
+  it('round-trips a redirect', async () => {
+    await write({ typedForm: 'thruot', correctedForm: 'throat', alternatives: ['throughout'] });
+
+    expect(await read('thruot')).toEqual({
+      typedForm: 'thruot',
+      correctedForm: 'throat',
+      alternatives: ['throughout'],
+    });
+  });
+
+  it('matches on lower(typed_form), so a differently-cased typo finds the row', async () => {
+    await write({ typedForm: 'thruot', correctedForm: 'throat', alternatives: [] });
+
+    expect((await read('Thruot'))?.correctedForm).toBe('throat');
+    expect((await read('THRUOT'))?.correctedForm).toBe('throat');
+  });
+
+  it('answers undefined for a form with no redirect', async () => {
+    expect(await read('throat')).toBeUndefined();
+  });
+
+  it('scopes the lookup to the language', async () => {
+    await write({ typedForm: 'thruot', correctedForm: 'throat', alternatives: [] });
+    const other = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findCorrectionByForm({ languageCode: 'he', form: 'thruot' }),
+    );
+    expect(other).toBeUndefined();
+  });
+
+  // The contract the whole flow depends on: a second write for one typed form is
+  // a NO-OP that raises nothing, and leaves the FIRST target in place. Three
+  // ordinary paths reach it — a step-3 fall-through, a concurrent double miss,
+  // and a dict:restore replayed onto a database that already holds part of the
+  // file. A raise on any of them would roll persistEntries back with it, so the
+  // corrected form would never be written, so the next lookup would miss again,
+  // forever.
+  it('is a no-op on a second write for the same typed form', async () => {
+    await write({ typedForm: 'thruot', correctedForm: 'throat', alternatives: ['throughout'] });
+    await expect(
+      write({ typedForm: 'Thruot', correctedForm: 'throughout', alternatives: [] }),
+    ).resolves.toBeUndefined();
+
+    expect(await read('thruot')).toEqual({
+      typedForm: 'thruot',
+      correctedForm: 'throat',
+      alternatives: ['throughout'],
+    });
+    const rows = await t.db.execute<{ count: string }>(
+      sql`SELECT count(*)::text AS count FROM dict_corrections`,
+    );
+    expect(rows.rows[0].count).toBe('1');
+  });
+
+  // The cap belongs to the WRITE, not to one caller. This is the restore path's
+  // shape exactly: no `domain/` guard anywhere in the call, because dictImport
+  // does not go through domain/ at all — it calls the repository directly, and
+  // that is deliberate, since a restored row and a looked-up row are
+  // indistinguishable precisely because the restore replays through the
+  // repository. A corrections.jsonl holding four alternatives would otherwise
+  // produce a row that violates the published response schema on every redirect
+  // hit, and router.openapi does not validate responses at runtime.
+  it('stores at most three alternatives, deduplicated, with no domain guard in the call', async () => {
+    await write({
+      typedForm: 'thruot',
+      correctedForm: 'throat',
+      alternatives: ['Throughout', 'throughout', 'throaty', 'thruot', 'throat', 'thorough'],
+    });
+
+    expect((await read('thruot'))?.alternatives).toEqual([
+      'Throughout',
+      'throaty',
+      'thorough',
+    ]);
   });
 });
