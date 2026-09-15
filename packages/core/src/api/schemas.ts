@@ -262,7 +262,9 @@ export const LlmCorrectionSchema = z.object({
   //
   // Six here against three on the wire: `maxItems` travels to Gemini either way,
   // but a provider that ignores it would, under `.max(3)`, fail the WHOLE parse on
-  // one surplus alternative. Six matches `entries`' own cap, chosen the same way.
+  // one surplus alternative. Six is deliberately NOT tied to `entries`' cap, which
+  // is five for a provider-side reason described there; this one is six because
+  // doubling the wire's three leaves room for a surplus without failing an answer.
   //
   // The rule all of this follows: `correction` is decorative, so NOTHING about it
   // may fail an answer the model otherwise got right.
@@ -271,14 +273,26 @@ export const LlmCorrectionSchema = z.object({
 
 export const LlmTranslationSchema = z.object({
   kind: TranslationKindSchema,
-  // Six, not three: `light` alone is noun, adjective and verb, and a
+  // Five, not three: `light` alone is noun, adjective and verb, and a
   // competing lemma still has to fit beside it.
+  //
+  // Five rather than six, and that ceiling is Gemini's rather than ours. This
+  // schema travels as `responseSchema`, where array caps multiply: six entries
+  // by five senses by a nested example object exceeded the provider's limit the
+  // moment phase 13 added `correction`, and every translation call answered
+  // `400 INVALID_ARGUMENT — the specified schema produces a constraint that has
+  // too many states for serving`. Measured against the live API, not reasoned:
+  // six entries fails with `correction` present and five succeeds, while
+  // `senses` stays at five because READ_LIMIT and TranslationResponseSchema both
+  // hold it there. No stub can catch this — MockServer accepts any
+  // `responseSchema` without validating it — so only `npm run eval` or a real
+  // lookup exercises it.
   //
   // When `correction` is present these describe `corrected_form`, not the typed
   // text — and so does `kind`, which the prompt's fourth rule is what actually
   // secures. `resolveKind` only clamps a single token; it cannot rule on a
   // multi-token corrected form.
-  entries: z.array(LlmEntrySchema).max(6),
+  entries: z.array(LlmEntrySchema).max(5),
   correction: LlmCorrectionSchema.optional(),
 });
 

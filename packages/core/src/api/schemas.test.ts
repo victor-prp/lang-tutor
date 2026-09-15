@@ -355,13 +355,18 @@ describe('LlmTranslationSchema', () => {
     ).toBe(false);
   });
 
-  it('caps entries at six and senses at five within an entry', () => {
+  // Five, not the six this asserted before phase 13, and the ceiling is the
+  // provider's rather than ours: array caps multiply inside `responseSchema`, and
+  // six entries by five senses tipped Gemini past "too many states for serving"
+  // the moment `correction` was added — a 400 on every translation call. Measured
+  // against the live API. `senses` stays at five, where READ_LIMIT holds it.
+  it('caps entries at five and senses at five within an entry', () => {
     const entry = { lemma: 'x', part_of_speech: 'noun', senses: [sense] };
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(6).fill(entry) }).success,
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(5).fill(entry) }).success,
     ).toBe(true);
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(7).fill(entry) }).success,
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(6).fill(entry) }).success,
     ).toBe(false);
     expect(
       LlmTranslationSchema.safeParse({
@@ -419,14 +424,17 @@ describe('part_of_speech on the entry', () => {
     ).toBe(true);
   });
 
-  it('accepts six entries and rejects seven', () => {
+  // Five and six, not six and seven: phase 13 lowered the entries cap because
+  // Gemini rejects the resulting `responseSchema` otherwise — see the comment on
+  // `LlmTranslationSchema.entries`.
+  it('accepts five entries and rejects six', () => {
     const entry = { lemma: 'x', part_of_speech: 'noun' as const, senses: [aSense] };
     const make = (n: number) => ({
       kind: 'word' as const,
       entries: Array.from({ length: n }, () => entry),
     });
-    expect(LlmTranslationSchema.safeParse(make(6)).success).toBe(true);
-    expect(LlmTranslationSchema.safeParse(make(7)).success).toBe(false);
+    expect(LlmTranslationSchema.safeParse(make(5)).success).toBe(true);
+    expect(LlmTranslationSchema.safeParse(make(6)).success).toBe(false);
   });
 });
 
