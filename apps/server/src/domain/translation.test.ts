@@ -92,6 +92,81 @@ describe('buildPrompt', () => {
   it('says senses belong to the headword, not to the typed form', () => {
     expect(buildPrompt({ text: 'running', direction: 'en_he' }).system).toMatch(/inflected/i);
   });
+
+  // Asserted as a NEGATIVE on the old wording, because the failure this prevents
+  // is the old rule surviving BESIDE the new one — and an addition looks
+  // identical to a replacement in every test that only checks the new text is
+  // present.
+  it('replaces the unconditional not-a-word rule rather than supplementing it', () => {
+    const { system } = buildPrompt({ text: 'thruot', direction: 'en_he' });
+    expect(system).not.toContain(
+      'not a word or expression in either language, return an empty entries',
+    );
+    expect(system).toContain('no real word or expression was plausibly intended');
+  });
+
+  it('tells the model a correctly spelled inflected form is not a misspelling', () => {
+    const { system } = buildPrompt({ text: 'booked', direction: 'en_he' });
+    expect(system).toMatch(/inflected form is not a misspelling/i);
+    expect(system).toContain('walks');
+    expect(system).toContain('went');
+  });
+
+  it('asks for a surface form and up to three ranked alternatives', () => {
+    const { system } = buildPrompt({ text: 'bokked', direction: 'en_he' });
+    expect(system).toContain('correction.corrected_form');
+    expect(system).toMatch(/surface form/i);
+    // The distinction the whole feature turns on: `bokked` wants `booked`, whose
+    // lemma is `book` — and phase 12 made that difference load-bearing, because
+    // `booked` renders הזמין where `book` renders להזמין.
+    expect(system).toContain('`bokked` corrects to `booked`');
+    expect(system).toContain('correction.alternatives');
+  });
+
+  it('suspends the build-the-example-around-the-input rule when a correction is present', () => {
+    const { system } = buildPrompt({ text: 'bokked', direction: 'en_he' });
+    expect(system).toMatch(/build the example sentence around `?corrected_form`?/i);
+  });
+
+  // The fourth rule, and the one a reader will think redundant. `resolveKind`
+  // clamps a single token to `word` and otherwise DEFERS to the model, so it
+  // cannot rule on a multi-token corrected form; `kind` is then written onto
+  // dict_variants.kind for that form, first-writer-wins, and read back by
+  // `kindForForm` on every later hit — including the hit a learner who spells
+  // `break a leg` correctly gets. Without this rule one mistyped lookup freezes
+  // `kind: 'word'` on a real phrase for the life of the dictionary.
+  it('tells the model to classify the corrected form, not the input as typed', () => {
+    const { system } = buildPrompt({ text: 'breakaleg', direction: 'en_he' });
+    expect(system).toMatch(/classify `?corrected_form`? rather than the input as typed/i);
+    expect(system).toContain('breakaleg');
+  });
+
+  // The wording lock that keeps an illustration word from silently capturing the
+  // integration bucket's MockServer expectations. The system instruction is part
+  // of the request body those expectations match a regex against, so naming
+  // `saws` here would make EVERY first call in that bucket match the `saw`
+  // expectation and be answered with the wrong payload — a failure that looks
+  // like a service bug and is a prompt edit. Phase 12 hit exactly this.
+  //
+  // Deliberately NOT asserted for the quoted expectations (`"bank"`, `"scan"`,
+  // `"saw"`). The body is JSON.stringify'd, so a quoted word in the instruction
+  // arrives as \"bank\" and the expectation's regex `"bank"` does not match it:
+  // the closing quote is preceded by a backslash. What a quoted expectation
+  // matches is the user part, "text":"bank". Forbidding those here would lock a
+  // non-rule.
+  //
+  // RE-DERIVE THIS LIST from the registered `matchText` values before changing
+  // any illustration word in any rule. It grows every time a test registers an
+  // UNQUOTED matchText.
+  it('names neither saw nor see, the two unquoted MockServer expectations', () => {
+    for (const text of ['book', 'ספר', 'break a leg']) {
+      for (const direction of ['en_he', 'he_en'] as const) {
+        const { system } = buildPrompt({ text, direction });
+        expect(system).not.toContain('saw');
+        expect(system).not.toContain('see');
+      }
+    }
+  });
 });
 
 describe('parseLlmTranslation', () => {

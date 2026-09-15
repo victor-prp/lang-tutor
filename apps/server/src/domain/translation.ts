@@ -107,11 +107,17 @@ export function buildPrompt(input: {
     // cards apart, and "The water was cold" fits a glass and a lake equally.
     // The illustration uses `spring`, which is in neither the seed nor the eval
     // set, so it cannot bias anything this repo measures. The illustration also
-    // avoids the words the integration bucket matches MockServer expectations
-    // on — `see`, `saw`, `saws`, `bank`, `banks` — because the system
-    // instruction is part of the request body those expectations match against.
-    // An earlier draft said "We saw the spring" and made every `see` lookup in
-    // that bucket match the `saw` expectation instead.
+    // avoids `saw` and `see`, the only two expectations this instruction can
+    // trip. An UNQUOTED matchText matches a regex over the whole request body,
+    // and the system instruction is in that body; a QUOTED one (`"bank"`,
+    // `"scan"`) matches only the learner's text, because the body is
+    // JSON-encoded and the instruction's own quotes arrive escaped — measured,
+    // not reasoned: a body whose instruction reads `Rule: "banks" is plural`
+    // matches the expectation `banks` and does not match `"banks"`. Re-derive
+    // the forbidden pair from the registered expectations before changing any
+    // illustration word here or in any other rule. An earlier draft said "We saw
+    // the spring" and made every `see` lookup in that bucket match the `saw`
+    // expectation instead.
     'Choose each example so that it could not be read as any other sense of the same word.',
     'A sentence that merely contains the word is not enough — it must rule the other senses',
     'out. For "spring": "The spring in the mattress broke" rules out the season, while "I like',
@@ -131,8 +137,62 @@ export function buildPrompt(input: {
     'translation, and omit the example entirely — a sentence needs no example of itself.',
     'Its part_of_speech is required by the schema but meaningless for a sentence, and the',
     'server discards it along with the entry, which is never stored; answer "verb".',
-    'If the input is not a word or expression in either language, return an empty entries',
-    'array rather than inventing a translation.',
+    // Phase 13. REPLACED, not supplemented. Left standing beside the correction
+    // rules below it is a flat contradiction about exactly the input this phase
+    // exists for: `thruot` is not a word in either language, so the old wording
+    // demanded empty entries while the new one demands entries describing
+    // `throat`. The added clause carries the whole difference.
+    //
+    // "in either language" is kept rather than narrowed to the source language,
+    // and the rules below say it for the same reason: `direction` is detected
+    // from the script and can be wrong, so a rule scoped to the detected source
+    // would let a real English word typed under he_en be reported as a
+    // misspelling of a Hebrew one.
+    'If the input is not a word or expression in either language and no real word or',
+    'expression was plausibly intended, return an empty entries array and omit `correction`,',
+    'rather than inventing a translation.',
+    // Phase 13, rule 1. The rule the whole feature turns on and the one most
+    // likely to regress, because `lemma ≠ typed form` is true of an inflection
+    // AND of a typo — which is precisely why detection cannot be a string
+    // comparison and has to be asked for explicitly. `saws` is the obvious
+    // illustration word and is FORBIDDEN: it is registered unquoted as a
+    // MockServer matchText, and the system instruction is part of the body those
+    // expectations match against. `running` and `booked` already appear above, so
+    // they add no new exposure; `walks` and `went` are clear.
+    'A correctly spelled inflected form is not a misspelling: "running", "booked", "walks"',
+    'and "went" are real forms of real words — return them normally and omit `correction`.',
+    // Phase 13, rule 2. `corrected_form` is a SURFACE form, never a lemma: a
+    // learner typing `bokked` wants `booked`, whose lemma is `book`. Under phase
+    // 10 the distinction was invisible; phase 12 made it load-bearing, because
+    // `booked` renders הזמין and `book` renders להזמין on purpose.
+    'When the input is not a word or expression in either language but one or more real ones',
+    'were plausibly intended, set `correction.corrected_form` to the single most likely',
+    'intended surface form — matching the grammatical form the learner appears to have typed,',
+    'so `bokked` corrects to `booked` and not to `book` — and list up to three other plausible',
+    'intended forms, ranked, in `correction.alternatives`. The `entries` then describe',
+    '`corrected_form`.',
+    // Phase 13, rule 3. Suspends, for this path only, the
+    // "build the example sentence around the input as typed" rule above. Without
+    // it the dictionary stores example sentences containing a misspelling —
+    // permanently, since persistEntries writes exactly these examples.
+    'When `correction` is present, build the example sentence around `corrected_form`, never',
+    'around the input as typed.',
+    // Phase 13, rule 4. The one a reader will think redundant, and the one with a
+    // permanent consequence. `resolveKind` clamps a single token to `word` and
+    // otherwise DEFERS to the model, so it cannot rule on a multi-token corrected
+    // form; `kind` is then written onto dict_variants.kind for that form,
+    // first-writer-wins, and read back by kindForForm on every later hit —
+    // including the hit a learner who spells `break a leg` correctly gets.
+    // Without this rule, one mistyped lookup freezes kind: 'word' on a real
+    // phrase for the life of the dictionary. No server-side rule can repair it:
+    // the mirror of the clamp does not exist, because a multi-token form can be a
+    // phrase or a sentence and nothing in code can say which.
+    //
+    // The illustration reuses "break a leg", which the imperative-expression rule
+    // above already names, so it adds no new exposure under the word constraint.
+    'When `correction` is present, classify `corrected_form` rather than the input as typed:',
+    '"breakaleg" is corrected to "break a leg", so its kind is "phrase" even though what was',
+    'typed is a single token.',
   ].join(' ');
 
   // The learner's text is untrusted and stays in its own part, never
