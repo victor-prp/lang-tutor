@@ -68,6 +68,26 @@ describe('toGeminiSchema', () => {
     expect(serialized).not.toContain('$schema');
     expect(serialized).not.toContain('additionalProperties');
   });
+
+  // The regression lock on this phase's `.optional()` decision. `.default([])`
+  // was the obvious spelling: Zod 4 emits a `"default": []` key into the JSON
+  // Schema, `strip` removes only $schema and additionalProperties, so the key
+  // would travel to Gemini inside responseSchema — a keyword this repository has
+  // never sent. A responseSchema Gemini refuses is a 400 on EVERY translation
+  // call: a total outage of the endpoint, arrived at through a field designed
+  // never to be able to fail an answer.
+  //
+  // A test rather than a comment because the next person reaching for
+  // `.default()` will reach for it in packages/core, nowhere near this reasoning.
+  it('emits no default keyword anywhere, at any depth', () => {
+    expect(JSON.stringify(toGeminiSchema(LlmTranslationSchema))).not.toContain('"default"');
+  });
+
+  it('leaves correction out of the root required list', () => {
+    const schema = toGeminiSchema(LlmTranslationSchema) as Record<string, unknown>;
+    expect(schema.required).toEqual(['kind', 'entries']);
+    expect(schema.properties).toHaveProperty('correction');
+  });
 });
 
 describe('createGeminiClient', () => {

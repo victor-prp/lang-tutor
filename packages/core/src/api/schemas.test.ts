@@ -3,12 +3,14 @@ import { describe, expect, it } from '@jest/globals';
 import {
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
+  LlmCorrectionSchema,
   LlmEntrySchema,
   LlmTranslationSchema,
   PartOfSpeechSchema,
   LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
+  TranslationCorrectionSchema,
   TranslationRequestSchema,
   TranslationResponseSchema,
   TranslationSenseSchema,
@@ -425,5 +427,82 @@ describe('part_of_speech on the entry', () => {
     });
     expect(LlmTranslationSchema.safeParse(make(6)).success).toBe(true);
     expect(LlmTranslationSchema.safeParse(make(7)).success).toBe(false);
+  });
+});
+
+describe('the correction block', () => {
+  const base = { text: 'thruot', direction: 'en_he', kind: 'word', senses: [] } as const;
+
+  it('is optional on the wire, so today\'s responses still parse', () => {
+    expect(TranslationResponseSchema.safeParse(base).success).toBe(true);
+  });
+
+  it('is optional on the model schema, so today\'s answers still parse', () => {
+    expect(LlmTranslationSchema.safeParse({ kind: 'word', entries: [] }).success).toBe(true);
+  });
+
+  it('caps the wire at three alternatives and the model schema at six', () => {
+    const alt = (n: number) => Array.from({ length: n }, (_, i) => `alt${i}`);
+    const wire = (n: number) =>
+      TranslationResponseSchema.safeParse({
+        ...base,
+        correction: { corrected_form: 'throat', alternatives: alt(n) },
+      }).success;
+    const model = (n: number) =>
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [],
+        correction: { corrected_form: 'throat', alternatives: alt(n) },
+      }).success;
+
+    expect(wire(3)).toBe(true);
+    expect(wire(4)).toBe(false);
+    // Six, not three: `maxItems` travels to Gemini inside responseSchema, so a
+    // conforming provider never reaches it — but a provider that ignores it must
+    // not 502 a good translation over one surplus decorative alternative.
+    // `tidyAlternatives` truncates to three before the answer reaches the wire.
+    expect(model(6)).toBe(true);
+    expect(model(7)).toBe(false);
+  });
+
+  it('caps a form at 100 characters on both, the ceiling learner text already has', () => {
+    const long = 'a'.repeat(101);
+    expect(
+      TranslationResponseSchema.safeParse({
+        ...base,
+        correction: { corrected_form: long, alternatives: [] },
+      }).success,
+    ).toBe(false);
+    expect(
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [],
+        correction: { corrected_form: long },
+      }).success,
+    ).toBe(false);
+    expect(
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [],
+        correction: { corrected_form: 'throat', alternatives: [long] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires alternatives on the wire — what this server publishes is never absent', () => {
+    expect(
+      TranslationResponseSchema.safeParse({ ...base, correction: { corrected_form: 'throat' } })
+        .success,
+    ).toBe(false);
+  });
+
+  it('rejects a correction with no corrected_form: that is not a correction', () => {
+    expect(
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [],
+        correction: { alternatives: ['throat'] },
+      }).success,
+    ).toBe(false);
   });
 });

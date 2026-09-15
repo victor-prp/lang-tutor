@@ -413,3 +413,37 @@ describe('both prompts forbid nikud', () => {
     expect(system).toMatch(/no nikud/);
   });
 });
+
+describe('parseLlmTranslation and an absent or null alternatives list', () => {
+  const entry = {
+    lemma: 'throat',
+    part_of_speech: 'noun',
+    senses: [{ translation: 'גרון', sense_code: 'body_part' }],
+  };
+
+  // A provider that simply omits the empty array. A bare (required) array would
+  // fail the WHOLE parse here, and one decorative empty list would turn a correct
+  // translation into a 502 by way of TranslationUnreadable.
+  it('parses a correction whose alternatives key is absent', () => {
+    const parsed = parseLlmTranslation(
+      JSON.stringify({ kind: 'word', entries: [entry], correction: { corrected_form: 'throat' } }),
+    );
+    expect(parsed?.correction?.corrected_form).toBe('throat');
+    // undefined, not []. The schema is `.optional()`; it is `tidyAlternatives` in
+    // domain/ that produces the empty array — asserted there, not here.
+    expect(parsed?.correction?.alternatives).toBeUndefined();
+  });
+
+  // How structured output spells "none". `dropNulls` runs BEFORE safeParse, so
+  // the key is deleted — which is fatal for a field that is neither optional nor
+  // defaulted. Asserted on raw JSON, never on a pre-built object, because
+  // dropNulls is the thing under test.
+  it('parses a correction whose alternatives key is null', () => {
+    const parsed = parseLlmTranslation(
+      `{"kind":"word","entries":[${JSON.stringify(entry)}],` +
+        `"correction":{"corrected_form":"throat","alternatives":null}}`,
+    );
+    expect(parsed?.correction?.corrected_form).toBe('throat');
+    expect(parsed?.correction?.alternatives).toBeUndefined();
+  });
+});
