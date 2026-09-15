@@ -60,7 +60,7 @@ export default function TranslateScreen() {
         accessibilityRole="button"
         testID="translate-submit"
         disabled={!canSubmit}
-        onPress={t.submit}
+        onPress={() => t.submit()}
         style={[styles.button, !canSubmit && styles.buttonDisabled]}
       >
         <Text style={styles.buttonLabel}>{strings.translateAction}</Text>
@@ -77,7 +77,7 @@ export default function TranslateScreen() {
       {t.status === 'error' ? (
         <View testID="translate-error" style={styles.notice}>
           <Text style={styles.noticeText}>{strings.translateUnavailable}</Text>
-          <Pressable accessibilityRole="button" testID="translate-retry" onPress={t.submit}>
+          <Pressable accessibilityRole="button" testID="translate-retry" onPress={() => t.submit()}>
             <Text style={styles.link}>{strings.translateRetry}</Text>
           </Pressable>
         </View>
@@ -99,6 +99,44 @@ export default function TranslateScreen() {
               <Text style={styles.link}>{strings.translateFlip}</Text>
             </Pressable>
           </View>
+
+          {/* Inside the `answered` branch, which makes one promise structural
+              rather than a hope: `status` is `empty` whenever `senses` is empty,
+              so an empty answer cannot render a banner even if one reached the
+              wire. `zxqwbtl` still shows translateEmpty. */}
+          {t.result.correction ? (
+            <View testID="translate-correction" style={styles.correction}>
+              <Text style={styles.correctionText}>
+                {strings.translateCorrectionNotice(
+                  t.result.text,
+                  t.result.correction.corrected_form,
+                )}
+              </Text>
+
+              {t.result.correction.alternatives.length > 0 ? (
+                <View style={styles.alternatives}>
+                  <Text style={styles.correctionText}>{strings.translateDidYouMean}</Text>
+                  {t.result.correction.alternatives.map((alternative, index) => (
+                    <Pressable
+                      key={alternative}
+                      accessibilityRole="button"
+                      testID={`translate-alternative-${index}`}
+                      // Both, and in this order: setText so the field agrees with
+                      // the results, and the override so the request does not use
+                      // the state value this render still holds.
+                      onPress={() => {
+                        t.setText(alternative);
+                        t.submit(alternative);
+                      }}
+                      style={styles.alternativeChip}
+                    >
+                      <Text style={styles.alternativeLabel}>{alternative}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           {visible.map((sense, index) => (
             <SenseCard
@@ -301,4 +339,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   moreLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
+  correction: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  correctionText: { color: colors.text, fontSize: fontSizes.sm, writingDirection: 'rtl' },
+  alternatives: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  alternativeChip: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  alternativeLabel: { color: colors.primary, fontSize: fontSizes.sm, fontWeight: '700' },
 });

@@ -32,7 +32,20 @@ export async function clearGemini(request: APIRequestContext): Promise<void> {
 
 export async function expectGemini(
   request: APIRequestContext,
-  payload: { kind: 'word' | 'phrase' | 'sentence'; entries: unknown[] },
+  payload: {
+    kind: 'word' | 'phrase' | 'sentence';
+    entries: unknown[];
+    /** Phase 13. Absent on every existing call site. */
+    correction?: { corrected_form: string; alternatives?: string[] };
+  },
+  /**
+   * `once` makes this a ONE-SHOT expectation, consumed in registration order.
+   * The correction flow needs two different answers in one test, and MockServer
+   * consumes one-shots in the order they were registered — so the count has to
+   * match the calls exactly. Opt-in rather than the default, so the existing
+   * specs (one expectation, one or more calls) are untouched.
+   */
+  opts: { once?: boolean } = {},
 ): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
     data: {
@@ -42,6 +55,7 @@ export async function expectGemini(
         headers: { 'content-type': ['application/json'] },
         body: envelope(payload),
       },
+      ...(opts.once ? { times: { remainingTimes: 1, unlimited: false } } : {}),
     },
   });
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);

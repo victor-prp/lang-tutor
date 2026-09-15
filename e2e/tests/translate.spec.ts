@@ -222,3 +222,81 @@ test('a word looked up twice is answered without the provider the second time', 
   await expect(sense(page, 'דיה')).toBeVisible();
   await expect(page.getByTestId('translate-error')).toHaveCount(0);
 });
+
+// Two one-shot expectations, and the count has to match the calls exactly.
+// `thruot` makes ONE call because its corrected form `throat` is a lexeme nobody
+// has stored, so phase 12's reconciliation never fires; tapping `throughout`
+// makes one for the same reason. Both hold because neither word is among the
+// thirteen strings in content.generated.ts and globalSetup drops and rebuilds
+// lang_tutor_e2e every run — so the flow starts from the seed and nothing else.
+//
+// CHOOSE ANY REPLACEMENT WORD THE SAME WAY: a corrected form whose lexeme the
+// seed already holds would make a second call and silently consume the
+// expectation meant for the tap.
+test('a misspelling shows the correction, and an alternative can be tapped', async ({
+  page,
+  request,
+}) => {
+  await expectGemini(
+    request,
+    {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'throat',
+          part_of_speech: 'noun',
+          senses: [
+            {
+              translation: 'גרון',
+              example: { source: 'She had a sore throat.', target: 'היה לה כאב גרון.' },
+              sense_code: 'body_part',
+            },
+          ],
+        },
+      ],
+      correction: { corrected_form: 'throat', alternatives: ['throughout'] },
+    },
+    { once: true },
+  );
+  await expectGemini(
+    request,
+    {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'throughout',
+          part_of_speech: 'preposition',
+          senses: [
+            {
+              translation: 'בכל רחבי',
+              example: { source: 'It rained throughout the day.', target: 'ירד גשם כל היום.' },
+              sense_code: 'all_through',
+            },
+          ],
+        },
+      ],
+    },
+    { once: true },
+  );
+  await openTranslate(page, request, 'e2e_translate_correction');
+
+  await page.getByTestId('translate-input').fill('thruot');
+  await page.getByTestId('translate-submit').click();
+
+  // The banner names both forms, and the answer is the corrected form's.
+  const banner = page.getByTestId('translate-correction');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('thruot');
+  await expect(banner).toContainText('throat');
+  await expect(sense(page, 'גרון')).toBeVisible();
+
+  // Tapping the chip is an ordinary lookup of that text — a FULL miss, so it
+  // shows the loading skeleton for as long as any other new word does.
+  await page.getByTestId('translate-alternative-0').click();
+  await expect(sense(page, 'בכל רחבי')).toBeVisible();
+  // And nothing is written for an alternative, so it carries no banner of its own.
+  await expect(page.getByTestId('translate-correction')).toHaveCount(0);
+  // The field agrees with the results it is showing — the setText half of the
+  // handler, which is the half a bare submit() would have left stale.
+  await expect(page.getByTestId('translate-input')).toHaveValue('throughout');
+});
