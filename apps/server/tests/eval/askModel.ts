@@ -2,6 +2,7 @@ import type {
   LlmEntry,
   LlmReconciliation,
   PartOfSpeech,
+  TranslationCorrection,
   TranslationDirection,
   TranslationKind,
   TranslationSense,
@@ -14,10 +15,11 @@ import {
   normalizeSenses,
   parseLlmReconciliation,
   parseLlmTranslation,
+  resolveCorrection,
   resolveKind,
   type StoredSense,
 } from '../../src/domain/translation';
-import { flattenEntries, mergeEntries } from '../../src/domain/dictionary';
+import { flattenEntries, mergeEntries, normalizeForm } from '../../src/domain/dictionary';
 import type { LlmClient } from '../../src/services/llm';
 
 /**
@@ -39,6 +41,9 @@ export type ModelAnswer = {
   kind: TranslationKind;
   entries: LlmEntry[];
   senses: TranslationSense[];
+  /** Phase 13. Exposed alongside `entries`, which the wire flattens away, and for
+   *  the same reason: it is what the correction cases score. */
+  correction?: TranslationCorrection;
 };
 
 export async function askModel(
@@ -56,9 +61,21 @@ export async function askModel(
   const parsed = parseLlmTranslation(raw);
   if (!parsed) throw new Error('the model response did not match the expected shape');
 
-  const kind = resolveKind(text, parsed.kind);
+  // The service's step 4, verbatim. `kind` comes out of here computed against the
+  // EFFECTIVE form, so it is the kind the server would actually have written onto
+  // dict_variants — which is the only version of it worth scoring.
+  const resolved = resolveCorrection(parsed, { typedForm: normalizeForm(text), direction });
+  if (!resolved) throw new Error('the correction named a form in the other script');
+  const { correction, kind } = resolved;
+
   const entries = mergeEntries(parsed.entries);
-  return { direction, kind, entries, senses: normalizeSenses(kind, flattenEntries(entries)) };
+  return {
+    direction,
+    kind,
+    entries,
+    senses: normalizeSenses(kind, flattenEntries(entries)),
+    ...(correction ? { correction } : {}),
+  };
 }
 
 /**

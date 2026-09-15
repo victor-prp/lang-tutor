@@ -204,6 +204,33 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     detail: result.kind,
   });
 
+  if (kase.expectNoCorrection) {
+    checks.push({
+      name: 'reports no correction',
+      ok: !result.correction,
+      detail: result.correction?.corrected_form ?? 'none',
+    });
+  }
+
+  if (kase.expectCorrection) {
+    checks.push({
+      name: `corrects to ${kase.expectCorrection}`,
+      ok:
+        result.correction?.corrected_form.toLowerCase() === kase.expectCorrection.toLowerCase(),
+      detail: result.correction?.corrected_form ?? 'none',
+    });
+  }
+
+  if (kase.expectAlternative) {
+    checks.push({
+      name: `offers ${kase.expectAlternative} as an alternative`,
+      ok: (result.correction?.alternatives ?? []).some(
+        (alternative) => alternative.toLowerCase() === kase.expectAlternative!.toLowerCase(),
+      ),
+      detail: (result.correction?.alternatives ?? []).join(', ') || 'none',
+    });
+  }
+
   if (kase.expectEmpty) return checks;
 
   checks.push({
@@ -563,6 +590,16 @@ async function main(): Promise<void> {
         `       kind=${row.result.kind} direction=${row.result.direction} ` +
           `senses=${row.result.senses.map((sense) => sense.translation).join(' | ') || '(none)'}`,
       );
+      // Phase 13. Without this, a failing correction check says only that it was
+      // wrong — never what the model corrected to, which is the first thing
+      // needed to tell a prompt regression from a model that picked a different
+      // (also defensible) alternative.
+      if (row.result.correction) {
+        console.log(
+          `       correction=${row.result.correction.corrected_form} ` +
+            `alternatives=${row.result.correction.alternatives.join(', ') || '(none)'}`,
+        );
+      }
     }
     if (row.rendering) {
       console.log(

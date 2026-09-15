@@ -44,6 +44,16 @@ export type EvalCase = {
    *  scorecard; what is mechanical is that a sentence we have already seen fail
    *  does not come back. */
   rejectExample?: string[];
+  /** Phase 13. The corrected_form the model must report, matched
+   *  case-insensitively. */
+  expectCorrection?: string;
+  /** Must appear somewhere in `correction.alternatives`. */
+  expectAlternative?: string;
+  /** No correction at all. The inflection trap, and the most important assertion
+   *  in the set: `lemma ≠ typed form` is true of an inflection AND of a typo, so
+   *  a model that starts "correcting" real forms writes permanent redirects away
+   *  from correctly spelled words. */
+  expectNoCorrection?: true;
 };
 
 export const CASES: EvalCase[] = [
@@ -71,6 +81,13 @@ export const CASES: EvalCase[] = [
     rejectAny: ['ספר'],
     rejectTop: ['להזמין'],
     expectEntryPos: ['verb', 'adjective'],
+    // Phase 13. The inflection trap. A model that calls `booked` a misspelling of
+    // `book` writes a redirect that never expires — partially self-limiting, since
+    // the redirect is consulted only AFTER the by-form read misses, so once
+    // `booked` is legitimately written the bad row is shadowed and inert. It bites
+    // for a form never looked up correctly first. These three are the cases to
+    // watch when a model version changes.
+    expectNoCorrection: true,
   },
   {
     label: 'ranking: a homonym with an unrelated second sense',
@@ -113,6 +130,13 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['ריצה', 'לרוץ', 'רץ'],
     expectLemma: 'run',
+    // Phase 13. The inflection trap. A model that calls `booked` a misspelling of
+    // `book` writes a redirect that never expires — partially self-limiting, since
+    // the redirect is consulted only AFTER the by-form read misses, so once
+    // `booked` is legitimately written the bad row is shadowed and inert. It bites
+    // for a form never looked up correctly first. These three are the cases to
+    // watch when a model version changes.
+    expectNoCorrection: true,
   },
   {
     label: 'the reverse direction, and that script detection agreed',
@@ -143,6 +167,13 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['ראה', 'לראות'],
     expectAlso: ['מסור', 'לנסר'],
+    // Phase 13. The inflection trap. A model that calls `booked` a misspelling of
+    // `book` writes a redirect that never expires — partially self-limiting, since
+    // the redirect is consulted only AFTER the by-form read misses, so once
+    // `booked` is legitimately written the bad row is shadowed and inert. It bites
+    // for a form never looked up correctly first. These three are the cases to
+    // watch when a model version changes.
+    expectNoCorrection: true,
   },
   // Phase 12 follow-up. `water` has two noun senses — the substance you drink and a body
   // of water you swim in — and Hebrew renders both מים, so the example is the
@@ -188,6 +219,81 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: [],
     expectEmpty: true,
+    // Near NOTHING, as against near a word: the empty-entries answer and no
+    // correction. Its `kind` must also be `word` — a correction dropped for empty
+    // entries has changed nothing about the answer (criterion 7).
+    expectNoCorrection: true,
+  },
+  // Phase 13. The reported defect itself, measured against the real model: the
+  // model already reads `thruot` as `throat` and says so in `lemma`; what this
+  // scores is that it now says so in `correction` instead of silently.
+  {
+    label: 'a misspelling one edit from a real word',
+    text: 'thruot',
+    expectKind: 'word',
+    acceptTop: ['גרון'],
+    expectCorrection: 'throat',
+    // `thruot` is as close to `throughout` as to `throat`, and nothing asked the
+    // model to enumerate corrections before this phase — it committed to one.
+    expectAlternative: 'throughout',
+  },
+  {
+    label: 'the classic transposition',
+    text: 'recieve',
+    expectKind: 'word',
+    acceptTop: ['לקבל'],
+    expectCorrection: 'receive',
+  },
+  // A phrase, not a word: scope is words and phrases, both directions.
+  {
+    label: 'a misspelled word inside a fixed expression',
+    text: 'brake a leg',
+    expectKind: 'phrase',
+    acceptTop: ['בהצלחה'],
+    rejectAny: ['לשבור רגל'],
+    expectCorrection: 'break a leg',
+  },
+  // The fourth prompt rule, and the ONLY case in the set where a SINGLE TOKEN
+  // must be classified as a phrase. `brake a leg` above cannot score it: what was
+  // typed already contains whitespace, so the model answers `phrase` with or
+  // without the rule. This is the case where a model classifying the input as
+  // typed answers `word`, the server's resolveKind DEFERS to it because the
+  // corrected form has whitespace, and `kind: 'word'` is written onto the variant
+  // `break a leg` permanently. It is also the case that forces the askModel
+  // change: scored against the typed text it clamps to `word` and can never pass.
+  {
+    label: 'a single token corrected to a phrase',
+    text: 'breakaleg',
+    expectKind: 'phrase',
+    acceptTop: ['בהצלחה'],
+    expectCorrection: 'break a leg',
+  },
+  // The Latin-script counterpart of ktiv male: a real word in one standard of
+  // English that a model may "correct" to the American form, writing a permanent
+  // redirect away from a correct spelling. Phase 12 met this shape with
+  // `burnt`/`burned` and pinned a lemma rule for it; here the rule is the first
+  // one — a correctly spelled form is not a misspelling — and this is the case
+  // that scores its spelling-variant half.
+  {
+    label: 'a real spelling variant is not a misspelling',
+    text: 'colour',
+    expectKind: 'word',
+    acceptTop: ['צבע'],
+    expectNoCorrection: true,
+  },
+  // Symmetry across directions, and the Hebrew-side risk with no clean answer:
+  // ktiv male against ktiv haser and optional nikud mean many valid Hebrew
+  // spellings differ from each other, and normalizeForm deliberately strips
+  // neither — so the model may report a VALID alternative spelling as a
+  // misspelling and write a permanent redirect away from it. This single line
+  // matters more than its length suggests.
+  {
+    label: 'a Hebrew misspelling, for symmetry across directions',
+    text: 'שולחם',
+    direction: 'he_en',
+    expectKind: 'word',
+    acceptTop: ['table'],
+    expectCorrection: 'שולחן',
   },
 ];
 
