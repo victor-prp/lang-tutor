@@ -350,4 +350,36 @@ describe('POST /api/translations', () => {
     expect(body.senses.map((sense) => sense.translation)).toContain('ספר');
     expect(await countGeminiRequests(ns)).toBe(0);
   });
+
+  it('carries the correction block to the wire, with the typed string in text', async () => {
+    await expectGeminiJson(ns, {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'throat',
+          part_of_speech: 'noun',
+          senses: [
+            {
+              translation: 'גרון',
+              example: { source: 'She had a sore throat.', target: 'היה לה כאב גרון.' },
+              sense_code: 'body_part',
+            },
+          ],
+        },
+      ],
+      correction: { corrected_form: 'throat', alternatives: ['throughout'] },
+    });
+
+    const res = await translate({ text: 'thruot' });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      text: string;
+      correction?: { corrected_form: string; alternatives: string[] };
+      senses: { translation: string }[];
+    };
+    expect(body.text).toBe('thruot');
+    expect(body.correction).toEqual({ corrected_form: 'throat', alternatives: ['throughout'] });
+    expect(body.senses[0].translation).toBe('גרון');
+  });
 });

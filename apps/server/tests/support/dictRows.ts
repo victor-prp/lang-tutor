@@ -1,5 +1,15 @@
+import { eq } from 'drizzle-orm';
+
 import type { Db } from '../../src/db/client';
-import { dictLexemes, dictSenses, dictVarTranslations, dictVariants } from '../../src/db/schema';
+import {
+  dictCorrections,
+  dictLexemes,
+  dictSenses,
+  dictVarTranslations,
+  dictVariants,
+} from '../../src/db/schema';
+import { createDictRepo } from '../../src/repo/dictionary';
+import { withTx } from './withTx';
 
 /**
  * Writes one lexeme's rows directly, without going through persistEntries.
@@ -107,4 +117,60 @@ export async function insertLexeme(
   }
 
   return { lexemeId: lexeme.id, variantIds, senseIds };
+}
+
+// Phase 13. Small read/write helpers for the service-level correction suite
+// (tests/integration/services/translations.correction.test.ts), which must
+// stay black-box at the DATABASE too — ADR 0001 R2 forbids a service-layer
+// test from importing drizzle-orm, src/db/ or src/repo/ directly, the same
+// rule that keeps services/translations.ts itself off a database handle.
+// tests/support/ is the test composition root and is exempt, so these live
+// here beside `insertLexeme` rather than in the test file that calls them.
+
+/** All `dict_corrections` rows, or how many of them exist. Callers that only
+ *  need a count still get one array read — this table is tiny in every test. */
+export async function readDictCorrections(
+  db: Db,
+): Promise<{ typedForm: string; correctedForm: string }[]> {
+  return db
+    .select({
+      typedForm: dictCorrections.typedForm,
+      correctedForm: dictCorrections.correctedForm,
+    })
+    .from(dictCorrections);
+}
+
+/** How many `dict_variants` rows exist for one form, or in total when `form`
+ *  is omitted — the "before/after, nothing new was written" shape several
+ *  correction tests need. */
+export async function countDictVariants(db: Db, form?: string): Promise<number> {
+  const rows = form === undefined
+    ? await db.select().from(dictVariants)
+    : await db.select().from(dictVariants).where(eq(dictVariants.form, form));
+  return rows.length;
+}
+
+export async function countDictSenses(db: Db): Promise<number> {
+  return (await db.select().from(dictSenses)).length;
+}
+
+export async function countDictVarTranslations(db: Db): Promise<number> {
+  return (await db.select().from(dictVarTranslations)).length;
+}
+
+/** Deletes one lexeme and, by CASCADE, its variants, senses and translations —
+ *  the dangling-redirect scenario, where a `dict_corrections` row survives a
+ *  target that no longer has any rows because nothing references it. */
+export async function deleteLexemeByLemma(db: Db, lemma: string): Promise<void> {
+  await db.delete(dictLexemes).where(eq(dictLexemes.lemma, lemma));
+}
+
+/** Writes a redirect row directly through the repository, bypassing
+ *  `translate` — for a test that stages a pre-existing redirect (the hop
+ *  case) rather than one the service itself would have written. */
+export async function insertCorrection(
+  db: Db,
+  input: { languageCode: string; typedForm: string; correctedForm: string; alternatives: string[] },
+): Promise<void> {
+  await withTx(db, (tx) => createDictRepo(tx).persistCorrection(input));
 }
