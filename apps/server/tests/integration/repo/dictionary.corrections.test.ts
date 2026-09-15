@@ -34,35 +34,50 @@ async function insertRaw(values: {
   `);
 }
 
+/** drizzle wraps the pg error: DrizzleQueryError's own message is only
+ *  "Failed query: ...", and the constraint name lives on the DatabaseError it
+ *  carries as `cause`. Asserting on the wrapper's message would pass for ANY
+ *  failed insert — which is not what these tests are about. */
+async function violatedConstraint(run: () => Promise<void>): Promise<string | undefined> {
+  try {
+    await run();
+    return undefined;
+  } catch (error) {
+    return (error as { cause?: { constraint?: string } }).cause?.constraint;
+  }
+}
+
 describe('the dict_corrections constraints', () => {
   const ok = { typedForm: 'thruot', correctedForm: 'throat', alternatives: [] as string[] };
 
   it('accepts a well-formed redirect', async () => {
-    await expect(insertRaw(ok)).resolves.toBeDefined();
+    await expect(insertRaw(ok)).resolves.toBeUndefined();
   });
 
   it('rejects a typed form over 100 characters', async () => {
-    await expect(insertRaw({ ...ok, typedForm: 'a'.repeat(101) })).rejects.toThrow(
-      /dict_corrections_typed_form_length/,
+    expect(await violatedConstraint(() => insertRaw({ ...ok, typedForm: 'a'.repeat(101) }))).toBe(
+      'dict_corrections_typed_form_length',
     );
   });
 
   it('rejects a corrected form over 100 characters', async () => {
-    await expect(insertRaw({ ...ok, correctedForm: 'a'.repeat(101) })).rejects.toThrow(
-      /dict_corrections_corrected_form_length/,
-    );
+    expect(
+      await violatedConstraint(() => insertRaw({ ...ok, correctedForm: 'a'.repeat(101) })),
+    ).toBe('dict_corrections_corrected_form_length');
   });
 
   it('rejects a fourth alternative', async () => {
-    await expect(
-      insertRaw({ ...ok, alternatives: ['a1', 'b2', 'c3', 'd4'] }),
-    ).rejects.toThrow(/dict_corrections_alternatives_valid/);
+    expect(
+      await violatedConstraint(() =>
+        insertRaw({ ...ok, alternatives: ['a1', 'b2', 'c3', 'd4'] }),
+      ),
+    ).toBe('dict_corrections_alternatives_valid');
   });
 
   it('rejects an alternative over 100 characters', async () => {
-    await expect(insertRaw({ ...ok, alternatives: ['a'.repeat(101)] })).rejects.toThrow(
-      /dict_corrections_alternatives_valid/,
-    );
+    expect(
+      await violatedConstraint(() => insertRaw({ ...ok, alternatives: ['a'.repeat(101)] })),
+    ).toBe('dict_corrections_alternatives_valid');
   });
 
   // The unique index IS this table's identity — there is no primary key. Proven
@@ -70,8 +85,8 @@ describe('the dict_corrections constraints', () => {
   // is that a second write for one typed form raises NOTHING.
   it('rejects a duplicate typed form, matched case-insensitively', async () => {
     await insertRaw(ok);
-    await expect(insertRaw({ ...ok, typedForm: 'Thruot' })).rejects.toThrow(
-      /dict_corrections_form_key/,
+    expect(await violatedConstraint(() => insertRaw({ ...ok, typedForm: 'Thruot' }))).toBe(
+      'dict_corrections_form_key',
     );
   });
 
