@@ -954,5 +954,10 @@ describe('the corrected-form probe', () => {
 
     expect(dict.persisted[0].form).toBe('kite');
     expect(dict.correctionsWritten).toHaveLength(0);
+    // The count that actually discriminates "no probe": step 1's serveForm is the
+    // only read here. If the `if (correction)` guard at step 5b were ever dropped
+    // or widened, its serveForm would push a second findSensesByForm read, and
+    // this would catch it even though the outcome above stays the same either way.
+    expect(dict.reads).toHaveLength(1);
   });
 });
