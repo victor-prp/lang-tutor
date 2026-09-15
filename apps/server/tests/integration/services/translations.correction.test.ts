@@ -66,9 +66,16 @@ const entries = (
 ];
 
 describe('a corrected lookup, against a real database', () => {
-  // Criterion 5. Phase 12's fail-closed rule, asserted for this table: steps 8
-  // and 9 share one transaction, so a failed reconciliation call writes no
-  // entries AND no redirect. A redirect can never point at a form with no rows.
+  // Criterion 5. Phase 12's fail-closed rule, asserted for this table:
+  // `reconcile` is called ABOVE the `try { transaction(...) }` block, so a
+  // failing call never reaches an open transaction — what this proves is
+  // fail-closed, a failed reconciliation call writes no entries AND no
+  // redirect, not that steps 8 and 9 share a transaction (it would pass the
+  // same with them in two, or ten). The shared transaction itself is
+  // established BY CONSTRUCTION at services/translations.ts, in the
+  // `transaction(async (repos) => { ... })` callback that contains both
+  // writes, not by this test — steps 8 and 9 are DEPENDENT there: a redirect
+  // can never point at a form with no rows.
   //
   // `pledge` and its forms are in neither the seed nor any other test's
   // namespace. The lexeme is given senses first so that call 2 actually fires —

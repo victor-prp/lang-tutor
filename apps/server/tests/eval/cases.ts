@@ -245,6 +245,13 @@ export const CASES: EvalCase[] = [
     expectCorrection: 'receive',
   },
   // A phrase, not a word: scope is words and phrases, both directions.
+  //
+  // PROMPT CONTAMINATION: `buildPrompt`'s system instruction
+  // (apps/server/src/domain/translation.ts:228) states verbatim '"break a leg"
+  // is a phrase, not a sentence.' as its imperative-expression example, so the
+  // corrected form this case expects is already in what the model reads. This
+  // case measures prompt recall more than correction ability. Re-point it at
+  // an example absent from the prompt the next time someone here has an API key.
   {
     label: 'a misspelled word inside a fixed expression',
     text: 'brake a leg',
@@ -261,6 +268,14 @@ export const CASES: EvalCase[] = [
   // corrected form has whitespace, and `kind: 'word'` is written onto the variant
   // `break a leg` permanently. It is also the case that forces the askModel
   // change: scored against the typed text it clamps to `word` and can never pass.
+  //
+  // PROMPT CONTAMINATION: `buildPrompt`'s system instruction
+  // (apps/server/src/domain/translation.ts:340) states verbatim
+  // '"breakaleg" is corrected to "break a leg", so its kind is "phrase" even
+  // though what was typed is a single token.' — the exact correction this
+  // case expects. This case measures prompt recall more than correction
+  // ability. Re-point it at an example absent from the prompt the next time
+  // someone here has an API key.
   {
     label: 'a single token corrected to a phrase',
     text: 'breakaleg',

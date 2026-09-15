@@ -363,12 +363,27 @@ async function serveForm({
  * One use case: translate a word, phrase or sentence, reusing what the
  * dictionary already holds.
  *
- * **Two transactions, not one.** ADR 0001 R8 is amended in this phase to say a
- * use case opens at most one *write* transaction, and a read preceding
- * third-party I/O may be its own. Holding one open across the provider call
- * was rejected outright: ten seconds of an idle pooled connection per lookup,
- * one per concurrent learner. The two race harmlessly, because the write is
- * idempotent against UNIQUE(language_code, lemma) and UNIQUE(lexeme_id, form).
+ * **Dependent writes share a transaction; independent, idempotent writes may
+ * each be their own.** ADR 0001 R8's phase 13 amendment replaces the earlier
+ * "at most one write transaction" rule: a use case's *dependent* writes —
+ * where either is wrong without the other — share one `transaction(...)`
+ * call, while a write that is correct and idempotent on its own, whether or
+ * not the others land, may be its own. This file now has nine
+ * `transaction(...)` call sites, and a single lookup can perform two writes
+ * of either kind. Steps 8 and 9 are dependent and share one transaction:
+ * persisting the answer's entries and persisting its redirect, because a
+ * redirect must not point at a form with no rows. The step-5b probe's pair is
+ * independent: serving an already-stored corrected form repairs that
+ * lexeme's renderings inside `serveForm`'s own transaction, then the typed
+ * form's redirect is recorded in a second — each correct alone, each a no-op
+ * when repeated, so a failure between them leaves a correct dictionary and
+ * one more provider call on the next lookup. Holding one transaction open
+ * across the provider call was rejected outright: ten seconds of an idle
+ * pooled connection per lookup, one per concurrent learner. Reads preceding
+ * third-party I/O — the redirect probe at step 2, the reconciliation lookup
+ * before step 8 — may each be their own, and every write races harmlessly
+ * because it is idempotent against
+ * `UNIQUE(language_code, lemma, part_of_speech)` and `UNIQUE(lexeme_id, form)`.
  *
  * Note the calls below are written as bare `transaction(...)`, destructured
  * from the parameter list, never read off a `deps` object: R8's lint check

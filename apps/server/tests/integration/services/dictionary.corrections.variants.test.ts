@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import { eq } from 'drizzle-orm';
 
-import { dictCorrections, dictVariants } from '../../../src/db/schema';
+// NOT `src/db/schema` or `drizzle-orm` directly: ADR 0001 R2 keeps a
+// service-level test off the database exactly as it keeps
+// services/translations.ts itself off one, and
+// scripts/check-adr-0001-layered-architecture.sh enforces it. These helpers
+// live in tests/support/ — the test composition root ADR 0001 exempts.
+import { countDictVariants, readDictCorrections } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import {
   clearNamespace,
@@ -69,13 +73,10 @@ describe('a reported misspelling never becomes a dictionary variant', () => {
     await service.translate({ text: 'thruot' });
     await service.translate({ text: 'Thruot' });
 
-    expect(await t.db.select().from(dictVariants).where(eq(dictVariants.form, 'thruot')))
-      .toHaveLength(0);
-    expect(await t.db.select().from(dictVariants).where(eq(dictVariants.form, 'Thruot')))
-      .toHaveLength(0);
+    expect(await countDictVariants(t.db, 'thruot')).toBe(0);
+    expect(await countDictVariants(t.db, 'Thruot')).toBe(0);
     // The correct spelling IS a variant, and there is exactly one redirect.
-    expect(await t.db.select().from(dictVariants).where(eq(dictVariants.form, 'throat')))
-      .toHaveLength(1);
-    expect(await t.db.select().from(dictCorrections)).toHaveLength(1);
+    expect(await countDictVariants(t.db, 'throat')).toBe(1);
+    expect(await readDictCorrections(t.db)).toHaveLength(1);
   });
 });

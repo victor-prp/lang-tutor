@@ -777,9 +777,15 @@ describe('a correction on the miss path', () => {
     expect(result.correction).toBeUndefined();
   });
 
-  // Criterion 5, unit half. A failing reconciliation call writes nothing — no
-  // entries AND no redirect — because steps 8 and 9 share one transaction. Those
-  // two are DEPENDENT: a redirect must not point at a form with no rows.
+  // Criterion 5, unit half. `reconcile` is called ABOVE the
+  // `try { transaction(...) }` block, so a failing call never reaches an open
+  // transaction — what this proves is fail-closed: a failed reconciliation
+  // reaches neither write. It would pass exactly the same with steps 8 and 9
+  // in two transactions, or ten. The shared transaction itself is established
+  // BY CONSTRUCTION at services/translations.ts, in the
+  // `transaction(async (repos) => { ... })` callback that contains both
+  // writes, not by this test — steps 8 and 9 are DEPENDENT there: a redirect
+  // must not point at a form with no rows.
   it('writes neither entries nor a redirect when the reconciliation call fails', async () => {
     const { service, dict } = serviceWith(corrected(), 'not json at all');
     dict.stored['book:verb'] = [

@@ -51,6 +51,7 @@ wire changed, and `apps/mobile` has no changed file.
 - Phase 10: [plan](docs/superpowers/plans/2026-09-10-lang-tutor-phase-10-vocabulary-persistence.md) — this phase's plan carries its design; no separate design doc was written.
 - Phase 11: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-11-vocabulary-backfill-sourcing.md) · [plan](docs/superpowers/plans/2026-09-13-lang-tutor-phase-11-vocabulary-backfill.md)
 - Phase 12: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-12-dict-lexemes-design.md) · [plan](docs/superpowers/plans/2026-09-13-lang-tutor-phase-12-dict-lexemes.md)
+- Phase 13: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-13-misspelling-corrections-design.md) · [plan](docs/superpowers/plans/2026-09-15-lang-tutor-phase-13-misspelling-corrections.md)
 
 ## Layout
 
@@ -329,6 +330,11 @@ same repository function a live lookup calls, and a restored row is indistinguis
 a looked-up one. Restoring is idempotent and never overwrites live content: every level is
 `ON CONFLICT DO NOTHING`, so a form already looked up keeps both its senses and its
 wording.
+
+`dict:export` also writes a sibling `corrections.jsonl` beside whichever dictionary path
+was used — `data/backfill/en-he/corrections.jsonl` by default, or beside a custom
+`--export-dict` path — and `dict:restore` reads it back the same way, reporting zero
+restored corrections rather than failing when the sibling file is absent.
 
 > **`data/backfill/en-he/dictionary.jsonl` predates migration `0005` and will not restore.**
 > Its entries carry no `part_of_speech`, and the renderings it holds were stored per meaning

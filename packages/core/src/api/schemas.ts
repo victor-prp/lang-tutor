@@ -271,6 +271,9 @@ export const LlmCorrectionSchema = z.object({
 
 export const LlmTranslationSchema = z.object({
   kind: TranslationKindSchema,
+  // Six, not three: `light` alone is noun, adjective and verb, and a
+  // competing lemma still has to fit beside it.
+  //
   // When `correction` is present these describe `corrected_form`, not the typed
   // text — and so does `kind`, which the prompt's fourth rule is what actually
   // secures. `resolveKind` only clamps a single token; it cannot rule on a
