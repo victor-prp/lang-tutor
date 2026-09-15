@@ -30,7 +30,25 @@ const OPTIONS_VALIDATION_FUNCTION = sql`
   $$;
 `;
 
+// Beside question_options_valid and for the reason that one gives: drizzle-kit
+// cannot generate CREATE FUNCTION, a hand-edit to a generated migration would be
+// silently lost the next time anyone runs `db:generate`, and CREATE OR REPLACE
+// before migrate() is idempotent and guarantees the function exists before the
+// CHECK constraint that references it.
+//
+// `text[]` rather than `jsonb`, matching session_questions.option_order's use of
+// a Postgres array for a homogeneous list. The count cap is here rather than in a
+// column type because nothing in Postgres bounds an array's length.
+const CORRECTION_ALTERNATIVES_FUNCTION = sql`
+  create or replace function correction_alternatives_valid(alts text[]) returns boolean
+    language sql immutable as $$
+    select coalesce(array_length(alts, 1), 0) <= 3
+       and not exists (select 1 from unnest(alts) a where length(a) not between 1 and 100)
+    $$;
+`;
+
 export async function runMigrations(db: Db): Promise<void> {
   await db.execute(OPTIONS_VALIDATION_FUNCTION);
+  await db.execute(CORRECTION_ALTERNATIVES_FUNCTION);
   await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
 }

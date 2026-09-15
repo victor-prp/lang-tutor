@@ -1,0 +1,853 @@
+{
+  "id": "17a77207-d2e2-4e96-ab4e-859b96f7a0e6",
+  "prevId": "3c82d2a2-933a-4f08-812d-24548773d2a9",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.answers": {
+      "name": "answers",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "selected_option_position": {
+          "name": "selected_option_position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "answered_at": {
+          "name": "answered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "answers_session_id_position_question_id_session_questions_session_id_position_question_id_fk": {
+          "name": "answers_session_id_position_question_id_session_questions_session_id_position_question_id_fk",
+          "tableFrom": "answers",
+          "tableTo": "session_questions",
+          "columnsFrom": [
+            "session_id",
+            "position",
+            "question_id"
+          ],
+          "columnsTo": [
+            "session_id",
+            "position",
+            "question_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "answers_session_id_position_pk": {
+          "name": "answers_session_id_position_pk",
+          "columns": [
+            "session_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "answers_selected_option_position_nonneg": {
+          "name": "answers_selected_option_position_nonneg",
+          "value": "\"answers\".\"selected_option_position\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dict_corrections": {
+      "name": "dict_corrections",
+      "schema": "",
+      "columns": {
+        "language_code": {
+          "name": "language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "typed_form": {
+          "name": "typed_form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "corrected_form": {
+          "name": "corrected_form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "alternatives": {
+          "name": "alternatives",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "dict_corrections_form_key": {
+          "name": "dict_corrections_form_key",
+          "columns": [
+            {
+              "expression": "language_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(\"typed_form\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "dict_corrections_typed_form_length": {
+          "name": "dict_corrections_typed_form_length",
+          "value": "length(\"dict_corrections\".\"typed_form\") between 1 and 100"
+        },
+        "dict_corrections_corrected_form_length": {
+          "name": "dict_corrections_corrected_form_length",
+          "value": "length(\"dict_corrections\".\"corrected_form\") between 1 and 100"
+        },
+        "dict_corrections_alternatives_valid": {
+          "name": "dict_corrections_alternatives_valid",
+          "value": "correction_alternatives_valid(\"dict_corrections\".\"alternatives\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dict_lexemes": {
+      "name": "dict_lexemes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "language_code": {
+          "name": "language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lemma": {
+          "name": "lemma",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "part_of_speech": {
+          "name": "part_of_speech",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "sense_version": {
+          "name": "sense_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dict_lexemes_language_lemma_pos_key": {
+          "name": "dict_lexemes_language_lemma_pos_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "language_code",
+            "lemma",
+            "part_of_speech"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.dict_senses": {
+      "name": "dict_senses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "lexeme_id": {
+          "name": "lexeme_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sense_code": {
+          "name": "sense_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dict_senses_lexeme_id_dict_lexemes_id_fk": {
+          "name": "dict_senses_lexeme_id_dict_lexemes_id_fk",
+          "tableFrom": "dict_senses",
+          "tableTo": "dict_lexemes",
+          "columnsFrom": [
+            "lexeme_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dict_senses_lexeme_code_key": {
+          "name": "dict_senses_lexeme_code_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "lexeme_id",
+            "sense_code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.dict_var_translations": {
+      "name": "dict_var_translations",
+      "schema": "",
+      "columns": {
+        "variant_id": {
+          "name": "variant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sense_id": {
+          "name": "sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_language_code": {
+          "name": "user_language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "translation": {
+          "name": "translation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "definition_notes": {
+          "name": "definition_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "example_source": {
+          "name": "example_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "example_target": {
+          "name": "example_target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rank": {
+          "name": "rank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dict_var_translations_variant_id_dict_variants_id_fk": {
+          "name": "dict_var_translations_variant_id_dict_variants_id_fk",
+          "tableFrom": "dict_var_translations",
+          "tableTo": "dict_variants",
+          "columnsFrom": [
+            "variant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "dict_var_translations_sense_id_dict_senses_id_fk": {
+          "name": "dict_var_translations_sense_id_dict_senses_id_fk",
+          "tableFrom": "dict_var_translations",
+          "tableTo": "dict_senses",
+          "columnsFrom": [
+            "sense_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "dict_var_translations_variant_id_sense_id_user_language_code_pk": {
+          "name": "dict_var_translations_variant_id_sense_id_user_language_code_pk",
+          "columns": [
+            "variant_id",
+            "sense_id",
+            "user_language_code"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "dict_var_translations_variant_rank_key": {
+          "name": "dict_var_translations_variant_rank_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "variant_id",
+            "user_language_code",
+            "rank"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "dict_var_translations_rank_nonneg": {
+          "name": "dict_var_translations_rank_nonneg",
+          "value": "\"dict_var_translations\".\"rank\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dict_variants": {
+      "name": "dict_variants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "lexeme_id": {
+          "name": "lexeme_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "language_code": {
+          "name": "language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "form": {
+          "name": "form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entry_rank": {
+          "name": "entry_rank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rendered_sense_version": {
+          "name": "rendered_sense_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "dict_variants_form_entry_rank_key": {
+          "name": "dict_variants_form_entry_rank_key",
+          "columns": [
+            {
+              "expression": "language_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(\"form\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entry_rank",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "dict_variants_lexeme_id_dict_lexemes_id_fk": {
+          "name": "dict_variants_lexeme_id_dict_lexemes_id_fk",
+          "tableFrom": "dict_variants",
+          "tableTo": "dict_lexemes",
+          "columnsFrom": [
+            "lexeme_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dict_variants_lexeme_form_key": {
+          "name": "dict_variants_lexeme_form_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "lexeme_id",
+            "form"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "dict_variants_entry_rank_nonneg": {
+          "name": "dict_variants_entry_rank_nonneg",
+          "value": "\"dict_variants\".\"entry_rank\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.questions": {
+      "name": "questions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sense_id": {
+          "name": "sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prompt_variant_id": {
+          "name": "prompt_variant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_language": {
+          "name": "target_language",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_language_code": {
+          "name": "user_language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "options": {
+          "name": "options",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "questions_user_id_users_id_fk": {
+          "name": "questions_user_id_users_id_fk",
+          "tableFrom": "questions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "questions_sense_id_dict_senses_id_fk": {
+          "name": "questions_sense_id_dict_senses_id_fk",
+          "tableFrom": "questions",
+          "tableTo": "dict_senses",
+          "columnsFrom": [
+            "sense_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "questions_prompt_variant_id_dict_variants_id_fk": {
+          "name": "questions_prompt_variant_id_dict_variants_id_fk",
+          "tableFrom": "questions",
+          "tableTo": "dict_variants",
+          "columnsFrom": [
+            "prompt_variant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "questions_options_valid": {
+          "name": "questions_options_valid",
+          "value": "question_options_valid(\"questions\".\"options\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.session_questions": {
+      "name": "session_questions",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "option_order": {
+          "name": "option_order",
+          "type": "integer[]",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "session_questions_session_id_sessions_id_fk": {
+          "name": "session_questions_session_id_sessions_id_fk",
+          "tableFrom": "session_questions",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "session_questions_question_id_questions_id_fk": {
+          "name": "session_questions_question_id_questions_id_fk",
+          "tableFrom": "session_questions",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "question_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "session_questions_session_id_position_pk": {
+          "name": "session_questions_session_id_position_pk",
+          "columns": [
+            "session_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "session_questions_position_question_key": {
+          "name": "session_questions_position_question_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "session_id",
+            "position",
+            "question_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sessions": {
+      "name": "sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sessions_user_id_users_id_fk": {
+          "name": "sessions_user_id_users_id_fk",
+          "tableFrom": "sessions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "username": {
+          "name": "username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "age": {
+          "name": "age",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "native_language": {
+          "name": "native_language",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_language": {
+          "name": "target_language",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_username_unique": {
+          "name": "users_username_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "username"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "users_username_format": {
+          "name": "users_username_format",
+          "value": "\"users\".\"username\" ~ '^[a-z0-9_]{3,30}$'"
+        },
+        "users_display_name_length": {
+          "name": "users_display_name_length",
+          "value": "length(\"users\".\"display_name\") between 1 and 60"
+        },
+        "users_age_range": {
+          "name": "users_age_range",
+          "value": "\"users\".\"age\" between 3 and 120"
+        },
+        "users_languages_differ": {
+          "name": "users_languages_differ",
+          "value": "\"users\".\"native_language\" <> \"users\".\"target_language\""
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

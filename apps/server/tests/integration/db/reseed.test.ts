@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { content } from '../../../src/db/content';
 import { reseedContent } from '../../../src/db/reseed';
@@ -108,5 +108,28 @@ describe('reseedContent', () => {
     const first = await t.db.select().from(dictLexemes);
     await reseedContent(t.db);
     expect(await t.db.select().from(dictLexemes)).toHaveLength(first.length);
+  });
+
+  // `TRUNCATE dict_lexemes, sessions CASCADE` cannot reach dict_corrections:
+  // CASCADE follows FOREIGN KEYS, and this table has none by design. Left alone,
+  // every `npm run db:reseed` would empty the dictionary and leave the WHOLE
+  // redirect table pointing into it — which turns the "dangling redirect" risk
+  // from a rare event into a routine one, because db:reseed is a supported
+  // command phase 12 ran repeatedly while re-recording.
+  //
+  // This check is one word away from being a check that cannot fire, so watch it
+  // FAIL against the current statement before adding the table name.
+  it('leaves no redirect pointing into the dictionary it just emptied', async () => {
+    await t.db.execute(sql`
+      INSERT INTO dict_corrections (language_code, typed_form, corrected_form)
+      VALUES ('en', 'thruot', 'throat')
+    `);
+
+    await reseedContent(t.db);
+
+    const rows = await t.db.execute<{ count: string }>(
+      sql`SELECT count(*)::text AS count FROM dict_corrections`,
+    );
+    expect(rows.rows[0].count).toBe('0');
   });
 });

@@ -36,6 +36,7 @@ const TABLES = [
   'dict_variants',
   'dict_senses',
   'dict_var_translations',
+  'dict_corrections',
   'questions',
   'sessions',
   'session_questions',
@@ -77,7 +78,7 @@ const VALID_OPTIONS = [
 ];
 
 describe('the migrated schema', () => {
-  it('creates all nine tables', async () => {
+  it('creates all ten tables', async () => {
     const result = await db.execute<{ table_name: string }>(sql`
       select table_name from information_schema.tables where table_schema = 'public'
     `);
