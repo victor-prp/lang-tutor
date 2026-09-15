@@ -7,6 +7,7 @@ import type {
   CreateUserRequestSchema,
   ErrorSchema,
   HealthResponseSchema,
+  LlmCorrectionSchema,
   LlmEntrySchema,
   LlmReconciliationSchema,
   LlmRenderingSchema,
@@ -21,6 +22,7 @@ import type {
   PositionSchema,
   QuestionSchema,
   ScoreSchema,
+  TranslationCorrectionSchema,
   TranslationDirectionSchema,
   TranslationKindSchema,
   TranslationRequestSchema,
@@ -59,7 +61,9 @@ export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;
 export type TranslationSense = z.infer<typeof TranslationSenseSchema>;
 export type TranslationRequest = z.infer<typeof TranslationRequestSchema>;
 export type TranslationResponse = z.infer<typeof TranslationResponseSchema>;
+export type TranslationCorrection = z.infer<typeof TranslationCorrectionSchema>;
 export type LlmTranslation = z.infer<typeof LlmTranslationSchema>;
+export type LlmCorrection = z.infer<typeof LlmCorrectionSchema>;
 export type LlmSense = z.infer<typeof LlmSenseSchema>;
 export type LlmEntry = z.infer<typeof LlmEntrySchema>;
 export type LlmRendering = z.infer<typeof LlmRenderingSchema>;

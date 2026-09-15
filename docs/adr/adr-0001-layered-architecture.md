@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12)
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -78,14 +78,32 @@ Three rules that are not import rules:
   outside one). `createTransaction(db, bind)` is generic in what it binds, so `db/`
   does not learn that `repo/` exists — `composition.ts` supplies `bind`.
 
-  **Amended three times.** Phase 9 added *"that touches the database"*, because
+  **Amended four times.** Phase 9 added *"that touches the database"*, because
   `services/translations.ts` was a use case with **zero** transactions. Phase 10 made that
   same use case have **two**: normalize, read, call the provider for one to three seconds,
   write, respond. Phase 12 gave it **three**, by putting a second model call between the
   first one and the write: normalize, read the cache, call the provider, read the stored
   senses of the lexemes that answer named, call again to reconcile them by meaning, write,
-  respond. The rule now reads: *a use case opens at most one **write** transaction; reads
-  preceding third-party I/O may each be their own.*
+  respond. After phase 12 the rule read: *a use case opens at most one **write** transaction;
+  reads preceding third-party I/O may each be their own.*
+
+  Phase 13 gave it a second **write**. A misspelling's first lookup can find that the corrected
+  form is already stored and behind its lexeme: serving it repairs its renderings — one
+  transaction — and the lookup must then record the redirect from the typed string, a second.
+  Those two writes are independent: the repair is correct whether or not the redirect lands,
+  the redirect is correct whether or not the repair happened, and each is idempotent — the
+  repair is stamped against the sense version it rendered, the redirect is
+  `ON CONFLICT DO NOTHING` — so a failure between them leaves a correct dictionary and one
+  more provider call on the next lookup. Forcing them into one transaction would have meant
+  threading a redirect concern through the shared hit path, and keeping them apart by serving
+  the stale form once would have reintroduced a second read path for one form, the divergence
+  the phase 12 F5 amendment exists to prevent. The rule now reads: *a use case's **dependent**
+  writes share one transaction; a write that is **independent and idempotent** — correct on
+  its own whether or not the others land, and a no-op when repeated — may be its own;
+  **reads** preceding third-party I/O may each be their own.* Two writes are dependent when
+  either is wrong without the other: the answer row and the session-complete flag, or the
+  dictionary rows and the redirect that points at them. Whether a pair is dependent is a
+  judgement made in the design doc that introduces it, and enforced by review like R9 and R12.
 
   Holding one transaction open across the provider call was rejected outright: ten seconds
   of an idle pooled connection per lookup, one per concurrent learner. Short transactions
@@ -95,15 +113,16 @@ Three rules that are not import rules:
 
   R8's detection command greps for `\.transaction(` — the mechanism, `db.transaction(`,
   which still has exactly one call site. The "how many per use case" half was never
-  machine-checked and is not now. `db/seed.ts` reaches a transaction through
-  `createTransaction` for exactly this reason.
+  machine-checked and is not now, and neither is the dependent/independent distinction.
+  `db/seed.ts` reaches a transaction through `createTransaction` for exactly this reason.
 
   **A read-only `Query` seam is the alternative, recorded rather than taken.**
   `createQuery(db, bind)` beside `createTransaction`, bound to a read-only projection of
-  the repositories, would keep this wording untouched and make "one write transaction per
-  use case" a type-level guarantee rather than prose — the way `Transaction` already makes
-  it impossible for a service to hold a `Db` — and would save a `BEGIN`/`COMMIT` round trip
-  on a cache hit. Declined for simplicity while one use case needs it: a new type, factory,
+  the repositories, would keep this wording untouched and make "a read is not a write" a
+  type-level guarantee rather than prose — the way `Transaction` already makes it
+  impossible for a service to hold a `Db` — and would save a `BEGIN`/`COMMIT` round trip
+  on a cache hit. Since phase 13 it could not make the write count type-level, because the
+  count is no longer one. Declined for simplicity while one use case needs it: a new type, factory,
   bind and read-only projection, plus a decision about `login`, a pure read that opens a
   transaction today. **Revisit it for the performance gain**, or the second time a use case
   wants a read outside its write.

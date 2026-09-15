@@ -24,11 +24,16 @@ beforeAll(async () => {
   await runMigrations(db);
 }, 60_000);
 
+// The same 60 seconds `beforeAll` takes, and for the same reason: this hook runs
+// `drop database ... with (force)` too, which waits on connection termination and
+// is the slowest thing either hook does. The asymmetry was latent until phase 13
+// made this bucket heavier — one more migration and about thirty more tests — and
+// CI crossed the 30-second default while every one of the 224 tests passed.
 afterAll(async () => {
   await handle.close();
   await admin.db.execute(sql.raw(`drop database if exists ${DB_NAME} with (force)`));
   await admin.close();
-});
+}, 60_000);
 
 const TABLES = [
   'users',
@@ -36,6 +41,7 @@ const TABLES = [
   'dict_variants',
   'dict_senses',
   'dict_var_translations',
+  'dict_corrections',
   'questions',
   'sessions',
   'session_questions',
@@ -77,7 +83,7 @@ const VALID_OPTIONS = [
 ];
 
 describe('the migrated schema', () => {
-  it('creates all nine tables', async () => {
+  it('creates all ten tables', async () => {
     const result = await db.execute<{ table_name: string }>(sql`
       select table_name from information_schema.tables where table_schema = 'public'
     `);

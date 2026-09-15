@@ -34,7 +34,7 @@ export type EvalCase = {
   rejectTop?: string[];
   /** The lemma each named part of speech must resolve to. `expectLemma` reads
    *  entries[0], which for an inflected form is usually the verb; this reaches
-   *  the entry that actually matters. Phase 13: `burnt` and `burned` are one
+   *  the entry that actually matters. Phase 12 follow-up: `burnt` and `burned` are one
    *  adjective, and must name one lemma. */
   expectLemmaFor?: Record<string, string>;
   /** No sense's example may contain any of these. A regression lock on a
@@ -44,6 +44,16 @@ export type EvalCase = {
    *  scorecard; what is mechanical is that a sentence we have already seen fail
    *  does not come back. */
   rejectExample?: string[];
+  /** Phase 13. The corrected_form the model must report, matched
+   *  case-insensitively. */
+  expectCorrection?: string;
+  /** Must appear somewhere in `correction.alternatives`. */
+  expectAlternative?: string;
+  /** No correction at all. The inflection trap, and the most important assertion
+   *  in the set: `lemma ≠ typed form` is true of an inflection AND of a typo, so
+   *  a model that starts "correcting" real forms writes permanent redirects away
+   *  from correctly spelled words. */
+  expectNoCorrection?: true;
 };
 
 export const CASES: EvalCase[] = [
@@ -71,6 +81,13 @@ export const CASES: EvalCase[] = [
     rejectAny: ['ספר'],
     rejectTop: ['להזמין'],
     expectEntryPos: ['verb', 'adjective'],
+    // Phase 13. The inflection trap. A model that calls `booked` a misspelling of
+    // `book` writes a redirect that never expires — partially self-limiting, since
+    // the redirect is consulted only AFTER the by-form read misses, so once
+    // `booked` is legitimately written the bad row is shadowed and inert. It bites
+    // for a form never looked up correctly first. These three are the cases to
+    // watch when a model version changes.
+    expectNoCorrection: true,
   },
   {
     label: 'ranking: a homonym with an unrelated second sense',
@@ -113,6 +130,13 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['ריצה', 'לרוץ', 'רץ'],
     expectLemma: 'run',
+    // Phase 13. The inflection trap. A model that calls `booked` a misspelling of
+    // `book` writes a redirect that never expires — partially self-limiting, since
+    // the redirect is consulted only AFTER the by-form read misses, so once
+    // `booked` is legitimately written the bad row is shadowed and inert. It bites
+    // for a form never looked up correctly first. These three are the cases to
+    // watch when a model version changes.
+    expectNoCorrection: true,
   },
   {
     label: 'the reverse direction, and that script detection agreed',
@@ -143,8 +167,15 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['ראה', 'לראות'],
     expectAlso: ['מסור', 'לנסר'],
+    // Phase 13. The inflection trap. A model that calls `booked` a misspelling of
+    // `book` writes a redirect that never expires — partially self-limiting, since
+    // the redirect is consulted only AFTER the by-form read misses, so once
+    // `booked` is legitimately written the bad row is shadowed and inert. It bites
+    // for a form never looked up correctly first. These three are the cases to
+    // watch when a model version changes.
+    expectNoCorrection: true,
   },
-  // Phase 13. `water` has two noun senses — the substance you drink and a body
+  // Phase 12 follow-up. `water` has two noun senses — the substance you drink and a body
   // of water you swim in — and Hebrew renders both מים, so the example is the
   // only thing that can tell the two cards apart. The recorded seed's second
   // example was "The water was cold.", which fits a glass and a lake equally
@@ -158,7 +189,7 @@ export const CASES: EvalCase[] = [
     expectAlso: ['להשקות'],
     rejectExample: ['The water was cold'],
   },
-  // Phase 13, F2. The model lemmatises verb forms to the base verb every time,
+  // Phase 12 follow-up, F2. The model lemmatises verb forms to the base verb every time,
   // but wavers on participial adjectives: `burnt` came back as the adjective
   // `burn` while `burned` came back as the adjective `burned`. Two lexemes for
   // one adjective — British and American spellings of a single word — each with
@@ -188,7 +219,104 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: [],
     expectEmpty: true,
+    // Near NOTHING, as against near a word: the empty-entries answer and no
+    // correction. Its `kind` must also be `word` — a correction dropped for empty
+    // entries has changed nothing about the answer (criterion 7).
+    expectNoCorrection: true,
   },
+  // Phase 13. The reported defect itself, measured against the real model: the
+  // model already reads `thruot` as `throat` and says so in `lemma`; what this
+  // scores is that it now says so in `correction` instead of silently.
+  {
+    label: 'a misspelling one edit from a real word',
+    text: 'thruot',
+    expectKind: 'word',
+    acceptTop: ['גרון'],
+    expectCorrection: 'throat',
+    // `thruot` is as close to `throughout` as to `throat`, and nothing asked the
+    // model to enumerate corrections before this phase — it committed to one.
+    expectAlternative: 'throughout',
+  },
+  {
+    label: 'the classic transposition',
+    text: 'recieve',
+    expectKind: 'word',
+    acceptTop: ['לקבל'],
+    expectCorrection: 'receive',
+  },
+  // A phrase, not a word: scope is words and phrases, both directions.
+  //
+  // PROMPT CONTAMINATION: `buildPrompt`'s system instruction
+  // (apps/server/src/domain/translation.ts:228) states verbatim '"break a leg"
+  // is a phrase, not a sentence.' as its imperative-expression example, so the
+  // corrected form this case expects is already in what the model reads. This
+  // case measures prompt recall more than correction ability. Re-point it at
+  // an example absent from the prompt the next time someone here has an API key.
+  {
+    label: 'a misspelled word inside a fixed expression',
+    text: 'brake a leg',
+    expectKind: 'phrase',
+    acceptTop: ['בהצלחה'],
+    rejectAny: ['לשבור רגל'],
+    expectCorrection: 'break a leg',
+  },
+  // The fourth prompt rule, and the ONLY case in the set where a SINGLE TOKEN
+  // must be classified as a phrase. `brake a leg` above cannot score it: what was
+  // typed already contains whitespace, so the model answers `phrase` with or
+  // without the rule. This is the case where a model classifying the input as
+  // typed answers `word`, the server's resolveKind DEFERS to it because the
+  // corrected form has whitespace, and `kind: 'word'` is written onto the variant
+  // `break a leg` permanently. It is also the case that forces the askModel
+  // change: scored against the typed text it clamps to `word` and can never pass.
+  //
+  // PROMPT CONTAMINATION: `buildPrompt`'s system instruction
+  // (apps/server/src/domain/translation.ts:340) states verbatim
+  // '"breakaleg" is corrected to "break a leg", so its kind is "phrase" even
+  // though what was typed is a single token.' — the exact correction this
+  // case expects. This case measures prompt recall more than correction
+  // ability. Re-point it at an example absent from the prompt the next time
+  // someone here has an API key.
+  {
+    label: 'a single token corrected to a phrase',
+    text: 'breakaleg',
+    expectKind: 'phrase',
+    acceptTop: ['בהצלחה'],
+    expectCorrection: 'break a leg',
+  },
+  // The Latin-script counterpart of ktiv male: a real word in one standard of
+  // English that a model may "correct" to the American form, writing a permanent
+  // redirect away from a correct spelling. Phase 12 met this shape with
+  // `burnt`/`burned` and pinned a lemma rule for it; here the rule is the first
+  // one — a correctly spelled form is not a misspelling — and this is the case
+  // that scores its spelling-variant half.
+  {
+    label: 'a real spelling variant is not a misspelling',
+    text: 'colour',
+    expectKind: 'word',
+    acceptTop: ['צבע'],
+    expectNoCorrection: true,
+  },
+  // THERE IS DELIBERATELY NO HEBREW CORRECTION CASE, and the reason is worth
+  // keeping so nobody adds one back on the same reasoning that failed.
+  //
+  // Phase 13 shipped one — `שולחם` expecting a correction to `שולחן` (table) —
+  // and the first eval run against a real model failed it. The model read
+  // `שולחם` as a legitimate inflected form of `שלח` and answered "it was sent to
+  // them", which is defensible: the string IS a real Hebrew form. So the case
+  // demanded the model "correct" a genuine word, which is precisely what the
+  // `running`, `booked`, `saw` and `colour` cases above exist to prove it must
+  // NOT do. The case contradicted the feature it was meant to measure, and it
+  // also failed two tier 1 checks because the answer carried empty examples.
+  //
+  // This is the Hebrew-side risk the design flagged and could not resolve: ktiv
+  // male against ktiv haser and optional nikud mean many valid Hebrew spellings
+  // differ from one another, and `normalizeForm` deliberately strips neither —
+  // so a Hebrew string that is unambiguously a misspelling and not merely an
+  // alternative spelling is genuinely hard to choose. A replacement needs a
+  // string no reading can make into a real word (a non-final letter in final
+  // position is one candidate), and it needs an eval run to confirm the model
+  // agrees before it is trusted. Correction behaviour is currently measured in
+  // English only.
 ];
 
 /**
@@ -223,7 +351,7 @@ export type RenderingCase = {
 };
 
 export const RENDERING_CASES: RenderingCase[] = [
-  // The phase 13 defect, reduced to its two inputs. `press`/verb holds these
+  // The phase 12 follow-up defect, reduced to its two inputs. `press`/verb holds these
   // five senses; the form `pressing` also belongs to a SEPARATE lexeme,
   // `pressing`/adjective, which call 1 returns as its own entry. Asked what
   // readings of "pressing" the list below lacks, the model answered דחוף

@@ -68,6 +68,14 @@ export const strings = {
   translateUnavailable: 'התרגום לא זמין',
   translateRetry: 'נסה שוב',
   translateTooLong: 'עד 100 תווים',
+  // U+2068 FSI and U+2069 PDI around each form. In the en_he direction this
+  // banner embeds a Latin word inside a Hebrew RTL sentence, and without an
+  // isolate the bidi algorithm reorders it against the wrong clause. The he_en
+  // direction has no such problem, and one rule for both is cheaper than a
+  // conditional.
+  translateCorrectionNotice: (typed: string, corrected: string) =>
+    `לא מצאנו את ⁨${typed}⁩ — מציגים תוצאות עבור ⁨${corrected}⁩`,
+  translateDidYouMean: 'האם התכוונת ל:',
   // Known parts of speech only. An unfamiliar value returns undefined and the
   // screen omits the line, so a value the model invents tomorrow degrades to a
   // missing label rather than a broken card — the same reason the wire keeps

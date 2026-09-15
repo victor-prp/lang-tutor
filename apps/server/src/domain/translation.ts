@@ -2,11 +2,14 @@ import type {
   LlmReconciliation,
   LlmTranslation,
   PartOfSpeech,
+  TranslationCorrection,
   TranslationDirection,
   TranslationKind,
   TranslationSense,
 } from '@lang-tutor/core/api';
 import { LlmReconciliationSchema, LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
+
+import { normalizeForm } from './dictionary';
 
 /**
  * The pure core of translation: which way round the request is, what to ask the
@@ -54,6 +57,149 @@ export function resolveKind(text: string, modelKind: TranslationKind): Translati
   return /\s/.test(text.trim()) ? modelKind : 'word';
 }
 
+/**
+ * A form is usable as a dictionary key only if it contains something to look up.
+ *
+ * Written as a CONTENT test and not as "normalizes to the empty string", which
+ * would fire on almost nothing: `normalizeForm` returns its input unchanged
+ * whenever stripping a trailing sentence mark would empty it (phase 12's F4
+ * branch), so `normalizeForm('???')` is `'???'`. Only a whitespace-only string —
+ * which `.min(1)` barely admits — normalizes to `''` at all. Letter-or-digit
+ * covers whitespace, punctuation, and any mixture of them.
+ */
+const HAS_CONTENT = /[\p{L}\p{N}]/u;
+
+/**
+ * The alternatives, tidied rather than rejected. Truncating is deliberate: the
+ * alternative was failing a whole answer over a decorative field.
+ *
+ * **Two callers, which is why it is a named function.** The guards call it so the
+ * response the model's own answer produces is right, and `persistCorrection`
+ * calls it again on the way into the database, so the three-item cap is a
+ * property of the WRITE rather than of one caller — `dict:restore` reaches the
+ * repository without passing through `domain/` at all, exactly as `dictImport`
+ * already does. Idempotent by construction: tidying an already-tidy list returns
+ * it unchanged, so the second application costs nothing and the two callers
+ * cannot disagree.
+ *
+ * `undefined` is a real input, not defensiveness: `LlmCorrectionSchema.alternatives`
+ * is `.optional()` rather than `.default([])`, so a model that omits the key hands
+ * this function an `undefined`, and turning it into `[]` here is what keeps a
+ * missing decorative field from reaching the wire schema, which requires the array.
+ */
+export function tidyAlternatives(
+  alternatives: string[] | undefined,
+  context: { correctedForm: string; typedForm: string },
+): string[] {
+  // Seeded with both forms, so an alternative that merely repeats one of them is
+  // removed by the same pass that removes a repeat of another alternative.
+  // Case-insensitive, and the FIRST occurrence is the one kept, so the model's
+  // ranking survives.
+  const seen = new Set([context.correctedForm.toLowerCase(), context.typedForm.toLowerCase()]);
+  const tidied: string[] = [];
+
+  for (const raw of alternatives ?? []) {
+    const form = normalizeForm(raw);
+    if (!HAS_CONTENT.test(form)) continue;
+    const key = form.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tidied.push(form);
+    if (tidied.length === 3) break;
+  }
+
+  return tidied;
+}
+
+/** What the service needs from a parsed answer before it touches a database:
+ *  which form the rest of the pipeline is about, what `kind` that form is, and
+ *  the correction block to attach to the response — if any survived. */
+export type ResolvedCorrection = {
+  correction?: TranslationCorrection;
+  effectiveForm: string;
+  kind: TranslationKind;
+};
+
+/**
+ * The four guards, the empty-entries clearing, the normalization of both forms
+ * and `resolveKind` — one pure function, applied to the parsed answer before
+ * phase 12's early return, so a dropped correction costs no database read and no
+ * second model call.
+ *
+ * **`null` means the answer is unusable**, which is the fourth guard and the only
+ * one that is not a drop. `domain/` cannot throw `TranslationUnreadable` — R3
+ * forbids importing `../errors` — so the caller raises, the arrangement
+ * `parseLlmTranslation` already uses.
+ *
+ * **The clearing runs before the effective form is computed, and that ordering is
+ * the point.** `kind` is computed from `effectiveForm`, and phase 12's
+ * empty-entries early return carries that `kind` — so a correction the response
+ * declines to report would already have changed the answer by the time the early
+ * return runs. A model answering `zxqwbtl` with `entries: []` and
+ * `corrected_form: "zxq wbtl"` would otherwise return `kind: 'phrase'` for a
+ * single-token input: no correction block, no rows written, and a `kind` that came
+ * from a correction the response denies carrying.
+ *
+ * Two callers: `services/translations.ts` at step 4 of the flow, and the eval
+ * harness's `askModel`, which is what lets that bucket score the `kind` the server
+ * would actually have written rather than a copy of the logic.
+ */
+export function resolveCorrection(
+  parsed: LlmTranslation,
+  context: { typedForm: string; direction: TranslationDirection },
+): ResolvedCorrection | null {
+  // The kind the answer has BEFORE any substitution. It is what the drop paths
+  // return, and it is what the sentence guard reads: `resolveKind` against the
+  // typed form is the clamp the request already earns, so a single token the
+  // model called a sentence is a `word` here and keeps its correction, while a
+  // genuine multi-token sentence loses it.
+  const typedKind = resolveKind(context.typedForm, parsed.kind);
+  const uncorrected: ResolvedCorrection = {
+    effectiveForm: context.typedForm,
+    kind: typedKind,
+  };
+
+  // The fifth rule, deliberately not listed as a guard: it is a test on the
+  // ENTRIES, not on the correction's content, and where it runs matters more than
+  // what it does — see the ordering note above.
+  if (!parsed.correction || parsed.entries.length === 0) return uncorrected;
+
+  // Guard 3, first because it is the cheapest and scopes the whole feature:
+  // detection is words and phrases. "I have a sore thruot" is out of scope.
+  if (typedKind === 'sentence') return uncorrected;
+
+  // Never the model's string as it arrived. What `normalizeForm` returns IS the
+  // dictionary key, and phase 12 added trailing-punctuation stripping to it
+  // precisely because the dev database held `book` with three senses and `book?`
+  // with four. A model answering `corrected_form: "Throat."` would otherwise write
+  // exactly that as a dict_variants.form and as a redirect target.
+  const correctedForm = normalizeForm(parsed.correction.corrected_form);
+
+  // Guard 1 — "did you mean throat? showing results for throat".
+  if (correctedForm.toLowerCase() === context.typedForm.toLowerCase()) return uncorrected;
+  // Guard 2 — see HAS_CONTENT.
+  if (!HAS_CONTENT.test(correctedForm)) return uncorrected;
+  // Guard 4 — the answer is unusable, not merely uncorrected. `direction` was
+  // detected from the typed script before call 1 and is fixed for the request.
+  if (detectDirection(correctedForm) !== context.direction) return null;
+
+  return {
+    correction: {
+      corrected_form: correctedForm,
+      alternatives: tidyAlternatives(parsed.correction.alternatives, {
+        correctedForm,
+        typedForm: context.typedForm,
+      }),
+    },
+    effectiveForm: correctedForm,
+    // Against the CORRECTED form, which is what makes `bokked` → `booked` a
+    // `word` even when the model answered `phrase`. It is not the whole of the
+    // job: the clamp fires only on a single token, so a multi-token corrected
+    // form is the model's call and the fourth prompt rule is what secures it.
+    kind: resolveKind(correctedForm, parsed.kind),
+  };
+}
+
 const LANGUAGE_NAMES = {
   en_he: { from: 'English', to: 'Hebrew' },
   he_en: { from: 'Hebrew', to: 'English' },
@@ -87,7 +233,7 @@ export function buildPrompt(input: {
     'Return one entry per headword AND part of speech: "book" is two entries, one noun and',
     'one verb. An inflected form belongs to the entry whose part of speech it realises:',
     '"booked" is the verb entry only, never the noun; "books" is legitimately both.',
-    // Phase 13, F2. The model lemmatises verb forms to the base verb every
+    // Phase 12 follow-up, F2. The model lemmatises verb forms to the base verb every
     // time and wavers on participial adjectives, which put two lexemes in the
     // dictionary for one adjective — measured as `burnt` naming `burnt` and
     // `burned` naming `burn` on the same afternoon, so it is not a wrong rule
@@ -101,17 +247,23 @@ export function buildPrompt(input: {
     `Give each sense one short natural example sentence in ${from} together with its ${to}`,
     'translation, and a short snake_case sense_code naming the meaning',
     '(financial_institution as against river_bank).',
-    // Phase 13. Where two senses of one entry render to the same word in the
+    // Phase 12 follow-up. Where two senses of one entry render to the same word in the
     // target language — Hebrew says מים for water-the-substance and
     // water-the-lake — the example is the ONLY thing that can tell the two
     // cards apart, and "The water was cold" fits a glass and a lake equally.
     // The illustration uses `spring`, which is in neither the seed nor the eval
     // set, so it cannot bias anything this repo measures. The illustration also
-    // avoids the words the integration bucket matches MockServer expectations
-    // on — `see`, `saw`, `saws`, `bank`, `banks` — because the system
-    // instruction is part of the request body those expectations match against.
-    // An earlier draft said "We saw the spring" and made every `see` lookup in
-    // that bucket match the `saw` expectation instead.
+    // avoids `saw` and `see`, the only two expectations this instruction can
+    // trip. An UNQUOTED matchText matches a regex over the whole request body,
+    // and the system instruction is in that body; a QUOTED one (`"bank"`,
+    // `"scan"`) matches only the learner's text, because the body is
+    // JSON-encoded and the instruction's own quotes arrive escaped — measured,
+    // not reasoned: a body whose instruction reads `Rule: "banks" is plural`
+    // matches the expectation `banks` and does not match `"banks"`. Re-derive
+    // the forbidden pair from the registered expectations before changing any
+    // illustration word here or in any other rule. An earlier draft said "We saw
+    // the spring" and made every `see` lookup in that bucket match the `saw`
+    // expectation instead.
     'Choose each example so that it could not be read as any other sense of the same word.',
     'A sentence that merely contains the word is not enough — it must rule the other senses',
     'out. For "spring": "The spring in the mattress broke" rules out the season, while "I like',
@@ -131,8 +283,62 @@ export function buildPrompt(input: {
     'translation, and omit the example entirely — a sentence needs no example of itself.',
     'Its part_of_speech is required by the schema but meaningless for a sentence, and the',
     'server discards it along with the entry, which is never stored; answer "verb".',
-    'If the input is not a word or expression in either language, return an empty entries',
-    'array rather than inventing a translation.',
+    // Phase 13. REPLACED, not supplemented. Left standing beside the correction
+    // rules below it is a flat contradiction about exactly the input this phase
+    // exists for: `thruot` is not a word in either language, so the old wording
+    // demanded empty entries while the new one demands entries describing
+    // `throat`. The added clause carries the whole difference.
+    //
+    // "in either language" is kept rather than narrowed to the source language,
+    // and the rules below say it for the same reason: `direction` is detected
+    // from the script and can be wrong, so a rule scoped to the detected source
+    // would let a real English word typed under he_en be reported as a
+    // misspelling of a Hebrew one.
+    'If the input is not a word or expression in either language and no real word or',
+    'expression was plausibly intended, return an empty entries array and omit `correction`,',
+    'rather than inventing a translation.',
+    // Phase 13, rule 1. The rule the whole feature turns on and the one most
+    // likely to regress, because `lemma ≠ typed form` is true of an inflection
+    // AND of a typo — which is precisely why detection cannot be a string
+    // comparison and has to be asked for explicitly. `saws` is the obvious
+    // illustration word and is FORBIDDEN: it is registered unquoted as a
+    // MockServer matchText, and the system instruction is part of the body those
+    // expectations match against. `running` and `booked` already appear above, so
+    // they add no new exposure; `walks` and `went` are clear.
+    'A correctly spelled inflected form is not a misspelling: "running", "booked", "walks"',
+    'and "went" are real forms of real words — return them normally and omit `correction`.',
+    // Phase 13, rule 2. `corrected_form` is a SURFACE form, never a lemma: a
+    // learner typing `bokked` wants `booked`, whose lemma is `book`. Under phase
+    // 10 the distinction was invisible; phase 12 made it load-bearing, because
+    // `booked` renders הזמין and `book` renders להזמין on purpose.
+    'When the input is not a word or expression in either language but one or more real ones',
+    'were plausibly intended, set `correction.corrected_form` to the single most likely',
+    'intended surface form — matching the grammatical form the learner appears to have typed,',
+    'so `bokked` corrects to `booked` and not to `book` — and list up to three other plausible',
+    'intended forms, ranked, in `correction.alternatives`. The `entries` then describe',
+    '`corrected_form`.',
+    // Phase 13, rule 3. Suspends, for this path only, the
+    // "build the example sentence around the input as typed" rule above. Without
+    // it the dictionary stores example sentences containing a misspelling —
+    // permanently, since persistEntries writes exactly these examples.
+    'When `correction` is present, build the example sentence around `corrected_form`, never',
+    'around the input as typed.',
+    // Phase 13, rule 4. The one a reader will think redundant, and the one with a
+    // permanent consequence. `resolveKind` clamps a single token to `word` and
+    // otherwise DEFERS to the model, so it cannot rule on a multi-token corrected
+    // form; `kind` is then written onto dict_variants.kind for that form,
+    // first-writer-wins, and read back by kindForForm on every later hit —
+    // including the hit a learner who spells `break a leg` correctly gets.
+    // Without this rule, one mistyped lookup freezes kind: 'word' on a real
+    // phrase for the life of the dictionary. No server-side rule can repair it:
+    // the mirror of the clamp does not exist, because a multi-token form can be a
+    // phrase or a sentence and nothing in code can say which.
+    //
+    // The illustration reuses "break a leg", which the imperative-expression rule
+    // above already names, so it adds no new exposure under the word constraint.
+    'When `correction` is present, classify `corrected_form` rather than the input as typed:',
+    '"breakaleg" is corrected to "break a leg", so its kind is "phrase" even though what was',
+    'typed is a single token.',
   ].join(' ');
 
   // The learner's text is untrusted and stays in its own part, never
@@ -246,7 +452,7 @@ export function buildRenderingPrompt(input: {
     'is the same one — even where you would have named it differently. Use a new',
     `snake_case sense_code only for a reading that is itself "${input.lemma}" used as a`,
     `${input.partOfSpeech} and that the list above does not contain.`,
-    // The phase 13 defect, and the reason the sentence above names the lexeme
+    // The phase 12 follow-up defect, and the reason the sentence above names the lexeme
     // twice. This call is scoped to ONE lexeme, but the form it renders may
     // belong to several: `pressing` is the verb `press` and, separately, the
     // adjective `pressing`. Asked only what readings the FORM has that the

@@ -3,8 +3,15 @@ import type { PartOfSpeech } from '@lang-tutor/core/api';
 import { eq } from 'drizzle-orm';
 
 import { dictVarTranslations } from '../../../src/db/schema';
-import { exportDictionary, fromJsonl, toJsonl } from '../../../src/db/dictExport';
-import { importDictionary } from '../../../src/db/dictImport';
+import {
+  correctionsFromJsonl,
+  correctionsToJsonl,
+  exportCorrections,
+  exportDictionary,
+  fromJsonl,
+  toJsonl,
+} from '../../../src/db/dictExport';
+import { importCorrections, importDictionary } from '../../../src/db/dictImport';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
@@ -178,5 +185,70 @@ describe('dictionary export/restore', () => {
 
     await restoreInto(target, exported);
     expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
+  });
+});
+
+describe('corrections.jsonl', () => {
+  const write = (t: TestDb, input: { typedForm: string; correctedForm: string; alternatives: string[] }) =>
+    withTx(t.db, (tx) => createDictRepo(tx).persistCorrection({ languageCode: 'en', ...input }));
+
+  it('round-trips a redirect, and the restored row serves the same answer', async () => {
+    await write(source, {
+      typedForm: 'thruot',
+      correctedForm: 'throat',
+      alternatives: ['throughout'],
+    });
+
+    const records = await exportCorrections(source.db, { languageCode: 'en' });
+    expect(records).toEqual([
+      { typed_form: 'thruot', corrected_form: 'throat', alternatives: ['throughout'] },
+    ]);
+
+    const result = await importCorrections(target.db, { records, languageCode: 'en' });
+    expect(result.records).toBe(1);
+    expect(
+      await withTx(target.db, (tx) =>
+        createDictRepo(tx).findCorrectionByForm({ languageCode: 'en', form: 'Thruot' }),
+      ),
+    ).toEqual({ typedForm: 'thruot', correctedForm: 'throat', alternatives: ['throughout'] });
+  });
+
+  it('survives the JSONL encoding it is stored as', async () => {
+    await write(source, { typedForm: 'שולחם', correctedForm: 'שולחן', alternatives: [] });
+
+    const records = await exportCorrections(source.db, { languageCode: 'en' });
+    expect(correctionsFromJsonl(correctionsToJsonl(records))).toEqual(records);
+  });
+
+  // The guarantee dictImport already provides for the dictionary, extended to
+  // this table: replaying a file onto a database that already holds part of it
+  // keeps the live content and raises nothing. persistCorrection being
+  // ON CONFLICT DO NOTHING is what makes it true, and a redirect that raised on a
+  // re-restore would make dict:restore non-idempotent for the first time since
+  // phase 11.
+  it('is idempotent: a re-restore keeps the live target and raises nothing', async () => {
+    await write(target, { typedForm: 'thruot', correctedForm: 'throat', alternatives: [] });
+
+    await importCorrections(target.db, {
+      languageCode: 'en',
+      records: [{ typed_form: 'Thruot', corrected_form: 'throughout', alternatives: [] }],
+    });
+
+    expect(
+      (
+        await withTx(target.db, (tx) =>
+          createDictRepo(tx).findCorrectionByForm({ languageCode: 'en', form: 'thruot' }),
+        )
+      )?.correctedForm,
+    ).toBe('throat');
+  });
+
+  // The file is genuinely optional, and it is empty on arrival — so a restore
+  // that cannot find it restores the dictionary and reports zero corrections
+  // rather than failing.
+  it('restores zero corrections from an empty or absent file', async () => {
+    expect(correctionsFromJsonl('')).toEqual([]);
+    expect(await importCorrections(target.db, { records: [], languageCode: 'en' }))
+      .toEqual({ records: 0 });
   });
 });

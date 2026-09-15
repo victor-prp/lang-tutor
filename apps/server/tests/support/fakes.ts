@@ -11,7 +11,7 @@ import type { StoredSense } from '../../src/domain/translation';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
-import type { PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
+import type { CorrectionRow, PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
@@ -143,8 +143,16 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
 }
 
 export type FakeDictRepo = DictRepo & {
-  /** What the next read answers with. Empty is a miss. */
-  hit: SenseRow[];
+  /**
+   * What the by-form read answers with, KEYED BY FORM and matched
+   * case-insensitively, the way the real index is. An absent key is a miss.
+   *
+   * A record rather than a single array since phase 13: steps 1, 3 and 5b of the
+   * lookup call `findSensesByForm` with different forms in ONE lookup and must
+   * get different answers. Before phase 13 every lookup read one form, and a
+   * single array was exactly right.
+   */
+  hit: Record<string, SenseRow[]>;
   /** What `findSensesByLexeme` answers with, keyed `lemma:partOfSpeech`. A
    *  lexeme absent from this map has no stored senses, which is how a test says
    *  "this is a new lexeme, so no second model call". */
@@ -154,10 +162,22 @@ export type FakeDictRepo = DictRepo & {
    *  the entries it was handed, flattened by the real domain function — which
    *  is what the real re-read would produce for a form nobody else claims. */
   reread: SenseRow[];
-  /** What `findStaleLexemesByForm` answers with. Empty is level — the default,
-   *  so an existing hit-path test that never mentions staleness keeps taking the
+  /** What `findStaleLexemesByForm` answers with, keyed by form. An absent key is
+   *  level — the default, so a test that never mentions staleness keeps taking the
    *  plain-hit branch. */
-  stale: StaleLexeme[];
+  stale: Record<string, StaleLexeme[]>;
+  /** The redirect table, keyed by TYPED form, matched case-insensitively. */
+  corrections: Record<string, CorrectionRow>;
+  /** Every `persistCorrection` call, in order. */
+  correctionsWritten: {
+    typedForm: string;
+    correctedForm: string;
+    alternatives: string[];
+    languageCode: string;
+  }[];
+  /** Every `repairVariantRenderings` call, in order — no longer unreachable from
+   *  phase 13 on, because the redirect-and-repair tests drive it. */
+  repaired: { variantId: string; senseVersion: number }[];
   /** Set to make the write throw. */
   persistError: Error | null;
   persisted: PersistEntriesInput[];
@@ -165,18 +185,27 @@ export type FakeDictRepo = DictRepo & {
 };
 
 export function createFakeDictRepo(): FakeDictRepo {
+  // One lookup rule for all three maps, matching the real index's
+  // (language_code, lower(form)) exactly — so a test that writes `Thruot` and
+  // reads `thruot` behaves the way Postgres does.
+  const at = <T>(map: Record<string, T>, form: string): T | undefined =>
+    map[form] ?? map[Object.keys(map).find((key) => key.toLowerCase() === form.toLowerCase()) ?? ''];
+
   const repo: FakeDictRepo = {
-    hit: [],
+    hit: {},
     stored: {},
     lexemeReads: [],
     reread: [],
-    stale: [],
+    stale: {},
+    corrections: {},
+    correctionsWritten: [],
+    repaired: [],
     persistError: null,
     persisted: [],
     reads: [],
     findSensesByForm: async (input) => {
       repo.reads.push(input);
-      return repo.hit;
+      return at(repo.hit, input.form) ?? [];
     },
     findSensesByLexeme: async (input) => {
       repo.lexemeReads.push({ lemma: input.lemma, partOfSpeech: input.partOfSpeech });
@@ -186,13 +215,25 @@ export function createFakeDictRepo(): FakeDictRepo {
       // from the sense_code, which is unique per lexeme, same as the real id.
       return senses.map((sense) => ({ senseId: `sense-${sense.senseCode}`, ...sense }));
     },
-    findStaleLexemesByForm: async () => repo.stale,
-    // The two repair-path methods are bare stubs, present because `DictRepo` names
-    // them and for no other reason: `stale` is empty by default, so no unit test
-    // reaches the repair branch at all. A recorder here would be written by the
-    // fake and read by nobody.
+    findStaleLexemesByForm: async (input) => at(repo.stale, input.form) ?? [],
+    findCorrectionByForm: async (input) => at(repo.corrections, input.form),
+    persistCorrection: async (input) => {
+      repo.correctionsWritten.push(input);
+      // First-writer-wins, like the real one: a second write for one typed form
+      // is a no-op that leaves the first target in place.
+      const existing = at(repo.corrections, input.typedForm);
+      if (!existing) {
+        repo.corrections[input.typedForm] = {
+          typedForm: input.typedForm,
+          correctedForm: input.correctedForm,
+          alternatives: input.alternatives,
+        };
+      }
+    },
     findSenseVersion: async () => 0,
-    repairVariantRenderings: async () => {},
+    repairVariantRenderings: async (input) => {
+      repo.repaired.push({ variantId: input.variantId, senseVersion: input.senseVersion });
+    },
     persistEntries: async (input) => {
       repo.persisted.push(input);
       if (repo.persistError) throw repo.persistError;

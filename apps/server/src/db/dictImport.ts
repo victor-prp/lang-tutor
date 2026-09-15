@@ -1,6 +1,6 @@
 import type { Db } from './client';
 import { createTransaction } from './transaction';
-import type { DictRecord } from './dictExport';
+import type { CorrectionRecord, DictRecord } from './dictExport';
 import { createDictRepo } from '../repo/dictionary';
 
 export type ImportResult = {
@@ -69,4 +69,41 @@ export async function importDictionary(
   }
 
   return { records: total, lexemesCreated };
+}
+
+/**
+ * Replays exported redirects through `persistCorrection` — the same repository
+ * function a live lookup calls — so a restored row and a looked-up one are
+ * indistinguishable, the guarantee `importDictionary` already provides for the
+ * dictionary.
+ *
+ * **Not chunked**, unlike `importDictionary`. That one is chunked because the
+ * backfill is ~89k records; this file arrives empty and stays near-empty, since
+ * the backfill word list is correctly spelled and corrections accumulate only
+ * from real learners. One transaction is the simpler shape while that is true.
+ *
+ * Safe against a database that already holds part of the file:
+ * `persistCorrection` is ON CONFLICT DO NOTHING, so a redirect already written
+ * keeps the target it has.
+ */
+export async function importCorrections(
+  db: Db,
+  input: { records: CorrectionRecord[]; languageCode: string },
+): Promise<{ records: number }> {
+  if (input.records.length === 0) return { records: 0 };
+
+  const inTransaction = createTransaction(db, (tx) => tx);
+  await inTransaction(async (tx) => {
+    const dict = createDictRepo(tx);
+    for (const record of input.records) {
+      await dict.persistCorrection({
+        languageCode: input.languageCode,
+        typedForm: record.typed_form,
+        correctedForm: record.corrected_form,
+        alternatives: record.alternatives,
+      });
+    }
+  });
+
+  return { records: input.records.length };
 }

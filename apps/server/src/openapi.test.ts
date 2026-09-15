@@ -132,6 +132,29 @@ describe('the translation endpoint in the published document', () => {
     const doc = await openApiDocument();
     expect(doc.paths['/api/translations'].post.description).toMatch(/rate limit/i);
   });
+
+  // Phase 13 moves the wire for the first time since phase 9, additively. A
+  // client that ignores `correction` behaves exactly as it does today, which is
+  // what `optional` publishes.
+  it('publishes the correction block as an optional property, and loses nothing', async () => {
+    const doc = await openApiDocument();
+    const schema = doc.paths['/api/translations'].post.responses['200']
+      .content['application/json'].schema;
+
+    expect(Object.keys(schema.properties).sort()).toEqual([
+      'correction',
+      'direction',
+      'kind',
+      'senses',
+      'text',
+    ]);
+    expect(schema.required).not.toContain('correction');
+    expect(schema.required.sort()).toEqual(['direction', 'kind', 'senses', 'text']);
+
+    const correction = schema.properties.correction;
+    expect(correction.properties).toHaveProperty('corrected_form');
+    expect(correction.properties.alternatives.maxItems).toBe(3);
+  });
 });
 
 describe('the user endpoints in the published document', () => {

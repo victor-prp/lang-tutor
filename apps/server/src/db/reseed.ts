@@ -24,10 +24,19 @@ import { seedContent } from './seed';
  * to it, and a session whose questions had vanished would be broken rather than
  * absent. `users` is untouched.
  *
+ * `dict_corrections` is named for the same reason `sessions` already is: nothing
+ * references it, so nothing would cascade to it. Left out, every reseed would
+ * empty the dictionary and leave the entire redirect table pointing into it — and
+ * a dangling redirect is described in the spec's risk register as needing "a
+ * truncated dictionary", which a supported command would then produce on demand.
+ * Symmetric rather than merely safe: a correction is the same kind of cache of
+ * the same kind of paid answer the dictionary is, and it is recoverable the same
+ * way — `dict:export` before, `dict:restore` after, now carrying both files.
+ *
  * The statement is written here and again in migration 0003 rather than shared
  * from one place: that migration is frozen history, this command is live.
  */
 export async function reseedContent(db: Db): Promise<void> {
-  await db.execute(sql`TRUNCATE dict_lexemes, sessions CASCADE`);
+  await db.execute(sql`TRUNCATE dict_lexemes, dict_corrections, sessions CASCADE`);
   await seedContent(db);
 }

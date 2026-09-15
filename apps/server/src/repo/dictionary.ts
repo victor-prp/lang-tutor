@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { Tx } from '../db/client';
 import { RepairWouldDropSense } from '../errors';
 import {
+  dictCorrections,
   dictVarTranslations,
   dictVariants,
   dictLexemes,
@@ -17,6 +18,7 @@ import {
   type SenseRow,
   type StaleLexeme,
 } from '../domain/dictionary';
+import { tidyAlternatives } from '../domain/translation';
 
 // The response cap. The database has no five limit — `see` keeps all its
 // senses and `saw` all of its — so this truncates the merge and nothing else,
@@ -45,6 +47,14 @@ export type PersistedEntry = {
   created: boolean;
 };
 
+/** One stored redirect. `typedForm` comes back as it was written, so a caller
+ *  that echoes it shows the learner what the dictionary actually holds. */
+export type CorrectionRow = {
+  typedForm: string;
+  correctedForm: string;
+  alternatives: string[];
+};
+
 /** One rendering a repair produces. Exported beside `PersistedEntry`. */
 export type RepairedRendering = {
   senseId: string;
@@ -70,7 +80,7 @@ export function createDictRepo(tx: Tx) {
    * `(tr.rank, v.entry_rank)` is unique across one form's rows and `v.lexeme_id`
    * closes it, so identical requests return identical answers — the same
    * senses in the same order — until its lexeme learns a new sense, at which
-   * point that form re-renders and re-ranks once (Task 13). This read is what
+   * point that form re-renders and re-ranks once (phase 12, Task 13). This read is what
    * both the plain hit and the repaired hit answer with.
    */
   const findSensesByForm = async (input: {
@@ -121,6 +131,83 @@ export function createDictRepo(tx: Tx) {
         asc(dictVariants.lexemeId),
       )
       .limit(READ_LIMIT);
+
+  /**
+   * One indexed lookup on `(language_code, lower(typed_form))` — the same
+   * matching rule `dict_variants` uses, and the same expression the unique index
+   * is built on, so the index is usable.
+   *
+   * Read only on a MISS path, which is what makes it free: a correctly spelled
+   * word resolves before this is ever called, and a lookup that reaches it is
+   * already paying for a provider call measured in seconds.
+   */
+  const findCorrectionByForm = async (input: {
+    form: string;
+    languageCode: string;
+  }): Promise<CorrectionRow | undefined> => {
+    const [row] = await tx
+      .select({
+        typedForm: dictCorrections.typedForm,
+        correctedForm: dictCorrections.correctedForm,
+        alternatives: dictCorrections.alternatives,
+      })
+      .from(dictCorrections)
+      .where(
+        and(
+          eq(dictCorrections.languageCode, input.languageCode),
+          sql`lower(${dictCorrections.typedForm}) = ${input.form.toLowerCase()}`,
+        ),
+      )
+      .limit(1);
+    return row;
+  };
+
+  /**
+   * First-writer-wins, like every other write in this dictionary.
+   *
+   * **The DO NOTHING is bare here, unlike the two in `persistEntries`, and that is
+   * a decision rather than a shortcut.** Those two name their conflict target
+   * because a bare clause would also swallow a collision on
+   * `dict_variants_form_entry_rank_key` or on
+   * `UNIQUE(variant_id, user_language_code, rank)` — safety nets that must be
+   * allowed to raise. This table has exactly ONE unique index and no primary key,
+   * so the only conflict a bare clause can swallow is the one it is meant to. A
+   * CHECK violation is not a conflict and still raises, which is what makes the
+   * three constraints a real backstop for `dict:restore`.
+   *
+   * Three ordinary paths write a redirect for a form that already has one: a
+   * step-3 fall-through, two learners missing the same typo concurrently, and a
+   * restore replayed onto a database that already holds part of the file. A raise
+   * on any of them is silently destructive, because it rolls `persistEntries` back
+   * with it and `translate`'s catch turns the failed write into a 200 — a
+   * permanent two-call tax on one typo, appearing as a log line rather than an
+   * error. A redirect that raised on a re-restore would also make `dict:restore`
+   * non-idempotent for the first time since phase 11.
+   *
+   * **`tidyAlternatives` is applied AGAIN here**, so the three-item cap and the
+   * dedupe are properties of the write rather than of one caller: `dict:restore`
+   * reaches this function without passing through `domain/` at all. Idempotent, so
+   * the second application costs nothing on the live path.
+   */
+  const persistCorrection = async (input: {
+    typedForm: string;
+    correctedForm: string;
+    alternatives: string[];
+    languageCode: string;
+  }): Promise<void> => {
+    await tx
+      .insert(dictCorrections)
+      .values({
+        languageCode: input.languageCode,
+        typedForm: input.typedForm,
+        correctedForm: input.correctedForm,
+        alternatives: tidyAlternatives(input.alternatives, {
+          correctedForm: input.correctedForm,
+          typedForm: input.typedForm,
+        }),
+      })
+      .onConflictDoNothing();
+  };
 
   /**
    * One row per lexeme this form belongs to, carrying both versions. No limit
@@ -593,10 +680,12 @@ export function createDictRepo(tx: Tx) {
   };
 
   return {
+    findCorrectionByForm,
     findSenseVersion,
     findSensesByForm,
     findSensesByLexeme,
     findStaleLexemesByForm,
+    persistCorrection,
     persistEntries,
     repairVariantRenderings,
   };

@@ -204,6 +204,33 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     detail: result.kind,
   });
 
+  if (kase.expectNoCorrection) {
+    checks.push({
+      name: 'reports no correction',
+      ok: !result.correction,
+      detail: result.correction?.corrected_form ?? 'none',
+    });
+  }
+
+  if (kase.expectCorrection) {
+    checks.push({
+      name: `corrects to ${kase.expectCorrection}`,
+      ok:
+        result.correction?.corrected_form.toLowerCase() === kase.expectCorrection.toLowerCase(),
+      detail: result.correction?.corrected_form ?? 'none',
+    });
+  }
+
+  if (kase.expectAlternative) {
+    checks.push({
+      name: `offers ${kase.expectAlternative} as an alternative`,
+      ok: (result.correction?.alternatives ?? []).some(
+        (alternative) => alternative.toLowerCase() === kase.expectAlternative!.toLowerCase(),
+      ),
+      detail: (result.correction?.alternatives ?? []).join(', ') || 'none',
+    });
+  }
+
   if (kase.expectEmpty) return checks;
 
   checks.push({
@@ -295,7 +322,7 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     });
   }
 
-  // Phase 13, F2. Per part of speech, because entries[0] for an inflected form
+  // Phase 12 follow-up, F2. Per part of speech, because entries[0] for an inflected form
   // is the verb and the defect lives on the adjective.
   if (kase.expectLemmaFor) {
     for (const [pos, lemma] of Object.entries(kase.expectLemmaFor)) {
@@ -314,7 +341,7 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     }
   }
 
-  // Phase 13. Scored against every sense's example, not only the top one: the
+  // Phase 12 follow-up. Scored against every sense's example, not only the top one: the
   // ambiguous sentence that prompted this rule sat at rank 1.
   if (kase.rejectExample) {
     const offenders = result.senses
@@ -401,7 +428,7 @@ function renderingTier2(kase: RenderingCase, answer: LlmReconciliation): Check[]
     });
   }
 
-  // The phase 13 defect. Scored against EVERY rendered sense, not only the
+  // The phase 12 follow-up defect. Scored against EVERY rendered sense, not only the
   // invented ones: a reading that belongs to another lexeme of this form is
   // wrong here whatever code carries it.
   if (kase.rejectAny) {
@@ -563,6 +590,16 @@ async function main(): Promise<void> {
         `       kind=${row.result.kind} direction=${row.result.direction} ` +
           `senses=${row.result.senses.map((sense) => sense.translation).join(' | ') || '(none)'}`,
       );
+      // Phase 13. Without this, a failing correction check says only that it was
+      // wrong — never what the model corrected to, which is the first thing
+      // needed to tell a prompt regression from a model that picked a different
+      // (also defensible) alternative.
+      if (row.result.correction) {
+        console.log(
+          `       correction=${row.result.correction.corrected_form} ` +
+            `alternatives=${row.result.correction.alternatives.join(', ') || '(none)'}`,
+        );
+      }
     }
     if (row.rendering) {
       console.log(

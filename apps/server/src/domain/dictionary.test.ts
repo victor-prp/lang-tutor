@@ -141,7 +141,7 @@ describe('normalizeForm', () => {
     expect(normalizeForm('שָׁלוֹם')).toBe('שָׁלוֹם');
   });
 
-  // Phase 13. `normalizeForm` is what turns a typed string into a dictionary
+  // Phase 12 follow-up. `normalizeForm` is what turns a typed string into a dictionary
   // KEY, and it used to collapse whitespace and nothing else — so `book?` was a
   // different key from `book`, looked up separately, paid for separately and
   // stored forever alongside it. The dev database held exactly that: `book` with
