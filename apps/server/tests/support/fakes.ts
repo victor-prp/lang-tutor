@@ -1,11 +1,17 @@
 import type { User } from '@lang-tutor/core/api';
 
 import type { AppDeps } from '../../src/composition';
-import { flattenEntries, rowsToSenses, type SenseRow } from '../../src/domain/vocabulary';
+import {
+  flattenEntries,
+  rowsToSenses,
+  type SenseRow,
+  type StaleLexeme,
+} from '../../src/domain/dictionary';
+import type { StoredSense } from '../../src/domain/translation';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
-import type { PersistEntriesInput, VocabRepo } from '../../src/repo/vocabulary';
+import type { PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
@@ -131,28 +137,40 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     user: repos.user ?? unreachableRepo('user repo'),
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
-    vocab: repos.vocab ?? unreachableRepo('vocab repo'),
+    dict: repos.dict ?? unreachableRepo('dict repo'),
   };
   return (run) => run(bound);
 }
 
-export type FakeVocabRepo = VocabRepo & {
+export type FakeDictRepo = DictRepo & {
   /** What the next read answers with. Empty is a miss. */
   hit: SenseRow[];
+  /** What `findSensesByLexeme` answers with, keyed `lemma:partOfSpeech`. A
+   *  lexeme absent from this map has no stored senses, which is how a test says
+   *  "this is a new lexeme, so no second model call". */
+  stored: Record<string, StoredSense[]>;
+  lexemeReads: { lemma: string; partOfSpeech: string }[];
   /** What the write's re-read answers with. Left empty, the fake answers with
    *  the entries it was handed, flattened by the real domain function — which
    *  is what the real re-read would produce for a form nobody else claims. */
   reread: SenseRow[];
+  /** What `findStaleLexemesByForm` answers with. Empty is level — the default,
+   *  so an existing hit-path test that never mentions staleness keeps taking the
+   *  plain-hit branch. */
+  stale: StaleLexeme[];
   /** Set to make the write throw. */
   persistError: Error | null;
   persisted: PersistEntriesInput[];
   reads: { form: string; languageCode: string; userLanguageCode: string }[];
 };
 
-export function createFakeVocabRepo(): FakeVocabRepo {
-  const repo: FakeVocabRepo = {
+export function createFakeDictRepo(): FakeDictRepo {
+  const repo: FakeDictRepo = {
     hit: [],
+    stored: {},
+    lexemeReads: [],
     reread: [],
+    stale: [],
     persistError: null,
     persisted: [],
     reads: [],
@@ -160,13 +178,28 @@ export function createFakeVocabRepo(): FakeVocabRepo {
       repo.reads.push(input);
       return repo.hit;
     },
+    findSensesByLexeme: async (input) => {
+      repo.lexemeReads.push({ lemma: input.lemma, partOfSpeech: input.partOfSpeech });
+      const senses = repo.stored[`${input.lemma}:${input.partOfSpeech}`] ?? [];
+      // A test builds `stored` entries without a senseId — the repository's own
+      // shape is what changed, not what a unit test needs to say. Synthesized
+      // from the sense_code, which is unique per lexeme, same as the real id.
+      return senses.map((sense) => ({ senseId: `sense-${sense.senseCode}`, ...sense }));
+    },
+    findStaleLexemesByForm: async () => repo.stale,
+    // The two repair-path methods are bare stubs, present because `DictRepo` names
+    // them and for no other reason: `stale` is empty by default, so no unit test
+    // reaches the repair branch at all. A recorder here would be written by the
+    // fake and read by nobody.
+    findSenseVersion: async () => 0,
+    repairVariantRenderings: async () => {},
     persistEntries: async (input) => {
       repo.persisted.push(input);
       if (repo.persistError) throw repo.persistError;
       return {
         written: input.entries.map((entry, index) => ({
           lemma: entry.lemma,
-          termId: `t-${index}`,
+          lexemeId: `t-${index}`,
           variantId: `v-${index}`,
           senseIds: entry.senses.map((_, rank) => `s-${index}-${rank}`),
           created: true,

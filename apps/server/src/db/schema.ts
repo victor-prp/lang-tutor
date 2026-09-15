@@ -47,8 +47,8 @@ export const users = pgTable(
   ],
 );
 
-export const vocabTerms = pgTable(
-  'vocab_terms',
+export const dictLexemes = pgTable(
+  'dict_lexemes',
   {
     // Server-issued from phase 10, as users.id has been since 0001: with the
     // dictionary now written at request time, a client-generated id would mean
@@ -58,25 +58,37 @@ export const vocabTerms = pgTable(
       .default(sql`gen_random_uuid()::text`),
     languageCode: varchar('language_code', { length: 10 }).notNull(),
     lemma: text('lemma').notNull(),
+    // A lexeme: the pair of a lemma and a part of speech. It moved up from the
+    // sense, where phase 10 put it. Part of speech does describe a meaning, but
+    // it also decides which forms a headword has, and only the lexeme can carry
+    // that — which is what stops `booked` reaching the noun's senses.
+    partOfSpeech: varchar('part_of_speech', { length: 50 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Bumped whenever this lexeme gains a sense. A variant records the value it
+    // was rendered against, and a variant that is behind is re-rendered on its
+    // next lookup — which is what stops two forms of one word disagreeing about
+    // how many meanings it has.
+    senseVersion: integer('sense_version').notNull().default(0),
   },
-  (t) => [unique('vocab_terms_language_lemma_key').on(t.languageCode, t.lemma)],
+  (t) => [
+    unique('dict_lexemes_language_lemma_pos_key').on(t.languageCode, t.lemma, t.partOfSpeech),
+  ],
 );
 
-export const termVariants = pgTable(
-  'term_variants',
+export const dictVariants = pgTable(
+  'dict_variants',
   {
     id: text('id')
       .primaryKey()
       .default(sql`gen_random_uuid()::text`),
-    termId: text('term_id')
+    lexemeId: text('lexeme_id')
       .notNull()
-      .references(() => vocabTerms.id, { onDelete: 'cascade' }),
+      .references(() => dictLexemes.id, { onDelete: 'cascade' }),
     // Copied from the term so the unique index below can exist: the scope that
-    // matters is one form in one language, but language lives on vocab_terms
+    // matters is one form in one language, but language lives on dict_lexemes
     // and an index reads one table. A term's language never changes, so the
     // copy cannot go stale — and it earns its keep in the read, which no
-    // longer joins vocab_terms at all.
+    // longer joins dict_lexemes at all.
     languageCode: varchar('language_code', { length: 10 }).notNull(),
     // Stored as it was written; matching is always lower(form). One rule for a
     // recorded `How do you do?` and for a learner who typed `BOOK`.
@@ -86,19 +98,35 @@ export const termVariants = pgTable(
     // sits on the variant rather than the term because it is a property of the
     // pairing: `saw` ranks `see` first, while `saws` returns `saw` alone at 0.
     entryRank: integer('entry_rank').notNull(),
+    // The lexeme's sense_version when this form's translations were last
+    // written. NOT a count of those translations: a form may legitimately
+    // render fewer senses than its lexeme holds, because the reconciliation
+    // call returns `translation: null` for a sense the form does not admit —
+    // adjectival `booked` has no record-a-charge reading. Counting would call
+    // that form permanently stale and re-render it on every single lookup.
+    //
+    // **Caveat for the second target language.** This is one column per
+    // variant, while a rendering is per (variant, sense, user_language_code).
+    // en↔he is the only pair today, so the two are the same thing; add a
+    // second target language and they part company — a repair rendering `he`
+    // would mark the variant level and leave the other language's rows
+    // unrepairable, since nothing then records that they are behind. The fix
+    // when that day comes is to key this by user_language_code (its own table,
+    // or a column on it), not to count rows here.
+    renderedSenseVersion: integer('rendered_sense_version').notNull().default(0),
   },
   (t) => [
     // Per term, so one form may belong to several terms — `saw` is a variant of
     // `see` *and* of `saw`, which is what every lexical source does.
-    unique('term_variants_term_form_key').on(t.termId, t.form),
-    check('term_variants_entry_rank_nonneg', sql`${t.entryRank} >= 0`),
+    unique('dict_variants_lexeme_form_key').on(t.lexemeId, t.form),
+    check('dict_variants_entry_rank_nonneg', sql`${t.entryRank} >= 0`),
     // Two jobs in one index. Its (language_code, lower(form)) prefix is exactly
     // the read's predicate, so there is no separate lookup index; its third
     // column enforces that no two terms claim the same reading of one form.
     // That cannot currently happen — a written form thereafter hits, and ranks
     // within one write are distinct by construction — which is the point: a
-    // safety net for a write bug, exactly like UNIQUE(term_id, rank).
-    uniqueIndex('term_variants_form_entry_rank_key').on(
+    // safety net for a write bug, exactly like UNIQUE(lexeme_id, rank).
+    uniqueIndex('dict_variants_form_entry_rank_key').on(
       t.languageCode,
       sql`lower(${t.form})`,
       t.entryRank,
@@ -106,48 +134,65 @@ export const termVariants = pgTable(
   ],
 );
 
-export const vocabTermSenses = pgTable(
-  'vocab_term_senses',
+export const dictSenses = pgTable(
+  'dict_senses',
   {
     id: text('id')
       .primaryKey()
       .default(sql`gen_random_uuid()::text`),
-    termId: text('term_id')
+    lexemeId: text('lexeme_id')
       .notNull()
-      .references(() => vocabTerms.id, { onDelete: 'cascade' }),
-    // Model-supplied, and there for readability alone: senses are never merged
-    // within a term, so it has no functional role. Three output tokens buys
-    // financial_institution against river_bank when reading rows in psql.
+      .references(() => dictLexemes.id, { onDelete: 'cascade' }),
+    // Model-supplied. Phase 10 called this decoration; from phase 12 it is
+    // load-bearing, and the unique key below is why: it is the only handle a
+    // later form's translations have on senses this lexeme already holds.
     senseCode: text('sense_code').notNull(),
-    // Part of speech describes a meaning, not a word: `book` is a noun (ספר)
-    // and a verb (להזמין). It moved here from vocab_terms in phase 10.
-    partOfSpeech: varchar('part_of_speech', { length: 50 }),
-    // "Most common first", within a term. Contiguous 0..n, which is what lets
-    // the read sort on the raw rank rather than a computed position.
-    rank: integer('rank').notNull(),
-    // The example in the term's own language. Its other half lives on the
-    // translation, because that half is in the learner's language.
-    exampleSource: text('example_source'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [
-    unique('vocab_term_senses_term_rank_key').on(t.termId, t.rank),
-    check('vocab_term_senses_rank_nonneg', sql`${t.rank} >= 0`),
-  ],
+  // The table is pure identity now. `part_of_speech` went up to the lexeme, and
+  // `rank` and `example_source` went down to the translation: a sense has no
+  // order and no example of its own, only a position and a wording within some
+  // given form's answer.
+  (t) => [unique('dict_senses_lexeme_code_key').on(t.lexemeId, t.senseCode)],
 );
 
-export const termSenseTranslations = pgTable(
-  'term_sense_translations',
+export const dictVarTranslations = pgTable(
+  'dict_var_translations',
   {
+    // The variant joins the key in phase 12, which is what makes an answer
+    // belong to the form that was typed: `booked` renders הזמין where `book`
+    // renders להזמין, and both are the same sense of the same lexeme.
+    variantId: text('variant_id')
+      .notNull()
+      .references(() => dictVariants.id, { onDelete: 'cascade' }),
     senseId: text('sense_id')
       .notNull()
-      .references(() => vocabTermSenses.id, { onDelete: 'cascade' }),
+      .references(() => dictSenses.id, { onDelete: 'cascade' }),
     userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
     translation: text('translation').notNull(),
     definitionNotes: text('definition_notes'),
+    // Both halves of the example live here, because an example belongs to the
+    // form that was typed: `booked` shows "I booked a table", not "I want to
+    // book a table". The source half is duplicated per target language, which is
+    // cheaper than a fifth table to normalise it.
+    exampleSource: text('example_source'),
     exampleTarget: text('example_target'),
+    // "Most common first", scoped to THIS form. It sits here rather than on the
+    // sense so that a sense a later form introduces lands where that form ranked
+    // it, instead of at max(rank)+1 — arrival order wearing a rank's clothes —
+    // and so that the lexeme's order does not depend on which form was looked up
+    // first. Values are the sense's position in the entry the model returned.
+    rank: integer('rank').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.senseId, t.userLanguageCode] })],
+  (t) => [
+    primaryKey({ columns: [t.variantId, t.senseId, t.userLanguageCode] }),
+    unique('dict_var_translations_variant_rank_key').on(
+      t.variantId,
+      t.userLanguageCode,
+      t.rank,
+    ),
+    check('dict_var_translations_rank_nonneg', sql`${t.rank} >= 0`),
+  ],
 );
 
 export const questions = pgTable(
@@ -159,10 +204,10 @@ export const questions = pgTable(
     userId: text('user_id').references(() => users.id),
     senseId: text('sense_id')
       .notNull()
-      .references(() => vocabTermSenses.id),
+      .references(() => dictSenses.id),
     promptVariantId: text('prompt_variant_id')
       .notNull()
-      .references(() => termVariants.id),
+      .references(() => dictVariants.id),
     targetLanguage: varchar('target_language', { length: 10 }).notNull(),
     userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
     type: varchar('type', { length: 50 }).notNull(),

@@ -66,3 +66,18 @@ export class TranslationUnreadable extends Error {
     this.name = 'TranslationUnreadable';
   }
 }
+
+/** A repair whose renderings would drop a sense the form is already serving.
+ *  Not a bad request and not a provider failure: it is the fail-closed guard in
+ *  `repo/dictionary.ts`'s `repairVariantRenderings`, and the translate use case
+ *  catches it and serves the stored answer — see that function's comment for why
+ *  dropping is worse than refusing. */
+export class RepairWouldDropSense extends Error {
+  constructor(
+    readonly variantId: string,
+    readonly senseIds: string[],
+  ) {
+    super(`a repair of variant ${variantId} would drop ${senseIds.length} rendered sense(s)`);
+    this.name = 'RepairWouldDropSense';
+  }
+}

@@ -1,10 +1,12 @@
 import type {
+  LlmReconciliation,
   LlmTranslation,
+  PartOfSpeech,
   TranslationDirection,
   TranslationKind,
   TranslationSense,
 } from '@lang-tutor/core/api';
-import { LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
+import { LlmReconciliationSchema, LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
 
 /**
  * The pure core of translation: which way round the request is, what to ask the
@@ -23,6 +25,14 @@ export type TranslationPrompt = {
   system: string;
   user: string;
   schema: typeof LlmTranslationSchema;
+};
+
+/** The second call's prompt. Same shape, a different schema — `LlmClient` takes
+ *  any `ZodType`, and `services/translations.ts` is where the two meet. */
+export type RenderingPrompt = {
+  system: string;
+  user: string;
+  schema: typeof LlmReconciliationSchema;
 };
 
 // The Hebrew block. Hebrew and Latin are disjoint in Unicode, so one character
@@ -59,9 +69,11 @@ export function buildPrompt(input: {
   // an eval case: an imperative fixed expression misclassified as a sentence, an
   // idiom translated word by word, and a sentence padded into a list of
   // alternatives behind a `more` button that should not appear. Phase 10 added
-  // the nesting rules, and `book` as a worked example — without it the nested
-  // shape invites one sense per entry, which is the failure mirror-image to the
-  // single-lemma shape it replaced.
+  // the nesting rules; phase 12 inverted the worked example, because "one entry
+  // per headword" was itself the reason `booked` came back carrying the noun's
+  // senses in the infinitive. An entry is now a lexeme — a headword AND a part
+  // of speech — and the last rule is what makes the answer fit the form typed
+  // rather than the headword it belongs to.
   const system = [
     `You translate from ${from} to ${to} for a Hebrew-speaking learner of English.`,
     'Return JSON only, matching the supplied schema.',
@@ -70,17 +82,55 @@ export function buildPrompt(input: {
     '"break a leg" is a phrase, not a sentence.',
     'Translate an idiom by its meaning, never word by word.',
     'Return one entry per headword the input could belong to, most likely reading first,',
-    'at most 3. An inflected form belongs to its headword and carries the headword\'s',
+    'at most 6. An inflected form belongs to its headword and carries the headword\'s',
     'senses: "running" is one entry whose lemma is "run".',
-    'Keep senses spanning parts of speech in ONE entry per headword: "book" is one entry',
-    'whose senses are ספר (noun) and להזמין (verb) — never two entries for one lemma.',
+    'Return one entry per headword AND part of speech: "book" is two entries, one noun and',
+    'one verb. An inflected form belongs to the entry whose part of speech it realises:',
+    '"booked" is the verb entry only, never the noun; "books" is legitimately both.',
+    // Phase 13, F2. The model lemmatises verb forms to the base verb every
+    // time and wavers on participial adjectives, which put two lexemes in the
+    // dictionary for one adjective — measured as `burnt` naming `burnt` and
+    // `burned` naming `burn` on the same afternoon, so it is not a wrong rule
+    // but the absence of one. Pinning to the base verb was rejected: it would
+    // merge the active and passive participles, and "a charming man" is not
+    // the same adjective as "I'm charmed".
+    'A participial adjective is its own headword rather than the base verb, and its lemma is',
+    'the participle spelled the regular way where a word has two: "burnt" and "burned" are',
+    'both the adjective "burned", while "burning" is the separate adjective "burning".',
     'Within an entry, rank its own senses with the most common first, at most 5.',
-    `Give each sense a part_of_speech, one short natural example sentence in ${from}`,
-    `together with its ${to} translation, and a short snake_case sense_code naming the`,
-    'meaning (financial_institution as against river_bank).',
+    `Give each sense one short natural example sentence in ${from} together with its ${to}`,
+    'translation, and a short snake_case sense_code naming the meaning',
+    '(financial_institution as against river_bank).',
+    // Phase 13. Where two senses of one entry render to the same word in the
+    // target language — Hebrew says מים for water-the-substance and
+    // water-the-lake — the example is the ONLY thing that can tell the two
+    // cards apart, and "The water was cold" fits a glass and a lake equally.
+    // The illustration uses `spring`, which is in neither the seed nor the eval
+    // set, so it cannot bias anything this repo measures. The illustration also
+    // avoids the words the integration bucket matches MockServer expectations
+    // on — `see`, `saw`, `saws`, `bank`, `banks` — because the system
+    // instruction is part of the request body those expectations match against.
+    // An earlier draft said "We saw the spring" and made every `see` lookup in
+    // that bucket match the `saw` expectation instead.
+    'Choose each example so that it could not be read as any other sense of the same word.',
+    'A sentence that merely contains the word is not enough — it must rule the other senses',
+    'out. For "spring": "The spring in the mattress broke" rules out the season, while "I like',
+    'the spring" rules out nothing.',
+    `Translate into the grammatical form matching the input's: a past-tense input takes a`,
+    'past-tense translation. A bare or "to"-marked English verb — "book", "to book" — is the',
+    `base form and takes the ${to} infinitive: להזמין, never הזמין. Where ${to} offers several`,
+    'forms for one category, use its dictionary citation form for that category; for Hebrew',
+    'past tense that is third-person masculine singular. Build the example sentence around the',
+    'input as typed, not around its headword.',
+    // "citation form" reads to the model as "how a dictionary prints it", and a
+    // printed Hebrew dictionary prints nikud. That cost a recording of סֵפֶר
+    // where every consumer here — the wire, the quiz options, the eval's
+    // substring matching — expects ספר. Say the script rule outright.
+    'Write Hebrew in plain unvocalised script, with no nikud: ספר, never סֵפֶר.',
     'For a "sentence": return exactly one entry holding exactly one sense with the',
-    'translation, and omit part_of_speech and example entirely — a sentence has no part',
-    'of speech and needs no example of itself.',
+    'translation, and omit the example entirely — a sentence needs no example of itself.',
+    'Its part_of_speech is required by the schema but meaningless for a sentence, and the',
+    'server discards it along with the entry, which is never stored; answer "verb".',
     'If the input is not a word or expression in either language, return an empty entries',
     'array rather than inventing a translation.',
   ].join(' ');
@@ -141,4 +191,115 @@ export function normalizeSenses(
 ): TranslationSense[] {
   if (kind !== 'sentence') return senses;
   return senses.slice(0, 1).map((sense) => ({ translation: sense.translation }));
+}
+
+/** One stored sense as the reconciliation prompt needs it: a code and the gloss
+ *  that names what it means. */
+export type StoredSense = {
+  senseCode: string;
+  translation: string;
+  exampleSource: string | null;
+  exampleTarget: string | null;
+};
+
+/**
+ * The second call. It exists because `sense_code` is model-invented per call:
+ * a lookup of `bank` names a sense river_bank and a later lookup of `banks`
+ * names the same sense river_edge, so a string comparison would duplicate the
+ * meaning silently. Deciding whether two glosses mean the same thing is a
+ * judgement, so the model makes it.
+ *
+ * Pure, like buildPrompt — it takes the stored senses as input rather than
+ * reaching for them, which is what keeps it unit-testable and eval-scorable.
+ */
+export function buildRenderingPrompt(input: {
+  form: string;
+  direction: TranslationDirection;
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  storedSenses: StoredSense[];
+}): RenderingPrompt {
+  const { from, to } = LANGUAGE_NAMES[input.direction];
+
+  // Each stored sense as `code — gloss — example`, one per line. The gloss is
+  // what the model matches on; the code is what it must give back unchanged
+  // when it decides the meaning is the same one.
+  const stored = input.storedSenses
+    .map((sense) => {
+      const example = sense.exampleSource ? ` — e.g. "${sense.exampleSource}"` : '';
+      return `- ${sense.senseCode} — ${sense.translation}${example}`;
+    })
+    .join('\n');
+
+  const system = [
+    `You translate from ${from} to ${to} for a Hebrew-speaking learner of English.`,
+    'Return JSON only, matching the supplied schema.',
+    `The ${from} headword "${input.lemma}" (${input.partOfSpeech}) is already in this`,
+    `dictionary with the senses below, each a sense_code and the ${to} gloss recorded for`,
+    'it:',
+    '',
+    stored,
+    '',
+    `Render those senses for the form "${input.form}" read as "${input.lemma}" used as a`,
+    `${input.partOfSpeech}.`,
+    'Return one item per stored sense, reusing its sense_code EXACTLY whenever the meaning',
+    'is the same one — even where you would have named it differently. Use a new',
+    `snake_case sense_code only for a reading that is itself "${input.lemma}" used as a`,
+    `${input.partOfSpeech} and that the list above does not contain.`,
+    // The phase 13 defect, and the reason the sentence above names the lexeme
+    // twice. This call is scoped to ONE lexeme, but the form it renders may
+    // belong to several: `pressing` is the verb `press` and, separately, the
+    // adjective `pressing`. Asked only what readings the FORM has that the
+    // stored list lacks, the model answered דחוף — truthfully, and onto the
+    // verb, where it became a permanent row duplicating a meaning the adjective
+    // entry of the same response already held.
+    `"${input.form}" may also belong to other headwords or to other parts of speech. Those`,
+    'are separate dictionary entries, answered by a separate call; never bring their',
+    `readings in here. If "${input.form}" has a meaning that is not "${input.lemma}" used as`,
+    `a ${input.partOfSpeech}, leave it out entirely.`,
+    `Where "${input.form}" does not admit a stored sense at all, return that sense_code with`,
+    'translation: null rather than forcing a translation.',
+    // The same rule as the first call, for the same reason — see buildPrompt.
+    // It belongs here too: this call writes examples for a form the first call
+    // never saw, so without it a reconciled form reintroduces exactly the
+    // ambiguity the first call now avoids.
+    'Choose each example so that it could not be read as any other sense of the same word.',
+    'A sentence that merely contains the word is not enough — it must rule the other senses',
+    'out.',
+    `Translate into the grammatical form matching "${input.form}": a past-tense form takes a`,
+    'past-tense translation. A bare or "to"-marked English verb — "book", "to book" — is the',
+    `base form and takes the ${to} infinitive: להזמין, never הזמין. Where ${to} offers several`,
+    'forms for one category, use its dictionary citation form for that category; for Hebrew',
+    `past tense that is third-person masculine singular. Build each example sentence around`,
+    `"${input.form}" as typed, not around the headword.`,
+    // Same rule as the first call, for the same reason — see buildPrompt.
+    'Write Hebrew in plain unvocalised script, with no nikud: ספר, never סֵפֶר.',
+    `Rank the result for "${input.form}" itself, most common first — not in the order above,`,
+    'which is another form\'s ranking.',
+  ].join(' ');
+
+  // The queried form is untrusted and stays in its own part, exactly as in
+  // buildPrompt. It is also named in the instruction above, which is why the
+  // schema — not the prose — is what the parse trusts.
+  return { system, user: input.form, schema: LlmReconciliationSchema };
+}
+
+/**
+ * Mirrors `parseLlmTranslation`, minus `dropNulls`.
+ *
+ * `translation: null` is load-bearing here — it is how the model says a form
+ * does not admit a stored sense at all — so stripping nulls would turn that
+ * answer into a malformed one. The schema is parsed against the raw JSON, and
+ * an absent `example` is still absent rather than null because the model is
+ * asked for the shape directly.
+ */
+export function parseLlmReconciliation(raw: string): LlmReconciliation | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(unfence(raw));
+  } catch {
+    return null;
+  }
+  const result = LlmReconciliationSchema.safeParse(json);
+  return result.success ? result.data : null;
 }

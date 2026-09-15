@@ -18,8 +18,8 @@ import { seedContent } from './seed';
  * rather than data, since the dictionary is a cache; the other cost is
  * play-test session history.
  *
- * CASCADE from vocab_terms reaches term_variants, vocab_term_senses,
- * term_sense_translations, questions, session_questions and answers. `sessions`
+ * CASCADE from dict_lexemes reaches dict_variants, dict_senses,
+ * dict_var_translations, questions, session_questions and answers. `sessions`
  * is named explicitly because nothing references it, so nothing would cascade
  * to it, and a session whose questions had vanished would be broken rather than
  * absent. `users` is untouched.
@@ -28,6 +28,6 @@ import { seedContent } from './seed';
  * from one place: that migration is frozen history, this command is live.
  */
 export async function reseedContent(db: Db): Promise<void> {
-  await db.execute(sql`TRUNCATE vocab_terms, sessions CASCADE`);
+  await db.execute(sql`TRUNCATE dict_lexemes, sessions CASCADE`);
   await seedContent(db);
 }

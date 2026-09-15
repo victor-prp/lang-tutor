@@ -35,7 +35,8 @@ describe('the MockServer helper', () => {
       entries: [
         {
           lemma: 'book',
-          senses: [{ translation: 'ספר', part_of_speech: 'noun', sense_code: 'printed_book' }],
+          part_of_speech: 'noun',
+          senses: [{ translation: 'ספר', sense_code: 'printed_book' }],
         },
       ],
     });
@@ -52,7 +53,8 @@ describe('the MockServer helper', () => {
       entries: [
         {
           lemma: 'book',
-          senses: [{ translation: 'ספר', part_of_speech: 'noun', sense_code: 'printed_book' }],
+          part_of_speech: 'noun',
+          senses: [{ translation: 'ספר', sense_code: 'printed_book' }],
         },
       ],
     });
@@ -63,7 +65,9 @@ describe('the MockServer helper', () => {
     const b = ns('iso-b');
     await expectGeminiJson(a, {
       kind: 'word',
-      entries: [{ lemma: 'א', senses: [{ translation: 'א', sense_code: 'a' }] }],
+      entries: [
+        { lemma: 'א', part_of_speech: 'noun', senses: [{ translation: 'א', sense_code: 'a' }] },
+      ],
     });
     await expectGeminiStatus(b, 500);
 

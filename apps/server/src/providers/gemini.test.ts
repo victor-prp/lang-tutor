@@ -39,11 +39,28 @@ describe('toGeminiSchema', () => {
     expect(schema).not.toHaveProperty('additionalProperties');
     expect(entryItem).not.toHaveProperty('additionalProperties');
     expect(senseItem).not.toHaveProperty('additionalProperties');
-    expect(entries.maxItems).toBe(3);
+    expect(entries.maxItems).toBe(6);
     expect(senses.maxItems).toBe(5);
-    expect(entryItem.required).toEqual(['lemma', 'senses']);
+    expect(entryItem.required).toEqual(['lemma', 'part_of_speech', 'senses']);
     expect(senseItem.required).toEqual(['translation', 'sense_code']);
     expect(schema.required).toEqual(['kind', 'entries']);
+    // The closed set travels to Gemini inside responseSchema, which is what makes
+    // an eleventh spelling of a word class inexpressible rather than merely
+    // discouraged — part_of_speech is half of dict_lexemes' unique key.
+    const entryPos = (entryItem.properties as Record<string, Record<string, unknown>>)
+      .part_of_speech;
+    expect(entryPos.enum).toEqual([
+      'noun',
+      'verb',
+      'adjective',
+      'adverb',
+      'pronoun',
+      'preposition',
+      'conjunction',
+      'determiner',
+      'interjection',
+      'numeral',
+    ]);
   });
 
   it('leaves no $schema or additionalProperties at any depth', () => {

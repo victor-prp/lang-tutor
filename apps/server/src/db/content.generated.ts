@@ -13,33 +13,39 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "window",
+        "part_of_speech": "noun",
         "senses": [
           {
             "translation": "חלון",
-            "part_of_speech": "noun",
             "example": {
-              "source": "Please close the window.",
-              "target": "בבקשה תסגור את החלון."
+              "source": "She opened the window to let in some fresh air.",
+              "target": "היא פתחה את החלון כדי להכניס אוויר צח."
             },
-            "sense_code": "building_opening"
+            "sense_code": "architectural_opening"
           },
           {
             "translation": "חלון",
-            "part_of_speech": "noun",
             "example": {
-              "source": "Close the browser window.",
-              "target": "סגור את חלון הדפדפן."
+              "source": "The ball hit the window and shattered the glass.",
+              "target": "הכדור פגע בחלון וניפץ את הזכוכית."
             },
-            "sense_code": "computer_interface"
+            "sense_code": "glass_pane"
           },
           {
-            "translation": "חלון הזדמנויות",
-            "part_of_speech": "noun",
+            "translation": "חלון",
             "example": {
-              "source": "There's a small window of opportunity to apply for the job.",
-              "target": "יש חלון הזדמנויות קטן להגיש מועמדות לעבודה."
+              "source": "We have a narrow window to launch the product before our competitors.",
+              "target": "יש לנו חלון צר להשיק את המוצר לפני המתחרים שלנו."
             },
-            "sense_code": "period_of_opportunity"
+            "sense_code": "time_period_opportunity"
+          },
+          {
+            "translation": "חלון",
+            "example": {
+              "source": "Click the 'X' icon to close the window.",
+              "target": "לחץ על סמל ה-'X' כדי לסגור את החלון."
+            },
+            "sense_code": "computer_interface_element"
           }
         ]
       }
@@ -50,24 +56,37 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "book",
+        "part_of_speech": "noun",
         "senses": [
           {
             "translation": "ספר",
-            "part_of_speech": "noun",
             "example": {
-              "source": "I read a good book.",
-              "target": "קראתי ספר טוב."
+              "source": "I read a good book yesterday.",
+              "target": "קראתי ספר טוב אתמול."
             },
             "sense_code": "written_work"
-          },
+          }
+        ]
+      },
+      {
+        "lemma": "book",
+        "part_of_speech": "verb",
+        "senses": [
           {
             "translation": "להזמין",
-            "part_of_speech": "verb",
             "example": {
-              "source": "I want to book a table.",
-              "target": "אני רוצה להזמין שולחן."
+              "source": "I need to book a flight for next month.",
+              "target": "אני צריך להזמין טיסה לחודש הבא."
             },
             "sense_code": "make_reservation"
+          },
+          {
+            "translation": "לרשום",
+            "example": {
+              "source": "The police officer will book him for speeding.",
+              "target": "השוטר ירשום אותו על נהיגה מהירה."
+            },
+            "sense_code": "record_information"
           }
         ]
       }
@@ -78,24 +97,37 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "water",
+        "part_of_speech": "noun",
         "senses": [
           {
             "translation": "מים",
-            "part_of_speech": "noun",
             "example": {
               "source": "I need a glass of water.",
               "target": "אני צריך כוס מים."
             },
             "sense_code": "liquid_h2o"
-          },
+          }
+        ]
+      },
+      {
+        "lemma": "water",
+        "part_of_speech": "verb",
+        "senses": [
           {
             "translation": "להשקות",
-            "part_of_speech": "verb",
             "example": {
-              "source": "Don't forget to water the plants.",
-              "target": "אל תשכח להשקות את הצמחים."
+              "source": "Please water the plants every morning.",
+              "target": "בבקשה תשקה את הצמחים כל בוקר."
             },
-            "sense_code": "provide_liquid_to_plants"
+            "sense_code": "irrigate_plants"
+          },
+          {
+            "translation": "לדמוע",
+            "example": {
+              "source": "My eyes started to water from the strong wind.",
+              "target": "העיניים שלי התחילו לדמוע מהרוח החזקה."
+            },
+            "sense_code": "eyes_tear"
           }
         ]
       }
@@ -106,15 +138,23 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "friend",
+        "part_of_speech": "noun",
         "senses": [
           {
             "translation": "חבר",
-            "part_of_speech": "noun",
             "example": {
-              "source": "My best friend is coming to visit.",
-              "target": "החבר הכי טוב שלי בא לבקר."
+              "source": "My friend helped me move last weekend.",
+              "target": "החבר שלי עזר לי לעבור דירה בסוף השבוע שעבר."
             },
-            "sense_code": "person_one_knows_and_likes"
+            "sense_code": "close_acquaintance"
+          },
+          {
+            "translation": "ידיד",
+            "example": {
+              "source": "He is a friend to all animals.",
+              "target": "הוא ידיד של כל בעלי החיים."
+            },
+            "sense_code": "ally_supporter"
           }
         ]
       }
@@ -125,15 +165,23 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "difficult",
+        "part_of_speech": "adjective",
         "senses": [
           {
             "translation": "קשה",
-            "part_of_speech": "adjective",
             "example": {
-              "source": "It was a difficult decision to make.",
-              "target": "זו הייתה החלטה קשה לקבל."
+              "source": "Learning a new language can be very difficult.",
+              "target": "ללמוד שפה חדשה יכול להיות קשה מאוד."
             },
-            "sense_code": "hard_to_do"
+            "sense_code": "hard_to_do_or_understand"
+          },
+          {
+            "translation": "קשה",
+            "example": {
+              "source": "He is a difficult person to work with.",
+              "target": "הוא אדם קשה לעבוד איתו."
+            },
+            "sense_code": "problematic_to_deal_with"
           }
         ]
       }
@@ -144,10 +192,10 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "remember",
+        "part_of_speech": "verb",
         "senses": [
           {
             "translation": "לזכור",
-            "part_of_speech": "verb",
             "example": {
               "source": "I need to remember to buy milk.",
               "target": "אני צריך לזכור לקנות חלב."
@@ -163,15 +211,15 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "excuse me",
+        "part_of_speech": "interjection",
         "senses": [
           {
             "translation": "סליחה",
-            "part_of_speech": "interjection",
             "example": {
-              "source": "Excuse me, could you tell me the way to the station?",
-              "target": "סליחה, תוכל לומר לי את הדרך לתחנה?"
+              "source": "Excuse me, do you know the way to the station?",
+              "target": "סליחה, אתה יודע את הדרך לתחנה?"
             },
-            "sense_code": "polite_interjection"
+            "sense_code": "polite_interruption_or_apology"
           }
         ]
       }
@@ -182,10 +230,11 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "good morning",
+        "part_of_speech": "interjection",
         "senses": [
           {
             "translation": "בוקר טוב",
-            "sense_code": "morning_greeting"
+            "sense_code": "greeting"
           }
         ]
       }
@@ -196,9 +245,14 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "thank you very much",
+        "part_of_speech": "interjection",
         "senses": [
           {
             "translation": "תודה רבה",
+            "example": {
+              "source": "Thank you very much for your help.",
+              "target": "תודה רבה לך על עזרתך."
+            },
             "sense_code": "expression_of_gratitude"
           }
         ]
@@ -210,15 +264,11 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "How do you do?",
+        "part_of_speech": "interjection",
         "senses": [
           {
             "translation": "מה שלומך?",
-            "part_of_speech": "interjection",
-            "example": {
-              "source": "Good morning, Mr. Smith. How do you do?",
-              "target": "בוקר טוב, אדון סמית'. מה שלומך?"
-            },
-            "sense_code": "formal_greeting_inquiry_well_being"
+            "sense_code": "social_greeting"
           }
         ]
       }
@@ -229,15 +279,15 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "see you later",
+        "part_of_speech": "interjection",
         "senses": [
           {
-            "translation": "נתראה אחר כך",
-            "part_of_speech": "interjection",
+            "translation": "להתראות אחר כך",
             "example": {
               "source": "I have to go now, see you later!",
-              "target": "אני חייב ללכת עכשיו, נתראה אחר כך!"
+              "target": "אני חייב ללכת עכשיו, להתראות אחר כך!"
             },
-            "sense_code": "farewell_expression"
+            "sense_code": "farewell_greeting"
           }
         ]
       }
@@ -248,15 +298,11 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "Have a nice day!",
+        "part_of_speech": "interjection",
         "senses": [
           {
             "translation": "שיהיה לך יום נעים!",
-            "part_of_speech": "greeting",
-            "example": {
-              "source": "I'm leaving now. Have a nice day!",
-              "target": "אני הולך עכשיו. שיהיה לך יום נעים!"
-            },
-            "sense_code": "greeting_wish_for_good_day"
+            "sense_code": "wish_good_day"
           }
         ]
       }
@@ -267,10 +313,15 @@ export const recorded: Record<string, LlmTranslation> = {
     "entries": [
       {
         "lemma": "Nice to meet you",
+        "part_of_speech": "interjection",
         "senses": [
           {
             "translation": "נעים מאוד",
-            "sense_code": "greeting_upon_introduction"
+            "example": {
+              "source": "Hello, I'm Sarah. Nice to meet you.",
+              "target": "שלום, אני שרה. נעים מאוד."
+            },
+            "sense_code": "social_greeting"
           }
         ]
       }

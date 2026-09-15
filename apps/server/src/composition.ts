@@ -7,7 +7,7 @@ import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
 import { createUserRepo } from './repo/users';
-import { createVocabRepo } from './repo/vocabulary';
+import { createDictRepo } from './repo/dictionary';
 import type { LlmClient } from './services/llm';
 import { createSessionService, type SessionService } from './services/sessions';
 import { createTranslationService, type TranslationService } from './services/translations';
@@ -44,7 +44,7 @@ export function createServerDeps(io: {
     session: createSessionRepo(tx),
     question: createQuestionRepo(tx),
     user: createUserRepo(tx),
-    vocab: createVocabRepo(tx),
+    dict: createDictRepo(tx),
   }));
 
   // The one place in the repo that names both `createGeminiClient` and

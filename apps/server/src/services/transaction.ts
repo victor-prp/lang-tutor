@@ -1,7 +1,7 @@
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { UserRepo } from '../repo/users';
-import type { VocabRepo } from '../repo/vocabulary';
+import type { DictRepo } from '../repo/dictionary';
 
 // The repositories composition.ts binds to one transaction. This module holds
 // types only — R2 lets services reference repo modules as types, and nothing
@@ -10,7 +10,7 @@ export type Repos = {
   session: SessionRepo;
   question: QuestionRepo;
   user: UserRepo;
-  vocab: VocabRepo;
+  dict: DictRepo;
 };
 
 /**

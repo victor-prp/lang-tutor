@@ -1,6 +1,7 @@
 import type {
   LlmEntry,
   LlmSense,
+  PartOfSpeech,
   TranslationDirection,
   TranslationKind,
   TranslationSense,
@@ -13,7 +14,7 @@ import type {
  * ADR 0001 R3 forbids every cross-layer import here — no Drizzle, no `../errors`,
  * no `../repo/*` — so the row shapes this module accepts are declared locally,
  * the same arrangement `domain/translation.ts` already uses for
- * `TranslationPrompt`. `repo/vocabulary.ts` imports these types; nothing here
+ * `TranslationPrompt`. `repo/dictionary.ts` imports these types; nothing here
  * imports it.
  */
 
@@ -27,33 +28,36 @@ const RESPONSE_SENSE_CAP = 5;
  * without failing a schema, because Zod strips unknown keys on parse rather
  * than on serialize.
  */
-function toResponseSense(sense: LlmSense): TranslationSense {
-  const result: TranslationSense = { translation: sense.translation };
-  if (sense.part_of_speech) result.part_of_speech = sense.part_of_speech;
+function toResponseSense(sense: LlmSense, partOfSpeech: PartOfSpeech): TranslationSense {
+  const result: TranslationSense = { translation: sense.translation, part_of_speech: partOfSpeech };
   if (sense.example) result.example = { source: sense.example.source, target: sense.example.target };
   return result;
 }
 
 /**
- * One entry per lemma, enforced rather than trusted. Merriam-Webster publishes
- * `book:1` and `book:2`, so a model pulled by that convention may split one
- * lemma by part of speech; under UNIQUE(language_code, lemma) the second such
- * entry would resolve to the same term, find senses already written, and be
- * silently dropped. The prompt asks for one entry per headword and this makes
- * it true regardless. Rejecting the answer instead would throw away content
- * over a formatting choice.
+ * Key on the pair, not the lemma. A model returning (book,noun) and (book,verb)
+ * is describing two lexemes, and phase 12 stores them as two rows; fusing them
+ * here is what made an inflected verb form serve a noun sense.
  *
- * Exact-string keys: `vocab_terms` is unique on the exact lemma, so anything
+ * Two entries sharing a lemma AND a part of speech are still fused, for the
+ * reason phase 10 fused every same-lemma pair: Merriam-Webster publishes
+ * `book:1` and `book:2`, a model pulled by that convention may split one lexeme
+ * across two entries, and under UNIQUE(language_code, lemma, part_of_speech) the
+ * second would resolve to the same lexeme and be silently dropped. Rejecting the
+ * answer instead would throw away content over a formatting choice.
+ *
+ * Exact-string keys: `dict_lexemes` is unique on the exact pair, so anything
  * looser here would merge two rows the database keeps apart.
  */
 export function mergeEntries(entries: LlmEntry[]): LlmEntry[] {
-  const byLemma = new Map<string, LlmEntry>();
+  const byLexeme = new Map<string, LlmEntry>();
   for (const entry of entries) {
-    const existing = byLemma.get(entry.lemma);
+    const key = `${entry.lemma} ${entry.part_of_speech}`;
+    const existing = byLexeme.get(key);
     if (existing) existing.senses = [...existing.senses, ...entry.senses];
-    else byLemma.set(entry.lemma, { lemma: entry.lemma, senses: [...entry.senses] });
+    else byLexeme.set(key, { ...entry, senses: [...entry.senses] });
   }
-  return [...byLemma.values()];
+  return [...byLexeme.values()];
 }
 
 /**
@@ -71,7 +75,7 @@ export function flattenEntries(entries: LlmEntry[]): TranslationSense[] {
   for (let rank = 0; rank < deepest; rank++) {
     for (const entry of entries) {
       const sense = entry.senses[rank];
-      if (sense) flat.push(toResponseSense(sense));
+      if (sense) flat.push(toResponseSense(sense, entry.part_of_speech));
     }
   }
   return flat.slice(0, RESPONSE_SENSE_CAP);
@@ -90,7 +94,27 @@ export function flattenEntries(entries: LlmEntry[]): TranslationSense[] {
  * turns a hit into a silent miss.
  */
 export function normalizeForm(text: string): string {
-  return text.trim().replace(/\s+/g, ' ');
+  const collapsed = text.trim().replace(/\s+/g, ' ');
+
+  // A multi-word expression keeps its punctuation: it is part of the
+  // expression, and two seeded ones — `How do you do?` and `Have a nice day!` —
+  // are stored with it. Only a single token is treated as a bare key with a
+  // sentence mark stuck to it.
+  if (/\s/.test(collapsed)) return collapsed;
+
+  // Phase 13. What this function returns is a dictionary KEY — the `form` a
+  // variant is stored and matched under — and the dictionary has no TTL, so a
+  // key that differs by a keystroke is a second permanent copy of the word. The
+  // dev database held `book` with three senses and `book?` with four: two
+  // lookups, two provider calls, two divergent answers for one word.
+  //
+  // Nikud survives this: Hebrew points are combining marks, not punctuation,
+  // and they are part of the word rather than something stuck to its end.
+  const stripped = collapsed.replace(/[.,;:!?]+$/u, '');
+
+  // An input that is nothing but punctuation has no key to strip down to, and
+  // an empty form would defeat the request schema's min(1) after the fact.
+  return stripped === '' ? collapsed : stripped;
 }
 
 /** Both codes come from `direction` alone. No user id is involved, which is why
@@ -104,11 +128,11 @@ export function languagesFor(direction: TranslationDirection): {
 
 /**
  * A row of the by-form read. Declared here rather than imported from Drizzle:
- * R3 forbids this layer knowing that Drizzle exists, and `repo/vocabulary.ts`
+ * R3 forbids this layer knowing that Drizzle exists, and `repo/dictionary.ts`
  * selects exactly these columns under exactly these names.
  */
 export type SenseRow = {
-  termId: string;
+  lexemeId: string;
   rank: number;
   entryRank: number;
   partOfSpeech: string | null;
@@ -116,7 +140,7 @@ export type SenseRow = {
   translation: string;
   exampleTarget: string | null;
   /** The queried form's own kind, copied onto every row from the
-   *  entry_rank 0 variant's `term_variants.kind` — see `kindForForm`. */
+   *  entry_rank 0 variant's `dict_variants.kind` — see `kindForForm`. */
   kind: TranslationKind;
 };
 
@@ -133,41 +157,83 @@ export function kindForForm(rows: SenseRow[]): TranslationKind {
   return rows.find((row) => row.entryRank === 0)!.kind;
 }
 
-/** One sense as the write stores it, across two tables: `exampleSource` is in
- *  the term's own language and lives on the sense, `exampleTarget` is in the
- *  learner's and lives on the translation. */
+/**
+ * One sense as the write stores it. Both halves of the example travel together
+ * now, because both land on the same row: from phase 12 a translation belongs
+ * to a (variant, sense) pairing, and an example belongs to the form that was
+ * typed — `booked` shows "I booked a table", not "I want to book a table".
+ *
+ * No part of speech here: that moved up to the lexeme, which is the level that
+ * decides which forms a headword has.
+ */
 export type SenseToWrite = {
   rank: number;
   senseCode: string;
-  partOfSpeech: string | null;
-  exampleSource: string | null;
   translation: string;
+  exampleSource: string | null;
   exampleTarget: string | null;
 };
 
-export type EntryRows = { lemma: string; entryRank: number; senses: SenseToWrite[] };
+export type EntryRows = {
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  entryRank: number;
+  senses: SenseToWrite[];
+};
 
 /**
  * The two ranks, assigned in the one place that knows both. `entryRank` is this
- * term's position among the entries the model returned *for this form* — a
+ * lexeme's position among the entries the model returned *for this form* — a
  * property of the pairing, which is why it ends up on the variant. `rank` is
- * the sense's position within its own headword. Contiguous 0..n with no gaps,
- * which is what lets the read sort on the raw rank rather than a computed
- * position.
+ * the sense's position within its own entry, and from phase 12 it ends up on
+ * the translation rather than the sense, because it is this form's ordering and
+ * not the lexeme's. Contiguous 0..n with no gaps, which is what lets the read
+ * sort on the raw rank rather than a computed position.
  */
 export function entriesToRows(entries: LlmEntry[]): EntryRows[] {
   return entries.map((entry, entryRank) => ({
     lemma: entry.lemma,
+    partOfSpeech: entry.part_of_speech,
     entryRank,
     senses: entry.senses.map((sense, rank) => ({
       rank,
       senseCode: sense.sense_code,
-      partOfSpeech: sense.part_of_speech ?? null,
-      exampleSource: sense.example?.source ?? null,
       translation: sense.translation,
+      exampleSource: sense.example?.source ?? null,
       exampleTarget: sense.example?.target ?? null,
     })),
   }));
+}
+
+/** One row of the staleness probe: a form's variant beside the lexeme it belongs to. */
+export type StaleLexemeRow = {
+  lexemeId: string;
+  variantId: string;
+  lemma: string;
+  partOfSpeech: string;
+  senseVersion: number;
+  renderedSenseVersion: number;
+};
+
+export type StaleLexeme = Omit<StaleLexemeRow, 'senseVersion' | 'renderedSenseVersion'>;
+
+/**
+ * Which of a form's lexemes have learned a sense since this form was rendered.
+ *
+ * A form spans one variant per lexeme it belongs to — `book` is a variant of the
+ * noun lexeme AND of the verb lexeme — and they go stale independently, so this
+ * returns a list rather than a boolean. Only the stale ones are re-rendered;
+ * `reconcile` is already per-entry, so that falls out of the existing shape.
+ */
+export function staleLexemes(rows: StaleLexemeRow[]): StaleLexeme[] {
+  return rows
+    .filter((row) => row.renderedSenseVersion < row.senseVersion)
+    .map(({ lexemeId, variantId, lemma, partOfSpeech }) => ({
+      lexemeId,
+      variantId,
+      lemma,
+      partOfSpeech,
+    }));
 }
 
 /**

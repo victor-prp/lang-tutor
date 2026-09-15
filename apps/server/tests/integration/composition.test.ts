@@ -7,7 +7,7 @@ import { createTestServerDeps } from '../support/serverDeps';
 import { seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
-import { insertTerm } from '../support/vocabRows';
+import { insertLexeme } from '../support/dictRows';
 
 let t: TestDb;
 
@@ -52,19 +52,26 @@ describe('createServerDeps', () => {
   });
 
   it('assembles a translations service that reads the database, not the provider', async () => {
-    await insertTerm(t.db, {
+    await insertLexeme(t.db, {
       lemma: 'ladder',
       languageCode: 'en',
+      partOfSpeech: 'noun',
       userLanguageCode: 'he',
-      variants: [{ form: 'ladder', kind: 'word', entryRank: 0 }],
-      senses: [
+      senses: [{ senseCode: 'climbing_frame' }],
+      variants: [
         {
-          rank: 0,
-          senseCode: 'climbing_frame',
-          translation: 'סולם',
-          partOfSpeech: 'noun',
-          exampleSource: null,
-          exampleTarget: null,
+          form: 'ladder',
+          kind: 'word',
+          entryRank: 0,
+          translations: [
+            {
+              senseCode: 'climbing_frame',
+              rank: 0,
+              translation: 'סולם',
+              exampleSource: null,
+              exampleTarget: null,
+            },
+          ],
         },
       ],
     });

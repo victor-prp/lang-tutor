@@ -79,6 +79,46 @@ export async function expectGeminiJson(
   });
 }
 
+/**
+ * The SECOND call's answer, beside the first call's `expectGeminiJson`.
+ *
+ * MockServer takes the first matching expectation, and the two prompts are
+ * distinguishable by body: only the reconciliation prompt says "reusing its
+ * sense_code EXACTLY". Registering this one FIRST is therefore what keeps a
+ * broad `expectGeminiJson` from answering the second call with a first-call
+ * payload — and it is why `matchText` exists on both.
+ */
+export async function expectReconciliation(
+  ns: string,
+  opts: {
+    senses: { sense_code: string; translation: string | null; example?: { source: string; target: string } }[];
+    matchText?: string;
+    /** Holds the answer back, so a test can do something else while this call is
+     *  in flight — the 5-15 seconds a real reconciliation takes is the window
+     *  every read-then-write race in this use case lives in. */
+    delayMs?: number;
+  },
+): Promise<void> {
+  await expectation(ns, {
+    match: {
+      body: {
+        type: 'REGEX',
+        regex: `[\\s\\S]*reusing its sense_code EXACTLY${
+          opts.matchText ? `[\\s\\S]*${opts.matchText}` : ''
+        }[\\s\\S]*`,
+      },
+    },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ senses: opts.senses })),
+        ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
+      },
+    },
+  });
+}
+
 export async function expectGeminiStatus(ns: string, statusCode: number): Promise<void> {
   await expectation(ns, {
     action: { httpResponse: { statusCode, body: '{"error":{"message":"upstream"}}' } },

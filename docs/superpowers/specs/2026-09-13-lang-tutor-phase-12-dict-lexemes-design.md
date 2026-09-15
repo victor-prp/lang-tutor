@@ -1,0 +1,1226 @@
+# Phase 12 — Lexemes, per-form translations, and the `dict_*` rename
+
+- **Status:** Implemented. Amended 2026-09-14 and again 2026-09-15 — see *Amendments after
+  implementation* at the end, which records the defects found in the shipped phase and the
+  decisions taken about them. Everything above that section is the design as approved on
+  2026-09-13 and is left unedited, so it still reads as what was believed at the time.
+- **One claim above is now retracted.** The 2026-09-15 amendment *A form re-renders when its
+  lexeme learns more* withdraws the guarantee that *the same string returns the same senses in
+  the same order, forever*, which the sections **Appending a sense cannot change an existing
+  form's answer**, **Step 4 is unchanged by step 2** and the *Out of scope* bullet
+  **Invalidation, TTL and refresh** all state as settled. Read those three passages as
+  superseded; they are left in place because the amendment only makes sense beside the
+  reasoning it overturns.
+- **Date:** 2026-09-13
+- **Source:** phase 10
+  (`docs/superpowers/specs/2026-09-10-lang-tutor-phase-10-vocabulary-persistence-design.md`)
+  hung both forms and senses off the lemma and put `part_of_speech` on the sense. Both
+  decisions are reversed here, and the translation moves down to the form.
+
+## Summary
+
+A learner who types `booked` is told it means `ספר` — a book you read. Two defects are stacked
+in that one answer, and this phase fixes both.
+
+**The reading is wrong.** `booked` is a verb form, but senses hang off the *lemma*, so every
+form of `book` inherits one ranking made for the bare headword. The model is not at fault:
+asked about `booked` directly, Gemini answers `הזמין` first, correctly. `persistEntries`
+discards that answer because the lemma already exists.
+
+**The rendering is wrong too.** Even once `booked` reaches the verb, it renders as `להזמין` —
+the infinitive, "to book". The learner typed a past tense. The translation is stored on the
+sense, which belongs to the lexeme, so it cannot vary by form.
+
+So a term becomes a **lexeme** (a lemma together with a part of speech) and a translation
+becomes a property of the **(variant, sense)** pairing rather than of the sense alone. The
+four tables are renamed `dict_*` in the same phase, since every one of them changes anyway.
+
+Nothing about the wire changes. `POST /api/translations` keeps its request, its response, its
+three statuses and its published OpenAPI document, and `apps/mobile` is not touched at all.
+
+## The defect, measured
+
+Reproduced against the real database before anything was designed: seed `book` with
+`rank 0 = ספר`, then persist the model's genuine `booked` answer. The verb senses are dropped
+and `find('booked')` returns `ספר[noun] | להזמין[verb]`.
+
+It is not a corner case. Against the checked-in backfill (10,814 forms):
+
+| Measure | Count |
+|---|---|
+| Forms in the dataset | 10,814 |
+| Entries whose lemma differs from the form (inflections) | 1,830 |
+| Entries whose senses span more than one part of speech | 2,524 |
+| Lemmas reached by more than one form | 1,135 |
+| ...of those, lemmas serving the **identical** sense list to every form | **1,135** |
+
+Every multi-form lemma in the dataset is affected. `burn` serves
+`לשרוף|לבעור|כוויה|לשרוף|לשרוף` to all of `burn`, `burned`, `burning`, `burnt` and `Burns` —
+so `burned` offers "a burn", a noun, in the infinitive-rendered company of verbs.
+
+## What this adds
+
+| Area | Addition |
+|---|---|
+| DB | Migration `0004` — the `dict_*` rename, tables, constraints, indexes and two foreign-key columns |
+| DB | Migration `0005` — `part_of_speech` moves to the lexeme; the unique key widens; translations move to the variant and take the example with them |
+| Core | `PartOfSpeechSchema`, a closed enum; `part_of_speech` moves from `LlmSenseSchema` to `LlmEntrySchema`; `entries` cap 3 → 6; `LlmRenderingSchema` and `LlmReconciliationSchema` for the second call |
+| Server | `domain/dictionary.ts` (was `domain/vocabulary.ts`) — entries key on the pair |
+| Server | `domain/translation.ts` — the prompt keys entries on (lemma, part of speech), pins the target-language form conventions, and loses two rules and the `book` worked example |
+| Server | `domain/translation.ts` — `buildRenderingPrompt`, the second, smaller prompt |
+| Server | `services/translations.ts` — the reconciliation branch: read the lexemes' stored senses, make the second call, fail the lookup if it fails |
+| Server | `repo/dictionary.ts` (was `repo/vocabulary.ts`) — the read joins the lexeme and joins translations per variant; a new `findSensesByLexeme` feeds the second prompt; the write upserts senses by `sense_code` and writes translations per variant |
+| Docs | ADR 0001 R8 amended a third time: reads preceding third-party I/O may **each** be their own |
+| Data | `content.generated.ts` re-recorded; `data/backfill/en-he/dictionary.jsonl` replaces `vocabulary.jsonl`, regenerated by a re-run the user performs |
+
+No new table and none removed — still four. No new endpoint. No change to `apps/mobile`. No
+new ADR check.
+
+## Decisions settled during design
+
+**A term is a lexeme.** `dict_lexemes` gains `part_of_speech NOT NULL` and its unique key
+becomes `(language_code, lemma, part_of_speech)`. `book` is two rows — `(book, noun)` and
+`(book, verb)` — with no parent row above them. Phase 10 moved this column *down* to the sense
+on the reasoning that "part of speech describes a meaning, not a word." That is true of a
+sense and false of a form: `booked` is a form of the verb, and with the column on the sense
+there was nowhere to record it.
+
+**A translation belongs to a form, not to a meaning.** `dict_var_translations` is keyed
+`(variant_id, sense_id, user_language_code)`. The same sense of the same lexeme renders
+`להזמין` under the variant `book` and `הזמין` under `booked`. This is the second half of the
+reported defect and it is why the table's rename to `dict_var_translations` is accurate rather
+than cosmetic — it stopped being a sense translation.
+
+**The example moves down with it.** `example_source` leaves the sense and joins the
+translation row. Today a lookup of `booked` would show *"I want to book a table"*, an example
+that does not contain the word the learner typed; it now shows *"I booked a table"*. The cost
+is that `example_source` is duplicated per target language. With one target language, and with
+the two directions holding separate lexemes anyway, that is cheaper than a fifth table to
+normalise it.
+
+**Appending a sense cannot change an existing form's answer.** This falls out of the shape and
+is worth stating, because phase 10's absolute guarantee — *the same string returns the same
+senses in the same order, forever* — would otherwise look broken. A form's answer is assembled
+from **its own** translation rows, so a sense appended to the lexeme by some later form has no
+row for the older variant and cannot appear in its answer. The guarantee survives a dictionary
+that now grows.
+
+**Sense order belongs to the form, not to the lexeme.** `rank` sits on
+`dict_var_translations` rather than on `dict_senses`, and the read orders by it. Keeping it on
+the lexeme looked simpler and was wrong twice over. A sense a later form introduces would be
+appended at `max(rank) + 1` — arrival order wearing a rank's clothes — so a form that ranked
+its new sense *first* would serve it last. And the lexeme's whole order would depend on which
+form happened to be looked up first, permanently: `book` then `booked` and `booked` then `book`
+would produce different answers for *both* forms. That is the same arrival-order dependency
+this phase removes at the routing level, left in place one level down.
+
+Probing the model showed that two forms rank the senses they *share* identically — `bank` and
+`banks` agree exactly — so this buys nothing for shared senses. It is entirely about where a
+form's own new sense lands, and about not letting the first lookup fix an order for every
+lookup after it. Ranks now come straight from the position each sense held in the entry the
+model returned for that form, and `UNIQUE(variant_id, user_language_code, rank)` keeps them
+contiguous per form.
+
+**Matching a new form's senses to a lexeme's existing ones is a second model call, not a
+string comparison.** This is the single most consequential decision in the phase and an earlier
+draft got it wrong.
+
+Two lookups of one lexeme are two independent model calls, and nothing tells the second what
+the first named its senses. `sense_code` is free text, so the same meaning comes back under a
+different name — measured, not supposed:
+
+```
+bank   ->  financial_institution · river_bank
+banks  ->  financial_institution · river_edge      same sense, different code
+```
+
+An exact-string match on `sense_code` therefore fails silently and appends a duplicate. The
+damage is invisible on the wire — every form is served from its own translation rows, so every
+answer stays correct — and shows up only as a lexeme accumulating four senses for two meanings,
+then ten for three. `UNIQUE(lexeme_id, sense_code)` does not help: it stops `river_bank` twice,
+not `river_bank` beside `river_edge`.
+
+The operation actually needed is *does this form's reading mean the same as that stored one*,
+which is a judgement about meaning. So on a miss whose returned `(lemma, part_of_speech)`
+**already has senses**, the service makes a **second, smaller call**: it hands the model the
+stored senses — code, translation, example — together with the new form, and asks for one
+rendering per stored sense, `null` where the form does not admit it, plus any genuinely new
+sense with a new code. The answer comes back ranked for this form, which is also where the
+form's `rank` values come from.
+
+**Cost, measured against the backfill.** 2,838 of 10,814 forms belong to a lemma reached by
+more than one form, and 1,135 of those are the first arrival that creates the lexeme — so the
+second call fires on about **1,703 forms, ~16%**. Splitting by part of speech distributes a
+lemma's forms across two or three lexemes, so the real figure is lower. The call is
+output-light, so the token cost is well under 16%; the request cost is not, and against the
+10K/day quota it moves the full backfill from roughly nine days to ten and a half.
+
+**A failed second call fails the whole lookup.** Nothing is written — not the first call's
+answer, not the variant. This deliberately breaks the phase 10 pattern where a failed write
+still returns `200` with the translation, and the asymmetry is the reason: that rule protects a
+*correct* answer whose storage failed, while here storage would succeed and the data would be
+known-wrong. The dictionary has no TTL and no invalidation, so a bad row is permanent and a
+failed request costs one retry. The learner sees the same provider error they already see when
+the first call fails; no new status and no new error type.
+
+**`sense_code` is load-bearing, and now carried by something that can do the job.** Phase 10
+wrote that it "has no functional role… exists for readability". It is now the identity a
+rendering is attached to — but matched by a model reading glosses, not by `strcmp`.
+
+**The prompt pins the target-language form conventions.** Left unpinned, the model renders
+`booked` as `הזמין` on one call and `הזמנתי` on another, and first-writer-wins freezes
+whichever arrived. The prompt therefore states the rule: render the translation in the
+grammatical form matching the input's, and where the target language offers several, use its
+dictionary citation form for that category — for Hebrew past tense, third-person masculine
+singular.
+
+**Hebrew has no form-neutral past tense, and third-person masculine singular is the
+convention, not a neutral choice.** `הזמין` is *he* booked; `הזמינה`, `הזמנתי` and `הזמינו` are
+equally valid readings of English `booked`. Hebrew lexicography already cites verbs in exactly
+this form — `כָּתַב`, `הִזְמִין` are dictionary headwords — so this follows the target language's
+own convention rather than inventing one. It is still a limitation: a learner reading
+*"they booked"* sees a form that does not agree with that sentence. Recorded in *Risks*.
+
+**`part_of_speech` is a closed enum, enforced by the model's own output schema.** The column
+joins a unique key, so free text fragments the dictionary: `(book, "verb phrase")` and
+`(book, "verb_phrase")` would be two lexemes. The existing data shows this is not
+hypothetical — 80 distinct values, including `verb phrase` (697) beside `verb_phrase` (388),
+`proper noun` (419) beside `proper_noun` (135), and `noun phrase` (296) beside `noun_phrase`
+(257).
+
+```ts
+export const PartOfSpeechSchema = z.enum([
+  'noun', 'verb', 'adjective', 'adverb', 'pronoun',
+  'preposition', 'conjunction', 'determiner', 'interjection', 'numeral',
+]);
+```
+
+`buildPrompt` already hands its Zod schema to Gemini as `responseSchema`, so the enum is
+enforced at generation and an eleventh spelling is not expressible. Same mechanism
+`TranslationKindSchema` has always used. A normalising fold in `domain/` was rejected: it
+defends against a condition the enum removes.
+
+**Phrase parts of speech collapse to their head.** `verb phrase`, `verbal_phrase` and
+`idiomatic_verb_phrase` all become `verb`; `noun phrase` becomes `noun`. `kind` already records
+that the input is a phrase, so encoding phrase-ness again duplicates one fact across two
+columns — which is how 80 values grew from an intended handful. `proper_noun` collapses to
+`noun`, which discards a real distinction and is recorded in *Risks*.
+
+**`NOT NULL` is safe.** 291 senses in the current data carry no part of speech, but the only
+entries that legitimately lack one are sentences, and a sentence is never written to the
+dictionary.
+
+**The entries cap rises from 3 to 6.** Splitting by part of speech makes entries multiply:
+`light` alone needs three lexemes (noun `אור`, adjective `קל`, verb `להדליק`), leaving no room
+under the old cap for a competing lemma, and `saw` needs `see`-verb, `saw`-noun and `saw`-verb.
+Three would have reintroduced, through the new axis, the disappearance the entries model was
+built in phase 10 to prevent. The five-sense response cap is unchanged, and round-robin
+ordering means every lexeme still contributes its top sense before any contributes its second.
+
+**The wire does not change.** The response stays a flat `senses` array, round-robined across
+lexemes, with `part_of_speech` on each sense filled from its entry and `translation` now
+carrying the form-appropriate rendering. `TranslationRequestSchema` and
+`TranslationResponseSchema` are byte-identical to phase 9. Grouping the response by lexeme
+remains out of scope, as in phase 10 — but it is now structurally available rather than merely
+conceivable.
+
+**The backfill is invalidated and re-run, not transformed.** The dataset cannot repair itself:
+the exporter reads the database, and the database already discarded every per-form answer, so
+the exported JSONL preserves the corrupted senses rather than the model's originals. Splitting
+entries by `part_of_speech` offline would recover the lexemes but still could not say which
+lexeme `burned` belongs to, and nothing anywhere holds a per-form rendering. Re-running removes
+the condition instead of reconstructing around it — the move recording the seed made in phase
+10.
+
+**The re-run is not part of this phase's work.** The code ships verified; the backfill is an
+operation the user runs afterwards, gradually. Gemini's daily quota of 10K requests guarantees
+a full run ends early, so the real backfill is spread across roughly ten and a half days of
+partial runs
+driven by `run-backfill-daily.mjs`. Nothing in the plan starts it.
+
+**The rename is total, and lands first.** Every name carrying `vocab` or `term` moves to
+`dict`, including the two npm scripts and the three log events. It ships as its own migration
+and its own commit *before* the structural work, so a large mechanical diff is not tangled
+through two real changes. Both migrations run against a truncated database, so splitting them
+costs nothing.
+
+| Now | After |
+|---|---|
+| `vocab_terms` / `vocabTerms` | `dict_lexemes` / `dictLexemes` |
+| `term_variants` / `termVariants` | `dict_variants` / `dictVariants` |
+| `vocab_term_senses` / `vocabTermSenses` | `dict_senses` / `dictSenses` |
+| `term_sense_translations` / `termSenseTranslations` | `dict_var_translations` / `dictVarTranslations` |
+| `term_id` (on variants and senses) | `lexeme_id` |
+| `repo/vocabulary.ts`, `domain/vocabulary.ts` | `repo/dictionary.ts`, `domain/dictionary.ts` |
+| `db/vocabExport.ts`, `db/vocabImport.ts` | `db/dictExport.ts`, `db/dictImport.ts` |
+| `tests/support/vocabRows.ts` | `tests/support/dictRows.ts` |
+| `createVocabRepo`, `VocabRepo`, `Repos.vocab`, `VocabRecord` | `createDictRepo`, `DictRepo`, `Repos.dict`, `DictRecord` |
+| `vocab:export`, `vocab:restore` | `dict:export`, `dict:restore` |
+| `vocab_cache_hit`, `vocab_persisted`, `vocab_persist_failed` | `dict_cache_hit`, `dict_persisted`, `dict_persist_failed` |
+| `data/backfill/en-he/vocabulary.jsonl` | `data/backfill/en-he/dictionary.jsonl` |
+
+`dict_lexemes` is plural because every other table here is. `sense_id` and `prompt_variant_id`
+keep their names — they still name what they point at.
+
+## Data model
+
+```sql
+dict_lexemes(id, language_code, lemma, part_of_speech, created_at)
+  UNIQUE (language_code, lemma, part_of_speech)   -- dict_lexemes_language_lemma_pos_key
+
+dict_variants(id, lexeme_id -> dict_lexemes, language_code, form, kind, entry_rank)
+  UNIQUE (lexeme_id, form)                        -- dict_variants_lexeme_form_key
+  UNIQUE INDEX (language_code, lower(form), entry_rank)
+                                                  -- dict_variants_form_entry_rank_key
+  CHECK (entry_rank >= 0)
+
+dict_senses(id, lexeme_id -> dict_lexemes, sense_code, created_at)
+  UNIQUE (lexeme_id, sense_code)                  -- dict_senses_lexeme_code_key  [NEW]
+  -- identity only: which meanings this lexeme has. No rank.
+
+dict_var_translations(variant_id -> dict_variants, sense_id -> dict_senses,
+                      user_language_code, rank, translation,
+                      example_source, example_target, definition_notes)
+  PRIMARY KEY (variant_id, sense_id, user_language_code)
+  UNIQUE (variant_id, user_language_code, rank)   -- dict_var_translations_variant_rank_key
+  CHECK (rank >= 0)
+```
+
+Four tables, as before. What moved: `part_of_speech` up to the lexeme; `example_source`,
+`translation` **and `rank`** down to the `(variant, sense)` pairing.
+
+`UNIQUE(lexeme_id, sense_code)` is new and load-bearing rather than defensive. It is what makes
+matching an incoming sense to a stored one deterministic, and it settles the concurrent case:
+two forms of one new lexeme racing to write the same sense resolve to one row.
+
+Both migrations run on empty tables — `TRUNCATE dict_lexemes, sessions CASCADE` precedes
+`0005` — so neither backfills nor drops a default. `CASCADE` reaches `dict_variants`,
+`dict_senses`, `dict_var_translations`, `questions`, `session_questions` and `answers`;
+`sessions` is named because nothing references it; `users` is untouched.
+
+**`dict_variants.entry_rank` keeps its meaning** and now orders lexemes rather than lemmas,
+which makes one mechanism cover two cases that used to be different:
+
+```
+book   -> 2 variants:  (book,noun) rank 0 · (book,verb) rank 1
+booked -> 1 variant:   (book,verb) rank 0            <- the reading fix
+saw    -> 2 variants:  (see,verb)  rank 0 · (saw,noun) rank 1
+```
+
+## The two flows
+
+### The read
+
+```sql
+SELECT tr.rank, v.entry_rank, l.part_of_speech, v.kind,
+       tr.translation, tr.example_source, tr.example_target
+FROM dict_variants v
+JOIN dict_lexemes l ON l.id = v.lexeme_id
+JOIN dict_senses  s ON s.lexeme_id = v.lexeme_id
+JOIN dict_var_translations tr
+     ON tr.variant_id = v.id
+    AND tr.sense_id   = s.id
+    AND tr.user_language_code = $3
+WHERE v.language_code = $2 AND lower(v.form) = $1
+ORDER BY tr.rank, v.entry_rank, v.lexeme_id
+LIMIT 5
+```
+
+Two changes from phase 10. The lexeme join is back — phase 10 removed it deliberately ("no
+join to `vocab_terms` at all") and `part_of_speech` now lives there. And the translation join
+carries `variant_id`, which is what makes the answer form-specific.
+
+**Servability gets stronger.** The inner join is now on *this variant's* translations, so a
+form is servable only when it has its own renderings. Under phase 10 a variant written for a
+lexeme whose senses already existed inherited another form's translations; that is exactly the
+`booked → ספר` path, and it is now structurally unreachable.
+
+The `ORDER BY` is unchanged. Round-robin across lexemes is what makes `book` answer
+`ספר · להזמין · כרך · לשריין` rather than both noun senses ahead of any verb sense.
+
+### The write
+
+Reconciliation happens in the **service**, between the two model calls. The repository is
+handed entries whose sense codes are already settled, so `persistEntries` stays a pure write.
+
+```
+SERVICE, on a miss:
+  A  entries <- mergeEntries(parse(call 1))
+  B  the sentence / empty-entries guard returns FIRST — a sentence is never
+     written, so it must not pay a database read or a second model call
+  B' read: for each entry, does (language, lemma, part_of_speech) exist WITH senses?
+     One gloss per sense across ALL the lexeme's variants — never filtered to a
+     chosen variant. `entry_rank` is the entry's index for one queried form, so
+     the verb lexeme of `book` owns no entry_rank 0 variant and filtering on one
+     would report it as having no senses, skipping reconciliation for exactly the
+     lexemes that need it.
+  C  if none do            -> straight to the write
+     if any do             -> call 2, handing it those lexemes' stored senses
+                              (code, translation, example) and the queried form.
+                              It returns, ranked for this form:
+                                { sense_code, translation, example } | null per stored sense
+                                plus any new sense with a new code
+     if call 2 fails       -> throw. Nothing is written. The learner retries.
+  D  entries <- the reconciled set, deduped by sense_code and re-ranked 0..n
+  E  recompute the flattened response — the failed-write path returns it, and a
+     stale one would serve call 1's un-reconciled renderings
+
+REPOSITORY, one write transaction:
+  for each entry E, index i:
+    1  INSERT lexeme (language_code, E.lemma, E.part_of_speech)
+         ON CONFLICT (language_code, lemma, part_of_speech) DO NOTHING RETURNING id
+         nothing returned -> SELECT the id
+    2  INSERT variant (lexeme_id, language_code, form, kind, entry_rank = i)
+         ON CONFLICT (lexeme_id, form) DO NOTHING;  then SELECT its id
+    3  for each sense of E: INSERT (lexeme_id, sense_code)
+         ON CONFLICT (lexeme_id, sense_code) DO NOTHING; then SELECT the id
+    4  INSERT dict_var_translations (this variant, each sense id, target language,
+                                     rank = the sense's position in E,
+                                     translation, example_source, example_target)
+         ON CONFLICT (variant_id, sense_id, user_language_code) DO NOTHING
+         -- the target is named, never bare, so a collision on
+         -- UNIQUE(variant_id, user_language_code, rank) still raises
+  5  re-run the by-form read and return it
+```
+
+**First-writer-wins splits in two, and both halves are now correct.** A sense is written once
+per lexeme and never rewritten — phase 10's rule, unchanged, and it stops losing data the
+moment the unit it guards is a lexeme. A *translation* is written once per `(variant, sense)`,
+so a form that arrives later contributes its own renderings instead of silently inheriting.
+
+The repository's step 3 is now an idempotent upsert rather than a match: by the time entries
+reach it, step C has already decided which codes are reused and which are new.
+`UNIQUE(lexeme_id, sense_code)` is what keeps it honest under concurrency.
+
+### Worked through, end to end
+
+The second lookup deliberately introduces a sense the first never had, and ranks it **first**.
+That is the case a simpler example hides, and the one the rank's placement decides.
+
+```
+1  'book'   miss -> entries [(book,noun), (book,verb)]
+             L1=(book,noun)  S1 printed_work · S2 volume
+             L2=(book,verb)  S3 reserve      · S4 secure_in_advance
+             V1 = variant 'book' on L1, entry_rank 0
+             V2 = variant 'book' on L2, entry_rank 1
+             translations  (V1,S1,r0) ספר      (V1,S2,r1) כרך
+                           (V2,S3,r0) להזמין   (V2,S4,r1) לשריין
+             -> [ספר, להזמין, כרך, לשריין]        round-robin on rank, then entry_rank
+
+2  'booked' call 1 -> entries [(book,verb)] with codes THIS call invented:
+                      make_reservation · charge_by_police
+             L2 exists WITH senses, so the service makes call 2, handing it
+             L2's stored senses and the form 'booked':
+                      S3 reserve            להזמין  "I want to book a table"
+                      S4 secure_in_advance  לשריין  "book a slot for Tuesday"
+             call 2 returns, ranked for 'booked':
+                      0  charge_by_police  (new)  רשם
+                      1  S3 reserve                הזמין
+                      2  S4 secure_in_advance      שריין
+             S5 = charge_by_police is added to L2. S5 carries no rank.
+             V3 = variant 'booked' on L2, entry_rank 0
+             translations  (V3,S5,r0) רשם   (V3,S3,r1) הזמין   (V3,S4,r2) שריין
+             -> [רשם, הזמין, שריין]
+
+             Note what call 2 prevented: call 1 named the reserve sense
+             `make_reservation`, which matches no stored code. A string
+             comparison would have added it as a SIXTH sense of L2, duplicating
+             S3, and every answer would still have looked correct.
+
+3  'booked' HIT, no provider call, the same three
+
+4  'book'   HIT -> still [ספר, להזמין, כרך, לשריין]
+             S5 exists on L2 now, but there is no (V1|V2, S5) translation row,
+             so it cannot reach either 'book' variant's answer.
+```
+
+Three properties to check in review, one per step:
+
+**Step 2 reconciles by meaning, not by string.** Call 1's `make_reservation` and the stored
+`reserve` are the same sense under two names; only a model reading both glosses can say so.
+
+**Step 2 orders by the form's own answer.** Had `rank` stayed on `dict_senses`, `S5` would have
+been appended at `max(rank) + 1 = 2` and `booked` would have served `הזמין · שריין · רשם` — the
+model's third choice first and its first choice last.
+
+**Step 2 renders in the form's own tense.** `הזמין`, not the `להזמין` that `book` stores against
+the same sense `S3`.
+
+**Step 4 is unchanged by step 2.** Writing `booked` added rows and altered no existing answer.
+That is what lets phase 10's guarantee — the same string returns the same senses in the same
+order, forever — survive a dictionary that now grows new senses.
+
+## The contract change, and how it stays off the wire
+
+```ts
+export const PartOfSpeechSchema = z.enum([
+  'noun', 'verb', 'adjective', 'adverb', 'pronoun',
+  'preposition', 'conjunction', 'determiner', 'interjection', 'numeral',
+]);
+
+export const LlmSenseSchema = TranslationSenseSchema
+  .omit({ part_of_speech: true })
+  .extend({ sense_code: z.string().min(1).max(60) });
+
+export const LlmEntrySchema = z.object({
+  lemma: z.string().min(1),
+  part_of_speech: PartOfSpeechSchema,
+  senses: z.array(LlmSenseSchema).min(1).max(5),
+});
+
+export const LlmTranslationSchema = z.object({
+  kind: TranslationKindSchema,
+  entries: z.array(LlmEntrySchema).max(6),
+});
+```
+
+`TranslationSenseSchema` — the wire shape — is unchanged, `part_of_speech` included. The
+response fills each sense's value from its entry, so a client sees exactly what it saw in phase
+11. That is what keeps the OpenAPI document byte-identical and `apps/mobile` untouched.
+
+**The prompt loses two rules, a worked example, and gains a form-agreement rule.** These go:
+
+> Keep senses spanning parts of speech in ONE entry per headword: "book" is one entry whose
+> senses are ספר (noun) and להזמין (verb) — never two entries for one lemma.
+
+They existed only because the schema had nowhere to put the split, and the `book` example was
+teaching the model the exact ranking that produces the bug. In their place: one entry per
+headword **and part of speech**; an inflected form belongs to the entry whose part of speech it
+realises; and
+
+> Translate into the grammatical form matching the input's — a past-tense input takes a
+> past-tense translation. Where the target language offers several such forms, use its
+> dictionary citation form for that category; for Hebrew past tense that is third-person
+> masculine singular. Build the example sentence around the input as typed, not around its
+> headword.
+
+### The reconciliation call
+
+A second schema and a second prompt builder, both in the same layers as the first —
+`LlmRenderingSchema` in `packages/core`, `buildRenderingPrompt` in `domain/translation.ts`.
+
+```ts
+// One rendering of one stored sense for one new form. `translation: null` means
+// the form does not admit that sense at all — adjectival `booked` has no
+// record-a-charge reading — and the sense is then simply absent for this form.
+export const LlmRenderingSchema = z.object({
+  sense_code: z.string().min(1).max(60),
+  translation: z.string().min(1).nullable(),
+  example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
+});
+
+export const LlmReconciliationSchema = z.object({
+  // Ranked FOR THE QUERIED FORM, most common first. Stored codes reused where the
+  // meaning matches; a new code only for a genuinely new reading.
+  senses: z.array(LlmRenderingSchema).max(5),
+});
+```
+
+`buildRenderingPrompt({ form, direction, lexeme, storedSenses })` stays a pure function, as
+`buildPrompt` is — it takes more input, not hidden state, so it remains unit-testable and
+eval-scorable. It says: here is a headword, its part of speech, and the senses already
+recorded for it with their translations and examples; here is a form of it; give one rendering
+per stored sense in the grammatical form that matches, `null` where the form does not admit the
+sense, plus any reading this form has that the list does not — and rank the result for this
+form.
+
+## Testing
+
+Placement follows ADR 0004 — the folder decides the bucket — and no bucket is added.
+
+### Unit
+
+| File | Covers |
+|---|---|
+| `domain/dictionary.test.ts` | `mergeEntries` keys on (lemma, part of speech) and keeps `(book,noun)` and `(book,verb)` apart where it used to fuse them; `entriesToRows` reads the part of speech off the entry and the example off the sense; `rowsToSenses` still never emits `sense_code` |
+| `domain/translation.test.ts` | the prompt names the pair, states the form-agreement rule, and no longer contains the `book`/`ספר` example; the parser accepts an entry carrying `part_of_speech`, rejects one without it, rejects a value outside the enum, accepts six entries and rejects seven |
+| `domain/translation.test.ts` (reconciliation) | `buildRenderingPrompt` includes every stored sense's code, translation and example, names the queried form, and asks for `null` where the form does not admit a sense; `LlmReconciliationSchema` accepts a `null` translation and rejects an empty string |
+| `services/translations.test.ts` (reconciliation) | a miss whose lexeme has no senses makes **one** client call; a miss whose lexeme has senses makes **two**; a failing second call writes **nothing** and propagates the error rather than returning 200 |
+| `services/translations.test.ts` | unchanged in shape; fixtures gain the column |
+| `packages/core/src/api/schemas.test.ts` | `PartOfSpeechSchema` rejects `verb phrase` and `Verb`; `LlmSenseSchema` has no `part_of_speech`; `TranslationSenseSchema` still does |
+
+### Integration
+
+| File | Covers |
+|---|---|
+| `repo/dictionary.pos.test.ts` **new** | The reading regression: persist `book` as two lexemes, then a `booked` answer naming `(book,verb)` only; `find('booked')` returns verb senses and **no noun sense at any position**. Seen to fail first |
+| `repo/dictionary.form.test.ts` **new** | The rendering regression: `book` renders `להזמין` and `booked` renders `הזמין` for the **same** sense of the same lexeme; and writing `booked` leaves `book`'s answer byte-identical |
+| `repo/dictionary.test.ts` | one lemma with two parts of speech creates two lexemes; a duplicate pair is rejected; a duplicate `(lexeme_id, sense_code)` is rejected; an incoming sense whose code matches nothing is added to the lexeme and ranked by this form's own ordering |
+| `repo/dictionary.order.test.ts` | round-robin now interleaves lexemes of one lemma as well as separate lemmas |
+| `db/seed.test.ts` | the re-recorded fixture writes lexemes and per-variant translations |
+| `db/dictRoundTrip.test.ts` | export and restore survive the new shape: a record holding two same-lemma entries with different parts of speech round-trips byte-identically |
+
+### e2e
+
+`translate.spec.ts` is unchanged. The wire did not move, so nothing in the browser can tell.
+
+### Evals
+
+The `book` case inverts. Today it asserts **one** entry with two senses — the shape this phase
+makes wrong. It becomes **two** entries, `(book,noun)` first and `(book,verb)` second. Added:
+
+- `booked` returns entries whose parts of speech are `verb` or `adjective` and **no** `noun`
+  entry, and whose top translation is a past-tense Hebrew form, not an infinitive. Both halves
+  of the reported defect, scored.
+- `light` returns three entries — noun, adjective, verb — exercising the raised cap.
+
+`saw` (two entries) and `running` (lemma `run`) are unchanged and must still hold.
+
+**Re-recording and evals need a model, and the daily quota is currently exhausted.**
+`GEMINI_MODEL` is configuration rather than code, so pointing it at a different Gemini model is
+the supported way to proceed. Nothing in the code changes for it.
+
+## ADR consequences
+
+**One ADR amendment, one prose edit, no new ADR, and no new detection command.** Stated rather than left silent,
+because phase 9 established that a check must be shown to fail before it is trusted, and the
+counterpart is that a phase adding none should say so.
+
+- **ADR 0002 R6** — the factory list names `createVocabRepo`; it becomes `createDictRepo`. That
+  is the only ADR text the rename touches. Verified: no `scripts/check-adr-*.sh` greps any of
+  the renamed identifiers, so no detection command changes.
+- **ADR 0001 R8 — amended a third time.** The use case is now: read the cache, call the
+  provider, **read the lexemes' stored senses, call the provider again**, write. That is two
+  reads before third-party I/O, and R8's phase-10 wording permits one — *"a use case opens at
+  most one write transaction; a read preceding third-party I/O may be its own."* Amended
+  wording: *a use case opens at most one **write** transaction; **reads** preceding third-party
+  I/O may each be their own.* Still one write transaction, which is the half the rule exists to
+  protect. The detection command greps for `\.transaction(` — the mechanism — and is unchanged,
+  so the architecture check stays at seventeen rules and no planted-violation step is needed.
+- **ADR 0003** — the wire is byte-identical, so the contract check and `openapi.test.ts` pass
+  untouched. This is the ADR most at risk and the reason the response shape was left alone.
+- **ADR 0004** — no new bucket.
+- **ADR 0005** — untouched; nothing here records a learner.
+
+**A judgement call left open for review:** "a `dict_lexemes` row is a lexeme, not a lemma, and
+a translation belongs to a form" is a durable structural invariant, and `docs/adr/` is where
+this repo records those. It is not recorded as an ADR here because every existing ADR pairs its
+rule with a grep-able detection command, and this is a data-model fact no regex can check. If
+the preference is to record it anyway, `create-adr` should run before implementation.
+
+## Prior art
+
+Phase 10's *Prior art* argued that senses belong to the entry rather than to a surface form,
+and it was right. What it got wrong is what an entry *is*: it read LMF's `LexicalEntry` as a
+lemma and explicitly declined to "split one lemma per part of speech", calling that a
+convention with "no gain a flat response could show". The gain is this phase's first defect.
+
+A survey of how existing systems attach an inflected form was run before this design
+(`drafts/dictionary-form-sense-modeling-research.md` and its two results):
+
+- **The part-of-speech-scoped unit is the near-universal convention.** OntoLex-Lemon's
+  `LexicalEntry` "requires a single part of speech" (W3C lexicog spec, verified); Wikidata
+  Lexemes carry exactly one lexical category, so noun `book` and verb `book` are two L-numbers;
+  Merriam-Webster splits `book:1` from `book:2`; Oxford keys `lexicalEntries` by
+  `lexicalCategory`; Wiktextract emits one object per (word, POS).
+- **Merriam-Webster solves the reading half structurally.** `meta.stems` — "all of the entry's
+  headwords, variants, inflections… Each stem string is a valid search term that should match
+  this entry" (verified) — is per homograph, so `booked` is a stem of `book:2` alone while
+  `books` is a stem of both and returns both. That is the behaviour `entry_rank` produces here
+  once terms are lexemes.
+- **No system links a form to a subset of senses.** The one spec-level exception is OntoLex's
+  `lexicog:restrictedTo`, which is inverted (`Domain: LexicalSense, Range: FormRestriction`,
+  verified), feature-mediated, and scoped *below* the part-of-speech split.
+- **No monolingual system varies sense ranking by the looked-up form.** This design does, and
+  the departure is deliberate — see the decision above. The form selects which
+  unit you land on; the unit's order is then fixed. That is why this phase routes rather than
+  re-ranks. It is also the boundary where a **bilingual** dictionary departs from the survey:
+  the surveyed bilingual products (Linguee, Glosbe, Reverso) hold no sense inventory at all and
+  proxy meaning through corpus examples, so none of them had to answer what `booked` renders
+  as. Per-variant translation is this design's own step beyond the prior art, taken because a
+  learner's answer is a rendering, not a citation.
+
+## Out of scope
+
+- **Grouping the response by lexeme.** The wire stays flat.
+- **Running the backfill.** The user runs it, gradually, after this ships.
+- **Transforming the existing dataset.** It is discarded and regenerated.
+- **Full Hebrew paradigms.** One rendering per (form, sense), in the citation form for its
+  grammatical category. Person, gender and number are not offered.
+- **A lemmatiser.** Every surface form still costs one provider call on first lookup.
+- **Invalidation, TTL and refresh.** A sense is still written once per lexeme and a translation
+  once per (variant, sense), permanently.
+- **Per-learner ownership.** Nothing still records who asked.
+- **A third language.** `direction` still has two values.
+
+## Risks
+
+- **The backfill is discarded and costs real money to rebuild.** Phase 11 measured ~7 ILS per
+  1,100 entries against a 10K/day quota; the full 89K set is roughly 570 ILS, plus ~16% more
+  requests for the reconciliation call, and about ten and a half days of gradual runs. The 10,814 forms already written are lost. This is the price of one data
+  shape instead of a transform that could not have been correct — nothing anywhere holds a
+  per-form rendering to recover.
+- **`vocabulary.jsonl` is stale the moment `0005` lands** and is replaced by
+  `dictionary.jsonl` only when the re-run finishes. Restoring the old file into a migrated
+  database fails on missing columns, which is the desired failure — but it must be in the README
+  beside the command.
+- **Third-person masculine singular will be wrong for many sentences.** A learner reading
+  *"they booked"* sees `הזמין`. The convention matches Hebrew dictionaries, but the app shows it
+  in a context a dictionary does not have. This is the most likely play-test complaint.
+- **A miss can now cost two provider calls.** On roughly 16% of misses — those whose lexeme
+  already has senses — latency goes from 5–15s to 10–30s, and the full backfill from about nine
+  days to ten and a half. Phase 9's "latency is the experience" risk gets worse on a minority of
+  lookups; during the backfill, which is offline, it costs only quota.
+- **A failed second call fails the lookup.** Deliberate, and a departure from phase 10's
+  degrade-and-serve rule: here the degraded write would store known-wrong data into a dictionary
+  with no TTL. The learner retries. If the second call turns out to fail often, this converts a
+  data-quality problem into a visible availability problem, which is the intended trade but
+  should be watched in the logs.
+- **The reconciliation call can get the judgement wrong**, merging two senses that differ or
+  splitting one that does not. That is a worse failure than the string comparison it replaces,
+  because it is confident rather than silent — but it is also the only mechanism that can be
+  right at all, and it is eval-scored.
+- **`sense_code` drift creates near-duplicate senses** when the second call misjudges. The model may return `make_reservation`
+  on one call and `reserve` on the next; both then exist on the lexeme with separate ranks and
+  separate translations. `UNIQUE(lexeme_id, sense_code)` prevents exact duplicates, not
+  synonymous ones. Feeding existing codes back into the prompt was rejected — it would make the
+  prompt depend on database state and break the property that makes it unit-testable and
+  eval-scorable.
+- **Translation rows multiply.** One row per (form, sense, language) rather than per (sense,
+  language). A lexeme with four forms and three senses holds twelve rows where phase 10 held
+  three. Storage is cheap; the honest cost is that a re-record touches more rows.
+- **Collapsing `proper_noun` into `noun`** discards a real distinction affecting 554 senses in
+  the current data. Widening the enum later is additive and cheap; the reverse would not be.
+- **The enum can be too small.** Article, particle, auxiliary and modal are the plausible gaps,
+  and because the enum is enforced in `responseSchema` the model picks the nearest allowed value
+  rather than failing loudly. The eval bucket is where a systematic mis-assignment surfaces.
+- **More entries means more tokens and more latency on ambiguous strings.** Six is a ceiling,
+  not a target, but `light` and `saw` now cost measurably more.
+- **The model can still file a form under the wrong lexeme.** Nothing downstream checks that
+  `booked` is really a verb form. A wrong lexeme is now the quiet failure that a wrong sense
+  ranking used to be.
+- **The rename touches 40-odd files at once.** It lands as its own commit with no behaviour
+  change, which is what makes it reviewable; a reviewer should read `0004` and the commit
+  message and then skim.
+
+## Success criteria
+
+1. `booked` returns the verb senses and **no** noun sense at any position, from the model on an
+   empty database and from Postgres on the second lookup.
+2. `booked` renders `הזמין`, not `להזמין`, for the same sense that `book` renders `להזמין`.
+3. Writing `booked` leaves a previously stored `book` answer byte-identical.
+4. A form whose lexeme already has senses triggers exactly one reconciliation call; a form
+   whose lexeme is new triggers none. A sense the reconciliation call maps to a stored code
+   reuses that sense row rather than creating a second one for the same meaning — `banks`
+   reusing `bank`'s `river_bank` even though call 1 named it `river_edge`.
+5. A failing reconciliation call leaves the database byte-identical and surfaces the provider
+   error; no variant, sense or translation row is written.
+6. A sense the reconciliation call reports as new is added to the lexeme rather than dropped,
+   and is ranked by the position it was given **for that form** — a form that ranks its new
+   sense first serves it first.
+7. Looking up `book` then `booked`, and looking up `booked` then `book`, produce the same two
+   answers. Neither order of arrival fixes an ordering for the other form.
+8. `book` returns **two** entries, and the flat response interleaves them so `ספר` and `להזמין`
+   both appear before either second sense.
+9. A lemma with senses in two parts of speech creates two `dict_lexemes` rows; a third insert of
+   an existing pair is rejected; a duplicate `(lexeme_id, sense_code)` is rejected.
+10. `light` returns three entries under the raised cap; a seventh entry fails the parse.
+11. Every `part_of_speech` written is one of the ten enum values; no value containing a space or
+    an underscore reaches `dict_lexemes`.
+12. No name containing `vocab`, `term_`, `Term` or `Vocab` remains under `apps/`, `packages/`,
+    `scripts/` or `e2e/` outside migration history.
+13. The published OpenAPI document is byte-identical to phase 11's and `apps/mobile` has no
+    changed file.
+14. `npm run test:all` and `npm run e2e` are green with no network access and no API key.
+15. `npm run lint:arch` passes and still reports seventeen ADR 0001 checks.
+16. The seed's sixteen recorded strings answer from a freshly migrated database with no provider
+    request, re-recorded through the new prompt.
+
+## Amendments after implementation (2026-09-14)
+
+Two defects surfaced the day after the phase shipped, one of them reported from the REST
+API by hand. Both are recorded here rather than in a new spec because both are consequences
+of decisions taken above, and the corrections only make sense beside the reasoning they
+correct.
+
+The section grew past those two. A hand-written report of the shipped phase produced five
+findings, labelled F1-F5 in the plan, and the subsections below work through them in the order
+they were taken rather than in the order they were reported. The last of them, added
+2026-09-15, is different in kind from the rest: F1-F4 were defects in how this design was
+carried out, while F5 is this design doing exactly what it says and the design being wrong to
+say it. That is why it retracts a guarantee instead of fixing an implementation.
+
+### The reconciliation call's escape hatch was scoped to the form, not to the lexeme
+
+**The report.** `POST /api/translations {"text":"pressing"}` returned five senses of which
+two pairs were the same Hebrew word:
+
+```
+1. דחוף  [verb]       This is a pressing matter.
+2. דחוף  [adjective]  This is a pressing issue.
+3. לוחץ  [verb]       He is pressing the button.
+4. לוחץ  [adjective]  We have a pressing deadline.
+5. דוחק  [verb]       They are pressing him for answers.
+```
+
+**What was actually wrong.** `press`/verb owned a sense `urgent_important` → דחוף. *Pressing*
+meaning urgent is not a reading of the verb *press* at all; it exists only as the adjective,
+and the adjective lexeme `pressing` already held it. One meaning, written twice, to two
+lexemes, by one request.
+
+The database dated the damage precisely, because `dict_senses.created_at` timestamps each
+sense and a variant only carries translations for senses that existed when it was written:
+
+| time | lookup | what it did |
+|---|---|---|
+| 09:27:54 | `pressed` | created `press`/verb with four senses, and `pressed`/adjective. Correct |
+| 09:28:14 | `press` | `press`/verb stored → reconciliation ran, reused the four and invented `publish_print` (a genuine missing verb sense); created `press`/noun |
+| 09:28:36 | `pressing` | `press`/verb stored → reconciliation ran, reused four, nulled `publish_print`, and **invented `urgent_important` → דחוף**; call 1's second entry created `pressing`/adjective holding the same meaning |
+
+The signature is that `urgent_important` carries a translation for the `pressing` variant and
+for no other form of the verb. A real verb sense renders for `press` and `pressed` too; every
+one of the original four does. A sense that exists for exactly one form is a sense invented
+while rendering that form.
+
+**The root cause, and it is one of this document's own sentences.** *The reconciliation call*
+above specifies the escape hatch as *"plus any genuinely new sense with a new code"*, and
+`buildRenderingPrompt` implemented it as *"Use a new snake_case sense_code only for a reading
+the list above does not contain."* That question is scoped to the **form**. The row it
+produces is scoped to the **lexeme**. Those two scopes differ exactly when one form spans
+several lexemes — which is the ordinary case this phase was built to serve, not an edge one.
+
+Asked what readings of *pressing* the verb's stored list lacks, the model answered *urgent*.
+Truthfully. It was answering the question it was asked.
+
+The second contributing factor is that reconciliation runs per entry, in isolation, over
+`Promise.all`, each call seeing only its own lexeme's stored senses. Call 1 had **already
+correctly split** `pressing` into a verb entry and an adjective entry in the same response.
+The verb's reconciliation call had no way to know a sibling entry in that very answer owned
+the adjective reading.
+
+**Reproduced with prompts alone**, no server and no database, by building both prompts and
+POSTing them directly to Gemini. Call 1 assigned *urgent* to `pressing`/adjective as
+`urgent_critical` → דחוף with the example *"We have a pressing need for more resources."*
+Call 2, reconciling `press`/verb, invented `urgent_important` → דחוף with **the same example
+sentence**. At `temperature: 0` that is the stable answer to that prompt.
+
+**Decision: the escape hatch is licensed by the lexeme, and the other lexemes of the form are
+named as out of scope.** `buildRenderingPrompt` now says a new code is only for *a reading
+that is itself "press" used as a verb*, and adds that the form may belong to other headwords
+or parts of speech, that those are separate entries answered by a separate call, and that a
+meaning of the form which is not this lexeme is to be left out entirely.
+
+Deliberately a prompt change and not a filter. The judgement *"is this reading really a verb
+sense of press"* is the same kind of judgement the second call already exists to make; a
+regex over sense codes cannot make it, and a hard rule against new codes would destroy the
+call's purpose — `publish_print` is a genuinely missing verb sense and must still be
+reachable.
+
+**A side effect worth recording:** the invented sense was *displacing* a real one.
+`LlmReconciliationSchema` caps `senses` at five, and the fabricated sense took a slot. After
+the fix the same prompt renders all five stored verb senses, `publish_print` = מדפיס
+included.
+
+### `normalizeForm` produced a dictionary key but only normalised whitespace
+
+Unrelated to the above and found while surveying the data for more instances of it.
+
+`normalizeForm` trimmed and collapsed whitespace and did nothing else, so `book?` was a
+**different dictionary key** from `book`. The dev database held both, with divergent content —
+`book` with three senses, `book?` with four — each bought with its own provider call and, given
+this phase's decision that there is no TTL and no invalidation, kept forever. `booked.` and
+`booked` were a second pair.
+
+**Decision: strip trailing `. , ; : ! ?` from a single-token input only.** Two guards. A
+multi-word expression keeps its punctuation, because the punctuation is part of the
+expression and two seeded ones — `How do you do?` and `Have a nice day!` — are stored with it;
+a blanket strip would split every recorded phrase from its own seed row. And an input that is
+nothing but punctuation is returned unchanged, so no form can normalise down to an empty key.
+
+Nikud survives: Hebrew points are combining marks, not trailing punctuation. The rule works in
+both scripts, so `שלום!` and `שלום` are also one key now.
+
+This reverses an assertion this phase shipped. `domain/dictionary.test.ts` carried a test
+titled *"leaves a Hebrew string untouched, nikud and punctuation included"*; the nikud half is
+kept and the punctuation half is now the opposite. Noted because it is a deliberate reversal
+of a previously-asserted rule rather than an incidental edit.
+
+### Both provider calls are now eval-scored, because the unscored one is the one that shipped broken
+
+The *Evals* section above lists four cases, and every one of them exercises `buildPrompt`.
+`askModel` — the eval bucket's entire model-facing surface — stops at the first call. So the
+call this phase *introduced*, the one that invents sense codes and writes them into a
+dictionary with no TTL, had **no real-model coverage at all**, while the entry split it was
+built to complement had four cases. That is why `pressing` shipped.
+
+**Decision: the eval bucket covers both call sites.** `askRendering` sits beside `askModel`,
+a `RenderingCase` type sits beside `EvalCase`, and both sets run in one scorecard sharing one
+concurrency budget — the quota they compete for is the same one.
+
+`RenderingCase` is a separate type rather than a variant of `EvalCase` because almost nothing
+transfers: a rendering answer has no `kind` to classify, no entry split, and no ranking across
+lexemes. What it has instead is a lexeme fixed in advance and a list of senses already stored
+against it, passed as a literal. Stored senses are handed in rather than read from Postgres,
+for the same reason `askModel` stops short of the service: the object under test is the
+prompt, and this bucket has no database.
+
+Two cases, and the second exists to constrain the fix:
+
+- **`pressing` ← `press`/verb**, with the five stored senses copied out of the dev database as
+  they stood immediately before the bad lookup. Rejects דחוף.
+- **`banks` ← `bank`/noun**, asserting both stored codes come back reused. This is the
+  counterweight. Forbidding new codes outright would have satisfied the first case and
+  destroyed the reason the second call exists — the `bank`/`banks`, `river_bank`/`river_edge`
+  argument made at length above. A fix that makes the model afraid to answer fails here rather
+  than silently.
+
+`askRendering` went into `askModel.ts` rather than a new file on purpose: ADR 0004's prose
+enumerates this bucket as `run.ts`, `cases.ts`, `askModel.ts` and `generate-content.ts`, and a
+fifth module would have made that enumeration stale.
+
+`run.ts` also gained an optional substring filter, matching the `content:generate -- book`
+precedent, so iterating on one prompt rule costs one call rather than fourteen. CI passes no
+argument; the footer prints the counts actually scored, so a filtered run cannot be mistaken
+for a full one.
+
+### Decisions deliberately *not* taken
+
+**No structural guard in `reconcile()`.** The server still writes whatever the second call
+returns. A guard is defensible — reject an entry whose new codes duplicate a meaning a
+sibling entry in the same response already carries — and it is the natural extension of this
+phase's own *a failed second call fails the whole lookup* reasoning: if a known-wrong row is
+worth a failed request, a detectably-wrong row is too. It is not built. The prompt now asks
+the right question, and the leak detector below found exactly one instance in the live data,
+so the evidence does not yet justify the second mechanism. Recorded as deferred, not
+rejected.
+
+**Duplicate translations across lexemes are not a defect and are not being fixed.** Surveying
+every stored form for repeated translations found six, and only `pressing` was the leak:
+
+| form | what collides | same lexeme? |
+|---|---|---|
+| `difficult` | `hard_to_do` / `hard_to_please` → both קשה | yes, adjective |
+| `water` | `liquid_substance` / `body_of_water` → both מים | yes, noun |
+| `round` | `competition_stage` / `circuit_course` → both סיבוב | yes, noun |
+| `better` | `good`/adj + `well`/adv → both טוב יותר | no, two lexemes |
+| `burning` | `burn`/adj `on_fire` + `burn`/verb `be_on_fire` → both בוער | no, two lexemes |
+
+Four of the five are linguistically correct — genuinely distinct English meanings that Hebrew
+collapses onto one word — and the test that decides it is the **example**, not the sense code.
+`difficult` separates cleanly ("The exam was very difficult." against "He is a difficult
+child."), as do `round` ("He won the first round." against "Let's take a round around the
+park."), `better` (adjective against adverb) and `burning` (attributive adjective against
+progressive verb).
+
+`water` does not, and an earlier revision of this section wrongly cleared it. The noun's two
+senses are `liquid_substance`, "I drank some water.", and `body_of_water`, **"The water was
+cold."** — which describes the substance, not a lake, so it fails to demonstrate the sense its
+code names. A *body of water* is a real English sense; this row does not show it, and the two
+cards are indistinguishable in both languages. The sense code is model-invented free text and
+can confidently name a distinction nothing else in the row supports, so a sense is only as
+real as its example.
+
+**The provider is not deterministic at `temperature: 0`, and an earlier revision of this
+section said otherwise.** A single `npm run content:generate -- water` returned a
+byte-identical file, and that was read as proof that re-recording could not help. Sampling
+eight runs of the same prompt showed two different answers — the ambiguous two-noun-sense
+version in five, and a version dropping the second sense in three. One identical result was a
+coincidence, or provider-side caching, not determinism. Nothing here should be concluded from
+a single call; the eval bucket's scores have the same property, which is the deeper reason
+`test-eval` can go red on an innocent diff.
+
+The fix is the rule recorded in the next section.
+
+`difficult` and `water` are **seed** words, so both predate this phase entirely and come from
+call 1 and the recording, nothing to do with reconciliation.
+
+What makes them *read* as duplicates is a gap this phase chose: *The wire does not change*
+keeps the response a flat array of `translation` + `part_of_speech` with no gloss, so a
+learner sees קשה twice with no way to tell the two senses apart. `sense_code` exists and is
+load-bearing, and `rowsToSenses` still deliberately never emits it. That remains the right
+call for the wire contract, but it is now a known presentation gap rather than a theoretical
+one, and it is the strongest argument yet for the *grouping the response by lexeme* item still
+sitting in *Out of scope*.
+
+**A latent consequence, not currently live.** All thirteen quiz questions are hand-authored
+from the recording with hand-picked distractors, so nothing is broken. But `difficult`'s
+question uses `hard_to_do` = קשה while `hard_to_please` is also קשה. If question generation
+were ever driven off the dictionary rather than the recording, that pair would produce two
+indistinguishable questions, or a distractor equal to the correct answer.
+
+### What the risk register got right, and what it missed
+
+*Risks* named two failure modes for the reconciliation call — **merging two senses that
+differ**, and **splitting one that does not** — and a third for `sense_code` drift. The
+observed defect is a fourth, unlisted one: **importing a reading that belongs to a different
+lexeme entirely**. It is not a merge, not a split and not a drift; the model was asked a
+question about the form and answered it correctly, and the answer landed on the wrong row.
+
+*Risks* also says **"the model can still file a form under the wrong lexeme… nothing
+downstream checks that `booked` is really a verb form."** That is the closest entry and it is
+about the *variant*. The defect was the mirror image: the form was filed under the right
+lexemes — call 1 split `pressing` into verb and adjective perfectly — and a *sense* was filed
+under the wrong one.
+
+### An example must rule out the word's other senses
+
+Follows directly from `water` above. Where two senses of one entry render to the same word in
+the target language, the example is the **only** thing that can tell the two cards apart, and
+the prompt asked merely for "one short natural example sentence" — a bar `"The water was
+cold."` clears.
+
+Both prompts now carry the rule, `buildRenderingPrompt` as well as `buildPrompt`: the second
+call writes examples for a form the first never saw, so leaving it out would let a reconciled
+form reintroduce exactly the ambiguity the first call had stopped producing.
+
+> Choose each example so that it could not be read as any other sense of the same word. A
+> sentence that merely contains the word is not enough — it must rule the other senses out.
+
+`buildPrompt` adds an illustration built on `spring`. Two constraints picked that headword.
+It appears in neither the seed nor the eval set, so it cannot bias anything this repo
+measures — phase 12 removed the `book` worked example for the opposite reason, that it was
+teaching a ranking. And the illustration must avoid the strings the integration bucket matches
+MockServer expectations on. An earlier draft read *"We saw the spring"*, which put `saw` into
+every system instruction; MockServer matches on the request body, the system instruction is
+part of it, and every `see` lookup in that bucket began matching the `saw` expectation. The
+suite caught it as one failure in `walks the saw sequence end to end`. The illustration now
+reads *"I like the spring"*.
+
+**Measured before and after, six words, five runs each** — because one word cannot show what a
+prompt rule does to the rest of the vocabulary, and one run cannot show anything at all.
+Counting answers where two senses of one entry share a translation:
+
+| | before | after |
+|---|---|---|
+| `water` | 3/5 | **0/5** |
+| `difficult` | 1/5 | 5/5 |
+| `round` | 3/5 | 5/5 |
+| `burning` | 0/5 | 3/5 |
+| `better` | 0/5 | 2/5 |
+| `pressing` | 0/5 | 0/5 |
+| total | 7/30 = 23% | 15/30 = 50% |
+
+**The rate doubled and the answers improved.** That metric counts identical translations, not
+indistinguishable cards, and the two are different — the distinction this whole section turns
+on. Before, one of the four offending pairs was genuinely ambiguous. After, none were: the
+model keeps *more* senses that share a Hebrew word because it can now tell them apart by
+example — `burn`/adjective בוער as *"The burning log in the fireplace kept us warm."* against
+*"He had a burning desire to prove himself."*
+
+**The rule's real mechanism is pruning, not better writing.** This is the part worth stating
+plainly, because it is not what the rule says it does. `water` was not fixed by the model
+producing a sharper `body_of_water` example; across eight sampled answers it never produced
+one. It drops the sense and returns three clean cards. For a bilingual dictionary where both
+readings render מים that is defensible — the learner loses nothing they could have used — but
+a sense that cannot be distinctly exemplified now disappears rather than being rendered badly,
+and that will apply elsewhere.
+
+One quality wobble was observed and is not fixed: `well`/adverb produced *"You should think
+better about your decision"*, which is not idiomatic. The model strains when pushed to
+differentiate.
+
+`npm run eval` scores 55/56 = 98.2%, against 98.0% before, with the pre-existing `saw` stem
+miss as the only warning. The `water` case locks the specific sentence that failed — a
+regression lock in the shape `rejectTop` already had, not a general claim that every other
+example is good. Whether an example disambiguates remains a judgement read off the scorecard.
+
+### A participial adjective names one lemma, whichever spelling is typed
+
+The fourth defect, and the only one invisible to a learner. `part_of_speech` joining
+`dict_lexemes`' unique key made a lexeme a (lemma, part of speech) pair — but the *lemma* half
+is still whatever the model says it is, and for participial adjectives it says different things
+on different calls. Measured on one afternoon: `burnt` came back as the adjective `burnt` and
+`burned` as the adjective `burn`, the opposite way round from the values recorded a day
+earlier. Not a wrong rule — the absence of one.
+
+The result is two lexemes for a single adjective whose two spellings are British and American
+variants of one word. Each carries its own sense list; neither can ever see the other's; and
+the reconciliation call cannot help, because it is keyed on `(lemma, part_of_speech)` and the
+lemma is exactly what differs, so each spelling looks like a lexeme nobody has stored.
+
+**Pinning to the base verb was rejected.** It is the obvious fix — `burned`/adjective becomes
+`burn`/adjective and every spelling shares — and it merges two adjectives that are not the
+same word. An active participle is not a passive one: *a charming man* and *I'm charmed* are
+different adjectives, and filing them on one lexeme with one sense list is a worse defect than
+the one being fixed.
+
+**The rule pins the participle and its spelling instead:**
+
+> A participial adjective is its own headword rather than the base verb, and its lemma is the
+> participle spelled the regular way where a word has two: "burnt" and "burned" are both the
+> adjective "burned", while "burning" is the separate adjective "burning".
+
+Spelling variants of one adjective merge; genuinely distinct participles stay apart. The verb
+side is untouched, because it never had the defect — the model lemmatises verb forms to the
+base verb every time.
+
+**Measured over eight forms, three runs each.** Every form became stable across runs, which is
+the property that was missing; `burnt` and `burned` agree on `burned`; the irregulars `broken`
+and `frozen` name themselves, as does each of `pressed` and `pressing`.
+
+Two apparent disagreements are the measurement being wrong rather than the model. `learnt` and
+`spelt` return no adjective entry at all while `learned` and `spelled` do — and that is
+correct, because `learned` in the *erudite* sense is a genuine adjective that `learnt` never
+is. A spelling-variant check cannot assume both spellings carry the same parts of speech.
+
+Unlike the other three fixes this one needs no re-record: the seed contains no participial
+adjective. `npm run eval` scores 63/64 = 98.4%.
+
+**What it does not fix.** Nothing verifies that the model's lemma is *right*, only that it is
+consistent. A form filed under a wrong-but-stable lemma is still wrong, and is still the quiet
+failure ADR-free territory that this phase's *Risks* already names.
+
+### A form re-renders when its lexeme learns more (manual-report F5)
+
+**The finding.** `book` was looked up first and answered from two senses' worth of knowledge.
+A later lookup of `books` taught the `book`/noun lexeme a third sense, `accounts_records`. The
+plural serves it; the singular does not, and never will — with no TTL, `book` is answered from
+storage forever. Two forms of one lexeme permanently disagree about how many meanings the word
+has.
+
+**Validated before anything was designed.** Reproduced at three levels against a real Postgres
+and the real seed: the row state, the repository reads (`findSensesByForm('scan')` returning 2
+rows while its lexeme holds 3 senses), and the whole use case through MockServer, where a
+repeat lookup of the stale form adds no provider request and returns a byte-identical answer. A
+control run — the later form reconciling to the *same* senses — was used to confirm the probe
+could report the opposite, since a check that cannot fire looks exactly like a check that
+passes. The live dev database no longer holds the reported rows; it has been reseeded since,
+which is why the mechanism was reproduced rather than read back.
+
+**This is not a defect in the implementation.** It is the section *Appending a sense cannot
+change an existing form's answer* working precisely as written, and that section exists to
+protect phase 10's *the same string returns the same senses in the same order, forever*. F5 and
+that guarantee are the same sentence read from opposite sides. So the question was never how to
+fix a bug; it was whether the guarantee is worth what it costs.
+
+**Decision: the guarantee is retracted.** A form's answer now changes exactly when its lexeme
+learns a sense the form has never rendered, and at no other time. The new wording, which
+replaces phase 10's everywhere it is quoted:
+
+> The same string returns the same senses in the same order until its lexeme learns a new
+> sense, at which point that form re-renders and re-ranks once.
+
+**Why not close the sense set instead.** The cheaper fix was to stop lexemes growing at all:
+have the first call for a lemma return its complete sense inventory, and let reconciliation map
+onto that set or drop, never add. No migration, no extra model call, no mutable rows, and the
+guarantee survives untouched — every form agrees because nothing can diverge. It was rejected
+because it caps the dictionary's quality at whatever one model call happened to produce. The
+seeded `book`/noun holds exactly **one** sense today, so closing the set would make
+`accounts_records` unreachable from *every* form rather than only from the singular. That
+trades a visible inconsistency for an invisible incompleteness, and the invisible one is the
+failure nobody ever reports.
+
+#### Detecting that a form is behind
+
+Two integer columns, migration `0006`:
+
+| Column | Meaning |
+|---|---|
+| `dict_lexemes.sense_version` | bumped in the same transaction that inserts a sense |
+| `dict_variants.rendered_sense_version` | the lexeme version this form's translations were written against |
+
+`findSensesByForm` already joins `dict_lexemes`, so it selects both and compares them per row:
+no second query, no correlated `COUNT`, and the hit path stays one read.
+
+**A counter rather than counting senses live**, because `READ_LIMIT = 5` truncates the read.
+The number of rows the read returns is therefore not the number of senses the form renders, and
+comparing it to anything is wrong in exactly the case that matters — a form with five or more
+senses, which is where a missing sixth is least visible.
+
+**A form spanning two lexemes is stale if *any* of them is ahead**, and only that lexeme's
+entry is re-rendered. `book` is a noun lexeme and a verb lexeme; a sense learned by `books`
+makes the noun entry stale and leaves the verb entry alone. This falls out of the existing
+shape rather than being new machinery — `reconcile` is already per-entry, and already skips an
+entry whose lexeme has no stored senses.
+
+#### Repairing
+
+A stale hit runs **the reconciliation call that already exists**. `buildRenderingPrompt` is
+handed the lexeme's full stored sense list and the queried form, and asks for exactly what a
+repair needs: render every one of these senses for *this* form, in *this* form's grammatical
+category, ranked for *this* form. No new prompt, and that prompt is already eval-scored.
+
+The variant's translation rows are then **deleted and reinserted**, not appended to. This is
+forced rather than stylistic, and it is the one genuine architectural concession in the whole
+change:
+
+- `UNIQUE(variant_id, user_language_code, rank)` means a new row needs a free rank.
+- Appending at `max(rank) + 1` is the option the section *Sense order belongs to the form, not
+  to the lexeme* already rejected, in these words: *arrival order wearing a rank's clothes — so
+  a form that ranked its new sense first would serve it last.* Re-ranking is the entire point.
+
+Delete-then-insert keeps the repository's write insert-only in shape while making rows mutable
+in fact. `repo/dictionary.ts` says today that a translation is *"never rewritten, merged or
+refreshed"*; that comment is now false and is corrected alongside the code.
+
+**ADR 0001 R8 is unaffected.** The repaired lookup is read → provider call → one write
+transaction: still at most one write, and the read precedes third-party I/O, which R8's phase 12
+amendment already permits. No ADR is amended by this change and no check count moves.
+
+#### When the repair fails
+
+**Serve the stored answer and log it. The request succeeds.**
+
+This is a deliberate departure from the rule three sections above — *a failed reconciliation
+call fails the whole lookup* — and the distinction is the one this spec already draws between
+its two failure paths. Fail-closed exists because a degraded *write* puts known-wrong rows into
+a dictionary with no TTL. A failed repair writes nothing at all: the older rows stay, and they
+were correct when written, merely incomplete. That is the *"protects a correct answer whose
+storage failed"* case, which degrades and answers 200.
+
+So the invariant is unchanged — **never write what is known to be wrong** — and only the
+consequence differs, because here the two failure modes point opposite ways.
+
+One attempt per request, no backoff and no circuit breaker. A repair that fails persistently
+means every hit on that form pays a provider call and returns the stale answer; that is a risk,
+recorded below, not a mechanism to build now.
+
+#### What it costs, and what it deliberately does not
+
+One provider call, paid once per form per growth event, by whichever learner happens to hit the
+stale form first. That learner waits the 5-15s a first lookup costs; everyone after them is back
+to an instant hit. The dictionary converges rather than drifting.
+
+**Nothing is paid during the backfill.** The backfill only writes, and staleness is detected on
+read, so a run costs exactly what it costs today. This is the decisive argument against the
+alternative considered below.
+
+**Eager fan-out was rejected.** The symmetrical fix is to re-render for every existing variant
+at the moment a lexeme learns a sense — correct, and it keeps the hit path free of provider
+calls entirely. It was rejected on cost: the fan-out fires inside the write path, which is
+where the backfill lives, so it multiplies a run already measured at roughly 570 ILS and ten
+and a half days, by a factor set by how many forms of each lemma the dataset holds (1,135
+lemmas are reached by more than one form). Lazy repair moves that cost to forms someone
+actually looks up again, which is a small fraction of what gets written.
+
+**Read-time borrowing was rejected outright.** Serving the missing sense using another variant's
+rendering is `booked` showing *"I want to book a table"* again — the defect this phase exists to
+fix, reintroduced through the read instead of the write.
+
+#### Testing
+
+| Bucket | What it pins |
+|---|---|
+| Unit (`domain/`) | the staleness comparison is a pure predicate over the two versions and belongs in `domain/`, not in the repository |
+| Integration (`repo/`) | staleness detected when one of a form's two lexemes is ahead and not when both are level; delete-and-reinsert leaves ranks contiguous from 0, which `UNIQUE(variant_id, user_language_code, rank)` would otherwise reject; a repair that re-ranks is visible in row order |
+| Integration (`services/`) | the F5 reproduction, inverted: a form that was stale **heals** to the full sense list, costs exactly one provider call to do it, and is free on every lookup after; and a repair whose provider call fails still answers 200 with the older rows intact |
+| Eval | no new case required — the repair reuses the already-scored reconciliation prompt. A case pinning re-ranking is optional and should be judged on whether it is stable across runs before it is added |
+
+The service-level test already exists as a validation harness written while reproducing F5; it
+asserts the frozen behaviour today and is inverted rather than written fresh.
+
+#### Migration numbering
+
+This takes **`0006`**, and the phase 13 misspellings spec moves its `dict_corrections`
+migration to **`0007`**. Phase 13 depends on this fix and is planned behind it; nothing past
+`0005` is on disk, so the renumber costs a line in that spec and nothing else.
+
+#### Risks
+
+- **Rows become mutable.** The first design in this tree where an existing row is replaced
+  rather than only inserted. Every reader of `dict_var_translations` now has to hold "this
+  row can be superseded" in mind, and the delete-then-insert is inside a transaction that must
+  not partially apply.
+- **A persistently failing repair is a permanent cost, invisibly.** Every hit on the stale form
+  buys a provider call and returns the old answer, and the only signal is a log line. Worth a
+  named log event so it can be counted.
+- **The repair can be worse than what it replaces.** It re-ranks from the model's current
+  judgement, so a form whose ordering was good can come back ordered differently and no better.
+  This is the reconciliation call's existing *"can get the judgement wrong"* risk, now able to
+  affect an answer that was already stored rather than only a new one.
+- **A form that is looked up rarely stays stale for a long time**, which is the intended trade —
+  cost follows use — but it means the dictionary is only eventually consistent, and two forms
+  can still disagree in the window between the growth and the next lookup.
+- **`dictImport` replays through `persistEntries`**, so both version columns have to come out
+  right on a restore. They should be *derived* during import rather than carried in the export
+  file, so a dump stays a dump of the dictionary rather than of its bookkeeping.

@@ -3,6 +3,15 @@
 - **Status:** Sourcing scripts and the resumable runner built and verified; bulk backfill
   started against both CSVs and hit the daily rate limit — continuing gradually. The result
   so far is checked in and restorable (`data/backfill/en-he/vocabulary.jsonl`).
+
+  **Superseded in part by phase 12:** migration `0005` changed what a row means twice over
+  — a lexeme is now a lemma together with a part of speech, and a translation belongs to a
+  form rather than to a meaning — so the dataset this phase produced is invalid and the
+  backfill restarts from the CSVs. The sourcing scripts, the resumable runner and the
+  export/restore mechanism are unaffected and are what the re-run uses; the commands are
+  now `dict:export` and `dict:restore`, and the dataset file is
+  `data/backfill/en-he/dictionary.jsonl`. Everything below this note describes what was
+  true when it was written and has deliberately not been rewritten.
 - **Date:** 2026-09-13
 - **Source:** phase 10 (`docs/superpowers/specs/2026-09-10-lang-tutor-phase-10-vocabulary-persistence-design.md`)
   made every lookup a write to a shared, permanent dictionary. This phase asks: what should

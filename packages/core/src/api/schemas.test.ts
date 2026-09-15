@@ -3,7 +3,9 @@ import { describe, expect, it } from '@jest/globals';
 import {
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
+  LlmEntrySchema,
   LlmTranslationSchema,
+  PartOfSpeechSchema,
   LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
@@ -285,12 +287,12 @@ describe('TranslationResponseSchema', () => {
 });
 
 describe('LlmTranslationSchema', () => {
-  const sense = { translation: 'ספר', part_of_speech: 'noun', sense_code: 'printed_book' };
+  const sense = { translation: 'ספר', sense_code: 'printed_book' };
 
   it('is a list of entries, each a lemma with its own ranked senses', () => {
     const result = LlmTranslationSchema.safeParse({
       kind: 'word',
-      entries: [{ lemma: 'book', senses: [sense] }],
+      entries: [{ lemma: 'book', part_of_speech: 'noun', senses: [sense] }],
     });
     expect(result.success).toBe(true);
   });
@@ -299,8 +301,16 @@ describe('LlmTranslationSchema', () => {
     const result = LlmTranslationSchema.safeParse({
       kind: 'word',
       entries: [
-        { lemma: 'see', senses: [{ translation: 'לראות', sense_code: 'perceive' }] },
-        { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+        {
+          lemma: 'see',
+          part_of_speech: 'verb',
+          senses: [{ translation: 'לראות', sense_code: 'perceive' }],
+        },
+        {
+          lemma: 'saw',
+          part_of_speech: 'noun',
+          senses: [{ translation: 'מסור', sense_code: 'tool' }],
+        },
       ],
     });
     expect(result.success).toBe(true);
@@ -312,18 +322,25 @@ describe('LlmTranslationSchema', () => {
 
   it('rejects an entry with no lemma', () => {
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ senses: [sense] }] }).success,
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [{ part_of_speech: 'noun', senses: [sense] }],
+      }).success,
     ).toBe(false);
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: '', senses: [sense] }] })
-        .success,
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [{ lemma: '', part_of_speech: 'noun', senses: [sense] }],
+      }).success,
     ).toBe(false);
   });
 
   it('rejects an entry with an empty sense list — meaningless, not empty', () => {
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: 'book', senses: [] }] })
-        .success,
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [{ lemma: 'book', part_of_speech: 'noun', senses: [] }],
+      }).success,
     ).toBe(false);
   });
 
@@ -331,23 +348,23 @@ describe('LlmTranslationSchema', () => {
     expect(
       LlmTranslationSchema.safeParse({
         kind: 'word',
-        entries: [{ lemma: 'book', senses: [{ translation: 'ספר' }] }],
+        entries: [{ lemma: 'book', part_of_speech: 'noun', senses: [{ translation: 'ספר' }] }],
       }).success,
     ).toBe(false);
   });
 
-  it('caps entries at three and senses at five within an entry', () => {
-    const entry = { lemma: 'x', senses: [sense] };
+  it('caps entries at six and senses at five within an entry', () => {
+    const entry = { lemma: 'x', part_of_speech: 'noun', senses: [sense] };
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(3).fill(entry) }).success,
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(6).fill(entry) }).success,
     ).toBe(true);
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(4).fill(entry) }).success,
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(7).fill(entry) }).success,
     ).toBe(false);
     expect(
       LlmTranslationSchema.safeParse({
         kind: 'word',
-        entries: [{ lemma: 'x', senses: Array(6).fill(sense) }],
+        entries: [{ lemma: 'x', part_of_speech: 'noun', senses: Array(6).fill(sense) }],
       }).success,
     ).toBe(false);
   });
@@ -361,5 +378,52 @@ describe('LlmTranslationSchema', () => {
     });
     expect(result.success).toBe(true);
     expect(result.data?.senses[0]).not.toHaveProperty('sense_code');
+  });
+});
+
+// Phase 12: a lexeme is a lemma AND a part of speech, so part_of_speech moves
+// from the sense up to the entry and joins a closed set. It stays on the wire
+// sense, which does not move.
+describe('part_of_speech on the entry', () => {
+  const aSense = { translation: 'X', sense_code: 'make_reservation' };
+
+  it('accepts the ten word classes and rejects spelling variants', () => {
+    expect(PartOfSpeechSchema.safeParse('verb').success).toBe(true);
+    expect(PartOfSpeechSchema.safeParse('numeral').success).toBe(true);
+    expect(PartOfSpeechSchema.safeParse('verb phrase').success).toBe(false);
+    expect(PartOfSpeechSchema.safeParse('verb_phrase').success).toBe(false);
+    expect(PartOfSpeechSchema.safeParse('Verb').success).toBe(false);
+    expect(PartOfSpeechSchema.safeParse('proper_noun').success).toBe(false);
+  });
+
+  it('requires part_of_speech on the entry and strips it from the sense', () => {
+    expect(LlmEntrySchema.safeParse({ lemma: 'book', senses: [aSense] }).success).toBe(false);
+    expect(
+      LlmEntrySchema.safeParse({ lemma: 'book', part_of_speech: 'verb', senses: [aSense] })
+        .success,
+    ).toBe(true);
+
+    const parsed = LlmEntrySchema.parse({
+      lemma: 'book',
+      part_of_speech: 'verb',
+      senses: [{ ...aSense, part_of_speech: 'noun' }],
+    });
+    expect(parsed.senses[0]).not.toHaveProperty('part_of_speech');
+  });
+
+  it('keeps part_of_speech on the wire sense', () => {
+    expect(
+      TranslationSenseSchema.safeParse({ translation: 'X', part_of_speech: 'noun' }).success,
+    ).toBe(true);
+  });
+
+  it('accepts six entries and rejects seven', () => {
+    const entry = { lemma: 'x', part_of_speech: 'noun' as const, senses: [aSense] };
+    const make = (n: number) => ({
+      kind: 'word' as const,
+      entries: Array.from({ length: n }, () => entry),
+    });
+    expect(LlmTranslationSchema.safeParse(make(6)).success).toBe(true);
+    expect(LlmTranslationSchema.safeParse(make(7)).success).toBe(false);
   });
 });

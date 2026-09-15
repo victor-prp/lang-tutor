@@ -29,6 +29,27 @@
       "when": 1789058831962,
       "tag": "0003_dusty_outlaw_kid",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789058831963,
+      "tag": "0004_dict_rename",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789328794945,
+      "tag": "0005_lexemes_and_form_translations",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789421933305,
+      "tag": "0006_sense_versions",
+      "breakpoints": true
     }
   ]
 }

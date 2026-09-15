@@ -4,29 +4,31 @@ import {
   createFakeLlmClient,
   createFakeLogger,
   createFakeTransaction,
-  createFakeVocabRepo,
+  createFakeDictRepo,
 } from '../../tests/support/fakes';
-import type { SenseRow } from '../domain/vocabulary';
+import type { SenseRow } from '../domain/dictionary';
 import { LlmUnavailable, TranslationUnreadable } from '../errors';
 import { createTranslationService } from './translations';
 
 const reply = (payload: unknown) => JSON.stringify(payload);
 
-/** One entry, for the many tests that do not care about the nesting. */
-const oneEntry = (lemma: string, senses: Record<string, unknown>[]) => ({
-  entries: [{ lemma, senses }],
+/** One entry, for the many tests that do not care about the nesting. An entry is
+ *  a lexeme from phase 12 on, so it carries a part of speech whether or not the
+ *  test is about one. */
+const oneEntry = (lemma: string, senses: Record<string, unknown>[], pos = 'noun') => ({
+  entries: [{ lemma, part_of_speech: pos, senses }],
 });
 
 function serviceWith(...replies: (string | Error)[]) {
   const llm = createFakeLlmClient(...replies);
   const logger = createFakeLogger();
-  const vocab = createFakeVocabRepo();
-  const transaction = createFakeTransaction({ vocab });
-  return { service: createTranslationService({ llm, transaction, logger }), llm, logger, vocab };
+  const dict = createFakeDictRepo();
+  const transaction = createFakeTransaction({ dict });
+  return { service: createTranslationService({ llm, transaction, logger }), llm, logger, dict };
 }
 
 const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
-  termId: 't-1',
+  lexemeId: 't-1',
   rank: 0,
   entryRank: 0,
   partOfSpeech: null,
@@ -88,15 +90,14 @@ describe('translate', () => {
     const { service } = serviceWith(
       reply({
         kind: 'sentence',
-        ...oneEntry('I read a book', [
-          {
-            translation: 'קראתי ספר.',
-            part_of_speech: 'verb',
-            example: { source: 'a', target: 'b' },
-            sense_code: 's',
-          },
-          { translation: 'אחר', sense_code: 't' },
-        ]),
+        ...oneEntry(
+          'I read a book',
+          [
+            { translation: 'קראתי ספר.', example: { source: 'a', target: 'b' }, sense_code: 's' },
+            { translation: 'אחר', sense_code: 't' },
+          ],
+          'verb',
+        ),
       }),
     );
 
@@ -146,12 +147,17 @@ describe('translate', () => {
         entries: [
           {
             lemma: 'see',
+            part_of_speech: 'verb',
             senses: [
               { translation: 'לראות', sense_code: 'perceive' },
               { translation: 'להבין', sense_code: 'understand' },
             ],
           },
-          { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
         ],
       }),
     );
@@ -163,15 +169,15 @@ describe('translate', () => {
   });
 
   it('serves a hit from the database and calls the model zero times', async () => {
-    const { service, llm, vocab, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
-    vocab.hit = [row('סולם')];
+    const { service, llm, dict, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
+    dict.hit = [row('סולם')];
 
     const result = await service.translate({ text: 'ladder' });
 
     expect(llm.calls).toHaveLength(0);
     expect(result.senses).toEqual([{ translation: 'סולם' }]);
     expect(logger.events[0]).toEqual({
-      event: 'vocab_cache_hit',
+      event: 'dict_cache_hit',
       direction: 'en_he',
       term_count: 1,
       sense_count: 1,
@@ -184,8 +190,8 @@ describe('translate', () => {
     // `phrase` regardless of what was written. The stored row says `word`,
     // recorded that way by the entry_rank 0 variant, and the hit path must
     // honour it rather than guess.
-    const { service, vocab } = serviceWith(reply({ kind: 'word', entries: [] }));
-    vocab.hit = [row('לזכור', { kind: 'word' })];
+    const { service, dict } = serviceWith(reply({ kind: 'word', entries: [] }));
+    dict.hit = [row('לזכור', { kind: 'word' })];
 
     const result = await service.translate({ text: 'to remember' });
 
@@ -193,11 +199,11 @@ describe('translate', () => {
   });
 
   it('reads with the normalized form and the direction\'s language pair', async () => {
-    const { service, vocab } = serviceWith(reply({ kind: 'word', entries: [] }));
+    const { service, dict } = serviceWith(reply({ kind: 'word', entries: [] }));
 
     await service.translate({ text: '  good   morning ' });
 
-    expect(vocab.reads[0]).toEqual({
+    expect(dict.reads[0]).toEqual({
       form: 'good morning',
       languageCode: 'en',
       userLanguageCode: 'he',
@@ -205,12 +211,20 @@ describe('translate', () => {
   });
 
   it('writes every entry on a miss, with the queried form and the resolved kind', async () => {
-    const { service, llm, vocab } = serviceWith(
+    const { service, llm, dict } = serviceWith(
       reply({
         kind: 'word',
         entries: [
-          { lemma: 'see', senses: [{ translation: 'לראות', sense_code: 'perceive' }] },
-          { lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] },
+          {
+            lemma: 'see',
+            part_of_speech: 'verb',
+            senses: [{ translation: 'לראות', sense_code: 'perceive' }],
+          },
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
         ],
       }),
     );
@@ -218,26 +232,32 @@ describe('translate', () => {
     await service.translate({ text: 'saw' });
 
     expect(llm.calls).toHaveLength(1);
-    expect(vocab.persisted).toHaveLength(1);
-    expect(vocab.persisted[0]).toMatchObject({
+    expect(dict.persisted).toHaveLength(1);
+    expect(dict.persisted[0]).toMatchObject({
       form: 'saw',
       languageCode: 'en',
       userLanguageCode: 'he',
       kind: 'word',
     });
-    expect(vocab.persisted[0].entries.map((entry) => entry.lemma)).toEqual(['see', 'saw']);
+    expect(dict.persisted[0].entries.map((entry) => entry.lemma)).toEqual(['see', 'saw']);
   });
 
   it('answers with what the write re-read, not with what the model replied', async () => {
     // The re-read is what makes the writer's answer identical to the next
     // reader's, so the service must not shortcut it.
-    const { service, vocab } = serviceWith(
+    const { service, dict } = serviceWith(
       reply({
         kind: 'word',
-        entries: [{ lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] }],
+        entries: [
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
+        ],
       }),
     );
-    vocab.reread = [row('לראות'), row('מסור')];
+    dict.reread = [row('לראות'), row('מסור')];
 
     const result = await service.translate({ text: 'saw' });
 
@@ -245,35 +265,49 @@ describe('translate', () => {
   });
 
   it('merges two entries for one lemma before writing, so neither is dropped', async () => {
-    const { service, vocab } = serviceWith(
+    const { service, dict } = serviceWith(
       reply({
         kind: 'word',
         entries: [
-          { lemma: 'book', senses: [{ translation: 'ספר', sense_code: 'printed_book' }] },
-          { lemma: 'book', senses: [{ translation: 'להזמין', sense_code: 'reserve' }] },
+          {
+            lemma: 'book',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'ספר', sense_code: 'printed_book' }],
+          },
+          {
+            lemma: 'book',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'כרך', sense_code: 'volume' }],
+          },
         ],
       }),
     );
 
     await service.translate({ text: 'book' });
 
-    expect(vocab.persisted[0].entries).toHaveLength(1);
-    expect(vocab.persisted[0].entries[0].senses).toHaveLength(2);
+    expect(dict.persisted[0].entries).toHaveLength(1);
+    expect(dict.persisted[0].entries[0].senses).toHaveLength(2);
   });
 
   it('still answers 200 with the flattened entries when the write throws', async () => {
-    const { service, vocab, logger } = serviceWith(
+    const { service, dict, logger } = serviceWith(
       reply({
         kind: 'word',
-        entries: [{ lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] }],
+        entries: [
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
+        ],
       }),
     );
-    vocab.persistError = new Error('deadlock detected');
+    dict.persistError = new Error('deadlock detected');
 
     const result = await service.translate({ text: 'saw' });
 
-    expect(result.senses).toEqual([{ translation: 'מסור' }]);
-    expect(logger.errors.map((entry) => entry.message)).toContain('vocab_persist_failed');
+    expect(result.senses).toEqual([{ translation: 'מסור', part_of_speech: 'noun' }]);
+    expect(logger.errors.map((entry) => entry.message)).toContain('dict_persist_failed');
   });
 
   it('writes nothing for a sentence, an empty entry list, or a provider failure', async () => {
@@ -281,39 +315,201 @@ describe('translate', () => {
       reply({
         kind: 'sentence',
         entries: [
-          { lemma: 'I read a book', senses: [{ translation: 'קראתי ספר.', sense_code: 's' }] },
+          {
+            lemma: 'I read a book',
+            part_of_speech: 'verb',
+            senses: [{ translation: 'קראתי ספר.', sense_code: 's' }],
+          },
         ],
       }),
     );
     await sentence.service.translate({ text: 'I read a book' });
-    expect(sentence.vocab.persisted).toHaveLength(0);
+    expect(sentence.dict.persisted).toHaveLength(0);
 
     const empty = serviceWith(reply({ kind: 'word', entries: [] }));
     await empty.service.translate({ text: 'asdkjhasd' });
-    expect(empty.vocab.persisted).toHaveLength(0);
+    expect(empty.dict.persisted).toHaveLength(0);
 
     const blocked = serviceWith('');
     await blocked.service.translate({ text: 'asdkjhasd' });
-    expect(blocked.vocab.persisted).toHaveLength(0);
+    expect(blocked.dict.persisted).toHaveLength(0);
 
     const down = serviceWith(new LlmUnavailable('responded 500'));
     await expect(down.service.translate({ text: 'saw' })).rejects.toBeInstanceOf(LlmUnavailable);
-    expect(down.vocab.persisted).toHaveLength(0);
+    expect(down.dict.persisted).toHaveLength(0);
   });
 
   it('logs what it persisted', async () => {
     const { service, logger } = serviceWith(
       reply({
         kind: 'word',
-        entries: [{ lemma: 'saw', senses: [{ translation: 'מסור', sense_code: 'tool' }] }],
+        entries: [
+          {
+            lemma: 'saw',
+            part_of_speech: 'noun',
+            senses: [{ translation: 'מסור', sense_code: 'tool' }],
+          },
+        ],
       }),
     );
 
     await service.translate({ text: 'saw' });
 
     expect(logger.events).toEqual([
-      { event: 'vocab_persisted', entry_count: 1, terms_created: 1 },
+      { event: 'dict_persisted', entry_count: 1, lexemes_created: 1 },
       { event: 'translated', direction: 'en_he', kind: 'word', sense_count: 1 },
     ]);
+  });
+});
+
+// Phase 12's second model call. Two independent lookups of one lexeme name the
+// same sense differently — `bank` says river_bank where `banks` says river_edge
+// — so matching stored senses on the code alone would duplicate the meaning
+// silently. Where a lexeme already has senses, a second, smaller call reconciles
+// by meaning instead.
+describe('reconciliation', () => {
+  const oneVerb = reply({
+    kind: 'word',
+    entries: [
+      {
+        lemma: 'cook',
+        part_of_speech: 'verb',
+        senses: [{ translation: 'PAST-RENAMED', sense_code: 'renamed_by_this_call' }],
+      },
+    ],
+  });
+
+  const storedReserve = [
+    {
+      senseCode: 'prepare_food',
+      translation: 'INF-PREPARE',
+      exampleSource: null,
+      exampleTarget: null,
+    },
+  ];
+
+  it('makes one client call when the lexeme is new', async () => {
+    const { service, llm, dict } = serviceWith(oneVerb);
+
+    await service.translate({ text: 'cook' });
+
+    expect(llm.calls).toHaveLength(1);
+    // It still asked — "no stored senses" is an answer, not a skipped read.
+    expect(dict.lexemeReads).toEqual([{ lemma: 'cook', partOfSpeech: 'verb' }]);
+  });
+
+  it('makes a second call when the lexeme already has senses', async () => {
+    const { service, llm, dict } = serviceWith(
+      oneVerb,
+      reply({ senses: [{ sense_code: 'prepare_food', translation: 'PAST-PREPARE' }] }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    const result = await service.translate({ text: 'cooked' });
+
+    expect(llm.calls).toHaveLength(2);
+    // The stored code won, not the one call 1 invented.
+    expect(dict.persisted[0].entries[0].senses[0].sense_code).toBe('prepare_food');
+    expect(result.senses[0].translation).toBe('PAST-PREPARE');
+  });
+
+  it('does not make a second call for a sentence', async () => {
+    // The branch sits after the sentence guard: a sentence is never written to
+    // the dictionary, so a database round trip and a second model call would
+    // both be spent on an answer that is then discarded.
+    const { service, llm, dict } = serviceWith(
+      reply({
+        kind: 'sentence',
+        entries: [
+          {
+            lemma: 'I cooked dinner',
+            part_of_speech: 'verb',
+            senses: [{ translation: 'בישלתי ארוחת ערב.', sense_code: 'the_sentence' }],
+          },
+        ],
+      }),
+    );
+
+    await service.translate({ text: 'I cooked dinner' });
+
+    expect(llm.calls).toHaveLength(1);
+    expect(dict.lexemeReads).toEqual([]);
+  });
+
+  it('writes nothing and propagates the error when the second call fails', async () => {
+    const { service, dict } = serviceWith(oneVerb, new LlmUnavailable('network failure'));
+    dict.stored['cook:verb'] = storedReserve;
+
+    // Deliberately unlike the failed-WRITE path below, which still answers 200:
+    // that one protects a correct answer whose storage failed, this one prevents
+    // storing an answer known to be wrong into a dictionary with no TTL.
+    await expect(service.translate({ text: 'cooked' })).rejects.toBeInstanceOf(LlmUnavailable);
+    expect(dict.persisted).toHaveLength(0);
+  });
+
+  it('drops a sense the form does not admit, and re-sequences the ranks', async () => {
+    const { service, dict } = serviceWith(
+      oneVerb,
+      reply({
+        senses: [
+          { sense_code: 'fabricate_accounts', translation: 'PAST-FABRICATE' },
+          { sense_code: 'prepare_food', translation: null },
+        ],
+      }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    const result = await service.translate({ text: 'cooked' });
+
+    const senses = dict.persisted[0].entries[0].senses;
+    expect(senses.map((s) => s.sense_code)).toEqual(['fabricate_accounts']);
+    expect(result.senses.map((s) => s.translation)).toEqual(['PAST-FABRICATE']);
+  });
+
+  it('dedupes two renderings sharing a code, keeping the first', async () => {
+    // Not defensive tidying: two renderings with one sense_code resolve to one
+    // sense id, so they become two rows with the same
+    // (variant_id, sense_id, user_language_code) — a primary-key collision that
+    // DO NOTHING swallows, leaving a hole in the rank sequence that
+    // UNIQUE(variant_id, user_language_code, rank) then rejects.
+    const { service, dict } = serviceWith(
+      oneVerb,
+      reply({
+        senses: [
+          { sense_code: 'prepare_food', translation: 'FIRST' },
+          { sense_code: 'prepare_food', translation: 'SECOND' },
+        ],
+      }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    await service.translate({ text: 'cooked' });
+
+    expect(dict.persisted[0].entries[0].senses).toHaveLength(1);
+    expect(dict.persisted[0].entries[0].senses[0].translation).toBe('FIRST');
+  });
+
+  it('logs what was reused and what was newly named', async () => {
+    const { service, dict, logger } = serviceWith(
+      oneVerb,
+      reply({
+        senses: [
+          { sense_code: 'prepare_food', translation: 'PAST-PREPARE' },
+          { sense_code: 'fabricate_accounts', translation: 'PAST-FABRICATE' },
+        ],
+      }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    await service.translate({ text: 'cooked' });
+
+    // Drift is visible from the log alone, without reading rows: a lexeme whose
+    // senses keep growing is a prompt that keeps renaming them.
+    expect(logger.events).toContainEqual({
+      event: 'dict_reconciled',
+      entry_count: 1,
+      reused: 1,
+      newly_named: 1,
+    });
   });
 });

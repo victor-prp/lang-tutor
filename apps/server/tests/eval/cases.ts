@@ -1,4 +1,6 @@
-import type { TranslationDirection, TranslationKind } from '@lang-tutor/core/api';
+import type { PartOfSpeech, TranslationDirection, TranslationKind } from '@lang-tutor/core/api';
+
+import type { StoredSense } from '../../src/domain/translation';
 
 /**
  * Each case stresses one property of the prompt. `acceptTop` is a *set*, not a
@@ -18,22 +20,57 @@ export type EvalCase = {
   expectEmpty?: boolean;
   /** Exactly this many entries. `saw` is 2 — the failure the entries model replaced. */
   expectEntries?: number;
-  /** At least this many senses on the first entry. `book` is 2 — the failure
-   *  the nested shape invites, where a model splits one lemma by part of speech. */
+  /** At least this many senses on the first entry. */
   expectEntrySenses?: number;
   /** The lemma the first entry must resolve to. `running` is `run`. */
   expectLemma?: string;
+  /** Every entry's part_of_speech must be one of these. `booked` is a verb form,
+   *  so a noun entry is the reading defect returning. */
+  expectEntryPos?: string[];
+  /** Exactly these parts of speech, in this order, one entry each. */
+  expectPosOrder?: string[];
+  /** The top translation must NOT be any of these — the rendering defect:
+   *  `booked` answering with an infinitive rather than a past tense. */
+  rejectTop?: string[];
+  /** The lemma each named part of speech must resolve to. `expectLemma` reads
+   *  entries[0], which for an inflected form is usually the verb; this reaches
+   *  the entry that actually matters. Phase 13: `burnt` and `burned` are one
+   *  adjective, and must name one lemma. */
+  expectLemmaFor?: Record<string, string>;
+  /** No sense's example may contain any of these. A regression lock on a
+   *  specific known-bad sentence, exactly as `rejectTop` is on a known-bad
+   *  translation — NOT a general claim that every other example is good.
+   *  Whether an example demonstrates its sense is a judgement, read off the
+   *  scorecard; what is mechanical is that a sentence we have already seen fail
+   *  does not come back. */
+  rejectExample?: string[];
 };
 
 export const CASES: EvalCase[] = [
+  // Inverted by phase 12. This case used to assert `book` was ONE entry whose
+  // senses spanned two parts of speech — the shape that made `booked` inherit
+  // the noun's senses in the infinitive. It is now the worked example of two.
   {
-    label: 'ranking: the common sense first, the rarer one still present',
+    label: 'one lemma, two parts of speech, two entries',
     text: 'book',
     expectKind: 'word',
     acceptTop: ['ספר'],
     expectAlso: ['להזמין', 'הזמנה', 'לשריין'],
-    expectEntries: 1,
-    expectEntrySenses: 2,
+    expectEntries: 2,
+    expectPosOrder: ['noun', 'verb'],
+  },
+  // Both halves of the reported defect in one case: `rejectAny: ['ספר']` is the
+  // reading — an inflected verb form must never reach the noun's senses — and
+  // `rejectTop: ['להזמין']` is the rendering: a past-tense input must not answer
+  // with an infinitive.
+  {
+    label: 'an inflected form: its own part of speech, in its own tense',
+    text: 'booked',
+    expectKind: 'word',
+    acceptTop: ['הזמין', 'תפוס'],
+    rejectAny: ['ספר'],
+    rejectTop: ['להזמין'],
+    expectEntryPos: ['verb', 'adjective'],
   },
   {
     label: 'ranking: a homonym with an unrelated second sense',
@@ -42,12 +79,14 @@ export const CASES: EvalCase[] = [
     acceptTop: ['בנק'],
     expectAlso: ['גדה', 'גדת הנהר', 'שפה'],
   },
+  // Three parts of speech of one lemma, which is why the entry cap went 3 -> 6.
   {
-    label: 'senses spanning parts of speech',
+    label: 'three parts of speech of one lemma, under the raised cap',
     text: 'light',
     expectKind: 'word',
     acceptTop: ['אור'],
     expectAlso: ['קל', 'בהיר', 'להדליק'],
+    expectEntries: 3,
   },
   {
     label: 'an idiom translated by meaning, and classified phrase despite being imperative',
@@ -62,12 +101,17 @@ export const CASES: EvalCase[] = [
     expectKind: 'phrase',
     acceptTop: ['נקודת מבט', 'השקפה'],
   },
+  // `expectEntries` is deliberately absent here and on `saw` below. Phase 12
+  // splits entries by part of speech as well as by headword, so the entry COUNT
+  // of an inflected form is no longer a stable property: `running` is the verb
+  // `run`, the noun `run` and arguably an adjective, and all three are correct.
+  // What still holds — and is what this case was ever really about — is that the
+  // form resolves to its headword rather than to itself.
   {
-    label: 'an inflected form still resolves',
+    label: 'an inflected form still resolves to its headword',
     text: 'running',
     expectKind: 'word',
     acceptTop: ['ריצה', 'לרוץ', 'רץ'],
-    expectEntries: 1,
     expectLemma: 'run',
   },
   {
@@ -89,13 +133,54 @@ export const CASES: EvalCase[] = [
     acceptTop: ['מגניב', 'קריר', 'נחמד'],
     expectAlso: ['קריר', 'צונן', 'מגניב'],
   },
+  // Two headwords, and since phase 12 three lexemes: the verb `see`, the noun
+  // `saw` (the tool) and the verb `saw` (to cut). The count is not asserted for
+  // the reason given on `running`; that both headwords are reached is, by
+  // acceptTop and expectAlso together.
   {
     label: 'one string, two headwords: the verb see and the noun saw',
     text: 'saw',
     expectKind: 'word',
     acceptTop: ['ראה', 'לראות'],
     expectAlso: ['מסור', 'לנסר'],
-    expectEntries: 2,
+  },
+  // Phase 13. `water` has two noun senses — the substance you drink and a body
+  // of water you swim in — and Hebrew renders both מים, so the example is the
+  // only thing that can tell the two cards apart. The recorded seed's second
+  // example was "The water was cold.", which fits a glass and a lake equally
+  // and so demonstrates neither. The prompt now requires an example that rules
+  // the other senses out; this is the lock on the sentence that did not.
+  {
+    label: 'an example must rule out the word\'s other senses, not merely contain it',
+    text: 'water',
+    expectKind: 'word',
+    acceptTop: ['מים'],
+    expectAlso: ['להשקות'],
+    rejectExample: ['The water was cold'],
+  },
+  // Phase 13, F2. The model lemmatises verb forms to the base verb every time,
+  // but wavers on participial adjectives: `burnt` came back as the adjective
+  // `burn` while `burned` came back as the adjective `burned`. Two lexemes for
+  // one adjective — British and American spellings of a single word — each with
+  // its own sense list, neither ever able to see the other's, and reconciliation
+  // structurally unable to help because it keys on the lemma that differs.
+  //
+  // The convention is the regular -ed spelling, so both of these must name
+  // `burned`. `burning` is deliberately NOT expected to merge: an active
+  // participle adjective is a different adjective from a passive one.
+  {
+    label: 'a participial adjective names one lemma whichever spelling is typed',
+    text: 'burnt',
+    expectKind: 'word',
+    acceptTop: ['שרוף', 'שרף', 'נשרף'],
+    expectLemmaFor: { adjective: 'burned' },
+  },
+  {
+    label: 'and the other spelling names the same one',
+    text: 'burned',
+    expectKind: 'word',
+    acceptTop: ['שרף', 'שרוף', 'נשרף'],
+    expectLemmaFor: { adjective: 'burned' },
   },
   {
     label: 'gibberish returns nothing rather than an invented translation',
@@ -103,5 +188,114 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: [],
     expectEmpty: true,
+  },
+];
+
+/**
+ * A case for the **second** call — `buildRenderingPrompt`, which renders a
+ * lexeme the dictionary already holds for a newly queried form.
+ *
+ * Separate from `EvalCase` rather than a variant of it because almost nothing
+ * transfers: there is no `kind` to classify, no entry split to score, and no
+ * ranking across lexemes. What there is instead is a lexeme fixed in advance
+ * and a list of senses already stored against it.
+ */
+export type RenderingCase = {
+  label: string;
+  /** The form a learner typed — what the stored senses must be rendered for. */
+  form: string;
+  direction?: TranslationDirection;
+  /** The lexeme being rendered: a lemma AND a part of speech, since phase 12. */
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  /** What the dictionary already holds for that lexeme, as
+   *  `repo/dictionary.ts`'s findSensesByLexeme would have returned it. */
+  stored: StoredSense[];
+  /** Stored codes that must come back reused, carrying a translation. Reuse is
+   *  the entire reason this call exists — a renamed code stores the meaning
+   *  twice, forever. */
+  expectReused?: string[];
+  /** Must appear as no translation at all. This is how a reading belonging to a
+   *  DIFFERENT lexeme of the same form is rejected: `pressing` is the verb
+   *  `press` and the adjective `pressing`, and the verb's rendering must not
+   *  claim the adjective's meaning. */
+  rejectAny?: string[];
+};
+
+export const RENDERING_CASES: RenderingCase[] = [
+  // The phase 13 defect, reduced to its two inputs. `press`/verb holds these
+  // five senses; the form `pressing` also belongs to a SEPARATE lexeme,
+  // `pressing`/adjective, which call 1 returns as its own entry. Asked what
+  // readings of "pressing" the list below lacks, the model answered דחוף
+  // (urgent) — truthfully, and onto the wrong lexeme. The stored senses are
+  // copied out of the dev database as they stood immediately before the lookup
+  // that produced the duplicate.
+  {
+    label: 'a form spanning two lexemes: the verb must not claim the adjective reading',
+    form: 'pressing',
+    lemma: 'press',
+    partOfSpeech: 'verb',
+    stored: [
+      {
+        senseCode: 'applied_force',
+        translation: 'ללחוץ',
+        exampleSource: 'Press the button firmly.',
+        exampleTarget: 'ללחוץ על הכפתור בחוזקה.',
+      },
+      {
+        senseCode: 'urged_insisted',
+        translation: 'לדחוק',
+        exampleSource: 'They will press him for details.',
+        exampleTarget: 'הם ידחקו בו לפרטים.',
+      },
+      {
+        senseCode: 'extracted_liquid',
+        translation: 'סחט',
+        exampleSource: 'He pressed the grapes for wine.',
+        exampleTarget: 'הוא סחט את הענבים ליין.',
+      },
+      {
+        senseCode: 'ironed_clothes',
+        translation: 'לגהץ',
+        exampleSource: 'She needs to press her uniform.',
+        exampleTarget: 'היא צריכה לגהץ את המדים שלה.',
+      },
+      {
+        senseCode: 'publish_print',
+        translation: 'להדפיס',
+        exampleSource: 'The publisher decided to press more copies of the book.',
+        exampleTarget: 'המוציא לאור החליט להדפיס עותקים נוספים של הספר.',
+      },
+    ],
+    expectReused: ['applied_force', 'urged_insisted', 'extracted_liquid', 'ironed_clothes'],
+    // דחוף is the adjective lexeme's reading. The verb rendering must not carry
+    // it under any code, new or reused.
+    rejectAny: ['דחוף'],
+  },
+  // The counterweight, and it must stay green. Forbidding new sense codes
+  // outright would fix the case above and break this call's actual purpose:
+  // `bank` names a sense river_bank where `banks` would have named it
+  // river_edge, and reuse is what stops the dictionary holding both. A fix that
+  // makes the model afraid to answer shows up here, not above.
+  {
+    label: 'a sense the model would name differently is reused, not stored twice',
+    form: 'banks',
+    lemma: 'bank',
+    partOfSpeech: 'noun',
+    stored: [
+      {
+        senseCode: 'financial_institution',
+        translation: 'בנק',
+        exampleSource: 'The bank approved the loan.',
+        exampleTarget: 'הבנק אישר את ההלוואה.',
+      },
+      {
+        senseCode: 'river_bank',
+        translation: 'גדה',
+        exampleSource: 'We sat on the bank of the river.',
+        exampleTarget: 'ישבנו על גדת הנהר.',
+      },
+    ],
+    expectReused: ['financial_institution', 'river_bank'],
   },
 ];
