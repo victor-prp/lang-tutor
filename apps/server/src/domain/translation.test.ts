@@ -7,7 +7,9 @@ import {
   normalizeSenses,
   parseLlmReconciliation,
   parseLlmTranslation,
+  resolveCorrection,
   resolveKind,
+  tidyAlternatives,
 } from './translation';
 
 describe('detectDirection', () => {
@@ -520,5 +522,203 @@ describe('parseLlmTranslation and an absent or null alternatives list', () => {
     );
     expect(parsed?.correction?.corrected_form).toBe('throat');
     expect(parsed?.correction?.alternatives).toBeUndefined();
+  });
+});
+
+describe('tidyAlternatives', () => {
+  const ctx = { correctedForm: 'throat', typedForm: 'thruot' };
+
+  it('turns an absent list into an empty one, which is what the wire schema requires', () => {
+    expect(tidyAlternatives(undefined, ctx)).toEqual([]);
+  });
+
+  it('normalizes each entry the same way the corrected form is normalized', () => {
+    expect(tidyAlternatives(['  Throughout.  ', 'thro   at'], ctx)).toEqual([
+      'Throughout',
+      'thro at',
+    ]);
+  });
+
+  it('drops an entry with no letter or digit', () => {
+    expect(tidyAlternatives(['???', '   ', 'throughout'], ctx)).toEqual(['throughout']);
+  });
+
+  it('removes duplicates of the corrected form, of the typed form, and of one another', () => {
+    expect(
+      tidyAlternatives(['Throat', 'THRUOT', 'throughout', 'Throughout'], ctx),
+    ).toEqual(['throughout']);
+  });
+
+  it('truncates to three, keeping the model\'s ranking', () => {
+    expect(tidyAlternatives(['a1', 'b2', 'c3', 'd4', 'e5', 'f6'], ctx)).toEqual([
+      'a1',
+      'b2',
+      'c3',
+    ]);
+  });
+
+  // Idempotent by construction, which is what lets persistCorrection apply it a
+  // second time on the way into the database without the two callers being able
+  // to disagree.
+  it('leaves an already-tidy list unchanged', () => {
+    const tidy = tidyAlternatives(['throughout', 'throaty'], ctx);
+    expect(tidyAlternatives(tidy, ctx)).toEqual(tidy);
+  });
+});
+
+describe('resolveCorrection', () => {
+  const entry = {
+    lemma: 'throat',
+    part_of_speech: 'noun' as const,
+    senses: [{ translation: 'גרון', sense_code: 'body_part' }],
+  };
+  const answer = (over: Record<string, unknown> = {}) => ({
+    kind: 'word' as const,
+    entries: [entry],
+    ...over,
+  });
+  const en = { typedForm: 'thruot', direction: 'en_he' as const };
+
+  it('leaves an uncorrected answer on the typed form', () => {
+    const resolved = resolveCorrection(answer(), en);
+    expect(resolved).toEqual({ effectiveForm: 'thruot', kind: 'word' });
+  });
+
+  it('substitutes the corrected form and carries the tidied alternatives', () => {
+    const resolved = resolveCorrection(
+      answer({ correction: { corrected_form: 'throat', alternatives: ['throughout'] } }),
+      en,
+    );
+    expect(resolved).toEqual({
+      correction: { corrected_form: 'throat', alternatives: ['throughout'] },
+      effectiveForm: 'throat',
+      kind: 'word',
+    });
+  });
+
+  // Guard 1. Removes a whole class of "did you mean throat? — showing results
+  // for throat".
+  it('drops a corrected form that normalizes to the typed form, case-insensitively', () => {
+    const resolved = resolveCorrection(
+      answer({ correction: { corrected_form: '  Thruot.  ' } }),
+      en,
+    );
+    expect(resolved).toEqual({ effectiveForm: 'thruot', kind: 'word' });
+  });
+
+  // Guard 2, written as a content test rather than as "normalizes to the empty
+  // string" — which is what an earlier revision specified and which does not do
+  // the job. normalizeForm returns the input UNCHANGED whenever stripping would
+  // empty it (`stripped === '' ? collapsed : stripped`), so normalizeForm('???')
+  // is '???': it would clear an empty-string test, clear guard 1, become the
+  // effective form, and be written as a dict_variants.form and as a redirect
+  // target. Only a whitespace-only string normalizes to '' at all.
+  it('drops a corrected form with no letter or digit, ??? included', () => {
+    for (const corrected of ['???', '  ', '...']) {
+      expect(resolveCorrection(answer({ correction: { corrected_form: corrected } }), en))
+        .toEqual({ effectiveForm: 'thruot', kind: 'word' });
+    }
+  });
+
+  // Guard 3. Detection is scoped to words and phrases, so a sentence carrying a
+  // correction is the model ignoring its instructions rather than a case to
+  // handle. The ENTRIES are kept — a sentence is never written to the dictionary,
+  // so nothing is poisoned, and refusing the answer outright would fail a request
+  // the model translated correctly over a field it was told not to send.
+  it('drops a correction on a sentence but keeps the answer', () => {
+    const resolved = resolveCorrection(
+      answer({ kind: 'sentence', correction: { corrected_form: 'I have a sore throat' } }),
+      { typedForm: 'I have a sore thruot', direction: 'en_he' },
+    );
+    expect(resolved).toEqual({ effectiveForm: 'I have a sore thruot', kind: 'sentence' });
+  });
+
+  // Guard 4, and the only one that is not a drop. The case is a transliteration —
+  // `shalom` typed under en_he, which is not an English word and is plausibly the
+  // Hebrew one, and the prompt's "either language" wording is what licenses the
+  // model to name it. Dropping would not help: the entries describe the corrected
+  // headword, so they are wrong in the same way. Left unchecked, `effectiveForm`
+  // would be a Hebrew string written as an English variant, the redirect stored
+  // under `en`, and the entries the product of an English-to-Hebrew prompt asked
+  // about a Hebrew headword. A wrong row is permanent; a failed request costs one
+  // retry.
+  it('returns null when the corrected form is in the other script', () => {
+    expect(
+      resolveCorrection(answer({ correction: { corrected_form: 'שלום' } }), {
+        typedForm: 'shalom',
+        direction: 'en_he',
+      }),
+    ).toBeNull();
+    expect(
+      resolveCorrection(answer({ correction: { corrected_form: 'hello' } }), {
+        typedForm: 'הלו',
+        direction: 'he_en',
+      }),
+    ).toBeNull();
+  });
+
+  it('truncates a fourth alternative rather than rejecting the answer', () => {
+    const resolved = resolveCorrection(
+      answer({
+        correction: { corrected_form: 'throat', alternatives: ['a1', 'b2', 'c3', 'd4'] },
+      }),
+      en,
+    );
+    expect(resolved?.correction?.alternatives).toEqual(['a1', 'b2', 'c3']);
+  });
+
+  it('collapses two identical alternatives to one', () => {
+    const resolved = resolveCorrection(
+      answer({ correction: { corrected_form: 'throat', alternatives: ['Throughout', 'throughout'] } }),
+      en,
+    );
+    expect(resolved?.correction?.alternatives).toEqual(['Throughout']);
+  });
+
+  // THE ORDERING TRAP, and the assertion an implementation is most likely to
+  // miss. Two things must be true of this answer, not one: it carries no
+  // correction, AND its kind was not derived from the corrected form. Clearing at
+  // the return instead of before the effective form passes the first and fails
+  // the second.
+  it('clears a correction on empty entries BEFORE the effective form is computed', () => {
+    const resolved = resolveCorrection(
+      { kind: 'phrase', entries: [], correction: { corrected_form: 'zxq wbtl' } },
+      { typedForm: 'zxqwbtl', direction: 'en_he' },
+    );
+    expect(resolved?.correction).toBeUndefined();
+    expect(resolved?.effectiveForm).toBe('zxqwbtl');
+    expect(resolved?.kind).toBe('word');
+  });
+
+  it('normalizes the corrected form, so no .-suffixed key can reach the dictionary', () => {
+    const resolved = resolveCorrection(
+      answer({ correction: { corrected_form: 'Throat.', alternatives: ['Throughout!'] } }),
+      en,
+    );
+    expect(resolved?.effectiveForm).toBe('Throat');
+    expect(resolved?.correction?.corrected_form).toBe('Throat');
+    expect(resolved?.correction?.alternatives).toEqual(['Throughout']);
+  });
+
+  // One fact read from both sides. The first half is the clamp firing on a
+  // single-token corrected form — the half resolveKind handles. The second is
+  // deliberately the uncomfortable one: it pins that the server CANNOT fix a
+  // multi-token corrected form and that the fourth prompt rule is load-bearing.
+  // An earlier revision asserted the opposite and would have passed only by
+  // accident of the stub.
+  it('runs resolveKind against the corrected form, clamping one token and deferring otherwise', () => {
+    expect(
+      resolveCorrection(answer({ kind: 'phrase', correction: { corrected_form: 'booked' } }), {
+        typedForm: 'bokked',
+        direction: 'en_he',
+      })?.kind,
+    ).toBe('word');
+
+    expect(
+      resolveCorrection(answer({ kind: 'word', correction: { corrected_form: 'break a leg' } }), {
+        typedForm: 'breakaleg',
+        direction: 'en_he',
+      })?.kind,
+    ).toBe('word');
   });
 });

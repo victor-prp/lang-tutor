@@ -2,11 +2,14 @@ import type {
   LlmReconciliation,
   LlmTranslation,
   PartOfSpeech,
+  TranslationCorrection,
   TranslationDirection,
   TranslationKind,
   TranslationSense,
 } from '@lang-tutor/core/api';
 import { LlmReconciliationSchema, LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
+
+import { normalizeForm } from './dictionary';
 
 /**
  * The pure core of translation: which way round the request is, what to ask the
@@ -52,6 +55,149 @@ export function detectDirection(text: string): TranslationDirection {
  */
 export function resolveKind(text: string, modelKind: TranslationKind): TranslationKind {
   return /\s/.test(text.trim()) ? modelKind : 'word';
+}
+
+/**
+ * A form is usable as a dictionary key only if it contains something to look up.
+ *
+ * Written as a CONTENT test and not as "normalizes to the empty string", which
+ * would fire on almost nothing: `normalizeForm` returns its input unchanged
+ * whenever stripping a trailing sentence mark would empty it (phase 12's F4
+ * branch), so `normalizeForm('???')` is `'???'`. Only a whitespace-only string —
+ * which `.min(1)` barely admits — normalizes to `''` at all. Letter-or-digit
+ * covers whitespace, punctuation, and any mixture of them.
+ */
+const HAS_CONTENT = /[\p{L}\p{N}]/u;
+
+/**
+ * The alternatives, tidied rather than rejected. Truncating is deliberate: the
+ * alternative was failing a whole answer over a decorative field.
+ *
+ * **Two callers, which is why it is a named function.** The guards call it so the
+ * response the model's own answer produces is right, and `persistCorrection`
+ * calls it again on the way into the database, so the three-item cap is a
+ * property of the WRITE rather than of one caller — `dict:restore` reaches the
+ * repository without passing through `domain/` at all, exactly as `dictImport`
+ * already does. Idempotent by construction: tidying an already-tidy list returns
+ * it unchanged, so the second application costs nothing and the two callers
+ * cannot disagree.
+ *
+ * `undefined` is a real input, not defensiveness: `LlmCorrectionSchema.alternatives`
+ * is `.optional()` rather than `.default([])`, so a model that omits the key hands
+ * this function an `undefined`, and turning it into `[]` here is what keeps a
+ * missing decorative field from reaching the wire schema, which requires the array.
+ */
+export function tidyAlternatives(
+  alternatives: string[] | undefined,
+  context: { correctedForm: string; typedForm: string },
+): string[] {
+  // Seeded with both forms, so an alternative that merely repeats one of them is
+  // removed by the same pass that removes a repeat of another alternative.
+  // Case-insensitive, and the FIRST occurrence is the one kept, so the model's
+  // ranking survives.
+  const seen = new Set([context.correctedForm.toLowerCase(), context.typedForm.toLowerCase()]);
+  const tidied: string[] = [];
+
+  for (const raw of alternatives ?? []) {
+    const form = normalizeForm(raw);
+    if (!HAS_CONTENT.test(form)) continue;
+    const key = form.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tidied.push(form);
+    if (tidied.length === 3) break;
+  }
+
+  return tidied;
+}
+
+/** What the service needs from a parsed answer before it touches a database:
+ *  which form the rest of the pipeline is about, what `kind` that form is, and
+ *  the correction block to attach to the response — if any survived. */
+export type ResolvedCorrection = {
+  correction?: TranslationCorrection;
+  effectiveForm: string;
+  kind: TranslationKind;
+};
+
+/**
+ * The four guards, the empty-entries clearing, the normalization of both forms
+ * and `resolveKind` — one pure function, applied to the parsed answer before
+ * phase 12's early return, so a dropped correction costs no database read and no
+ * second model call.
+ *
+ * **`null` means the answer is unusable**, which is the fourth guard and the only
+ * one that is not a drop. `domain/` cannot throw `TranslationUnreadable` — R3
+ * forbids importing `../errors` — so the caller raises, the arrangement
+ * `parseLlmTranslation` already uses.
+ *
+ * **The clearing runs before the effective form is computed, and that ordering is
+ * the point.** `kind` is computed from `effectiveForm`, and phase 12's
+ * empty-entries early return carries that `kind` — so a correction the response
+ * declines to report would already have changed the answer by the time the early
+ * return runs. A model answering `zxqwbtl` with `entries: []` and
+ * `corrected_form: "zxq wbtl"` would otherwise return `kind: 'phrase'` for a
+ * single-token input: no correction block, no rows written, and a `kind` that came
+ * from a correction the response denies carrying.
+ *
+ * Two callers: `services/translations.ts` at step 4 of the flow, and the eval
+ * harness's `askModel`, which is what lets that bucket score the `kind` the server
+ * would actually have written rather than a copy of the logic.
+ */
+export function resolveCorrection(
+  parsed: LlmTranslation,
+  context: { typedForm: string; direction: TranslationDirection },
+): ResolvedCorrection | null {
+  // The kind the answer has BEFORE any substitution. It is what the drop paths
+  // return, and it is what the sentence guard reads: `resolveKind` against the
+  // typed form is the clamp the request already earns, so a single token the
+  // model called a sentence is a `word` here and keeps its correction, while a
+  // genuine multi-token sentence loses it.
+  const typedKind = resolveKind(context.typedForm, parsed.kind);
+  const uncorrected: ResolvedCorrection = {
+    effectiveForm: context.typedForm,
+    kind: typedKind,
+  };
+
+  // The fifth rule, deliberately not listed as a guard: it is a test on the
+  // ENTRIES, not on the correction's content, and where it runs matters more than
+  // what it does — see the ordering note above.
+  if (!parsed.correction || parsed.entries.length === 0) return uncorrected;
+
+  // Guard 3, first because it is the cheapest and scopes the whole feature:
+  // detection is words and phrases. "I have a sore thruot" is out of scope.
+  if (typedKind === 'sentence') return uncorrected;
+
+  // Never the model's string as it arrived. What `normalizeForm` returns IS the
+  // dictionary key, and phase 12 added trailing-punctuation stripping to it
+  // precisely because the dev database held `book` with three senses and `book?`
+  // with four. A model answering `corrected_form: "Throat."` would otherwise write
+  // exactly that as a dict_variants.form and as a redirect target.
+  const correctedForm = normalizeForm(parsed.correction.corrected_form);
+
+  // Guard 1 — "did you mean throat? showing results for throat".
+  if (correctedForm.toLowerCase() === context.typedForm.toLowerCase()) return uncorrected;
+  // Guard 2 — see HAS_CONTENT.
+  if (!HAS_CONTENT.test(correctedForm)) return uncorrected;
+  // Guard 4 — the answer is unusable, not merely uncorrected. `direction` was
+  // detected from the typed script before call 1 and is fixed for the request.
+  if (detectDirection(correctedForm) !== context.direction) return null;
+
+  return {
+    correction: {
+      corrected_form: correctedForm,
+      alternatives: tidyAlternatives(parsed.correction.alternatives, {
+        correctedForm,
+        typedForm: context.typedForm,
+      }),
+    },
+    effectiveForm: correctedForm,
+    // Against the CORRECTED form, which is what makes `bokked` → `booked` a
+    // `word` even when the model answered `phrase`. It is not the whole of the
+    // job: the clamp fires only on a single token, so a multi-token corrected
+    // form is the model's call and the fourth prompt rule is what secures it.
+    kind: resolveKind(correctedForm, parsed.kind),
+  };
 }
 
 const LANGUAGE_NAMES = {
