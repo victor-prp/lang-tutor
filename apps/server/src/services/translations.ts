@@ -404,6 +404,55 @@ export function createTranslationService({
         return { text, direction, kind: direct.kind, senses: direct.senses };
       }
 
+      // Step 2. One indexed lookup, its own read — R8 permits it, and it is
+      // reached ONLY when the typed form has no rows, a path that otherwise costs
+      // a provider call measured in seconds.
+      //
+      // NOT folded into `serveForm`: that function owns its own read transaction,
+      // which is exactly what makes it reusable, and folding this in would mean
+      // passing a redirect lookup through a function that knows nothing about
+      // redirects.
+      const redirect = await transaction((repos) =>
+        repos.dict.findCorrectionByForm({ form, languageCode: source }),
+      );
+
+      if (redirect) {
+        // Step 3 is step 1 with a different argument, and that is the whole of the
+        // fix. A redirect hit is byte-identical to typing the correct spelling
+        // because the SAME function produces both, staleness probe and repair
+        // included. The correction block is attached AFTER serveForm returns and
+        // changes neither field it produced.
+        const served = await serveForm({
+          llm,
+          transaction,
+          form: redirect.correctedForm,
+          direction,
+          source,
+          target,
+          logger,
+        });
+        if (served) {
+          logger.info({
+            event: 'dict_redirect_hit',
+            direction,
+            alternative_count: redirect.alternatives.length,
+          });
+          return {
+            text,
+            direction,
+            kind: served.kind,
+            senses: served.senses,
+            correction: {
+              corrected_form: redirect.correctedForm,
+              alternatives: redirect.alternatives,
+            },
+          };
+        }
+        // A miss falls through to the model with the redirect DISCARDED. It is
+        // deliberately not reused to rewrite the query: see Task 9's
+        // "the model declines" note.
+      }
+
       const raw = await llm(buildPrompt({ text, direction }));
 
       // An empty string is the contract's "no content" — a safety block, or a

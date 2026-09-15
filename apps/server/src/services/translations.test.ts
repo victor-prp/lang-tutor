@@ -8,6 +8,7 @@ import {
 } from '../../tests/support/fakes';
 import type { SenseRow } from '../domain/dictionary';
 import { LlmUnavailable, TranslationUnreadable } from '../errors';
+import type { CorrectionRow } from '../repo/dictionary';
 import { createTranslationService } from './translations';
 
 const reply = (payload: unknown) => JSON.stringify(payload);
@@ -170,7 +171,7 @@ describe('translate', () => {
 
   it('serves a hit from the database and calls the model zero times', async () => {
     const { service, llm, dict, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
-    dict.hit = [row('סולם')];
+    dict.hit = { ladder: [row('סולם')] };
 
     const result = await service.translate({ text: 'ladder' });
 
@@ -191,7 +192,7 @@ describe('translate', () => {
     // recorded that way by the entry_rank 0 variant, and the hit path must
     // honour it rather than guess.
     const { service, dict } = serviceWith(reply({ kind: 'word', entries: [] }));
-    dict.hit = [row('לזכור', { kind: 'word' })];
+    dict.hit = { 'to remember': [row('לזכור', { kind: 'word' })] };
 
     const result = await service.translate({ text: 'to remember' });
 
@@ -372,10 +373,10 @@ describe('translate', () => {
     const { service, dict, logger } = serviceWith(
       reply({ senses: [{ sense_code: 'rung', translation: 'שלב' }] }),
     );
-    dict.hit = [row('סולם', { lexemeId: 't-1' })];
-    dict.stale = [
-      { lexemeId: 't-1', variantId: 'v-1', lemma: 'ladder', partOfSpeech: 'noun' },
-    ];
+    dict.hit = { ladder: [row('סולם', { lexemeId: 't-1' })] };
+    dict.stale = {
+      ladder: [{ lexemeId: 't-1', variantId: 'v-1', lemma: 'ladder', partOfSpeech: 'noun' }],
+    };
     // `repairForm` keeps only a rendering whose sense_code is already stored for
     // this lexeme (an unknown code names no sense, and a repair may not invent
     // one). Without this the model's reply above matches nothing, the repair
@@ -542,5 +543,114 @@ describe('reconciliation', () => {
       reused: 1,
       newly_named: 1,
     });
+  });
+});
+
+describe('the stored redirect', () => {
+  const redirect = (over: Partial<CorrectionRow> = {}): CorrectionRow => ({
+    typedForm: 'thruot',
+    correctedForm: 'throat',
+    alternatives: ['throughout'],
+    ...over,
+  });
+
+  it('answers a known typo from the corrected form, with NO provider call', async () => {
+    const { service, llm, dict, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
+    dict.corrections = { thruot: redirect() };
+    dict.hit = { throat: [row('גרון', { kind: 'word' })] };
+
+    const result = await service.translate({ text: 'thruot' });
+
+    expect(llm.calls).toHaveLength(0);
+    expect(result.senses).toEqual([{ translation: 'גרון' }]);
+    expect(result.kind).toBe('word');
+    // The typed string survives in exactly two places: the response's `text`, and
+    // the dict_corrections row.
+    expect(result.text).toBe('thruot');
+    expect(result.correction).toEqual({ corrected_form: 'throat', alternatives: ['throughout'] });
+    const events = logger.events.map((event) => event.event);
+    expect(events).toContain('dict_redirect_hit');
+    // A redirect hit is NOT also a cache hit. The ratio between the two events is
+    // precisely what the second one exists to show.
+    expect(events).not.toContain('dict_cache_hit');
+  });
+
+  // Step 1 precedes step 2, permanently. A string that is a real form in its own
+  // right is never routed away from itself, even if a redirect for it exists —
+  // which is the same rule that makes a typo shadow its own redirect once a
+  // variant is written for it.
+  it('never consults a redirect for a form that has rows of its own', async () => {
+    const { service, dict, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
+    dict.corrections = { throat: redirect({ typedForm: 'throat', correctedForm: 'throughout' }) };
+    dict.hit = { throat: [row('גרון', { kind: 'word' })] };
+
+    const result = await service.translate({ text: 'throat' });
+
+    expect(result.correction).toBeUndefined();
+    expect(result.senses).toEqual([{ translation: 'גרון' }]);
+    expect(logger.events.map((event) => event.event)).toContain('dict_cache_hit');
+  });
+
+  it('falls through to the model when the redirect target has no rows', async () => {
+    const { service, llm, dict } = serviceWith(
+      reply({
+        kind: 'word',
+        ...oneEntry('thruot', [{ translation: 'גרון', sense_code: 'body_part' }]),
+      }),
+    );
+    dict.corrections = { thruot: redirect() };
+    dict.hit = {};
+
+    await service.translate({ text: 'thruot' });
+
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  // Step 3 goes through serveForm, staleness probe and repair included. Read the
+  // rows directly here instead and `thruot` would serve two senses forever while
+  // `throat` kept converging on three — permanently, since a redirect hit makes no
+  // provider call and nothing else visits that path.
+  //
+  // What this asserts is that the repair RAN, not what it produced. `repairForm`
+  // closes with `findSensesByForm(form)`, which in this fake reads `dict.hit`
+  // again and so returns the same rows before and after — `dict.reread` feeds
+  // `persistEntries`, not the repair. Proving the repair CHANGED the answer needs
+  // real rows, and that is the integration bucket's job (Task 11's byte-identical
+  // case).
+  it('repairs a stale redirect target, with exactly one provider call', async () => {
+    const { service, llm, dict } = serviceWith(
+      reply({ senses: [{ sense_code: 'body_part', translation: 'צוואר' }] }),
+    );
+    dict.corrections = { thruot: redirect() };
+    dict.hit = { throat: [row('גרון', { lexemeId: 't-1', kind: 'word' })] };
+    dict.stale = {
+      throat: [{ lexemeId: 't-1', variantId: 'v-1', lemma: 'throat', partOfSpeech: 'noun' }],
+    };
+    dict.stored['throat:noun'] = [
+      { senseCode: 'body_part', translation: 'גרון', exampleSource: null, exampleTarget: null },
+    ];
+
+    const result = await service.translate({ text: 'thruot' });
+
+    // The repair call, and only it — a redirect hit pays no call 1.
+    expect(llm.calls).toHaveLength(1);
+    expect(llm.calls[0].system).toContain('reusing its sense_code EXACTLY');
+    expect(llm.calls[0].user).toBe('throat');
+    expect(dict.repaired).toEqual([{ variantId: 'v-1', senseVersion: 0 }]);
+    expect(result.correction).toEqual({ corrected_form: 'throat', alternatives: ['throughout'] });
+  });
+
+  // The convention every other event in this file holds to, and the one a new
+  // event is most likely to break.
+  it('keeps the learner\'s text out of both new events', async () => {
+    const { service, dict, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
+    dict.corrections = { thruot: redirect() };
+    dict.hit = { throat: [row('גרון', { kind: 'word' })] };
+
+    await service.translate({ text: 'thruot' });
+
+    const serialized = JSON.stringify(logger.events);
+    expect(serialized).not.toContain('thruot');
+    expect(serialized).not.toContain('throat');
   });
 });
