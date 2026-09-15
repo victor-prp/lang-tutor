@@ -296,20 +296,27 @@ export const CASES: EvalCase[] = [
     acceptTop: ['צבע'],
     expectNoCorrection: true,
   },
-  // Symmetry across directions, and the Hebrew-side risk with no clean answer:
-  // ktiv male against ktiv haser and optional nikud mean many valid Hebrew
-  // spellings differ from each other, and normalizeForm deliberately strips
-  // neither — so the model may report a VALID alternative spelling as a
-  // misspelling and write a permanent redirect away from it. This single line
-  // matters more than its length suggests.
-  {
-    label: 'a Hebrew misspelling, for symmetry across directions',
-    text: 'שולחם',
-    direction: 'he_en',
-    expectKind: 'word',
-    acceptTop: ['table'],
-    expectCorrection: 'שולחן',
-  },
+  // THERE IS DELIBERATELY NO HEBREW CORRECTION CASE, and the reason is worth
+  // keeping so nobody adds one back on the same reasoning that failed.
+  //
+  // Phase 13 shipped one — `שולחם` expecting a correction to `שולחן` (table) —
+  // and the first eval run against a real model failed it. The model read
+  // `שולחם` as a legitimate inflected form of `שלח` and answered "it was sent to
+  // them", which is defensible: the string IS a real Hebrew form. So the case
+  // demanded the model "correct" a genuine word, which is precisely what the
+  // `running`, `booked`, `saw` and `colour` cases above exist to prove it must
+  // NOT do. The case contradicted the feature it was meant to measure, and it
+  // also failed two tier 1 checks because the answer carried empty examples.
+  //
+  // This is the Hebrew-side risk the design flagged and could not resolve: ktiv
+  // male against ktiv haser and optional nikud mean many valid Hebrew spellings
+  // differ from one another, and `normalizeForm` deliberately strips neither —
+  // so a Hebrew string that is unambiguously a misspelling and not merely an
+  // alternative spelling is genuinely hard to choose. A replacement needs a
+  // string no reading can make into a real word (a non-final letter in final
+  // position is one candidate), and it needs an eval run to confirm the model
+  // agrees before it is trusted. Correction behaviour is currently measured in
+  // English only.
 ];
 
 /**
