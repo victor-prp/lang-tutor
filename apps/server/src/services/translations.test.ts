@@ -360,6 +360,37 @@ describe('translate', () => {
       { event: 'translated', direction: 'en_he', kind: 'word', sense_count: 1 },
     ]);
   });
+
+  // After the extraction the hit log lives in `translate` and fires for every
+  // step-1 hit, repaired or not: `serveForm` logs the repair events — they
+  // describe the repair whichever path reached it — and never the hit, because
+  // only the caller knows whether it was a cache hit or a redirect hit. Before
+  // the extraction a SUCCESSFUL repair returned without logging dict_cache_hit
+  // while a FAILED one fell through and logged it, which is the inconsistency
+  // this pins away.
+  it('logs a cache hit whether or not the hit needed a repair', async () => {
+    const { service, dict, logger } = serviceWith(
+      reply({ senses: [{ sense_code: 'rung', translation: 'שלב' }] }),
+    );
+    dict.hit = [row('סולם', { lexemeId: 't-1' })];
+    dict.stale = [
+      { lexemeId: 't-1', variantId: 'v-1', lemma: 'ladder', partOfSpeech: 'noun' },
+    ];
+    // `repairForm` keeps only a rendering whose sense_code is already stored for
+    // this lexeme (an unknown code names no sense, and a repair may not invent
+    // one). Without this the model's reply above matches nothing, the repair
+    // throws, and the test would exercise a FAILED repair instead of the
+    // successful one this test is about.
+    dict.stored['ladder:noun'] = [
+      { senseCode: 'rung', translation: 'שלב-ישן', exampleSource: null, exampleTarget: null },
+    ];
+
+    await service.translate({ text: 'ladder' });
+
+    const events = logger.events.map((event) => event.event);
+    expect(events).toContain('dict_repaired');
+    expect(events).toContain('dict_cache_hit');
+  });
 });
 
 // Phase 12's second model call. Two independent lookups of one lexeme name the

@@ -2,8 +2,10 @@ import type {
   LlmEntry,
   PartOfSpeech,
   TranslationDirection,
+  TranslationKind,
   TranslationRequest,
   TranslationResponse,
+  TranslationSense,
 } from '@lang-tutor/core/api';
 
 import {
@@ -264,6 +266,98 @@ async function repairForm({
   });
 }
 
+/** What one form resolves to. `rows` travels with the answer because the hit log
+ *  counts distinct lexemes, and only the CALLER logs the hit. */
+type ServedForm = {
+  kind: TranslationKind;
+  senses: TranslationSense[];
+  rows: SenseRow[];
+};
+
+/**
+ * Resolve one form to an answer: read its rows beside its stale lexemes, repair
+ * it where a lexeme is ahead, and answer from the rows actually served. `null` is
+ * a MISS.
+ *
+ * This is phase 12's F5 hit path, lifted out of `translate` and given a parameter.
+ * It is not new behaviour and not new machinery — naming it is what lets a
+ * redirect reach the SAME path rather than a parallel one. Steps 1, 3 and 5b of
+ * the flow all call it, with `form`, with a stored redirect's target, and with the
+ * corrected form; "byte-identical to typing the correct spelling" is then the same
+ * code path called twice rather than a hope about two staying in step.
+ *
+ * Module-private, like `reconcile` and `repairForm` above: one step of one use
+ * case, not a primitive (ADR 0001 R9).
+ *
+ * **The repair events are logged HERE and the hit is NOT.** `dict_repaired` and
+ * `dict_repair_failed` describe the repair whichever path reached it. The hit
+ * belongs to the caller, which is the only place that knows whether it was a cache
+ * hit or a redirect hit — and the ratio between those two is precisely what
+ * `dict_redirect_hit` exists to show. Extracted with the hit log still inside,
+ * every redirect hit would be counted as a cache hit as well.
+ *
+ * **Its own read transaction**, which is exactly what makes it reusable, and the
+ * reason step 2's redirect lookup is NOT folded into it: that would mean passing a
+ * redirect lookup through a function that knows nothing about redirects. R8 permits
+ * these reads — each precedes third-party I/O.
+ */
+async function serveForm({
+  llm,
+  transaction,
+  form,
+  direction,
+  source,
+  target,
+  logger,
+}: {
+  llm: LlmClient;
+  transaction: Transaction;
+  form: string;
+  direction: TranslationDirection;
+  source: string;
+  target: string;
+  logger: Logger;
+}): Promise<ServedForm | null> {
+  const { rows, stale } = await transaction(async (repos) => ({
+    rows: await repos.dict.findSensesByForm({
+      form,
+      languageCode: source,
+      userLanguageCode: target,
+    }),
+    stale: await repos.dict.findStaleLexemesByForm({ form, languageCode: source }),
+  }));
+
+  // Checked FIRST: a variant with no renderings in this target language is a
+  // MISS, not a repair, even if its lexeme is ahead. It has never been looked up.
+  if (rows.length === 0) return null;
+
+  let answerRows = rows;
+  if (stale.length > 0) {
+    // The repair reuses buildRenderingPrompt verbatim: "here is everything this
+    // lexeme knows, render it for THIS form and rank it for THIS form" is exactly
+    // what a repair needs, and that prompt is eval-scored.
+    try {
+      answerRows = await repairForm({ llm, transaction, form, direction, stale, source, target });
+      // Counts and direction, like every other event in this file. The learner's
+      // query text stays out of the log.
+      logger.info({ event: 'dict_repaired', direction, lexeme_count: stale.length });
+    } catch (error) {
+      // Deliberately NOT the fail-closed path. A failed repair writes nothing, so
+      // the stored rows stand — correct when written, merely incomplete. Failing
+      // the request would deny a learner an answer the dictionary already holds,
+      // to protect them from an answer that is not wrong.
+      logger.error('dict_repair_failed', error);
+      answerRows = rows;
+    }
+  }
+
+  // BOTH fields off the rows actually served, so a repair re-ranks the answer it
+  // returns. `kind` is read, never guessed: it is written by the persisting call
+  // onto the entry_rank 0 variant and read back by `kindForForm`, so a hit answers
+  // with what was actually stored rather than a re-derived guess that can disagree.
+  return { kind: kindForForm(answerRows), senses: rowsToSenses(answerRows), rows: answerRows };
+}
+
 /**
  * One use case: translate a word, phrase or sentence, reusing what the
  * dictionary already holds.
@@ -297,44 +391,17 @@ export function createTranslationService({
       const { source, target } = languagesFor(direction);
       const form = normalizeForm(text);
 
-      const { hit, stale } = await transaction(async (repos) => ({
-        hit: await repos.dict.findSensesByForm({ form, languageCode: source, userLanguageCode: target }),
-        stale: await repos.dict.findStaleLexemesByForm({ form, languageCode: source }),
-      }));
-
-      if (hit.length > 0 && stale.length > 0) {
-        // The repair reuses buildRenderingPrompt verbatim: "here is everything
-        // this lexeme knows, render it for THIS form and rank it for THIS
-        // form" is exactly what a repair needs, and that prompt is eval-scored.
-        try {
-          const repaired = await repairForm({ llm, transaction, form, direction, stale, source, target });
-          // Counts and direction, like every other event in this file. The
-          // learner's query text stays out of the log.
-          logger.info({ event: 'dict_repaired', direction, lexeme_count: stale.length });
-          return { text, direction, kind: kindForForm(repaired), senses: rowsToSenses(repaired) };
-        } catch (error) {
-          // Deliberately NOT the fail-closed path. A failed repair writes
-          // nothing, so the stored rows stand — correct when written, merely
-          // incomplete. Failing the request would deny a learner an answer the
-          // dictionary already holds, to protect them from an answer that is
-          // not wrong. See the spec's "When the repair fails".
-          logger.error('dict_repair_failed', error);
-        }
-      }
-
-      if (hit.length > 0) {
-        const senses = rowsToSenses(hit);
+      // Step 1 of the flow. The hot path: a correctly spelled word resolves here
+      // exactly as it does today, repair included, and pays nothing for this phase.
+      const direct = await serveForm({ llm, transaction, form, direction, source, target, logger });
+      if (direct) {
         logger.info({
           event: 'dict_cache_hit',
           direction,
-          term_count: new Set(hit.map((row) => row.lexemeId)).size,
-          sense_count: senses.length,
+          term_count: new Set(direct.rows.map((r) => r.lexemeId)).size,
+          sense_count: direct.senses.length,
         });
-        // Read, not guessed: `kind` is written by the persisting call
-        // (`repo/dictionary.ts`) onto the entry_rank 0 variant and read back
-        // by `kindForForm`, so a hit answers with what was actually stored —
-        // never a re-derived guess that can disagree with it.
-        return { text, direction, kind: kindForForm(hit), senses };
+        return { text, direction, kind: direct.kind, senses: direct.senses };
       }
 
       const raw = await llm(buildPrompt({ text, direction }));
