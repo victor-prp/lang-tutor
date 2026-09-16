@@ -3,7 +3,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 
 import { pushEvidence } from './evidence.ts';
 import { decide, type Action } from './filing.ts';
-import { parseReportLoose } from './findings.ts';
+import { parseReportLoose, shotBasename } from './findings.ts';
 import { knownIssuesSchema, renderIssueBody } from './knownIssues.ts';
 
 const MAX_NEW = 3;
@@ -52,7 +52,7 @@ function gh(args: string[]): string {
  */
 function screenshotMarkdown(finding: { evidence: { screenshots: string[] } }): string[] {
   return finding.evidence.screenshots
-    .map((path) => shotUrls.get(path))
+    .map((path) => shotUrls.get(shotBasename(path)))
     .filter((url): url is string => Boolean(url))
     .map((url) => `![screenshot](${url})`);
 }

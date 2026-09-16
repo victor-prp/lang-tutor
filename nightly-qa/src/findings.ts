@@ -129,6 +129,19 @@ export function parseReportLoose(value: unknown): {
 }
 
 /**
+ * The basename of a screenshot reference, whatever form the agent used.
+ *
+ * The brief asks for `shots/f1.png`; the first CI night wrote bare `f1.png` for
+ * every image. A convention in a brief is a request to a model, not a
+ * constraint on it, so every consumer compares by basename and both forms
+ * resolve to the same file. The images themselves are always flat inside the
+ * run's shots directory, so the basename is the whole identity.
+ */
+export function shotBasename(reference: string): string {
+  return reference.split('/').pop() || reference;
+}
+
+/**
  * A referenced screenshot is not the same thing as a screenshot.
  *
  * The evidence rule is satisfied by a filename, and a filename is something the

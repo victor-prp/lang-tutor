@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { checkScreenshots, parseReportLoose, severities } from './findings.ts';
+import { checkScreenshots, parseReportLoose, severities, shotBasename } from './findings.ts';
 
 const path = process.argv[2];
 if (!path) {
@@ -45,9 +45,14 @@ for (const drop of dropped) {
   console.warn(`  dropped    finding ${drop.id}: ${drop.reason}`);
 }
 
-// Screenshot paths in a finding are relative to the findings file itself.
+// Screenshot paths in a finding are relative to the findings file itself. The
+// images are always flat in shots/, so a bare filename and a shots/-prefixed one
+// name the same image - the first CI night produced the bare form for all four.
 const base = dirname(resolve(path));
-const { missing, unevidenced } = checkScreenshots(report, (p) => existsSync(resolve(base, p)));
+const { missing, unevidenced } = checkScreenshots(
+  report,
+  (p) => existsSync(resolve(base, 'shots', shotBasename(p))) || existsSync(resolve(base, p)),
+);
 for (const gap of missing) {
   console.warn(`  missing    finding ${gap.id} cites ${gap.path}, which is not on disk`);
 }

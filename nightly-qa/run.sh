@@ -64,6 +64,21 @@ session_status=$?
 # server log so one directory holds everything the run produced.
 cp -R "$WORK/.out/." "$OUT/" 2>/dev/null || true
 
+# Named screenshots do not land in .out/shots, and this is not a guess: in
+# @playwright/mcp, browser_take_screenshot resolves an explicit `filename`
+# through workspaceFile(), which is path.resolve(cwd, name), and only falls back
+# to outputFile() - the one that honours --output-dir - when no filename is
+# given. The brief asks for named screenshots so a finding can cite one, so every
+# PNG lands in the work directory root instead. The .yml page snapshots arrive in
+# .out/shots correctly precisely because they carry no filename.
+#
+# Collect them here or the night's strongest evidence is thrown away with $WORK.
+mkdir -p "$OUT/shots"
+for png in "$WORK"/*.png; do
+  [ -e "$png" ] || continue
+  cp "$png" "$OUT/shots/"
+done
+
 npx tsx nightly-qa/src/summarize.ts "$OUT/transcript.jsonl"
 if [ $session_status -ne 0 ]; then
   echo "  !!         claude exited $session_status — see $OUT/transcript.jsonl" >&2

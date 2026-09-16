@@ -27,11 +27,10 @@ export function pushEvidence(
     encoding: 'utf8',
   }).trim();
 
+  // Keyed by bare filename. file.ts looks up through shotBasename(), so a
+  // finding citing `shots/f1.png` and one citing `f1.png` both land here.
   for (const image of images) {
-    urls.set(
-      `shots/${image}`,
-      `https://raw.githubusercontent.com/${repo}/${BRANCH}/${runDate}/${image}`,
-    );
+    urls.set(image, `https://raw.githubusercontent.com/${repo}/${BRANCH}/${runDate}/${image}`);
   }
 
   if (!apply) {

@@ -38,8 +38,9 @@ A finding needs, without exception:
 
 When you take a screenshot, give the tool a **bare filename** such as
 `f2-two-identical-senses.png`, with no directory in front of it. A filename with a
-directory in it is written nowhere at all, and the tool still reports success. Then refer
-to it in your findings as `shots/<that filename>`.
+directory in it is written nowhere at all, and the tool still reports success. Then cite it
+in your findings under exactly that same bare filename — do not put a directory in front of
+it there either. The run collects the images for you.
 
 The network log is the strongest evidence you have, and it is what separates a server
 problem from a presentation problem. When the screen shows one meaning, look at what the
@@ -113,7 +114,7 @@ Write two files before you finish. Write `findings.json` **first**.
       "expected": "what you expected",
       "observed": "what happened",
       "evidence": {
-        "screenshots": ["shots/f1.png"],
+        "screenshots": ["f1.png"],
         "network": "the request and what came back",
         "console": []
       },

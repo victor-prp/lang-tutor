@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { checkScreenshots, parseReport, parseReportLoose } from './findings.ts';
+import { checkScreenshots, parseReport, parseReportLoose, shotBasename } from './findings.ts';
 
 const validFinding = {
   id: 'f1',
@@ -173,4 +173,20 @@ test('rejects a match that is neither an issue number nor new', () => {
   assert.throws(() =>
     parseReport({ ...validReport, findings: [{ ...validFinding, match: { new: false } }] }),
   );
+});
+
+test('a screenshot reference resolves by basename whichever form the agent used', () => {
+  assert.equal(shotBasename('shots/f1.png'), 'f1.png');
+  assert.equal(shotBasename('f1.png'), 'f1.png');
+  assert.equal(shotBasename('.out/shots/f1.png'), 'f1.png');
+});
+
+test('the first CI night cited bare filenames, and those still resolve', () => {
+  // Not hypothetical: run 35099189836 wrote "f2-mark-meaning-no-network.png"
+  // while the brief asked for "shots/f2-mark-meaning-no-network.png". The
+  // convention is a request to a model, not a constraint on it, so every
+  // consumer compares by basename rather than trusting the prefix.
+  const onDisk = new Set(['f2-mark-meaning-no-network.png']);
+  const cited = ['f2-mark-meaning-no-network.png', 'shots/f2-mark-meaning-no-network.png'];
+  for (const reference of cited) assert.ok(onDisk.has(shotBasename(reference)), reference);
 });
