@@ -157,7 +157,11 @@ export const TranslationRequestSchema = z.object({
   // reach the model in one call.
   text: z.string().trim().min(1).max(100),
   // Absent means "detect from the script". Present only when the learner taps
-  // the flip control, so a wrong detection is recoverable.
+  // the flip control, which sends the translation it is holding back the other
+  // way: detection would answer that one from the script too, and agree with
+  // this field every time but one — a translation with no Hebrew in it at all,
+  // where a proper noun comes back spelled as it went in and only this field
+  // knows the lookup was meant to be reversed.
   direction: TranslationDirectionSchema.optional(),
 });
 
