@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { loadConfig } from '../config';
 import { createDb } from './client';
+import { ensureDatabase, laneStampFrom } from './ensureDatabase';
 import { runMigrations } from './migrate';
 import { reseedContent } from './reseed';
 import { seedContent } from './seed';
@@ -45,6 +46,12 @@ function correctionsPathFor(dictionaryPath: string): string {
 // same config as the first rather than a copy-pasted connection string.
 async function main(): Promise<void> {
   const { databaseUrl, poolMax } = loadConfig(process.env);
+  // Before the pool: a lane's database is created by nothing else, and opening a
+  // pool against a database that does not exist fails with a driver error that
+  // reads like a configuration mistake.
+  if (await ensureDatabase(databaseUrl, laneStampFrom(process.env))) {
+    console.log(`created ${databaseUrl}`);
+  }
   const { db, close } = createDb(databaseUrl, {
     max: poolMax,
     onError: (error) => console.error('unexpected error on idle Postgres client', error),
