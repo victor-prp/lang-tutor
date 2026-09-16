@@ -175,3 +175,58 @@ leaks no canary. Only positive proof that a session completed counts.
   information" and "two entries with the identical translation and part of speech,
   undifferentiated". Matching prose would be guesswork. Matching the fingerprint line is
   what part B should lean on, and these two runs are its first test fixture.
+
+## First nights in CI
+
+Six dispatched runs on 2026-09-16, all against the real provider, all on the phase branch
+with the repository's default branch temporarily pointed at it — `workflow_dispatch` only
+works for a workflow that already exists on the default branch, and the cron was removed for
+the duration so nothing could fire unattended while that was true.
+
+| Run | Purpose | Result | Wall clock |
+|---|---|---|---|
+| 35099189836 | First CI session, writes nothing | green, **no usable screenshots** | 10 min |
+| 35100575460 | Same, after the screenshot fix | green, 4 PNGs collected | 8 min |
+| 35110251688 | First filing run | 3 issues, 3 capped | 10 min |
+| 35111485954 | Second night, same charter | **0 duplicates** | 12 min |
+| 35112962614 | Fence deliberately breached | **failed at the guard**, no session | 2 min |
+| 35113291702 | Planted defect | filed as a bug, not merged with its neighbour | 8 min |
+
+**Cost and budget.** $1.43, $1.35 and $1.30 per session; 126, 119 and 110 turns against the
+cap of 200. Part A's estimate of roughly $1.50 and 7 to 10 minutes held exactly. The turn cap
+has comfortable headroom and should not be lowered — the deduplication pass is the last thing
+a session does, and it is the part that would be cut.
+
+**One duplicate needed a human, and it was the design working.** Issue #32 was filed with
+`possible-duplicate` against #30. Both are real and distinct — one is a sense whose example
+sentence does not demonstrate it, the other is a poorly ordered sense list — but both landed
+on `wrong-content`, and their fingerprints therefore matched exactly. **`wrong-content` is too
+broad.** It is the catch-all the vocabulary reaches for whenever the content is wrong in some
+way, which is most content defects. A future term like `example-mismatch` or `wrong-order`
+would separate these. `other` never appeared in six runs, so the list is not missing a term
+for something unnameable; it is missing precision in a term it already has.
+
+The flag behaved correctly regardless: it labelled and filed rather than silently merging,
+which is what the design asks for. Over-merging would have hidden #32 completely.
+
+**The check that mattered most, twice.** Three findings across two runs shared
+`dictionary | senses list` with an open issue and were correctly **not** merged:
+`hidden-behind-tap` (#33), `wrong-content` (#32) and `dead-end` (#34, the planted one). Each
+reached a human as a neighbour line in the job summary instead. This is the exact failure
+part A produced by hand, and the reason the duplicate flag fires on a full three-segment
+fingerprint rather than on `screen | element`.
+
+**Deduplication works because the brief lands, not because the code is clever.** On the
+second night the agent read `known-issues.json`, wrote *"Confirmed known issue #28 still
+reproduces"* in one line of its notes, explicitly declined to re-verify #29 and #30, and
+spent the night finding three problems nobody had been told about. That is the behaviour the
+whole phase exists to produce, and it came from four paragraphs of `mission.md`.
+
+**What the first night nearly cost.** It went green, produced five sound findings, and
+carried not one usable image. `browser_take_screenshot` resolves an explicit `filename`
+against the MCP server's working directory and only honours `--output-dir` when no filename
+is given, so every PNG was written to the work directory root and discarded with it. The
+`.yml` page snapshots landed correctly the whole time, which is what made the gap look like
+nothing was wrong. `validate.ts` reported `missing finding f1 cites ...` for all three
+images on that run — the guard part A built worked perfectly, and nobody was reading it.
+A green tick is not a result.

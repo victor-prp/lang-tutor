@@ -1,8 +1,9 @@
 # Nightly QA agent — design
 
-- **Status:** Part A implemented and measured; part B ready to plan. See
-  *Delivery in two phases*, and `nightly-qa/POC-RESULTS.md` for what the two proof-of-
-  concept sessions showed. Everything below that describes the night is still a design.
+- **Status:** Implemented and running. Part A proved the session locally; part B runs it
+  nightly and files what it finds. See *Delivery in two phases*, and
+  `nightly-qa/POC-RESULTS.md` — *First nights in CI* for the six verification runs, their
+  cost, and the one defect they caught in the pipeline itself.
 - **Date:** 2026-09-15
 - **Relationship to earlier work:** the e2e suite
   (`docs/superpowers/specs/2026-08-26-lang-tutor-e2e-testing-design.md`) proved the app and
@@ -527,10 +528,26 @@ swallowed the agent's own output rule; and `expo export` must clear its cache, b
 Metro's cache key excludes the value of the inlined environment variable, so an export after
 a port change silently serves an app pointed at the old server.
 
-**Part B — the night.** `nightly-qa.yml` with its two jobs and dispatch inputs;
-`prepare.sh` and the charter files; `file.ts` with its tests and the deduplication rules;
-the `match` field in the output contract; the artifact. Written against part A's numbers
-and part A's report.
+**Part B — the night. Implemented; see `nightly-qa/POC-RESULTS.md` — *First nights in
+CI*.** `nightly-qa.yml` with its two jobs and dispatch inputs; `prepare.sh` and the charter
+files; `filing.ts` with its tests and `file.ts` with the side effects; `evidence.ts` and the
+orphan screenshot branch; the `match` field in the output contract; the artifact. Written
+against part A's numbers and part A's report.
+
+Six dispatched runs proved it before the first unattended night: a session that writes
+nothing, a filing dry run, one real filing run, a second night on the same charter that
+filed **no duplicate**, a deliberate fence breach that **failed the job before any session
+started**, and a planted defect that arrived as a bug and was correctly not merged with the
+neighbouring issue that shares its screen and element.
+
+Two things the verification found that the design had not anticipated. The first is in
+`@playwright/mcp`: `browser_take_screenshot` honours `--output-dir` only when no `filename`
+is given, and resolves an explicit one against its own working directory instead, so the
+first CI night went green carrying five sound findings and not one usable image. The second
+is that `wrong-content` is too broad a symptom term — two genuinely different defects
+fingerprinted identically through it, and the `possible-duplicate` flag fired on a pair a
+human had to separate. It labelled rather than merged, which is the design behaving
+correctly, but the vocabulary wants a finer term.
 
 ## Out of scope
 
