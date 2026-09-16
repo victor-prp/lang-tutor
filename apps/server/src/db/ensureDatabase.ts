@@ -1,6 +1,11 @@
 import { sql } from 'drizzle-orm';
 
-import { assertDatabaseIdentifier, databaseNameFrom, maintenanceUrlFor } from '../config';
+import {
+  assertDatabaseIdentifier,
+  databaseNameFrom,
+  loadConfig,
+  maintenanceUrlFor,
+} from '../config';
 import { createDb } from './client';
 
 /**
@@ -21,7 +26,10 @@ export function laneStampFrom(env: NodeJS.ProcessEnv): LaneStamp {
   return {
     lane: env.LANE?.trim() || 'main',
     slot: env.LANE_SLOT?.trim() || '0',
-    port: env.PORT?.trim() || '3001',
+    // Through loadConfig rather than a second `|| '3001'`: lane 0's port default
+    // lives in exactly one place (ADR 0006), and loadConfig already treats an
+    // unset, empty or malformed PORT the same way this needs to.
+    port: String(loadConfig(env).port),
     // A checkout run outside the wrapper still stamps something true: cwd is
     // where the command was issued.
     root: env.LANE_ROOT?.trim() || process.cwd(),

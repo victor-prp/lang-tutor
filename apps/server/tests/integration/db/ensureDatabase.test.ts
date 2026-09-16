@@ -8,6 +8,7 @@ import {
   laneStampFrom,
   parseLaneComment,
 } from '../../../src/db/ensureDatabase';
+import { loadConfig } from '../../../src/config';
 import { ADMIN_URL, urlFor } from '../../support/dbNames';
 import { DROP_TIMEOUT_MS, dropDatabases } from '../../support/dropDatabases';
 
@@ -121,7 +122,9 @@ describe('laneStampFrom', () => {
     expect(laneStampFrom({})).toEqual({
       lane: 'main',
       slot: '0',
-      port: '3001',
+      // Read from config rather than written out again: lane 0's port default
+      // has one home, and this asserts the stamp takes it from there.
+      port: String(loadConfig({}).port),
       root: process.cwd(),
       branch: 'unknown',
     });
