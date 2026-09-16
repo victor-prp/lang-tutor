@@ -1,0 +1,155 @@
+name: Nightly QA
+
+# Deliberately not part of ci.yml. This job calls a paid model twice over - the
+# agent and Gemini - and takes half an hour, neither of which belongs on every
+# push. It is also the one workflow whose failure is often a finding rather than
+# a regression.
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      persona:
+        description: 'Override tonight''s persona (blank = by date)'
+        required: false
+      focus:
+        description: 'Override tonight''s focus area (blank = by date)'
+        required: false
+      max_turns:
+        description: 'Turn cap'
+        required: false
+        default: '200'
+      file_issues:
+        description: 'Write to the tracker'
+        type: boolean
+        required: false
+        default: true
+
+# One night at a time. Two sessions against one server would interleave, and a
+# manual dispatch should queue behind the schedule rather than race it. No
+# cancel-in-progress: a half-finished session is wasted money.
+concurrency:
+  group: nightly-qa
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Holds the model. Can READ issues and nothing else - the whole safety
+  # argument for this workflow is that the half with the model cannot write.
+  explore:
+    if: github.repository_owner == 'victor-prp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      # The binary and the native download are separate steps, and a blocked
+      # postinstall leaves a CLI that cannot start. guard.sh would catch it, but
+      # it costs nothing to fail here with a clear message instead.
+      - name: Verify the CLI can start
+        run: claude --version
+
+      # NOT `npx playwright install`. That resolves to the repository's own
+      # Playwright (1.62.1, which e2e pins) and fetches Chromium revision 1234,
+      # while @playwright/mcp pins its own Playwright at 1.64.0-alpha and wants
+      # 1244. The mismatch is invisible on a developer laptop, where MCP falls
+      # back to the system Chrome; a fresh runner has none, and the browser
+      # simply fails to launch. Installing through MCP's own copy is what keeps
+      # the revision right whatever version it bumps to next.
+      - name: Install Chromium for Playwright MCP
+        run: node node_modules/@playwright/mcp/node_modules/playwright-core/cli.js install --with-deps chromium
+
+      - run: npm run db:up
+
+      - name: Start the app against the real provider
+        run: ./nightly-qa/up.sh
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+
+      - name: Pick tonight's charter and read the tracker
+        id: charter
+        run: |
+          args=""
+          [ -n "${{ inputs.persona }}" ] && args="$args --persona ${{ inputs.persona }}"
+          [ -n "${{ inputs.focus }}" ] && args="$args --focus ${{ inputs.focus }}"
+          ./nightly-qa/prepare.sh $args >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Before the session, every night. A leak fails here and no session runs.
+      - name: Prove the source fence holds
+        run: ./nightly-qa/guard.sh
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+      - name: The session
+        run: |
+          ./nightly-qa/run.sh \
+            --persona "$(sed -n 1p nightly-qa/.out/charter)" \
+            --focus "$(sed -n 2p nightly-qa/.out/charter)" \
+            --max-turns "${{ inputs.max_turns || '200' }}"
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+      # always(): a session that died still leaves a transcript and a server log,
+      # and those are the only way to find out why.
+      - name: Upload the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-qa-${{ github.run_id }}
+          path: nightly-qa/.out/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Holds no model. This is the only job that writes.
+  file:
+    needs: explore
+    # NOT `inputs.file_issues != false`. On a scheduled run the inputs context is
+    # empty, so that expression is `null != false`, and GitHub casts both sides
+    # to a number before comparing: 0 != 0 is false. Every unattended night would
+    # have explored and filed nothing, with two green jobs to say so. The check
+    # is therefore on the event: a schedule always files, a dispatch files only
+    # when the box is ticked.
+    if: always() && needs.explore.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.file_issues)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # the orphan evidence branch
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-qa-${{ github.run_id }}
+          path: nightly-qa/.out/
+
+      - name: File
+        run: |
+          git config user.name 'nightly-qa'
+          git config user.email 'noreply@anthropic.com'
+          npx tsx nightly-qa/src/file.ts \
+            nightly-qa/.out/findings.json \
+            nightly-qa/.out/known-issues.json \
+            --apply
+        env:
+          GH_TOKEN: ${{ github.token }}
