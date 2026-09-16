@@ -92,7 +92,7 @@ Write two files before you finish. Write `findings.json` **first**.
         "network": "the request and what came back",
         "console": []
       },
-      "fingerprint": "screen | element | symptom — three short parts, no dates, no specific words you looked up"
+      "fingerprint": "screen | element | symptom-from-the-list-below"
     }
   ],
   "notes": "anything you could not get to, and why"
@@ -103,8 +103,26 @@ Write two files before you finish. Write `findings.json` **first**.
 never worked, set it to `false`, say so in `notes`, and stop.
 
 The `fingerprint` is how tonight's finding gets matched against the same problem found on
-another night. Describe the defect, never the example: `dictionary | senses list | only the
-top sense shows before "more"` is right; `the word "window" showed one meaning` is wrong.
+another night, so it has to be stable across nights rather than well written. Three parts
+separated by ` | `:
+
+1. **screen** — one word, from the same list as the `screen` field.
+2. **element** — the control or region, two or three words: `senses list`, `direction swap`,
+   `mark-meaning action`, `route navigation`.
+3. **symptom** — exactly one of these words, and nothing else:
+   `no-network-call`, `duplicate-entry`, `hidden-behind-tap`, `server-error`, `stale-input`, `lost-session`, `dead-end`, `no-feedback`, `wrong-content`, `other`.
+
+So `dictionary | senses list | hidden-behind-tap`, not "only the top sense shows before
+more". Free prose here is why the same defect failed to match itself across two earlier
+sessions: one run wrote "two senses share identical translation and part of speech" and the
+other "two senses share the same translation and part of speech", and nothing could see
+those as one problem.
+
+Never put the specific word you looked up in the fingerprint. Describe the defect, not the
+example.
+
+If nothing in the list fits, use `other` and say in `notes` what word you would have
+wanted. A term the list is missing is worth knowing about.
 
 One finding per defect. If the same problem shows up on five different words, that is one
 finding whose steps mention that it reproduces broadly, not five findings.

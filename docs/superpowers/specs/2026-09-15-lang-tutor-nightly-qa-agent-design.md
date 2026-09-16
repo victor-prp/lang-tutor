@@ -259,7 +259,7 @@ The skill's body is the standing part of the prompt; the charter is the variable
         "network": "POST /api/translations → 200, entries[0].senses.length = 4",
         "console": []
       },
-      "fingerprint": "translate | senses list | only top sense before more",
+      "fingerprint": "translate | senses list | hidden-behind-tap",
       "match": { "issue": 42 }
     }
   ],
@@ -304,8 +304,13 @@ takes to the job summary:
 1. **Malformed or missing file:** fail the job. The `explore` job's artifact is still there.
 2. **Confidence `low`:** never filed. Listed in the summary.
 3. **`match.issue = n`, issue open:** comment on *n*: date, persona, focus, the observed
-   text, a link to the run's artifact for the screenshot. Do not reopen, retitle or
-   relabel.
+   text, and the run's screenshots. Do not reopen or retitle. **Do relabel when the
+   severity rose**, replacing the severity label and saying so in the comment. Phase A
+   showed why: the direction-swap defect was `weird` on one run and a `bug` on the next,
+   because only the second run reached the state that returns 502. The same defect looks
+   worse once a nastier manifestation is found, and an issue frozen at the severity of the
+   night it was opened will understate it forever. Severity never falls automatically — a
+   quieter night is not evidence the problem got smaller.
 4. **`match.issue = n`, issue closed, labelled `wontfix` or `by-design`:** drop silently
    into the summary. A decision was made; the bot does not argue with it nightly.
 5. **`match.issue = n`, issue closed otherwise:** one comment, "reproduced again on
@@ -314,19 +319,53 @@ takes to the job summary:
    before `inconvenience`. Overflow goes to the summary with a note that it was not filed
    for the cap. Title is the finding's title prefixed `[nightly-qa]`; labels `nightly-qa`
    and the severity; body rendered from a fixed template ending in a **Fingerprint** line
-   copied from the finding. That line is what makes tomorrow's deduplication reliable:
-   the agent compares fingerprints first and prose second.
+   copied from the finding.
 7. **`match` absent:** the agent ran out of turns before deciding. Not filed; the summary
    says so, and the finding is in the artifact for a human.
 
-A last guard in code, independent of the agent's judgement: before creating, `file.ts`
-compares the new title against every open `nightly-qa` issue title and refuses a
-near-exact match (normalised, small edit distance). It is the gh-aw `deduplicate-by-title`
-rule, and it exists for the night the model's judgement is off.
+### How matching actually has to work
 
-Screenshots do not go into issues: the GitHub API has no image upload for issue bodies.
-Every comment and issue links to the run, whose artifact holds them, retained 14 days.
-That is a known weakness; see *Decisions deferred*.
+The original plan here — the agent compares fingerprints first and prose second, with a
+near-identical-title check in code as the safety net — was tested against phase A's two runs
+and does not survive. Three defects were found by both runs, which makes six fingerprints
+and three known-correct answers.
+
+| Strategy | Catches | Fails |
+|---|---|---|
+| Exact fingerprint match | **0 of 3** | Pairs differ by a word: "two senses share *identical* translation and part of speech" against "two senses share *the same* translation and part of speech". |
+| First two fingerprint segments (`screen \| element`) | 3 of 3 | Catastrophically over-merges. Four findings across the two runs carry `dictionary \| senses list`, and they are **three different problems**: duplicate meanings, the real "more" button, and the suppressed button. |
+| Near-identical title, in code | **0 of 3** | The same defect was titled *"Save this meaning" claims success but never calls the server* and *"Saved to vocabulary" confirmation shown after choosing a meaning, but no request is sent to the server*. |
+
+So three changes.
+
+**The model decides, and that is not a fallback.** Given the existing issues' text it has the
+context to tell the suppressed button from the working one — it did exactly that
+unprompted, filing one as a `bug` and the other as an `inconvenience`. Nothing mechanical
+available here distinguishes those two, so the judgement is the mechanism, not a
+convenience on top of one.
+
+**The fingerprint's third segment becomes a controlled vocabulary, not prose.** Free text
+in that position is what made every pair miss by a word. The agent picks the symptom from a
+fixed list carried in the brief — `no-network-call`, `duplicate-entry`, `hidden-behind-tap`,
+`server-error`, `stale-input`, `lost-session`, `dead-end`, `no-feedback`, `wrong-content`,
+`other` — so the fingerprint becomes matchable while the prose stays free. A finding that
+reaches for `other` twice in a week is a sign the list needs a term, and the report should
+say so.
+
+**The code guard stops pretending to be a safety net.** It caught nothing above, and a
+guard that cannot fire is the failure mode `CLAUDE.md` warns about. It becomes a *flag*
+rather than a refusal: when a new issue's `screen | element` collides with an open one, file
+it anyway and label it `possible-duplicate` for a human to merge. Over-merging silently is
+worse than a labelled pair, because a merged issue is invisible.
+
+**Screenshots go into the issue.** The GitHub API has no image upload for issue bodies, and
+the original answer was to link the run's artifact, retained 14 days. Phase A changed this
+from a minor weakness into a real one: `nightly-qa/evidence/f_light_expanded.png` proves the
+duplicate-meanings defect on its own, more directly than the prose does, and an issue whose
+evidence expires in a fortnight is an issue nobody can act on later. The `file` job commits
+the run's screenshots to an orphan `nightly-qa-evidence` branch and links them by raw URL.
+That branch never merges and is not built by CI; at four images a night and roughly 25KB
+each it costs a few megabytes a year.
 
 ## Caps
 
@@ -412,15 +451,19 @@ Gemini calls and in the subscription window.
 | Playwright MCP cannot launch Chromium | The first browser tool call errors. The brief requires `run.browser_ok` in `findings.json`, set from whether the first `browser_navigate` to the app succeeded; `file.ts` fails the job when it is `false`, so a night with no browser is red, not quietly empty. |
 | Turn cap hit | `findings.json` exists from before the dedup pass; unmatched findings are not filed and are listed in the summary. |
 | OAuth token expired | The action fails at authentication; nothing is filed. Renewal is manual (`claude setup-token`). |
-| Agent files nonsense | Cap of 3, low confidence never filed, title guard in code, and every issue carries the label, so a bad night is three labelled issues to close. |
+| Agent files nonsense | Cap of 3, low confidence never filed, and every issue carries the label, so a bad night is three labelled issues to close. Note the code guard is a `possible-duplicate` flag, not a filter — it stops nothing on its own. |
 
 ## Verification before the first night
 
 In the spirit of `CLAUDE.md`'s rule for ADR checks: a system that can only ever say
 "nothing found" looks identical to one that works. Before the schedule is enabled:
 
-1. `file.test.ts` covers each filing rule with fixtures, including the title guard and
-   the cap ordering.
+1. `file.test.ts` covers each filing rule with fixtures, including severity escalation, the
+   `possible-duplicate` flag and the cap ordering. Its fixtures are phase A's two real runs,
+   in `nightly-qa/FINDINGS.md`: they contain three defects found twice and described
+   differently, plus the trap pair that shares `dictionary | senses list` while being two
+   different problems. A matching strategy that merges that pair is wrong, and this is the
+   test that says so.
 2. A local `npm run qa:nightly` against a branch with a **planted defect** (hide the
    **more** button behind an off-screen style, say) must produce a finding with the right
    screen and a screenshot. Then the same run on the clean tree must not.
@@ -478,8 +521,9 @@ and phase A's report.
   entirely. Revisit when findings a human closes as "cannot reproduce" reach roughly one run
   in three. The output contract already carries `steps`, so the verifier can be added later
   without a schema change.
-- **Screenshots in issues.** Artifacts expire. If a screenshot turns out to be the thing a
-  reader always needs, the `file` job can commit them to an orphan branch and link there.
+- **Screenshots in issues — settled: they go in.** Phase A showed a single image proving a
+  defect outright, so the orphan-branch approach moves from this list into phase B's scope.
+  See *How matching actually has to work*.
 - **Claude's issue writes via the GitHub App instead of `GITHUB_TOKEN`.** Not needed:
   issues created with `GITHUB_TOKEN` trigger no further workflows, which here is a feature.
 - **Browser in a container — settled: not needed.** Playwright MCP refuses the `file:`
