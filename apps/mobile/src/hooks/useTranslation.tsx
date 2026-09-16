@@ -13,8 +13,6 @@ export type TranslationValue = {
   text: string;
   setText: (value: string) => void;
   result: TranslationResponse | undefined;
-  revealed: boolean;
-  reveal: () => void;
   chosenIndex: number | null;
   choose: (index: number) => void;
   /**
@@ -35,7 +33,6 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
   const [status, setStatus] = useState<TranslationStatus>('idle');
   const [text, setText] = useState('');
   const [result, setResult] = useState<TranslationResponse | undefined>(undefined);
-  const [revealed, setRevealed] = useState(false);
   const [chosenIndex, setChosenIndex] = useState<number | null>(null);
 
   const run = useCallback(
@@ -44,7 +41,6 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
       if (trimmed.length === 0 || trimmed.length > 100) return;
 
       setStatus('loading');
-      setRevealed(false);
       setChosenIndex(null);
       try {
         const response = await api.translate(
@@ -72,9 +68,7 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
       text,
       setText,
       result,
-      revealed,
       chosenIndex,
-      reveal: () => setRevealed(true),
       choose: (index: number) => setChosenIndex(index),
       submit: (override?: string) => void run(override ?? text, undefined),
       // Re-requests with the opposite direction made explicit, which is what
@@ -84,11 +78,10 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
         setStatus('idle');
         setText('');
         setResult(undefined);
-        setRevealed(false);
         setChosenIndex(null);
       },
     }),
-    [status, text, result, revealed, chosenIndex, run],
+    [status, text, result, chosenIndex, run],
   );
 
   return <TranslationContext.Provider value={value}>{children}</TranslationContext.Provider>;

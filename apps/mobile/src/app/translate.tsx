@@ -21,13 +21,17 @@ export default function TranslateScreen() {
   const canSubmit = t.text.trim().length > 0 && !tooLong && t.status !== 'loading';
 
   // A sentence has one translation rather than competing senses, so it gets
-  // neither `more` nor a save button. Withholding the save is deliberate: a
-  // sentence is already known not to belong in a vocabulary, and offering to
+  // neither a count line nor a save button. Withholding the save is deliberate:
+  // a sentence is already known not to belong in a vocabulary, and offering to
   // save one would promise the single behaviour that is not coming.
   const isSentence = t.result?.kind === 'sentence';
   const senses = t.result?.senses ?? [];
-  const visible = isSentence || t.revealed ? senses : senses.slice(0, 1);
-  const hidden = senses.length - visible.length;
+  // Every sense the one response carried, together. The whole reason to look up
+  // a polysemous word is to compare its meanings, and the server already sent
+  // them all — hiding the tail behind a tap charged an interaction for
+  // information the client was holding. Only the ranking signal is kept: the
+  // first card still says which meaning is the common one.
+  const showCount = !isSentence && senses.length > 1;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -138,7 +142,13 @@ export default function TranslateScreen() {
             </View>
           ) : null}
 
-          {visible.map((sense, index) => (
+          {showCount ? (
+            <Text testID="translate-count" style={styles.senseCount}>
+              {strings.translateSenseCount(senses.length)}
+            </Text>
+          ) : null}
+
+          {senses.map((sense, index) => (
             <SenseCard
               key={`${sense.translation}-${index}`}
               sense={sense}
@@ -149,25 +159,14 @@ export default function TranslateScreen() {
             />
           ))}
 
-          {!isSentence && hidden > 0 && t.chosenIndex === null ? (
-            <Pressable
-              accessibilityRole="button"
-              testID="translate-more"
-              onPress={t.reveal}
-              style={styles.moreButton}
-            >
-              <Text style={styles.moreLabel}>{strings.translateMore(hidden)}</Text>
-            </Pressable>
-          ) : null}
-
           {t.chosenIndex !== null ? (
             <Pressable
               accessibilityRole="button"
               testID="translate-new-word"
               onPress={t.reset}
-              style={styles.moreButton}
+              style={styles.secondaryButton}
             >
-              <Text style={styles.moreLabel}>{strings.translateNewWord}</Text>
+              <Text style={styles.secondaryLabel}>{strings.translateNewWord}</Text>
             </Pressable>
           ) : null}
         </ScrollView>
@@ -194,8 +193,15 @@ function SenseCard({
     : undefined;
 
   return (
-    <View style={[styles.card, isTop && styles.cardTop, chosen && styles.cardChosen]}>
-      {isTop ? <Text style={styles.badge}>{strings.translateTopSense}</Text> : null}
+    <View
+      testID="translate-sense"
+      style={[styles.card, isTop && styles.cardTop, chosen && styles.cardChosen]}
+    >
+      {isTop ? (
+        <Text testID="translate-top-sense" style={styles.badge}>
+          {strings.translateTopSense}
+        </Text>
+      ) : null}
       <Text style={styles.translation}>{sense.translation}</Text>
       {partOfSpeech ? <Text style={styles.partOfSpeech}>{partOfSpeech}</Text> : null}
 
@@ -274,6 +280,7 @@ const styles = StyleSheet.create({
   results: { gap: spacing.sm, paddingBottom: spacing.xl },
   directionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   directionLabel: { color: colors.muted, fontSize: fontSizes.sm, writingDirection: 'rtl' },
+  senseCount: { color: colors.muted, fontSize: fontSizes.sm, writingDirection: 'rtl' },
   card: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,
@@ -330,7 +337,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   chooseLabel: { color: colors.onPrimary, fontSize: fontSizes.sm, fontWeight: '700' },
-  moreButton: {
+  secondaryButton: {
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
@@ -338,7 +345,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  moreLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
+  secondaryLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   correction: {
     backgroundColor: colors.surface,
     borderRadius: radii.lg,

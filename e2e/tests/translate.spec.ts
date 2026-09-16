@@ -18,9 +18,9 @@ test.setTimeout(120_000);
 // three; what changed is which entry each belongs to.
 //
 // That also changes the order they arrive in, because the merge is round-robin
-// across entries by rank: noun[0], verb[0], noun[1] — סולם, להוביל, דירוג. The
-// assertions below care about the top sense and the count behind `more`, both
-// of which are unchanged.
+// across entries by rank: noun[0], verb[0], noun[1] — סולם, להוביל, דירוג. That
+// order is what the word spec below asserts: the badge belongs to סולם, and the
+// verb sense sits second on screen.
 const LADDER_ENTRIES = [
   {
     lemma: 'ladder',
@@ -74,7 +74,7 @@ async function openTranslate(page: Page, request: APIRequestContext, username: s
   }).toPass({ timeout: 30_000 });
 }
 
-test('a word shows its most common meaning, reveals the rest, and confirms a choice', async ({
+test('a word shows every sense at once, ranked, and confirms a choice', async ({
   page,
   request,
 }) => {
@@ -84,21 +84,23 @@ test('a word shows its most common meaning, reveals the rest, and confirms a cho
   await page.getByTestId('translate-input').fill('ladder');
   await page.getByTestId('translate-submit').click();
 
-  // The top sense only, with the other two behind `more`.
+  // All three senses up front — one response, one screen, nothing behind a tap.
   await expect(sense(page, 'סולם')).toBeVisible();
-  await expect(sense(page, 'דירוג')).toBeHidden();
-  await expect(page.getByTestId('translate-more')).toContainText('2');
-
-  await page.getByTestId('translate-more').click();
-  await expect(sense(page, 'דירוג')).toBeVisible();
   await expect(sense(page, 'להוביל')).toBeVisible();
+  await expect(sense(page, 'דירוג')).toBeVisible();
+  await expect(page.getByTestId('translate-count')).toHaveText('3 משמעויות');
+
+  // Ranked, and only the first carries the badge: showing them together must
+  // not cost the learner the signal about which one is the common meaning.
+  await expect(page.getByTestId('translate-top-sense')).toHaveCount(1);
+  await expect(page.getByTestId('translate-sense').first()).toContainText('סולם');
 
   await page.getByTestId('translate-choose').nth(1).click();
   await expect(page.getByTestId('translate-chosen')).toHaveText('התרגום נשמר לאוצר המילים שלך');
   await expect(page.getByTestId('translate-new-word')).toBeVisible();
 });
 
-test('a sentence gets one translation, with neither more nor a save button', async ({
+test('a sentence gets one translation, with neither a count nor a save button', async ({
   page,
   request,
 }) => {
@@ -120,7 +122,9 @@ test('a sentence gets one translation, with neither more nor a save button', asy
   await page.getByTestId('translate-submit').click();
 
   await expect(sense(page, 'אני מצפה לראות אותך.')).toBeVisible();
-  await expect(page.getByTestId('translate-more')).toHaveCount(0);
+  // One translation, so neither the count line nor the save button: a count of
+  // one is noise, and a sentence is known not to belong in a vocabulary.
+  await expect(page.getByTestId('translate-count')).toHaveCount(0);
   await expect(page.getByTestId('translate-choose')).toHaveCount(0);
 });
 
@@ -217,8 +221,6 @@ test('a word looked up twice is answered without the provider the second time', 
   await page.getByTestId('translate-submit').click();
 
   await expect(sense(page, 'עפיפון')).toBeVisible();
-  await expect(page.getByTestId('translate-more')).toContainText('1');
-  await page.getByTestId('translate-more').click();
   await expect(sense(page, 'דיה')).toBeVisible();
   await expect(page.getByTestId('translate-error')).toHaveCount(0);
 });
