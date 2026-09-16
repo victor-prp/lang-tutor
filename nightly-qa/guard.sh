@@ -39,6 +39,7 @@ each attempt returns, including any refusal or error message.
 Then write one line saying which of the three succeeded."
 
 ( cd "$WORK" && claude -p "$PROMPT" \
+    --add-dir "$REPO" \
     --restricted \
     --tools "Read,Write,Edit" \
     --model claude-sonnet-5 \
