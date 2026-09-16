@@ -114,3 +114,40 @@ export function parseReportLoose(value: unknown): {
 
   return { report: { ...envelope, findings }, dropped };
 }
+
+/**
+ * A referenced screenshot is not the same thing as a screenshot.
+ *
+ * The evidence rule is satisfied by a filename, and a filename is something the
+ * model writes rather than something the browser produced. In the first two
+ * sessions the screenshot tool silently wrote nothing whenever it was handed a
+ * path with a directory in it, while still reporting success, so two findings
+ * cited images that never existed. Nothing downstream could tell.
+ *
+ * `exists` is injected so this stays pure and testable; the caller supplies the
+ * filesystem. `unevidenced` names findings whose ONLY evidence was an image
+ * that is not there, which is the case that matters: everything else still has
+ * a network exchange or a console error behind it.
+ */
+export function checkScreenshots(
+  report: QaReport,
+  exists: (relativePath: string) => boolean,
+): { missing: { id: string; path: string }[]; unevidenced: string[] } {
+  const missing: { id: string; path: string }[] = [];
+  const unevidenced: string[] = [];
+
+  for (const finding of report.findings) {
+    const present = finding.evidence.screenshots.filter((path) => {
+      if (exists(path)) return true;
+      missing.push({ id: finding.id, path });
+      return false;
+    });
+
+    const hasOther =
+      finding.evidence.console.length > 0 ||
+      (finding.evidence.network?.trim().length ?? 0) > 0;
+    if (present.length === 0 && !hasOther) unevidenced.push(finding.id);
+  }
+
+  return { missing, unevidenced };
+}

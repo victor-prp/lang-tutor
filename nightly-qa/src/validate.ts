@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
-import { parseReportLoose, severities } from './findings.ts';
+import { checkScreenshots, parseReportLoose, severities } from './findings.ts';
 
 const path = process.argv[2];
 if (!path) {
@@ -42,6 +43,19 @@ if (!report.run.browser_ok) {
 
 for (const drop of dropped) {
   console.warn(`  dropped    finding ${drop.id}: ${drop.reason}`);
+}
+
+// Screenshot paths in a finding are relative to the findings file itself.
+const base = dirname(resolve(path));
+const { missing, unevidenced } = checkScreenshots(report, (p) => existsSync(resolve(base, p)));
+for (const gap of missing) {
+  console.warn(`  missing    finding ${gap.id} cites ${gap.path}, which is not on disk`);
+}
+if (unevidenced.length > 0) {
+  console.error(
+    `Findings whose only evidence was a screenshot that does not exist: ${unevidenced.join(', ')}.`,
+  );
+  process.exit(1);
 }
 
 const counts = severities.map(

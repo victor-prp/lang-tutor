@@ -36,6 +36,11 @@ A finding needs, without exception:
 - what you actually observed,
 - and at least one of: a screenshot, the network exchange behind it, or a console error.
 
+When you take a screenshot, give the tool a **bare filename** such as
+`f2-two-identical-senses.png`, with no directory in front of it. A filename with a
+directory in it is written nowhere at all, and the tool still reports success. Then refer
+to it in your findings as `shots/<that filename>`.
+
 The network log is the strongest evidence you have, and it is what separates a server
 problem from a presentation problem. When the screen shows one meaning, look at what the
 server actually returned. "The screen shows one meaning and the response carried four" is a

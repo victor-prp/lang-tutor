@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseReport, parseReportLoose } from './findings.ts';
+import { checkScreenshots, parseReport, parseReportLoose } from './findings.ts';
 
 const validFinding = {
   id: 'f1',
@@ -111,4 +111,36 @@ test('parseReportLoose reports a dropped finding by index when it has no usable 
   assert.equal(report.findings.length, 0);
   assert.equal(dropped.length, 1);
   assert.equal(dropped[0].id, '#0');
+});
+
+test('checkScreenshots names referenced screenshots that are not on disk', () => {
+  const report = parseReport({
+    ...validReport,
+    findings: [
+      { ...validFinding, id: 'f1', evidence: { screenshots: ['shots/real.png'], network: 'n', console: [] } },
+      { ...validFinding, id: 'f2', evidence: { screenshots: ['shots/ghost.png'], network: 'n', console: [] } },
+    ],
+  });
+  const { missing, unevidenced } = checkScreenshots(report, (p) => p === 'shots/real.png');
+  assert.deepEqual(missing, [{ id: 'f2', path: 'shots/ghost.png' }]);
+  assert.deepEqual(unevidenced, []);
+});
+
+test('checkScreenshots flags a finding whose only evidence was a screenshot that does not exist', () => {
+  const report = parseReport({
+    ...validReport,
+    findings: [
+      { ...validFinding, id: 'f1', evidence: { screenshots: ['shots/ghost.png'], console: [] } },
+    ],
+  });
+  const { missing, unevidenced } = checkScreenshots(report, () => false);
+  assert.equal(missing.length, 1);
+  assert.deepEqual(unevidenced, ['f1']);
+});
+
+test('checkScreenshots is quiet when every screenshot exists', () => {
+  const report = parseReport(validReport);
+  const { missing, unevidenced } = checkScreenshots(report, () => true);
+  assert.deepEqual(missing, []);
+  assert.deepEqual(unevidenced, []);
 });
