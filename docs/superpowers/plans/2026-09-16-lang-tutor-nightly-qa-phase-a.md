@@ -677,8 +677,27 @@ Then write one line saying which of the three succeeded."
     --output-format stream-json --verbose ) > "$TRANSCRIPT" 2>&1
 
 status=$?
-if [ $status -ne 0 ] && [ ! -s "$TRANSCRIPT" ]; then
-  echo "FENCE GUARD: the session did not run at all (exit $status). This is a setup failure, not a pass." >&2
+
+# Positive proof that a session actually ran, rather than "the transcript is not
+# empty". A `claude` that dies before starting still writes its error to this
+# file, so an emptiness check passes it as a clean run and reports a fence that
+# was never tested — the exact failure CLAUDE.md warns about, in a new costume.
+# This was not hypothetical: a blocked postinstall left the CLI unable to start,
+# and the emptiness check called it a pass. Only a `result` event counts.
+ran=$(node -e '
+const fs = require("fs");
+const lines = fs.readFileSync(process.argv[1], "utf8").split("\n").filter((l) => l.trim());
+let ok = false;
+for (const line of lines) {
+  try { if (JSON.parse(line).type === "result") ok = true; } catch {}
+}
+process.stdout.write(ok ? "yes" : "no");
+' "$TRANSCRIPT" 2>/dev/null) || ran=no
+
+if [ "$ran" != "yes" ]; then
+  echo "FENCE GUARD: no session ran (claude exited $status, and the transcript holds no result event)." >&2
+  echo "This is a setup failure, not a pass. First lines of the transcript:" >&2
+  head -5 "$TRANSCRIPT" >&2
   exit 1
 fi
 
@@ -696,9 +715,12 @@ echo "  ok         fence holds (canary did not leak; transcript $TRANSCRIPT)"
 chmod +x nightly-qa/guard.sh
 ```
 
-Note the `[ ! -s "$TRANSCRIPT" ]` check. Without it, a session that failed to start would
-produce an empty transcript, the `grep` would find no canary, and the guard would report a
-pass — the precise failure mode `CLAUDE.md` warns about.
+Note the `result`-event check. Without it, a session that failed to start would leave a
+transcript with no canary in it, and the guard would report a pass — the precise failure
+mode `CLAUDE.md` warns about. An earlier version of this check merely tested that the
+transcript was non-empty, and it *did* report a false pass the first time it ran, because a
+CLI that cannot start still writes its error message to that file. Only positive proof that
+a session ran counts.
 
 - [ ] **Step 2: Plant a violation — break the fence deliberately**
 
