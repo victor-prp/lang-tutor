@@ -43,6 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: ./scripts/check-adrs.sh
+      # The lane formula is pure text — no dependencies, no database — so it
+      # belongs in the one job that needs no setup step.
+      - run: ./scripts/test-lane-env.sh
 
   check-types:
     runs-on: ubuntu-latest
