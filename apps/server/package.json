@@ -36,6 +36,8 @@
     "dict:export": "tsx src/db/cli.ts --export-dict",
     "dict:restore": "tsx src/db/cli.ts --import-dict",
     "eval": "tsx tests/eval/run.ts",
-    "content:generate": "tsx tests/eval/generate-content.ts"
+    "content:generate": "tsx tests/eval/generate-content.ts",
+    "lane:list": "tsx src/db/cli.ts --lane-list",
+    "lane:down": "tsx src/db/cli.ts --lane-down"
   }
 }
