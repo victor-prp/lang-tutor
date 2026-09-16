@@ -669,6 +669,7 @@ Then write one line saying which of the three succeeded."
 
 ( cd "$WORK" && claude -p "$PROMPT" \
     --restricted \
+    --tools "Read,Write,Edit" \
     --settings "$WORK/settings.json" \
     --mcp-config "$WORK/mcp.json" \
     --strict-mcp-config \
@@ -1373,6 +1374,7 @@ a headless run.
 W=$(./nightly-qa/workdir.sh)
 ( cd "$W" && claude -p "Reply with exactly: HARNESS OK" \
     --restricted \
+    --tools "Read,Write,Edit" \
     --settings "$W/settings.json" \
     --mcp-config "$W/mcp.json" \
     --strict-mcp-config \
@@ -1446,6 +1448,7 @@ WORK=$(./nightly-qa/workdir.sh "${WORKDIR_ARGS[@]+"${WORKDIR_ARGS[@]}"}") || exi
 echo "  ..         session starting ($MODEL, max $MAX_TURNS turns)"
 ( cd "$WORK" && claude -p "$(cat "$WORK/brief.md")" \
     --restricted \
+    --tools "Read,Write,Edit" \
     --model "$MODEL" \
     --settings "$WORK/settings.json" \
     --mcp-config "$WORK/mcp.json" \

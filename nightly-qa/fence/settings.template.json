@@ -12,7 +12,9 @@
       "Task",
       "NotebookEdit",
       "mcp__playwright__browser_evaluate",
-      "mcp__playwright__browser_file_upload"
+      "mcp__playwright__browser_run_code_unsafe",
+      "mcp__playwright__browser_webmcp_call",
+      "mcp__playwright__browser_webmcp_list"
     ],
     "allow": [
       "Read(//__WORK__/**)",

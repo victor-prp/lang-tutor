@@ -40,6 +40,7 @@ Then write one line saying which of the three succeeded."
 
 ( cd "$WORK" && claude -p "$PROMPT" \
     --restricted \
+    --tools "Read,Write,Edit" \
     --settings "$WORK/settings.json" \
     --mcp-config "$WORK/mcp.json" \
     --strict-mcp-config \

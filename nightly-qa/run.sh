@@ -43,6 +43,7 @@ WORK=$(./nightly-qa/workdir.sh "${WORKDIR_ARGS[@]+"${WORKDIR_ARGS[@]}"}") || exi
 echo "  ..         session starting ($MODEL, max $MAX_TURNS turns)"
 ( cd "$WORK" && claude -p "$(cat "$WORK/brief.md")" \
     --restricted \
+    --tools "Read,Write,Edit" \
     --model "$MODEL" \
     --settings "$WORK/settings.json" \
     --mcp-config "$WORK/mcp.json" \
