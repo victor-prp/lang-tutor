@@ -69,7 +69,14 @@ echo "  ok         server on :$QA_API_PORT (real Gemini)"
 # EXPO_PUBLIC_API_URL must be set at EXPORT time: Metro inlines EXPO_PUBLIC_*
 # into the bundle, so setting it when serving would be too late and the app
 # would throw at module scope.
-EXPO_PUBLIC_API_URL="$QA_API_URL" npm run build:web -w apps/mobile > "$OUT/export.log" 2>&1 \
+#
+# --clear is not optional here, and the first QA session was lost to learning
+# why. Metro caches the transformed module, and the cache key does not include
+# the value of the inlined environment variable, so an export that follows a
+# change of EXPO_PUBLIC_API_URL happily reuses a bundle with the OLD url baked
+# in. The export reports success, the app loads, and every API call goes to a
+# server that is not the one under test. Nothing anywhere says so.
+EXPO_PUBLIC_API_URL="$QA_API_URL" npm run build:web -w apps/mobile -- --clear > "$OUT/export.log" 2>&1 \
   || { tail -20 "$OUT/export.log" >&2; fail "expo export failed."; }
 
 ( cd apps/mobile && npx expo serve dist --port "$QA_APP_PORT" ) > "$OUT/serve.log" 2>&1 &
@@ -80,6 +87,10 @@ until curl -sf -o /dev/null "$QA_APP_URL"; do
   [ "$SECONDS" -lt "$deadline" ] || { tail -20 "$OUT/serve.log" >&2; fail "App did not answer on :8082 within 60s."; }
   sleep 1
 done
-echo "  ok         app on :$QA_APP_PORT"
+if ! grep -rq "localhost:$QA_API_PORT" apps/mobile/dist/_expo/static/js/web/*.js 2>/dev/null; then
+  fail "The exported bundle does not reference localhost:$QA_API_PORT. Metro served a stale cache; the app would call the wrong server."
+fi
+
+echo "  ok         app on :$QA_APP_PORT (bundle points at :$QA_API_PORT)"
 echo "$QA_APP_URL" > "$OUT/app-url"
 echo "Environment up. Tear it down with ./nightly-qa/down.sh"
