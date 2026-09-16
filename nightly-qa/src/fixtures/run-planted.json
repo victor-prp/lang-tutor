@@ -1,0 +1,146 @@
+{
+  "run": {
+    "date": "2026-09-16",
+    "persona": "careful-adult",
+    "focus": "polysemy",
+    "browser_ok": true
+  },
+  "coverage": [
+    "signed up as a new user through onboarding (username, name, age, native=Hebrew, target=English)",
+    "looked up single words with multiple senses in the dictionary: bank, light, set",
+    "looked up an idiom phrase: kick the bucket",
+    "looked up a full sentence containing an ambiguous word: I saw her duck under the table.",
+    "looked up a deliberately misspelled word: recieve",
+    "used the direction-swap (⇄) control on an existing result",
+    "chose a meaning with \"זו המשמעות שחיפשתי\" and watched the network log for a save call",
+    "checked the profile screen for saved-vocabulary data",
+    "checked the home screen for any vocabulary/history list",
+    "played a full 10-question practice session, including one deliberately wrong answer, through to the results screen",
+    "checked console logs for errors across the session",
+    "triggered a full page reload/navigation to see whether the session survives it"
+  ],
+  "findings": [
+    {
+      "id": "f1",
+      "severity": "bug",
+      "confidence": "high",
+      "title": "\"Saved to vocabulary\" confirmation shown after choosing a meaning, but no request is sent to the server",
+      "screen": "dictionary",
+      "steps": [
+        "Open the dictionary (תרגום מלה או ביטוי)",
+        "Type any word, e.g. \"set\", and submit",
+        "Open the network log and clear/note the current requests",
+        "Click \"זו המשמעות שחיפשתי\" (this is the meaning I was looking for)",
+        "Observe the on-screen text that appears and compare it against the network log for the same period"
+      ],
+      "expected": "Choosing a meaning that the app says was \"saved to your vocabulary\" (התרגום נשמר לאוצר המילים שלך) to result in some server call that persists it, so it can later be reviewed or practiced.",
+      "observed": "The button click only changes local UI state (shows the confirmation text and swaps the button for \"מלה חדשה\"/new word). No new network request of any kind fires when the button is clicked — the network log shows the same requests before and after the click.",
+      "evidence": {
+        "screenshots": ["shots/saved-no-network.png"],
+        "network": "Before click: last request is POST /api/translations (index 16, the lookup for \"set\" reversed). After clicking translate-choose, browser_network_requests still lists only up to index 16 — no new request appears.",
+        "console": []
+      },
+      "fingerprint": "dictionary | choose-meaning action | confirmation text shown with no corresponding network call"
+    },
+    {
+      "id": "f2",
+      "severity": "bug",
+      "confidence": "high",
+      "title": "Dictionary result only ever shows one sense, even when the server returns several genuinely different ones",
+      "screen": "dictionary",
+      "steps": [
+        "Open the dictionary and look up a word with several distinct meanings, e.g. \"bank\" or \"set\"",
+        "Read the result card and note it shows exactly one translation, part of speech and example, under the heading \"המשמעות הנפוצה\" (the common meaning)",
+        "Inspect the network response for the same lookup"
+      ],
+      "expected": "Either all senses returned by the server are shown (perhaps with the common one first), or there is some visible way (a \"more meanings\"/\"other senses\" control) to reach the rest, since the word clearly has more than one common English meaning (e.g. \"bank\" = financial institution / riverbank / to deposit / to rely on).",
+      "observed": "For \"bank\" the server returned 4 senses (noun \"בנק\", verb \"להפקיד בבנק\", noun \"גדה\", verb \"לסמוך\"), but the screen shows only the first one, with no button, link or indicator that other senses exist. The same happened for \"light\" (5 senses returned, 1 shown) and \"set\" (5 senses returned, 1 shown). This reproduced on every polysemous word tried; no word surfaced more than one sense in the UI.",
+      "evidence": {
+        "screenshots": ["shots/bank-translate.png"],
+        "network": "POST /api/translations for \"bank\" returned senses: [noun בנק, verb להפקיד בבנק, noun גדה, verb לסמוך]; the rendered card shows only the first (בנק). Same pattern confirmed for \"light\" (5 senses returned, 1 rendered) and \"set\" (5 senses returned, 1 rendered).",
+        "console": []
+      },
+      "fingerprint": "dictionary | senses list | only the first sense renders, no way to reach the rest"
+    },
+    {
+      "id": "f3",
+      "severity": "bug",
+      "confidence": "medium",
+      "title": "Dictionary can return two near-duplicate senses for the same word with no distinguishing information",
+      "screen": "dictionary",
+      "steps": [
+        "Open the dictionary and look up \"light\"",
+        "Inspect the full network response (not just what renders on screen)"
+      ],
+      "expected": "Each sense in the response should represent a genuinely distinct meaning, since the list is meant to help a learner tell the meanings of a word apart.",
+      "observed": "The response for \"light\" contains two separate senses that are both the noun \"אור\" (illumination), differing only in their example sentence (\"The light in the room was dim.\" vs \"Please turn off the light when you leave.\") — not a distinct meaning from each other. This sits alongside three genuinely different senses (adjective \"light\"=קל/not heavy, verb \"to light\"=להדליק, adjective \"light\"=בהיר/pale colour), so the duplication looks like a data-generation slip rather than an intentional repeat.",
+      "evidence": {
+        "screenshots": [],
+        "network": "POST /api/translations {\"text\":\"light\"} response senses[0] and senses[3] both have translation \"אור\" / part_of_speech \"noun\", with only the example differing.",
+        "console": []
+      },
+      "fingerprint": "dictionary | senses list | two senses share the same translation and part of speech"
+    },
+    {
+      "id": "f4",
+      "severity": "weird",
+      "confidence": "medium",
+      "title": "Swapping translation direction re-submits the same Latin-script text as if it were Hebrew, with no notice that it was reinterpreted",
+      "screen": "dictionary",
+      "steps": [
+        "Open the dictionary and look up an English word, e.g. \"set\" (direction shows \"מאנגלית לעברית\")",
+        "Without changing the text box, click \"⇄ החלף\"",
+        "Wait for the new result and read it"
+      ],
+      "expected": "Either the text box is cleared so the learner can type a Hebrew word, or, if the same text is resent, the app tells the learner it reinterpreted their English spelling as a Hebrew word (the way it does for a misspelled English word, e.g. typing \"recieve\" shows \"לא מצאנו את recieve — מציגים תוצאות עבור receive\").",
+      "observed": "The input box still shows the Latin text \"set\", the direction label changes to \"מעברית לאנגלית\" (Hebrew→English), and the app silently resubmits {\"text\":\"set\",\"direction\":\"he_en\"}. The server guesses this means the Hebrew loanword סט and returns an English result (\"set, collection\") with a Hebrew example sentence. Nothing on screen tells the learner their English spelling was reinterpreted as a Hebrew word, unlike the typo-correction banner used elsewhere in the same screen.",
+      "evidence": {
+        "screenshots": [],
+        "network": "POST /api/translations request body {\"text\":\"set\",\"direction\":\"he_en\"}; response senses[0].translation = \"set, collection\", example.source is Hebrew (קניתי סט חדש של כלי אוכל.), example.target is English.",
+        "console": []
+      },
+      "fingerprint": "dictionary | direction swap | same script resent under new direction with no reinterpretation notice"
+    },
+    {
+      "id": "f5",
+      "severity": "inconvenience",
+      "confidence": "medium",
+      "title": "No screen anywhere shows the vocabulary the app claims to have saved",
+      "screen": "home",
+      "steps": [
+        "In the dictionary, look up a word and click \"זו המשמעות שחיפשתי\" so the app says the translation was saved to your vocabulary",
+        "Go back to the home screen and look for a list of saved words",
+        "Open the profile screen and look for the same"
+      ],
+      "expected": "Some way to see the words saved to \"אוצר המילים שלך\" (your vocabulary), since the app explicitly names that collection when confirming a save.",
+      "observed": "Home screen only offers \"התחל\" (start practice) and the dictionary entry point; the profile screen only shows the signup details (username, name, age, native/target language). Neither screen lists or links to saved vocabulary.",
+      "evidence": {
+        "screenshots": [],
+        "network": "",
+        "console": []
+      },
+      "fingerprint": "home/profile | saved vocabulary | no screen exposes the collection the app names"
+    },
+    {
+      "id": "f6",
+      "severity": "weird",
+      "confidence": "low",
+      "title": "A full page navigation/reload logs the user out even though login only needs a username",
+      "screen": "login",
+      "steps": [
+        "Sign up or log in normally and reach the home screen",
+        "Navigate the browser directly to http://localhost:8092/ (a full reload rather than in-app navigation)",
+        "Observe the resulting screen"
+      ],
+      "expected": "Either the session survives a reload (since the app already ran through onboarding), or, if it does not, the login screen should behave consistently with a real auth step.",
+      "observed": "The app returns to /login. The username field is pre-filled with the last used username, and clicking \"כניסה\" with no password logs back in immediately. So the app has no real session persistence across reloads, but also no real authentication (no password) — the login screen exists but is not protecting anything.",
+      "evidence": {
+        "screenshots": [],
+        "network": "POST /api/login {\"username\":\"victor_qa\"} => 200, no password field ever appears in the onboarding or login forms",
+        "console": []
+      },
+      "fingerprint": "login | session persistence | reload clears session but username-only login trivially restores it"
+    }
+  ],
+  "notes": "Typo correction (recieve -> receive) and the idiom lookup (kick the bucket) worked well and are not included as findings. The practice session (10 questions, one deliberate wrong answer, results screen with a 'review these' list) worked correctly with clear right/wrong visual feedback and no console errors. Did not explore: what happens with an empty/whitespace query, extremely long input, or a phrase that mixes Hebrew and English; did not test multiple accounts or the 'switch user' button beyond seeing it exists; did not confirm whether vocabulary is persisted anywhere server-side under a different endpoint than /api/translations, since no UI surface exists to check it and reverse-engineering the API further felt out of scope for a user-perspective session."
+}
