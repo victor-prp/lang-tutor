@@ -84,16 +84,25 @@ Precedents, each with the one thing taken from it:
 │   │      Read/Write under .out. Writes .out/findings.json, report.md, shots/*.png
 │   7. upload artifact  nightly-qa-<date>    ← report, findings, screenshots, server log
 │
-└─ job: file  (needs: explore)   (permissions: issues write)
+└─ job: file  (needs: explore)   (permissions: issues write, contents write)
     1. download the artifact
     2. nightly-qa/file.ts                    ← no model. Comments on matched issues,
-                                               creates new ones (capped), writes the
-                                               job summary. --dry-run prints instead.
+                                               creates new ones (capped), pushes the
+                                               screenshots, writes the job summary.
+                                               Without --apply it prints instead.
 ```
 
 Two jobs, not one, because the split is the permission boundary: the job that holds the
 model has read-only access to issues, and the job that writes issues holds no model. This
 is the safe-outputs shape, and it is also what makes the write side unit-testable.
+
+`file` needs `contents: write` as well as `issues: write`, which the original sketch did
+not account for: pushing the `nightly-qa-evidence` branch is a write to the repository, not
+to the tracker. That is a broader permission than this design would otherwise hand out, and
+it is acceptable for exactly one reason — it sits in the job that holds no model. Nothing
+with browser access, and nothing that read a page tonight, can reach it. Had the two jobs
+been collapsed to save a runner minute, this permission alone would be the argument against
+it.
 
 ## The environment — `nightly-qa/up.sh`
 
@@ -354,9 +363,25 @@ say so.
 
 **The code guard stops pretending to be a safety net.** It caught nothing above, and a
 guard that cannot fire is the failure mode `CLAUDE.md` warns about. It becomes a *flag*
-rather than a refusal: when a new issue's `screen | element` collides with an open one, file
-it anyway and label it `possible-duplicate` for a human to merge. Over-merging silently is
-worse than a labelled pair, because a merged issue is invisible.
+rather than a refusal: the issue is filed either way, and `possible-duplicate` is a label a
+human resolves. Over-merging silently is worse than a labelled pair, because a merged issue
+is invisible.
+
+**As built, the flag fires on an exact three-segment fingerprint match**, not on a
+`screen | element` collision. The weaker trigger was written before this same section made
+the symptom a controlled vocabulary, and the two decisions interact badly: with a fixed
+symptom word, `dictionary | senses list | duplicate-entry` and
+`dictionary | senses list | hidden-behind-tap` are cleanly different problems, and a
+`screen | element` trigger would label almost every dictionary finding a possible duplicate
+— which is the same as labelling none of them. Part A produced exactly that pair, a
+suppressed control and a working-but-awkward one in the same senses list, so this is not a
+hypothetical. Under the vocabulary a full match is both meaningful and rare.
+
+The weaker `screen | element` neighbours are still computed, and printed in the job summary
+under *Neighbours, for a human to glance at*. A person sees that two findings sit on the
+same control without either issue being labelled. `filing.test.ts` guards the distinction
+directly, and that test was confirmed able to fail by switching the comparison back to the
+prefix.
 
 **Screenshots go into the issue.** The GitHub API has no image upload for issue bodies, and
 the original answer was to link the run's artifact, retained 14 days. Part A changed this
@@ -411,8 +436,10 @@ nightly-qa/                                a workspace, like e2e/
 
 Part B adds `.github/workflows/nightly-qa.yml` (the two jobs), `prepare.sh` (charter pick
 and known-issues dump), `file.ts` with `file.test.ts` (the filing rules), and the remaining
-persona and focus files. `charters/` from the original sketch is `brief/`, since the part A
-files already have that shape.
+persona and focus files. The charters live where this document's *Charters* section says:
+`nightly-qa/charters/personas/*.md` and `nightly-qa/charters/focus/*.md`. Part A's two
+files started in `brief/` and moved there in part B, leaving `brief/mission.md` as the one
+piece every night shares.
 
 `nightly-qa/` is a workspace so `npm run test:unit` picks up its tests automatically
 and so the MCP server version is pinned in the lockfile. It is outside `apps/`, so ADRs
