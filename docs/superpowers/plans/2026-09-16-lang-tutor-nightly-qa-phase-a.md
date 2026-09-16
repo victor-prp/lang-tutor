@@ -402,7 +402,8 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `nightly-qa/.out/` from Task 1.
 - Produces: `nightly-qa/workdir.sh [--headed]` prints the absolute path of a freshly built
-  scratch directory on stdout and creates it at `nightly-qa/.work/`. That directory holds
+  scratch directory on stdout and creates it **outside the checkout**, under `$TMPDIR` (or
+  at `$NIGHTLY_QA_WORK` when set), fully resolved. That directory holds
   `settings.json`, `mcp.json`, `brief.md` (only if `nightly-qa/brief/` exists; Task 5
   creates it) and an empty `.out/`. Tasks 3, 6 and 7 all call it and use its stdout.
 
@@ -498,7 +499,13 @@ set -u
 cd "$(dirname "$0")/.." || exit 1
 
 REPO=$(pwd -P)
-WORK="$REPO/nightly-qa/.work"
+# Outside the checkout, deliberately, and this is not cosmetic. Deny rules beat
+# allow rules with no exception, so with the work directory nested inside the
+# repo the `Read(//<repo>/**)` deny would also swallow `Edit(//<work>/.out/**)`
+# and the agent could not write its own report. Keeping the two trees disjoint
+# removes the overlap, and it is what makes blockReadsOutsideWorkingDirectories
+# fence the checkout on its own. CI does the same with $RUNNER_TEMP.
+WORK_RAW="${NIGHTLY_QA_WORK:-${TMPDIR:-/tmp}/lang-tutor-nightly-qa}"
 HEADLESS="--headless"
 
 for arg in "$@"; do
@@ -508,8 +515,15 @@ for arg in "$@"; do
   esac
 done
 
-rm -rf "$WORK"
-mkdir -p "$WORK/.out/shots"
+rm -rf "$WORK_RAW"
+mkdir -p "$WORK_RAW/.out/shots"
+
+# Resolve only after the directory exists. TMPDIR carries a trailing slash on
+# macOS, which would otherwise leave a `//` in the middle of a permission rule's
+# path, and /var is a symlink to /private/var, which would leave the allow rule
+# describing a different path than the one Claude reports as its working
+# directory. Both would fence nothing while looking perfectly correct.
+WORK=$(cd "$WORK_RAW" && pwd -P) || { echo "could not resolve $WORK_RAW" >&2; exit 1; }
 
 # `//` is an absolute path from the filesystem root in a permission rule. A
 # single leading slash would anchor at the settings source instead, which is a
@@ -551,16 +565,23 @@ node -e 'JSON.parse(require("fs").readFileSync(process.argv[1]));console.log("se
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1]));console.log("mcp.json is valid JSON")' "$W/mcp.json"
 ```
 
-Expected: both files are valid JSON; every `__WORK__` and `__REPO__` is gone; the deny
-rules read `Read(///Users/.../lang-tutor/**)`-style — that is, exactly two slashes after
-the paren, then the absolute path. If you see three slashes or one, the `#/` stripping is
-wrong; fix it before continuing.
+Expected: both files are valid JSON; every `__WORK__` and `__REPO__` is gone; the rules
+read `Read(//Users/.../lang-tutor/**)` — exactly two slashes after the paren, then the
+absolute path, and no `//` anywhere later in the path. Check all three of these, because
+each failure fences nothing while looking correct:
+
+```bash
+W=$(./nightly-qa/workdir.sh)
+grep -c '//.*//' "$W/settings.json"                      # want 0: no mid-path double slash
+case "$W" in "$(pwd -P)"/*) echo OVERLAP;; *) echo ok;; esac   # want ok: disjoint from the repo
+grep -E '"(Read|Edit)\(' "$W/settings.json"             # eyeball the four path rules
+```
 
 - [ ] **Step 5: Confirm the headed variant differs in exactly one place**
 
 ```bash
-./nightly-qa/workdir.sh --headed >/dev/null && grep -c 'no-headless' nightly-qa/.work/mcp.json
-./nightly-qa/workdir.sh >/dev/null && grep -c '"--headless"' nightly-qa/.work/mcp.json
+grep -c 'no-headless' "$(./nightly-qa/workdir.sh --headed)/mcp.json"
+grep -c '"--headless"' "$(./nightly-qa/workdir.sh)/mcp.json"
 ```
 
 Expected: `1` from each.

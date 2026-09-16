@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "blockReadsOutsideWorkingDirectories": true,
+    "deny": [
+      "Read(//__REPO__/**)",
+      "Edit(//__REPO__/**)",
+      "Grep",
+      "Glob",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Task",
+      "NotebookEdit",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_file_upload"
+    ],
+    "allow": [
+      "Read(//__WORK__/**)",
+      "Edit(//__WORK__/.out/**)",
+      "mcp__playwright__*"
+    ]
+  }
+}

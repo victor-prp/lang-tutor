@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@0.0.81",
+        "__HEADLESS__",
+        "--isolated",
+        "--viewport-size", "412,915",
+        "--output-dir", "__WORK__/.out/shots",
+        "--allowed-origins", "localhost:8082;localhost:3001"
+      ]
+    }
+  }
+}
