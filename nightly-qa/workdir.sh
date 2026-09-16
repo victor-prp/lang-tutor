@@ -30,10 +30,15 @@ HEADLESS="--headless"
 QA_API_PORT="${QA_API_PORT:-3101}"
 QA_APP_PORT="${QA_APP_PORT:-8092}"
 
-for arg in "$@"; do
-  case "$arg" in
-    --headed) HEADLESS="--no-headless" ;;
-    *) echo "unknown argument: $arg" >&2; exit 1 ;;
+PERSONA="careful-adult"
+FOCUS="polysemy"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --headed) HEADLESS="--no-headless"; shift ;;
+    --persona) PERSONA="$2"; shift 2 ;;
+    --focus) FOCUS="$2"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
 
@@ -57,12 +62,18 @@ sed -e "s|__WORK__|$WORK|g" -e "s|__HEADLESS__|$HEADLESS|g" \
     -e "s|__API_PORT__|$QA_API_PORT|g" -e "s|__APP_PORT__|$QA_APP_PORT|g" \
   nightly-qa/fence/mcp.template.json > "$WORK/mcp.json"
 
-if [ -d nightly-qa/brief ] && [ -f nightly-qa/brief/mission.md ]; then
-  cat nightly-qa/brief/mission.md \
-      nightly-qa/brief/persona-careful-adult.md \
-      nightly-qa/brief/focus-polysemy.md \
-    | sed -e "s|__APP_URL__|http://localhost:$QA_APP_PORT|g" > "$WORK/brief.md"
-fi
+PERSONA_FILE="nightly-qa/charters/personas/$PERSONA.md"
+FOCUS_FILE="nightly-qa/charters/focus/$FOCUS.md"
+# Fail rather than fall back. A typo in a charter name must not quietly produce a
+# session with no persona at all, which would look like a normal night in every
+# artifact it left behind.
+[ -f "$PERSONA_FILE" ] || { echo "no such persona: $PERSONA_FILE" >&2; exit 1; }
+[ -f "$FOCUS_FILE" ] || { echo "no such focus: $FOCUS_FILE" >&2; exit 1; }
+
+cat nightly-qa/brief/mission.md "$PERSONA_FILE" "$FOCUS_FILE" \
+  | sed -e "s|__APP_URL__|http://localhost:$QA_APP_PORT|g" > "$WORK/brief.md"
+
+echo "  ok         charter: $PERSONA / $FOCUS" >&2
 
 echo "  ok         work dir at $WORK ($HEADLESS)" >&2
 echo "$WORK"

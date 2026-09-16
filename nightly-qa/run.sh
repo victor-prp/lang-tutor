@@ -27,6 +27,8 @@ WORKDIR_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --headed) WORKDIR_ARGS+=(--headed); shift ;;
+    --persona) WORKDIR_ARGS+=(--persona "$2"); shift 2 ;;
+    --focus) WORKDIR_ARGS+=(--focus "$2"); shift 2 ;;
     --max-turns) MAX_TURNS="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
