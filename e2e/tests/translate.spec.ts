@@ -302,3 +302,83 @@ test('a misspelling shows the correction, and an alternative can be tapped', asy
   // handler, which is the half a bare submit() would have left stale.
   await expect(page.getByTestId('translate-input')).toHaveValue('throughout');
 });
+
+// The direction row's whole promise: what the box holds and what the label says
+// are the same lookup. The control swaps the result INTO the box, so the next
+// submit is the reverse lookup rather than a repeat of the first one — which is
+// what the nightly QA agent caught (#29): a label that flipped, an input that
+// did not, and a resubmit that quietly went back the way it came.
+const directionLabel = (page: Page) => page.getByText(/^מ(אנגלית לעברית|עברית לאנגלית)$/);
+
+test('swapping direction puts the translation in the box and looks it up in reverse', async ({
+  page,
+  request,
+}) => {
+  // Two one-shot expectations, consumed in registration order: the en_he lookup
+  // of the typed word, then the he_en lookup of its translation. A word the seed
+  // does not hold and no other spec here writes, so both calls are full misses
+  // that reach MockServer — and a third call would find no expectation at all,
+  // which is what makes the resubmit assertion below meaningful.
+  await expectGemini(
+    request,
+    {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'hedgehog',
+          part_of_speech: 'noun',
+          senses: [
+            {
+              translation: 'קיפוד',
+              example: { source: 'A hedgehog crossed the path.', target: 'קיפוד חצה את השביל.' },
+              sense_code: 'spiny_animal',
+            },
+          ],
+        },
+      ],
+    },
+    { once: true },
+  );
+  await expectGemini(
+    request,
+    {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'קיפוד',
+          part_of_speech: 'noun',
+          senses: [
+            {
+              translation: 'hedgehog',
+              example: { source: 'קיפוד חצה את השביל.', target: 'A hedgehog crossed the path.' },
+              sense_code: 'spiny_animal',
+            },
+          ],
+        },
+      ],
+    },
+    { once: true },
+  );
+  await openTranslate(page, request, 'e2e_translate_swap');
+
+  await page.getByTestId('translate-input').fill('hedgehog');
+  await page.getByTestId('translate-submit').click();
+  await expect(sense(page, 'קיפוד')).toBeVisible();
+  await expect(directionLabel(page)).toHaveText('מאנגלית לעברית');
+
+  await page.getByTestId('translate-flip').click();
+
+  // The box holds the translation, the label describes the reverse direction,
+  // and the senses are the reverse lookup's — three ways of saying one thing.
+  await expect(page.getByTestId('translate-input')).toHaveValue('קיפוד');
+  await expect(sense(page, 'hedgehog')).toBeVisible();
+  await expect(directionLabel(page)).toHaveText('מעברית לאנגלית');
+
+  // And it sticks. Submitting again from this state is the same he_en lookup,
+  // answered from Postgres this time — not a silent revert to en_he, and not a
+  // third provider call, which has no expectation left to answer it.
+  await page.getByTestId('translate-submit').click();
+  await expect(sense(page, 'hedgehog')).toBeVisible();
+  await expect(directionLabel(page)).toHaveText('מעברית לאנגלית');
+  await expect(page.getByTestId('translate-error')).toHaveCount(0);
+});

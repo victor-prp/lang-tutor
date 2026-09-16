@@ -23,6 +23,13 @@ export type TranslationValue = {
    * field agrees with the results it is showing.
    */
   submit: (override?: string) => void;
+  /**
+   * Swaps the direction by swapping the TEXT: the sense on screen moves into the
+   * input, and that is what gets looked up, the other way round. A direction the
+   * box does not agree with is not a state this screen can be in, which is the
+   * whole point — the label describes the text that produced it, and the next
+   * submit is the reverse lookup rather than a repeat of the first one.
+   */
   flip: () => void;
   reset: () => void;
 };
@@ -71,9 +78,21 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
       chosenIndex,
       choose: (index: number) => setChosenIndex(index),
       submit: (override?: string) => void run(override ?? text, undefined),
-      // Re-requests with the opposite direction made explicit, which is what
-      // makes a wrong detection recoverable rather than a dead end.
-      flip: () => void run(text, result?.direction === 'he_en' ? 'en_he' : 'he_en'),
+      flip: () => {
+        // The chosen sense if the learner has picked one, else the ranked first
+        // — the card wearing the badge. A result with no senses is the `empty`
+        // status, which renders no control at all, so the guard is for the type
+        // rather than for anything a learner can reach.
+        const sense = result?.senses[chosenIndex ?? 0];
+        if (!result || !sense) return;
+        // Both halves, exactly as the correction chips call both: `run` must not
+        // read the `text` this render still holds. The direction travels
+        // explicitly rather than being left to detection, so the reverse lookup
+        // is the reverse lookup even when the translation carries no Hebrew for
+        // detection to find — a proper noun comes back spelled the same way.
+        setText(sense.translation);
+        void run(sense.translation, result.direction === 'he_en' ? 'en_he' : 'he_en');
+      },
       reset: () => {
         setStatus('idle');
         setText('');
