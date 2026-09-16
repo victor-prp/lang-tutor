@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from '@jest/globals';
+import { afterAll, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
 import { createDb } from '../../../src/db/client';
@@ -9,6 +9,7 @@ import {
   parseLaneComment,
 } from '../../../src/db/ensureDatabase';
 import { ADMIN_URL, urlFor } from '../../support/dbNames';
+import { DROP_TIMEOUT_MS, dropDatabases } from '../../support/dropDatabases';
 
 // A name of its own, outside the t_ sweep patterns, because this test creates a
 // database the way a lane does rather than the way the harness does — and drops
@@ -32,12 +33,18 @@ async function admin<T>(fn: (db: ReturnType<typeof createDb>['db']) => Promise<T
   }
 }
 
-afterEach(async () => {
-  await admin((db) => db.execute(sql.raw(`drop database if exists ${NAME} with (force)`)));
-});
+// Once for the file, not after every test. See tests/support/dropDatabases.ts:
+// a DROP DATABASE waits on a checkpoint that this suite's other workers keep
+// busy, so it is far too expensive to pay five times over.
+afterAll(() => dropDatabases([NAME]), DROP_TIMEOUT_MS);
 
 describe('ensureDatabase', () => {
   it('creates the database when it does not exist', async () => {
+    // The one drop inside a test, and the reason is the assertion below: this is
+    // the only case that needs the database to be absent, and saying so here is
+    // what keeps it from depending on which test ran before it.
+    await dropDatabases([NAME]);
+
     const created = await ensureDatabase(urlFor(NAME), STAMP);
     expect(created).toBe(true);
 
@@ -45,7 +52,7 @@ describe('ensureDatabase', () => {
       db.execute<{ datname: string }>(sql`select datname from pg_database where datname = ${NAME}`),
     );
     expect(found.rows).toHaveLength(1);
-  });
+  }, DROP_TIMEOUT_MS);
 
   it('is idempotent: a second call creates nothing and does not throw', async () => {
     await ensureDatabase(urlFor(NAME), STAMP);

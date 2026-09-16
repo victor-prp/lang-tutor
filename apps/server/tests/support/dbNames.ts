@@ -8,6 +8,27 @@ export function urlFor(name: string): string {
   return `postgres://postgres:postgres@${HOST}:${PORT}/${name}`;
 }
 
+/**
+ * The prefix every test database of THIS checkout carries.
+ *
+ * Read per call rather than captured at import: globalSetup, globalTeardown and
+ * the workers are separate processes, and a value captured in one of them is
+ * not the value another would see. `t_` is lane 0's, which is what every
+ * checkout used before lanes existed.
+ *
+ * This is the whole of the cross-checkout fix. The sweep below drops by pattern,
+ * so two checkouts sharing a prefix would drop each other's live databases
+ * mid-run — templates included.
+ */
+export function dbPrefix(): string {
+  return process.env.TEST_DB_PREFIX ?? 't_';
+}
+
+/** The anchored regex globalSetup sweeps by: this lane's databases and no others. */
+export function sweepPattern(): string {
+  return `^${dbPrefix()}(test|tmpl)_`;
+}
+
 // One template per Jest worker, not one shared template: CREATE DATABASE locks
 // its template for the duration of the copy, so a single template would make
 // every worker serialise on it.
@@ -17,7 +38,7 @@ export function urlFor(name: string): string {
 // templates by exact worker number was the leak: a 4-worker run followed by a
 // 2-worker run stranded 3 and 4 permanently, because nothing ever looked for them.
 export function templateName(workerId: string | number): string {
-  return `t_tmpl_${workerId}`;
+  return `${dbPrefix()}tmpl_${workerId}`;
 }
 
 /** Postgres truncates identifiers past this silently, which would collide names. */
@@ -45,7 +66,7 @@ function slugify(testName: string): string {
  * COMMENT — see testDb.ts.
  */
 export function testDbName(testName: string, random: string): string {
-  const prefix = 't_test_';
+  const prefix = `${dbPrefix()}test_`;
   const budget = MAX_IDENTIFIER_BYTES - prefix.length - 1 - random.length;
   const slug = slugify(testName).slice(0, budget).replace(/_+$/, '') || 'unnamed';
   return `${prefix}${slug}_${random}`;

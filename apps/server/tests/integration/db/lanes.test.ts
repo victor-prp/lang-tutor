@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
 import { createDb, type Db } from '../../../src/db/client';
 import { ensureDatabase } from '../../../src/db/ensureDatabase';
 import { dropLaneDatabases, listLaneDatabases } from '../../../src/db/lanes';
 import { ADMIN_URL, urlFor } from '../../support/dbNames';
+import { DROP_TIMEOUT_MS, dropDatabases } from '../../support/dropDatabases';
 
 const LANE = 'lanes_probe';
 const MADE = [
@@ -31,22 +32,31 @@ async function admin<T>(fn: (db: Db) => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Idempotent, and called by each test that needs the fixture rather than from a
+ * beforeEach: the one test below that drops it must not leave the others
+ * depending on declaration order to still have it.
+ */
 async function createAll(): Promise<void> {
   await ensureDatabase(urlFor(MADE[0]), STAMP);
   await admin(async (db) => {
+    // An anchored alternation rather than `= any($1)`: drizzle expands a JS array
+    // into a parameter tuple, which is not what ANY wants on its right side.
+    const present = await db.execute<{ datname: string }>(
+      sql`select datname from pg_database where datname ~ ${`^(${MADE.join('|')})$`}`,
+    );
+    const have = new Set(present.rows.map((row) => row.datname));
     for (const name of MADE.slice(1)) {
-      await db.execute(sql.raw(`create database ${name}`));
+      if (!have.has(name)) await db.execute(sql.raw(`create database ${name}`));
     }
   });
 }
 
-afterEach(async () => {
-  await admin(async (db) => {
-    for (const name of MADE) {
-      await db.execute(sql.raw(`drop database if exists ${name} with (force)`));
-    }
-  });
-});
+// Built once and torn down once, never per test. See tests/support/dropDatabases.ts:
+// dropping these four in an afterEach, twenty times over this file, is what made
+// it fail roughly one run in three.
+beforeAll(createAll, DROP_TIMEOUT_MS);
+afterAll(() => dropDatabases(MADE), DROP_TIMEOUT_MS);
 
 describe('listLaneDatabases', () => {
   it('reports each lane database with the stamp that says who owns it', async () => {
@@ -70,6 +80,7 @@ describe('listLaneDatabases', () => {
 });
 
 describe('dropLaneDatabases', () => {
+  // The one test that drops anything, because dropping is its subject.
   it('drops the dev, e2e and per-test databases of one lane and nothing else', async () => {
     await createAll();
     const dropped = await admin((db) => dropLaneDatabases(db, LANE));
@@ -89,7 +100,7 @@ describe('dropLaneDatabases', () => {
       ),
     );
     expect(zero.rows).toHaveLength(1);
-  });
+  }, DROP_TIMEOUT_MS);
 
   it('reports nothing for a lane that has no databases', async () => {
     expect(await admin((db) => dropLaneDatabases(db, 'never_existed'))).toEqual([]);
