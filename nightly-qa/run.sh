@@ -12,6 +12,8 @@ cd "$(dirname "$0")/.." || exit 1
 
 REPO=$(pwd -P)
 OUT="$REPO/nightly-qa/.out"
+QA_API_PORT="${QA_API_PORT:-3101}"
+QA_APP_PORT="${QA_APP_PORT:-8092}"
 MAX_TURNS=150
 # Pinned rather than left to the CLI default, because phase A's whole output is a
 # set of measurements and a turn count measured against an unknown model means
@@ -30,8 +32,8 @@ done
 
 fail() { echo "$1" >&2; exit 1; }
 
-curl -sf -o /dev/null http://localhost:3001/health || fail "No server on :3001. Run ./nightly-qa/up.sh first."
-curl -sf -o /dev/null http://localhost:8082 || fail "No app on :8082. Run ./nightly-qa/up.sh first."
+curl -sf -o /dev/null "http://localhost:$QA_API_PORT/health" || fail "No server on :$QA_API_PORT. Run ./nightly-qa/up.sh first."
+curl -sf -o /dev/null "http://localhost:$QA_APP_PORT" || fail "No app on :$QA_APP_PORT. Run ./nightly-qa/up.sh first."
 
 # --- the fence, before anything else -----------------------------------------
 ./nightly-qa/guard.sh "${WORKDIR_ARGS[@]+"${WORKDIR_ARGS[@]}"}" || fail "Fence guard failed. Not starting a session."

@@ -27,6 +27,8 @@ REPO=$(pwd -P)
 # rather than the only one. CI does the same thing with $RUNNER_TEMP.
 WORK_RAW="${NIGHTLY_QA_WORK:-${TMPDIR:-/tmp}/lang-tutor-nightly-qa}"
 HEADLESS="--headless"
+QA_API_PORT="${QA_API_PORT:-3101}"
+QA_APP_PORT="${QA_APP_PORT:-8092}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -52,12 +54,14 @@ sed -e "s|__WORK__|${WORK#/}|g" -e "s|__REPO__|${REPO#/}|g" \
   nightly-qa/fence/settings.template.json > "$WORK/settings.json"
 
 sed -e "s|__WORK__|$WORK|g" -e "s|__HEADLESS__|$HEADLESS|g" \
+    -e "s|__API_PORT__|$QA_API_PORT|g" -e "s|__APP_PORT__|$QA_APP_PORT|g" \
   nightly-qa/fence/mcp.template.json > "$WORK/mcp.json"
 
 if [ -d nightly-qa/brief ] && [ -f nightly-qa/brief/mission.md ]; then
   cat nightly-qa/brief/mission.md \
       nightly-qa/brief/persona-careful-adult.md \
-      nightly-qa/brief/focus-polysemy.md > "$WORK/brief.md"
+      nightly-qa/brief/focus-polysemy.md \
+    | sed -e "s|__APP_URL__|http://localhost:$QA_APP_PORT|g" > "$WORK/brief.md"
 fi
 
 echo "  ok         work dir at $WORK ($HEADLESS)" >&2

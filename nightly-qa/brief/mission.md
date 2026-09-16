@@ -1,7 +1,7 @@
 # Tonight's QA session
 
 You are testing a language-learning app by using it, the way one of its learners would.
-The app is at **http://localhost:8082**. It is in Hebrew, laid out right to left, and it is
+The app is at **__APP_URL__**. It is in Hebrew, laid out right to left, and it is
 built for Hebrew speakers who are learning English.
 
 You have never used it before and you have no account. Start there.

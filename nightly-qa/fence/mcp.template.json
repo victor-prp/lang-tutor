@@ -8,7 +8,7 @@
         "--isolated",
         "--viewport-size", "412,915",
         "--output-dir", "__WORK__/.out/shots",
-        "--allowed-origins", "localhost:8082;localhost:3001"
+        "--allowed-origins", "localhost:__APP_PORT__;localhost:__API_PORT__"
       ]
     }
   }
