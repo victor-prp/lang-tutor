@@ -16,7 +16,7 @@ const translateRoute = createRoute({
   summary: 'Translate a word, phrase or sentence',
   description:
     'Returns every sense in one response, ranked with the most common first, so a client ' +
-    'can reveal the rest without a second request. An input that is not a word or ' +
+    'can show them all without a second request. An input that is not a word or ' +
     'expression yields 200 with an empty `senses` array — that is an answer, not a failure. ' +
     'NOTE: this endpoint calls a paid third-party model on every request and there is no ' +
     'rate limit in front of it.',

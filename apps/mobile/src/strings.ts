@@ -60,7 +60,11 @@ export const strings = {
     direction === 'he_en' ? 'מעברית לאנגלית' : 'מאנגלית לעברית',
   translateFlip: '⇄ החלף',
   translateTopSense: 'המשמעות הנפוצה',
-  translateMore: (count: number) => `עוד משמעויות (${count})`,
+  // Every sense is on screen, so this line is an orientation aid rather than a
+  // control: it says how far the list goes before the learner starts scrolling.
+  // Rendered only when there is more than one, because "1 משמעויות" is both
+  // ungrammatical and pointless.
+  translateSenseCount: (count: number) => `${count} משמעויות`,
   translateChoose: 'זו המשמעות שחיפשתי',
   translateChosen: 'התרגום נשמר לאוצר המילים שלך',
   translateNewWord: 'מלה חדשה',

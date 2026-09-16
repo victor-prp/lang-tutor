@@ -3,6 +3,15 @@
 - **Status:** Approved, ready for an implementation plan
 - **Date:** 2026-09-08
 - **Source:** `docs/superpowers/drafts/adding-words-to-student.md`
+- **Amended:** 2026-09-17 — the `עוד משמעויות (n)` control is gone, see below
+
+> **The `more` control no longer exists (issue #33).** Everywhere this document
+> describes a top sense shown alone with the rest behind **more**, the screen now shows
+> **every** sense at once, ranked, with `n משמעויות` above the cards when `n > 1` and the
+> `המשמעות הנפוצה` badge still on the first. The response always carried the whole list,
+> so the tap charged an interaction for information the client was already holding — and
+> comparing meanings is the reason a polysemous word gets looked up at all. Nothing else
+> in this document changed: same one request, same ranking, same per-sense button.
 
 ## Summary
 
@@ -379,7 +388,7 @@ One new screen, one new entry point, no change to identity or session code.
 | Route | Behaviour |
 |---|---|
 | `app/index.tsx` | Home gains a card that navigates to `/translate`. The `futureSpace` View this screen already reserves is where it goes. |
-| `app/translate.tsx` | The whole flow: a text field, the answer, **more**, and the per-sense button. |
+| `app/translate.tsx` | The whole flow: a text field, the answer, and the per-sense button. |
 
 `api/client.ts` gains `translate`. It is a POST, so the existing `postJson` helper covers
 it and no `getJson` is needed — the same reason phase 8 needed none. `strings.ts` gains the
@@ -387,17 +396,18 @@ Hebrew copy for every state below.
 
 ### Screen states
 
+> The **Revealed** state is gone — see the amendment at the top of this document.
+
 | State | What is on screen |
 |---|---|
 | Idle | The field and a submit control. Nothing else. |
 | Loading | A skeleton card where the answer will appear. |
-| Answered | The detected direction with `⇄ החלף`, the top sense as a card with its own button, and `עוד משמעויות (n)` when `n > 0`. |
-| Revealed | The remaining senses, each an identical card with its own button. |
-| Chosen | The chosen sense alone, marked, with `התרגום נשמר לאוצר המילים שלך` and `מלה חדשה`. |
+| Answered | The detected direction with `⇄ החלף`, then every sense as a card with its own button, the first badged as the common meaning. |
+| Chosen | The chosen sense marked, with `התרגום נשמר לאוצר המילים שלך` and `מלה חדשה`. |
 | Empty | `לא מצאנו תרגום` and the field kept as typed, so it can be corrected rather than retyped. |
 | Error | `התרגום לא זמין` and a retry control. |
 
-For `kind: 'sentence'` the **more** control and the per-sense button are both absent: one
+For `kind: 'sentence'` the count line and the per-sense button are both absent: one
 translation, and no offer to save it. The Chosen state is therefore unreachable for a
 sentence, which is the intended behaviour and needs a test that says so.
 
@@ -412,8 +422,8 @@ sentence, which is the intended behaviour and needs a test that says so.
 - **No streaming.** A structured JSON response cannot be rendered partially, so the honest
   treatment of the one-to-three second wait is a skeleton, not a progressively filling
   card.
-- **`more` reveals, it does not navigate.** The revealed senses are the same list on the
-  same screen; there is no second route and no second request.
+- **The senses are one list on one screen.** There is no second route and no second
+  request — and, since issue #33, no second tap either.
 - **A sense card's own button is what selects it**, not the card body. The learner is
   reading these cards to compare them, and a tap-anywhere card turns reading into
   accidental choosing.
@@ -591,8 +601,8 @@ the UI — the pattern phase 8 established for creating its learner via `POST /a
 no new machinery. `globalSetup.ts` gains a MockServer reachability check beside its Postgres
 one. New `translate.spec.ts`:
 
-- A word → the top sense → **more** → choose → the confirmation.
-- A sentence → one translation, **no** `more` control and **no** save button.
+- A word → every sense, ranked → choose → the confirmation.
+- A sentence → one translation, **no** count line and **no** save button.
 - An empty sense list → `לא מצאנו תרגום`.
 - An expectation returning `500` → the error state, and a retry that succeeds once a good
   expectation replaces it. Testing the retry *working* is the point; a permanently failing
