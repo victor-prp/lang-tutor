@@ -52,6 +52,7 @@ wire changed, and `apps/mobile` has no changed file.
 - Phase 11: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-11-vocabulary-backfill-sourcing.md) · [plan](docs/superpowers/plans/2026-09-13-lang-tutor-phase-11-vocabulary-backfill.md)
 - Phase 12: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-12-dict-lexemes-design.md) · [plan](docs/superpowers/plans/2026-09-13-lang-tutor-phase-12-dict-lexemes.md)
 - Phase 13: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-13-misspelling-corrections-design.md) · [plan](docs/superpowers/plans/2026-09-15-lang-tutor-phase-13-misspelling-corrections.md)
+- Phase 14: [design](docs/superpowers/specs/2026-09-15-lang-tutor-phase-14-nightly-qa-design.md) · [plan, part A](docs/superpowers/plans/2026-09-16-lang-tutor-phase-14-nightly-qa-part-a.md) · [plan, part B](docs/superpowers/plans/2026-09-16-lang-tutor-phase-14-nightly-qa-part-b.md) — the first phase in two parts: a local proof of concept, then the nightly workflow. Findings from the proof of concept are in [nightly-qa/FINDINGS.md](nightly-qa/FINDINGS.md).
 
 ## Layout
 

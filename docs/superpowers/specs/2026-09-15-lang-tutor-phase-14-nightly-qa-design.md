@@ -1,7 +1,9 @@
 # Nightly QA agent — design
 
-- **Status:** Draft, awaiting review. Delivered in two phases — see *Delivery in two
-  phases*: a local proof of concept first, the workflow and the filing second.
+- **Status:** Implemented and running. Part A proved the session locally; part B runs it
+  nightly and files what it finds. See *Delivery in two phases*, and
+  `nightly-qa/POC-RESULTS.md` — *First nights in CI* for the six verification runs, their
+  cost, and the one defect they caught in the pipeline itself.
 - **Date:** 2026-09-15
 - **Relationship to earlier work:** the e2e suite
   (`docs/superpowers/specs/2026-08-26-lang-tutor-e2e-testing-design.md`) proved the app and
@@ -72,8 +74,8 @@ Precedents, each with the one thing taken from it:
 ├─ job: explore            (permissions: contents read, issues read, id-token write)
 │   1. npm ci, install Chromium
 │   2. npm run db:up                         ← Postgres (+ MockServer, unused tonight)
-│   3. nightly-qa/up.sh                      ← fresh lang_tutor_e2e, server on :3001
-│   │                                          against real Gemini, web export on :8082
+│   3. nightly-qa/up.sh                      ← fresh lang_tutor_qa, server on :3101
+│   │                                          against real Gemini, web export on :8092
 │   4. nightly-qa/prepare.sh                 ← picks the charter for tonight, dumps the
 │   │                                          bot's issues to .out/known-issues.json
 │   5. nightly-qa/guard.sh                   ← three probes that must be refused (see
@@ -83,25 +85,38 @@ Precedents, each with the one thing taken from it:
 │   │      Read/Write under .out. Writes .out/findings.json, report.md, shots/*.png
 │   7. upload artifact  nightly-qa-<date>    ← report, findings, screenshots, server log
 │
-└─ job: file  (needs: explore)   (permissions: issues write)
+└─ job: file  (needs: explore)   (permissions: issues write, contents write)
     1. download the artifact
     2. nightly-qa/file.ts                    ← no model. Comments on matched issues,
-                                               creates new ones (capped), writes the
-                                               job summary. --dry-run prints instead.
+                                               creates new ones (capped), pushes the
+                                               screenshots, writes the job summary.
+                                               Without --apply it prints instead.
 ```
 
 Two jobs, not one, because the split is the permission boundary: the job that holds the
 model has read-only access to issues, and the job that writes issues holds no model. This
 is the safe-outputs shape, and it is also what makes the write side unit-testable.
 
+`file` needs `contents: write` as well as `issues: write`, which the original sketch did
+not account for: pushing the `nightly-qa-evidence` branch is a write to the repository, not
+to the tracker. That is a broader permission than this design would otherwise hand out, and
+it is acceptable for exactly one reason — it sits in the job that holds no model. Nothing
+with browser access, and nothing that read a page tonight, can reach it. Had the two jobs
+been collapsed to save a runner minute, this permission alone would be the argument against
+it.
+
 ## The environment — `nightly-qa/up.sh`
 
 The same three things `e2e/playwright.config.ts` starts, started from a shell script
 because Playwright only starts its `webServer` entries under `playwright test`:
 
-1. `npx tsx e2e/globalSetup.ts` — drops and recreates `lang_tutor_e2e`, migrates, seeds.
-   Reused as-is; it already probes MockServer liveness, which `db:up` provides, so nothing
-   changes there. A fresh database every night means every lookup the agent makes is a real
+1. `npx tsx nightly-qa/src/provision-db.ts` — drops and recreates `lang_tutor_qa`,
+   migrates, seeds. Not `e2e/globalSetup.ts`, which the design originally proposed reusing:
+   that file hard-codes `lang_tutor_e2e` and probes MockServer, and a QA run needs neither.
+   Its own database means an e2e run and a QA run can be in flight at once without one
+   dropping the other's out from under it. `globalSetup.ts` is not a library but a caller of
+   `createDb`, `runMigrations` and `seedContent`; this is a second caller of the same three,
+   which is the same relationship rather than a copy. A fresh database every night means every lookup the agent makes is a real
    provider call, which is the point, and also means the dictionary cache cannot grow into
    a hidden variable between nights.
 2. `npm run start -w apps/server` with `DATABASE_URL` pointing at that database,
@@ -110,10 +125,15 @@ because Playwright only starts its `webServer` entries under `playwright test`:
    endpoint, applies. Waited for on `/health`. Stdout and stderr go to
    `nightly-qa/.out/server.log`, which ships in the artifact: a 502 the learner saw as a
    blank screen is explained there.
-3. `EXPO_PUBLIC_API_URL=http://localhost:3001 npm run build:web -w apps/mobile` then
-   `npm run serve:web -w apps/mobile` on 8082. Same port and same reasons as e2e.
+3. `EXPO_PUBLIC_API_URL=http://localhost:3101 npm run build:web -w apps/mobile -- --clear`
+   then `expo serve` on 8092. Ports of its own rather than e2e's, so a run can start beside
+   a developer's server and beside an e2e run; both are overridable. `--clear` is not
+   optional: Metro's cache key excludes the value of the inlined variable, so an export
+   after a port change reports success and serves an app pointed at the old server. `up.sh`
+   greps the built bundle for the port it just started and refuses to continue if they
+   disagree.
 
-The script is idempotent about ports: if 3001 or 8082 is already bound it fails loudly,
+The script is idempotent about ports: if either is already bound it fails loudly,
 the same rule `playwright.config.ts` applies with `reuseExistingServer: false`.
 
 The browser binary is the one implementation risk here. `@playwright/mcp` bundles its own
@@ -132,7 +152,11 @@ the nightly run become the same command. The workflow has two triggers: the nigh
 inputs, `persona`, `focus`, `max_turns` and `file_issues` (default `true`), so a night
 can be re-run by hand with a chosen charter, or run without touching the tracker. The prompt
 is a skill invocation, `/nightly-qa`, so the brief lives in the repository at
-`.claude/skills/nightly-qa/SKILL.md` and is reviewed like code.
+`nightly-qa/brief/` as three files — mission, persona, focus — that `workdir.sh`
+concatenates, and is reviewed like code. Not a skill, which the design first proposed: a
+skill has to be discovered from `.claude/skills/` in the working directory, and the working
+directory is a generated scratch directory by design. Passing the brief as the prompt text
+removes the discovery step entirely.
 
 ### Tools, and why each
 
@@ -146,7 +170,9 @@ is a skill invocation, `/nightly-qa`, so the brief lives in the repository at
 | `Read(/.out/**)` | The charter and the known-issues dump. |
 | `Edit(/.out/**)` | The report, the findings file. (`Write` is governed by `Edit` rules.) Nothing else is writable. |
 
-Deliberately absent: `browser_evaluate` (can mutate the page and fake a result), `Bash`
+Deliberately absent: `browser_evaluate` **and** `browser_run_code_unsafe` (Playwright 0.0.81
+exposes both, and either runs arbitrary code in the page, which is how an agent fakes a
+result instead of observing one), the `webmcp` bridge, `Bash`
 (no `curl`, no `gh`), `Read` of anything outside `.out/`, and every GitHub MCP tool. The
 agent cannot read `apps/`, cannot call the server directly, and cannot touch the tracker.
 
@@ -158,7 +184,9 @@ directory with no permission check at all, so a session started in the checkout 
 fence is structural, in three layers, each of which holds on its own.
 
 1. **The working directory is not the checkout.** The session starts in a scratch
-   directory (`nightly-qa/.work/` locally, `$RUNNER_TEMP/qa` in CI) that holds only the
+   directory (under `$TMPDIR` locally, `$RUNNER_TEMP/qa` in CI — **outside the checkout**,
+   because deny beats allow and a nested directory's own allow rule is swallowed by the
+   repo's deny) that holds only the
    skill, the charter and `.out/`. The checkout, where the servers are already running
    from, is outside it. `permissions.blockReadsOutsideWorkingDirectories: true` makes the
    file tools refuse every path outside the working directory in every permission mode,
@@ -167,7 +195,7 @@ fence is structural, in three layers, each of which holds on its own.
 2. **The tools do not exist.** Deny rules beat allow rules, and a bare tool name in a deny
    rule removes the tool from the model's context. The session's settings deny `Bash`,
    `Grep`, `Glob`, `WebFetch`, `WebSearch`, `Agent`, `Edit`, `NotebookEdit` and
-   `mcp__playwright__browser_evaluate` by name, then allow `Read(/.out/**)`,
+   both code-execution browser tools by name, then allow `Read(/.out/**)`,
    `Edit(/.out/**)` and `mcp__playwright__*`. `--strict-mcp-config` with the one
    `mcp.json` means no other MCP server can appear. An absolute-path deny on the checkout
    (`Read(//<checkout>/**)`) is added on top, belt over braces.
@@ -191,7 +219,7 @@ Why this matters, given the repository is public: not secrecy, honesty. A tester
 read the code stops being a user. It explains findings away as "by design", and it drives
 the app by `testID` instead of by what is on the screen.
 
-### The brief (`SKILL.md`), in outline
+### The brief (`nightly-qa/brief/`), in outline
 
 The skill's body is the standing part of the prompt; the charter is the variable part.
 
@@ -241,7 +269,7 @@ The skill's body is the standing part of the prompt; the charter is the variable
         "network": "POST /api/translations → 200, entries[0].senses.length = 4",
         "console": []
       },
-      "fingerprint": "translate | senses list | only top sense before more",
+      "fingerprint": "translate | senses list | hidden-behind-tap",
       "match": { "issue": 42 }
     }
   ],
@@ -286,8 +314,13 @@ takes to the job summary:
 1. **Malformed or missing file:** fail the job. The `explore` job's artifact is still there.
 2. **Confidence `low`:** never filed. Listed in the summary.
 3. **`match.issue = n`, issue open:** comment on *n*: date, persona, focus, the observed
-   text, a link to the run's artifact for the screenshot. Do not reopen, retitle or
-   relabel.
+   text, and the run's screenshots. Do not reopen or retitle. **Do relabel when the
+   severity rose**, replacing the severity label and saying so in the comment. Part A
+   showed why: the direction-swap defect was `weird` on one run and a `bug` on the next,
+   because only the second run reached the state that returns 502. The same defect looks
+   worse once a nastier manifestation is found, and an issue frozen at the severity of the
+   night it was opened will understate it forever. Severity never falls automatically — a
+   quieter night is not evidence the problem got smaller.
 4. **`match.issue = n`, issue closed, labelled `wontfix` or `by-design`:** drop silently
    into the summary. A decision was made; the bot does not argue with it nightly.
 5. **`match.issue = n`, issue closed otherwise:** one comment, "reproduced again on
@@ -296,56 +329,120 @@ takes to the job summary:
    before `inconvenience`. Overflow goes to the summary with a note that it was not filed
    for the cap. Title is the finding's title prefixed `[nightly-qa]`; labels `nightly-qa`
    and the severity; body rendered from a fixed template ending in a **Fingerprint** line
-   copied from the finding. That line is what makes tomorrow's deduplication reliable:
-   the agent compares fingerprints first and prose second.
+   copied from the finding.
 7. **`match` absent:** the agent ran out of turns before deciding. Not filed; the summary
    says so, and the finding is in the artifact for a human.
 
-A last guard in code, independent of the agent's judgement: before creating, `file.ts`
-compares the new title against every open `nightly-qa` issue title and refuses a
-near-exact match (normalised, small edit distance). It is the gh-aw `deduplicate-by-title`
-rule, and it exists for the night the model's judgement is off.
+### How matching actually has to work
 
-Screenshots do not go into issues: the GitHub API has no image upload for issue bodies.
-Every comment and issue links to the run, whose artifact holds them, retained 14 days.
-That is a known weakness; see *Decisions deferred*.
+The original plan here — the agent compares fingerprints first and prose second, with a
+near-identical-title check in code as the safety net — was tested against part A's two runs
+and does not survive. Three defects were found by both runs, which makes six fingerprints
+and three known-correct answers.
+
+| Strategy | Catches | Fails |
+|---|---|---|
+| Exact fingerprint match | **0 of 3** | Pairs differ by a word: "two senses share *identical* translation and part of speech" against "two senses share *the same* translation and part of speech". |
+| First two fingerprint segments (`screen \| element`) | 3 of 3 | Catastrophically over-merges. Four findings across the two runs carry `dictionary \| senses list`, and they are **three different problems**: duplicate meanings, the real "more" button, and the suppressed button. |
+| Near-identical title, in code | **0 of 3** | The same defect was titled *"Save this meaning" claims success but never calls the server* and *"Saved to vocabulary" confirmation shown after choosing a meaning, but no request is sent to the server*. |
+
+So three changes.
+
+**The model decides, and that is not a fallback.** Given the existing issues' text it has the
+context to tell the suppressed button from the working one — it did exactly that
+unprompted, filing one as a `bug` and the other as an `inconvenience`. Nothing mechanical
+available here distinguishes those two, so the judgement is the mechanism, not a
+convenience on top of one.
+
+**The fingerprint's third segment becomes a controlled vocabulary, not prose.** Free text
+in that position is what made every pair miss by a word. The agent picks the symptom from a
+fixed list carried in the brief — `no-network-call`, `duplicate-entry`, `hidden-behind-tap`,
+`server-error`, `stale-input`, `lost-session`, `dead-end`, `no-feedback`, `wrong-content`,
+`other` — so the fingerprint becomes matchable while the prose stays free. A finding that
+reaches for `other` twice in a week is a sign the list needs a term, and the report should
+say so.
+
+**The code guard stops pretending to be a safety net.** It caught nothing above, and a
+guard that cannot fire is the failure mode `CLAUDE.md` warns about. It becomes a *flag*
+rather than a refusal: the issue is filed either way, and `possible-duplicate` is a label a
+human resolves. Over-merging silently is worse than a labelled pair, because a merged issue
+is invisible.
+
+**As built, the flag fires on an exact three-segment fingerprint match**, not on a
+`screen | element` collision. The weaker trigger was written before this same section made
+the symptom a controlled vocabulary, and the two decisions interact badly: with a fixed
+symptom word, `dictionary | senses list | duplicate-entry` and
+`dictionary | senses list | hidden-behind-tap` are cleanly different problems, and a
+`screen | element` trigger would label almost every dictionary finding a possible duplicate
+— which is the same as labelling none of them. Part A produced exactly that pair, a
+suppressed control and a working-but-awkward one in the same senses list, so this is not a
+hypothetical. Under the vocabulary a full match is both meaningful and rare.
+
+The weaker `screen | element` neighbours are still computed, and printed in the job summary
+under *Neighbours, for a human to glance at*. A person sees that two findings sit on the
+same control without either issue being labelled. `filing.test.ts` guards the distinction
+directly, and that test was confirmed able to fail by switching the comparison back to the
+prefix.
+
+**Screenshots go into the issue.** The GitHub API has no image upload for issue bodies, and
+the original answer was to link the run's artifact, retained 14 days. Part A changed this
+from a minor weakness into a real one: `nightly-qa/evidence/f_light_expanded.png` proves the
+duplicate-meanings defect on its own, more directly than the prose does, and an issue whose
+evidence expires in a fortnight is an issue nobody can act on later. The `file` job commits
+the run's screenshots to an orphan `nightly-qa-evidence` branch and links them by raw URL.
+That branch never merges and is not built by CI; at four images a night and roughly 25KB
+each it costs a few megabytes a year.
 
 ## Caps
 
 | Cap | Where | Value to start | Why |
 |---|---|---|---|
-| Turns | `claude_args: --max-turns` | 150 | The only spend cap that applies on a subscription. Roughly: ~20 for onboarding and login, ~80 browser actions, ~20 for reading known issues and writing outputs, slack. |
+| Turns | `--max-turns` | 200 | The only spend cap that applies on a subscription. Roughly: ~20 for onboarding and login, ~80 browser actions, ~20 for reading known issues and writing outputs, slack. |
 | Actions | in the brief | ~80 | Soft cap so the hard cap is not hit mid-report. |
 | Job timeout | `timeout-minutes` | 40 | `npm ci`, Chromium, the web export and the session; e2e's job is allowed 30 with no agent. |
 | Overlap | `concurrency: nightly-qa`, no cancel | 1 | Two sessions against one server would interleave; a manual dispatch queues behind the night. |
 | New issues | `file.ts` | 3 per night | A quiet tracker is what makes a comment on it worth reading. |
-| Model | `claude_args: --model` | Sonnet 5 | Tool-heavy, cheap on the window. One line to change. |
+| Model | `--model` | Sonnet 5 | Tool-heavy, cheap on the window. One line to change. |
 | Forks | `if: github.repository_owner == 'victor-prp'` | — | Secrets are withheld on forks; a red run nobody can fix is worse than a skipped one. |
 | Gemini | none needed | — | A night is tens of lookups. The eval job spends more per push. |
 
-The turn number is a guess to be corrected: after three nights the artifact's report and
-the action's own usage line say how many turns a night actually needs, and the value is
-set from that. Scheduled at `0 1 * * *` UTC, which is early morning in Israel, so the
+The turn number is measured rather than guessed. Two part A sessions against Sonnet 5
+used 142 and 134 turns; 150 was close enough to truncation to cut a report short, so the
+cap is 200. Each ran 7 to 10 minutes and cost about $1.50 API-equivalent. Pinning the
+model matters for more than the bill: a turn count means nothing beside an unknown model,
+and the CLI's inherited default was Opus, at roughly four times the cost per turn.
+Scheduled at `0 1 * * *` UTC, which is early morning in Israel, so the
 session's use of the five-hour window lands where no interactive session is competing.
 
 ## Repository layout
 
+Built in part A:
+
 ```
-.github/workflows/nightly-qa.yml           the two jobs
-.claude/skills/nightly-qa/SKILL.md         the brief; allowed-tools frontmatter
 nightly-qa/                                a workspace, like e2e/
-  package.json                             @playwright/mcp pinned, tsx, node:test
-  mcp.json                                 the MCP server command and flags
-  up.sh                                    environment, mirrors playwright.config.ts
-  prepare.sh                               charter pick + known-issues dump
-  file.ts                                  filing rules; --dry-run
-  file.test.ts                             node:test over the pure rules
-  charters/personas/*.md
-  charters/focus/*.md
-  .out/                                    gitignored; artifact contents
+  package.json                             @playwright/mcp pinned, tsx, zod, node:test
+  up.sh / down.sh                          environment; mirrors playwright.config.ts
+  workdir.sh                               the scratch dir, from the fence templates
+  guard.sh                                 the canary probes
+  run.sh                                   one session, end to end
+  fence/settings.template.json             permissions, with __WORK__ / __REPO__
+  fence/mcp.template.json                  the MCP server command and flags
+  brief/mission.md, persona-*.md, focus-*.md
+  src/provision-db.ts                      lang_tutor_qa
+  src/findings.ts, findings.test.ts        the contract and its tests
+  src/validate.ts, summarize.ts            the two CLIs run.sh calls
+  POC-RESULTS.md                           what the two sessions showed
+  .out/, .work/                            gitignored
 ```
 
-`nightly-qa/` is a workspace so `npm run test:unit` picks up `file.test.ts` automatically
+Part B adds `.github/workflows/nightly-qa.yml` (the two jobs), `prepare.sh` (charter pick
+and known-issues dump), `file.ts` with `file.test.ts` (the filing rules), and the remaining
+persona and focus files. The charters live where this document's *Charters* section says:
+`nightly-qa/charters/personas/*.md` and `nightly-qa/charters/focus/*.md`. Part A's two
+files started in `brief/` and moved there in part B, leaving `brief/mission.md` as the one
+piece every night shares.
+
+`nightly-qa/` is a workspace so `npm run test:unit` picks up its tests automatically
 and so the MCP server version is pinned in the lockfile. It is outside `apps/`, so ADRs
 0001 to 0005 do not apply to it, and outside `apps/server/tests/`, so ADR 0004's buckets
 are untouched; e2e already set that precedent for a top-level browser-driven workspace.
@@ -382,15 +479,19 @@ Gemini calls and in the subscription window.
 | Playwright MCP cannot launch Chromium | The first browser tool call errors. The brief requires `run.browser_ok` in `findings.json`, set from whether the first `browser_navigate` to the app succeeded; `file.ts` fails the job when it is `false`, so a night with no browser is red, not quietly empty. |
 | Turn cap hit | `findings.json` exists from before the dedup pass; unmatched findings are not filed and are listed in the summary. |
 | OAuth token expired | The action fails at authentication; nothing is filed. Renewal is manual (`claude setup-token`). |
-| Agent files nonsense | Cap of 3, low confidence never filed, title guard in code, and every issue carries the label, so a bad night is three labelled issues to close. |
+| Agent files nonsense | Cap of 3, low confidence never filed, and every issue carries the label, so a bad night is three labelled issues to close. Note the code guard is a `possible-duplicate` flag, not a filter — it stops nothing on its own. |
 
 ## Verification before the first night
 
 In the spirit of `CLAUDE.md`'s rule for ADR checks: a system that can only ever say
 "nothing found" looks identical to one that works. Before the schedule is enabled:
 
-1. `file.test.ts` covers each filing rule with fixtures, including the title guard and
-   the cap ordering.
+1. `file.test.ts` covers each filing rule with fixtures, including severity escalation, the
+   `possible-duplicate` flag and the cap ordering. Its fixtures are part A's two real runs,
+   in `nightly-qa/FINDINGS.md`: they contain three defects found twice and described
+   differently, plus the trap pair that shares `dictionary | senses list` while being two
+   different problems. A matching strategy that merges that pair is wrong, and this is the
+   test that says so.
 2. A local `npm run qa:nightly` against a branch with a **planted defect** (hide the
    **more** button behind an off-screen style, say) must produce a finding with the right
    screen and a screenshot. Then the same run on the clean tree must not.
@@ -407,21 +508,46 @@ export at all, how many turns a night takes, whether the findings are sharp or h
 positives, and whether the fence holds. One local run answers all four. So the work is
 split, and the second half is designed against a real report rather than an imagined one.
 
-**Phase A — proof of concept, local only.** `up.sh`; the scratch directory with the
-settings fence and `mcp.json`; `guard.sh`; `SKILL.md` with one persona and one focus
-hard-coded; a run script that starts `claude -p` headed; `report.md` and a first cut of
-`findings.json` with no `match` field. No workflow, no charter rotation, no filing. Done
-when: the guard's three probes are refused; a run against a planted defect (the **more**
-button hidden off-screen) reports it with the right screen and a screenshot; the same run
-on the clean tree does not; and the turn count and the report have been read by a human.
+**Part A — proof of concept, local only. Implemented; see
+`nightly-qa/POC-RESULTS.md`.** `up.sh`; the scratch directory with the settings fence and
+`mcp.json`; `guard.sh`; the brief with one persona and one focus; `run.sh`; the findings
+schema and its validator. No workflow, no charter rotation, no filing.
 
-Phase A settles: the turn cap, the model, whether the verifier stage is needed now, and
-whether the browser has to move into the container.
+It answered all four questions. The agent found the planted defect — the reveal button
+suppressed — as a high-confidence bug carrying the network evidence that the server had
+returned four senses while the screen showed one. On the clean tree that finding is absent,
+and the same screen is reported instead as a high-confidence *inconvenience*. Same area,
+different severity, right both times. Two of the six distinct findings across the two runs
+are examples from this project's original brief, reached unprompted, and one is a 502 on the
+clean tree that no existing test covers.
 
-**Phase B — the night.** `nightly-qa.yml` with its two jobs and dispatch inputs;
-`prepare.sh` and the charter files; `file.ts` with its tests and the deduplication rules;
-the `match` field in the output contract; the artifact. Written against phase A's numbers
-and phase A's report.
+Part A also cost six harness defects to get there, none of them visible on review, all
+listed in `POC-RESULTS.md`. Two are worth carrying into any future work here: the scratch
+directory must not sit inside the checkout, because deny beats allow and the repo rule
+swallowed the agent's own output rule; and `expo export` must clear its cache, because
+Metro's cache key excludes the value of the inlined environment variable, so an export after
+a port change silently serves an app pointed at the old server.
+
+**Part B — the night. Implemented; see `nightly-qa/POC-RESULTS.md` — *First nights in
+CI*.** `nightly-qa.yml` with its two jobs and dispatch inputs; `prepare.sh` and the charter
+files; `filing.ts` with its tests and `file.ts` with the side effects; `evidence.ts` and the
+orphan screenshot branch; the `match` field in the output contract; the artifact. Written
+against part A's numbers and part A's report.
+
+Six dispatched runs proved it before the first unattended night: a session that writes
+nothing, a filing dry run, one real filing run, a second night on the same charter that
+filed **no duplicate**, a deliberate fence breach that **failed the job before any session
+started**, and a planted defect that arrived as a bug and was correctly not merged with the
+neighbouring issue that shares its screen and element.
+
+Two things the verification found that the design had not anticipated. The first is in
+`@playwright/mcp`: `browser_take_screenshot` honours `--output-dir` only when no `filename`
+is given, and resolves an explicit one against its own working directory instead, so the
+first CI night went green carrying five sound findings and not one usable image. The second
+is that `wrong-content` is too broad a symptom term — two genuinely different defects
+fingerprinted identically through it, and the `possible-duplicate` flag fired on a pair a
+human had to separate. It labelled rather than merged, which is the design behaving
+correctly, but the vocabulary wants a finer term.
 
 ## Out of scope
 
@@ -433,14 +559,17 @@ and phase A's report.
 
 ## Decisions deferred
 
-- **Verifier stage.** One session for now, per the decision in this thread. If, after
-  the first weeks, the rate of findings a human closes as "cannot reproduce" is high, add a
-  second fresh-context session that replays each finding's steps and drops what it cannot
-  reproduce. The output contract already carries `steps` for that reason.
-- **Screenshots in issues.** Artifacts expire. If a screenshot turns out to be the thing a
-  reader always needs, the `file` job can commit them to an orphan branch and link there.
-- **Turn cap.** 150 is a placeholder until three nights of data exist.
+- **Verifier stage — settled: not needed now.** Across two part A sessions every kept
+  finding described something really present in the app, and the agent reported an obstacle
+  honestly rather than inventing findings when a harness bug blocked it from the focus area
+  entirely. Revisit when findings a human closes as "cannot reproduce" reach roughly one run
+  in three. The output contract already carries `steps`, so the verifier can be added later
+  without a schema change.
+- **Screenshots in issues — settled: they go in.** Part A showed a single image proving a
+  defect outright, so the orphan-branch approach moves from this list into part B's scope.
+  See *How matching actually has to work*.
 - **Claude's issue writes via the GitHub App instead of `GITHUB_TOKEN`.** Not needed:
   issues created with `GITHUB_TOKEN` trigger no further workflows, which here is a feature.
-- **Browser in a container.** Only if the guard shows `--allowed-origins` does not refuse
-  `file://`. Decided in phase A.
+- **Browser in a container — settled: not needed.** Playwright MCP refuses the `file:`
+  protocol itself, independently of `--allowed-origins`, and the guard confirmed it with the
+  error verbatim. `npx` is enough.
