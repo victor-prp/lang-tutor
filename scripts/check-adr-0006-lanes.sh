@@ -60,10 +60,10 @@ r2() {
 }
 
 r3() {
-  # db:down and lane:clean are absent on purpose: both act on the shared world
-  # from the main checkout rather than as a lane, so neither takes lane values.
-  # lane:clean walks every worktree and delegates lane:down to each one, which
-  # is where the lane values are read.
+  # db:down, lane:clean and lane:abandon are absent on purpose: all act on the
+  # shared world from the main checkout rather than as a lane, so none of them
+  # take lane values. The two lane commands delegate lane:down to the worktree
+  # they are acting on, which is where the lane values are read.
   for key in server mobile e2e test:integration db:up db:migrate db:reseed \
              dict:export dict:restore lane:list lane:down; do
     line=$(grep -E "^    \"$key\": " package.json)

@@ -10,8 +10,16 @@
 # Three kinds of worktree are left alone, and the reasons are the whole point:
 #
 #   locked      a live session holds it. `git worktree lock` is how Claude Code
-#               marks a worktree it is working in, and pulling one out from under
-#               a running session loses whatever is uncommitted.
+#               marks a worktree it created, and pulling one out from under a
+#               running session loses whatever is uncommitted. It releases the
+#               lock when the session ends, and a periodic sweep releases one
+#               left by a session whose process was killed.
+#
+#               Note what this does NOT cover: Claude Code locks only worktrees
+#               it created itself. One made by hand with `git worktree add` is
+#               never locked, even with a session running in it — so for those
+#               the protection is the two checks below plus git's own refusal to
+#               remove a worktree with uncommitted or untracked files.
 #   not merged  it carries a commit master does not have. That is unfinished
 #               work, and dropping its databases and branch would lose it.
 #   the main    lane 0 is not a lane that gets retired, and you cannot remove the
@@ -49,6 +57,7 @@ git show-ref -q --verify refs/remotes/origin/master && BASE=origin/master
 
 plan_count=0
 clean_count=0
+done_count=0
 
 # `git worktree list --porcelain` emits a record per worktree, blank-line
 # separated: `worktree <path>`, then `branch <ref>` or `detached`, and `locked`
@@ -56,10 +65,13 @@ clean_count=0
 # containing a space survives.
 while IFS= read -r line; do
   case "$line" in
-    "worktree "*) wt_path=${line#worktree }; wt_branch=""; wt_locked=0 ;;
+    "worktree "*) wt_path=${line#worktree }; wt_branch=""; wt_locked=0; wt_reason="" ;;
     "branch "*)   wt_branch=${line#branch }; wt_branch=${wt_branch#refs/heads/} ;;
     "detached")   wt_branch="" ;;
-    "locked"*)    wt_locked=1 ;;
+    # `locked` or `locked <reason>`. Claude Code writes the reason when it holds a
+    # worktree for a session — "claude session <name> (pid NNNN start ...)" — and
+    # that is exactly what someone deciding whether to reclaim it needs to read.
+    "locked"*)    wt_locked=1; wt_reason=${line#locked}; wt_reason=${wt_reason# } ;;
     "")
       [ -n "${wt_path:-}" ] || continue
       [ "$wt_path" = "$MAIN" ] && { wt_path=""; continue; }
@@ -68,7 +80,7 @@ while IFS= read -r line; do
       plan_count=$((plan_count + 1))
 
       if [ "$wt_locked" -eq 1 ]; then
-        printf '  skip       %-28s locked — a session is using it\n' "$name"
+        printf '  skip       %-28s locked — %s\n' "$name" "${wt_reason:-a session is using it}"
       elif [ -z "$wt_branch" ]; then
         printf '  skip       %-28s detached HEAD — nothing to judge merged\n' "$name"
       elif [ "$(git rev-parse "$wt_branch" 2>/dev/null)" = "$(git rev-parse "$BASE" 2>/dev/null)" ]; then
@@ -80,9 +92,16 @@ while IFS= read -r line; do
         printf '  skip       %-28s no commits of its own — nothing finished here yet\n' "$name"
       elif ! git merge-base --is-ancestor "$wt_branch" "$BASE" 2>/dev/null; then
         printf '  skip       %-28s not merged into %s\n' "$name" "$BASE"
+      elif [ -n "$(git -C "$wt_path" status --porcelain 2>/dev/null)" ]; then
+        # Asked here, before anything destructive. `git worktree remove` would
+        # refuse this anyway, but only AFTER lane:down had already dropped the
+        # databases — losing them for a worktree that then survives. Skipping in
+        # the plan is both safer and more honest about what will happen.
+        printf '  skip       %-28s has uncommitted or untracked files\n' "$name"
       else
         printf '  clean      %-28s merged into %s\n' "$name" "$BASE"
         clean_count=$((clean_count + 1))
+        removed=0
         if [ "$APPLY" -eq 1 ]; then
           # Inside the worktree, and before it is removed: this is the only place
           # `lane:down` can find the lane it belongs to.
@@ -93,6 +112,8 @@ while IFS= read -r line; do
           fi
           git worktree remove "$wt_path" \
             || { printf '               could not remove %s — leaving the branch alone\n' "$name"; wt_path=""; continue; }
+          removed=1
+          done_count=$((done_count + 1))
           git branch -d "$wt_branch" > /dev/null 2>&1 \
             && printf '               removed, branch %s deleted\n' "$wt_branch" \
             || printf '               removed; branch %s kept (git refused to delete it)\n' "$wt_branch"
@@ -111,9 +132,14 @@ if [ "$plan_count" -eq 0 ]; then
   echo "No worktrees besides the main checkout."
 elif [ "$APPLY" -eq 1 ]; then
   git worktree prune
-  echo "Cleaned $clean_count of $plan_count. Orphaned databases, if any: npm run lane:list"
+  echo "Removed $done_count of the $clean_count planned. Orphaned databases, if any: npm run lane:list"
 elif [ "$clean_count" -eq 0 ]; then
   echo "Nothing to clean. This was a plan; nothing was changed."
 else
-  echo "This was a plan; nothing was changed. Run './scripts/lane-clean.sh --yes' to carry it out."
+  echo "This was a plan; nothing was changed. To carry it out:"
+  # The bare `--` is load-bearing: `npm run lane:clean --yes` silently keeps the
+  # flag for npm itself and the script never sees it, so it would dry-run again
+  # and look like it had done nothing.
+  echo "    npm run lane:clean -- --yes        (the bare -- is required)"
+  echo "    ./scripts/lane-clean.sh --yes      (same thing, without npm)"
 fi
