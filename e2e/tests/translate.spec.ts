@@ -56,6 +56,16 @@ const LADDER_ENTRIES = [
 // two elements and fail Playwright's strict mode rather than the assertion.
 const sense = (page: Page, text: string) => page.getByText(text, { exact: true });
 
+/**
+ * The body of the next POST /api/translations, armed BEFORE the click that
+ * causes it. Returned un-awaited on purpose: awaiting it before the click would
+ * wait for a request that nothing has asked for yet.
+ */
+const translationRequest = (page: Page): Promise<unknown> =>
+  page
+    .waitForRequest((r) => r.url().endsWith('/api/translations') && r.method() === 'POST')
+    .then((r) => r.postDataJSON());
+
 // Registers expectations through Playwright's `request` fixture, the pattern
 // phase 8 established for creating a learner via POST /api/users.
 test.beforeEach(async ({ request }) => {
@@ -299,4 +309,99 @@ test('a misspelling shows the correction, and an alternative can be tapped', asy
   // The field agrees with the results it is showing — the setText half of the
   // handler, which is the half a bare submit() would have left stale.
   await expect(page.getByTestId('translate-input')).toHaveValue('throughout');
+});
+
+// Issue #29. The flip changed the label and nothing else: the submit that
+// followed carried no `direction` at all, so the server detected from the script
+// again and the label reverted to what the flip had just overruled — a control
+// that was cosmetic AND misleading about what the next tap would do.
+//
+// The two one-shots are the only provider calls this flow may make. The third
+// lookup is answered from Postgres whichever way the bug falls — `quill` is
+// written as an English form by the first call and as a Hebrew one by the second
+// — so the provider is cleared before it, and which of the two rows comes back
+// is exactly what tells a sticky flip from a forgotten one. That is why the two
+// payloads translate to different strings.
+test('a flipped direction survives the next submit instead of reverting', async ({
+  page,
+  request,
+}) => {
+  await expectGemini(
+    request,
+    {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'quill',
+          part_of_speech: 'noun',
+          senses: [
+            {
+              translation: 'נוצה',
+              example: { source: 'He wrote with a quill.', target: 'הוא כתב בנוצה.' },
+              sense_code: 'writing_feather',
+            },
+          ],
+        },
+      ],
+    },
+    { once: true },
+  );
+  // What the server asks for once the flip makes he_en explicit: the same string,
+  // read as Hebrew. Nonsense as Hebrew, and that is the point — the learner is
+  // the one who insisted, so the app owes them the direction on the label rather
+  // than a quiet detection back to the one they just rejected.
+  await expectGemini(
+    request,
+    {
+      kind: 'word',
+      entries: [
+        {
+          lemma: 'quill',
+          part_of_speech: 'noun',
+          senses: [{ translation: 'feather pen', sense_code: 'read_as_hebrew' }],
+        },
+      ],
+    },
+    { once: true },
+  );
+  await openTranslate(page, request, 'e2e_translate_flip');
+
+  await page.getByTestId('translate-input').fill('quill');
+  await page.getByTestId('translate-submit').click();
+  await expect(sense(page, 'נוצה')).toBeVisible();
+  await expect(page.getByTestId('translate-direction')).toHaveText('מאנגלית לעברית');
+
+  await page.getByTestId('translate-flip').click();
+  await expect(sense(page, 'feather pen')).toBeVisible();
+  await expect(page.getByTestId('translate-direction')).toHaveText('מעברית לאנגלית');
+  // The flip re-translates the text; it does not move the answer into the box.
+  // Which is what the control's label now says, and what it always did.
+  await expect(page.getByTestId('translate-input')).toHaveValue('quill');
+
+  await clearGemini(request);
+
+  // The outgoing body, not the rendered label. Both answers here come from
+  // Postgres in milliseconds, so an assertion on the screen could be satisfied
+  // by the PREVIOUS answer still being painted and pass under the bug — the
+  // request is the thing that either carries the direction or does not, which is
+  // also the evidence the report was filed on.
+  const resubmitted = translationRequest(page);
+  await page.getByTestId('translate-submit').click();
+  expect(await resubmitted).toEqual({ text: 'quill', direction: 'he_en' });
+
+  // Before the fix this showed נוצה again under 'מאנגלית לעברית'.
+  await expect(sense(page, 'feather pen')).toBeVisible();
+  await expect(page.getByTestId('translate-direction')).toHaveText('מעברית לאנגלית');
+  await expect(sense(page, 'נוצה')).toHaveCount(0);
+
+  // A different string is a different lookup, so it goes back to detection
+  // rather than inheriting the flip — which is the other half of the fix, and
+  // the one that keeps a flip from following the learner around forever.
+  // `window` is one of the seeded strings, so this too is answered without the
+  // provider that is no longer expecting a call.
+  const nextWord = translationRequest(page);
+  await page.getByTestId('translate-input').fill('window');
+  await page.getByTestId('translate-submit').click();
+  expect(await nextWord).toEqual({ text: 'window' });
+  await expect(page.getByTestId('translate-direction')).toHaveText('מאנגלית לעברית');
 });

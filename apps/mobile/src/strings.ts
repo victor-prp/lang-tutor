@@ -58,7 +58,11 @@ export const strings = {
   translateAction: 'תרגם',
   translateDirection: (direction: string) =>
     direction === 'he_en' ? 'מעברית לאנגלית' : 'מאנגלית לעברית',
-  translateFlip: '⇄ החלף',
+  // "Reverse the direction", not "swap" (החלף), which is what this said while
+  // it swapped nothing: it never moved the result into the input box, and the
+  // word invited exactly that reading. What it does — and now keeps doing for
+  // the string it was tapped on — is translate the same text the other way.
+  translateFlip: '⇄ הפוך כיוון',
   translateTopSense: 'המשמעות הנפוצה',
   translateMore: (count: number) => `עוד משמעויות (${count})`,
   translateChoose: 'זו המשמעות שחיפשתי',

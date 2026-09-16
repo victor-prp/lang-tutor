@@ -83,6 +83,23 @@ export default function TranslateScreen() {
         </View>
       ) : null}
 
+      {/* Above both answers rather than inside the answered one, and outside the
+          ScrollView so it cannot scroll away from the text it describes. "We
+          found no translation" is the most likely moment for the direction to
+          be the thing that was wrong, and a control the learner cannot reach
+          there is a dead end: the flip now sticks, so nothing else on the
+          screen would take them back to detection. */}
+      {t.result && (t.status === 'answered' || t.status === 'empty') ? (
+        <View style={styles.directionRow}>
+          <Text testID="translate-direction" style={styles.directionLabel}>
+            {strings.translateDirection(t.result.direction)}
+          </Text>
+          <Pressable accessibilityRole="button" testID="translate-flip" onPress={t.flip}>
+            <Text style={styles.link}>{strings.translateFlip}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {t.status === 'empty' ? (
         <View testID="translate-empty" style={styles.notice}>
           <Text style={styles.noticeText}>{strings.translateEmpty}</Text>
@@ -91,15 +108,6 @@ export default function TranslateScreen() {
 
       {t.status === 'answered' && t.result ? (
         <ScrollView contentContainerStyle={styles.results}>
-          <View style={styles.directionRow}>
-            <Text style={styles.directionLabel}>
-              {strings.translateDirection(t.result.direction)}
-            </Text>
-            <Pressable accessibilityRole="button" testID="translate-flip" onPress={t.flip}>
-              <Text style={styles.link}>{strings.translateFlip}</Text>
-            </Pressable>
-          </View>
-
           {/* Inside the `answered` branch, which makes one promise structural
               rather than a hope: `status` is `empty` whenever `senses` is empty,
               so an empty answer cannot render a banner even if one reached the
@@ -272,7 +280,12 @@ const styles = StyleSheet.create({
   },
   noticeText: { color: colors.text, fontSize: fontSizes.md, writingDirection: 'rtl' },
   results: { gap: spacing.sm, paddingBottom: spacing.xl },
-  directionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  directionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
   directionLabel: { color: colors.muted, fontSize: fontSizes.sm, writingDirection: 'rtl' },
   card: {
     backgroundColor: colors.surface,
