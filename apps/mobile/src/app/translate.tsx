@@ -149,7 +149,7 @@ export default function TranslateScreen() {
             />
           ))}
 
-          {!isSentence && hidden > 99 && t.chosenIndex === null ? (
+          {!isSentence && hidden > 0 && t.chosenIndex === null ? (
             <Pressable
               accessibilityRole="button"
               testID="translate-more"
