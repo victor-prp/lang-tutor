@@ -9,9 +9,9 @@ import { z } from 'zod';
  * claim with nothing behind it is the failure mode this whole run exists to
  * avoid. The brief says the same thing in prose; this is what makes it true.
  *
- * `match` is deliberately absent. Deduplication is phase B, and adding the
- * field before there is anything to match against would invite the agent to
- * invent issue numbers.
+ * `match` is the agent's deduplication decision, added in phase B. It is
+ * optional, and the difference between absent and { new: true } is the whole
+ * point: the first files nothing, the second files an issue.
  */
 
 export const severities = ['bug', 'weird', 'inconvenience'] as const;
@@ -22,6 +22,18 @@ const evidenceSchema = z.object({
   network: z.string().optional(),
   console: z.array(z.string()).default([]),
 });
+
+/**
+ * The agent's own judgement about whether the tracker already knows this.
+ *
+ * Optional on purpose. A session that hits the turn cap before the
+ * deduplication pass leaves it off entirely, and that is a different thing from
+ * "I decided this is new" - file.ts files the second and never the first.
+ */
+const matchSchema = z.union([
+  z.object({ issue: z.number().int().positive() }).strict(),
+  z.object({ new: z.literal(true) }).strict(),
+]);
 
 const findingSchema = z
   .object({
@@ -35,6 +47,7 @@ const findingSchema = z
     observed: z.string().min(1),
     evidence: evidenceSchema,
     fingerprint: z.string().min(1),
+    match: matchSchema.optional(),
   })
   .refine(
     (f) =>

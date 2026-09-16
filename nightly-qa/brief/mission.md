@@ -67,6 +67,31 @@ failure it was hiding**, not "the alert is missing".
 Spend about 80 browser actions exploring, then stop and write up. Leave yourself enough
 room to write both files below — a brilliant session with no report is a wasted night.
 
+## What is already known
+
+`known-issues.json` in your working directory lists every issue this bot has ever filed,
+open and closed. Read it **before** you start exploring, and again before you write up.
+
+Reading it first saves you the night. These are problems someone has already been told
+about, so do not spend your budget re-finding them. If you happen to pass one, a single
+line in the report saying it still reproduces is worth more than a finding.
+
+Reading it again at the end is the deduplication pass, and it is the part that keeps the
+tracker worth reading. For **every** finding, add a `match` field:
+
+- `"match": { "issue": 42 }` when it is the same underlying problem as issue 42, even if
+  the wording, the word you looked up, or the severity differ. Same screen, same control,
+  same symptom means same problem.
+- `"match": { "new": true }` when nothing in the list is this problem.
+
+Judge the problem, not the prose. Two write-ups of one defect will not look alike. What
+makes them the same is the fingerprint and the mechanism, not the sentence. And the reverse
+trap is real: two findings can share a screen and a control and still be different problems,
+so a suppressed control and a working-but-awkward one are **not** a match.
+
+If you run out of budget before you get to this, leave `match` off rather than guessing. A
+guess files a duplicate; an absent field files nothing and says so.
+
 ## What to leave behind
 
 Write two files before you finish. Write `findings.json` **first**.
@@ -92,7 +117,8 @@ Write two files before you finish. Write `findings.json` **first**.
         "network": "the request and what came back",
         "console": []
       },
-      "fingerprint": "screen | element | symptom-from-the-list-below"
+      "fingerprint": "screen | element | symptom-from-the-list-below",
+      "match": { "new": true }
     }
   ],
   "notes": "anything you could not get to, and why"
@@ -120,6 +146,10 @@ those as one problem.
 
 Never put the specific word you looked up in the fingerprint. Describe the defect, not the
 example.
+
+The `match` field is the deduplication decision described above: `{ "new": true }`, or
+`{ "issue": <number> }` naming an issue from `known-issues.json`. Leave it out entirely if
+you never got to that pass.
 
 If nothing in the list fits, use `other` and say in `notes` what word you would have
 wanted. A term the list is missing is worth knowing about.

@@ -144,3 +144,33 @@ test('checkScreenshots is quiet when every screenshot exists', () => {
   assert.deepEqual(missing, []);
   assert.deepEqual(unevidenced, []);
 });
+
+test('accepts a finding matched to an existing issue', () => {
+  const parsed = parseReport({
+    ...validReport,
+    findings: [{ ...validFinding, match: { issue: 42 } }],
+  });
+  assert.deepEqual(parsed.findings[0].match, { issue: 42 });
+});
+
+test('accepts a finding the agent judged new', () => {
+  const parsed = parseReport({
+    ...validReport,
+    findings: [{ ...validFinding, match: { new: true } }],
+  });
+  assert.deepEqual(parsed.findings[0].match, { new: true });
+});
+
+test('accepts a finding with no match at all, for a session that ran out of turns', () => {
+  const parsed = parseReport(validReport);
+  assert.equal(parsed.findings[0].match, undefined);
+});
+
+test('rejects a match that is neither an issue number nor new', () => {
+  assert.throws(() =>
+    parseReport({ ...validReport, findings: [{ ...validFinding, match: { issue: 'yes' } }] }),
+  );
+  assert.throws(() =>
+    parseReport({ ...validReport, findings: [{ ...validFinding, match: { new: false } }] }),
+  );
+});

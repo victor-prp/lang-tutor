@@ -75,5 +75,14 @@ cat nightly-qa/brief/mission.md "$PERSONA_FILE" "$FOCUS_FILE" \
 
 echo "  ok         charter: $PERSONA / $FOCUS" >&2
 
+# The agent reads this to decide what is already known. Copied in rather than
+# read from the checkout, because the checkout is exactly what the fence stops
+# it reaching.
+if [ -f nightly-qa/.out/known-issues.json ]; then
+  cp nightly-qa/.out/known-issues.json "$WORK/known-issues.json"
+else
+  echo '[]' > "$WORK/known-issues.json"
+fi
+
 echo "  ok         work dir at $WORK ($HEADLESS)" >&2
 echo "$WORK"
