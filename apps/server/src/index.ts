@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
 
 import { createApp } from './app';
-import { loadConfig, loadGeminiConfig } from './config';
+import { databaseNameFrom, loadConfig, loadGeminiConfig } from './config';
 import { createServerDeps } from './composition';
 import { createDb } from './db/client';
 import { createConsoleLogger } from './logger';
@@ -30,6 +30,13 @@ export function main(): void {
     fetch: globalThis.fetch,
     gemini,
     translationTimeoutMs: config.translationTimeoutMs,
+    // Resolved here, in the one place that reads the environment: app.ts must
+    // not learn that a lane exists.
+    identity: {
+      lane: config.lane,
+      database: databaseNameFrom(config.databaseUrl),
+      port: config.port,
+    },
   });
 
   const server = serve(

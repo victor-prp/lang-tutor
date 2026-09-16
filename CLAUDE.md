@@ -28,16 +28,30 @@ wrong in the diff — a model update alone will do it. Read the run's `eval-repo
 before assuming the commit broke something, and never answer a tier 2 drop by lowering
 `TIER2_THRESHOLD`.
 
-# Worktrees
+# Lanes
 
-`git worktree add` brings tracked files and nothing else, so a new worktree is missing
-exactly what `.gitignore` covers — `apps/mobile/.env.local` and `node_modules`. Run
-`./scripts/setup-worktree.sh` before running the app, the tests or the e2e suite; it is
-idempotent, and a SessionStart hook (`.claude/settings.json`) says so when either is
-absent. Skipping it makes the app throw `EXPO_PUBLIC_API_URL is not set` at module scope,
+Every checkout is a **lane** with ports and databases of its own, so several can run at
+once. The main checkout is lane 0 and its values are unchanged: server 3001, Metro 8081,
+database `lang_tutor`. Each worktree gets a slot from its `.lane` file and a name from its
+branch, and `scripts/lane-env.sh` derives everything else — see
+`docs/adr/adr-0006-lanes.md`, which a check script enforces.
+
+Run `./scripts/setup-worktree.sh` in a new worktree before anything else. `git worktree
+add` brings tracked files and nothing else, so a new worktree is missing exactly what
+`.gitignore` covers — `apps/mobile/.env.local`, `node_modules` and `.lane` — and it has no
+database yet. The script is idempotent, and a SessionStart hook says so when it has not
+run. Skipping it makes the app throw `EXPO_PUBLIC_API_URL is not set` at module scope,
 which surfaces as three misleading expo-router errors about a missing default export.
 
-**Never run `npm run db:up` from a worktree** while another checkout's Postgres holds port
-5432: compose derives its project name from the directory, so it starts a second container
-and fails. Reuse the running one — integration tests clone a per-test database off it
-either way.
+**Never hardcode a port or a database name.** `npm run server`, `mobile`, `e2e`,
+`test:integration` and every `db:`/`dict:` script already run through the wrapper and need
+no arguments. `npm run lane:list` shows every lane on the shared Postgres, which of them a
+server is answering for, and any database whose worktree is gone.
+
+**`npm run db:up` is refused from a worktree** while another checkout's Postgres holds port
+5432: compose derives its project name from the directory, so it would start a second
+container and fail. Start it from the main checkout; every lane has its own databases on
+that one container.
+
+The main checkout stays on `master`. A branch can only be checked out in one place at a
+time, and switching branches under a running server is what lanes exist to avoid.

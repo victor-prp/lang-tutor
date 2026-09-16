@@ -64,6 +64,7 @@ export function createFakeAppDeps(): AppDeps {
     users,
     translations,
     health: { ping: unreachable },
+    identity: { lane: 'test', database: 'test_db', port: 0 },
     logger: createFakeLogger(),
   };
 }

@@ -39,6 +39,7 @@ function depsWithPing(ok: boolean): AppDeps {
     users: unreachableUsers,
     translations: unreachableTranslations,
     health: { ping: async () => ok },
+    identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001 },
     logger: createFakeLogger(),
   };
 }
@@ -46,16 +47,29 @@ function depsWithPing(ok: boolean): AppDeps {
 // No database: the health route's two branches are both reachable with a fake.
 // The app's one database-backed case lives in tests/integration/app.test.ts.
 describe('GET /health', () => {
-  it('returns 200 with ok: true when the health check passes', async () => {
+  it('returns 200 and names the lane that answered when the check passes', async () => {
     const res = await createApp(depsWithPing(true)).request('/health');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await res.json()).toEqual({
+      ok: true,
+      lane: 'phase_15',
+      database: 'lang_tutor_phase_15',
+      port: 4001,
+    });
   });
 
-  it('returns 503 with ok: false when the health check fails', async () => {
+  // The identity is on the failure body too, and deliberately: a 503 from the
+  // wrong lane is exactly as misleading as a 200 from it, and this is the body
+  // a developer reads while wondering which server they reached.
+  it('returns 503 and still names the lane when the check fails', async () => {
     const res = await createApp(depsWithPing(false)).request('/health');
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ ok: false });
+    expect(await res.json()).toEqual({
+      ok: false,
+      lane: 'phase_15',
+      database: 'lang_tutor_phase_15',
+      port: 4001,
+    });
   });
 });
 

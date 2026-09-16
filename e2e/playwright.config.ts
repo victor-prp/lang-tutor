@@ -39,7 +39,10 @@ export default defineConfig({
       command: 'npm run start -w apps/server',
       cwd: REPO_ROOT,
       env: {
+        PORT: String(new URL(API_URL).port),
         DATABASE_URL: E2E_DATABASE_URL,
+        // Published on /health, so a probe that reaches the wrong server says so.
+        LANE: process.env.LANE ?? 'main',
         // Only the base URL differs from production. There is no stub mode
         // inside the server.
         GEMINI_BASE_URL: `${MOCKSERVER_URL}/${E2E_MOCK_NAMESPACE}`,
@@ -47,7 +50,12 @@ export default defineConfig({
         GEMINI_MODEL: 'e2e-model',
       },
       url: `${API_URL}/health`,
-      reuseExistingServer: !process.env.CI,
+      // Never reuse, not even locally. Until phase 15 this was `!process.env.CI`,
+      // and on a developer's machine it silently attached the suite to whatever
+      // held the port — the dev server, on the dictionary database, calling the
+      // real provider. This entry now has a port of its own, so an occupied one
+      // means a stray process and must fail the run loudly.
+      reuseExistingServer: false,
       timeout: 60_000,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -57,13 +65,13 @@ export default defineConfig({
       // hosting it can never disagree. EXPO_PUBLIC_API_URL must be set HERE:
       // export-time inlining is the only thing that controls the app's API
       // target, and it overrides apps/mobile/.env.local without touching it.
-      // Served on 8082, not Metro's default 8081: reuseExistingServer must
-      // never let this entry silently attach to a `npm run mobile` dev server
-      // a developer happens to have running elsewhere.
+      // Served on this lane's e2e app port, never Metro's: reuseExistingServer
+      // must never let this entry silently attach to a `npm run mobile` dev
+      // server a developer happens to have running.
       command: 'npm run build:web -w apps/mobile && npm run serve:web -w apps/mobile',
       cwd: REPO_ROOT,
       url: APP_URL,
-      env: { EXPO_PUBLIC_API_URL: API_URL },
+      env: { EXPO_PUBLIC_API_URL: API_URL, E2E_APP_PORT: new URL(APP_URL).port },
       // Deliberately not tied to CI: a stray process already on this port must
       // fail the run loudly (port already in use) rather than have Playwright
       // silently reuse it and run the test against the wrong server.

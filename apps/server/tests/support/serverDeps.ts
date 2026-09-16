@@ -22,6 +22,7 @@ export function createTestServerDeps(io: {
   rng: () => number;
   geminiBaseUrl?: string;
   translationTimeoutMs?: number;
+  identity?: { lane: string; database: string; port: number };
 }): AppDeps {
   return createServerDeps({
     db: io.db,
@@ -34,5 +35,6 @@ export function createTestServerDeps(io: {
       model: 'test-model',
     },
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
+    identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0 },
   });
 }

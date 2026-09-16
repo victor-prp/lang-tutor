@@ -13,6 +13,7 @@ docs/superpowers/drafts/
 /drafts/
 scripts/translation-backfills/en-he/logs/
 .claude/worktrees/
+.lane
 nightly-qa/.out/
 nightly-qa/.work/
 .nightly-qa-canary.txt

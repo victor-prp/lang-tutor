@@ -187,7 +187,8 @@ migration.
 
 Docker, then the database, then the server, then the app. The mobile app reads its
 server URL from `apps/mobile/.env.local`, which Expo auto-loads and git ignores (only
-`.env.example` is committed) — create it before the first run.
+`.env.example` is committed). In the main checkout, create it by hand; in a worktree,
+`./scripts/setup-worktree.sh` generates it pointing at that lane's own server.
 
 ```bash
 npm install
@@ -227,6 +228,44 @@ network namespace. Edit the `apps/mobile/.env.local` created above:
 ```
 
 Phone and dev machine must be on the same Wi-Fi network.
+
+### Working in lanes
+
+Several checkouts can run at once. The main checkout is **lane 0** and keeps the values
+above. Each worktree is a lane of its own, numbered 1..9, with ports and databases derived
+from its slot and branch by `scripts/lane-env.sh`:
+
+| | lane 0 | slot *n* |
+|---|---|---|
+| server | 3001 | 3001 + 1000·n |
+| Metro | 8081 | 8081 + 1000·n |
+| e2e server / app | 3002 / 8082 | 3002 / 8082 + 1000·n |
+| dev database | `lang_tutor` | `lang_tutor_<branch>` |
+| e2e database | `lang_tutor_e2e` | `lang_tutor_e2e_<branch>` |
+| test databases | `t_…` | `t_<branch>_…` |
+
+```bash
+git worktree add -b my-feature .claude/worktrees/my-feature master
+cd .claude/worktrees/my-feature
+./scripts/setup-worktree.sh   # slot, node_modules, .env.local, its own database
+npm run server                # on this lane's port
+npm run dict:restore          # optional: the checked-in dictionary, ~2 minutes
+```
+
+Every script that starts or tests something already runs through the wrapper, so none of
+them take a port or a database argument. `npm run lane:list` shows what exists:
+
+```
+lang_tutor                     lane main         :3001 serving
+lang_tutor_my_feature          lane my_feature   branch my-feature  |  :4001 idle
+```
+
+`/health` names the lane, database and port that answered, so a probe can never be
+mistaken for another lane's server. Removing a worktree is `npm run lane:down` from inside
+it, then `git worktree remove`.
+
+One shared Postgres and one shared MockServer serve every lane; start them from the main
+checkout with `npm run db:up`, which is refused elsewhere.
 
 ### Environment variables
 

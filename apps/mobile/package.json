@@ -37,7 +37,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --port ${METRO_PORT:-8081}",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
@@ -45,7 +45,7 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "build:web": "expo export -p web --output-dir dist",
-    "serve:web": "expo serve dist --port 8082"
+    "serve:web": "expo serve dist --port ${E2E_APP_PORT:-8082}"
   },
   "jest": {
     "preset": "jest-expo",

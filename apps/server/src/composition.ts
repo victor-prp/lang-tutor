@@ -13,11 +13,23 @@ import { createSessionService, type SessionService } from './services/sessions';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
 
+/**
+ * Which checkout this process belongs to, as published by /health. Data, not a
+ * collaborator: app.ts holds no logic, so the values arrive already resolved
+ * from the composition root that read the environment.
+ */
+export type ServerIdentity = {
+  lane: string;
+  database: string;
+  port: number;
+};
+
 export type AppDeps = {
   sessions: SessionService;
   users: UserService;
   translations: TranslationService;
   health: HealthRepo;
+  identity: ServerIdentity;
   logger: Logger;
 };
 
@@ -36,6 +48,7 @@ export function createServerDeps(io: {
   // inject a short budget instead of paying a slow provider's delay in
   // wall-clock time — see config.ts's TRANSLATION_TIMEOUT_MS default.
   translationTimeoutMs: number;
+  identity: ServerIdentity;
 }): AppDeps {
   // Binding the repositories to a transaction is assembly, which is what this
   // file is for. Doing it here is what lets services/ take a transaction rather
@@ -64,6 +77,7 @@ export function createServerDeps(io: {
     users: createUserService({ transaction, logger: io.logger }),
     translations: createTranslationService({ llm, transaction, logger: io.logger }),
     health: createHealthRepo(io.db, io.logger),
+    identity: io.identity,
     logger: io.logger,
   };
 }

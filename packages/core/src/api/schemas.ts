@@ -86,9 +86,15 @@ export const ErrorSchema = z.object({
 });
 
 // /health is part of the wire contract too: the e2e suite waits on it, and a
-// 503 there is what distinguishes "server booting" from "broken".
+// 503 there is what distinguishes "server booting" from "broken". Since phase
+// 15 it also answers "which server is this?" — several checkouts run at once,
+// each on its own port and database, and a healthy port alone cannot tell them
+// apart. The database is named, never the URL: the URL carries credentials.
 export const HealthResponseSchema = z.object({
   ok: z.boolean(),
+  lane: z.string(),
+  database: z.string(),
+  port: z.number().int(),
 });
 
 // Identity, phase 8. A username identifies a learner; it authenticates nothing.

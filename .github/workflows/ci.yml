@@ -43,6 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: ./scripts/check-adrs.sh
+      # The lane formula is pure text — no dependencies, no database — so it
+      # belongs in the one job that needs no setup step.
+      - run: ./scripts/test-lane-env.sh
 
   check-types:
     runs-on: ubuntu-latest
@@ -117,7 +120,13 @@ jobs:
             git status --porcelain apps/server/src/db/migrations >&2
             exit 1
           fi
+      # A prefix of its own, which is how the lane mechanism is exercised on
+      # every push: a prefix that some module ignored would leave databases named
+      # `t_test_*` behind, and tests/integration/support/isolation.test.ts fails
+      # on exactly that.
       - run: npm run test:integration
+        env:
+          TEST_DB_PREFIX: t_ci_
 
   test-e2e:
     runs-on: ubuntu-latest

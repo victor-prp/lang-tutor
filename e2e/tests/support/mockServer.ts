@@ -1,14 +1,17 @@
 import type { APIRequestContext } from '@playwright/test';
 
-import { MOCKSERVER_URL } from '../../urls';
+import { MOCKSERVER_URL, requireEnv } from '../../urls';
 
 /**
  * One namespace for the whole run rather than one per test: the server is a
  * single long-lived process with a single GEMINI_BASE_URL in its environment.
  * Safe because playwright.config.ts already runs `workers: 1` with
  * `fullyParallel: false`, and each spec clears the namespace before it registers.
+ *
+ * Per lane since phase 15, because "clears the namespace before it registers" is
+ * only safe while one run owns it.
  */
-export const E2E_MOCK_NAMESPACE = 'e2e';
+export const E2E_MOCK_NAMESPACE = requireEnv('E2E_MOCK_NAMESPACE');
 
 const path = `/${E2E_MOCK_NAMESPACE}/v1beta/models/.*:generateContent`;
 

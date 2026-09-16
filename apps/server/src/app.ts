@@ -39,7 +39,10 @@ export function createApp(deps: AppDeps) {
 
   app.openapi(healthRoute, async (c) => {
     const ok = await deps.health.ping();
-    return ok ? c.json({ ok: true }, 200) : c.json({ ok: false }, 503);
+    // The identity is on both bodies: a 503 from the wrong lane misleads exactly
+    // as much as a 200 from it.
+    const body = { ...deps.identity, ok };
+    return ok ? c.json(body, 200) : c.json(body, 503);
   });
 
   app.route('/api', createUsersRouter(deps.users));

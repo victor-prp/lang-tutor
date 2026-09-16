@@ -2,6 +2,7 @@
 // literal object rather than mutating the process environment.
 export type Config = {
   databaseUrl: string;
+  lane: string;
   port: number;
   poolMax: number;
   translationTimeoutMs: number;
@@ -19,6 +20,9 @@ const DEFAULT_TRANSLATION_TIMEOUT_MS = 25_000;
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   return {
     databaseUrl: env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
+    // Which checkout this server belongs to. `main` is the main checkout, and
+    // the default, so an unset environment is lane 0 — see scripts/lane-env.sh.
+    lane: env.LANE?.trim() || 'main',
     // `Number('') === 0` and `Number('nonsense') === NaN`, both falsy: an unset,
     // empty or malformed value all mean "use the default".
     port: Number(env.PORT) || 3001,
@@ -63,4 +67,37 @@ export function loadGeminiConfig(env: NodeJS.ProcessEnv): GeminiConfig {
   }
 
   return { apiKey, baseUrl: env.GEMINI_BASE_URL?.trim() || DEFAULT_GEMINI_BASE_URL, model };
+}
+
+/**
+ * The database name inside a connection string. `/health` publishes it and the
+ * lane tooling drops by it, so it is parsed once, here, rather than with a
+ * regex at each call site.
+ */
+export function databaseNameFrom(databaseUrl: string): string {
+  return decodeURIComponent(new URL(databaseUrl).pathname.replace(/^\//, ''));
+}
+
+/**
+ * The same server, same credentials, pointed at the maintenance database.
+ * CREATE DATABASE and DROP DATABASE cannot run from inside their target.
+ */
+export function maintenanceUrlFor(databaseUrl: string): string {
+  const url = new URL(databaseUrl);
+  url.pathname = '/postgres';
+  return url.toString();
+}
+
+/**
+ * Throws unless `name` is a bare lowercase Postgres identifier.
+ *
+ * An identifier cannot be a bound parameter, so any CREATE/DROP DATABASE has to
+ * interpolate it. Every name that reaches one comes from scripts/lane-env.sh,
+ * which emits `[a-z0-9_]` only; this is the assertion that says so out loud
+ * rather than trusting it.
+ */
+export function assertDatabaseIdentifier(name: string): void {
+  if (!/^[a-z][a-z0-9_]{0,62}$/.test(name)) {
+    throw new Error(`refusing ${JSON.stringify(name)} as a database identifier`);
+  }
 }

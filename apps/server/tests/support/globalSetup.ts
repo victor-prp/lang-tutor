@@ -3,7 +3,7 @@ import { sql } from 'drizzle-orm';
 import { createDb } from '../../src/db/client';
 import { runMigrations } from '../../src/db/migrate';
 import { seedContent } from '../../src/db/seed';
-import { ADMIN_URL, templateName, urlFor } from './dbNames';
+import { ADMIN_URL, sweepPattern, templateName, urlFor } from './dbNames';
 
 /**
  * Sweeps the previous run's databases, then migrates and seeds one template per
@@ -39,8 +39,11 @@ export default async function globalSetup(config: { maxWorkers: number }): Promi
     // names this harness actually creates; a bare `t_` prefix match would take a
     // hand-made `t_scratch` with it. A third category of test database, if one is
     // ever added, goes in this pattern deliberately.
+    //
+    // Since phase 15 the prefix is this lane's, so a second checkout running the
+    // same suite at the same time sweeps its own databases and not this one's.
     const stale = await admin.db.execute<{ datname: string }>(
-      sql`select datname from pg_database where datname ~ ${'^t_(test|tmpl)_'}`,
+      sql`select datname from pg_database where datname ~ ${sweepPattern()}`,
     );
     for (const { datname } of stale.rows) {
       // Quoted and with embedded double-quotes escaped Postgres-style: an

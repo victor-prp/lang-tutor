@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 import { createDb } from '../../../src/db/client';
 import { users } from '../../../src/db/schema';
 import { seedUser } from '../../support/seedUser';
-import { ADMIN_URL } from '../../support/dbNames';
+import { ADMIN_URL, dbPrefix } from '../../support/dbNames';
 import { createTestDb, type TestDb } from '../../support/testDb';
 
 let current: TestDb;
@@ -39,14 +39,25 @@ describe('per-test database isolation', () => {
     }
   });
 
-  it('names the database after the test and comments it with the detail', async () => {
+  it("names the database after the test, under this lane's prefix", async () => {
     // The slug is the full "describe > it" name, so it is long enough to be
-    // truncated — which is the interesting half of the assertion. 63-byte limit
-    // minus `t_test_` (7), the separator (1) and 8 hex chars leaves 47 for the
-    // slug; this name's slug is cut to 46 because the 47th character was `_`.
-    expect(current.name).toMatch(
-      /^t_test_per_test_database_isolation_names_the_database_[0-9a-f]{8}$/,
-    );
+    // truncated — which is the interesting half of the assertion. The budget is
+    // computed from the prefix, not from a constant: a lane's prefix is longer
+    // than lane 0's bare `t_`, and a fixed budget would overrun the 63-byte
+    // identifier limit and silently collide two tests.
+    const prefix = dbPrefix();
+    const parts = current.name.match(new RegExp(`^${prefix}test_([a-z0-9_]+)_([0-9a-f]{8})$`));
+    expect(parts).not.toBeNull();
+
+    // A truncation of this test's own name, never a rewriting of it — asserted
+    // as a prefix rather than against a literal, because where the cut falls is
+    // a function of how long THIS lane's prefix is, and pinning it to a literal
+    // would be the constant this test exists to rule out.
+    const [, slug] = parts ?? [];
+    expect(
+      'per_test_database_isolation_names_the_database_after_the_test_under_this_lane_s_prefix',
+    ).toContain(slug);
+    expect(slug.length).toBeGreaterThan(20);
     expect(current.name.length).toBeLessThanOrEqual(63);
 
     const admin = createDb(ADMIN_URL, { max: 1, onError: () => {} });
@@ -59,7 +70,7 @@ describe('per-test database isolation', () => {
       const comment = result.rows[0]?.comment ?? '';
       // The untruncated name, which is what the identifier could not carry.
       expect(comment).toContain(
-        'per-test database isolation names the database after the test and comments it with the detail',
+        "per-test database isolation names the database after the test, under this lane's prefix",
       );
       expect(comment).toContain('isolation.test.ts');
       expect(comment).toContain(`worker: ${process.env.JEST_WORKER_ID ?? '1'}`);
@@ -67,5 +78,11 @@ describe('per-test database isolation', () => {
     } finally {
       await admin.close();
     }
+  });
+
+  it('takes its prefix from the environment, so two checkouts never collide', async () => {
+    // Not a tautology: this is the assertion that fails if TEST_DB_PREFIX is
+    // read once at import time by one module and ignored by another.
+    expect(dbPrefix()).toBe(process.env.TEST_DB_PREFIX ?? 't_');
   });
 });

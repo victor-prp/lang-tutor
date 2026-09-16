@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
-import { loadConfig } from '../config';
+import { loadConfig, maintenanceUrlFor } from '../config';
 import { createDb } from './client';
+import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
+import { dropLaneDatabases, listLaneDatabases } from './lanes';
 import { runMigrations } from './migrate';
 import { reseedContent } from './reseed';
 import { seedContent } from './seed';
@@ -41,10 +43,103 @@ function correctionsPathFor(dictionaryPath: string): string {
   return join(dirname(dictionaryPath), 'corrections.jsonl');
 }
 
+/** `--lane-down <name>`, or the current lane when the name is omitted. */
+function laneDownTarget(currentLane: string): string | undefined {
+  const index = process.argv.indexOf('--lane-down');
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  return value && !value.startsWith('--') ? value : currentLane;
+}
+
+/**
+ * What a server on this port claims to be, or undefined if nothing answers.
+ * This is the whole point of the listing: a port that answers is not proof that
+ * the lane you think owns it is the one that replied.
+ */
+async function laneAnswering(port: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(`http://localhost:${port}/health`, {
+      signal: AbortSignal.timeout(500),
+    });
+    const body = (await res.json()) as { lane?: string };
+    return body.lane ?? 'unnamed';
+  } catch {
+    return undefined;
+  }
+}
+
+async function printLanes(databaseUrl: string): Promise<void> {
+  const admin = createDb(maintenanceUrlFor(databaseUrl), { max: 1, onError: () => {} });
+  try {
+    const rows = await listLaneDatabases(admin.db);
+    for (const row of rows) {
+      const stamp = parseLaneComment(row.comment);
+      const lane = stamp.lane ?? (row.name === 'lang_tutor' ? 'main' : '?');
+      const port = stamp.port ?? (row.name === 'lang_tutor' ? '3001' : undefined);
+      const serving = port ? await laneAnswering(port) : undefined;
+
+      const notes: string[] = [];
+      if (stamp.branch) notes.push(`branch ${stamp.branch}`);
+      if (port) {
+        notes.push(
+          serving === undefined
+            ? `:${port} idle`
+            : serving === lane
+              ? `:${port} serving`
+              : `:${port} SERVED BY LANE ${serving}`,
+        );
+      }
+      // A worktree that is gone leaves its databases behind. Naming them is the
+      // only way anyone finds them again.
+      if (stamp.root && !existsSync(stamp.root)) {
+        notes.push(`ORPHAN — worktree ${stamp.root} is gone; npm run lane:down -- ${lane}`);
+      }
+      console.log(`${row.name.padEnd(36)} lane ${lane.padEnd(26)} ${notes.join('  |  ')}`);
+    }
+  } finally {
+    await admin.close();
+  }
+}
+
+async function dropLane(databaseUrl: string, lane: string): Promise<void> {
+  const admin = createDb(maintenanceUrlFor(databaseUrl), { max: 1, onError: () => {} });
+  try {
+    const dropped = await dropLaneDatabases(admin.db, lane);
+    if (dropped.length === 0) {
+      console.log(`lane ${lane} owns no databases`);
+      return;
+    }
+    for (const name of dropped) console.log(`dropped ${name}`);
+    console.log(`\nThe worktree itself is still there. Remove it with 'git worktree remove'.`);
+  } finally {
+    await admin.close();
+  }
+}
+
 // A second process is a legitimate second composition root — but it reads the
 // same config as the first rather than a copy-pasted connection string.
 async function main(): Promise<void> {
-  const { databaseUrl, poolMax } = loadConfig(process.env);
+  const { databaseUrl, poolMax, lane } = loadConfig(process.env);
+
+  // Both of these run against the maintenance database and must not create or
+  // migrate anything — `--lane-down` in particular is about to drop the very
+  // database ensureDatabase would otherwise make.
+  if (process.argv.includes('--lane-list')) {
+    await printLanes(databaseUrl);
+    return;
+  }
+  const downTarget = laneDownTarget(lane);
+  if (downTarget !== undefined) {
+    await dropLane(databaseUrl, downTarget);
+    return;
+  }
+
+  // Before the pool: a lane's database is created by nothing else, and opening a
+  // pool against a database that does not exist fails with a driver error that
+  // reads like a configuration mistake.
+  if (await ensureDatabase(databaseUrl, laneStampFrom(process.env))) {
+    console.log(`created ${databaseUrl}`);
+  }
   const { db, close } = createDb(databaseUrl, {
     max: poolMax,
     onError: (error) => console.error('unexpected error on idle Postgres client', error),

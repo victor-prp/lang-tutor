@@ -3,14 +3,17 @@ import { sql } from 'drizzle-orm';
 import { createDb } from '../apps/server/src/db/client';
 import { runMigrations } from '../apps/server/src/db/migrate';
 import { seedContent } from '../apps/server/src/db/seed';
-import { MOCKSERVER_URL } from './urls';
+import { databaseNameFrom } from '../apps/server/src/config';
+import { MOCKSERVER_URL, requireEnv } from './urls';
 
 const HOST = process.env.PGHOST ?? 'localhost';
 const PORT = process.env.PGPORT ?? '5432';
 const ADMIN_URL = `postgres://postgres:postgres@${HOST}:${PORT}/postgres`;
 
-export const E2E_DATABASE = 'lang_tutor_e2e';
-export const E2E_DATABASE_URL = `postgres://postgres:postgres@${HOST}:${PORT}/${E2E_DATABASE}`;
+// This lane's e2e database. Dropped and rebuilt per run, which is exactly why it
+// must not be shared between checkouts.
+export const E2E_DATABASE_URL = requireEnv('E2E_DATABASE_URL');
+export const E2E_DATABASE = databaseNameFrom(E2E_DATABASE_URL);
 
 /**
  * Playwright starts its own long-lived server, so the per-test clone strategy
