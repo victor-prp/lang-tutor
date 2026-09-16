@@ -69,10 +69,21 @@ R2 does not cover `apps/server/tests/`: `tests/integration/db/lanes.test.ts` and
   class of bug; only R5 catches it.
 
 - **R6 — The main checkout stays on `master` and is lane 0; feature work happens in
-  worktrees.** No script checks this, and none can: a checkout's branch is legitimately
-  whatever its owner needs. It is written down because the design rests on it — a feature
-  branch held in the main checkout cannot also be checked out in a worktree, and switching
-  branches under a running server and Metro is what lanes exist to avoid.
+  worktrees.** Nothing *forbids* this, and nothing should: a checkout's branch is
+  legitimately whatever its owner needs, and reviewing someone else's branch in the main
+  checkout is a normal thing to do. It is written down because the design rests on it — a
+  feature branch held in the main checkout cannot also be checked out in a worktree, and
+  switching branches under a running server and Metro is what lanes exist to avoid.
+
+  It is **detected**, though, which is not the same as forbidden. Within hours of this ADR
+  being accepted, two parallel sessions were started for two small fixes; one created a
+  worktree and the other branched in place, leaving lane 0 on a feature branch. The rule
+  was already written here and in CLAUDE.md, and prose alone did not keep it — which is the
+  same lesson every other check in this repo exists to encode. The SessionStart hook in
+  `.claude/settings.json` therefore adds a line to the lane report when `LANE_SLOT` is 0 and
+  the branch is not `master`, naming the branch and giving the two commands that move the
+  work into a lane of its own. A warning rather than a block, because the legitimate uses
+  above are real and a block would only be worked around.
 - **R7 — `nightly-qa/` is deliberately outside the formula.** Its ports (3101, 8092) are
   hand-picked and unreachable by the arithmetic. In CI each run owns its runner, so lanes
   buy it nothing; locally its reserved ports already coexist with a dev loop.
