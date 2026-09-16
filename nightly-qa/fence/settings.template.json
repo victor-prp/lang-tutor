@@ -2,6 +2,8 @@
   "permissions": {
     "blockReadsOutsideWorkingDirectories": true,
     "deny": [
+      "Read(//__REPO__/**)",
+      "Edit(//__REPO__/**)",
       "Grep",
       "Glob",
       "WebFetch",
