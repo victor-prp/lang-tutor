@@ -202,3 +202,11 @@ describe('the user endpoints in the published document', () => {
     expect(doc.paths['/api/login'].post.description).toMatch(/NO authentication/);
   });
 });
+
+describe('GET /health in the published document', () => {
+  it('publishes the identity fields a caller needs to tell two lanes apart', async () => {
+    const doc = await openApiDocument();
+    const schema = doc.paths['/health'].get.responses['200'].content['application/json'].schema;
+    expect(schema.required.sort()).toEqual(['database', 'lane', 'ok', 'port']);
+  });
+});
