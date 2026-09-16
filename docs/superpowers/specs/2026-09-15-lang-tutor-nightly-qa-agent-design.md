@@ -1,7 +1,8 @@
 # Nightly QA agent — design
 
-- **Status:** Draft, awaiting review. Delivered in two phases — see *Delivery in two
-  phases*: a local proof of concept first, the workflow and the filing second.
+- **Status:** Phase A implemented and measured; phase B ready to plan. See
+  *Delivery in two phases*, and `nightly-qa/POC-RESULTS.md` for what the two proof-of-
+  concept sessions showed. Everything below that describes the night is still a design.
 - **Date:** 2026-09-15
 - **Relationship to earlier work:** the e2e suite
   (`docs/superpowers/specs/2026-08-26-lang-tutor-e2e-testing-design.md`) proved the app and
@@ -72,8 +73,8 @@ Precedents, each with the one thing taken from it:
 ├─ job: explore            (permissions: contents read, issues read, id-token write)
 │   1. npm ci, install Chromium
 │   2. npm run db:up                         ← Postgres (+ MockServer, unused tonight)
-│   3. nightly-qa/up.sh                      ← fresh lang_tutor_e2e, server on :3001
-│   │                                          against real Gemini, web export on :8082
+│   3. nightly-qa/up.sh                      ← fresh lang_tutor_qa, server on :3101
+│   │                                          against real Gemini, web export on :8092
 │   4. nightly-qa/prepare.sh                 ← picks the charter for tonight, dumps the
 │   │                                          bot's issues to .out/known-issues.json
 │   5. nightly-qa/guard.sh                   ← three probes that must be refused (see
@@ -99,9 +100,13 @@ is the safe-outputs shape, and it is also what makes the write side unit-testabl
 The same three things `e2e/playwright.config.ts` starts, started from a shell script
 because Playwright only starts its `webServer` entries under `playwright test`:
 
-1. `npx tsx e2e/globalSetup.ts` — drops and recreates `lang_tutor_e2e`, migrates, seeds.
-   Reused as-is; it already probes MockServer liveness, which `db:up` provides, so nothing
-   changes there. A fresh database every night means every lookup the agent makes is a real
+1. `npx tsx nightly-qa/src/provision-db.ts` — drops and recreates `lang_tutor_qa`,
+   migrates, seeds. Not `e2e/globalSetup.ts`, which the design originally proposed reusing:
+   that file hard-codes `lang_tutor_e2e` and probes MockServer, and a QA run needs neither.
+   Its own database means an e2e run and a QA run can be in flight at once without one
+   dropping the other's out from under it. `globalSetup.ts` is not a library but a caller of
+   `createDb`, `runMigrations` and `seedContent`; this is a second caller of the same three,
+   which is the same relationship rather than a copy. A fresh database every night means every lookup the agent makes is a real
    provider call, which is the point, and also means the dictionary cache cannot grow into
    a hidden variable between nights.
 2. `npm run start -w apps/server` with `DATABASE_URL` pointing at that database,
@@ -110,10 +115,15 @@ because Playwright only starts its `webServer` entries under `playwright test`:
    endpoint, applies. Waited for on `/health`. Stdout and stderr go to
    `nightly-qa/.out/server.log`, which ships in the artifact: a 502 the learner saw as a
    blank screen is explained there.
-3. `EXPO_PUBLIC_API_URL=http://localhost:3001 npm run build:web -w apps/mobile` then
-   `npm run serve:web -w apps/mobile` on 8082. Same port and same reasons as e2e.
+3. `EXPO_PUBLIC_API_URL=http://localhost:3101 npm run build:web -w apps/mobile -- --clear`
+   then `expo serve` on 8092. Ports of its own rather than e2e's, so a run can start beside
+   a developer's server and beside an e2e run; both are overridable. `--clear` is not
+   optional: Metro's cache key excludes the value of the inlined variable, so an export
+   after a port change reports success and serves an app pointed at the old server. `up.sh`
+   greps the built bundle for the port it just started and refuses to continue if they
+   disagree.
 
-The script is idempotent about ports: if 3001 or 8082 is already bound it fails loudly,
+The script is idempotent about ports: if either is already bound it fails loudly,
 the same rule `playwright.config.ts` applies with `reuseExistingServer: false`.
 
 The browser binary is the one implementation risk here. `@playwright/mcp` bundles its own
@@ -132,7 +142,11 @@ the nightly run become the same command. The workflow has two triggers: the nigh
 inputs, `persona`, `focus`, `max_turns` and `file_issues` (default `true`), so a night
 can be re-run by hand with a chosen charter, or run without touching the tracker. The prompt
 is a skill invocation, `/nightly-qa`, so the brief lives in the repository at
-`.claude/skills/nightly-qa/SKILL.md` and is reviewed like code.
+`nightly-qa/brief/` as three files — mission, persona, focus — that `workdir.sh`
+concatenates, and is reviewed like code. Not a skill, which the design first proposed: a
+skill has to be discovered from `.claude/skills/` in the working directory, and the working
+directory is a generated scratch directory by design. Passing the brief as the prompt text
+removes the discovery step entirely.
 
 ### Tools, and why each
 
@@ -146,7 +160,9 @@ is a skill invocation, `/nightly-qa`, so the brief lives in the repository at
 | `Read(/.out/**)` | The charter and the known-issues dump. |
 | `Edit(/.out/**)` | The report, the findings file. (`Write` is governed by `Edit` rules.) Nothing else is writable. |
 
-Deliberately absent: `browser_evaluate` (can mutate the page and fake a result), `Bash`
+Deliberately absent: `browser_evaluate` **and** `browser_run_code_unsafe` (Playwright 0.0.81
+exposes both, and either runs arbitrary code in the page, which is how an agent fakes a
+result instead of observing one), the `webmcp` bridge, `Bash`
 (no `curl`, no `gh`), `Read` of anything outside `.out/`, and every GitHub MCP tool. The
 agent cannot read `apps/`, cannot call the server directly, and cannot touch the tracker.
 
@@ -158,7 +174,9 @@ directory with no permission check at all, so a session started in the checkout 
 fence is structural, in three layers, each of which holds on its own.
 
 1. **The working directory is not the checkout.** The session starts in a scratch
-   directory (`nightly-qa/.work/` locally, `$RUNNER_TEMP/qa` in CI) that holds only the
+   directory (under `$TMPDIR` locally, `$RUNNER_TEMP/qa` in CI — **outside the checkout**,
+   because deny beats allow and a nested directory's own allow rule is swallowed by the
+   repo's deny) that holds only the
    skill, the charter and `.out/`. The checkout, where the servers are already running
    from, is outside it. `permissions.blockReadsOutsideWorkingDirectories: true` makes the
    file tools refuse every path outside the working directory in every permission mode,
@@ -167,7 +185,7 @@ fence is structural, in three layers, each of which holds on its own.
 2. **The tools do not exist.** Deny rules beat allow rules, and a bare tool name in a deny
    rule removes the tool from the model's context. The session's settings deny `Bash`,
    `Grep`, `Glob`, `WebFetch`, `WebSearch`, `Agent`, `Edit`, `NotebookEdit` and
-   `mcp__playwright__browser_evaluate` by name, then allow `Read(/.out/**)`,
+   both code-execution browser tools by name, then allow `Read(/.out/**)`,
    `Edit(/.out/**)` and `mcp__playwright__*`. `--strict-mcp-config` with the one
    `mcp.json` means no other MCP server can appear. An absolute-path deny on the checkout
    (`Read(//<checkout>/**)`) is added on top, belt over braces.
@@ -191,7 +209,7 @@ Why this matters, given the repository is public: not secrecy, honesty. A tester
 read the code stops being a user. It explains findings away as "by design", and it drives
 the app by `testID` instead of by what is on the screen.
 
-### The brief (`SKILL.md`), in outline
+### The brief (`nightly-qa/brief/`), in outline
 
 The skill's body is the standing part of the prompt; the charter is the variable part.
 
@@ -314,38 +332,50 @@ That is a known weakness; see *Decisions deferred*.
 
 | Cap | Where | Value to start | Why |
 |---|---|---|---|
-| Turns | `claude_args: --max-turns` | 150 | The only spend cap that applies on a subscription. Roughly: ~20 for onboarding and login, ~80 browser actions, ~20 for reading known issues and writing outputs, slack. |
+| Turns | `--max-turns` | 200 | The only spend cap that applies on a subscription. Roughly: ~20 for onboarding and login, ~80 browser actions, ~20 for reading known issues and writing outputs, slack. |
 | Actions | in the brief | ~80 | Soft cap so the hard cap is not hit mid-report. |
 | Job timeout | `timeout-minutes` | 40 | `npm ci`, Chromium, the web export and the session; e2e's job is allowed 30 with no agent. |
 | Overlap | `concurrency: nightly-qa`, no cancel | 1 | Two sessions against one server would interleave; a manual dispatch queues behind the night. |
 | New issues | `file.ts` | 3 per night | A quiet tracker is what makes a comment on it worth reading. |
-| Model | `claude_args: --model` | Sonnet 5 | Tool-heavy, cheap on the window. One line to change. |
+| Model | `--model` | Sonnet 5 | Tool-heavy, cheap on the window. One line to change. |
 | Forks | `if: github.repository_owner == 'victor-prp'` | — | Secrets are withheld on forks; a red run nobody can fix is worse than a skipped one. |
 | Gemini | none needed | — | A night is tens of lookups. The eval job spends more per push. |
 
-The turn number is a guess to be corrected: after three nights the artifact's report and
-the action's own usage line say how many turns a night actually needs, and the value is
-set from that. Scheduled at `0 1 * * *` UTC, which is early morning in Israel, so the
+The turn number is measured rather than guessed. Two phase A sessions against Sonnet 5
+used 142 and 134 turns; 150 was close enough to truncation to cut a report short, so the
+cap is 200. Each ran 7 to 10 minutes and cost about $1.50 API-equivalent. Pinning the
+model matters for more than the bill: a turn count means nothing beside an unknown model,
+and the CLI's inherited default was Opus, at roughly four times the cost per turn.
+Scheduled at `0 1 * * *` UTC, which is early morning in Israel, so the
 session's use of the five-hour window lands where no interactive session is competing.
 
 ## Repository layout
 
+Built in phase A:
+
 ```
-.github/workflows/nightly-qa.yml           the two jobs
-.claude/skills/nightly-qa/SKILL.md         the brief; allowed-tools frontmatter
 nightly-qa/                                a workspace, like e2e/
-  package.json                             @playwright/mcp pinned, tsx, node:test
-  mcp.json                                 the MCP server command and flags
-  up.sh                                    environment, mirrors playwright.config.ts
-  prepare.sh                               charter pick + known-issues dump
-  file.ts                                  filing rules; --dry-run
-  file.test.ts                             node:test over the pure rules
-  charters/personas/*.md
-  charters/focus/*.md
-  .out/                                    gitignored; artifact contents
+  package.json                             @playwright/mcp pinned, tsx, zod, node:test
+  up.sh / down.sh                          environment; mirrors playwright.config.ts
+  workdir.sh                               the scratch dir, from the fence templates
+  guard.sh                                 the canary probes
+  run.sh                                   one session, end to end
+  fence/settings.template.json             permissions, with __WORK__ / __REPO__
+  fence/mcp.template.json                  the MCP server command and flags
+  brief/mission.md, persona-*.md, focus-*.md
+  src/provision-db.ts                      lang_tutor_qa
+  src/findings.ts, findings.test.ts        the contract and its tests
+  src/validate.ts, summarize.ts            the two CLIs run.sh calls
+  POC-RESULTS.md                           what the two sessions showed
+  .out/, .work/                            gitignored
 ```
 
-`nightly-qa/` is a workspace so `npm run test:unit` picks up `file.test.ts` automatically
+Phase B adds `.github/workflows/nightly-qa.yml` (the two jobs), `prepare.sh` (charter pick
+and known-issues dump), `file.ts` with `file.test.ts` (the filing rules), and the remaining
+persona and focus files. `charters/` from the original sketch is `brief/`, since the phase A
+files already have that shape.
+
+`nightly-qa/` is a workspace so `npm run test:unit` picks up its tests automatically
 and so the MCP server version is pinned in the lockfile. It is outside `apps/`, so ADRs
 0001 to 0005 do not apply to it, and outside `apps/server/tests/`, so ADR 0004's buckets
 are untouched; e2e already set that precedent for a top-level browser-driven workspace.
@@ -407,16 +437,25 @@ export at all, how many turns a night takes, whether the findings are sharp or h
 positives, and whether the fence holds. One local run answers all four. So the work is
 split, and the second half is designed against a real report rather than an imagined one.
 
-**Phase A — proof of concept, local only.** `up.sh`; the scratch directory with the
-settings fence and `mcp.json`; `guard.sh`; `SKILL.md` with one persona and one focus
-hard-coded; a run script that starts `claude -p` headed; `report.md` and a first cut of
-`findings.json` with no `match` field. No workflow, no charter rotation, no filing. Done
-when: the guard's three probes are refused; a run against a planted defect (the **more**
-button hidden off-screen) reports it with the right screen and a screenshot; the same run
-on the clean tree does not; and the turn count and the report have been read by a human.
+**Phase A — proof of concept, local only. Implemented; see
+`nightly-qa/POC-RESULTS.md`.** `up.sh`; the scratch directory with the settings fence and
+`mcp.json`; `guard.sh`; the brief with one persona and one focus; `run.sh`; the findings
+schema and its validator. No workflow, no charter rotation, no filing.
 
-Phase A settles: the turn cap, the model, whether the verifier stage is needed now, and
-whether the browser has to move into the container.
+It answered all four questions. The agent found the planted defect — the reveal button
+suppressed — as a high-confidence bug carrying the network evidence that the server had
+returned four senses while the screen showed one. On the clean tree that finding is absent,
+and the same screen is reported instead as a high-confidence *inconvenience*. Same area,
+different severity, right both times. Two of the six distinct findings across the two runs
+are examples from this project's original brief, reached unprompted, and one is a 502 on the
+clean tree that no existing test covers.
+
+Phase A also cost six harness defects to get there, none of them visible on review, all
+listed in `POC-RESULTS.md`. Two are worth carrying into any future work here: the scratch
+directory must not sit inside the checkout, because deny beats allow and the repo rule
+swallowed the agent's own output rule; and `expo export` must clear its cache, because
+Metro's cache key excludes the value of the inlined environment variable, so an export after
+a port change silently serves an app pointed at the old server.
 
 **Phase B — the night.** `nightly-qa.yml` with its two jobs and dispatch inputs;
 `prepare.sh` and the charter files; `file.ts` with its tests and the deduplication rules;
@@ -433,14 +472,16 @@ and phase A's report.
 
 ## Decisions deferred
 
-- **Verifier stage.** One session for now, per the decision in this thread. If, after
-  the first weeks, the rate of findings a human closes as "cannot reproduce" is high, add a
-  second fresh-context session that replays each finding's steps and drops what it cannot
-  reproduce. The output contract already carries `steps` for that reason.
+- **Verifier stage — settled: not needed now.** Across two phase A sessions every kept
+  finding described something really present in the app, and the agent reported an obstacle
+  honestly rather than inventing findings when a harness bug blocked it from the focus area
+  entirely. Revisit when findings a human closes as "cannot reproduce" reach roughly one run
+  in three. The output contract already carries `steps`, so the verifier can be added later
+  without a schema change.
 - **Screenshots in issues.** Artifacts expire. If a screenshot turns out to be the thing a
   reader always needs, the `file` job can commit them to an orphan branch and link there.
-- **Turn cap.** 150 is a placeholder until three nights of data exist.
 - **Claude's issue writes via the GitHub App instead of `GITHUB_TOKEN`.** Not needed:
   issues created with `GITHUB_TOKEN` trigger no further workflows, which here is a feature.
-- **Browser in a container.** Only if the guard shows `--allowed-origins` does not refuse
-  `file://`. Decided in phase A.
+- **Browser in a container — settled: not needed.** Playwright MCP refuses the `file:`
+  protocol itself, independently of `--allowed-origins`, and the guard confirmed it with the
+  error verbatim. `npx` is enough.
