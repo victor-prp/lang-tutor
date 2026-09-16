@@ -1843,8 +1843,15 @@ jobs:
       - name: Verify the CLI can start
         run: claude --version
 
+      # NOT `npx playwright install`. That resolves to the repository's own
+      # Playwright (1.62.1, which e2e pins) and fetches Chromium revision 1234,
+      # while @playwright/mcp pins its own Playwright at 1.64.0-alpha and wants
+      # 1244. The mismatch is invisible on a developer laptop, where MCP falls
+      # back to the system Chrome; a fresh runner has none, and the browser
+      # simply fails to launch. Installing through MCP's own copy is what keeps
+      # the revision right whatever version it bumps to next.
       - name: Install Chromium for Playwright MCP
-        run: npx playwright install --with-deps chromium
+        run: node node_modules/@playwright/mcp/node_modules/playwright-core/cli.js install --with-deps chromium
 
       - run: npm run db:up
 
@@ -1986,7 +1993,23 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Prove it before the first unattended night
+### Task 8: Prove it on the branch, by hand, before it runs on its own
+
+**The order matters and is not the obvious one.** `workflow_dispatch` only fires for a
+workflow that exists on the **default branch** — confirmed in GitHub's own documentation:
+"This event will only trigger a workflow run if the workflow file exists on the default
+branch." So a workflow living only on this branch cannot be triggered at all, by button or
+by CLI.
+
+The way through, which keeps every real run on this branch: merge a **dispatch-only stub**
+to master first. It carries the full `workflow_dispatch` block and no `schedule`, so it can
+never fire on its own, and it makes manual triggering possible. From then on, dispatching
+against this branch runs **this branch's** version of the file, so all iteration happens
+here. The schedule is added in the last commit, once everything below passes.
+
+One detail that bites otherwise: GitHub validates dispatch inputs against the **default
+branch's** copy of the workflow. The stub must therefore carry the final `inputs` block
+from the start, even though the rest of the file keeps changing on the branch.
 
 **Files:**
 - Modify: `apps/mobile/src/app/translate.tsx` (temporarily, then revert)
@@ -1994,15 +2017,55 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 This is the *Verification before the first night* section of the spec. Nothing here is
 optional: the whole point of the workflow is that nobody is watching when it runs.
 
-- [ ] **Step 1: A dispatch that writes nothing**
+- [ ] **Step 0: Prove the browser installs and launches, before spending a runner on it**
 
-Push the branch, then:
+The cheapest possible check of the most likely CI failure, run locally against a cache that
+does not already hold the answer:
 
 ```bash
+mv ~/Library/Caches/ms-playwright ~/Library/Caches/ms-playwright.bak
+node node_modules/@playwright/mcp/node_modules/playwright-core/cli.js install chromium
+ls ~/Library/Caches/ms-playwright/
+./nightly-qa/guard.sh; echo "exit=$?"
+```
+
+Expected: `chromium-1244` appears, and the guard passes — which it can only do by launching
+a browser, since its third probe is a navigation. Then restore:
+
+```bash
+rm -rf ~/Library/Caches/ms-playwright && mv ~/Library/Caches/ms-playwright.bak ~/Library/Caches/ms-playwright
+```
+
+If the guard fails here it would have failed in CI, and it cost three cents to find out.
+
+- [ ] **Step 1: Merge the dispatch-only stub to master**
+
+Create a branch off master carrying **only** `.github/workflows/nightly-qa.yml`, with the
+`schedule:` block deleted and everything else — including the whole `inputs:` block —
+exactly as Task 7 wrote it. Open a pull request, and say in its description that the
+workflow is inert until the schedule is added, so a reviewer is not left wondering.
+
+Merge it. Nothing runs: a workflow with no `schedule` and no `push` trigger fires only when
+someone asks it to.
+
+```bash
+gh workflow list | grep -i nightly
+```
+
+Expected: `Nightly QA` is listed. Until it is, no dispatch below will work.
+
+- [ ] **Step 2: A dispatch against this branch that writes nothing**
+
+```bash
+git push
 gh workflow run nightly-qa.yml --ref "$(git branch --show-current)" \
   -f persona=careful-adult -f focus=polysemy -f file_issues=false
 gh run watch
 ```
+
+This runs **this branch's** copy of the workflow, not master's stub. Every fix from here on
+is a push to this branch followed by another dispatch, and master stays untouched until the
+very last step.
 
 Expected: `explore` succeeds, `file` is skipped. Then read the artifact rather than trusting
 the green tick:
@@ -2017,7 +2080,7 @@ Expected: a real report, findings that validate, and `match` present on each one
 is missing everywhere, the brief's deduplication section is not landing and Task 3 needs
 revisiting before anything files.
 
-- [ ] **Step 2: Dry-run the filing against that real run**
+- [ ] **Step 3: Dry-run the filing against that real run**
 
 ```bash
 npx tsx nightly-qa/src/file.ts /tmp/qa-run/findings.json /tmp/qa-run/known-issues.json
@@ -2026,7 +2089,7 @@ npx tsx nightly-qa/src/file.ts /tmp/qa-run/findings.json /tmp/qa-run/known-issue
 Expected: a plausible set of `would run` lines and a summary. Read every one. This is the
 last look before the bot writes to your tracker.
 
-- [ ] **Step 3: Let it file, once, and inspect what it made**
+- [ ] **Step 4: Let it file, once, and inspect what it made**
 
 ```bash
 gh workflow run nightly-qa.yml --ref "$(git branch --show-current)" -f file_issues=true
@@ -2038,7 +2101,7 @@ Expected: at most three new issues, each labelled `nightly-qa` and a severity, e
 ending in a fingerprint line, each screenshot rendering from the evidence branch. Open one
 and check the image actually loads.
 
-- [ ] **Step 4: Prove deduplication works, which needs a second night**
+- [ ] **Step 5: Prove deduplication works, which needs a second night**
 
 Run it again the same day, with the same charter:
 
@@ -2055,7 +2118,7 @@ stop and read the run's `findings.json` to see whether the agent set `match.new`
 something it should have matched — that is a brief problem, not a code problem, and the
 brief is where to fix it.
 
-- [ ] **Step 5: Prove the fence still fails in CI**
+- [ ] **Step 6: Prove the fence still fails in CI**
 
 Temporarily add `--add-dir "$REPO"` to `guard.sh` and remove the two `__REPO__` deny rules
 from `fence/settings.template.json`, exactly as part A did. Push, dispatch, and confirm the
@@ -2063,7 +2126,7 @@ from `fence/settings.template.json`, exactly as part A did. Push, dispatch, and 
 
 A fence that has only ever been proven on a laptop has not been proven where it runs.
 
-- [ ] **Step 6: Prove a planted defect is still caught through the whole pipeline**
+- [ ] **Step 7: Prove a planted defect is still caught through the whole pipeline**
 
 In `apps/mobile/src/app/translate.tsx`, change `hidden > 0` to `hidden > 99`. Push,
 dispatch with `file_issues=true`, and confirm an issue appears describing meanings that
@@ -2074,23 +2137,46 @@ git checkout apps/mobile/src/app/translate.tsx
 git status --short apps/mobile
 ```
 
-- [ ] **Step 7: Record what the first nights showed**
+- [ ] **Step 8: Record what the first nights showed**
 
 Append a short section to `nightly-qa/POC-RESULTS.md` titled *First nights in CI*: how long
 the job took, what it cost, how many issues it filed, how many were duplicates a human had
 to merge, and whether the `other` symptom appeared. That last one decides whether the
 controlled vocabulary needs another term.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Turn the schedule on, and only now**
+
+Everything above ran by hand, on this branch, against a master that could not fire anything.
+Add the `schedule:` block back to `.github/workflows/nightly-qa.yml`, and merge this branch.
+That commit is the first moment the agent can run without someone asking it to.
 
 ```bash
-git add nightly-qa/POC-RESULTS.md
-git commit -m "test: verify the nightly pipeline end to end before leaving it unattended
+grep -A2 '^on:' .github/workflows/nightly-qa.yml
+gh workflow view nightly-qa.yml
+```
 
-Six checks, in the order that makes each one meaningful. A dispatch that writes
-nothing, then a filing dry run read line by line, then one real filing run
-inspected issue by issue. Then the one the whole phase exists for: a second run
-on the same charter the same day, which must comment rather than file again.
+Expected: the schedule is present, and the workflow shows both triggers — scheduled, and
+manual. Nothing else changes: the dispatch inputs are the same ones the stub carried, so a
+hand-run night stays available afterwards for re-testing a fix.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add nightly-qa/POC-RESULTS.md .github/workflows/nightly-qa.yml
+git commit -m "test: verify the nightly pipeline by hand, then let it run on its own
+
+Every run below happened on this branch, triggered by hand, against a master
+that carried a workflow with no schedule and so could fire nothing on its own.
+That inversion is forced: workflow_dispatch only works for a workflow already on
+the default branch, so a dispatch-only stub goes first and the schedule goes
+last.
+
+The checks in the order that makes each one meaningful. The browser install
+proven locally against a cleared cache, because it is the likeliest CI failure
+and costs three cents to rule out. A dispatch that writes nothing. A filing dry
+run read line by line. One real filing run inspected issue by issue. Then the
+one the whole phase exists for: a second run on the same charter the same day,
+which must comment rather than file again.
 
 Then the two that prove the checks can fail. The fence is breached in CI, not
 just on a laptop, and the dictionary's reveal button is suppressed again to
@@ -2170,9 +2256,11 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 | The cap holds and prefers bugs | Task 4 test |
 | Nothing is written without `--apply` | Task 5 Step 3 |
 | Screenshots outlive the artifact | Task 6 Step 3, Task 8 Step 3 |
-| The fence fails the job in CI, not only locally | Task 8 Step 5 |
-| A second run on the same charter files no duplicate | Task 8 Step 4 |
-| A real defect reaches a real issue | Task 8 Step 6 |
+| The MCP browser installs and launches from a cold cache | Task 8 Step 0 |
+| The fence fails the job in CI, not only locally | Task 8 Step 6 |
+| A second run on the same charter files no duplicate | Task 8 Step 5 |
+| A real defect reaches a real issue | Task 8 Step 7 |
+| Nothing runs unattended until every check above passed | Task 8 Step 9 is the first commit with a schedule |
 
 ## Out of scope
 
