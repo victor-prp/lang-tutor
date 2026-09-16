@@ -17,7 +17,14 @@ export type TranslationValue = {
   reveal: () => void;
   chosenIndex: number | null;
   choose: (index: number) => void;
-  submit: () => void;
+  /**
+   * `override` exists for the correction banner's alternative chips. `submit()`
+   * closes over the provider's `text` state, so `setText(alt)` followed by a bare
+   * `submit()` would re-run the TYPED string: the closure captured the old value
+   * and the state update has not landed yet. The handler calls both, so the input
+   * field agrees with the results it is showing.
+   */
+  submit: (override?: string) => void;
   flip: () => void;
   reset: () => void;
 };
@@ -69,7 +76,7 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
       chosenIndex,
       reveal: () => setRevealed(true),
       choose: (index: number) => setChosenIndex(index),
-      submit: () => void run(text, undefined),
+      submit: (override?: string) => void run(override ?? text, undefined),
       // Re-requests with the opposite direction made explicit, which is what
       // makes a wrong detection recoverable rather than a dead end.
       flip: () => void run(text, result?.direction === 'he_en' ? 'en_he' : 'he_en'),

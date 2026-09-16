@@ -3,6 +3,7 @@ import { and, asc, eq } from 'drizzle-orm';
 
 import type { Db } from './client';
 import {
+  dictCorrections,
   dictVarTranslations,
   dictVariants,
   dictLexemes,
@@ -148,4 +149,57 @@ export function fromJsonl(text: string): DictRecord[] {
   const trimmed = text.trim();
   if (trimmed === '') return [];
   return trimmed.split('\n').map((line) => JSON.parse(line) as DictRecord);
+}
+
+/**
+ * One exported line is one redirect. snake_case keys, matching `DictRecord`'s
+ * own and the shape the repository is handed back on restore.
+ *
+ * A separate file from `dictionary.jsonl` rather than a section inside it,
+ * because that file's invariant is "one line is one lookup, replayable through
+ * persistEntries" — and a redirect is replayed through a different function.
+ */
+export type CorrectionRecord = {
+  typed_form: string;
+  corrected_form: string;
+  alternatives: string[];
+};
+
+export async function exportCorrections(
+  db: Db,
+  input: { languageCode: string },
+): Promise<CorrectionRecord[]> {
+  const rows = await db
+    .select({
+      typedForm: dictCorrections.typedForm,
+      correctedForm: dictCorrections.correctedForm,
+      alternatives: dictCorrections.alternatives,
+    })
+    .from(dictCorrections)
+    .where(eq(dictCorrections.languageCode, input.languageCode));
+
+  const records = rows.map((row) => ({
+    typed_form: row.typedForm,
+    corrected_form: row.correctedForm,
+    alternatives: row.alternatives,
+  }));
+  // Sorted in JS by UTF-16 code unit, not by SQL ORDER BY, for the reason
+  // groupRows gives: Postgres' text ordering depends on the database's collation,
+  // so the same data could export in a different order on another machine and
+  // show up as a whole-file diff.
+  records.sort((a, b) =>
+    a.typed_form < b.typed_form ? -1 : a.typed_form > b.typed_form ? 1 : 0,
+  );
+  return records;
+}
+
+export function correctionsToJsonl(records: CorrectionRecord[]): string {
+  if (records.length === 0) return '';
+  return records.map((record) => JSON.stringify(record)).join('\n') + '\n';
+}
+
+export function correctionsFromJsonl(text: string): CorrectionRecord[] {
+  const trimmed = text.trim();
+  if (trimmed === '') return [];
+  return trimmed.split('\n').map((line) => JSON.parse(line) as CorrectionRecord);
 }

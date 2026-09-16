@@ -91,7 +91,7 @@ describe('translate, against a real database', () => {
     expect(await countGeminiRequests(ns, 'ladder')).toBe(1);
   });
 
-  // Phase 13. `book?` was a different dictionary key from `book`, so a trailing
+  // Phase 12 follow-up. `book?` was a different dictionary key from `book`, so a trailing
   // keystroke bought a second provider call and a second permanent copy of the
   // word — the dev database held `book` with three senses and `book?` with
   // four. The sibling of the casing-and-spacing case above, and it asserts the

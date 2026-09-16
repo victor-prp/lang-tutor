@@ -63,7 +63,13 @@ async function expectation(ns: string, spec: ExpectationSpec): Promise<void> {
 
 export async function expectGeminiJson(
   ns: string,
-  opts: { kind: TranslationKind; entries: LlmEntry[]; matchText?: string },
+  opts: {
+    kind: TranslationKind;
+    entries: LlmEntry[];
+    /** Phase 13. Without this no integration row can drive a stub that corrects. */
+    correction?: { corrected_form: string; alternatives?: string[] };
+    matchText?: string;
+  },
 ): Promise<void> {
   await expectation(ns, {
     match: opts.matchText
@@ -73,7 +79,13 @@ export async function expectGeminiJson(
       httpResponse: {
         statusCode: 200,
         headers: { 'content-type': ['application/json'] },
-        body: JSON.stringify(geminiResponse({ kind: opts.kind, entries: opts.entries })),
+        body: JSON.stringify(
+          geminiResponse({
+            kind: opts.kind,
+            entries: opts.entries,
+            ...(opts.correction ? { correction: opts.correction } : {}),
+          }),
+        ),
       },
     },
   });

@@ -155,11 +155,31 @@ export const TranslationRequestSchema = z.object({
   direction: TranslationDirectionSchema.optional(),
 });
 
+// Three, not six: every correction that reaches the wire has been through
+// `tidyAlternatives`, applied by the guards on the model path and again by
+// `persistCorrection` on the write — so this cap is an invariant the SERVER
+// holds rather than a hope about a third party, which is exactly the kind of cap
+// a published contract should state. Applying it in only one of those two places
+// would leave `dict:restore` free to violate it: the restore reaches the
+// repository without passing through `domain/` at all.
+//
+// `alternatives` is REQUIRED and un-defaulted here, unlike on the model schema
+// below. The asymmetry is the point: what a third party sends may be absent,
+// what this server publishes may not be.
+export const TranslationCorrectionSchema = z.object({
+  corrected_form: z.string().min(1).max(100),
+  alternatives: z.array(z.string().min(1).max(100)).max(3),
+});
+
 export const TranslationResponseSchema = z.object({
+  // The string the learner typed, so the client can say "you typed thruot".
   text: z.string(),
   direction: TranslationDirectionSchema,
+  // Both of these belong to the CORRECTED form when a correction is present, and
+  // are byte-identical to what a direct lookup of it returns.
   kind: TranslationKindSchema,
   senses: z.array(TranslationSenseSchema).max(5),
+  correction: TranslationCorrectionSchema.optional(),
 });
 
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from
@@ -210,12 +230,70 @@ export const LlmEntrySchema = z.object({
   senses: z.array(LlmSenseSchema).min(1).max(5),
 });
 
+// What the model reports, phase 13. Present only when the typed string is not a
+// word or expression in either language but is near one or more that are.
+export const LlmCorrectionSchema = z.object({
+  // A surface form, not a lemma: `bokked` corrects to `booked`, never to `book`.
+  // `.max(100)` is the request schema's own ceiling on learner text — this is the
+  // one untrusted string that does not come through it, and it becomes a
+  // dictionary key. `min(1)` because a correction without one is not a correction.
+  corrected_form: z.string().min(1).max(100),
+  // Other plausible intended forms, ranked, no senses. Tapping one is an ordinary
+  // lookup that misses.
+  //
+  // `.optional()`, NOT a bare array — a bare array would be REQUIRED, and this
+  // field must never be able to fail a good answer. `parseLlmTranslation` runs
+  // `dropNulls` BEFORE `safeParse`, because phase 9 made absent and null mean the
+  // same thing, so a provider answering `alternatives: null` — which is how
+  // structured output spells "none" — has the key deleted and would then fail a
+  // required field. The whole parse fails with it, and one decorative empty list
+  // turns a correct translation into a 502. A provider that simply omits the
+  // empty array lands in the same place. `.optional()` makes both spellings mean
+  // "absent", and `tidyAlternatives` turns absent into `[]`.
+  //
+  // `.default([])` was the obvious spelling and is deliberately NOT used. Zod 4
+  // emits a `"default": []` key into the JSON Schema; `toGeminiSchema` strips only
+  // `$schema` and `additionalProperties`, so the key would travel to Gemini inside
+  // `responseSchema`, and no schema here has ever sent it. A rejected
+  // `responseSchema` is `LlmUnavailable('responded 400')` on EVERY translation
+  // call — a total outage, from a field designed never to fail an answer.
+  // (`z.toJSONSchema` also defaults to output mode, where a defaulted field is
+  // REQUIRED, so `.default([])` would have told Gemini the key is mandatory too.)
+  //
+  // Six here against three on the wire: `maxItems` travels to Gemini either way,
+  // but a provider that ignores it would, under `.max(3)`, fail the WHOLE parse on
+  // one surplus alternative. Six is deliberately NOT tied to `entries`' cap, which
+  // is five for a provider-side reason described there; this one is six because
+  // doubling the wire's three leaves room for a surplus without failing an answer.
+  //
+  // The rule all of this follows: `correction` is decorative, so NOTHING about it
+  // may fail an answer the model otherwise got right.
+  alternatives: z.array(z.string().min(1).max(100)).max(6).optional(),
+});
+
 export const LlmTranslationSchema = z.object({
   kind: TranslationKindSchema,
-  // Ranked: the likeliest reading of the typed form first. Six, not three:
-  // `light` alone is noun, adjective and verb, and a competing lemma still has
-  // to fit beside it.
-  entries: z.array(LlmEntrySchema).max(6),
+  // Five, not three: `light` alone is noun, adjective and verb, and a
+  // competing lemma still has to fit beside it.
+  //
+  // Five rather than six, and that ceiling is Gemini's rather than ours. This
+  // schema travels as `responseSchema`, where array caps multiply: six entries
+  // by five senses by a nested example object exceeded the provider's limit the
+  // moment phase 13 added `correction`, and every translation call answered
+  // `400 INVALID_ARGUMENT — the specified schema produces a constraint that has
+  // too many states for serving`. Measured against the live API, not reasoned:
+  // six entries fails with `correction` present and five succeeds, while
+  // `senses` stays at five because READ_LIMIT and TranslationResponseSchema both
+  // hold it there. No stub can catch this — MockServer accepts any
+  // `responseSchema` without validating it — so only `npm run eval` or a real
+  // lookup exercises it.
+  //
+  // When `correction` is present these describe `corrected_form`, not the typed
+  // text — and so does `kind`, which the prompt's fourth rule is what actually
+  // secures. `resolveKind` only clamps a single token; it cannot rule on a
+  // multi-token corrected form.
+  entries: z.array(LlmEntrySchema).max(5),
+  correction: LlmCorrectionSchema.optional(),
 });
 
 // The second model call, phase 12. It exists because `sense_code` is invented

@@ -51,6 +51,7 @@ wire changed, and `apps/mobile` has no changed file.
 - Phase 10: [plan](docs/superpowers/plans/2026-09-10-lang-tutor-phase-10-vocabulary-persistence.md) — this phase's plan carries its design; no separate design doc was written.
 - Phase 11: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-11-vocabulary-backfill-sourcing.md) · [plan](docs/superpowers/plans/2026-09-13-lang-tutor-phase-11-vocabulary-backfill.md)
 - Phase 12: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-12-dict-lexemes-design.md) · [plan](docs/superpowers/plans/2026-09-13-lang-tutor-phase-12-dict-lexemes.md)
+- Phase 13: [design](docs/superpowers/specs/2026-09-13-lang-tutor-phase-13-misspelling-corrections-design.md) · [plan](docs/superpowers/plans/2026-09-15-lang-tutor-phase-13-misspelling-corrections.md)
 
 ## Layout
 
@@ -60,7 +61,7 @@ An npm-workspace monorepo.
 |---|---|
 | `packages/core` | `@lang-tutor/core` — the API contract (`api/`), quiz rules (`domain/`), internal helpers (`utils/`). One runtime dependency, `zod`: since phase 7 the wire contract *is* a set of Zod schemas, and every type in `api/types.ts` is inferred from one. Consumed as TypeScript source, so there is no build step. |
 | `apps/mobile` | The Expo app. Screens — login, onboarding, home, session, results and profile — plus components, theme, Hebrew copy, and the API client. |
-| `apps/server` | A Hono server on `@hono/node-server`. Session state and the question pool live in Postgres, reached only through Drizzle: `routes/` (Hono handlers) call `services/` (use cases, each one transaction), which call `repo/` (query functions) and the server's own `domain/` (the session state machine), backed by `db/` (schema, migrations, the connection). The app talks to the server over HTTP; the server never lets SQL leak above `repo/`. Also consumed as TypeScript source via `tsx`, no build step. |
+| `apps/server` | A Hono server on `@hono/node-server`. Session state and the question pool live in Postgres, reached only through Drizzle: `routes/` (Hono handlers) call `services/` (use cases, each owning its transaction boundaries), which call `repo/` (query functions) and the server's own `domain/` (the session state machine), backed by `db/` (schema, migrations, the connection). The app talks to the server over HTTP; the server never lets SQL leak above `repo/`. Also consumed as TypeScript source via `tsx`, no build step. |
 
 `utils/` is not in core's `exports` map, so it is unreachable from either app by
 design. Anything a consumer needs comes from `@lang-tutor/core/api` (types) or
@@ -85,13 +86,14 @@ what makes that enforceable — `./api` is type-only, so a mobile import that fo
 | `providers/` | `fetch`, its own transport types, `errors`, `logger` | services, routes, domain, repo, db — and nothing but `composition.ts` may import it |
 
 `routes/` (Hono handlers) never sees a `Db` or a repository — it does not know a
-database exists. `services/` owns transaction boundaries: a use case that touches the database is
-exactly one `db.transaction(...)`, so "one transaction per use case" is structural, not
-a convention. (Since phase 9 a use case may touch no table at all — translation calls a
-model and nothing else — which is why that rule is worded around the database rather
-than around use cases.) This is why the store and the mock question pool from earlier phases are
-gone rather than kept as a fallback: a second data source would mean a second place a
-transaction could leak across.
+database exists. `services/` owns transaction boundaries: a use case's dependent writes share
+one `transaction(...)`, an independent, idempotent write may be its own, and a read that
+precedes a provider call may be its own — ADR 0001 R8, as amended through phase 13 — so the
+boundary is structural, not a convention. (Since phase 9 a use case may touch no table at
+all — translation calls a model and nothing else — which is why that rule is worded around
+the database rather than around use cases.) This is why the store and the mock question pool
+from earlier phases are gone rather than kept as a fallback: a second data source would mean
+a second place a transaction could leak across.
 
 Since phase 7 a route is one `createRoute` definition plus its handler, and that
 definition is simultaneously the routing entry, the request validator, the response type
@@ -328,6 +330,11 @@ same repository function a live lookup calls, and a restored row is indistinguis
 a looked-up one. Restoring is idempotent and never overwrites live content: every level is
 `ON CONFLICT DO NOTHING`, so a form already looked up keeps both its senses and its
 wording.
+
+`dict:export` also writes a sibling `corrections.jsonl` beside whichever dictionary path
+was used — `data/backfill/en-he/corrections.jsonl` by default, or beside a custom
+`--export-dict` path — and `dict:restore` reads it back the same way, reporting zero
+restored corrections rather than failing when the sibling file is absent.
 
 > **`data/backfill/en-he/dictionary.jsonl` predates migration `0005` and will not restore.**
 > Its entries carry no `part_of_speech`, and the renderings it holds were stored per meaning

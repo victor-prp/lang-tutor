@@ -195,6 +195,66 @@ export const dictVarTranslations = pgTable(
   ],
 );
 
+/**
+ * Phase 13. `typed_form → corrected_form` plus ranked alternatives: a misspelling
+ * is a ROUTING fact, not a dictionary fact. `thruot` is not a form of `throat` —
+ * it is a string that should be read as one, and storing it as a variant would
+ * mean inventing a per-form rendering, an example sentence and a rank ordering
+ * for a string that is not a word.
+ *
+ * **No id and no primary key, which is deliberate.** Nothing can reference a
+ * redirect: no foreign key points at one, corrections.jsonl keys a line by
+ * typed_form, and persistCorrection addresses a row by
+ * (language_code, lower(typed_form)). An id would be a column that exists only to
+ * look like the neighbours. The unique index below is the row's whole identity.
+ * Adding `id text PRIMARY KEY` later is an additive migration that changes no
+ * query here.
+ *
+ * **`corrected_form` is a plain string, not a foreign key.** Referencing
+ * dict_variants.id would couple the redirect to a row `TRUNCATE ... CASCADE` can
+ * remove; as a string, a dangling redirect degrades into a miss and a model call
+ * rather than raising.
+ *
+ * **Global, with no user_id.** That `thruot` is not an English word is a fact
+ * about English. Phase 12 keeps "nothing records who asked" and ADR 0005 leaves
+ * identity unauthenticated.
+ *
+ * The three CHECKs mirror TranslationCorrectionSchema, on the precedent `users`
+ * set: the schema gives a 400 with a good message, the constraint is what
+ * actually holds when something bypasses the route — and `dict:restore` reaches
+ * persistCorrection without passing through either schema. On the live path they
+ * can never fire, which is what the ON CONFLICT DO NOTHING contract depends on.
+ */
+export const dictCorrections = pgTable(
+  'dict_corrections',
+  {
+    languageCode: varchar('language_code', { length: 10 }).notNull(),
+    // Stored as written; matched on lower(). One rule for a learner who typed
+    // `Thruot` and one who typed `thruot`.
+    typedForm: text('typed_form').notNull(),
+    // A SURFACE form, never a lemma: `bokked` corrects to `booked`, not `book`.
+    correctedForm: text('corrected_form').notNull(),
+    alternatives: text('alternatives')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('dict_corrections_typed_form_length', sql`length(${t.typedForm}) between 1 and 100`),
+    check(
+      'dict_corrections_corrected_form_length',
+      sql`length(${t.correctedForm}) between 1 and 100`,
+    ),
+    // An IMMUTABLE SQL function, the mechanism question_options_valid already
+    // uses, installed where that one is — see db/migrate.ts.
+    check('dict_corrections_alternatives_valid', sql`correction_alternatives_valid(${t.alternatives})`),
+    // Matching on an expression index is exactly what
+    // dict_variants_form_entry_rank_key does.
+    uniqueIndex('dict_corrections_form_key').on(t.languageCode, sql`lower(${t.typedForm})`),
+  ],
+);
+
 export const questions = pgTable(
   'questions',
   {

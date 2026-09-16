@@ -51,6 +51,9 @@ describe('repos', () => {
   // Bound into the same transaction since phase 10, and untouched by these use
   // cases: reaching it here would mean the session service grew a second job.
   const dictRepo: DictRepo = {
+    findCorrectionByForm: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
     findSenseVersion: () => {
       throw new Error('the session service must not read the dictionary tables');
     },
@@ -62,6 +65,9 @@ describe('repos', () => {
     },
     findStaleLexemesByForm: () => {
       throw new Error('the session service must not read the dictionary tables');
+    },
+    persistCorrection: () => {
+      throw new Error('the session service must not write the dictionary tables');
     },
     persistEntries: () => {
       throw new Error('the session service must not write the dictionary tables');
