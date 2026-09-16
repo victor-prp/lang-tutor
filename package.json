@@ -4,7 +4,8 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "e2e"
+    "e2e",
+    "nightly-qa"
   ],
   "dependencies": {
     "zod": "^4.4.3"
@@ -26,6 +27,7 @@
     "dict:export": "npm run dict:export --workspace apps/server",
     "dict:restore": "npm run dict:restore --workspace apps/server",
     "eval": "npm run eval --workspace apps/server",
-    "content:generate": "npm run content:generate --workspace apps/server"
+    "content:generate": "npm run content:generate --workspace apps/server",
+    "qa:poc": "bash nightly-qa/run.sh"
   }
 }

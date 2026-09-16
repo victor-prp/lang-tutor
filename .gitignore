@@ -13,3 +13,5 @@ docs/superpowers/drafts/
 /drafts/
 scripts/translation-backfills/en-he/logs/
 .claude/worktrees/
+nightly-qa/.out/
+nightly-qa/.work/
