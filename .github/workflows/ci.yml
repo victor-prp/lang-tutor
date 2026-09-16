@@ -46,6 +46,8 @@ jobs:
       # The lane formula is pure text — no dependencies, no database — so it
       # belongs in the one job that needs no setup step.
       - run: ./scripts/test-lane-env.sh
+      - run: ./scripts/test-lane-clean.sh
+      - run: ./scripts/test-lane-abandon.sh
 
   check-types:
     runs-on: ubuntu-latest

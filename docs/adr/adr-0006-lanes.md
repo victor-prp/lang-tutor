@@ -38,6 +38,11 @@ from lane 0.
 | R1 | `e2e/`, `apps/server/tests/`, `scripts/`, root `package.json` | a literal port `3001`, `3002`, `8081` or `8082` |
 | R2 | `e2e/`, `scripts/`, root `package.json` | a `lang_tutor` database name in a string literal or a URL path |
 | R3 | root `package.json` scripts `server`, `mobile`, `e2e`, `test:integration`, `lane:list`, `lane:down`, `db:*`, `dict:*` | a script body that does not invoke `lane-env.sh` |
+
+`db:down`, `lane:clean` and `lane:abandon` are deliberately outside R3. Both act on the shared world from
+the main checkout rather than as a lane: `db:down` stops the shared containers, and
+`lane:clean` walks every worktree and `lane:abandon` acts on one named worktree; both
+delegate `lane:down` to that worktree, which is where the lane values are actually read.
 | R4 | `e2e/urls.ts`, `e2e/tests/support/mockServer.ts`; `scripts/*.sh` | an address or namespace that is not read from the environment; an absolute path under `/tmp` that is not from `mktemp` |
 
 The owners, excluded from R1 and R2, are `scripts/lane-env.sh` (the formula),
