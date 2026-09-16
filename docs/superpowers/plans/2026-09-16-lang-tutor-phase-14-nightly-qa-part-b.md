@@ -1,8 +1,8 @@
-# Nightly QA agent — phase B (the night) implementation plan
+# Nightly QA agent — part B (the night) implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Run phase A's session unattended every night in GitHub Actions, and turn its
+**Goal:** Run part A's session unattended every night in GitHub Actions, and turn its
 findings into a small, non-duplicating set of tracker issues.
 
 **Architecture:** One workflow, two jobs. `explore` holds the model and can only *read*
@@ -12,13 +12,13 @@ decisions under fixed rules. Charters rotate by date so no two consecutive night
 same persona and focus.
 
 **Tech Stack:** GitHub Actions, `gh` CLI, bash, Node 26 (`node --test` runs TypeScript
-natively), `tsx`, Zod 4. Everything phase A built is reused unchanged unless a task says
+natively), `tsx`, Zod 4. Everything part A built is reused unchanged unless a task says
 otherwise.
 
-**Spec:** `docs/superpowers/specs/2026-09-15-lang-tutor-nightly-qa-agent-design.md`.
+**Spec:** `docs/superpowers/specs/2026-09-15-lang-tutor-phase-14-nightly-qa-design.md`.
 Read *Architecture*, *Charters*, *Filing*, *How matching actually has to work*, *Caps* and
 *Verification before the first night* before Task 1. `nightly-qa/POC-RESULTS.md` records
-what phase A measured, and every number below comes from it.
+what part A measured, and every number below comes from it.
 
 ## Global Constraints
 
@@ -70,10 +70,10 @@ without an issue being labelled. Task 9 corrects the spec to say this.
 | `nightly-qa/src/knownIssues.ts` | Zod schema for `known-issues.json`, plus `parseFingerprint` and the issue-body renderer. |
 | `nightly-qa/src/knownIssues.test.ts` | Its tests. |
 | `nightly-qa/src/filing.ts` | **Pure.** `decide(report, known, limits) -> Action[]`. No `gh`, no filesystem, no clock. |
-| `nightly-qa/src/filing.test.ts` | Its tests, built on the phase A fixtures. |
+| `nightly-qa/src/filing.test.ts` | Its tests, built on the part A fixtures. |
 | `nightly-qa/src/file.ts` | The impure half: reads the files, calls `gh`, writes the job summary. `--dry-run` by default in local use. |
 | `nightly-qa/src/evidence.ts` | Pushes a run's screenshots to the orphan `nightly-qa-evidence` branch and returns their raw URLs. |
-| `nightly-qa/src/fixtures/run-clean.json`, `run-planted.json` | The two phase A runs. Already committed. |
+| `nightly-qa/src/fixtures/run-clean.json`, `run-planted.json` | The two part A runs. Already committed. |
 | `.github/workflows/nightly-qa.yml` | The two jobs. |
 | `nightly-qa/run.sh` | Gains `--persona`/`--focus` passthrough and `--known-issues`. |
 | `nightly-qa/src/findings.ts` | Gains the optional `match` field. |
@@ -89,7 +89,7 @@ without an issue being labelled. Task 9 corrects the spec to say this.
 - Modify: `nightly-qa/workdir.sh`, `nightly-qa/run.sh`
 
 **Interfaces:**
-- Consumes: phase A's `workdir.sh`, which currently concatenates two hardcoded filenames.
+- Consumes: part A's `workdir.sh`, which currently concatenates two hardcoded filenames.
 - Produces: `workdir.sh --persona <name> --focus <name>` assembles
   `mission.md + charters/personas/<persona>.md + charters/focus/<focus>.md`, and fails
   loudly when either file is missing. `run.sh` passes both through. Task 2's `prepare.sh`
@@ -404,7 +404,7 @@ session with no persona that looks completely normal afterwards, which is why it
 git add -A nightly-qa/charters nightly-qa/brief nightly-qa/workdir.sh nightly-qa/run.sh
 git commit -m "feat: four personas and seven focus areas, chosen by argument
 
-Phase A hardcoded one of each. They move to charters/ and workdir.sh takes
+Part A hardcoded one of each. They move to charters/ and workdir.sh takes
 --persona and --focus, which is everything the rotation needs from this side.
 
 Four and seven are coprime, so a date-driven pick cycles all 28 pairings before
@@ -630,7 +630,7 @@ an issue with no screenshots reads normally.
 npm test -w nightly-qa
 ```
 
-Expected: PASS, and the phase A tests still pass alongside.
+Expected: PASS, and the part A tests still pass alongside.
 
 - [ ] **Step 5: Write `prepare.sh`**
 
@@ -977,8 +977,8 @@ type Neighbour = { finding: string; issue: number; shared: string };
 
   Task 5's `file.ts` executes these and nothing else.
 
-This is the heart of phase B. It is pure — no `gh`, no filesystem, no clock — so every rule
-is testable, and the tests use phase A's real runs rather than invented data.
+This is the heart of part B. It is pure — no `gh`, no filesystem, no clock — so every rule
+is testable, and the tests use part A's real runs rather than invented data.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1159,7 +1159,7 @@ test('severityRank orders bug above weird above inconvenience', () => {
 });
 
 // --- the real runs -----------------------------------------------------------
-// These are phase A's two sessions. What makes them worth testing against is
+// These are part A's two sessions. What makes them worth testing against is
 // exactly what invented fixtures smooth over: the same defect written up two
 // different ways on two different nights.
 
@@ -1376,7 +1376,7 @@ prefix:
 Run `npm test -w nightly-qa`. Expected: **FAIL**, on
 `must not flag: these are two different problems`. Then revert the line. A test that cannot
 fail is the failure mode `CLAUDE.md` warns about, and this one guards the exact mistake
-phase A proved is easy to make.
+part A proved is easy to make.
 
 - [ ] **Step 6: Commit**
 
@@ -1385,12 +1385,12 @@ git add nightly-qa/src/filing.ts nightly-qa/src/filing.test.ts
 git commit -m "feat: decide what reaches the tracker, without touching it
 
 decide() is pure - no gh, no filesystem, no clock - so every rule is tested
-against phase A's two real sessions rather than against invented data. What
+against part A's two real sessions rather than against invented data. What
 makes those runs worth testing against is exactly what invented fixtures smooth
 over: the same defect written up two different ways on two different nights.
 
 The test that matters most is the trap. Two findings that share a screen and an
-element can still be different problems, and phase A produced exactly that pair:
+element can still be different problems, and part A produced exactly that pair:
 a suppressed control and a working-but-awkward one, in the same senses list.
 Flagging on the prefix merges them and hides one completely, so the duplicate
 flag fires only on a full three-segment fingerprint match. Confirmed by making
@@ -1398,7 +1398,7 @@ it fail: switching the comparison to the prefix breaks that test and nothing
 else.
 
 Severity escalates but never falls. A quieter night is not evidence a problem
-got smaller, only that the agent did not reach the worse path - phase A found
+got smaller, only that the agent did not reach the worse path - part A found
 the same defect as 'weird' one run and a 502 the next.
 
 An issue number the agent invented files nothing, and an issue closed as
@@ -1553,7 +1553,7 @@ In the root `package.json` `scripts`, after `qa:poc`:
     "qa:file": "tsx nightly-qa/src/file.ts nightly-qa/.out/findings.json nightly-qa/.out/known-issues.json",
 ```
 
-- [ ] **Step 3: Dry-run against a real phase A session**
+- [ ] **Step 3: Dry-run against a real part A session**
 
 ```bash
 node -e '
@@ -1627,7 +1627,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
   screenshot's relative path (`shots/f1.png`) to a raw URL on the orphan branch. `file.ts`
   substitutes these into the `<!-- screenshots -->` marker.
 
-The spec's reasoning: an artifact expires in 14 days, and phase A produced an image that
+The spec's reasoning: an artifact expires in 14 days, and part A produced an image that
 proves a defect on its own. Evidence with an expiry date is evidence nobody can act on
 later.
 
@@ -1749,7 +1749,7 @@ git add nightly-qa/src/evidence.ts nightly-qa/src/file.ts
 git commit -m "feat: keep a run's screenshots where the issue can still reach them
 
 The GitHub API has no image upload for issue bodies, so the original answer was
-a link to the run artifact - which expires in 14 days. Phase A turned that from
+a link to the run artifact - which expires in 14 days. Part A turned that from
 a minor weakness into a real one by producing an image that proves a defect on
 its own, better than the prose does. Evidence with an expiry date is evidence
 nobody can act on later.
@@ -1975,7 +1975,7 @@ fails the job and no session starts.
 
 claude --version is its own step because an install whose native binary
 postinstall was blocked leaves a CLI that cannot start at all - that happened
-during phase A, and the guard reported the fence holding because no session had
+during part A, and the guard reported the fence holding because no session had
 run. The guard now catches it; this catches it earlier with a clearer message.
 
 The artifact uploads on always(): a session that died still leaves the
@@ -2058,7 +2058,7 @@ brief is where to fix it.
 - [ ] **Step 5: Prove the fence still fails in CI**
 
 Temporarily add `--add-dir "$REPO"` to `guard.sh` and remove the two `__REPO__` deny rules
-from `fence/settings.template.json`, exactly as phase A did. Push, dispatch, and confirm the
+from `fence/settings.template.json`, exactly as part A did. Push, dispatch, and confirm the
 `explore` job fails at the guard step with the canary message. Then revert both.
 
 A fence that has only ever been proven on a laptop has not been proven where it runs.
@@ -2107,7 +2107,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 9: Reconcile the spec with what was built
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-09-15-lang-tutor-nightly-qa-agent-design.md`
+- Modify: `docs/superpowers/specs/2026-09-15-lang-tutor-phase-14-nightly-qa-design.md`
 
 - [ ] **Step 1: Correct the possible-duplicate trigger**
 
@@ -2130,7 +2130,7 @@ The spec's architecture diagram gives the `file` job `issues: write`. It also ne
 `contents: write` to push the evidence branch. Say so, and say why that is acceptable: the
 job holds no model, so nothing with browser access can reach that permission.
 
-- [ ] **Step 4: Mark phase B done**
+- [ ] **Step 4: Mark part B done**
 
 Update the **Status** line and the *Delivery in two phases* section. Link the first-nights
 section of `POC-RESULTS.md`.
@@ -2138,7 +2138,7 @@ section of `POC-RESULTS.md`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-09-15-lang-tutor-nightly-qa-agent-design.md
+git add docs/superpowers/specs/2026-09-15-lang-tutor-phase-14-nightly-qa-design.md
 git commit -m "docs: reconcile the design with the nightly pipeline as built
 
 Three corrections. The possible-duplicate flag fires on a full fingerprint

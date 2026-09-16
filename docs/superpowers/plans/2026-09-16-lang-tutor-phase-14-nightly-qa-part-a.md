@@ -1,4 +1,4 @@
-# Nightly QA agent — phase A (proof of concept) implementation plan
+# Nightly QA agent — part A (proof of concept) implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -11,12 +11,12 @@ the app the way `e2e/playwright.config.ts` does but against the real Gemini API,
 generated scratch working directory that is not the checkout, a guard that proves the
 source fence holds, and a run script that starts `claude -p` there with only browser tools.
 The agent writes `findings.json` and `report.md`; a small Zod validator checks the shape.
-No GitHub, no workflow, no charter rotation — those are phase B.
+No GitHub, no workflow, no charter rotation — those are part B.
 
 **Tech Stack:** bash, Node 26 (`node --test` runs TypeScript natively, no Jest needed),
 `tsx`, Zod 4, `@playwright/mcp` 0.0.81, Claude Code CLI 2.1.272.
 
-**Spec:** `docs/superpowers/specs/2026-09-15-lang-tutor-nightly-qa-agent-design.md` —
+**Spec:** `docs/superpowers/specs/2026-09-15-lang-tutor-phase-14-nightly-qa-design.md` —
 specifically the sections *The environment*, *The session*, *The fence*, *Running it
 locally* and *Delivery in two phases*. Read it before Task 1.
 
@@ -50,7 +50,7 @@ locally* and *Delivery in two phases*. Read it before Task 1.
 |---|---|
 | `nightly-qa/package.json` | Workspace manifest. Pins `@playwright/mcp`, `zod`, `tsx`. Declares `test` and `typecheck` so the root `--workspaces` scripts pick them up. |
 | `nightly-qa/src/provision-db.ts` | Drops and recreates `lang_tutor_qa`, migrates, seeds. Calls the same three server functions `e2e/globalSetup.ts` calls, and is a sibling caller of them rather than a copy of that file. |
-| `nightly-qa/src/findings.ts` | The Zod schema for `findings.json`. The one piece of phase A that phase B builds on directly. |
+| `nightly-qa/src/findings.ts` | The Zod schema for `findings.json`. The one piece of part A that part B builds on directly. |
 | `nightly-qa/src/findings.test.ts` | Unit tests for that schema. |
 | `nightly-qa/src/validate.ts` | CLI: validate `.out/findings.json`, print a summary, exit non-zero on a bad shape. |
 | `nightly-qa/src/summarize.ts` | CLI: read `.out/transcript.jsonl`, print turns, duration, and the final text. This is how the turn cap gets its real number. |
@@ -62,9 +62,9 @@ locally* and *Delivery in two phases*. Read it before Task 1.
 | `nightly-qa/guard.sh` | The three probes. Fails if a canary planted in the checkout reaches the transcript. |
 | `nightly-qa/run.sh` | Wires it together: workdir, guard, session, validate, summarize. |
 | `nightly-qa/brief/mission.md` | The standing brief: rules of evidence, severities, the web-build caveat, the output contract. |
-| `nightly-qa/brief/persona-careful-adult.md` | The one persona phase A uses. |
-| `nightly-qa/brief/focus-polysemy.md` | The one focus area phase A uses. |
-| `nightly-qa/POC-RESULTS.md` | Written in Task 7. What the two runs showed, and the four numbers phase B needs. |
+| `nightly-qa/brief/persona-careful-adult.md` | The one persona part A uses. |
+| `nightly-qa/brief/focus-polysemy.md` | The one focus area part A uses. |
+| `nightly-qa/POC-RESULTS.md` | Written in Task 7. What the two runs showed, and the four numbers part B needs. |
 | `package.json` (root) | Adds `nightly-qa` to `workspaces` and a `qa:poc` script. |
 | `.gitignore` | Adds `nightly-qa/.out/` and `nightly-qa/.work/`. |
 
@@ -764,7 +764,7 @@ grep -o '"text":"[^"]\{0,400\}' nightly-qa/.out/guard-transcript.jsonl | tail -2
 Read the agent's own account of the three attempts and note, for the commit message and
 later for `POC-RESULTS.md`, **which** probe was stopped by **which** layer. Probe 3 is the
 one to look at hardest: if the browser was allowed to open the `file://` URL and simply
-rendered nothing useful, `--allowed-origins` is not fencing `file://` and phase B needs the
+rendered nothing useful, `--allowed-origins` is not fencing `file://` and part B needs the
 container option from the spec. Write down what actually happened, not what should have.
 
 - [ ] **Step 7: Commit**
@@ -798,7 +798,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Consumes: the workspace from Task 1.
 - Produces: `parseReport(unknown): QaReport` from `nightly-qa/src/findings.ts`, throwing a
   `ZodError` on a bad shape. The exported types are `QaReport`, `Finding`, `Severity`.
-  Task 6's `run.sh` invokes `nightly-qa/src/validate.ts` as a CLI; phase B's `file.ts`
+  Task 6's `run.sh` invokes `nightly-qa/src/validate.ts` as a CLI; part B's `file.ts`
   imports `parseReport` directly.
 
 - [ ] **Step 1: Write the failing test**
@@ -909,7 +909,7 @@ import { z } from 'zod';
  * claim with nothing behind it is the failure mode this whole run exists to
  * avoid. The brief says the same thing in prose; this is what makes it true.
  *
- * `match` is deliberately absent. Deduplication is phase B, and adding the
+ * `match` is deliberately absent. Deduplication is part B, and adding the
  * field before there is anything to match against would invite the agent to
  * invent issue numbers.
  */
@@ -1060,7 +1060,7 @@ carries at least one of a screenshot, a network exchange or a console error. A
 report is a claim about the product, and an unevidenced claim is the failure
 mode the whole run exists to avoid.
 
-No match field yet — deduplication is phase B, and the field would only invite
+No match field yet — deduplication is part B, and the field would only invite
 the agent to invent issue numbers before there is anything to match against.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
@@ -1268,7 +1268,7 @@ the agent is no longer a black-box user, and that is the whole premise.
 git add nightly-qa/brief
 git commit -m "feat: write the QA agent's brief as mission, persona and focus
 
-Three files concatenated into the prompt, so phase B's rotation is a change of
+Three files concatenated into the prompt, so part B's rotation is a change of
 which two are picked rather than a rewrite. The mission carries the rules of
 evidence, the three severities with the calibration examples, and the output
 contract; the persona and focus are what will vary night to night.
@@ -1306,7 +1306,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 import { readFileSync } from 'node:fs';
 
 /**
- * Reads the stream-json transcript and prints what phase B needs to set its
+ * Reads the stream-json transcript and prints what part B needs to set its
  * caps: how many turns the session actually took, how long it ran, and what it
  * said at the end. The turn cap in the design is a placeholder until this has
  * been run for real.
@@ -1418,7 +1418,7 @@ cd "$(dirname "$0")/.." || exit 1
 REPO=$(pwd -P)
 OUT="$REPO/nightly-qa/.out"
 MAX_TURNS=150
-# Pinned rather than left to the CLI default, because phase A's whole output is a
+# Pinned rather than left to the CLI default, because part A's whole output is a
 # set of measurements and a turn count measured against an unknown model means
 # nothing. Change it here, deliberately, and re-measure.
 MODEL="claude-sonnet-5"
@@ -1605,7 +1605,7 @@ The run **passes** if `findings.json` contains a finding that:
 - and carries network evidence showing the response held more senses than were shown.
 
 Record the verdict as pass or fail. If it failed, do not adjust the plan to make it pass —
-record *why* it failed, because that is the finding phase A exists to produce. The three
+record *why* it failed, because that is the finding part A exists to produce. The three
 likely causes, in order: the agent never reached the dictionary (a brief problem), the
 accessibility tree of a right-to-left Expo export was unreadable (a harness problem, and
 the one that would sink the approach), or it saw the defect and classified it as an
@@ -1651,7 +1651,7 @@ Create `nightly-qa/POC-RESULTS.md` with these sections, filled from what actuall
 Every number comes from the two `summarize.ts` outputs, not from memory:
 
 ```markdown
-# Phase A results
+# Part A results
 
 Two runs, <date>. Same environment, same brief, same persona and focus. The first against
 a planted defect (the reveal button suppressed in the dictionary), the second against the
@@ -1678,14 +1678,14 @@ clean tree.
 
 <which of the guard's three probes was refused, and by which layer. State explicitly
 whether the browser was stopped from opening a file:// URL, since that decides whether
-phase B needs the container.>
+part B needs the container.>
 
 ## What the findings were worth
 
 <of the findings across both runs, how many would you actually act on? How many were
-wrong? This is the number that decides whether phase B needs a verifier stage.>
+wrong? This is the number that decides whether part B needs a verifier stage.>
 
-## What phase B should change
+## What part B should change
 
 <the real turn cap, whether the brief needs work, anything about the harness that surprised
 you>
@@ -1705,7 +1705,7 @@ the clean run meaningful.
 
 POC-RESULTS.md records the verdict, the measured turn count, what the fence
 actually stopped, and how many findings were worth acting on. Those four
-numbers are what phase B's caps, its container decision and its verifier
+numbers are what part B's caps, its container decision and its verifier
 decision are set from.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
@@ -1713,17 +1713,17 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Fold phase A's answers back into the spec
+### Task 8: Fold part A's answers back into the spec
 
 **Files:**
-- Modify: `docs/superpowers/specs/2026-09-15-lang-tutor-nightly-qa-agent-design.md`
+- Modify: `docs/superpowers/specs/2026-09-15-lang-tutor-phase-14-nightly-qa-design.md`
 
 **Interfaces:**
 - Consumes: `nightly-qa/POC-RESULTS.md` from Task 7.
-- Produces: a spec whose phase B is written against measured values, ready to plan.
+- Produces: a spec whose part B is written against measured values, ready to plan.
 
-The spec's *Decisions deferred* section names four things phase A was supposed to settle.
-Settle them in writing, in the spec, so phase B's plan is not written against the same
+The spec's *Decisions deferred* section names four things part A was supposed to settle.
+Settle them in writing, in the spec, so part B's plan is not written against the same
 guesses.
 
 - [ ] **Step 1: Replace the turn cap placeholder, and confirm the model**
@@ -1744,29 +1744,29 @@ no longer deferred.
 
 In *Decisions deferred*, replace the `**Browser in a container.**` bullet with the answer
 from `POC-RESULTS.md`. If `--allowed-origins` refused the `file://` navigation, say so and
-say the container is not needed. If it did not, move the container into phase B's scope in
+say the container is not needed. If it did not, move the container into part B's scope in
 *Delivery in two phases* and describe the change: the MCP server runs from
 `mcr.microsoft.com/playwright/mcp` with host networking instead of `npx`.
 
 - [ ] **Step 3: Settle the verifier question**
 
-In *Decisions deferred*, replace the `**Verifier stage.**` bullet with the phase A answer.
+In *Decisions deferred*, replace the `**Verifier stage.**` bullet with the part A answer.
 If the findings were largely sound, keep one session and say what rate of unsound findings
-would change that. If they were not, promote the verifier into phase B's scope in
+would change that. If they were not, promote the verifier into part B's scope in
 *Delivery in two phases*, and note that `file.ts` then consumes verified findings only.
 
-- [ ] **Step 4: Mark phase A done**
+- [ ] **Step 4: Mark part A done**
 
-In *Delivery in two phases*, change the phase A paragraph's opening to record that it is
+In *Delivery in two phases*, change the part A paragraph's opening to record that it is
 implemented, and link `nightly-qa/POC-RESULTS.md`. In the document header's **Status**
-line, replace `Draft, awaiting review` with the current state: phase A implemented, phase
+line, replace `Draft, awaiting review` with the current state: part A implemented, phase
 B ready to plan.
 
 - [ ] **Step 5: Re-read the spec against what was built**
 
 Read the *The environment*, *The session* and *The fence* sections against the code that
 now exists. Anything the implementation contradicts must be corrected in the spec rather
-than left to mislead the phase B planner. Two known drifts to check for and fix:
+than left to mislead the part B planner. Two known drifts to check for and fix:
 
 - The spec says the agent is given `Read(/.out/**)` and the prompt is a skill invocation
   (`/nightly-qa` from `.claude/skills/`). The implementation passes the brief as the prompt
@@ -1780,12 +1780,12 @@ than left to mislead the phase B planner. Two known drifts to check for and fix:
 - [ ] **Step 6: Commit**
 
 ```bash
-git add docs/superpowers/specs/2026-09-15-lang-tutor-nightly-qa-agent-design.md
-git commit -m "docs: settle phase A's four open questions in the design
+git add docs/superpowers/specs/2026-09-15-lang-tutor-phase-14-nightly-qa-design.md
+git commit -m "docs: settle part A's four open questions in the design
 
 The turn cap, the container, the verifier stage and the state of the fence were
 all placeholders written before anything ran. They are now answers, taken from
-nightly-qa/POC-RESULTS.md, so phase B is planned against measurements rather
+nightly-qa/POC-RESULTS.md, so part B is planned against measurements rather
 than against the same guesses a second time.
 
 Also corrects two places where the implementation went a different way than the
@@ -1801,7 +1801,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ## Verification checklist
 
-Phase A is done when all of these are true. Each has a command.
+Part A is done when all of these are true. Each has a command.
 
 | Claim | How it was shown |
 |---|---|
@@ -1815,11 +1815,11 @@ Phase A is done when all of these are true. Each has a command.
 | A session cannot start without its environment | Task 6 Step 5: `qa:poc` refuses and exits 1 |
 | The agent finds a real defect | Task 7 Step 5: the planted finding, with network evidence |
 | The agent does not invent that defect | Task 7 Step 9: it is absent from the clean run |
-| Phase B has real numbers | Task 7 Step 10 and Task 8: `POC-RESULTS.md` and the amended spec |
+| Part B has real numbers | Task 7 Step 10 and Task 8: `POC-RESULTS.md` and the amended spec |
 
-## What phase A deliberately does not do
+## What part A deliberately does not do
 
 No GitHub workflow, no issue filing, no `file.ts`, no deduplication, no `match` field, no
 charter rotation, no second persona, no verifier session, no artifact upload, no schedule.
-All of it is phase B, and all of it is cheaper to write once the questions above have
+All of it is part B, and all of it is cheaper to write once the questions above have
 answers.

@@ -1,6 +1,6 @@
 # Nightly QA agent — design
 
-- **Status:** Phase A implemented and measured; phase B ready to plan. See
+- **Status:** Part A implemented and measured; part B ready to plan. See
   *Delivery in two phases*, and `nightly-qa/POC-RESULTS.md` for what the two proof-of-
   concept sessions showed. Everything below that describes the night is still a design.
 - **Date:** 2026-09-15
@@ -305,7 +305,7 @@ takes to the job summary:
 2. **Confidence `low`:** never filed. Listed in the summary.
 3. **`match.issue = n`, issue open:** comment on *n*: date, persona, focus, the observed
    text, and the run's screenshots. Do not reopen or retitle. **Do relabel when the
-   severity rose**, replacing the severity label and saying so in the comment. Phase A
+   severity rose**, replacing the severity label and saying so in the comment. Part A
    showed why: the direction-swap defect was `weird` on one run and a `bug` on the next,
    because only the second run reached the state that returns 502. The same defect looks
    worse once a nastier manifestation is found, and an issue frozen at the severity of the
@@ -326,7 +326,7 @@ takes to the job summary:
 ### How matching actually has to work
 
 The original plan here — the agent compares fingerprints first and prose second, with a
-near-identical-title check in code as the safety net — was tested against phase A's two runs
+near-identical-title check in code as the safety net — was tested against part A's two runs
 and does not survive. Three defects were found by both runs, which makes six fingerprints
 and three known-correct answers.
 
@@ -359,7 +359,7 @@ it anyway and label it `possible-duplicate` for a human to merge. Over-merging s
 worse than a labelled pair, because a merged issue is invisible.
 
 **Screenshots go into the issue.** The GitHub API has no image upload for issue bodies, and
-the original answer was to link the run's artifact, retained 14 days. Phase A changed this
+the original answer was to link the run's artifact, retained 14 days. Part A changed this
 from a minor weakness into a real one: `nightly-qa/evidence/f_light_expanded.png` proves the
 duplicate-meanings defect on its own, more directly than the prose does, and an issue whose
 evidence expires in a fortnight is an issue nobody can act on later. The `file` job commits
@@ -380,7 +380,7 @@ each it costs a few megabytes a year.
 | Forks | `if: github.repository_owner == 'victor-prp'` | — | Secrets are withheld on forks; a red run nobody can fix is worse than a skipped one. |
 | Gemini | none needed | — | A night is tens of lookups. The eval job spends more per push. |
 
-The turn number is measured rather than guessed. Two phase A sessions against Sonnet 5
+The turn number is measured rather than guessed. Two part A sessions against Sonnet 5
 used 142 and 134 turns; 150 was close enough to truncation to cut a report short, so the
 cap is 200. Each ran 7 to 10 minutes and cost about $1.50 API-equivalent. Pinning the
 model matters for more than the bill: a turn count means nothing beside an unknown model,
@@ -390,7 +390,7 @@ session's use of the five-hour window lands where no interactive session is comp
 
 ## Repository layout
 
-Built in phase A:
+Built in part A:
 
 ```
 nightly-qa/                                a workspace, like e2e/
@@ -409,9 +409,9 @@ nightly-qa/                                a workspace, like e2e/
   .out/, .work/                            gitignored
 ```
 
-Phase B adds `.github/workflows/nightly-qa.yml` (the two jobs), `prepare.sh` (charter pick
+Part B adds `.github/workflows/nightly-qa.yml` (the two jobs), `prepare.sh` (charter pick
 and known-issues dump), `file.ts` with `file.test.ts` (the filing rules), and the remaining
-persona and focus files. `charters/` from the original sketch is `brief/`, since the phase A
+persona and focus files. `charters/` from the original sketch is `brief/`, since the part A
 files already have that shape.
 
 `nightly-qa/` is a workspace so `npm run test:unit` picks up its tests automatically
@@ -459,7 +459,7 @@ In the spirit of `CLAUDE.md`'s rule for ADR checks: a system that can only ever 
 "nothing found" looks identical to one that works. Before the schedule is enabled:
 
 1. `file.test.ts` covers each filing rule with fixtures, including severity escalation, the
-   `possible-duplicate` flag and the cap ordering. Its fixtures are phase A's two real runs,
+   `possible-duplicate` flag and the cap ordering. Its fixtures are part A's two real runs,
    in `nightly-qa/FINDINGS.md`: they contain three defects found twice and described
    differently, plus the trap pair that shares `dictionary | senses list` while being two
    different problems. A matching strategy that merges that pair is wrong, and this is the
@@ -480,7 +480,7 @@ export at all, how many turns a night takes, whether the findings are sharp or h
 positives, and whether the fence holds. One local run answers all four. So the work is
 split, and the second half is designed against a real report rather than an imagined one.
 
-**Phase A — proof of concept, local only. Implemented; see
+**Part A — proof of concept, local only. Implemented; see
 `nightly-qa/POC-RESULTS.md`.** `up.sh`; the scratch directory with the settings fence and
 `mcp.json`; `guard.sh`; the brief with one persona and one focus; `run.sh`; the findings
 schema and its validator. No workflow, no charter rotation, no filing.
@@ -493,17 +493,17 @@ different severity, right both times. Two of the six distinct findings across th
 are examples from this project's original brief, reached unprompted, and one is a 502 on the
 clean tree that no existing test covers.
 
-Phase A also cost six harness defects to get there, none of them visible on review, all
+Part A also cost six harness defects to get there, none of them visible on review, all
 listed in `POC-RESULTS.md`. Two are worth carrying into any future work here: the scratch
 directory must not sit inside the checkout, because deny beats allow and the repo rule
 swallowed the agent's own output rule; and `expo export` must clear its cache, because
 Metro's cache key excludes the value of the inlined environment variable, so an export after
 a port change silently serves an app pointed at the old server.
 
-**Phase B — the night.** `nightly-qa.yml` with its two jobs and dispatch inputs;
+**Part B — the night.** `nightly-qa.yml` with its two jobs and dispatch inputs;
 `prepare.sh` and the charter files; `file.ts` with its tests and the deduplication rules;
-the `match` field in the output contract; the artifact. Written against phase A's numbers
-and phase A's report.
+the `match` field in the output contract; the artifact. Written against part A's numbers
+and part A's report.
 
 ## Out of scope
 
@@ -515,14 +515,14 @@ and phase A's report.
 
 ## Decisions deferred
 
-- **Verifier stage — settled: not needed now.** Across two phase A sessions every kept
+- **Verifier stage — settled: not needed now.** Across two part A sessions every kept
   finding described something really present in the app, and the agent reported an obstacle
   honestly rather than inventing findings when a harness bug blocked it from the focus area
   entirely. Revisit when findings a human closes as "cannot reproduce" reach roughly one run
   in three. The output contract already carries `steps`, so the verifier can be added later
   without a schema change.
-- **Screenshots in issues — settled: they go in.** Phase A showed a single image proving a
-  defect outright, so the orphan-branch approach moves from this list into phase B's scope.
+- **Screenshots in issues — settled: they go in.** Part A showed a single image proving a
+  defect outright, so the orphan-branch approach moves from this list into part B's scope.
   See *How matching actually has to work*.
 - **Claude's issue writes via the GitHub App instead of `GITHUB_TOKEN`.** Not needed:
   issues created with `GITHUB_TOKEN` trigger no further workflows, which here is a feature.

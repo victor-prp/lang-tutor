@@ -1,4 +1,4 @@
-# Phase A results
+# Part A results
 
 Two sessions, 2026-09-16, same environment, same brief, persona `careful-adult` and focus
 `polysemy` both times. The first ran against a planted defect: the dictionary's "more
@@ -106,7 +106,7 @@ Of the six, judged as a maintainer would:
   phase 9 deliberately put that confirmation ahead of the storage that followed. A full page
   reload returns to login, because ADR 0005 has no sessions. Both are real from a learner's
   side, and both are exactly the kind of finding the tracker needs to record a decision
-  against once and then recognise as known, which is what phase B's deduplication is for.
+  against once and then recognise as known, which is what part B's deduplication is for.
 
 **No verifier stage is needed yet.** The design deferred that decision pending a
 false-positive rate, and the rate is zero across two sessions. Revisit it if findings a
@@ -118,10 +118,10 @@ the run lost to the port bug it reported that it could not get past signup, said
 that the cause was probably environmental rather than an application fault, and declined to
 report anything about the focus area it never reached.
 
-## What phase A changed before it could produce these numbers
+## What part A changed before it could produce these numbers
 
 Six defects in the harness itself, each found by running it and none visible on review.
-They are recorded because phase B will be tempted to skip the same steps.
+They are recorded because part B will be tempted to skip the same steps.
 
 1. **The fence blocked the agent's own report.** The scratch working directory was nested
    inside the checkout, so the deny rule on the checkout also matched the allow rule on the
@@ -158,7 +158,7 @@ first run reported the fence holding when no session had run at all, because the
 not start and the check merely tested that the transcript was non-empty. A process that dies
 leaks no canary. Only positive proof that a session completed counts.
 
-## What phase B should change
+## What part B should change
 
 - **Turn cap 200.** Measured, not guessed: 142 and 134 against caps of 150 and 200. 150 was
   close enough to truncation to cut a report short.
@@ -174,4 +174,4 @@ leaks no canary. Only positive proof that a session completed counts.
   problems described differently: "two near-duplicate senses ... with no distinguishing
   information" and "two entries with the identical translation and part of speech,
   undifferentiated". Matching prose would be guesswork. Matching the fingerprint line is
-  what phase B should lean on, and these two runs are its first test fixture.
+  what part B should lean on, and these two runs are its first test fixture.
