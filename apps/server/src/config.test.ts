@@ -1,6 +1,12 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { loadConfig, loadGeminiConfig } from './config';
+import {
+  assertDatabaseIdentifier,
+  databaseNameFrom,
+  loadConfig,
+  loadGeminiConfig,
+  maintenanceUrlFor,
+} from './config';
 
 // Literal env objects in, Config out. No process.env is read or written here —
 // which is the whole point of taking `env` as a parameter.
@@ -8,6 +14,7 @@ describe('loadConfig', () => {
   it('falls back to the development defaults for an empty environment', () => {
     expect(loadConfig({})).toEqual({
       databaseUrl: 'postgres://postgres:postgres@localhost:5432/lang_tutor',
+      lane: 'main',
       port: 3001,
       poolMax: 5,
       translationTimeoutMs: 25_000,
@@ -18,12 +25,14 @@ describe('loadConfig', () => {
     expect(
       loadConfig({
         DATABASE_URL: 'postgres://u:p@db:5432/other',
+        LANE: 'other-lane',
         PORT: '8080',
         PG_POOL_MAX: '20',
         TRANSLATION_TIMEOUT_MS: '12000',
       }),
     ).toEqual({
       databaseUrl: 'postgres://u:p@db:5432/other',
+      lane: 'other-lane',
       port: 8080,
       poolMax: 20,
       translationTimeoutMs: 12_000,
@@ -91,6 +100,59 @@ describe('loadGeminiConfig', () => {
       loadGeminiConfig({ GEMINI_API_KEY: 'sk-leaked-secret-42' } as NodeJS.ProcessEnv);
     } catch (error) {
       expect((error as Error).message).not.toContain('sk-leaked-secret-42');
+    }
+  });
+});
+
+describe('the lane', () => {
+  it('is main when LANE is unset, empty or blank', () => {
+    expect(loadConfig({}).lane).toBe('main');
+    expect(loadConfig({ LANE: '' }).lane).toBe('main');
+    expect(loadConfig({ LANE: '   ' }).lane).toBe('main');
+  });
+
+  it('is whatever LANE says, trimmed', () => {
+    expect(loadConfig({ LANE: ' phase_15 ' }).lane).toBe('phase_15');
+  });
+});
+
+// Two functions rather than one regex at each call site: /health reports the
+// name, and creating a missing database needs the maintenance URL. Both are
+// readings of DATABASE_URL, which is what this module is for.
+describe('databaseNameFrom', () => {
+  it('takes the name out of a connection string', () => {
+    expect(databaseNameFrom('postgres://postgres:postgres@localhost:5432/lang_tutor')).toBe(
+      'lang_tutor',
+    );
+  });
+
+  it('is not confused by a query string or a percent-encoded name', () => {
+    expect(databaseNameFrom('postgres://u:p@h:5432/lang_tutor_x?sslmode=disable')).toBe(
+      'lang_tutor_x',
+    );
+    expect(databaseNameFrom('postgres://u:p@h:5432/a%20b')).toBe('a b');
+  });
+});
+
+describe('maintenanceUrlFor', () => {
+  it('points the same credentials and host at the postgres database', () => {
+    expect(maintenanceUrlFor('postgres://postgres:postgres@localhost:5432/lang_tutor_x')).toBe(
+      'postgres://postgres:postgres@localhost:5432/postgres',
+    );
+  });
+});
+
+// CREATE DATABASE cannot take a bound parameter, so the name is interpolated.
+// Every name reaching that path comes from lane-env.sh, which emits [a-z0-9_];
+// anything else is a bug in the formula and must not reach Postgres.
+describe('assertDatabaseIdentifier', () => {
+  it('accepts a lane database name', () => {
+    expect(() => assertDatabaseIdentifier('lang_tutor_phase_15')).not.toThrow();
+  });
+
+  it('refuses anything that is not a bare lowercase identifier', () => {
+    for (const bad of ['', 'Lang', '1lane', 'a-b', 'a b', 'a";drop', 'a'.repeat(64)]) {
+      expect(() => assertDatabaseIdentifier(bad)).toThrow('database identifier');
     }
   });
 });
