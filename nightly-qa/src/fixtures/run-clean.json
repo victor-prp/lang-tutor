@@ -1,0 +1,119 @@
+{
+  "run": { "date": "2026-09-16", "persona": "careful-adult", "focus": "polysemy", "browser_ok": true },
+  "coverage": [
+    "signed up as a new Hebrew-speaking learner and completed onboarding",
+    "looked up a concrete noun/verb word with multiple unrelated senses in the dictionary",
+    "looked up a word whose sense list contained a repeated meaning",
+    "looked up an idiomatic phrase",
+    "looked up an abstract verb with genuinely distinct senses",
+    "looked up a deliberately misspelled word to see typo handling",
+    "used the direction-swap control in the dictionary, with matching and mismatched input language",
+    "marked a chosen meaning as the one intended, and checked whether it was actually persisted",
+    "played a full 10-question practice session end to end, including a correct and an incorrect answer, and reached the results screen",
+    "re-navigated to the app's home route while logged in to check session handling"
+  ],
+  "findings": [
+    {
+      "id": "f1",
+      "severity": "bug",
+      "confidence": "high",
+      "title": "\"Save this meaning\" claims success but never calls the server",
+      "screen": "dictionary",
+      "steps": [
+        "Log in and open the dictionary (תרגום)",
+        "Type a word with multiple senses, e.g. 'bank', and submit",
+        "Click 'זו המשמעות שחיפשתי' (this is the meaning I meant) under the top sense",
+        "Watch the network log from the moment of the click"
+      ],
+      "expected": "Clicking the button persists the chosen sense to the user's vocabulary (the app itself displays the message 'התרגום נשמר לאוצר המילים שלך' — the translation was saved to your vocabulary), which should involve a request to the server.",
+      "observed": "The UI shows the saved confirmation message and disables/replaces the button, but no network request is issued at all — the only API calls in the log remain the earlier POST /api/users and POST /api/translations. Nothing is sent to record the choice.",
+      "evidence": {
+        "screenshots": [],
+        "network": "After clicking the choose-meaning button, browser_network_requests shows no new request; the last POST is still the original POST /api/translations that returned the sense list. No POST/PUT to any vocabulary or choice endpoint occurs.",
+        "console": []
+      },
+      "fingerprint": "dictionary | mark-meaning action | success message shown with no corresponding network call"
+    },
+    {
+      "id": "f2",
+      "severity": "bug",
+      "confidence": "high",
+      "title": "Swapping translation direction resubmits box text unchanged and crashes the server (502) when it doesn't match the new source language",
+      "screen": "dictionary",
+      "steps": [
+        "Open the dictionary and translate an English word, e.g. 'recieve' (English→Hebrew, the default direction)",
+        "Without changing the text box, click '⇄ החלף' to swap to Hebrew→English",
+        "Observe the result panel and check the network log for the resulting request"
+      ],
+      "expected": "Either the app clears/adapts the input for the new direction, or it declines to resubmit English text as if it were Hebrew, or it shows a graceful validation message.",
+      "observed": "The app immediately re-POSTs the same English text with direction 'he_en' ({\"text\":\"recieve\",\"direction\":\"he_en\"}). The server responds 502 Bad Gateway, a console error is logged, and the UI shows a generic 'התרגום לא זמין' (translation unavailable) with a retry button. As a control, swapping direction after typing genuine Hebrew text (e.g. 'בנק') works correctly and returns valid English senses, confirming the crash is specific to the language/direction mismatch left over from the swap.",
+      "evidence": {
+        "screenshots": [],
+        "network": "POST http://localhost:3101/api/translations with body {\"text\":\"recieve\",\"direction\":\"he_en\"} => 502 Bad Gateway",
+        "console": ["Failed to load resource: the server responded with a status of 502 (Bad Gateway) @ http://localhost:3101/api/translations:0"]
+      },
+      "fingerprint": "dictionary | direction swap | stale input text resubmitted under new direction causes server 502"
+    },
+    {
+      "id": "f3",
+      "severity": "bug",
+      "confidence": "medium",
+      "title": "Navigating directly to the app's home route while logged in bounces back to the login screen",
+      "screen": "home",
+      "steps": [
+        "Log in and complete any action, e.g. finish a practice session",
+        "Navigate (full page load) to http://localhost:8092/",
+        "Observe which screen loads"
+      ],
+      "expected": "The home screen loads showing the logged-in user's practice/dictionary entry points, since the session was valid moments before (other routes such as /translate load fine without re-login in the same conditions).",
+      "observed": "The app redirects to /login instead of showing home. The username field is pre-filled, and clicking 'כניסה' (no password required) logs back in immediately and returns to a working home screen. No network request accompanies the redirect to /login — it happens purely client-side. Re-navigating directly to /translate right after login does not trigger this redirect, only '/' does.",
+      "evidence": {
+        "screenshots": ["shots/f_home_redirect_login.png"],
+        "network": "browser_network_requests shows zero requests around the navigation to '/', confirming the redirect to /login is a client-side decision, not a rejected server session check.",
+        "console": []
+      },
+      "fingerprint": "home | route navigation | direct load of root path forces re-login despite valid session"
+    },
+    {
+      "id": "f4",
+      "severity": "bug",
+      "confidence": "medium",
+      "title": "One word's sense list contains two entries with the identical translation and part of speech, undifferentiated",
+      "screen": "dictionary",
+      "steps": [
+        "Open the dictionary and translate the word 'light'",
+        "Expand 'עוד משמעויות' to see all returned senses",
+        "Compare the Hebrew translation and part-of-speech tag across all noun senses"
+      ],
+      "expected": "Each listed sense represents a distinct meaning the learner needs to tell apart, as is the case for the other senses of this same word (adjective 'light' by weight vs. by color are correctly kept separate, and the verb sense is separate again).",
+      "observed": "Two of the five senses returned are both translation 'אור', part of speech 'noun' — one exemplified by 'The light in the room was dim' and the other by 'Please turn off the light when you leave.' Both sentences use 'light' in exactly the same sense (illumination); the app presents them as two different senses with no indication of how they differ, effectively duplicating one meaning in the list.",
+      "evidence": {
+        "screenshots": ["shots/f_light_top.png", "shots/f_light_expanded.png"],
+        "network": "POST /api/translations for {\"text\":\"light\"} returned senses including {\"translation\":\"אור\",\"part_of_speech\":\"noun\",...} twice, with only the example sentence differing between the two entries.",
+        "console": []
+      },
+      "fingerprint": "dictionary | senses list | two senses share identical translation and part of speech"
+    },
+    {
+      "id": "f5",
+      "severity": "inconvenience",
+      "confidence": "high",
+      "title": "All but the top sense are hidden behind \"more meanings\" even though the server already returned them",
+      "screen": "dictionary",
+      "steps": [
+        "Open the dictionary and translate any word that has more than one sense, e.g. 'bank', 'light' or 'run'",
+        "Observe the result panel immediately after the translation loads",
+        "Check the network response for the same request"
+      ],
+      "expected": "Since all senses were already delivered in the single API response (no extra loading needed), a learner comparing meanings would want to see them together, or at least a compact preview of each, rather than an extra click that reveals data already on the device.",
+      "observed": "Only the single 'top' sense is shown, with the remaining senses fully hidden behind a 'עוד משמעויות (N)' button, despite the JSON response already containing every sense's translation, part of speech and example. This reproduced on every multi-sense word tried (bank: 4 senses, light: 5 senses, receive: 4 senses, run: 5 senses) — one interaction pattern, not one problem per word.",
+      "evidence": {
+        "screenshots": ["shots/f_light_top.png"],
+        "network": "POST /api/translations for 'bank' returned all 4 senses in one 200 response; the UI rendered only the first sense until 'עוד משמעויות (3)' was clicked.",
+        "console": []
+      },
+      "fingerprint": "dictionary | senses list | only the top sense shows before an extra tap despite full data already delivered"
+    }
+  ],
+  "notes": "Did not explore: changing/incorrect profile data (age/name validation limits), practice session content beyond one full 10-question run, behavior with very long input or non-English/non-Hebrew scripts in the dictionary box, or repeated 'weird' cases of navigating to other deep routes to map exactly which ones survive the client-side session check described in f3. The login flow itself (username only, no password) was not evaluated as a security question since the persona and task are focused on usability/dictionary content, not auth hardening."
+}
