@@ -1,0 +1,446 @@
+# Nightly QA agent — design
+
+- **Status:** Draft, awaiting review. Delivered in two phases — see *Delivery in two
+  phases*: a local proof of concept first, the workflow and the filing second.
+- **Date:** 2026-09-15
+- **Relationship to earlier work:** the e2e suite
+  (`docs/superpowers/specs/2026-08-26-lang-tutor-e2e-testing-design.md`) proved the app and
+  the server close the loop on a scripted happy path, against MockServer. The eval bucket
+  (ADR 0004) is the one place that calls the real model, and it scores the prompt, not the
+  product. Nothing today uses the product the way a learner does, against the real model,
+  and asks whether the experience is any good. This design adds that.
+
+## Summary
+
+Every night a GitHub Actions job stands up the full environment the e2e suite already
+knows how to build — fresh Postgres database, the Hono server, the static web export of the
+Expo app — with one difference: the server talks to the real Gemini API. A Claude Code
+session is then handed a **charter** (a persona and a focus area, different each night)
+and a real browser through the Playwright MCP server, and told to behave like a learner:
+sign up, look words up, take a session, get confused, make typos, abandon things halfway.
+It reports defects, weird behaviour and inconveniences with screenshots and the network
+evidence behind them.
+
+Before anything is filed, the session reads every issue the bot has ever filed and decides,
+finding by finding, whether it is a known problem. Known problems get a comment on the
+existing issue. New ones become new issues, a few per night at most. A deterministic script
+does the filing; the agent only decides.
+
+One session, one browser, one night. No source access, no API calls the learner did not
+make, no verifier stage yet.
+
+## Goals
+
+- Find the class of problem the scripted tiers cannot: near-duplicate meanings offered side
+  by side, a typo silently accepted with no hint, the most common meaning hidden behind a
+  **more** button, a flow that dead-ends. UX, not just correctness.
+- Vary the exploration night to night, so the same ten clicks are not repeated.
+- Never file a duplicate. An existing issue gains a "seen again" comment instead.
+- Bound the cost on a Claude subscription and on the Gemini key, in a way that cannot be
+  exceeded by the agent being enthusiastic.
+- Be runnable locally, in a dry-run mode that files nothing, so the brief can be developed
+  without waiting for the night.
+
+## Non-goals
+
+- Replacing any deterministic tier. A finding here is a lead, not a failing test.
+- Native behaviour. The agent drives the web export, exactly as e2e does, so anything that
+  only exists on iOS or Android is invisible.
+- A second, adversarial verifier session. Deferred until the false-positive rate is known
+  (see *Decisions deferred*).
+- Fixing anything. The agent has no write access to the repository.
+
+## What shaped this design
+
+Precedents, each with the one thing taken from it:
+
+| Precedent | Taken |
+|---|---|
+| [Claude Code + Playwright MCP "Quinn"](https://alexop.dev/posts/building_ai_qa_engineer_claude_code_playwright/) | A persona charter and a tool allowlist restricted to browser tools, so the agent cannot read the source and stays a black-box user. About 7 minutes per run in Actions. |
+| [Site-agnostic explore-QA harness](https://alexop.dev/posts/exploratory-qa-ai-agents-site-agnostic-harness/) | A charter is a mission plus three or four risk oracles. Screenshots only at findings, to save context. A low-confidence finding is not shipped. |
+| [msilvera-howdy/qa-agent](https://github.com/msilvera-howdy/qa-agent) | "Belief is not a finding." Separate stages with separate tool allowlists: whatever reasons about findings does not also get the browser, and whatever writes to the tracker does not also get the model. |
+| [GitHub Agentic Workflows safe outputs](https://github.github.com/gh-aw/reference/safe-outputs/) | The agent never writes to GitHub. It emits a structured output; a separate job with scoped permissions applies it, with a `max` per run and title-based deduplication as code, not prompt. |
+| [Anthropic's issue-deduplication example](https://github.com/anthropics/claude-code-action/blob/main/examples/issue-deduplication.yml) | The model is a good judge of "same root problem" given the existing issues' text. No embeddings needed at this scale. |
+| [Playwright + LLM nightly agent](https://scrolltest.com/autonomous-testing-agent-playwright-llm-ollama-2026/) | Console errors and the network log are cheap evidence. Caps on total actions and on actions per page. |
+| [Claude Code GitHub Actions docs](https://code.claude.com/docs/en/github-actions) | A subscription OAuth token works in Actions. The dollar cap flag only limits API billing, so on a subscription the caps that matter are `--max-turns`, a job timeout and a concurrency group. |
+
+## Architecture
+
+```
+.github/workflows/nightly-qa.yml
+│
+├─ job: explore            (permissions: contents read, issues read, id-token write)
+│   1. npm ci, install Chromium
+│   2. npm run db:up                         ← Postgres (+ MockServer, unused tonight)
+│   3. nightly-qa/up.sh                      ← fresh lang_tutor_e2e, server on :3001
+│   │                                          against real Gemini, web export on :8082
+│   4. nightly-qa/prepare.sh                 ← picks the charter for tonight, dumps the
+│   │                                          bot's issues to .out/known-issues.json
+│   5. nightly-qa/guard.sh                   ← three probes that must be refused (see
+│   │                                          The fence); a leak fails the job here
+│   6. claude -p "/nightly-qa <charter>"      ← ONE session, run from a scratch working
+│   │      directory that is not the checkout. Tools: Playwright MCP (browser only),
+│   │      Read/Write under .out. Writes .out/findings.json, report.md, shots/*.png
+│   7. upload artifact  nightly-qa-<date>    ← report, findings, screenshots, server log
+│
+└─ job: file  (needs: explore)   (permissions: issues write)
+    1. download the artifact
+    2. nightly-qa/file.ts                    ← no model. Comments on matched issues,
+                                               creates new ones (capped), writes the
+                                               job summary. --dry-run prints instead.
+```
+
+Two jobs, not one, because the split is the permission boundary: the job that holds the
+model has read-only access to issues, and the job that writes issues holds no model. This
+is the safe-outputs shape, and it is also what makes the write side unit-testable.
+
+## The environment — `nightly-qa/up.sh`
+
+The same three things `e2e/playwright.config.ts` starts, started from a shell script
+because Playwright only starts its `webServer` entries under `playwright test`:
+
+1. `npx tsx e2e/globalSetup.ts` — drops and recreates `lang_tutor_e2e`, migrates, seeds.
+   Reused as-is; it already probes MockServer liveness, which `db:up` provides, so nothing
+   changes there. A fresh database every night means every lookup the agent makes is a real
+   provider call, which is the point, and also means the dictionary cache cannot grow into
+   a hidden variable between nights.
+2. `npm run start -w apps/server` with `DATABASE_URL` pointing at that database,
+   `GEMINI_API_KEY` and `GEMINI_MODEL` from the repository secrets and variables the eval
+   job already uses, and **no** `GEMINI_BASE_URL`, so the server's default, the real
+   endpoint, applies. Waited for on `/health`. Stdout and stderr go to
+   `nightly-qa/.out/server.log`, which ships in the artifact: a 502 the learner saw as a
+   blank screen is explained there.
+3. `EXPO_PUBLIC_API_URL=http://localhost:3001 npm run build:web -w apps/mobile` then
+   `npm run serve:web -w apps/mobile` on 8082. Same port and same reasons as e2e.
+
+The script is idempotent about ports: if 3001 or 8082 is already bound it fails loudly,
+the same rule `playwright.config.ts` applies with `reuseExistingServer: false`.
+
+The browser binary is the one implementation risk here. `@playwright/mcp` bundles its own
+Playwright version, which need not match the one `e2e/` installs, so the workflow installs
+Chromium through the MCP package's own dependency rather than through `e2e/`. Confirming
+the exact command is the first task of the plan, before anything else is built on it.
+
+## The session
+
+Claude Code in print mode (`claude -p`), authenticated with `CLAUDE_CODE_OAUTH_TOKEN`
+(the subscription, per the decision in this thread). The CLI is used directly rather than
+through `anthropics/claude-code-action`, because the fence below needs the session to
+start in a directory that is not the checkout, and the action runs in the checkout. The
+action is a wrapper over the same headless mode, so nothing is lost, and the local run and
+the nightly run become the same command. The workflow has two triggers: the nightly `schedule`, and `workflow_dispatch` with four
+inputs, `persona`, `focus`, `max_turns` and `file_issues` (default `true`), so a night
+can be re-run by hand with a chosen charter, or run without touching the tracker. The prompt
+is a skill invocation, `/nightly-qa`, so the brief lives in the repository at
+`.claude/skills/nightly-qa/SKILL.md` and is reviewed like code.
+
+### Tools, and why each
+
+| Tool | Purpose |
+|---|---|
+| `mcp__playwright__browser_navigate`, `_navigate_back`, `_click`, `_type`, `_fill_form`, `_press_key`, `_select_option`, `_hover`, `_wait_for`, `_resize` | Being a user. |
+| `mcp__playwright__browser_snapshot` | The accessibility tree. This is how the agent reads the page; it is far cheaper in tokens than a screenshot and it is what a screen reader would see, which is itself a lens on UX. |
+| `mcp__playwright__browser_take_screenshot` | Evidence, taken at a finding, not after every click. |
+| `mcp__playwright__browser_console_messages` | Page errors the UI swallowed. |
+| `mcp__playwright__browser_network_requests` | **The API lens.** The exact request the UI made and the exact response it got. This is how "the UI showed one meaning" becomes "the server returned four senses and the UI showed one" without the agent ever making a call the learner did not make. |
+| `Read(/.out/**)` | The charter and the known-issues dump. |
+| `Edit(/.out/**)` | The report, the findings file. (`Write` is governed by `Edit` rules.) Nothing else is writable. |
+
+Deliberately absent: `browser_evaluate` (can mutate the page and fake a result), `Bash`
+(no `curl`, no `gh`), `Read` of anything outside `.out/`, and every GitHub MCP tool. The
+agent cannot read `apps/`, cannot call the server directly, and cannot touch the tracker.
+
+### The fence — how "no source access" is made true
+
+An allowlist is not enough. Claude Code auto-allows file reads inside its working
+directory with no permission check at all, so a session started in the checkout can
+`Read`, `Grep` and `Glob` every file under `apps/` without ever consulting a rule. The
+fence is structural, in three layers, each of which holds on its own.
+
+1. **The working directory is not the checkout.** The session starts in a scratch
+   directory (`nightly-qa/.work/` locally, `$RUNNER_TEMP/qa` in CI) that holds only the
+   skill, the charter and `.out/`. The checkout, where the servers are already running
+   from, is outside it. `permissions.blockReadsOutsideWorkingDirectories: true` makes the
+   file tools refuse every path outside the working directory in every permission mode,
+   and there is no `--add-dir`. As a side effect the repository's `CLAUDE.md` is never
+   loaded: Claude reads the working directory's, and the scratch directory has none.
+2. **The tools do not exist.** Deny rules beat allow rules, and a bare tool name in a deny
+   rule removes the tool from the model's context. The session's settings deny `Bash`,
+   `Grep`, `Glob`, `WebFetch`, `WebSearch`, `Agent`, `Edit`, `NotebookEdit` and
+   `mcp__playwright__browser_evaluate` by name, then allow `Read(/.out/**)`,
+   `Edit(/.out/**)` and `mcp__playwright__*`. `--strict-mcp-config` with the one
+   `mcp.json` means no other MCP server can appear. An absolute-path deny on the checkout
+   (`Read(//<checkout>/**)`) is added on top, belt over braces.
+3. **The browser cannot reach the disk.** A `browser_navigate` to a `file://` URL of the
+   checkout would render the source and hand it back through a snapshot. The MCP server
+   runs `--headless --isolated`, with `--output-dir` under `.out/` and `--allowed-origins`
+   limited to the two localhost ports. Whether that refuses `file://` is verified, not
+   assumed (see below). If it does not, the browser moves into the official
+   `mcr.microsoft.com/playwright/mcp` container, which sees no host filesystem and reaches
+   the two servers over host networking.
+
+**The guard.** A fence that has never been tested against a breach looks identical to no
+fence. `nightly-qa/guard.sh` runs before every session, locally and in CI, with the same
+settings, MCP config and working directory, and a fixed three-turn prompt: read
+`apps/server/src/app.ts` by absolute path, grep the checkout for `testID`, navigate the
+browser to that file's `file://` URL. It fails if the transcript contains a line of the
+file. It costs a few turns a night and catches a Claude Code or Playwright MCP upgrade
+that changes behaviour.
+
+Why this matters, given the repository is public: not secrecy, honesty. A tester who can
+read the code stops being a user. It explains findings away as "by design", and it drives
+the app by `testID` instead of by what is on the screen.
+
+### The brief (`SKILL.md`), in outline
+
+The skill's body is the standing part of the prompt; the charter is the variable part.
+
+1. **Who you are tonight.** The persona file, verbatim, and the focus file, verbatim.
+2. **The rules of evidence.** A finding needs steps, expected, observed, and one of: a
+   screenshot, a network exchange, a console error. A finding with none of these is a
+   note in the report, not a finding. Rate your own confidence; low confidence is
+   reported but never filed.
+3. **What counts.** Three severities: `bug` (wrong or broken), `weird` (surprising, not
+   clearly wrong), `inconvenience` (works, costs the learner effort). The user's own three
+   examples are in the brief as calibration: near-duplicate meanings among four options,
+   a typo accepted with no hint, the top meaning shown alone behind **more**.
+4. **Known limits of the web build.** Native alerts do not render on web, so an action
+   that silently does nothing may be a swallowed error: check the network log and report
+   the failure, not the missing alert. This is the one place the brief gives the agent
+   inside knowledge, and it is there because without it every server error would be
+   reported as "the button does nothing".
+5. **Budget.** Stop exploring at roughly 80 browser actions and spend what is left on the
+   report. Write `findings.json` **before** the deduplication pass, so that hitting the
+   turn cap mid-dedup still leaves a complete report on disk.
+6. **Deduplication.** Read `known-issues.json`. For each finding, decide: the same
+   underlying problem as an existing issue (same screen, same symptom, even if the word
+   differs), or new. Record the decision on the finding. One issue per defect, never one
+   per word.
+7. **Debrief.** `report.md`: what was covered, what was not and why, the findings in
+   severity order, and anything the agent was unsure about.
+
+### Output contract — `findings.json`
+
+```json
+{
+  "run":      { "date": "2026-09-16", "persona": "impatient-typer", "focus": "typos",
+                "browser_ok": true },
+  "coverage": [ "onboarded as qa-2026-09-16-impatient", "looked up 11 strings", "..." ],
+  "findings": [
+    {
+      "id": "f1",
+      "severity": "inconvenience",
+      "confidence": "high",
+      "title": "Top meaning shown alone; the other three sit behind ‘more’",
+      "screen": "translate",
+      "steps": ["log in", "tap translate", "type ‘window’", "submit"],
+      "expected": "all meanings visible, most common first",
+      "observed": "one card; ‘more’ reveals three others",
+      "evidence": {
+        "screenshots": ["shots/f1-1.png"],
+        "network": "POST /api/translations → 200, entries[0].senses.length = 4",
+        "console": []
+      },
+      "fingerprint": "translate | senses list | only top sense before more",
+      "match": { "issue": 42 }
+    }
+  ],
+  "notes": "could not test the results screen: session ended at question 7 with ..."
+}
+```
+
+`match` is `{ "issue": n }`, `{ "new": true }`, or absent when the agent never reached the
+deduplication pass. The file is validated with a Zod schema in `file.ts`; a malformed file
+fails the `file` job loudly rather than filing garbage.
+
+## Charters — variety without chaos
+
+`nightly-qa/charters/personas/*.md` and `nightly-qa/charters/focus/*.md`, one short
+Markdown file each. Initial set:
+
+- **Personas:** `impatient-typer` (fast, typos, abandons anything slow), `careful-adult`
+  (reads everything, wants to understand nuance), `young-learner` (age 10, short words,
+  taps everything), `returning-user` (already has an account, skips onboarding, expects
+  things to be where they were).
+- **Focus areas:** `typos-and-near-misses`, `polysemy` (words with many meanings),
+  `phrases-and-sentences`, `session-and-scoring`, `abandon-and-resume` (leave a flow
+  halfway, come back), `onboarding-edges` (odd names, ages, empty fields), `hebrew-input`
+  (typing Hebrew where English is expected, and the reverse).
+
+`prepare.sh` picks persona `dayOfYear mod 4` and focus `dayOfYear mod 7`. Four and seven
+are coprime, so the pairing cycles through all 28 combinations before repeating, and the
+choice is a function of the date: re-running a night by hand gets the same charter, and
+`workflow_dispatch` inputs override both.
+
+The second source of variety is memory. `prepare.sh` also dumps every issue labelled
+`nightly-qa`, open and closed, to `known-issues.json`. The brief says: these are known, do
+not spend the night re-finding them, though confirming one still reproduces is worth one
+line in the report. That is the same file the deduplication pass reads, so it costs one
+`gh` call.
+
+## Filing — `nightly-qa/file.ts`
+
+No model. Reads `findings.json`, applies these rules in order, and prints every action it
+takes to the job summary:
+
+1. **Malformed or missing file:** fail the job. The `explore` job's artifact is still there.
+2. **Confidence `low`:** never filed. Listed in the summary.
+3. **`match.issue = n`, issue open:** comment on *n*: date, persona, focus, the observed
+   text, a link to the run's artifact for the screenshot. Do not reopen, retitle or
+   relabel.
+4. **`match.issue = n`, issue closed, labelled `wontfix` or `by-design`:** drop silently
+   into the summary. A decision was made; the bot does not argue with it nightly.
+5. **`match.issue = n`, issue closed otherwise:** one comment, "reproduced again on
+   `date` after close", and nothing else. Reopening is a human's call.
+6. **`match.new`:** create an issue, capped at **3 per night**, `bug` before `weird`
+   before `inconvenience`. Overflow goes to the summary with a note that it was not filed
+   for the cap. Title is the finding's title prefixed `[nightly-qa]`; labels `nightly-qa`
+   and the severity; body rendered from a fixed template ending in a **Fingerprint** line
+   copied from the finding. That line is what makes tomorrow's deduplication reliable:
+   the agent compares fingerprints first and prose second.
+7. **`match` absent:** the agent ran out of turns before deciding. Not filed; the summary
+   says so, and the finding is in the artifact for a human.
+
+A last guard in code, independent of the agent's judgement: before creating, `file.ts`
+compares the new title against every open `nightly-qa` issue title and refuses a
+near-exact match (normalised, small edit distance). It is the gh-aw `deduplicate-by-title`
+rule, and it exists for the night the model's judgement is off.
+
+Screenshots do not go into issues: the GitHub API has no image upload for issue bodies.
+Every comment and issue links to the run, whose artifact holds them, retained 14 days.
+That is a known weakness; see *Decisions deferred*.
+
+## Caps
+
+| Cap | Where | Value to start | Why |
+|---|---|---|---|
+| Turns | `claude_args: --max-turns` | 150 | The only spend cap that applies on a subscription. Roughly: ~20 for onboarding and login, ~80 browser actions, ~20 for reading known issues and writing outputs, slack. |
+| Actions | in the brief | ~80 | Soft cap so the hard cap is not hit mid-report. |
+| Job timeout | `timeout-minutes` | 40 | `npm ci`, Chromium, the web export and the session; e2e's job is allowed 30 with no agent. |
+| Overlap | `concurrency: nightly-qa`, no cancel | 1 | Two sessions against one server would interleave; a manual dispatch queues behind the night. |
+| New issues | `file.ts` | 3 per night | A quiet tracker is what makes a comment on it worth reading. |
+| Model | `claude_args: --model` | Sonnet 5 | Tool-heavy, cheap on the window. One line to change. |
+| Forks | `if: github.repository_owner == 'victor-prp'` | — | Secrets are withheld on forks; a red run nobody can fix is worse than a skipped one. |
+| Gemini | none needed | — | A night is tens of lookups. The eval job spends more per push. |
+
+The turn number is a guess to be corrected: after three nights the artifact's report and
+the action's own usage line say how many turns a night actually needs, and the value is
+set from that. Scheduled at `0 1 * * *` UTC, which is early morning in Israel, so the
+session's use of the five-hour window lands where no interactive session is competing.
+
+## Repository layout
+
+```
+.github/workflows/nightly-qa.yml           the two jobs
+.claude/skills/nightly-qa/SKILL.md         the brief; allowed-tools frontmatter
+nightly-qa/                                a workspace, like e2e/
+  package.json                             @playwright/mcp pinned, tsx, node:test
+  mcp.json                                 the MCP server command and flags
+  up.sh                                    environment, mirrors playwright.config.ts
+  prepare.sh                               charter pick + known-issues dump
+  file.ts                                  filing rules; --dry-run
+  file.test.ts                             node:test over the pure rules
+  charters/personas/*.md
+  charters/focus/*.md
+  .out/                                    gitignored; artifact contents
+```
+
+`nightly-qa/` is a workspace so `npm run test:unit` picks up `file.test.ts` automatically
+and so the MCP server version is pinned in the lockfile. It is outside `apps/`, so ADRs
+0001 to 0005 do not apply to it, and outside `apps/server/tests/`, so ADR 0004's buckets
+are untouched; e2e already set that precedent for a top-level browser-driven workspace.
+
+## Running it locally
+
+`npm run qa:nightly` at the root runs `up.sh`, `guard.sh`, then the same `claude -p`
+command CI runs, from the same kind of scratch directory with the same settings, MCP
+config and turn cap, then `file.ts --dry-run`. Nothing is CI-only: if the brief or the
+fence behaves differently at night than on a laptop, that is a defect in the setup. It
+needs Docker (and the one-Postgres-per-port rule from `CLAUDE.md`), `GEMINI_API_KEY` and
+`GEMINI_MODEL` in the shell as for `npm run eval`, and a local Claude Code login, which
+draws on the same subscription the night does.
+
+Two things are better locally:
+
+- **Headed.** `--headed` drops the MCP server's `--headless`, so the browser is visible
+  and the agent's clicks can be watched in real time. This is the fastest way to tune a
+  persona file.
+- **Explicit charter.** `--persona` and `--focus` override the day's pick, so one focus
+  area can be run repeatedly while it is being written.
+
+`--file` replaces the dry run with real filing, for the verification step that needs a
+tracker with one bot issue already in it. A local run costs the same as a night, in
+Gemini calls and in the subscription window.
+
+## How each failure surfaces
+
+| Failure | Surfaces as |
+|---|---|
+| Server fails to start, or the export fails | `up.sh` exits non-zero; the job is red before the model is called; the server log is uploaded. |
+| The fence leaks | `guard.sh` fails the job before the real session starts; nothing is explored, nothing is filed. |
+| Gemini is down or the key is bad | The learner sees the translate error state; the agent reports it as a `bug` with the network evidence; `file.ts` files it. Correct: that is what a learner would see. |
+| Playwright MCP cannot launch Chromium | The first browser tool call errors. The brief requires `run.browser_ok` in `findings.json`, set from whether the first `browser_navigate` to the app succeeded; `file.ts` fails the job when it is `false`, so a night with no browser is red, not quietly empty. |
+| Turn cap hit | `findings.json` exists from before the dedup pass; unmatched findings are not filed and are listed in the summary. |
+| OAuth token expired | The action fails at authentication; nothing is filed. Renewal is manual (`claude setup-token`). |
+| Agent files nonsense | Cap of 3, low confidence never filed, title guard in code, and every issue carries the label, so a bad night is three labelled issues to close. |
+
+## Verification before the first night
+
+In the spirit of `CLAUDE.md`'s rule for ADR checks: a system that can only ever say
+"nothing found" looks identical to one that works. Before the schedule is enabled:
+
+1. `file.test.ts` covers each filing rule with fixtures, including the title guard and
+   the cap ordering.
+2. A local `npm run qa:nightly` against a branch with a **planted defect** (hide the
+   **more** button behind an off-screen style, say) must produce a finding with the right
+   screen and a screenshot. Then the same run on the clean tree must not.
+3. A `workflow_dispatch` with `file_issues=false` runs the real pipeline end to end and
+   the dry-run summary is read by a human.
+4. One dispatch with filing on, into a repository state that already has one bot issue,
+   confirms a comment lands on it and no duplicate is created.
+
+## Delivery in two phases
+
+Everything that could sink the idea sits inside the session, and none of it is answered by
+writing the filing code: whether Playwright MCP can drive a right-to-left static Expo
+export at all, how many turns a night takes, whether the findings are sharp or half false
+positives, and whether the fence holds. One local run answers all four. So the work is
+split, and the second half is designed against a real report rather than an imagined one.
+
+**Phase A — proof of concept, local only.** `up.sh`; the scratch directory with the
+settings fence and `mcp.json`; `guard.sh`; `SKILL.md` with one persona and one focus
+hard-coded; a run script that starts `claude -p` headed; `report.md` and a first cut of
+`findings.json` with no `match` field. No workflow, no charter rotation, no filing. Done
+when: the guard's three probes are refused; a run against a planted defect (the **more**
+button hidden off-screen) reports it with the right screen and a screenshot; the same run
+on the clean tree does not; and the turn count and the report have been read by a human.
+
+Phase A settles: the turn cap, the model, whether the verifier stage is needed now, and
+whether the browser has to move into the container.
+
+**Phase B — the night.** `nightly-qa.yml` with its two jobs and dispatch inputs;
+`prepare.sh` and the charter files; `file.ts` with its tests and the deduplication rules;
+the `match` field in the output contract; the artifact. Written against phase A's numbers
+and phase A's report.
+
+## Out of scope
+
+- Native builds, Maestro, device farms.
+- A verifier stage, embeddings-based deduplication, auto-closing stale bot issues.
+- Slack or email. The run's job summary and the tracker are the two outputs.
+- Running on pull requests. Real model spend per push is the eval job's trade, not this one's.
+- Auto-fix. The bot never opens a pull request.
+
+## Decisions deferred
+
+- **Verifier stage.** One session for now, per the decision in this thread. If, after
+  the first weeks, the rate of findings a human closes as "cannot reproduce" is high, add a
+  second fresh-context session that replays each finding's steps and drops what it cannot
+  reproduce. The output contract already carries `steps` for that reason.
+- **Screenshots in issues.** Artifacts expire. If a screenshot turns out to be the thing a
+  reader always needs, the `file` job can commit them to an orphan branch and link there.
+- **Turn cap.** 150 is a placeholder until three nights of data exist.
+- **Claude's issue writes via the GitHub App instead of `GITHUB_TOKEN`.** Not needed:
+  issues created with `GITHUB_TOKEN` trigger no further workflows, which here is a feature.
+- **Browser in a container.** Only if the guard shows `--allowed-origins` does not refuse
+  `file://`. Decided in phase A.
