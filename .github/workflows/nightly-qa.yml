@@ -4,9 +4,14 @@ name: Nightly QA
 # agent and Gemini - and takes half an hour, neither of which belongs on every
 # push. It is also the one workflow whose failure is often a finding rather than
 # a regression.
+#
+# The schedule is DELIBERATELY ABSENT while this branch is the default branch.
+# Scheduled workflows run from the default branch, so leaving the cron in while
+# the default is pointed here would start unattended nights against a pipeline
+# that has not been proven yet - the one thing the whole verification sequence
+# exists to prevent. It goes back in the last commit of this phase, once the
+# default branch is master again and every check below has passed.
 on:
-  schedule:
-    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       persona:
