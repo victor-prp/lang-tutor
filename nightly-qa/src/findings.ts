@@ -44,6 +44,19 @@ const findingSchema = z
     { message: 'a finding needs evidence: a screenshot, a network exchange or a console error' },
   );
 
+/** The report minus its findings, which parseReportLoose validates one by one. */
+const envelopeSchema = z.object({
+  run: z.object({
+    date: z.string().min(1),
+    persona: z.string().min(1),
+    focus: z.string().min(1),
+    browser_ok: z.boolean(),
+  }),
+  coverage: z.array(z.string()),
+  findings: z.array(z.unknown()),
+  notes: z.string().default(''),
+});
+
 export const reportSchema = z.object({
   run: z.object({
     date: z.string().min(1),
@@ -62,4 +75,42 @@ export type QaReport = z.infer<typeof reportSchema>;
 
 export function parseReport(value: unknown): QaReport {
   return reportSchema.parse(value);
+}
+
+/**
+ * The envelope strictly, the findings one at a time.
+ *
+ * A single unevidenced finding used to reject the entire report, which threw
+ * away a whole session - five sound findings among them - over one weak sixth.
+ * That is the wrong trade: the contract exists to keep unevidenced claims from
+ * being filed, not to punish the run that carried one. So a bad finding is
+ * dropped and named, and the rest survive.
+ *
+ * The envelope still throws, because a broken envelope means the session did
+ * not produce a report at all, and there is nothing to salvage.
+ */
+export type DroppedFinding = { id: string; reason: string };
+
+export function parseReportLoose(value: unknown): {
+  report: QaReport;
+  dropped: DroppedFinding[];
+} {
+  const envelope = envelopeSchema.parse(value);
+  const findings: Finding[] = [];
+  const dropped: DroppedFinding[] = [];
+
+  envelope.findings.forEach((candidate, index) => {
+    const result = findingSchema.safeParse(candidate);
+    if (result.success) {
+      findings.push(result.data);
+      return;
+    }
+    const id =
+      candidate && typeof candidate === 'object' && typeof (candidate as { id?: unknown }).id === 'string'
+        ? ((candidate as { id: string }).id)
+        : `#${index}`;
+    dropped.push({ id, reason: result.error.issues.map((i) => i.message).join('; ') });
+  });
+
+  return { report: { ...envelope, findings }, dropped };
 }

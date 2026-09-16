@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { parseReport, severities } from './findings.ts';
+import { parseReportLoose, severities } from './findings.ts';
 
 const path = process.argv[2];
 if (!path) {
@@ -26,8 +26,9 @@ try {
 }
 
 let report;
+let dropped;
 try {
-  report = parseReport(parsed);
+  ({ report, dropped } = parseReportLoose(parsed));
 } catch (error) {
   console.error(`${path} does not match the findings contract:`);
   console.error(error);
@@ -37,6 +38,10 @@ try {
 if (!report.run.browser_ok) {
   console.error('The session reported browser_ok = false: it never drove the app.');
   process.exit(1);
+}
+
+for (const drop of dropped) {
+  console.warn(`  dropped    finding ${drop.id}: ${drop.reason}`);
 }
 
 const counts = severities.map(

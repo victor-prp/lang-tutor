@@ -14,7 +14,10 @@ REPO=$(pwd -P)
 OUT="$REPO/nightly-qa/.out"
 QA_API_PORT="${QA_API_PORT:-3101}"
 QA_APP_PORT="${QA_APP_PORT:-8092}"
-MAX_TURNS=150
+# Measured, not guessed: the first full session used 142 of a 150 cap, which is
+# close enough to truncation that a slightly chattier night would be cut off
+# mid-report. 200 leaves room without inviting a session to wander.
+MAX_TURNS=200
 # Pinned rather than left to the CLI default, because phase A's whole output is a
 # set of measurements and a turn count measured against an unknown model means
 # nothing. Change it here, deliberately, and re-measure.

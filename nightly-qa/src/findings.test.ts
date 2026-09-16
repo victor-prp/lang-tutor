@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseReport } from './findings.ts';
+import { parseReport, parseReportLoose } from './findings.ts';
 
 const validFinding = {
   id: 'f1',
@@ -78,4 +78,37 @@ test('defaults the optional evidence arrays and notes', () => {
   assert.deepEqual(parsed.findings[0].evidence.screenshots, []);
   assert.deepEqual(parsed.findings[0].evidence.console, []);
   assert.equal(parsed.notes, '');
+});
+
+test('parseReportLoose keeps the good findings and drops the unevidenced one', () => {
+  const mixed = {
+    ...validReport,
+    findings: [
+      validFinding,
+      { ...validFinding, id: 'f2', evidence: { screenshots: [], console: [] } },
+      { ...validFinding, id: 'f3' },
+    ],
+  };
+  const { report, dropped } = parseReportLoose(mixed);
+  assert.equal(report.findings.length, 2);
+  assert.deepEqual(
+    report.findings.map((f) => f.id),
+    ['f1', 'f3'],
+  );
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0].id, 'f2');
+  assert.match(dropped[0].reason, /evidence/);
+});
+
+test('parseReportLoose still throws when the envelope itself is broken', () => {
+  assert.throws(() => parseReportLoose({ findings: [] }));
+  assert.throws(() => parseReportLoose({ ...validReport, run: { ...validReport.run, browser_ok: 'yes' } }));
+});
+
+test('parseReportLoose reports a dropped finding by index when it has no usable id', () => {
+  const mixed = { ...validReport, findings: [{ nonsense: true }] };
+  const { report, dropped } = parseReportLoose(mixed);
+  assert.equal(report.findings.length, 0);
+  assert.equal(dropped.length, 1);
+  assert.equal(dropped[0].id, '#0');
 });
