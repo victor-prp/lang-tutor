@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 
+import { pushEvidence } from './evidence.ts';
 import { decide, type Action } from './filing.ts';
 import { parseReportLoose } from './findings.ts';
 import { knownIssuesSchema, renderIssueBody } from './knownIssues.ts';
@@ -17,6 +18,8 @@ if (!findingsPath || !knownPath) {
 
 const { report, dropped } = parseReportLoose(JSON.parse(readFileSync(findingsPath, 'utf8')));
 const known = knownIssuesSchema.parse(JSON.parse(readFileSync(knownPath, 'utf8')));
+
+const shotUrls = pushEvidence(report.run.date, `${findingsPath.replace(/\/[^/]+$/, '')}/shots`, apply);
 
 if (!report.run.browser_ok) {
   console.error('browser_ok is false: the session never drove the app. Filing nothing.');
@@ -41,6 +44,19 @@ function gh(args: string[]): string {
   return execFileSync('gh', args, { encoding: 'utf8' });
 }
 
+/**
+ * A finding cites `shots/f1.png`; the tracker needs a URL. Anything the run did
+ * not actually produce resolves to nothing and is dropped rather than rendered
+ * as a broken image - a referenced screenshot is not the same thing as a
+ * screenshot, and part A proved that gap is real.
+ */
+function screenshotMarkdown(finding: { evidence: { screenshots: string[] } }): string[] {
+  return finding.evidence.screenshots
+    .map((path) => shotUrls.get(path))
+    .filter((url): url is string => Boolean(url))
+    .map((url) => `![screenshot](${url})`);
+}
+
 function commentBody(action: Extract<Action, { kind: 'comment' }>): string {
   const head = action.reopened
     ? `Reproduced again on ${report.run.date}, after this issue was closed.`
@@ -52,7 +68,12 @@ function commentBody(action: Extract<Action, { kind: 'comment' }>): string {
     `${head} Persona **${report.run.persona}**, focus **${report.run.focus}**.` +
     escalation +
     `\n\n**Observed:** ${action.finding.observed}` +
-    (action.finding.evidence.network ? `\n\n**Network:** ${action.finding.evidence.network}` : '')
+    (action.finding.evidence.network ? `\n\n**Network:** ${action.finding.evidence.network}` : '') +
+    // The images go last, after the network line, so the prose still reads
+    // straight through on an issue that has accumulated several nights of them.
+    (screenshotMarkdown(action.finding).length > 0
+      ? `\n\n${screenshotMarkdown(action.finding).join('\n\n')}`
+      : '')
   );
 }
 
@@ -79,7 +100,11 @@ for (const action of actions) {
 
   const labels = ['nightly-qa', action.finding.severity];
   if (action.possibleDuplicateOf.length > 0) labels.push('possible-duplicate');
-  let body = renderIssueBody(action.finding, report.run);
+  const shots = screenshotMarkdown(action.finding);
+  let body = renderIssueBody(action.finding, report.run).replace(
+    '<!-- screenshots -->',
+    shots.length > 0 ? `**Screenshots**\n\n${shots.join('\n\n')}` : '',
+  );
   if (action.possibleDuplicateOf.length > 0) {
     body +=
       `\n> The same fingerprint is already open on ` +
