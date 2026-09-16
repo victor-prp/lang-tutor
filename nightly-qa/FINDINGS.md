@@ -3,6 +3,12 @@
 Two proof-of-concept sessions, 2026-09-16, persona `careful-adult`, focus `polysemy`.
 Both drove the real web app in a real browser against the real Gemini API.
 
+Screenshots referenced below as `shots/<name>.png` are kept in `nightly-qa/evidence/`.
+They come from the clean run only: the planted run cited two images that were never
+written, because the screenshot tool silently writes nothing when handed a path with a
+directory in it. The brief now asks for a bare filename and the validator names any cited
+image that is not on disk.
+
 
 ## Clean tree (the real app)
 
