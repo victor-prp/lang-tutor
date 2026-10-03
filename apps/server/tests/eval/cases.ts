@@ -321,6 +321,62 @@ export const CASES: EvalCase[] = [
   // position is one candidate), and it needs an eval run to confirm the model
   // agrees before it is trusted. Correction behaviour is currently measured in
   // English only.
+
+  // Phase 16 — Russian, explained in Hebrew. Each stresses one rule the language
+  // table added; spec §6 lists them.
+  {
+    label: 'ru: a verb keeps the aspect typed',
+    text: 'прочитала',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['קרא', 'קראה'],
+    expectLemma: 'прочитать',
+  },
+  {
+    label: 'ru: a noun case form belongs to its nominative singular',
+    text: 'книги',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['ספרים', 'ספר', 'של הספר'],
+    expectLemma: 'книга',
+  },
+  {
+    label: 'ru: an idiom by meaning, not word for word',
+    text: 'как дела?',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'phrase',
+    acceptTop: ['מה שלומך', 'מה שלומך?', 'מה נשמע', 'מה נשמע?', 'מה העניינים', 'מה העניינים?'],
+    rejectAny: ['איך מעשים', 'איך דברים'],
+  },
+  {
+    label: 'ru: a missing ё is a misspelling, corrected to the word',
+    text: 'елка',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['עץ אשוח', 'אשוח', 'עץ חג המולד'],
+    expectCorrection: 'ёлка',
+  },
+  {
+    label: 'ru: a same-script word of another language is not Russian',
+    text: 'дякую',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: [],
+    expectEmpty: true,
+  },
+  {
+    label: 'he → ru: a Hebrew word rendered in Russian',
+    text: 'חלון',
+    from: 'he',
+    to: 'ru',
+    expectKind: 'word',
+    acceptTop: ['окно'],
+  },
 ];
 
 /**
