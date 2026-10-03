@@ -264,6 +264,15 @@ export function buildPrompt(input: {
     `Give each sense one short natural example sentence in ${from} together with its ${to}`,
     'translation, and a short snake_case sense_code naming the meaning',
     '(financial_institution as against river_bank).',
+    // Phase 16 CI eval fix. Nothing said which language `translation` is in,
+    // and an ambiguous Russian form let the source language leak into it:
+    // `берет` (брать) glossed its "receive" sense as получает in 6 of 10
+    // calls — a Russian synonym, which the dictionary would have stored and
+    // shown as the Hebrew. 0 of 20 with this line. Kept deliberately plain: a
+    // stronger draft ("never in Russian: a Russian synonym is not a
+    // translation") pushed the model to translate at any cost, and `дякую`
+    // came back as תודה in 8 of 15 calls instead of empty (15 of 15 without it).
+    `Write every sense's translation in ${to}.`,
     // Phase 16 eval fix. The sentence rule below is the only one that names a
     // missing example, and `example` is optional in the schema because of it,
     // so a phrase that can stand alone as an utterance — `как дела?`, `break a
@@ -517,6 +526,8 @@ export function buildRenderingPrompt(input: {
     `a ${input.partOfSpeech}, leave it out entirely.`,
     `Where "${input.form}" does not admit a stored sense at all, return that sense_code with`,
     'translation: null rather than forcing a translation.',
+    // Same rule as the first call — see buildPrompt.
+    `Write every sense's translation in ${to}.`,
     // The same rule as the first call, for the same reason — see buildPrompt.
     // It belongs here too: this call writes examples for a form the first call
     // never saw, so without it a reconciled form reintroduces exactly the

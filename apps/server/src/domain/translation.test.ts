@@ -777,6 +777,13 @@ describe('prompts assembled from the language table', () => {
     expect(system('ru', 'he')).toContain('The input is meant to be Russian.');
   });
 
+  it('pins every translation to the target language, in both calls', () => {
+    const rule = "Write every sense's translation in Hebrew.";
+    expect(system('ru', 'he')).toContain(rule);
+    expect(rendering('ru', 'he')).toContain(rule);
+    expect(system('he', 'en')).toContain("Write every sense's translation in English.");
+  });
+
   it('applies the same rules to the rendering prompt', () => {
     expect(rendering('ru', 'he')).toContain('for a Hebrew-speaking learner of Russian.');
     expect(rendering('ru', 'he')).toContain('"прочитала"');
