@@ -2494,7 +2494,7 @@ This changes nothing on GitHub, but it spends a real session of about 300 turns 
 - [ ] **Step 1: Run calibration**
 
 Run: `npm run qa:calibrate 2>&1 | tee "$TMPDIR/calibration.txt"`
-Expected: the guard passes, the session runs, and `calibrate.ts` prints two blocks (all decided issues, and excluding the issues `rules.md` cites), then `PASS` or `FAIL`. Afterwards, `git status` must show `nightly-qa/triage/examples.csv`, `drafts/` and the Phase 17 spec and plan back where they were. If any is missing, its copy is in `$TMPDIR/lang-tutor-triage.hidden/`.
+Expected: the guard passes, the session runs, and `calibrate.ts` prints two blocks (all decided issues, and excluding the issues `rules.md` cites), then `PASS` or `FAIL`. The session runs against a `git archive` export of HEAD with the answers deleted (see the final-review fix for C1/I3/I4), so nothing in the checkout moves; `git status` is unchanged afterwards.
 
 - [ ] **Step 2: Write `nightly-qa/TRIAGE-CALIBRATION.md`**
 
