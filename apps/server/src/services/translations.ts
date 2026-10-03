@@ -325,7 +325,11 @@ async function serveForm({
       languageCode: source,
       userLanguageCode: target,
     }),
-    stale: await repos.dict.findStaleLexemesByForm({ form, languageCode: source }),
+    stale: await repos.dict.findStaleLexemesByForm({
+      form,
+      languageCode: source,
+      userLanguageCode: target,
+    }),
   }));
 
   // Checked FIRST: a variant with no renderings in this target language is a

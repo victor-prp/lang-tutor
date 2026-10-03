@@ -98,22 +98,6 @@ export const dictVariants = pgTable(
     // sits on the variant rather than the term because it is a property of the
     // pairing: `saw` ranks `see` first, while `saws` returns `saw` alone at 0.
     entryRank: integer('entry_rank').notNull(),
-    // The lexeme's sense_version when this form's translations were last
-    // written. NOT a count of those translations: a form may legitimately
-    // render fewer senses than its lexeme holds, because the reconciliation
-    // call returns `translation: null` for a sense the form does not admit —
-    // adjectival `booked` has no record-a-charge reading. Counting would call
-    // that form permanently stale and re-render it on every single lookup.
-    //
-    // **Caveat for the second target language.** This is one column per
-    // variant, while a rendering is per (variant, sense, user_language_code).
-    // en↔he is the only pair today, so the two are the same thing; add a
-    // second target language and they part company — a repair rendering `he`
-    // would mark the variant level and leave the other language's rows
-    // unrepairable, since nothing then records that they are behind. The fix
-    // when that day comes is to key this by user_language_code (its own table,
-    // or a column on it), not to count rows here.
-    renderedSenseVersion: integer('rendered_sense_version').notNull().default(0),
   },
   (t) => [
     // Per term, so one form may belong to several terms — `saw` is a variant of
@@ -192,6 +176,38 @@ export const dictVarTranslations = pgTable(
       t.rank,
     ),
     check('dict_var_translations_rank_nonneg', sql`${t.rank} >= 0`),
+  ],
+);
+
+/**
+ * Phase 16. The lexeme's sense_version a form's translations were last written
+ * against, PER EXPLANATION LANGUAGE. It replaces dict_variants'
+ * rendered_sense_version, which was one counter for every language: a repair
+ * rendering `en` stamped the variant level and left its `ru` rows behind with
+ * nothing to record it (the caveat that column's comment carried since phase 12).
+ *
+ * A row exists exactly when the variant has translations in that language:
+ * persistEntries and repairVariantRenderings upsert it, and migration 0008
+ * backfilled it. The stale read therefore INNER-joins it — a language with no
+ * row is one the form is never served in, so there is nothing to repair.
+ *
+ * NOT a count of translations, for the reason the old column gave: a form may
+ * legitimately render fewer senses than its lexeme holds.
+ */
+export const dictVariantRenderings = pgTable(
+  'dict_variant_renderings',
+  {
+    variantId: text('variant_id').notNull(),
+    userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
+    renderedSenseVersion: integer('rendered_sense_version').notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'dict_variant_renderings_pkey', columns: [t.variantId, t.userLanguageCode] }),
+    foreignKey({
+      name: 'dict_variant_renderings_variant_fk',
+      columns: [t.variantId],
+      foreignColumns: [dictVariants.id],
+    }).onDelete('cascade'),
   ],
 );
 

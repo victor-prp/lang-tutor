@@ -57,6 +57,13 @@
       "when": 1789486486579,
       "tag": "0007_dict_corrections",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791031109044,
+      "tag": "0008_variant_renderings",
+      "breakpoints": true
     }
   ]
 }

@@ -41,6 +41,7 @@ const TABLES = [
   'dict_variants',
   'dict_senses',
   'dict_var_translations',
+  'dict_variant_renderings',
   'dict_corrections',
   'questions',
   'sessions',

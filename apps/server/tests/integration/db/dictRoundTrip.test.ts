@@ -99,7 +99,7 @@ describe('dictionary export/restore', () => {
     // marker surviving a restore would leave it level regardless. A check that
     // cannot fire prints exactly what a passing one prints.
     const stale = await withTx(target.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'saw', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'saw', languageCode: 'en', userLanguageCode: 'he' }));
     expect(stale).toEqual([]);
   });
 

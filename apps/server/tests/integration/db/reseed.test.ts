@@ -62,6 +62,14 @@ describe('reseedContent', () => {
       expect(rows.length).toBeGreaterThanOrEqual(1);
     }
     expect(await t.db.select().from(users).where(eq(users.id, 'u_keep'))).toHaveLength(1);
+
+    // Every seeded rendering has its freshness row: one per (variant, language).
+    const counts = await t.db.execute<{ renderings: number; translated: number }>(sql`
+      select (select count(*) from dict_variant_renderings)::int as renderings,
+             (select count(*) from (select distinct variant_id, user_language_code
+                                      from dict_var_translations) d)::int as translated`);
+    expect(counts.rows[0].renderings).toBeGreaterThan(0);
+    expect(counts.rows[0].renderings).toBe(counts.rows[0].translated);
   });
 
   it('is what a bare re-seed cannot do: take a changed recording', async () => {
