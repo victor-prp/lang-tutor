@@ -64,6 +64,13 @@
       "when": 1791031109044,
       "tag": "0008_variant_renderings",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791031371980,
+      "tag": "0009_enrollments",
+      "breakpoints": true
     }
   ]
 }

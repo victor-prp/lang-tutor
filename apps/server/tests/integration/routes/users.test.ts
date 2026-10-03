@@ -40,7 +40,6 @@ const REQUEST = {
   display_name: 'דנה',
   age: 34,
   native_language: 'he',
-  target_language: 'en',
 };
 
 describe('POST /api/users', () => {
@@ -60,13 +59,6 @@ describe('POST /api/users', () => {
     const res = await postJson(app, '/api/users', { ...REQUEST, display_name: 'אחרת' });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'username is already taken' });
-  });
-
-  it('returns 400 for a matching language pair', async () => {
-    const app = buildTestApp();
-    const res = await postJson(app, '/api/users', { ...REQUEST, target_language: 'he' });
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: 'native and target language must differ' });
   });
 
   it('returns 400 with the contract error body for a malformed request', async () => {

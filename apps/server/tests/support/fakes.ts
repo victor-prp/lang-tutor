@@ -108,7 +108,6 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
         display_name: input.display_name,
         age: input.age,
         native_language: input.native_language,
-        target_language: input.target_language,
       };
       rows.push(user);
       return user;
@@ -136,6 +135,7 @@ function unreachableRepo<T extends object>(name: string): T {
 export function createFakeTransaction(repos: Partial<Repos>): Transaction {
   const bound: Repos = {
     user: repos.user ?? unreachableRepo('user repo'),
+    enrollment: repos.enrollment ?? unreachableRepo('enrollment repo'),
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),

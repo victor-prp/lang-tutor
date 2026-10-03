@@ -22,7 +22,6 @@ const DANA = {
   displayName: 'דנה',
   age: 34,
   nativeLanguage: 'he',
-  targetLanguage: 'en',
 };
 
 describe('the users table', () => {
@@ -45,7 +44,6 @@ describe('the users table', () => {
     ['an empty display name', { displayName: '' }],
     ['an age below the floor', { age: 2 }],
     ['an age above the ceiling', { age: 121 }],
-    ['a language pair that matches', { targetLanguage: 'he' }],
   ])('rejects %s', async (_label, override) => {
     await expect(
       withTx(t.db, (tx) => tx.insert(users).values({ ...DANA, ...override })),
@@ -67,7 +65,6 @@ const REQUEST = {
   display_name: 'דנה',
   age: 34,
   native_language: 'he' as const,
-  target_language: 'en' as const,
 };
 
 describe('createUserRepo', () => {
@@ -80,7 +77,6 @@ describe('createUserRepo', () => {
       display_name: 'דנה',
       age: 34,
       native_language: 'he',
-      target_language: 'en',
     });
     expect(user.id.length).toBeGreaterThan(0);
   });

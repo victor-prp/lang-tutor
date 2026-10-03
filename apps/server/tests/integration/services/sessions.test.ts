@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
-import { seedUser } from '../../support/seedUser';
+import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
 import {
+  EnrollmentNotFound,
   OptionOutOfRange,
   QuestionDesynced,
   SessionNotFound,
-  UserNotFound,
 } from '../../../src/errors';
 import { createTestServerDeps } from '../../support/serverDeps';
 import type { SessionService } from '../../../src/services/sessions';
@@ -35,29 +35,29 @@ afterEach(async () => {
 
 describe('startSession', () => {
   it('returns a ten-question session for a user who exists', async () => {
-    const { sessionId, record } = await service.startSession('u_1');
+    const { sessionId, record } = await service.startSession(enrollmentOf('u_1'));
     expect(typeof sessionId).toBe('string');
     expect(record.questions).toHaveLength(SESSION_LENGTH);
     expect(record.answers).toEqual([]);
     expect(record.complete).toBe(false);
   });
 
-  // The regression test for deleting upsertUser. Before this phase a session
-  // for an unknown id silently created the user.
-  it('refuses to start a session for a user who does not exist', async () => {
-    await expect(service.startSession('u_nobody')).rejects.toBeInstanceOf(UserNotFound);
+  // The regression test for deleting upsertUser. Before phase 8 a session for
+  // an unknown id silently created the user; it must not create an enrollment.
+  it('refuses to start a session for an enrollment that does not exist', async () => {
+    await expect(service.startSession('e_nobody')).rejects.toBeInstanceOf(EnrollmentNotFound);
   });
 
   it('gives the same learner a second, distinct session', async () => {
-    const first = await service.startSession('u_1');
-    const second = await service.startSession('u_1');
+    const first = await service.startSession(enrollmentOf('u_1'));
+    const second = await service.startSession(enrollmentOf('u_1'));
     expect(second.sessionId).not.toBe(first.sessionId);
   });
 });
 
 describe('submitAnswer', () => {
   it('advances on a fresh answer', async () => {
-    const { sessionId, record } = await service.startSession('u_1');
+    const { sessionId, record } = await service.startSession(enrollmentOf('u_1'));
     const question = record.questions[0];
     const after = await service.submitAnswer(sessionId, question.id, question.correct_option);
     expect(after.answers).toHaveLength(1);
@@ -70,7 +70,7 @@ describe('submitAnswer', () => {
   });
 
   it('replays a retried answer without double-counting it', async () => {
-    const { sessionId, record } = await service.startSession('u_1');
+    const { sessionId, record } = await service.startSession(enrollmentOf('u_1'));
     const question = record.questions[0];
     await service.submitAnswer(sessionId, question.id, question.correct_option);
     const retry = await service.submitAnswer(sessionId, question.id, question.correct_option);
@@ -84,21 +84,21 @@ describe('submitAnswer', () => {
   });
 
   it('throws QuestionDesynced for a question that is not current', async () => {
-    const { sessionId, record } = await service.startSession('u_1');
+    const { sessionId, record } = await service.startSession(enrollmentOf('u_1'));
     await expect(
       service.submitAnswer(sessionId, record.questions[3].id, 0),
     ).rejects.toBeInstanceOf(QuestionDesynced);
   });
 
   it('throws OptionOutOfRange for an option index past the last option', async () => {
-    const { sessionId, record } = await service.startSession('u_1');
+    const { sessionId, record } = await service.startSession(enrollmentOf('u_1'));
     await expect(
       service.submitAnswer(sessionId, record.questions[0].id, 99),
     ).rejects.toBeInstanceOf(OptionOutOfRange);
   });
 
   it('completes the session on the tenth answer and logs it exactly once', async () => {
-    const { sessionId, record } = await service.startSession('u_1');
+    const { sessionId, record } = await service.startSession(enrollmentOf('u_1'));
 
     let current = record;
     for (let i = 0; i < SESSION_LENGTH; i++) {
@@ -117,7 +117,7 @@ describe('submitAnswer', () => {
   });
 
   it('does not log a second time when a completed session is retried', async () => {
-    const { sessionId, record } = await service.startSession('u_1');
+    const { sessionId, record } = await service.startSession(enrollmentOf('u_1'));
     let current = record;
     for (let i = 0; i < SESSION_LENGTH; i++) {
       const question = current.questions[i];
@@ -138,8 +138,8 @@ describe('rng', () => {
     const second = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
       .sessions;
 
-    const a = await first.startSession('u_1');
-    const b = await second.startSession('u_2');
+    const a = await first.startSession(enrollmentOf('u_1'));
+    const b = await second.startSession(enrollmentOf('u_2'));
 
     expect(b.record.questions.map((question) => question.id)).toEqual(
       a.record.questions.map((question) => question.id),

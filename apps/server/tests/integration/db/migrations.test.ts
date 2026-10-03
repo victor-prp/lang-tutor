@@ -69,3 +69,40 @@ describe('0008_variant_renderings', () => {
     expect(column.rows).toHaveLength(0);
   });
 });
+
+describe('0009_enrollments', () => {
+  it('gives every user one enrollment with the pair they had, and every session its enrollment', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0008_variant_renderings'));
+
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language, target_language)
+        values ('u_he', 'u_he', 'he native', 30, 'he', 'en'),
+               ('u_en', 'u_en', 'en native', 40, 'en', 'he');
+      insert into sessions (id, user_id) values
+        ('00000000-0000-0000-0000-000000000001', 'u_he'),
+        ('00000000-0000-0000-0000-000000000002', 'u_en');
+    `);
+
+    await runMigrations(db);
+
+    const enrolled = await db.execute<{ user_id: string; source_language: string; target_language: string }>(
+      sql`select user_id, source_language, target_language from enrollments order by user_id`,
+    );
+    expect(enrolled.rows).toEqual([
+      { user_id: 'u_en', source_language: 'en', target_language: 'he' },
+      { user_id: 'u_he', source_language: 'he', target_language: 'en' },
+    ]);
+
+    const orphans = await db.execute(sql`
+      select s.id from sessions s
+        left join enrollments e on e.id = s.enrollment_id and e.user_id = s.user_id
+       where e.id is null`);
+    expect(orphans.rows).toHaveLength(0);
+
+    const column = await db.execute(sql`
+      select 1 from information_schema.columns
+       where table_name = 'users' and column_name = 'target_language'`);
+    expect(column.rows).toHaveLength(0);
+  });
+});

@@ -6,6 +6,7 @@ import { createGeminiClient } from './providers/gemini';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
+import { createEnrollmentRepo } from './repo/enrollments';
 import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
 import type { LlmClient } from './services/llm';
@@ -57,6 +58,7 @@ export function createServerDeps(io: {
     session: createSessionRepo(tx),
     question: createQuestionRepo(tx),
     user: createUserRepo(tx),
+    enrollment: createEnrollmentRepo(tx),
     dict: createDictRepo(tx),
   }));
 

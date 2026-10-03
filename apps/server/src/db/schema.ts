@@ -30,10 +30,10 @@ export const users = pgTable(
     username: text('username').notNull().unique(),
     displayName: text('display_name').notNull(),
     age: integer('age').notNull(),
-    // No default on either language: onboarding always supplies both, so a
-    // default could only mask a bug.
+    // No default: onboarding always supplies it, so a default could only mask a
+    // bug. Profile information from phase 16 on — the pair a learner studies
+    // lives on their enrollments, and nothing on the learning path reads this.
     nativeLanguage: varchar('native_language', { length: 10 }).notNull(),
-    targetLanguage: varchar('target_language', { length: 10 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -43,7 +43,43 @@ export const users = pgTable(
     check('users_username_format', sql`${t.username} ~ '^[a-z0-9_]{3,30}$'`),
     check('users_display_name_length', sql`length(${t.displayName}) between 1 and 60`),
     check('users_age_range', sql`${t.age} between 3 and 120`),
-    check('users_languages_differ', sql`${t.nativeLanguage} <> ${t.targetLanguage}`),
+  ],
+);
+
+/**
+ * Phase 16. A course of study: one target language, explained in one source
+ * language. A learner holds several, at most one per target.
+ *
+ * No UNIQUE(user_id) — the app switches between enrollments — and no "active"
+ * column anywhere: which one is active is a fact about one device's screen,
+ * held client-side, so every request names its enrollment or its pair.
+ *
+ * `UNIQUE(user_id, id)` exists only to be the target of the composite foreign
+ * keys below, the same pattern answers uses against session_questions: it
+ * proves the referencing row's user owns the enrollment.
+ *
+ * The source CHECK allows `en` because English-native learners existed before
+ * this phase and migrate unchanged; new enrollments are Hebrew-explained, a
+ * restriction the API publishes (EnrollmentSourceSchema), not the schema.
+ */
+export const enrollments = pgTable(
+  'enrollments',
+  {
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    userId: text('user_id').notNull(),
+    sourceLanguage: varchar('source_language', { length: 10 }).notNull(),
+    targetLanguage: varchar('target_language', { length: 10 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'enrollments_user_fk', columns: [t.userId], foreignColumns: [users.id] }),
+    unique('enrollments_user_target_key').on(t.userId, t.targetLanguage),
+    unique('enrollments_user_id_id_key').on(t.userId, t.id),
+    check('enrollments_languages_differ', sql`${t.sourceLanguage} <> ${t.targetLanguage}`),
+    check('enrollments_source_known', sql`${t.sourceLanguage} in ('he', 'en')`),
+    check('enrollments_target_known', sql`${t.targetLanguage} in ('he', 'en', 'ru')`),
   ],
 );
 
@@ -275,9 +311,10 @@ export const questions = pgTable(
   'questions',
   {
     id: text('id').primaryKey(),
-    // Nullable: NULL means shared. Phase 4 writes only shared rows; a later
-    // phase writes per-learner ones without a migration.
+    // Nullable: NULL means shared. A per-learner row carries both halves of its
+    // owner — user and enrollment — or neither; nothing writes one yet.
     userId: text('user_id').references(() => users.id),
+    enrollmentId: text('enrollment_id'),
     senseId: text('sense_id')
       .notNull()
       .references(() => dictSenses.id),
@@ -290,18 +327,40 @@ export const questions = pgTable(
     options: jsonb('options').$type<QuestionOption[]>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [check('questions_options_valid', sql`question_options_valid(${t.options})`)],
+  (t) => [
+    check('questions_options_valid', sql`question_options_valid(${t.options})`),
+    foreignKey({
+      name: 'questions_enrollment_fk',
+      columns: [t.userId, t.enrollmentId],
+      foreignColumns: [enrollments.userId, enrollments.id],
+    }),
+    check('questions_owner_complete', sql`(${t.userId} is null) = (${t.enrollmentId} is null)`),
+  ],
 );
 
-export const sessions = pgTable('sessions', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: text('user_id')
-    .notNull()
-    .references(() => users.id),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  // NULL = in progress. There is no separate `complete` column.
-  completedAt: timestamp('completed_at', { withTimezone: true }),
-});
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    // Phase 16. The course this session belongs to. With user_id it references
+    // enrollments (user_id, id), so a session can only be recorded against an
+    // enrollment its own learner holds.
+    enrollmentId: text('enrollment_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // NULL = in progress. There is no separate `complete` column.
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: 'sessions_enrollment_fk',
+      columns: [t.userId, t.enrollmentId],
+      foreignColumns: [enrollments.userId, enrollments.id],
+    }),
+  ],
+);
 
 export const sessionQuestions = pgTable(
   'session_questions',

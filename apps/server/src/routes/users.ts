@@ -6,7 +6,7 @@ import {
   UserSchema,
 } from '@lang-tutor/core/api/schemas';
 
-import { InvalidLanguagePair, UsernameTaken, UserNotFound } from '../errors';
+import { UsernameTaken, UserNotFound } from '../errors';
 import type { UserService } from '../services/users';
 
 const createUserRoute = createRoute({
@@ -26,7 +26,7 @@ const createUserRoute = createRoute({
     },
     400: {
       content: { 'application/json': { schema: ErrorSchema } },
-      description: 'The request body did not validate, or the two languages are the same.',
+      description: 'The request body did not validate.',
     },
     409: {
       content: { 'application/json': { schema: ErrorSchema } },
@@ -79,9 +79,6 @@ export function createUsersRouter(users: UserService) {
     } catch (error) {
       if (error instanceof UsernameTaken) {
         return c.json({ error: 'username is already taken' }, 409);
-      }
-      if (error instanceof InvalidLanguagePair) {
-        return c.json({ error: 'native and target language must differ' }, 400);
       }
       throw error; // app.ts's onError turns anything else into a 500
     }

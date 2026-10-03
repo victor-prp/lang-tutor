@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { eq } from 'drizzle-orm';
 
-import { seedUser } from '../../support/seedUser';
+import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { withTx } from '../../support/withTx';
@@ -27,9 +27,12 @@ afterEach(async () => {
 async function startSession(tx: Tx, userId = 'u_1') {
   const sessionRepo = createSessionRepo(tx);
   const questionRepo = createQuestionRepo(tx);
-  const pool = await questionRepo.loadQuestionPool('en', 'he', userId);
+  const pool = await questionRepo.loadQuestionPool('en', 'he', {
+    userId,
+    enrollmentId: enrollmentOf(userId),
+  });
   const record = newSessionRecord(userId, pool, testRng(7));
-  const sessionId = await sessionRepo.insertSession(userId, record.questions);
+  const sessionId = await sessionRepo.insertSession(userId, enrollmentOf(userId), record.questions);
   return { sessionRepo, sessionId, record };
 }
 

@@ -1,3 +1,4 @@
+import type { EnrollmentRepo } from '../repo/enrollments';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { UserRepo } from '../repo/users';
@@ -10,6 +11,7 @@ export type Repos = {
   session: SessionRepo;
   question: QuestionRepo;
   user: UserRepo;
+  enrollment: EnrollmentRepo;
   dict: DictRepo;
 };
 

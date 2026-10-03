@@ -43,7 +43,7 @@ export const PositionSchema = z.object({
 });
 
 export const CreateSessionRequestSchema = z.object({
-  user_id: z.string().min(1),
+  enrollment_id: z.string().min(1),
 });
 
 export const CreateSessionResponseSchema = z.object({
@@ -102,8 +102,18 @@ export const HealthResponseSchema = z.object({
 // and in a test. The display name carries the Hebrew.
 export const UsernameSchema = z.string().regex(/^[a-z0-9_]{3,30}$/);
 
-// The pair this app supports today. Narrow on the way in only — see UserSchema.
-export const LanguageCodeSchema = z.enum(['he', 'en']);
+// Every language the server knows. Request fields narrow to it; response fields
+// stay plain strings (see UserSchema below).
+export const LanguageCodeSchema = z.enum(['he', 'en', 'ru']);
+
+// What a learner may name as their native language at sign-up. Russian is a
+// target only in phase 16.
+export const NativeLanguageSchema = z.enum(['he', 'en']);
+
+// Phase 16's restriction, published rather than hidden: the app's UI is Hebrew
+// only, so every new enrollment is explained in Hebrew. Widening this enum is
+// non-breaking for every client that shipped before it.
+export const EnrollmentSourceSchema = z.enum(['he']);
 
 // A response shape, so the language fields are plain strings: they are read from
 // a varchar(10) column, and narrowing them here would turn a future third
@@ -114,19 +124,35 @@ export const UserSchema = z.object({
   display_name: z.string(),
   age: z.number().int(),
   native_language: z.string(),
-  target_language: z.string(),
 });
 
-// No .refine() for native !== target. The server's OpenAPI adapter converts
-// this to JSON Schema, which cannot express a cross-field rule; the service
-// raises InvalidLanguagePair and a database CHECK is the backstop.
 export const CreateUserRequestSchema = z.object({
   username: UsernameSchema,
   display_name: z.string().min(1).max(60),
   age: z.number().int().min(3).max(120),
-  native_language: LanguageCodeSchema,
-  target_language: LanguageCodeSchema,
+  native_language: NativeLanguageSchema,
 });
+
+// A course of study: one target language, explained in one source language.
+// Language fields are plain strings for the reason UserSchema's are.
+export const EnrollmentSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  source_language: z.string(),
+  target_language: z.string(),
+  created_at: z.string(),
+});
+
+export const EnrollmentListSchema = z.array(EnrollmentSchema);
+
+export const CreateEnrollmentRequestSchema = z
+  .object({
+    source_language: EnrollmentSourceSchema,
+    target_language: LanguageCodeSchema,
+  })
+  .refine((request) => request.source_language !== request.target_language, {
+    message: 'source and target language must differ',
+  });
 
 export const LoginRequestSchema = z.object({
   username: UsernameSchema,

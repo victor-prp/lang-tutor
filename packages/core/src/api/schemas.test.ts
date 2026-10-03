@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  CreateEnrollmentRequestSchema,
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
   LlmCorrectionSchema,
@@ -32,16 +33,16 @@ const QUESTION: Question = {
 // These assertions are that move's proof: the validation rules came across
 // unchanged, so the 400s the server returns today are the 400s it returns after.
 describe('CreateSessionRequestSchema', () => {
-  it('accepts a non-empty user_id', () => {
-    expect(CreateSessionRequestSchema.safeParse({ user_id: 'u1' }).success).toBe(true);
+  it('accepts a non-empty enrollment_id', () => {
+    expect(CreateSessionRequestSchema.safeParse({ enrollment_id: 'e1' }).success).toBe(true);
   });
 
-  it('rejects a missing user_id', () => {
+  it('rejects a missing enrollment_id', () => {
     expect(CreateSessionRequestSchema.safeParse({}).success).toBe(false);
   });
 
-  it('rejects an empty user_id', () => {
-    expect(CreateSessionRequestSchema.safeParse({ user_id: '' }).success).toBe(false);
+  it('rejects an empty enrollment_id', () => {
+    expect(CreateSessionRequestSchema.safeParse({ enrollment_id: '' }).success).toBe(false);
   });
 });
 
@@ -158,7 +159,6 @@ describe('CreateUserRequestSchema', () => {
     display_name: 'דנה',
     age: 34,
     native_language: 'he',
-    target_language: 'en',
   };
 
   it('accepts a well-formed request', () => {
@@ -171,18 +171,10 @@ describe('CreateUserRequestSchema', () => {
     ['an age below 3', { age: 2 }],
     ['an age above 120', { age: 121 }],
     ['a fractional age', { age: 9.5 }],
-    ['an unsupported language', { target_language: 'fr' }],
+    ['an unsupported language', { native_language: 'fr' }],
     ['a malformed username', { username: 'Dana' }],
   ])('rejects %s', (_label, override) => {
     expect(CreateUserRequestSchema.safeParse({ ...valid, ...override }).success).toBe(false);
-  });
-
-  // Deliberately accepted at the schema level: the service and a database
-  // CHECK reject it. A refinement here would not survive JSON Schema output.
-  it('does not itself reject a matching language pair', () => {
-    expect(
-      CreateUserRequestSchema.safeParse({ ...valid, target_language: 'he' }).success,
-    ).toBe(true);
   });
 });
 
@@ -203,8 +195,7 @@ describe('UserSchema', () => {
       username: 'dana',
       display_name: 'דנה',
       age: 34,
-      native_language: 'he',
-      target_language: 'fr',
+      native_language: 'fr',
     });
     expect(parsed.success).toBe(true);
   });
@@ -512,5 +503,21 @@ describe('the correction block', () => {
         correction: { alternatives: ['throat'] },
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('CreateEnrollmentRequestSchema', () => {
+  it('accepts a Hebrew-explained enrollment in English or Russian', () => {
+    expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'ru' }).success).toBe(true);
+    expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'en' }).success).toBe(true);
+  });
+
+  it('rejects an English source in phase 16', () => {
+    expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'en', target_language: 'ru' }).success).toBe(false);
+  });
+
+  it('rejects the same language twice and an unknown code', () => {
+    expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'he' }).success).toBe(false);
+    expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'fr' }).success).toBe(false);
   });
 });

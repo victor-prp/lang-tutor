@@ -1,10 +1,13 @@
 export type {
   AnswerRecord,
+  CreateEnrollmentRequest,
   CreateSessionRequest,
   CreateSessionResponse,
   CreateUserRequest,
+  Enrollment,
   ErrorResponse,
   HealthResponse,
+  LanguageCode,
   LlmCorrection,
   LlmEntry,
   LlmReconciliation,

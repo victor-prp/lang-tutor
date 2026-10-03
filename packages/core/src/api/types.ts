@@ -2,11 +2,14 @@ import type { z } from 'zod';
 
 import type {
   AnswerRecordSchema,
+  CreateEnrollmentRequestSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   CreateUserRequestSchema,
+  EnrollmentSchema,
   ErrorSchema,
   HealthResponseSchema,
+  LanguageCodeSchema,
   LlmCorrectionSchema,
   LlmEntrySchema,
   LlmReconciliationSchema,
@@ -68,3 +71,6 @@ export type LlmSense = z.infer<typeof LlmSenseSchema>;
 export type LlmEntry = z.infer<typeof LlmEntrySchema>;
 export type LlmRendering = z.infer<typeof LlmRenderingSchema>;
 export type LlmReconciliation = z.infer<typeof LlmReconciliationSchema>;
+export type Enrollment = z.infer<typeof EnrollmentSchema>;
+export type CreateEnrollmentRequest = z.infer<typeof CreateEnrollmentRequestSchema>;
+export type LanguageCode = z.infer<typeof LanguageCodeSchema>;
