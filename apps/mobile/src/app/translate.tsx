@@ -1,5 +1,5 @@
 import type { TranslationSense } from '@lang-tutor/core/api';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import {
   ActivityIndicator,
   Pressable,
@@ -17,6 +17,7 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 export default function TranslateScreen() {
   const t = useTranslation();
+  if (!t.direction) return <Redirect href="/" />;
   const tooLong = t.text.trim().length > 100;
   const canSubmit = t.text.trim().length > 0 && !tooLong && t.status !== 'loading';
 
@@ -40,6 +41,15 @@ export default function TranslateScreen() {
           <Text style={styles.link}>{strings.back}</Text>
         </Pressable>
         <Text style={styles.title}>{strings.translateTitle}</Text>
+      </View>
+
+      <View style={styles.directionRow}>
+        <Text testID="translate-direction" style={styles.directionLabel}>
+          {strings.translateDirection(t.direction.from, t.direction.to)}
+        </Text>
+        <Pressable accessibilityRole="button" testID="translate-flip" onPress={t.flip}>
+          <Text style={styles.link}>{strings.translateFlip}</Text>
+        </Pressable>
       </View>
 
       {/* NOT forced LTR. The username field pins writingDirection because a
@@ -89,21 +99,31 @@ export default function TranslateScreen() {
 
       {t.status === 'empty' ? (
         <View testID="translate-empty" style={styles.notice}>
-          <Text style={styles.noticeText}>{strings.translateEmpty}</Text>
+          {t.result?.reason === 'wrong_direction' ? (
+            <>
+              <Text style={styles.noticeText}>
+                {strings.translateWrongDirection(strings.languageName(t.direction.to))}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                testID="translate-flip-retry"
+                onPress={t.flipAndRetry}
+              >
+                <Text style={styles.link}>{strings.translateFlipRetry}</Text>
+              </Pressable>
+            </>
+          ) : t.result?.reason === 'out_of_pair' ? (
+            <Text testID="translate-out-of-pair" style={styles.noticeText}>
+              {strings.translateOutOfPair(strings.languageName(t.direction.from))}
+            </Text>
+          ) : (
+            <Text style={styles.noticeText}>{strings.translateEmpty}</Text>
+          )}
         </View>
       ) : null}
 
       {t.status === 'answered' && t.result ? (
         <ScrollView contentContainerStyle={styles.results}>
-          <View style={styles.directionRow}>
-            <Text style={styles.directionLabel}>
-              {strings.translateDirection(t.result.direction)}
-            </Text>
-            <Pressable accessibilityRole="button" testID="translate-flip" onPress={t.flip}>
-              <Text style={styles.link}>{strings.translateFlip}</Text>
-            </Pressable>
-          </View>
-
           {/* Inside the `answered` branch, which makes one promise structural
               rather than a hope: `status` is `empty` whenever `senses` is empty,
               so an empty answer cannot render a banner even if one reached the
