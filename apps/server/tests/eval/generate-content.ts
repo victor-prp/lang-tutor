@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import type { LlmTranslation } from '@lang-tutor/core/api';
 
 import { loadGeminiConfig } from '../../src/config';
-import { content, recordingKey } from '../../src/db/content';
+import { content, parseRecordArgs, recordingKey } from '../../src/db/content';
 import { recorded } from '../../src/db/content.generated';
 import { createGeminiClient } from '../../src/providers/gemini';
 import { askModel } from './askModel';
@@ -57,10 +57,7 @@ async function main(): Promise<void> {
   // the whole file, and a reviewer skimming noise is how a bad recording gets
   // committed. With no filter it re-records everything, which is the
   // deliberate act.
-  const args = process.argv.slice(2);
-  const pairIndex = args.indexOf('--pair');
-  const pair = pairIndex >= 0 ? args[pairIndex + 1] : undefined;
-  const filter = args.find((arg, index) => !arg.startsWith('--') && index !== pairIndex + 1);
+  const { filter, pair } = parseRecordArgs(process.argv.slice(2));
 
   const matching = content.filter(
     (entry) =>

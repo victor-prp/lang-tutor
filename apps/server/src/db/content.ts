@@ -31,6 +31,27 @@ export function recordingKey(entry: Pick<ContentEntry, 'from' | 'to' | 'query'>)
   return `${entry.from}-${entry.to}:${entry.query}`;
 }
 
+/** What `npm run content:generate` was asked to re-record: an optional query
+ *  and an optional `--pair <from>-<to>`. Pure, and here rather than beside the
+ *  recorder, because tests/eval/ holds no *.test.ts (ADR 0004 R4) and this is
+ *  the one part of the recorder worth a unit test: a query the parser drops
+ *  turns a one-entry re-record into a paid, unreviewed re-record of every
+ *  entry. */
+export function parseRecordArgs(args: readonly string[]): { filter?: string; pair?: string } {
+  const pairIndex = args.indexOf('--pair');
+  let pair: string | undefined;
+  if (pairIndex >= 0) {
+    pair = args[pairIndex + 1];
+    if (pair === undefined || pair.startsWith('--')) {
+      throw new Error('--pair needs a value, e.g. --pair ru-he.');
+    }
+  }
+  const filter = args.find(
+    (arg, index) => !arg.startsWith('--') && (pairIndex < 0 || index !== pairIndex + 1),
+  );
+  return { filter, pair };
+}
+
 /**
  * The right answer, derived rather than authored. It used to be a fourth
  * literal in `options`, duplicating the translation; splicing it in from the

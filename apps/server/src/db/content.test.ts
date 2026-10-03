@@ -3,7 +3,7 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { normalizeForm } from '../domain/dictionary';
 import { isInScript } from '../domain/languages';
-import { content, correctAnswerFor, optionsFor, recordingKey } from './content';
+import { content, correctAnswerFor, optionsFor, parseRecordArgs, recordingKey } from './content';
 import { recorded } from './content.generated';
 
 const LONG_PROMPT_LENGTH = 15;
@@ -116,5 +116,29 @@ describe('the pair-aware seed', () => {
         expect(isInScript(option, entry.to)).toBe(true);
       }
     }
+  });
+});
+
+describe('parseRecordArgs', () => {
+  it('reads a bare query as the filter', () => {
+    expect(parseRecordArgs(['окно'])).toEqual({ filter: 'окно', pair: undefined });
+  });
+
+  it('reads a query and a pair in either order', () => {
+    expect(parseRecordArgs(['--pair', 'ru-he', 'окно'])).toEqual({ filter: 'окно', pair: 'ru-he' });
+    expect(parseRecordArgs(['окно', '--pair', 'ru-he'])).toEqual({ filter: 'окно', pair: 'ru-he' });
+  });
+
+  it('reads a pair alone as no filter', () => {
+    expect(parseRecordArgs(['--pair', 'ru-he'])).toEqual({ filter: undefined, pair: 'ru-he' });
+  });
+
+  it('reads nothing as re-record everything', () => {
+    expect(parseRecordArgs([])).toEqual({ filter: undefined, pair: undefined });
+  });
+
+  it('refuses --pair with no value', () => {
+    expect(() => parseRecordArgs(['окно', '--pair'])).toThrow('--pair needs a value');
+    expect(() => parseRecordArgs(['--pair', '--other'])).toThrow('--pair needs a value');
   });
 });
