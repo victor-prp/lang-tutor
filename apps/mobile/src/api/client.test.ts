@@ -22,14 +22,14 @@ describe('api/client', () => {
     }));
     const client = buildClient(mockFetch);
 
-    const result = await client.createSession({ user_id: 'u1' });
+    const result = await client.createSession({ enrollment_id: 'e1' });
 
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/sessions',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 'u1' }),
+        body: JSON.stringify({ enrollment_id: 'e1' }),
       }),
     );
     expect(result.session_id).toBe('s1');
@@ -64,8 +64,8 @@ describe('api/client', () => {
     const mockFetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }));
     const client = buildClient(mockFetch);
 
-    await expect(client.createSession({ user_id: 'u1' })).rejects.toBeInstanceOf(ApiError);
-    await expect(client.createSession({ user_id: 'u1' })).rejects.toMatchObject({ status: 404 });
+    await expect(client.createSession({ enrollment_id: 'e1' })).rejects.toBeInstanceOf(ApiError);
+    await expect(client.createSession({ enrollment_id: 'e1' })).rejects.toMatchObject({ status: 404 });
   });
 
   it('login posts the username to /api/login', async () => {
@@ -75,7 +75,6 @@ describe('api/client', () => {
       display_name: 'דנה',
       age: 34,
       native_language: 'he',
-      target_language: 'en',
     };
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => user }));
     const client = buildClient(mockFetch);
@@ -107,7 +106,6 @@ describe('api/client', () => {
       display_name: 'דנה',
       age: 34,
       native_language: 'he' as const,
-      target_language: 'en' as const,
     };
     const mockFetch = jest.fn(async () => ({
       ok: true,
@@ -135,7 +133,6 @@ describe('api/client', () => {
         display_name: 'דנה',
         age: 34,
         native_language: 'he',
-        target_language: 'en',
       }),
     ).rejects.toMatchObject({ status: 409 });
   });
@@ -155,28 +152,26 @@ describe('api/client', () => {
       }));
       const client = buildClient(mockFetch);
 
-      await expect(client.translate({ text: 'book' })).resolves.toEqual(response);
+      await expect(client.translate({ text: 'book', from: 'en', to: 'he' })).resolves.toEqual(response);
       expect(mockFetch).toHaveBeenCalledWith(
         'http://test.local/api/translations',
         expect.objectContaining({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: 'book' }),
+          body: JSON.stringify({ text: 'book', from: 'en', to: 'he' }),
         }),
       );
     });
 
-    // The flip control is the only thing that sends this: absent means "detect
-    // from the script", so an always-present field would silently disable it.
-    it('sends an explicit direction when one is given', async () => {
+    it('sends the explicit direction it is given', async () => {
       const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
       const client = buildClient(mockFetch);
 
-      await client.translate({ text: 'book', direction: 'he_en' });
+      await client.translate({ text: 'книга', from: 'ru', to: 'he' });
 
       expect(mockFetch).toHaveBeenCalledWith(
         'http://test.local/api/translations',
-        expect.objectContaining({ body: JSON.stringify({ text: 'book', direction: 'he_en' }) }),
+        expect.objectContaining({ body: JSON.stringify({ text: 'книга', from: 'ru', to: 'he' }) }),
       );
     });
 
@@ -184,7 +179,38 @@ describe('api/client', () => {
       const mockFetch = jest.fn(async () => ({ ok: false, status: 502, json: async () => ({}) }));
       const client = buildClient(mockFetch);
 
-      await expect(client.translate({ text: 'book' })).rejects.toMatchObject({ status: 502 });
+      await expect(client.translate({ text: 'book', from: 'en', to: 'he' })).rejects.toMatchObject({ status: 502 });
     });
+  });
+
+  it("listEnrollments GETs the user's enrollments", async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => [] }));
+    const client = buildClient(mockFetch);
+    expect(await client.listEnrollments('u1')).toEqual([]);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/users/u1/enrollments',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('createEnrollment POSTs the request body', async () => {
+    const created = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'ru', created_at: 'x' };
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 201, json: async () => created }));
+    const client = buildClient(mockFetch);
+    expect(await client.createEnrollment('u1', { source_language: 'he', target_language: 'ru' })).toEqual(created);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/users/u1/enrollments',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ source_language: 'he', target_language: 'ru' }),
+      }),
+    );
+  });
+
+  it('throws ApiError(409) when already enrolled', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 409, json: async () => ({}) }));
+    await expect(
+      buildClient(mockFetch).createEnrollment('u1', { source_language: 'he', target_language: 'ru' }),
+    ).rejects.toEqual(new ApiError(409));
   });
 });
