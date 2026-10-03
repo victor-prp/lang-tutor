@@ -1,6 +1,6 @@
 import type { LanguageCode } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -20,19 +20,30 @@ export default function EnrollScreen() {
   const [picked, setPicked] = useState<LanguageCode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set for the rest of this screen's life once an enrollment succeeds. When
+  // that enrollment took the last free language, `enroll()`'s setEnrollments
+  // can re-render this screen with no targets before `router.dismissTo('/')`
+  // runs, and the entry redirect below would push a second home. A ref rather
+  // than `busy`: `finally` clears `busy` after dismissTo, on a screen that is
+  // still mounted while it animates away.
+  const submitted = useRef(false);
 
   if (!user) return <Redirect href="/login" />;
-  if (targets.length === 0) return <Redirect href="/" />;
+  // Reached with nothing left to enroll in: send the learner home. After a
+  // successful submit, dismissTo is already doing that.
+  if (targets.length === 0) return submitted.current ? null : <Redirect href="/" />;
 
   const selected = picked && targets.includes(picked) ? picked : targets[0];
 
   async function onSubmit() {
     setBusy(true);
     setError(null);
+    submitted.current = true;
     try {
       await enroll(selected);
       router.dismissTo('/');
     } catch {
+      submitted.current = false;
       setError(strings.enrollFailed);
     } finally {
       setBusy(false);
