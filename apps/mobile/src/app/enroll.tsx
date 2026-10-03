@@ -31,7 +31,7 @@ export default function EnrollScreen() {
     setError(null);
     try {
       await enroll(selected);
-      router.replace('/');
+      router.dismissTo('/');
     } catch {
       setError(strings.enrollFailed);
     } finally {
