@@ -9,6 +9,7 @@ import { createSessionRepo } from './repo/sessions';
 import { createEnrollmentRepo } from './repo/enrollments';
 import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
+import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
 import type { LlmClient } from './services/llm';
 import { createSessionService, type SessionService } from './services/sessions';
 import { createTranslationService, type TranslationService } from './services/translations';
@@ -28,6 +29,7 @@ export type ServerIdentity = {
 export type AppDeps = {
   sessions: SessionService;
   users: UserService;
+  enrollments: EnrollmentService;
   translations: TranslationService;
   health: HealthRepo;
   identity: ServerIdentity;
@@ -77,6 +79,7 @@ export function createServerDeps(io: {
   return {
     sessions: createSessionService({ transaction, rng: io.rng, logger: io.logger }),
     users: createUserService({ transaction, logger: io.logger }),
+    enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations: createTranslationService({ llm, transaction, logger: io.logger }),
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,

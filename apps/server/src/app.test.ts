@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { createApp } from './app';
 import type { AppDeps } from './composition';
+import type { EnrollmentService } from './services/enrollments';
 import type { SessionService } from './services/sessions';
 import type { TranslationService } from './services/translations';
 import type { UserService } from './services/users';
@@ -27,6 +28,15 @@ const unreachableUsers: UserService = {
   },
 };
 
+const unreachableEnrollments: EnrollmentService = {
+  enroll: () => {
+    throw new Error('the health route must not reach the enrollment service');
+  },
+  list: () => {
+    throw new Error('the health route must not reach the enrollment service');
+  },
+};
+
 const unreachableTranslations: TranslationService = {
   translate: () => {
     throw new Error('the health route must not reach the translation service');
@@ -37,6 +47,7 @@ function depsWithPing(ok: boolean): AppDeps {
   return {
     sessions: unreachableSessions,
     users: unreachableUsers,
+    enrollments: unreachableEnrollments,
     translations: unreachableTranslations,
     health: { ping: async () => ok },
     identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001 },

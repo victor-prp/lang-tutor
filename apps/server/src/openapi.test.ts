@@ -97,7 +97,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all six paths and nothing else', async () => {
+  it('contains all seven paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/login',
@@ -105,7 +105,25 @@ describe('the document as a whole', () => {
       NEXT_STEP,
       '/api/translations',
       '/api/users',
+      '/api/users/{id}/enrollments',
       '/health',
+    ]);
+  });
+});
+
+describe('the enrollment endpoints in the published document', () => {
+  it('declares every status POST /api/users/{id}/enrollments can return', async () => {
+    const doc = await openApiDocument();
+    expect(
+      Object.keys(doc.paths['/api/users/{id}/enrollments'].post.responses).sort(),
+    ).toEqual(['201', '400', '404', '409']);
+  });
+
+  it('declares every status GET /api/users/{id}/enrollments can return', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths['/api/users/{id}/enrollments'].get.responses).sort()).toEqual([
+      '200',
+      '404',
     ]);
   });
 });
