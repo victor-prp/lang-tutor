@@ -114,7 +114,7 @@ async function main(): Promise<void> {
   // reintroduces orphaned entries on an unfiltered re-record.
   const next: Record<string, LlmTranslation> = filter ? { ...recorded } : {};
   for (const query of queries) {
-    const answer = await askModel(llm, { text: query });
+    const answer = await askModel(llm, { text: query, from: 'en', to: 'he' });
     // A sentence is never persisted by a real lookup
     // (`services/translations.ts`), so recording one here would let
     // `db/seed.ts` store a dictionary row no lookup could ever have

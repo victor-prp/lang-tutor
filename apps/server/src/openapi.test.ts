@@ -162,13 +162,16 @@ describe('the translation endpoint in the published document', () => {
 
     expect(Object.keys(schema.properties).sort()).toEqual([
       'correction',
-      'direction',
+      'from',
       'kind',
+      'reason',
       'senses',
       'text',
+      'to',
     ]);
     expect(schema.required).not.toContain('correction');
-    expect(schema.required.sort()).toEqual(['direction', 'kind', 'senses', 'text']);
+    expect(schema.required).not.toContain('reason');
+    expect(schema.required.sort()).toEqual(['from', 'kind', 'senses', 'text', 'to']);
 
     const correction = schema.properties.correction;
     expect(correction.properties).toHaveProperty('corrected_form');

@@ -5,7 +5,6 @@ import {
   entriesToRows,
   flattenEntries,
   kindForForm,
-  languagesFor,
   mergeEntries,
   normalizeForm,
   rowsToSenses,
@@ -172,13 +171,6 @@ describe('normalizeForm', () => {
 
   it('collapses a tab and a newline the same way as a space', () => {
     expect(normalizeForm('see\tyou\nlater')).toBe('see you later');
-  });
-});
-
-describe('languagesFor', () => {
-  it('reads an English term with Hebrew translations, and the mirror', () => {
-    expect(languagesFor('en_he')).toEqual({ source: 'en', target: 'he' });
-    expect(languagesFor('he_en')).toEqual({ source: 'he', target: 'en' });
   });
 });
 

@@ -26,7 +26,7 @@ import type {
   QuestionSchema,
   ScoreSchema,
   TranslationCorrectionSchema,
-  TranslationDirectionSchema,
+  TranslationGuardReasonSchema,
   TranslationKindSchema,
   TranslationRequestSchema,
   TranslationResponseSchema,
@@ -58,7 +58,7 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type User = z.infer<typeof UserSchema>;
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
-export type TranslationDirection = z.infer<typeof TranslationDirectionSchema>;
+export type TranslationGuardReason = z.infer<typeof TranslationGuardReasonSchema>;
 export type TranslationKind = z.infer<typeof TranslationKindSchema>;
 export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;
 export type TranslationSense = z.infer<typeof TranslationSenseSchema>;

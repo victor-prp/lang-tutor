@@ -158,9 +158,10 @@ export const LoginRequestSchema = z.object({
   username: UsernameSchema,
 });
 
-// Translation, phase 9. Two directions only; a third language would need more
-// than an enum entry, so narrowing here is honest rather than limiting.
-export const TranslationDirectionSchema = z.enum(['en_he', 'he_en']);
+// Phase 16. Why an input came back empty without a model call: the script
+// guard (apps/server/src/domain/languages.ts) found its letters in `to`'s
+// script, or in neither language's.
+export const TranslationGuardReasonSchema = z.enum(['wrong_direction', 'out_of_pair']);
 
 // Describes the input, not a meaning, so it sits at the top level of the
 // response. `word` is decided in code for a single token; the model answers the
@@ -177,19 +178,23 @@ export const TranslationSenseSchema = z.object({
   example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
 });
 
-export const TranslationRequestSchema = z.object({
-  // Trimmed before length is judged, so "   " is empty rather than three chars.
-  // The 100-character ceiling is also the cap on how much untrusted text can
-  // reach the model in one call.
-  text: z.string().trim().min(1).max(100),
-  // Absent means "detect from the script". Present only when the learner taps
-  // the flip control, which sends the translation it is holding back the other
-  // way: detection would answer that one from the script too, and agree with
-  // this field every time but one — a translation with no Hebrew in it at all,
-  // where a proper noun comes back spelled as it went in and only this field
-  // knows the lookup was meant to be reversed.
-  direction: TranslationDirectionSchema.optional(),
-});
+export const TranslationRequestSchema = z
+  .object({
+    // Trimmed before length is judged, so "   " is empty rather than three chars.
+    // The 100-character ceiling is also the cap on how much untrusted text can
+    // reach the model in one call.
+    text: z.string().trim().min(1).max(100),
+    // Phase 16. Always stated by the client: there is no detection. The client
+    // reads the pair from the learner's active enrollment, so the endpoint
+    // stays anonymous — it never learns who asked.
+    from: LanguageCodeSchema,
+    to: LanguageCodeSchema,
+  })
+  // Every supported pair includes Hebrew: {he,en} and {he,ru}. en↔ru is refused
+  // here, before the model is ever called.
+  .refine(({ from, to }) => from !== to && (from === 'he' || to === 'he'), {
+    message: 'unsupported language pair',
+  });
 
 // Three, not six: every correction that reaches the wire has been through
 // `tidyAlternatives`, applied by the guards on the model path and again by
@@ -210,12 +215,16 @@ export const TranslationCorrectionSchema = z.object({
 export const TranslationResponseSchema = z.object({
   // The string the learner typed, so the client can say "you typed thruot".
   text: z.string(),
-  direction: TranslationDirectionSchema,
+  // Echoed as plain strings, for the reason UserSchema's language fields are.
+  from: z.string(),
+  to: z.string(),
   // Both of these belong to the CORRECTED form when a correction is present, and
   // are byte-identical to what a direct lookup of it returns.
   kind: TranslationKindSchema,
   senses: z.array(TranslationSenseSchema).max(5),
   correction: TranslationCorrectionSchema.optional(),
+  // Present only when the script guard emptied `senses` without a model call.
+  reason: TranslationGuardReasonSchema.optional(),
 });
 
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from
@@ -241,9 +250,9 @@ export const PartOfSpeechSchema = z.enum([
 // noun `saw`, and an earlier single-lemma shape could only ever answer one of
 // them. Phase 12 made an entry a *lexeme* — a lemma AND a part of speech —
 // because `booked` belongs to only one of `book`'s two. Deliberately still the
-// response shape *minus* `text` and `direction`: both are decided in code before
-// the call, so offering them to the model would only invite it to disagree with
-// the server.
+// response shape *minus* `text`, `from` and `to`: all three are fixed in code
+// before the call, so offering them to the model would only invite it to
+// disagree with the server.
 //
 // `sense_code` goes on an extension rather than on TranslationSenseSchema, which
 // is shared with the wire. It is model-supplied, and from phase 12 it is

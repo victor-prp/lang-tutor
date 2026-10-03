@@ -1,4 +1,4 @@
-import type { PartOfSpeech, TranslationDirection, TranslationKind } from '@lang-tutor/core/api';
+import type { LanguageCode, PartOfSpeech, TranslationKind } from '@lang-tutor/core/api';
 
 import type { StoredSense } from '../../src/domain/translation';
 
@@ -9,7 +9,9 @@ import type { StoredSense } from '../../src/domain/translation';
 export type EvalCase = {
   label: string;
   text: string;
-  direction?: TranslationDirection;
+  /** Defaults to en → he. */
+  from?: LanguageCode;
+  to?: LanguageCode;
   expectKind: TranslationKind;
   /** Accepted values for the highest-ranked sense. Empty when expectEmpty. */
   acceptTop: string[];
@@ -139,8 +141,10 @@ export const CASES: EvalCase[] = [
     expectNoCorrection: true,
   },
   {
-    label: 'the reverse direction, and that script detection agreed',
+    label: 'the reverse direction',
     text: 'מזלג',
+    from: 'he',
+    to: 'en',
     expectKind: 'word',
     acceptTop: ['fork'],
   },
@@ -332,7 +336,9 @@ export type RenderingCase = {
   label: string;
   /** The form a learner typed — what the stored senses must be rendered for. */
   form: string;
-  direction?: TranslationDirection;
+  /** Defaults to en → he. */
+  from?: LanguageCode;
+  to?: LanguageCode;
   /** The lexeme being rendered: a lemma AND a part of speech, since phase 12. */
   lemma: string;
   partOfSpeech: PartOfSpeech;

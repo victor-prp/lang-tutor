@@ -82,7 +82,7 @@ describe('createServerDeps', () => {
     // that the service received a transaction at all.
     const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
 
-    await expect(deps.translations.translate({ text: 'Ladder' })).resolves.toMatchObject({
+    await expect(deps.translations.translate({ text: 'Ladder', from: 'en', to: 'he' })).resolves.toMatchObject({
       kind: 'word',
       senses: [{ translation: 'סולם', part_of_speech: 'noun' }],
     });

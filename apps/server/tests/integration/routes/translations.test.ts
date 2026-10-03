@@ -86,12 +86,13 @@ describe('POST /api/translations', () => {
       ],
     });
 
-    const res = await translate({ text: 'ladder' });
+    const res = await translate({ text: 'ladder', from: 'en', to: 'he' });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       text: 'ladder',
-      direction: 'en_he',
+      from: 'en',
+      to: 'he',
       kind: 'word',
       senses: [
         {
@@ -104,7 +105,7 @@ describe('POST /api/translations', () => {
     });
   });
 
-  it('detects Hebrew input without being told', async () => {
+  it('translates the other way when the request says so', async () => {
     await expectGeminiJson(ns, {
       kind: 'word',
       entries: [
@@ -116,27 +117,10 @@ describe('POST /api/translations', () => {
       ],
     });
 
-    const res = await translate({ text: 'מזלג' });
+    const res = await translate({ text: 'מזלג', from: 'he', to: 'en' });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ direction: 'he_en' });
-  });
-
-  it('honours an explicit direction', async () => {
-    await expectGeminiJson(ns, {
-      kind: 'word',
-      entries: [
-        {
-          lemma: 'x',
-          part_of_speech: 'noun',
-          senses: [{ translation: 'x', sense_code: 'x' }],
-        },
-      ],
-    });
-
-    const res = await translate({ text: 'ladder', direction: 'he_en' });
-
-    expect(await res.json()).toMatchObject({ direction: 'he_en' });
+    expect(await res.json()).toMatchObject({ from: 'he', to: 'en' });
   });
 
   it('reduces a sentence to one bare sense', async () => {
@@ -157,7 +141,7 @@ describe('POST /api/translations', () => {
       ],
     });
 
-    const res = await translate({ text: 'I read a book' });
+    const res = await translate({ text: 'I read a book', from: 'en', to: 'he' });
 
     expect(await res.json()).toMatchObject({
       kind: 'sentence',
@@ -168,7 +152,7 @@ describe('POST /api/translations', () => {
   it('returns 200 with an empty sense list for gibberish', async () => {
     await expectGeminiJson(ns, { kind: 'word', entries: [] });
 
-    const res = await translate({ text: 'asdkjhasd' });
+    const res = await translate({ text: 'asdkjhasd', from: 'en', to: 'he' });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ senses: [] });
@@ -177,7 +161,7 @@ describe('POST /api/translations', () => {
   it('sends the API key as a header', async () => {
     await expectGeminiJson(ns, { kind: 'word', entries: [] });
 
-    await translate({ text: 'ladder' });
+    await translate({ text: 'ladder', from: 'en', to: 'he' });
 
     // The unit test asserts this against a fake fetch; this asserts the real
     // client actually put it on the wire.
@@ -186,15 +170,22 @@ describe('POST /api/translations', () => {
 
   it('rejects empty, blank and over-long text with the contract error body', async () => {
     for (const text of ['', '   ', 'a'.repeat(101)]) {
-      const res = await translate({ text });
+      const res = await translate({ text, from: 'en', to: 'he' });
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: 'invalid request' });
     }
   });
 
-  it('rejects an unknown direction', async () => {
-    const res = await translate({ text: 'ladder', direction: 'fr_he' });
-    expect(res.status).toBe(400);
+  it('rejects a missing pair, an unknown language and a pair without Hebrew', async () => {
+    for (const body of [
+      { text: 'ladder' },
+      { text: 'ladder', from: 'fr', to: 'he' },
+      { text: 'ladder', from: 'en', to: 'ru' },
+    ]) {
+      const res = await translate(body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid request' });
+    }
   });
 
   it('returns 502 when the provider fails, and logs why', async () => {
@@ -204,7 +195,7 @@ describe('POST /api/translations', () => {
     const res = await app.request('/api/translations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'ladder' }),
+      body: JSON.stringify({ text: 'ladder', from: 'en', to: 'he' }),
     });
 
     expect(res.status).toBe(502);
@@ -217,7 +208,7 @@ describe('POST /api/translations', () => {
 
   it('returns 502 when the provider rate-limits', async () => {
     await expectGeminiStatus(ns, 429);
-    expect((await translate({ text: 'ladder' })).status).toBe(502);
+    expect((await translate({ text: 'ladder', from: 'en', to: 'he' })).status).toBe(502);
   });
 
   it('returns 502 when the model answers with unreadable output, and logs why', async () => {
@@ -232,7 +223,7 @@ describe('POST /api/translations', () => {
     const res = await app.request('/api/translations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'ladder' }),
+      body: JSON.stringify({ text: 'ladder', from: 'en', to: 'he' }),
     });
 
     expect(res.status).toBe(502);
@@ -247,7 +238,7 @@ describe('POST /api/translations', () => {
   it('returns 200 with no senses when the model is safety-blocked', async () => {
     await expectGeminiRawBody(ns, JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } }));
 
-    const res = await translate({ text: 'ladder' });
+    const res = await translate({ text: 'ladder', from: 'en', to: 'he' });
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ senses: [] });
@@ -266,7 +257,7 @@ describe('POST /api/translations', () => {
     const res = await app.request('/api/translations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'ladder' }),
+      body: JSON.stringify({ text: 'ladder', from: 'en', to: 'he' }),
     });
 
     expect(res.status).toBe(502);
@@ -292,8 +283,8 @@ describe('POST /api/translations', () => {
       ],
     });
 
-    const first = await translate({ text: 'ladder' });
-    const second = await translate({ text: 'ladder' });
+    const first = await translate({ text: 'ladder', from: 'en', to: 'he' });
+    const second = await translate({ text: 'ladder', from: 'en', to: 'he' });
 
     expect(second.status).toBe(200);
     expect(await second.json()).toEqual(await first.json());
@@ -320,7 +311,7 @@ describe('POST /api/translations', () => {
       ],
     });
 
-    const res = await translate({ text: 'saw' });
+    const res = await translate({ text: 'saw', from: 'en', to: 'he' });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { senses: { translation: string }[] };
@@ -343,7 +334,7 @@ describe('POST /api/translations', () => {
     // produces"), which may import `recorded` because it sits in the `db/`
     // bucket. This test only proves the one thing that check cannot: that the
     // HTTP boundary serves it too, without reaching the provider.
-    const res = await translate({ text: 'book' });
+    const res = await translate({ text: 'book', from: 'en', to: 'he' });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { senses: { translation: string }[] };
@@ -370,7 +361,7 @@ describe('POST /api/translations', () => {
       correction: { corrected_form: 'throat', alternatives: ['throughout'] },
     });
 
-    const res = await translate({ text: 'thruot' });
+    const res = await translate({ text: 'thruot', from: 'en', to: 'he' });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {

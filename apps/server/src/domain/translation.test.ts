@@ -3,7 +3,6 @@ import { describe, expect, it } from '@jest/globals';
 import {
   buildPrompt,
   buildRenderingPrompt,
-  detectDirection,
   normalizeSenses,
   parseLlmReconciliation,
   parseLlmTranslation,
@@ -11,26 +10,6 @@ import {
   resolveKind,
   tidyAlternatives,
 } from './translation';
-
-describe('detectDirection', () => {
-  it('reads Latin script as English to Hebrew', () => {
-    expect(detectDirection('book')).toBe('en_he');
-    expect(detectDirection('break a leg')).toBe('en_he');
-  });
-
-  it('reads any Hebrew character as Hebrew to English', () => {
-    expect(detectDirection('מזלג')).toBe('he_en');
-    expect(detectDirection('ספר')).toBe('he_en');
-  });
-
-  it('treats mixed input as Hebrew, because one Hebrew letter settles it', () => {
-    expect(detectDirection('the ספר')).toBe('he_en');
-  });
-
-  it('falls back to en_he for input with no letters at all', () => {
-    expect(detectDirection('123')).toBe('en_he');
-  });
-});
 
 describe('resolveKind', () => {
   it('forces word for a single token, whatever the model said', () => {
@@ -46,34 +25,34 @@ describe('resolveKind', () => {
 
 describe('buildPrompt', () => {
   it('puts only the learner text in the user part', () => {
-    expect(buildPrompt({ text: 'book', direction: 'en_he' }).user).toBe('book');
+    expect(buildPrompt({ text: 'book', from: 'en', to: 'he' }).user).toBe('book');
   });
 
-  it('states the direction in the system part', () => {
-    expect(buildPrompt({ text: 'book', direction: 'en_he' }).system).toContain('English');
-    expect(buildPrompt({ text: 'ספר', direction: 'he_en' }).system).toContain('Hebrew');
+  it('states the pair in the system part', () => {
+    expect(buildPrompt({ text: 'book', from: 'en', to: 'he' }).system).toContain('English');
+    expect(buildPrompt({ text: 'ספר', from: 'he', to: 'en' }).system).toContain('Hebrew');
   });
 
   it('carries the three rules that exist because of specific failures', () => {
-    const { system } = buildPrompt({ text: 'break a leg', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'break a leg', from: 'en', to: 'he' });
     expect(system).toMatch(/imperative/i); // fixed expressions stay phrases
     expect(system).toMatch(/idiom/i); // translated by meaning, not word by word
     expect(system).toMatch(/exactly one sense/i); // a sentence is not polysemous
   });
 
   it('caps senses and forbids inventing a translation', () => {
-    const { system } = buildPrompt({ text: 'asdkjhasd', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'asdkjhasd', from: 'en', to: 'he' });
     expect(system).toMatch(/at most 5/i);
     expect(system).toMatch(/empty/i);
   });
 
   it('hands over the Zod schema itself, not a JSON Schema document', () => {
-    const { schema } = buildPrompt({ text: 'book', direction: 'en_he' });
+    const { schema } = buildPrompt({ text: 'book', from: 'en', to: 'he' });
     expect(typeof schema.safeParse).toBe('function');
   });
 
   it('asks for entries, one per headword, ranked', () => {
-    const { system } = buildPrompt({ text: 'saw', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'saw', from: 'en', to: 'he' });
     expect(system).toMatch(/entry per headword/i);
     expect(system).toMatch(/at most 6/i);
   });
@@ -82,17 +61,17 @@ describe('buildPrompt', () => {
   // the example of a lemma that is TWO entries rather than one — the shape
   // phase 10 asked for is what made an inflected verb form serve noun senses.
   it('gives book as the worked example of two entries, not of one', () => {
-    const { system } = buildPrompt({ text: 'book', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'book', from: 'en', to: 'he' });
     expect(system).toContain('"book" is two entries, one noun and one verb');
     expect(system).toContain('"booked" is the verb entry only, never the noun');
   });
 
   it('asks for a sense_code on every sense', () => {
-    expect(buildPrompt({ text: 'bank', direction: 'en_he' }).system).toMatch(/sense_code/);
+    expect(buildPrompt({ text: 'bank', from: 'en', to: 'he' }).system).toMatch(/sense_code/);
   });
 
   it('says senses belong to the headword, not to the typed form', () => {
-    expect(buildPrompt({ text: 'running', direction: 'en_he' }).system).toMatch(/inflected/i);
+    expect(buildPrompt({ text: 'running', from: 'en', to: 'he' }).system).toMatch(/inflected/i);
   });
 
   // Asserted as a NEGATIVE on the old wording, because the failure this prevents
@@ -100,7 +79,7 @@ describe('buildPrompt', () => {
   // identical to a replacement in every test that only checks the new text is
   // present.
   it('replaces the unconditional not-a-word rule rather than supplementing it', () => {
-    const { system } = buildPrompt({ text: 'thruot', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'thruot', from: 'en', to: 'he' });
     expect(system).not.toContain(
       'not a word or expression in either language, return an empty entries',
     );
@@ -108,14 +87,14 @@ describe('buildPrompt', () => {
   });
 
   it('tells the model a correctly spelled inflected form is not a misspelling', () => {
-    const { system } = buildPrompt({ text: 'booked', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'booked', from: 'en', to: 'he' });
     expect(system).toMatch(/inflected form is not a misspelling/i);
     expect(system).toContain('walks');
     expect(system).toContain('went');
   });
 
   it('asks for a surface form and up to three ranked alternatives', () => {
-    const { system } = buildPrompt({ text: 'bokked', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'bokked', from: 'en', to: 'he' });
     expect(system).toContain('correction.corrected_form');
     expect(system).toMatch(/surface form/i);
     // The distinction the whole feature turns on: `bokked` wants `booked`, whose
@@ -126,7 +105,7 @@ describe('buildPrompt', () => {
   });
 
   it('suspends the build-the-example-around-the-input rule when a correction is present', () => {
-    const { system } = buildPrompt({ text: 'bokked', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'bokked', from: 'en', to: 'he' });
     expect(system).toMatch(/build the example sentence around `?corrected_form`?/i);
   });
 
@@ -138,7 +117,7 @@ describe('buildPrompt', () => {
   // `break a leg` correctly gets. Without this rule one mistyped lookup freezes
   // `kind: 'word'` on a real phrase for the life of the dictionary.
   it('tells the model to classify the corrected form, not the input as typed', () => {
-    const { system } = buildPrompt({ text: 'breakaleg', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'breakaleg', from: 'en', to: 'he' });
     expect(system).toMatch(/classify `?corrected_form`? rather than the input as typed/i);
     expect(system).toContain('breakaleg');
   });
@@ -162,8 +141,11 @@ describe('buildPrompt', () => {
   // UNQUOTED matchText.
   it('names neither saw nor see, the two unquoted MockServer expectations', () => {
     for (const text of ['book', 'ספר', 'break a leg']) {
-      for (const direction of ['en_he', 'he_en'] as const) {
-        const { system } = buildPrompt({ text, direction });
+      for (const [from, to] of [
+        ['en', 'he'],
+        ['he', 'en'],
+      ] as const) {
+        const { system } = buildPrompt({ text, from, to });
         expect(system).not.toContain('saw');
         expect(system).not.toContain('see');
       }
@@ -302,7 +284,7 @@ describe('normalizeSenses', () => {
 // agrees grammatically with the form that was typed.
 describe('buildPrompt, phase 12', () => {
   it('asks for one entry per lemma and part of speech, with form agreement', () => {
-    const { system } = buildPrompt({ text: 'booked', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'booked', from: 'en', to: 'he' });
     expect(system).toMatch(/one entry per headword AND part of speech/i);
     expect(system).toMatch(/grammatical form matching the input/i);
     expect(system).toMatch(/third-person masculine singular/i);
@@ -315,7 +297,8 @@ describe('buildRenderingPrompt', () => {
   it('lists every stored sense with its gloss, and asks for null where inadmissible', () => {
     const { system, user } = buildRenderingPrompt({
       form: 'booked',
-      direction: 'en_he',
+      from: 'en',
+      to: 'he',
       lemma: 'book',
       partOfSpeech: 'verb',
       storedSenses: [
@@ -336,7 +319,8 @@ describe('buildRenderingPrompt', () => {
   it('names the queried form, the headword and its part of speech', () => {
     const { system } = buildRenderingPrompt({
       form: 'booked',
-      direction: 'en_he',
+      from: 'en',
+      to: 'he',
       lemma: 'book',
       partOfSpeech: 'verb',
       storedSenses: [
@@ -362,7 +346,8 @@ describe('buildRenderingPrompt', () => {
   it('confines a newly named reading to the lexeme being rendered, not the form', () => {
     const { system } = buildRenderingPrompt({
       form: 'pressing',
-      direction: 'en_he',
+      from: 'en',
+      to: 'he',
       lemma: 'press',
       partOfSpeech: 'verb',
       storedSenses: [
@@ -379,7 +364,8 @@ describe('buildRenderingPrompt', () => {
   it('asks for the stored code back unchanged, which is the whole point', () => {
     const { system } = buildRenderingPrompt({
       form: 'banks',
-      direction: 'en_he',
+      from: 'en',
+      to: 'he',
       lemma: 'bank',
       partOfSpeech: 'noun',
       storedSenses: [
@@ -397,7 +383,7 @@ describe('the participial-adjective lemma rule', () => {
   // and neither ever able to see the other's. A wording lock; the eval bucket's
   // `burnt` and `burned` cases score what the model does with it.
   it('pins a participial adjective to the regular -ed spelling of the participle', () => {
-    const { system } = buildPrompt({ text: 'burnt', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'burnt', from: 'en', to: 'he' });
     expect(system).toContain('A participial adjective is its own headword rather than the base verb');
     expect(system).toContain('spelled the regular way');
     // `burning` must NOT merge: an active participle is a different adjective
@@ -418,7 +404,7 @@ describe('the example-disambiguation rule', () => {
   // actually disambiguates is a judgement, scored by the `water` case in the
   // eval bucket.
   it('buildPrompt asks for an example that rules out the word\'s other senses', () => {
-    const { system } = buildPrompt({ text: 'water', direction: 'en_he' });
+    const { system } = buildPrompt({ text: 'water', from: 'en', to: 'he' });
     expect(system).toContain('could not be read as any other sense of the same word');
     // The illustration uses a headword that is in neither the seed nor the eval
     // set, so it cannot bias anything this repo measures.
@@ -428,7 +414,8 @@ describe('the example-disambiguation rule', () => {
   it('buildRenderingPrompt asks for the same thing, since it writes examples too', () => {
     const { system } = buildRenderingPrompt({
       form: 'waters',
-      direction: 'en_he',
+      from: 'en',
+      to: 'he',
       lemma: 'water',
       partOfSpeech: 'noun',
       storedSenses: [
@@ -474,13 +461,14 @@ describe('parseLlmReconciliation', () => {
 // matches on unvocalised text, so both prompts say the script rule outright.
 describe('both prompts forbid nikud', () => {
   it('buildPrompt asks for unvocalised Hebrew', () => {
-    expect(buildPrompt({ text: 'book', direction: 'en_he' }).system).toMatch(/no nikud/);
+    expect(buildPrompt({ text: 'book', from: 'en', to: 'he' }).system).toMatch(/no nikud/);
   });
 
   it('buildRenderingPrompt asks for unvocalised Hebrew', () => {
     const { system } = buildRenderingPrompt({
       form: 'booked',
-      direction: 'en_he',
+      from: 'en',
+      to: 'he',
       lemma: 'book',
       partOfSpeech: 'verb',
       storedSenses: [
@@ -577,7 +565,7 @@ describe('resolveCorrection', () => {
     entries: [entry],
     ...over,
   });
-  const en = { typedForm: 'thruot', direction: 'en_he' as const };
+  const en = { typedForm: 'thruot', from: 'en' as const, to: 'he' as const };
 
   it('leaves an uncorrected answer on the typed form', () => {
     const resolved = resolveCorrection(answer(), en);
@@ -628,7 +616,7 @@ describe('resolveCorrection', () => {
   it('drops a correction on a sentence but keeps the answer', () => {
     const resolved = resolveCorrection(
       answer({ kind: 'sentence', correction: { corrected_form: 'I have a sore throat' } }),
-      { typedForm: 'I have a sore thruot', direction: 'en_he' },
+      { typedForm: 'I have a sore thruot', from: 'en', to: 'he' },
     );
     expect(resolved).toEqual({ effectiveForm: 'I have a sore thruot', kind: 'sentence' });
   });
@@ -646,13 +634,15 @@ describe('resolveCorrection', () => {
     expect(
       resolveCorrection(answer({ correction: { corrected_form: 'שלום' } }), {
         typedForm: 'shalom',
-        direction: 'en_he',
+        from: 'en',
+        to: 'he',
       }),
     ).toBeNull();
     expect(
       resolveCorrection(answer({ correction: { corrected_form: 'hello' } }), {
         typedForm: 'הלו',
-        direction: 'he_en',
+        from: 'he',
+        to: 'en',
       }),
     ).toBeNull();
   });
@@ -683,7 +673,7 @@ describe('resolveCorrection', () => {
   it('clears a correction on empty entries BEFORE the effective form is computed', () => {
     const resolved = resolveCorrection(
       { kind: 'phrase', entries: [], correction: { corrected_form: 'zxq wbtl' } },
-      { typedForm: 'zxqwbtl', direction: 'en_he' },
+      { typedForm: 'zxqwbtl', from: 'en', to: 'he' },
     );
     expect(resolved?.correction).toBeUndefined();
     expect(resolved?.effectiveForm).toBe('zxqwbtl');
@@ -710,15 +700,111 @@ describe('resolveCorrection', () => {
     expect(
       resolveCorrection(answer({ kind: 'phrase', correction: { corrected_form: 'booked' } }), {
         typedForm: 'bokked',
-        direction: 'en_he',
+        from: 'en',
+        to: 'he',
       })?.kind,
     ).toBe('word');
 
     expect(
       resolveCorrection(answer({ kind: 'word', correction: { corrected_form: 'break a leg' } }), {
         typedForm: 'breakaleg',
-        direction: 'en_he',
+        from: 'en',
+        to: 'he',
       })?.kind,
     ).toBe('word');
+  });
+});
+
+describe('prompts assembled from the language table', () => {
+  const system = (from: 'he' | 'en' | 'ru', to: 'he' | 'en' | 'ru') =>
+    buildPrompt({ text: 'x', from, to }).system;
+  const rendering = (from: 'he' | 'en' | 'ru', to: 'he' | 'en' | 'ru') =>
+    buildRenderingPrompt({
+      form: 'x',
+      from,
+      to,
+      lemma: 'x',
+      partOfSpeech: 'noun',
+      storedSenses: [],
+    }).system;
+
+  it('names the pair and the learner', () => {
+    expect(system('en', 'he')).toContain(
+      'You translate from English to Hebrew for a Hebrew-speaking learner of English.',
+    );
+    expect(system('he', 'en')).toContain(
+      'You translate from Hebrew to English for a Hebrew-speaking learner of English.',
+    );
+    expect(system('ru', 'he')).toContain(
+      'You translate from Russian to Hebrew for a Hebrew-speaking learner of Russian.',
+    );
+    expect(system('he', 'ru')).toContain(
+      'You translate from Hebrew to Russian for a Hebrew-speaking learner of Russian.',
+    );
+  });
+
+  it("carries the source language's reading rules only when it is the source", () => {
+    expect(system('en', 'he')).toContain('A bare or "to"-marked English verb');
+    expect(system('he', 'en')).not.toContain('A bare or "to"-marked English verb');
+    expect(system('ru', 'he')).toContain('"прочитала"');
+    expect(system('he', 'ru')).not.toContain('"прочитала"');
+  });
+
+  it('carries the writing rules of both languages, because examples hold both', () => {
+    for (const prompt of [
+      system('en', 'he'),
+      system('he', 'en'),
+      system('ru', 'he'),
+      system('he', 'ru'),
+    ]) {
+      expect(prompt).toContain('no nikud');
+    }
+    expect(system('ru', 'he')).toContain('without stress marks');
+    expect(system('he', 'ru')).toContain('without stress marks');
+    expect(system('en', 'he')).not.toContain('Russian');
+  });
+
+  it('says which language the input is meant to be', () => {
+    expect(system('ru', 'he')).toContain('The input is meant to be Russian.');
+  });
+
+  it('applies the same rules to the rendering prompt', () => {
+    expect(rendering('ru', 'he')).toContain('for a Hebrew-speaking learner of Russian.');
+    expect(rendering('ru', 'he')).toContain('"прочитала"');
+    expect(rendering('ru', 'he')).toContain('without stress marks');
+    expect(rendering('en', 'he')).not.toContain('Russian');
+  });
+
+  it('never contains an unquoted registered matchText', () => {
+    for (const prompt of [system('en', 'he'), system('ru', 'he'), rendering('ru', 'he')]) {
+      expect(prompt).not.toMatch(/see|saw/);
+    }
+  });
+});
+
+describe('resolveCorrection guard 4 reads the language table', () => {
+  const parsed = (correctedForm: string) => ({
+    kind: 'word' as const,
+    entries: [
+      {
+        lemma: 'ёлка',
+        part_of_speech: 'noun' as const,
+        senses: [{ sense_code: 'fir', translation: 'אשוח' }],
+      },
+    ],
+    correction: { corrected_form: correctedForm, alternatives: [] },
+  });
+
+  it('rejects a corrected form in the other script', () => {
+    expect(
+      resolveCorrection(parsed('אשוח'), { typedForm: 'елка', from: 'ru', to: 'he' }),
+    ).toBeNull();
+  });
+
+  it('accepts елка corrected to ёлка', () => {
+    expect(
+      resolveCorrection(parsed('ёлка'), { typedForm: 'елка', from: 'ru', to: 'he' })?.correction
+        ?.corrected_form,
+    ).toBe('ёлка');
   });
 });

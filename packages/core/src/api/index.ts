@@ -24,7 +24,7 @@ export type {
   Question,
   Score,
   TranslationCorrection,
-  TranslationDirection,
+  TranslationGuardReason,
   TranslationKind,
   TranslationRequest,
   TranslationResponse,

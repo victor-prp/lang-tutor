@@ -3,17 +3,17 @@ import type {
   LlmTranslation,
   PartOfSpeech,
   TranslationCorrection,
-  TranslationDirection,
   TranslationKind,
   TranslationSense,
 } from '@lang-tutor/core/api';
 import { LlmReconciliationSchema, LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
 
 import { normalizeForm } from './dictionary';
+import { LANGUAGES, guardScript, type Language, type LanguageCode } from './languages';
 
 /**
- * The pure core of translation: which way round the request is, what to ask the
- * model, and how to read the answer. No I/O, no clock, no randomness.
+ * The pure core of translation: what to ask the model, and how to read the
+ * answer. No I/O, no clock, no randomness.
  *
  * ADR 0001 R3 forbids every cross-layer import here — anything reached by
  * climbing out of this directory — which shapes two things deliberately:
@@ -37,15 +37,6 @@ export type RenderingPrompt = {
   user: string;
   schema: typeof LlmReconciliationSchema;
 };
-
-// The Hebrew block. Hebrew and Latin are disjoint in Unicode, so one character
-// settles the direction — deterministic, free, and reproducible in a unit test,
-// where asking the model would have been none of those things.
-const HEBREW = /[֐-׿]/;
-
-export function detectDirection(text: string): TranslationDirection {
-  return HEBREW.test(text) ? 'he_en' : 'en_he';
-}
 
 /**
  * The model classifies `phrase` against `sentence`, because no token count can:
@@ -146,7 +137,7 @@ export type ResolvedCorrection = {
  */
 export function resolveCorrection(
   parsed: LlmTranslation,
-  context: { typedForm: string; direction: TranslationDirection },
+  context: { typedForm: string; from: LanguageCode; to: LanguageCode },
 ): ResolvedCorrection | null {
   // The kind the answer has BEFORE any substitution. It is what the drop paths
   // return, and it is what the sentence guard reads: `resolveKind` against the
@@ -179,9 +170,10 @@ export function resolveCorrection(
   if (correctedForm.toLowerCase() === context.typedForm.toLowerCase()) return uncorrected;
   // Guard 2 — see HAS_CONTENT.
   if (!HAS_CONTENT.test(correctedForm)) return uncorrected;
-  // Guard 4 — the answer is unusable, not merely uncorrected. `direction` was
-  // detected from the typed script before call 1 and is fixed for the request.
-  if (detectDirection(correctedForm) !== context.direction) return null;
+  // Guard 4 — the answer is unusable, not merely uncorrected: a corrected form
+  // in the wrong script would be written as a `from` variant. The language
+  // table decides, exactly as the request's own script guard does.
+  if (guardScript(correctedForm, context.from, context.to) !== 'pass') return null;
 
   return {
     correction: {
@@ -200,16 +192,41 @@ export function resolveCorrection(
   };
 }
 
-const LANGUAGE_NAMES = {
-  en_he: { from: 'English', to: 'Hebrew' },
-  he_en: { from: 'Hebrew', to: 'English' },
-} as const;
+/**
+ * Phase 16. Who the prompt says the learner is. Every supported pair includes
+ * Hebrew and every enrollment is Hebrew-explained (spec, "Assumptions that hold
+ * only in this phase"), so the learner speaks Hebrew and learns the pair's other
+ * language. Lifted when an English UI lands.
+ */
+function learnerLine(source: Language, target: Language): string {
+  const learned = source.code === 'he' ? target : source;
+  return `You translate from ${source.name} to ${target.name} for a Hebrew-speaking learner of ${learned.name}.`;
+}
+
+/** The middle of the grammatical-form rule: how to read the source, the
+ *  citation-form rule, and how to write the target. */
+function formRules(source: Language, target: Language): string[] {
+  return [
+    ...source.asSource(target.name),
+    `Where ${target.name} offers several forms for one category, use its dictionary citation form for that category.`,
+    ...target.asTarget,
+  ];
+}
+
+/** Both languages' writing rules, source first, each once. */
+function writingRules(source: Language, target: Language): string[] {
+  return [...new Set([...source.writing, ...target.writing])];
+}
 
 export function buildPrompt(input: {
   text: string;
-  direction: TranslationDirection;
+  from: LanguageCode;
+  to: LanguageCode;
 }): TranslationPrompt {
-  const { from, to } = LANGUAGE_NAMES[input.direction];
+  const source = LANGUAGES[input.from];
+  const target = LANGUAGES[input.to];
+  const from = source.name;
+  const to = target.name;
 
   // Three of these rules exist because of a specific failure mode, and each has
   // an eval case: an imperative fixed expression misclassified as a sentence, an
@@ -221,7 +238,7 @@ export function buildPrompt(input: {
   // of speech — and the last rule is what makes the answer fit the form typed
   // rather than the headword it belongs to.
   const system = [
-    `You translate from ${from} to ${to} for a Hebrew-speaking learner of English.`,
+    learnerLine(source, target),
     'Return JSON only, matching the supplied schema.',
     'Classify the input as "word", "phrase" or "sentence".',
     'A fixed dictionary expression is a "phrase" even when it is grammatically imperative:',
@@ -268,21 +285,21 @@ export function buildPrompt(input: {
     'A sentence that merely contains the word is not enough — it must rule the other senses',
     'out. For "spring": "The spring in the mattress broke" rules out the season, while "I like',
     'the spring" rules out nothing.',
-    `Translate into the grammatical form matching the input's: a past-tense input takes a`,
-    'past-tense translation. A bare or "to"-marked English verb — "book", "to book" — is the',
-    `base form and takes the ${to} infinitive: להזמין, never הזמין. Where ${to} offers several`,
-    'forms for one category, use its dictionary citation form for that category; for Hebrew',
-    'past tense that is third-person masculine singular. Build the example sentence around the',
-    'input as typed, not around its headword.',
-    // "citation form" reads to the model as "how a dictionary prints it", and a
-    // printed Hebrew dictionary prints nikud. That cost a recording of סֵפֶר
-    // where every consumer here — the wire, the quiz options, the eval's
-    // substring matching — expects ספר. Say the script rule outright.
-    'Write Hebrew in plain unvocalised script, with no nikud: ספר, never סֵפֶר.',
+    "Translate into the grammatical form matching the input's: a past-tense input takes a",
+    'past-tense translation.',
+    ...formRules(source, target),
+    'Build the example sentence around the input as typed, not around its headword.',
+    // Each language's script rules — Hebrew's no-nikud rule among them — live in
+    // languages.ts, with the reason for each.
+    ...writingRules(source, target),
     'For a "sentence": return exactly one entry holding exactly one sense with the',
     'translation, and omit the example entirely — a sentence needs no example of itself.',
     'Its part_of_speech is required by the schema but meaningless for a sentence, and the',
     'server discards it along with the entry, which is never stored; answer "verb".',
+    // Phase 16. The guard catches a wrong script for free; this is the case it
+    // cannot see — Ukrainian `дякую` under ru → he shares Russian's script.
+    `The input is meant to be ${source.name}. A word of another language is not a word in`,
+    `either language, even when it is written in the ${source.name} script.`,
     // Phase 13. REPLACED, not supplemented. Left standing beside the correction
     // rules below it is a flat contradiction about exactly the input this phase
     // exists for: `thruot` is not a word in either language, so the old wording
@@ -290,10 +307,10 @@ export function buildPrompt(input: {
     // `throat`. The added clause carries the whole difference.
     //
     // "in either language" is kept rather than narrowed to the source language,
-    // and the rules below say it for the same reason: `direction` is detected
-    // from the script and can be wrong, so a rule scoped to the detected source
-    // would let a real English word typed under he_en be reported as a
-    // misspelling of a Hebrew one.
+    // and the rules below say it too. It was written when the direction was
+    // detected from the script and could be wrong; from phase 16 the client
+    // states `from` and `to`, but the wording is the one the eval measured, so
+    // it stands.
     'If the input is not a word or expression in either language and no real word or',
     'expression was plausibly intended, return an empty entries array and omit `correction`,',
     'rather than inventing a translation.',
@@ -420,12 +437,16 @@ export type StoredSense = {
  */
 export function buildRenderingPrompt(input: {
   form: string;
-  direction: TranslationDirection;
+  from: LanguageCode;
+  to: LanguageCode;
   lemma: string;
   partOfSpeech: PartOfSpeech;
   storedSenses: StoredSense[];
 }): RenderingPrompt {
-  const { from, to } = LANGUAGE_NAMES[input.direction];
+  const source = LANGUAGES[input.from];
+  const target = LANGUAGES[input.to];
+  const from = source.name;
+  const to = target.name;
 
   // Each stored sense as `code — gloss — example`, one per line. The gloss is
   // what the model matches on; the code is what it must give back unchanged
@@ -438,7 +459,7 @@ export function buildRenderingPrompt(input: {
     .join('\n');
 
   const system = [
-    `You translate from ${from} to ${to} for a Hebrew-speaking learner of English.`,
+    learnerLine(source, target),
     'Return JSON only, matching the supplied schema.',
     `The ${from} headword "${input.lemma}" (${input.partOfSpeech}) is already in this`,
     `dictionary with the senses below, each a sense_code and the ${to} gloss recorded for`,
@@ -473,13 +494,11 @@ export function buildRenderingPrompt(input: {
     'A sentence that merely contains the word is not enough — it must rule the other senses',
     'out.',
     `Translate into the grammatical form matching "${input.form}": a past-tense form takes a`,
-    'past-tense translation. A bare or "to"-marked English verb — "book", "to book" — is the',
-    `base form and takes the ${to} infinitive: להזמין, never הזמין. Where ${to} offers several`,
-    'forms for one category, use its dictionary citation form for that category; for Hebrew',
-    `past tense that is third-person masculine singular. Build each example sentence around`,
-    `"${input.form}" as typed, not around the headword.`,
-    // Same rule as the first call, for the same reason — see buildPrompt.
-    'Write Hebrew in plain unvocalised script, with no nikud: ספר, never סֵפֶר.',
+    'past-tense translation.',
+    ...formRules(source, target),
+    `Build each example sentence around "${input.form}" as typed, not around the headword.`,
+    // Same rules as the first call, for the same reasons — see buildPrompt.
+    ...writingRules(source, target),
     `Rank the result for "${input.form}" itself, most common first — not in the order above,`,
     'which is another form\'s ranking.',
   ].join(' ');

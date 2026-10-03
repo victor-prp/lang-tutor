@@ -203,28 +203,42 @@ describe('UserSchema', () => {
 
 describe('TranslationRequestSchema', () => {
   it('accepts a word and a phrase', () => {
-    expect(TranslationRequestSchema.safeParse({ text: 'book' }).success).toBe(true);
-    expect(TranslationRequestSchema.safeParse({ text: 'break a leg' }).success).toBe(true);
+    expect(
+      TranslationRequestSchema.safeParse({ text: 'book', from: 'en', to: 'he' }).success,
+    ).toBe(true);
+    expect(
+      TranslationRequestSchema.safeParse({ text: 'break a leg', from: 'en', to: 'he' }).success,
+    ).toBe(true);
   });
 
   it('rejects empty, blank and over-long text', () => {
-    expect(TranslationRequestSchema.safeParse({ text: '' }).success).toBe(false);
-    expect(TranslationRequestSchema.safeParse({ text: '   ' }).success).toBe(false);
-    expect(TranslationRequestSchema.safeParse({ text: 'a'.repeat(101) }).success).toBe(false);
+    expect(
+      TranslationRequestSchema.safeParse({ text: '', from: 'en', to: 'he' }).success,
+    ).toBe(false);
+    expect(
+      TranslationRequestSchema.safeParse({ text: '   ', from: 'en', to: 'he' }).success,
+    ).toBe(false);
+    expect(
+      TranslationRequestSchema.safeParse({ text: 'a'.repeat(101), from: 'en', to: 'he' }).success,
+    ).toBe(false);
   });
 
   it('accepts text at exactly the 100-character limit', () => {
-    expect(TranslationRequestSchema.safeParse({ text: 'a'.repeat(100) }).success).toBe(true);
+    expect(
+      TranslationRequestSchema.safeParse({ text: 'a'.repeat(100), from: 'en', to: 'he' }).success,
+    ).toBe(true);
   });
 
-  it('treats direction as an optional override with two values', () => {
-    expect(TranslationRequestSchema.safeParse({ text: 'book' }).success).toBe(true);
-    expect(TranslationRequestSchema.safeParse({ text: 'book', direction: 'he_en' }).success).toBe(
-      true,
-    );
-    expect(TranslationRequestSchema.safeParse({ text: 'book', direction: 'fr_he' }).success).toBe(
-      false,
-    );
+  it('requires from and to, and accepts only pairs that include Hebrew', () => {
+    const ok = (from: string, to: string) =>
+      TranslationRequestSchema.safeParse({ text: 'x', from, to }).success;
+    expect(ok('en', 'he')).toBe(true);
+    expect(ok('he', 'en')).toBe(true);
+    expect(ok('ru', 'he')).toBe(true);
+    expect(ok('he', 'ru')).toBe(true);
+    expect(ok('en', 'ru')).toBe(false);
+    expect(ok('he', 'he')).toBe(false);
+    expect(TranslationRequestSchema.safeParse({ text: 'x' }).success).toBe(false);
   });
 });
 
@@ -258,7 +272,7 @@ describe('TranslationSenseSchema', () => {
 describe('TranslationResponseSchema', () => {
   it('caps senses at five', () => {
     const sense = { translation: 'ספר' };
-    const base = { text: 'book', direction: 'en_he', kind: 'word' } as const;
+    const base = { text: 'book', from: 'en', to: 'he', kind: 'word' } as const;
     expect(
       TranslationResponseSchema.safeParse({ ...base, senses: Array(5).fill(sense) }).success,
     ).toBe(true);
@@ -271,7 +285,8 @@ describe('TranslationResponseSchema', () => {
     expect(
       TranslationResponseSchema.safeParse({
         text: 'asdkjhasd',
-        direction: 'en_he',
+        from: 'en',
+        to: 'he',
         kind: 'word',
         senses: [],
       }).success,
@@ -370,7 +385,8 @@ describe('LlmTranslationSchema', () => {
   it('keeps sense_code off the response shape, which is shared with the wire', () => {
     const result = TranslationResponseSchema.safeParse({
       text: 'book',
-      direction: 'en_he',
+      from: 'en',
+      to: 'he',
       kind: 'word',
       senses: [{ translation: 'ספר', sense_code: 'printed_book' }],
     });
@@ -430,7 +446,7 @@ describe('part_of_speech on the entry', () => {
 });
 
 describe('the correction block', () => {
-  const base = { text: 'thruot', direction: 'en_he', kind: 'word', senses: [] } as const;
+  const base = { text: 'thruot', from: 'en', to: 'he', kind: 'word', senses: [] } as const;
 
   it('is optional on the wire, so today\'s responses still parse', () => {
     expect(TranslationResponseSchema.safeParse(base).success).toBe(true);

@@ -2,7 +2,6 @@ import type {
   LlmEntry,
   LlmSense,
   PartOfSpeech,
-  TranslationDirection,
   TranslationKind,
   TranslationSense,
 } from '@lang-tutor/core/api';
@@ -122,15 +121,6 @@ export function normalizeForm(text: string): string {
   // An input that is nothing but punctuation has no key to strip down to, and
   // an empty form would defeat the request schema's min(1) after the fact.
   return stripped === '' ? collapsed : stripped;
-}
-
-/** Both codes come from `direction` alone. No user id is involved, which is why
- *  the request schema did not have to change. */
-export function languagesFor(direction: TranslationDirection): {
-  source: string;
-  target: string;
-} {
-  return direction === 'en_he' ? { source: 'en', target: 'he' } : { source: 'he', target: 'en' };
 }
 
 /**
