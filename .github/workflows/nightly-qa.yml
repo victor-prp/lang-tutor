@@ -24,6 +24,11 @@ on:
         type: boolean
         required: false
         default: true
+      categorise:
+        description: 'Categorise and apply after filing'
+        type: boolean
+        required: false
+        default: true
 
 # One night at a time. Two sessions against one server would interleave, and a
 # manual dispatch should queue behind the schedule rather than race it. No
@@ -151,5 +156,84 @@ jobs:
             nightly-qa/.out/findings.json \
             nightly-qa/.out/known-issues.json \
             --apply
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Upload what was filed
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-qa-filed-${{ github.run_id }}
+          path: nightly-qa/.out/filed.json
+          if-no-files-found: error
+          retention-days: 14
+
+  # Holds a model that may READ the checkout - it has to: nearly every triage
+  # decision rests on a code comment, a spec or a commit. No Bash, no browser,
+  # no token that can write to GitHub. Its fence is proven by its own guard.
+  categorise:
+    needs: file
+    # On the event, not the input alone, for the reason spelled out on `file`:
+    # a scheduled run's inputs are empty and `!= false` evaluates false there.
+    if: always() && needs.file.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.categorise)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 300   # commits.txt
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Verify the CLI can start
+        run: claude --version
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-qa-filed-${{ github.run_id }}
+          path: nightly-qa/.out/
+      - name: The triage session
+        run: ./nightly-qa/triage/run.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          NIGHTLY_QA_TRIAGE_OUT: ${{ runner.temp }}/triage
+      - name: Upload the triage run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-qa-triage-${{ github.run_id }}
+          path: nightly-qa/.out/triage/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Holds no model. contents: read only so checkout works; the writes are all to
+  # the tracker.
+  apply:
+    needs: categorise
+    if: always() && needs.categorise.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-qa-triage-${{ github.run_id }}
+          path: nightly-qa/.out/triage/
+      - name: Apply
+        run: npx tsx nightly-qa/src/apply.ts nightly-qa/.out/triage --apply
         env:
           GH_TOKEN: ${{ github.token }}

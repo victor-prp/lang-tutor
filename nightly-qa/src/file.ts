@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { pushEvidence } from './evidence.ts';
 import { decide, type Action } from './filing.ts';
 import { parseReportLoose, shotBasename } from './findings.ts';
-import { knownIssuesSchema, renderIssueBody } from './knownIssues.ts';
+import { issueNumberFromUrl, knownIssuesSchema, renderIssueBody } from './knownIssues.ts';
 
 const MAX_NEW = 3;
 
@@ -27,6 +27,10 @@ if (!report.run.browser_ok) {
 }
 
 const { actions, neighbours } = decide(report, known, { maxNew: MAX_NEW });
+
+// Read by the categorise job: tonight's new issues and tonight's sightings are
+// targets whether or not they already carry a category.
+const filed = { created: [] as number[], commented: [] as number[] };
 
 const lines: string[] = [
   `# Nightly QA — ${report.run.date}`,
@@ -85,6 +89,7 @@ for (const action of actions) {
 
   if (action.kind === 'comment') {
     gh(['issue', 'comment', String(action.issue), '--body', commentBody(action)]);
+    filed.commented.push(action.issue);
     if (action.escalateTo) {
       const previous = known.find((i) => i.number === action.issue)?.severity;
       if (previous) gh(['issue', 'edit', String(action.issue), '--remove-label', previous]);
@@ -121,6 +126,8 @@ for (const action of actions) {
     '--body',
     body,
   ]);
+  const createdNumber = issueNumberFromUrl(out);
+  if (createdNumber !== null) filed.created.push(createdNumber);
   lines.push(`- **created** ${action.finding.title} ${out.trim()}`);
 }
 
@@ -140,3 +147,5 @@ console.log(summary);
 if (process.env.GITHUB_STEP_SUMMARY) {
   appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
 }
+
+writeFileSync(`${findingsPath.replace(/\/[^/]+$/, '')}/filed.json`, JSON.stringify(filed, null, 2) + '\n');

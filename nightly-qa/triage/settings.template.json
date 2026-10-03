@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "blockReadsOutsideWorkingDirectories": true,
+    "deny": [
+      "Bash",
+      "Edit(//__REPO__/**)",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Task"
+    ],
+    "allow": [
+      "Read(//__REPO__/**)",
+      "Read(//__OUT__/**)",
+      "Grep",
+      "Glob",
+      "Edit(//__OUT__/**)"
+    ]
+  }
+}

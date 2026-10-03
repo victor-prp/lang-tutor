@@ -34,6 +34,9 @@
     "eval": "npm run eval --workspace apps/server",
     "content:generate": "npm run content:generate --workspace apps/server --",
     "qa:poc": "bash nightly-qa/run.sh",
-    "qa:file": "tsx nightly-qa/src/file.ts nightly-qa/.out/findings.json nightly-qa/.out/known-issues.json"
+    "qa:file": "tsx nightly-qa/src/file.ts nightly-qa/.out/findings.json nightly-qa/.out/known-issues.json",
+    "qa:categorise": "bash nightly-qa/triage/run.sh && tsx nightly-qa/src/apply.ts nightly-qa/.out/triage",
+    "qa:calibrate": "bash nightly-qa/triage/run.sh --calibrate && tsx nightly-qa/src/calibrate.ts nightly-qa/triage/examples.csv nightly-qa/.out/triage/categories.json --rules nightly-qa/triage/rules.md",
+    "qa:seed": "tsx nightly-qa/src/seed.ts nightly-qa/triage/examples.csv nightly-qa/.out/seed && tsx nightly-qa/src/apply.ts nightly-qa/.out/seed"
   }
 }
