@@ -204,3 +204,19 @@ test('a real run with every finding marked new files exactly the cap, bugs first
   assert.equal(created.length, 3);
   assert.ok(created.every((a) => a.finding.severity === 'bug'));
 });
+
+test('a match on a closed duplicate comments on the original instead', () => {
+  const known = issues([
+    { number: 28, state: 'OPEN' },
+    {
+      number: 66,
+      state: 'CLOSED',
+      labels: ['nightly-qa', 'bug', 'triage:duplicate', 'duplicate'],
+      body: '**Fingerprint:** `dictionary | senses list | hidden-behind-tap`\n\n**Duplicate of:** #28\n',
+    },
+  ]);
+  const { actions } = decide(report([finding({ match: { issue: 66 } })]), known, limits);
+  const comment = expectComment(actions[0]);
+  assert.equal(comment.issue, 28);
+  assert.equal(comment.reopened, false);
+});

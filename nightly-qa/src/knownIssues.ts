@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { Finding, QaReport, Severity } from './findings.ts';
 import { severities } from './findings.ts';
+import { categoryFromLabels } from './categories.ts';
 
 /**
  * What the `file` job knows about the tracker, and how an issue carries enough
@@ -23,6 +24,35 @@ export function parseFingerprint(body: string): string | null {
     if (match) return match[1].trim();
   }
   return null;
+}
+
+/**
+ * Written by the triage apply job when it closes a duplicate. In the body for
+ * the same reason the fingerprint is: it is the field every human edit leaves
+ * alone, and it is already in known-issues.json without another API call.
+ */
+const DUPLICATE_LABEL = '**Duplicate of:**';
+
+export function parseDuplicateOf(body: string): number | null {
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(DUPLICATE_LABEL)) continue;
+    const match = trimmed.slice(DUPLICATE_LABEL.length).match(/#(\d+)/);
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
+export function withDuplicateOf(body: string | null, original: number): string {
+  const line = `${DUPLICATE_LABEL} #${original}\n`;
+  const kept = (body ?? '').replace(/\s+$/, '');
+  return kept === '' ? line : `${kept}\n\n${line}`;
+}
+
+/** `gh issue create` prints the new issue's URL; the number is its last segment. */
+export function issueNumberFromUrl(url: string): number | null {
+  const match = url.trim().match(/\/issues\/(\d+)$/);
+  return match ? Number(match[1]) : null;
 }
 
 export function severityFromLabels(labels: string[]): Severity | null {
@@ -49,6 +79,8 @@ export const knownIssuesSchema = z.array(rawIssueSchema).transform((rows) =>
       body,
       fingerprint: parseFingerprint(body),
       severity: severityFromLabels(labels),
+      category: categoryFromLabels(labels),
+      duplicateOf: parseDuplicateOf(body),
     };
   }),
 );

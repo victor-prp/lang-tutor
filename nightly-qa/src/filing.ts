@@ -71,7 +71,7 @@ export function decide(
     }
 
     if ('issue' in finding.match) {
-      const issue = byNumber.get(finding.match.issue);
+      let issue = byNumber.get(finding.match.issue);
       if (!issue) {
         actions.push({
           kind: 'skip',
@@ -79,6 +79,14 @@ export function decide(
           reason: `matched issue ${finding.match.issue} is not a known nightly-qa issue`,
         });
         continue;
+      }
+
+      // Triage closes a duplicate with `Duplicate of: #N` in its body. A sighting
+      // belongs on the original, where the decision about the problem lives -
+      // otherwise rule 5 below would comment "reproduced after close" on an issue
+      // nobody is watching. One hop only: triage refuses chains.
+      if (issue.state === 'closed' && issue.duplicateOf !== null) {
+        issue = byNumber.get(issue.duplicateOf) ?? issue;
       }
 
       if (issue.state === 'closed' && issue.labels.some((l) => SETTLED.includes(l.toLowerCase()))) {

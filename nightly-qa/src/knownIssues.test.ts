@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  issueNumberFromUrl,
   knownIssuesSchema,
+  parseDuplicateOf,
   parseFingerprint,
   renderIssueBody,
   severityFromLabels,
+  withDuplicateOf,
 } from './knownIssues.ts';
 
 test('parses the fingerprint back out of a rendered body', () => {
@@ -69,4 +72,40 @@ test('an issue a human opened, with no fingerprint and no severity label, still 
   assert.equal(parsed[0].fingerprint, null);
   assert.equal(parsed[0].severity, null);
   assert.equal(parsed[0].state, 'closed');
+});
+
+test('the duplicate line round-trips through the body', () => {
+  const body = withDuplicateOf('Found by the nightly QA agent.\n\n**Fingerprint:** `a | b | c`\n', 28);
+  assert.equal(parseDuplicateOf(body), 28);
+  assert.equal(parseFingerprint(body), 'a | b | c');
+});
+
+// Review Focus 4: gh returns null for an issue opened with no body.
+test('a null or empty body becomes just the duplicate line', () => {
+  assert.equal(withDuplicateOf(null, 28), '**Duplicate of:** #28\n');
+  assert.equal(withDuplicateOf('', 28), '**Duplicate of:** #28\n');
+  assert.equal(parseDuplicateOf(withDuplicateOf(null, 28)), 28);
+});
+
+test('a body with no duplicate line parses as null', () => {
+  assert.equal(parseDuplicateOf('Duplicate of #28, said a human in prose.'), null);
+});
+
+test('a known issue carries its category and its original', () => {
+  const [issue] = knownIssuesSchema.parse([
+    {
+      number: 66,
+      title: 't',
+      state: 'CLOSED',
+      labels: [{ name: 'nightly-qa' }, { name: 'triage:duplicate' }],
+      body: '**Duplicate of:** #28',
+    },
+  ]);
+  assert.equal(issue.category, 'duplicate');
+  assert.equal(issue.duplicateOf, 28);
+});
+
+test('the issue number is read from the URL gh prints', () => {
+  assert.equal(issueNumberFromUrl('https://github.com/victor-prp/lang-tutor/issues/69\n'), 69);
+  assert.equal(issueNumberFromUrl(''), null);
 });
