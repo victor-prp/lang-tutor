@@ -17,6 +17,8 @@ export type ReportInput = {
   changes: Change[];
   ruleGaps: RuleGap[];
   carried: number[];
+  /** Issue → the error from the gh command that stopped its change partway. */
+  failures: Map<number, string>;
   titles: Map<number, string>;
 };
 
@@ -38,6 +40,9 @@ export function renderReport(r: ReportInput): string {
   for (const refusal of r.checked.refused) {
     attention.push(`- #${refusal.decision.issue} ${title(refusal.decision.issue)} — not applied: ${refusal.reason}`);
   }
+  for (const [n, error] of r.failures) {
+    attention.push(`- #${n} ${title(n)} — failed to apply: ${cell(error)}. It keeps no category, so the next night retries it`);
+  }
   for (const n of r.checked.undecided) {
     attention.push(`- #${n} ${title(n)} — undecided: the session returned no decision; nothing was changed`);
   }
@@ -53,7 +58,8 @@ export function renderReport(r: ReportInput): string {
     '|---|---|---|---|---|',
     ...r.changes.map((c) => {
       const category = c.from && c.from !== c.to ? `${c.from} → ${c.to}` : c.to;
-      return `| #${c.decision.issue} | ${category} | ${c.action} | ${c.decision.confidence} | ${cell(c.decision.rationale)} |`;
+      const action = r.failures.has(c.decision.issue) ? `FAILED: ${c.action}` : c.action;
+      return `| #${c.decision.issue} | ${category} | ${action} | ${c.decision.confidence} | ${cell(c.decision.rationale)} |`;
     }),
   ];
 

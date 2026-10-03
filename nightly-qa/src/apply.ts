@@ -57,8 +57,20 @@ const known = knownIssuesSchema.parse(readJson('known.json'));
 const checked = checkDecisions(parsed.file, meta.targets, known);
 const changes = planChanges(checked.accepted, known);
 
+// A label that cannot be created will fail every change after it, so that one
+// is fatal. A single change failing is not: the rest still apply, the report
+// still says what happened, and the job still goes red at the end.
 for (const command of labelCommands()) gh(command);
-for (const change of changes) for (const command of change.commands) gh(command);
+const failures = new Map<number, string>();
+for (const change of changes) {
+  try {
+    for (const command of change.commands) gh(command);
+  } catch (error) {
+    const message = ((error as { stderr?: string }).stderr || (error as Error).message).trim().split('\n')[0];
+    failures.set(change.decision.issue, message);
+    console.error(`  !!         #${change.decision.issue}: ${message}`);
+  }
+}
 
 const runUrl =
   process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
@@ -72,6 +84,7 @@ const body = renderReport({
   changes,
   ruleGaps: parsed.file.rule_gaps,
   carried: meta.carried,
+  failures,
   titles: new Map(known.map((issue) => [issue.number, issue.title])),
 });
 
@@ -95,3 +108,4 @@ for (const p of previous) {
 }
 
 summarise(`# Nightly triage — ${meta.date}\n\n${body}`);
+if (failures.size > 0) process.exit(1);

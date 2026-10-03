@@ -17,18 +17,21 @@ function decision(over: Partial<TriageDecision> = {}): TriageDecision {
 
 const verbs = (commands: string[][]) => commands.map((c) => `${c[0]} ${c[1]}`);
 
-test('a first ux-polish decision labels, comments, and leaves the issue open', () => {
+// Final review I1: the category label goes on LAST, so "has a triage label"
+// means every earlier write landed. A failure before it leaves the issue
+// uncategorised, and tomorrow's run picks it up again.
+test('a first ux-polish decision comments, then labels, and leaves the issue open', () => {
   const [change] = planChanges([decision()], known(['nightly-qa', 'bug']));
-  assert.deepEqual(verbs(change.commands), ['issue edit', 'issue comment']);
-  assert.deepEqual(change.commands[0], ['issue', 'edit', '66', '--add-label', 'triage:ux-polish', '--add-label', 'known-issue']);
+  assert.deepEqual(verbs(change.commands), ['issue comment', 'issue edit']);
+  assert.deepEqual(change.commands.at(-1), ['issue', 'edit', '66', '--add-label', 'triage:ux-polish', '--add-label', 'known-issue']);
   assert.equal(change.action, 'labelled');
 });
 
-test('a duplicate gets the body line, a comment, and a not-planned close, in that order', () => {
+test('a duplicate gets the body line, a comment, a not-planned close, and its labels last', () => {
   const [change] = planChanges([decision({ category: 'duplicate', duplicate_of: 28 })], known(['nightly-qa']));
-  assert.deepEqual(verbs(change.commands), ['issue edit', 'issue edit', 'issue comment', 'issue close']);
-  assert.deepEqual(change.commands[1], ['issue', 'edit', '66', '--body', 'Observed.\n\n**Duplicate of:** #28\n']);
-  assert.deepEqual(change.commands[3], ['issue', 'close', '66', '--reason', 'not planned']);
+  assert.deepEqual(verbs(change.commands), ['issue edit', 'issue comment', 'issue close', 'issue edit']);
+  assert.deepEqual(change.commands[0], ['issue', 'edit', '66', '--body', 'Observed.\n\n**Duplicate of:** #28\n']);
+  assert.deepEqual(change.commands[2], ['issue', 'close', '66', '--reason', 'not planned']);
   assert.equal(change.action, 'closed as duplicate of #28');
 });
 
@@ -37,8 +40,8 @@ test('working-as-intended adds by-design and closes', () => {
     [decision({ category: 'working-as-intended', evidence: ['apps/mobile/src/hooks/useSession.tsx:184'] })],
     known(['nightly-qa']),
   );
-  assert.ok(change.commands[0].includes('by-design'));
-  assert.deepEqual(change.commands.at(-1), ['issue', 'close', '66', '--reason', 'not planned']);
+  assert.ok(change.commands.at(-1)?.includes('by-design'));
+  assert.deepEqual(change.commands.at(-2), ['issue', 'close', '66', '--reason', 'not planned']);
 });
 
 test('an unchanged category does nothing at all: no labels, no comment', () => {
@@ -52,13 +55,13 @@ test('leaving ux-polish removes known-issue and says it was recategorised', () =
     [decision({ category: 'real_bug' })],
     known(['nightly-qa', 'triage:ux-polish', 'known-issue']),
   );
-  assert.deepEqual(change.commands[0], [
+  assert.deepEqual(change.commands[1], [
     'issue', 'edit', '66',
     '--add-label', 'triage:real-bug',
     '--remove-label', 'triage:ux-polish',
     '--remove-label', 'known-issue',
   ]);
-  assert.match(change.commands[1].at(-1) ?? '', /recategorised from `ux-polish` to `real_bug`/);
+  assert.match(change.commands[0].at(-1) ?? '', /recategorised from `ux-polish` to `real_bug`/);
   assert.equal(change.action, 'recategorised');
 });
 
@@ -89,4 +92,15 @@ test('label creation covers every category label, known-issue and the report lab
     assert.ok(created.includes(name), name);
   }
   assert.ok(labelCommands().every((c) => c.includes('--force')));
+});
+
+// Final review I2: a stray label's companions leave with it.
+test('repairing toward a stray category also removes the old category companions', () => {
+  const [change] = planChanges(
+    [decision({ category: 'real_bug' })],
+    known(['nightly-qa', 'triage:ux-polish', 'known-issue', 'triage:real-bug']),
+  );
+  assert.deepEqual(change.commands, [
+    ['issue', 'edit', '66', '--remove-label', 'triage:ux-polish', '--remove-label', 'known-issue'],
+  ]);
 });

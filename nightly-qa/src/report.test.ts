@@ -16,7 +16,7 @@ const empty: Checked = { accepted: [], refused: [], undecided: [], ignored: [] }
 function input(over: Partial<ReportInput> = {}): ReportInput {
   return {
     date: '2026-10-04', runUrl: 'https://github.com/x/y/actions/runs/1',
-    checked: empty, changes: [], ruleGaps: [], carried: [], titles: new Map([[66, 'Swap drops senses']]),
+    checked: empty, changes: [], ruleGaps: [], carried: [], failures: new Map(), titles: new Map([[66, 'Swap drops senses']]),
     ...over,
   };
 }
@@ -59,4 +59,11 @@ test('carried-over targets and ignored decisions are listed, and the run is link
   assert.match(body, /## Carried over[\s\S]*#80, #81/);
   assert.match(body, /## Ignored[\s\S]*#99/);
   assert.match(body, /\[The run\]\(https:\/\/github\.com\/x\/y\/actions\/runs\/1\)/);
+});
+
+// Final review I1: a gh failure mid-apply still reaches the owner.
+test('a change that failed to apply is highlighted and marked failed in the table', () => {
+  const body = renderReport(input({ changes: [change()], failures: new Map([[66, 'HTTP 502']]) }));
+  assert.match(body.split('## All decisions')[0], /#66 .*failed to apply: HTTP 502/);
+  assert.match(body, /\| #66 \| ux-polish \| FAILED: labelled \|/);
 });

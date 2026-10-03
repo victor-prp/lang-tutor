@@ -58,25 +58,35 @@ export function planChanges(accepted: TriageDecision[], known: KnownIssue[]): Ch
     // table order would pick the stray one and call a repair a recategorisation.
     const from = issue.labels.includes(CATEGORY_LABEL[to]) ? to : issue.category;
     const wanted = CATEGORY_LABELS[to];
+    // Every other category the issue still wears gives up all of its labels,
+    // companions included - otherwise a stray triage:ux-polish leaves
+    // known-issue behind on what is now a real bug, and the explorer skips it.
     const stray = issue.labels.filter((l) => l.startsWith('triage:') && l !== CATEGORY_LABEL[to]);
-    const leaving =
-      from && from !== to ? CATEGORY_LABELS[from].filter((l) => !wanted.includes(l) && issue.labels.includes(l)) : [];
+    const leaving = categories
+      .filter((c) => c !== to && issue.labels.includes(CATEGORY_LABEL[c]))
+      .flatMap((c) => CATEGORY_LABELS[c])
+      .filter((l) => !wanted.includes(l) && issue.labels.includes(l));
     const remove = [...new Set([...stray, ...leaving])];
     const add = wanted.filter((l) => !issue.labels.includes(l));
 
     const n = String(decision.issue);
     const commands: string[][] = [];
-    if (add.length > 0 || remove.length > 0) {
-      commands.push([
-        'issue', 'edit', n,
-        ...add.flatMap((l) => ['--add-label', l]),
-        ...remove.flatMap((l) => ['--remove-label', l]),
-      ]);
-    }
+    // Applied LAST. The triage label is what takes an issue out of tomorrow's
+    // targets, so it must mean "everything before it landed": a comment or a
+    // close that fails leaves the issue uncategorised, and it is tried again.
+    const labelEdit =
+      add.length > 0 || remove.length > 0
+        ? [
+            'issue', 'edit', n,
+            ...add.flatMap((l) => ['--add-label', l]),
+            ...remove.flatMap((l) => ['--remove-label', l]),
+          ]
+        : null;
 
     // Same category: say nothing. A sighting that changes no decision should
     // not cost the issue's watchers a notification.
     if (from === to) {
+      if (labelEdit) commands.push(labelEdit);
       return { decision, from, to, action: commands.length > 0 ? 'labels repaired' : 'unchanged', commands };
     }
 
@@ -85,6 +95,7 @@ export function planChanges(accepted: TriageDecision[], known: KnownIssue[]): Ch
     }
     commands.push(['issue', 'comment', n, '--body', triageComment(decision, from)]);
     if (CLOSING.has(to)) commands.push(['issue', 'close', n, '--reason', 'not planned']);
+    if (labelEdit) commands.push(labelEdit);
 
     return { decision, from, to, action: actionFor(to, from, decision), commands };
   });
