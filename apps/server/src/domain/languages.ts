@@ -69,6 +69,13 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
       'A Russian noun belongs to its nominative singular, an adjective to its masculine',
       'nominative singular, and a verb to the infinitive of the aspect typed: "прочитала"',
       'belongs to "прочитать", never to "читать".',
+      // Measured: without it the model read `елка` as an accepted spelling —
+      // print often omits the dots — and answered with no correction, so the
+      // writing rule's "never елка" governs only what the model writes. The
+      // exception keeps `все` (all) from being "corrected" to `всё`.
+      'A Russian word typed with е where its spelling has ё is a misspelling: correct it to',
+      'the spelling with ё. This does not apply when the е spelling is itself a different',
+      'word, as все is beside всё.',
     ],
     asTarget: ['For Russian past tense that citation form is masculine singular.'],
     writing: [
