@@ -32,7 +32,7 @@
     "dict:export": "bash scripts/lane-env.sh npm run dict:export --workspace apps/server",
     "dict:restore": "bash scripts/lane-env.sh npm run dict:restore --workspace apps/server",
     "eval": "npm run eval --workspace apps/server",
-    "content:generate": "npm run content:generate --workspace apps/server",
+    "content:generate": "npm run content:generate --workspace apps/server --",
     "qa:poc": "bash nightly-qa/run.sh",
     "qa:file": "tsx nightly-qa/src/file.ts nightly-qa/.out/findings.json nightly-qa/.out/known-issues.json"
   }
