@@ -123,6 +123,12 @@ export function checkDecisions(file: CategoriesFile, targets: number[], known: K
   const refused: Refusal[] = [];
   const candidates: TriageDecision[] = [];
   for (const d of onTargets) {
+    // meta.json names the targets, but the tracker says what they are. A
+    // target that is not a nightly-qa issue is never acted on.
+    if (!byNumber.get(d.issue)?.labels.includes('nightly-qa')) {
+      refused.push({ decision: d, reason: `#${d.issue} is not a nightly-qa issue` });
+      continue;
+    }
     if ((counts.get(d.issue) ?? 0) > 1) {
       refused.push({ decision: d, reason: `#${d.issue} has more than one decision` });
       continue;

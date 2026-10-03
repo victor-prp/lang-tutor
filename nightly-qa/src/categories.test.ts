@@ -130,3 +130,16 @@ test('a low-confidence decision is accepted like any other', () => {
   const checked = checkDecisions(file([decision({ confidence: 'low' })]), [66], known([{ number: 66 }]));
   assert.equal(checked.accepted.length, 1);
 });
+
+// Final review C1: whatever meta.json claims, apply only ever acts on the
+// tracker's own nightly-qa issues.
+test('a target that is not a known nightly-qa issue is refused, whatever meta.json says', () => {
+  const checked = checkDecisions(
+    file([decision({ issue: 12, category: 'working-as-intended', evidence: ['x'] }), decision({ issue: 13 })]),
+    [12, 13],
+    known([{ number: 12, labels: ['bug'] }]),
+  );
+  assert.equal(checked.accepted.length, 0);
+  assert.match(checked.refused[0].reason, /#12 is not a nightly-qa issue/);
+  assert.match(checked.refused[1].reason, /#13 is not a nightly-qa issue/);
+});
