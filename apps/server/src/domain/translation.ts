@@ -264,6 +264,19 @@ export function buildPrompt(input: {
     `Give each sense one short natural example sentence in ${from} together with its ${to}`,
     'translation, and a short snake_case sense_code naming the meaning',
     '(financial_institution as against river_bank).',
+    // Phase 16 eval fix. The sentence rule below is the only one that names a
+    // missing example, and `example` is optional in the schema because of it,
+    // so a phrase that can stand alone as an utterance — `как дела?`, `break a
+    // leg` — was intermittently answered as kind "phrase" with no example at
+    // all. Saying where a stand-alone phrase's example goes removes the
+    // model's reason to drop it. It sits here, beside the rule it extends, on
+    // purpose: a first draft placed after the sentence rule, right before the
+    // third-language rule, coincided with `дякую` coming back translated in 2
+    // of 3 eval runs (0 of 3 from here).
+    'A "phrase" takes an example exactly as a word does, even when it ends in a question',
+    'mark or can be said on its own, as a greeting or a toast can: give every sense of a',
+    'phrase an example with a non-empty source and translation, using the phrase within a',
+    'longer sentence. Only a "sentence" goes without one.',
     // Phase 12 follow-up. Where two senses of one entry render to the same word in the
     // target language — Hebrew says מים for water-the-substance and
     // water-the-lake — the example is the ONLY thing that can tell the two

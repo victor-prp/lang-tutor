@@ -40,6 +40,15 @@ describe('buildPrompt', () => {
     expect(system).toMatch(/exactly one sense/i); // a sentence is not polysemous
   });
 
+  it('requires an example on every sense of a phrase, which only a sentence may omit', () => {
+    const { system } = buildPrompt({ text: 'как дела?', from: 'ru', to: 'he' });
+    expect(system).toContain('A "phrase" takes an example exactly as a word does');
+    expect(system).toContain(
+      'give every sense of a phrase an example with a non-empty source and translation',
+    );
+    expect(system).toContain('Only a "sentence" goes without one.');
+  });
+
   it('caps senses and forbids inventing a translation', () => {
     const { system } = buildPrompt({ text: 'asdkjhasd', from: 'en', to: 'he' });
     expect(system).toMatch(/at most 5/i);
