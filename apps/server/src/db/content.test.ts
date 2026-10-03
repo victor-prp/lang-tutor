@@ -2,7 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { normalizeForm } from '../domain/dictionary';
-import { content, correctAnswerFor, optionsFor } from './content';
+import { isInScript } from '../domain/languages';
+import { content, correctAnswerFor, optionsFor, recordingKey } from './content';
 import { recorded } from './content.generated';
 
 const LONG_PROMPT_LENGTH = 15;
@@ -14,18 +15,18 @@ describe('content', () => {
 
   it('gives every question and every query a unique id', () => {
     expect(new Set(content.map((entry) => entry.question_id)).size).toBe(content.length);
-    expect(new Set(content.map((entry) => entry.query)).size).toBe(content.length);
+    expect(new Set(content.map((entry) => recordingKey(entry))).size).toBe(content.length);
   });
 
   it('has a recording for every query', () => {
     for (const entry of content) {
-      expect(recorded[entry.query]).toBeDefined();
+      expect(recorded[recordingKey(entry)]).toBeDefined();
     }
   });
 
   it('has at least one entry with at least one sense in every recording', () => {
     for (const entry of content) {
-      const answer = recorded[entry.query];
+      const answer = recorded[recordingKey(entry)];
       expect(answer.entries.length).toBeGreaterThanOrEqual(1);
       expect(answer.entries[0].senses.length).toBeGreaterThanOrEqual(1);
     }
@@ -70,7 +71,7 @@ describe('content', () => {
     // A question points at its query's entry 0, sense 0. Two queries resolving
     // to one lemma would make the second question's correct option belong to
     // the first one's term, since senses are first-writer-wins.
-    const lemmas = content.map((entry) => recorded[entry.query].entries[0].lemma);
+    const lemmas = content.map((entry) => recorded[recordingKey(entry)].entries[0].lemma);
     expect(new Set(lemmas).size).toBe(content.length);
   });
 
@@ -82,5 +83,38 @@ describe('content', () => {
     // with exactly three.
     const long = content.filter((entry) => entry.query.length >= LONG_PROMPT_LENGTH);
     expect(long.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('the pair-aware seed', () => {
+  it('records every entry under its own pair', () => {
+    for (const entry of content) {
+      expect(recorded[recordingKey(entry)]).toBeDefined();
+    }
+  });
+
+  it('seeds at least a full session for every pair it seeds at all', () => {
+    const counts = new Map<string, number>();
+    for (const entry of content) {
+      const pair = `${entry.from}-${entry.to}`;
+      counts.set(pair, (counts.get(pair) ?? 0) + 1);
+    }
+    expect([...counts.keys()].sort()).toEqual(['en-he', 'ru-he']);
+    for (const count of counts.values()) expect(count).toBeGreaterThanOrEqual(SESSION_LENGTH);
+  });
+
+  it('never offers the correct answer as a distractor', () => {
+    for (const entry of content) {
+      expect(entry.distractors).not.toContain(correctAnswerFor(entry));
+    }
+  });
+
+  it('writes every query in from’s script and every option in to’s', () => {
+    for (const entry of content) {
+      expect(isInScript(entry.query, entry.from)).toBe(true);
+      for (const option of [...entry.distractors, correctAnswerFor(entry)]) {
+        expect(isInScript(option, entry.to)).toBe(true);
+      }
+    }
   });
 });

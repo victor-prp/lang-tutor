@@ -8,7 +8,7 @@
 import type { LlmTranslation } from '@lang-tutor/core/api';
 
 export const recorded: Record<string, LlmTranslation> = {
-  "window": {
+  "en-he:window": {
     "kind": "word",
     "entries": [
       {
@@ -18,40 +18,32 @@ export const recorded: Record<string, LlmTranslation> = {
           {
             "translation": "חלון",
             "example": {
-              "source": "She opened the window to let in some fresh air.",
-              "target": "היא פתחה את החלון כדי להכניס אוויר צח."
+              "source": "Please close the window, it's cold outside.",
+              "target": "בבקשה סגור את החלון, קר בחוץ."
             },
-            "sense_code": "architectural_opening"
+            "sense_code": "building_opening"
           },
           {
             "translation": "חלון",
             "example": {
-              "source": "The ball hit the window and shattered the glass.",
-              "target": "הכדור פגע בחלון וניפץ את הזכוכית."
+              "source": "The new software opened a small window on the screen.",
+              "target": "התוכנה החדשה פתחה חלון קטן על המסך."
             },
-            "sense_code": "glass_pane"
+            "sense_code": "computer_interface"
           },
           {
             "translation": "חלון",
             "example": {
-              "source": "We have a narrow window to launch the product before our competitors.",
-              "target": "יש לנו חלון צר להשיק את המוצר לפני המתחרים שלנו."
+              "source": "We have a small window of opportunity to complete the project.",
+              "target": "יש לנו חלון הזדמנויות קטן להשלים את הפרויקט."
             },
-            "sense_code": "time_period_opportunity"
-          },
-          {
-            "translation": "חלון",
-            "example": {
-              "source": "Click the 'X' icon to close the window.",
-              "target": "לחץ על סמל ה-'X' כדי לסגור את החלון."
-            },
-            "sense_code": "computer_interface_element"
+            "sense_code": "time_period"
           }
         ]
       }
     ]
   },
-  "book": {
+  "en-he:book": {
     "kind": "word",
     "entries": [
       {
@@ -64,7 +56,7 @@ export const recorded: Record<string, LlmTranslation> = {
               "source": "I read a good book yesterday.",
               "target": "קראתי ספר טוב אתמול."
             },
-            "sense_code": "written_work"
+            "sense_code": "printed_work"
           }
         ]
       },
@@ -75,24 +67,24 @@ export const recorded: Record<string, LlmTranslation> = {
           {
             "translation": "להזמין",
             "example": {
-              "source": "I need to book a flight for next month.",
-              "target": "אני צריך להזמין טיסה לחודש הבא."
+              "source": "I want to book a table for two.",
+              "target": "אני רוצה להזמין שולחן לשניים."
             },
             "sense_code": "make_reservation"
           },
           {
             "translation": "לרשום",
             "example": {
-              "source": "The police officer will book him for speeding.",
-              "target": "השוטר ירשום אותו על נהיגה מהירה."
+              "source": "The police officer booked him for speeding.",
+              "target": "השוטר רשם אותו על מהירות מופרזת."
             },
-            "sense_code": "record_information"
+            "sense_code": "record_offense"
           }
         ]
       }
     ]
   },
-  "water": {
+  "en-he:water": {
     "kind": "word",
     "entries": [
       {
@@ -105,7 +97,7 @@ export const recorded: Record<string, LlmTranslation> = {
               "source": "I need a glass of water.",
               "target": "אני צריך כוס מים."
             },
-            "sense_code": "liquid_h2o"
+            "sense_code": "liquid_substance"
           }
         ]
       },
@@ -119,7 +111,7 @@ export const recorded: Record<string, LlmTranslation> = {
               "source": "Please water the plants every morning.",
               "target": "בבקשה תשקה את הצמחים כל בוקר."
             },
-            "sense_code": "irrigate_plants"
+            "sense_code": "provide_liquid_to_plants"
           },
           {
             "translation": "לדמוע",
@@ -127,13 +119,13 @@ export const recorded: Record<string, LlmTranslation> = {
               "source": "My eyes started to water from the strong wind.",
               "target": "העיניים שלי התחילו לדמוע מהרוח החזקה."
             },
-            "sense_code": "eyes_tear"
+            "sense_code": "produce_tears"
           }
         ]
       }
     ]
   },
-  "friend": {
+  "en-he:friend": {
     "kind": "word",
     "entries": [
       {
@@ -143,24 +135,16 @@ export const recorded: Record<string, LlmTranslation> = {
           {
             "translation": "חבר",
             "example": {
-              "source": "My friend helped me move last weekend.",
-              "target": "החבר שלי עזר לי לעבור דירה בסוף השבוע שעבר."
+              "source": "My friend helped me move.",
+              "target": "חבר שלי עזר לי לעבור דירה."
             },
             "sense_code": "close_acquaintance"
-          },
-          {
-            "translation": "ידיד",
-            "example": {
-              "source": "He is a friend to all animals.",
-              "target": "הוא ידיד של כל בעלי החיים."
-            },
-            "sense_code": "ally_supporter"
           }
         ]
       }
     ]
   },
-  "difficult": {
+  "en-he:difficult": {
     "kind": "word",
     "entries": [
       {
@@ -170,24 +154,32 @@ export const recorded: Record<string, LlmTranslation> = {
           {
             "translation": "קשה",
             "example": {
-              "source": "Learning a new language can be very difficult.",
-              "target": "ללמוד שפה חדשה יכול להיות קשה מאוד."
+              "source": "Learning a new language can be difficult.",
+              "target": "ללמוד שפה חדשה יכול להיות קשה."
             },
-            "sense_code": "hard_to_do_or_understand"
+            "sense_code": "requiring_effort"
           },
           {
-            "translation": "קשה",
+            "translation": "מסובך",
             "example": {
-              "source": "He is a difficult person to work with.",
-              "target": "הוא אדם קשה לעבוד איתו."
+              "source": "It's a difficult problem to solve.",
+              "target": "זו בעיה מסובכת לפתור."
             },
-            "sense_code": "problematic_to_deal_with"
+            "sense_code": "complex_complicated"
+          },
+          {
+            "translation": "בעייתי",
+            "example": {
+              "source": "He can be a difficult person to work with.",
+              "target": "הוא יכול להיות אדם בעייתי לעבוד איתו."
+            },
+            "sense_code": "hard_to_deal_with_person"
           }
         ]
       }
     ]
   },
-  "to remember": {
+  "en-he:to remember": {
     "kind": "word",
     "entries": [
       {
@@ -197,16 +189,24 @@ export const recorded: Record<string, LlmTranslation> = {
           {
             "translation": "לזכור",
             "example": {
-              "source": "I need to remember to buy milk.",
-              "target": "אני צריך לזכור לקנות חלב."
+              "source": "I need to remember to lock the door before I leave.",
+              "target": "אני צריך לזכור לנעול את הדלת לפני שאני יוצא."
             },
-            "sense_code": "recall_information"
+            "sense_code": "retain_in_memory"
+          },
+          {
+            "translation": "להיזכר",
+            "example": {
+              "source": "It's hard to remember exactly what happened that day.",
+              "target": "קשה להיזכר בדיוק מה קרה באותו יום."
+            },
+            "sense_code": "recall_past_event"
           }
         ]
       }
     ]
   },
-  "excuse me": {
+  "en-he:excuse me": {
     "kind": "phrase",
     "entries": [
       {
@@ -225,7 +225,7 @@ export const recorded: Record<string, LlmTranslation> = {
       }
     ]
   },
-  "good morning": {
+  "en-he:good morning": {
     "kind": "phrase",
     "entries": [
       {
@@ -240,7 +240,7 @@ export const recorded: Record<string, LlmTranslation> = {
       }
     ]
   },
-  "thank you very much": {
+  "en-he:thank you very much": {
     "kind": "phrase",
     "entries": [
       {
@@ -251,7 +251,7 @@ export const recorded: Record<string, LlmTranslation> = {
             "translation": "תודה רבה",
             "example": {
               "source": "Thank you very much for your help.",
-              "target": "תודה רבה לך על עזרתך."
+              "target": "תודה רבה על עזרתך."
             },
             "sense_code": "expression_of_gratitude"
           }
@@ -259,7 +259,7 @@ export const recorded: Record<string, LlmTranslation> = {
       }
     ]
   },
-  "How do you do?": {
+  "en-he:How do you do?": {
     "kind": "phrase",
     "entries": [
       {
@@ -268,13 +268,17 @@ export const recorded: Record<string, LlmTranslation> = {
         "senses": [
           {
             "translation": "מה שלומך?",
-            "sense_code": "social_greeting"
+            "example": {
+              "source": "How do you do, Mr. Smith?",
+              "target": "מה שלומך, אדון סמית'?"
+            },
+            "sense_code": "formal_greeting_inquiry"
           }
         ]
       }
     ]
   },
-  "see you later": {
+  "en-he:see you later": {
     "kind": "phrase",
     "entries": [
       {
@@ -282,10 +286,10 @@ export const recorded: Record<string, LlmTranslation> = {
         "part_of_speech": "interjection",
         "senses": [
           {
-            "translation": "להתראות אחר כך",
+            "translation": "נתראה אחר כך",
             "example": {
               "source": "I have to go now, see you later!",
-              "target": "אני חייב ללכת עכשיו, להתראות אחר כך!"
+              "target": "אני חייב ללכת עכשיו, נתראה אחר כך!"
             },
             "sense_code": "farewell_greeting"
           }
@@ -293,7 +297,7 @@ export const recorded: Record<string, LlmTranslation> = {
       }
     ]
   },
-  "Have a nice day!": {
+  "en-he:Have a nice day!": {
     "kind": "phrase",
     "entries": [
       {
@@ -302,13 +306,17 @@ export const recorded: Record<string, LlmTranslation> = {
         "senses": [
           {
             "translation": "שיהיה לך יום נעים!",
-            "sense_code": "wish_good_day"
+            "example": {
+              "source": "I'm leaving now. Have a nice day!",
+              "target": "אני הולך עכשיו. שיהיה לך יום נעים!"
+            },
+            "sense_code": "farewell_greeting"
           }
         ]
       }
     ]
   },
-  "Nice to meet you": {
+  "en-he:Nice to meet you": {
     "kind": "phrase",
     "entries": [
       {
@@ -317,11 +325,229 @@ export const recorded: Record<string, LlmTranslation> = {
         "senses": [
           {
             "translation": "נעים מאוד",
+            "sense_code": "greeting_upon_introduction"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:окно": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "окно",
+        "part_of_speech": "noun",
+        "senses": [
+          {
+            "translation": "חלון",
             "example": {
-              "source": "Hello, I'm Sarah. Nice to meet you.",
-              "target": "שלום, אני שרה. נעים מאוד."
+              "source": "Я открыл окно, чтобы впустить свежий воздух.",
+              "target": "פתחתי את החלון כדי להכניס אוויר צח."
             },
-            "sense_code": "social_greeting"
+            "sense_code": "opening_in_wall"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:книга": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "книга",
+        "part_of_speech": "noun",
+        "senses": [
+          {
+            "translation": "ספר",
+            "example": {
+              "source": "Я читаю интересную книгу.",
+              "target": "אני קורא ספר מעניין."
+            },
+            "sense_code": "bound_pages_for_reading"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:вода": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "вода",
+        "part_of_speech": "noun",
+        "senses": [
+          {
+            "translation": "מים",
+            "example": {
+              "source": "Я пью воду каждый день.",
+              "target": "אני שותה מים כל יום."
+            },
+            "sense_code": "liquid_h2o"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:друг": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "друг",
+        "part_of_speech": "noun",
+        "senses": [
+          {
+            "translation": "חבר",
+            "example": {
+              "source": "Мой лучший друг приехал в гости.",
+              "target": "חברי הטוב ביותר הגיע לבקר."
+            },
+            "sense_code": "close_friend"
+          },
+          {
+            "translation": "ידיד",
+            "example": {
+              "source": "Он был мне другом в путешествии.",
+              "target": "הוא היה לי ידיד במסע."
+            },
+            "sense_code": "companion_or_acquaintance"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:трудный": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "трудный",
+        "part_of_speech": "adjective",
+        "senses": [
+          {
+            "translation": "קשה",
+            "example": {
+              "source": "Это был очень трудный экзамен.",
+              "target": "זו הייתה בחינה קשה מאוד."
+            },
+            "sense_code": "requiring_effort"
+          },
+          {
+            "translation": "מסובך",
+            "example": {
+              "source": "У него трудный характер.",
+              "target": "יש לו אופי מסובך."
+            },
+            "sense_code": "problematic_complicated"
+          },
+          {
+            "translation": "קשה",
+            "example": {
+              "source": "Мы пережили трудные времена.",
+              "target": "עברנו זמנים קשים."
+            },
+            "sense_code": "severe_harsh"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:помнить": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "помнить",
+        "part_of_speech": "verb",
+        "senses": [
+          {
+            "translation": "לזכור",
+            "example": {
+              "source": "Я помню этот день очень хорошо.",
+              "target": "אני זוכר את היום הזה היטב."
+            },
+            "sense_code": "retain_in_memory"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:извините": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "извинить",
+        "part_of_speech": "verb",
+        "senses": [
+          {
+            "translation": "סליחה",
+            "example": {
+              "source": "Извините, вы не могли бы мне помочь?",
+              "target": "סליחה, תוכל לעזור לי?"
+            },
+            "sense_code": "polite_interruption"
+          },
+          {
+            "translation": "סליחה",
+            "example": {
+              "source": "Извините за шум.",
+              "target": "סליחה על הרעש."
+            },
+            "sense_code": "apology"
+          },
+          {
+            "translation": "תסלחו",
+            "example": {
+              "source": "Извините, если я вас обидел.",
+              "target": "תסלחו לי אם פגעתי בכם."
+            },
+            "sense_code": "request_forgiveness"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:доброе утро": {
+    "kind": "phrase",
+    "entries": [
+      {
+        "lemma": "доброе утро",
+        "part_of_speech": "interjection",
+        "senses": [
+          {
+            "translation": "בוקר טוב",
+            "sense_code": "morning_greeting"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:спасибо большое": {
+    "kind": "phrase",
+    "entries": [
+      {
+        "lemma": "спасибо большое",
+        "part_of_speech": "interjection",
+        "senses": [
+          {
+            "translation": "תודה רבה",
+            "example": {
+              "source": "Спасибо большое за вашу помощь!",
+              "target": "תודה רבה על עזרתך!"
+            },
+            "sense_code": "expression_of_gratitude"
+          }
+        ]
+      }
+    ]
+  },
+  "ru-he:до свидания": {
+    "kind": "phrase",
+    "entries": [
+      {
+        "lemma": "до свидания",
+        "part_of_speech": "interjection",
+        "senses": [
+          {
+            "translation": "להתראות",
+            "sense_code": "farewell"
           }
         ]
       }

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { and, eq } from 'drizzle-orm';
 
-import { content, correctAnswerFor, optionsFor } from '../../../src/db/content';
+import { content, correctAnswerFor, optionsFor, recordingKey } from '../../../src/db/content';
 import { recorded } from '../../../src/db/content.generated';
 import {
   questions,
@@ -38,11 +38,11 @@ describe('seedContent', () => {
       for (const entry of content) {
         const rows = await dict.findSensesByForm({
           form: entry.query,
-          languageCode: 'en',
-          userLanguageCode: 'he',
+          languageCode: entry.from,
+          userLanguageCode: entry.to,
         });
         expect(rowsToSenses(rows)).toEqual(
-          flattenEntries(mergeEntries(recorded[entry.query].entries)),
+          flattenEntries(mergeEntries(recorded[recordingKey(entry)].entries)),
         );
       }
     });
@@ -57,15 +57,23 @@ describe('seedContent', () => {
 
     const lexemes = new Set(
       content.flatMap((entry) =>
-        recorded[entry.query].entries.map((e) => `${e.lemma}\u0000${e.part_of_speech}`),
+        recorded[recordingKey(entry)].entries.map((e) => `${e.lemma}\u0000${e.part_of_speech}`),
       ),
     );
     expect(await t.db.select().from(dictLexemes)).toHaveLength(lexemes.size);
   });
 
+  it('seeds ten ru → he questions and thirteen en → he', async () => {
+    const rows = await t.db.select().from(questions);
+    const count = (target: string) =>
+      rows.filter((row) => row.targetLanguage === target && row.userLanguageCode === 'he').length;
+    expect(count('ru')).toBe(10);
+    expect(count('en')).toBe(13);
+  });
+
   it('gives every variant its language and its entry rank', async () => {
     for (const variant of await t.db.select().from(dictVariants)) {
-      expect(variant.languageCode).toBe('en');
+      expect(['en', 'ru']).toContain(variant.languageCode);
       expect(variant.entryRank).toBeGreaterThanOrEqual(0);
       expect(['word', 'phrase', 'sentence']).toContain(variant.kind);
     }
@@ -77,7 +85,7 @@ describe('seedContent', () => {
   // them rather than disappearing.
   it('puts the recorded part of speech on the lexeme and the rank and example on the rendering', async () => {
     const [entry] = content;
-    const recordedEntry = recorded[entry.query].entries[0];
+    const recordedEntry = recorded[recordingKey(entry)].entries[0];
 
     const [lexeme] = await t.db
       .select()
@@ -136,7 +144,7 @@ describe('seedContent', () => {
       // A sense has no rank of its own now, so "entry 0, sense 0" is checked
       // where it is actually recorded: the sense_code the recording listed
       // first, for the entry that variant belongs to.
-      const recordedEntry = recorded[entry.query].entries.find(
+      const recordedEntry = recorded[recordingKey(entry)].entries.find(
         (e) => e.senses[0].sense_code === sense.senseCode,
       );
       expect(recordedEntry).toBeDefined();
@@ -166,7 +174,7 @@ describe('seedContent', () => {
         .where(
           and(
             eq(dictVarTranslations.senseId, question.senseId),
-            eq(dictVarTranslations.userLanguageCode, 'he'),
+            eq(dictVarTranslations.userLanguageCode, entry.to),
           ),
         );
 
@@ -187,10 +195,11 @@ describe('seedContent', () => {
     }
   });
 
-  it('marks every seeded question shared and Hebrew/English', async () => {
+  it('marks every seeded question shared, in a seeded pair', async () => {
     for (const row of await t.db.select().from(questions)) {
       expect(row.userId).toBeNull();
-      expect(row.targetLanguage).toBe('en');
+      expect(row.enrollmentId).toBeNull();
+      expect(['en', 'ru']).toContain(row.targetLanguage);
       expect(row.userLanguageCode).toBe('he');
       expect(row.type).toBe('multiple_choice');
     }
@@ -221,7 +230,7 @@ describe('seedContent', () => {
       .where(eq(dictVariants.form, 'to remember'));
     const [term] = await t.db.select().from(dictLexemes).where(eq(dictLexemes.id, variant.lexemeId));
 
-    expect(term.lemma).toBe(recorded['to remember'].entries[0].lemma);
+    expect(term.lemma).toBe(recorded['en-he:to remember'].entries[0].lemma);
     expect(term.lemma).not.toBe('to remember');
   });
 

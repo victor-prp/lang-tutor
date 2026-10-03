@@ -21,7 +21,9 @@ describe('loadQuestionPool', () => {
   it('returns every shared question for the language pair', async () => {
     await withTx(t.db, async (tx) => {
       const pool = await createQuestionRepo(tx).loadQuestionPool('en', 'he', { userId: 'u_1', enrollmentId: enrollmentOf('u_1') });
-      expect(pool).toHaveLength(content.length);
+      expect(pool).toHaveLength(
+        content.filter((entry) => entry.from === 'en' && entry.to === 'he').length,
+      );
     });
   });
 

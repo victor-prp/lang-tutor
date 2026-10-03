@@ -55,8 +55,8 @@ describe('reseedContent', () => {
       const rows = await withTx(t.db, (tx) =>
         createDictRepo(tx).findSensesByForm({
           form: entry.query,
-          languageCode: 'en',
-          userLanguageCode: 'he',
+          languageCode: entry.from,
+          userLanguageCode: entry.to,
         }),
       );
       expect(rows.length).toBeGreaterThanOrEqual(1);

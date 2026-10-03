@@ -93,10 +93,27 @@ describe('POST /api/sessions', () => {
   it("draws each enrollment's own pair for one learner holding two", async () => {
     await seedEnrollment(t.db, { id: 'e_u_1_ru', userId: 'u_1', targetLanguage: 'ru' });
     const app = buildTestApp();
-    // Until Task 7 seeds Russian, the ru pool is empty: the 409 is the proof the
-    // pool is keyed by the enrollment's pair and not by the learner.
-    expect((await postJson(app, '/api/sessions', { enrollment_id: 'e_u_1_ru' })).status).toBe(409);
-    expect((await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).status).toBe(200);
+    // The pool is keyed by the enrollment's pair and not by the learner: each
+    // session is walked to the end and every prompt is in its own pair's script.
+    const walk = async (enrollmentId: string, script: RegExp) => {
+      const started = await postJson(app, '/api/sessions', { enrollment_id: enrollmentId });
+      expect(started.status).toBe(200);
+      let current = await started.json();
+      for (let i = 0; i < 10; i++) {
+        expect(current.question.question).toMatch(script);
+        current = await (
+          await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
+            user_id: 'u_1',
+            question_id: current.question.id,
+            option_index: current.question.correct_option,
+          })
+        ).json();
+      }
+      expect(current.complete).toBe(true);
+    };
+
+    await walk('e_u_1_ru', /^\p{Script=Cyrillic}[\p{Script=Cyrillic} ]*$/u);
+    await walk(enrollmentOf('u_1'), /^[A-Za-z][A-Za-z ?!']*$/);
   });
 });
 
