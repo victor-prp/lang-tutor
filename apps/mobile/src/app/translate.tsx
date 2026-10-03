@@ -99,10 +99,13 @@ export default function TranslateScreen() {
 
       {t.status === 'empty' ? (
         <View testID="translate-empty" style={styles.notice}>
+          {/* The languages come from the answer, not from t.direction: the
+              top flip changes the direction without a new lookup, and the
+              notice describes the lookup that was refused. */}
           {t.result?.reason === 'wrong_direction' ? (
             <>
               <Text style={styles.noticeText}>
-                {strings.translateWrongDirection(strings.languageName(t.direction.to))}
+                {strings.translateWrongDirection(strings.languageName(t.result.to))}
               </Text>
               <Pressable
                 accessibilityRole="button"
@@ -114,7 +117,7 @@ export default function TranslateScreen() {
             </>
           ) : t.result?.reason === 'out_of_pair' ? (
             <Text testID="translate-out-of-pair" style={styles.noticeText}>
-              {strings.translateOutOfPair(strings.languageName(t.direction.from))}
+              {strings.translateOutOfPair(strings.languageName(t.result.from))}
             </Text>
           ) : (
             <Text style={styles.noticeText}>{strings.translateEmpty}</Text>
