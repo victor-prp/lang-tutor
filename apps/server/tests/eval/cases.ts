@@ -360,6 +360,40 @@ export const CASES: EvalCase[] = [
     acceptTop: ['עץ אשוח', 'אשוח', 'עץ חג המולד'],
     expectCorrection: 'ёлка',
   },
+  // The counterweight to `елка`, as `running`, `booked` and `colour` are to
+  // phase 13's correction rule. Each is a real word in its е spelling with a ё
+  // twin — все/всё, берет/берёт, небо/нёбо — so a ё rule that misfires here
+  // writes a permanent redirect away from a correctly spelled word.
+  {
+    label: 'ru: an е spelling that is itself a word is not a missing ё (все)',
+    text: 'все',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['כולם', 'הכל', 'הכול', 'כל'],
+    expectNoCorrection: true,
+  },
+  // Both readings are real: the noun "beret" and the verb берёт's е twin is
+  // the noun itself, so either top answer is acceptable — what is scored is
+  // that no correction is offered.
+  {
+    label: 'ru: an е spelling that is itself a word is not a missing ё (берет)',
+    text: 'берет',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['כומתה', 'לוקח', 'לוקחת'],
+    expectNoCorrection: true,
+  },
+  {
+    label: 'ru: an е spelling that is itself a word is not a missing ё (небо)',
+    text: 'небо',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['שמיים', 'שמים'],
+    expectNoCorrection: true,
+  },
   {
     label: 'ru: a same-script word of another language is not Russian',
     text: 'дякую',
