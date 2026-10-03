@@ -403,6 +403,45 @@ export const CASES: EvalCase[] = [
     acceptTop: [],
     expectEmpty: true,
   },
+  // The other side of `дякую`. The third-language rule first shipped without
+  // its borrowing clause and turned these from translated to empty under en → he,
+  // breaking learners who already used them: English uses them, but they are
+  // French and German by origin. Hebrew slang is the same check in the other
+  // direction — `סבבה` and `יאללה` are Arabic by origin and Hebrew by use.
+  {
+    label: 'a loan phrase in common use is the source language (déjà vu)',
+    text: 'déjà vu',
+    expectKind: 'phrase',
+    acceptTop: ["דז'", 'דז׳'],
+  },
+  {
+    label: 'a loanword in common use is the source language (schadenfreude)',
+    text: 'schadenfreude',
+    expectKind: 'word',
+    acceptTop: ['שמחה לאיד'],
+  },
+  {
+    label: 'a loan phrase in common use is the source language (bon appétit)',
+    text: 'bon appétit',
+    expectKind: 'phrase',
+    acceptTop: ['בתאבון', 'בתיאבון'],
+  },
+  {
+    label: 'he → en: Hebrew slang of Arabic origin is Hebrew (סבבה)',
+    text: 'סבבה',
+    from: 'he',
+    to: 'en',
+    expectKind: 'word',
+    acceptTop: ['ok', 'OK', 'Ok', 'cool', 'Cool', 'fine', 'great', 'alright', 'all right', 'sure'],
+  },
+  {
+    label: 'he → en: Hebrew slang of Arabic origin is Hebrew (יאללה)',
+    text: 'יאללה',
+    from: 'he',
+    to: 'en',
+    expectKind: 'word',
+    acceptTop: ['come on', 'Come on', "let's go", "Let's go", 'go', 'hurry', 'yalla'],
+  },
   {
     label: 'he → ru: a Hebrew word rendered in Russian',
     text: 'חלון',

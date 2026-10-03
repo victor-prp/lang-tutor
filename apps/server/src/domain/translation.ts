@@ -319,10 +319,18 @@ export function buildPrompt(input: {
     // plausibly intending its Russian equivalent and returned a correction to
     // `спасибо` with a translation — the correction rules below are what it
     // followed, so this has to say outright that they do not apply.
-    `The input is meant to be ${source.name}. A word of a third language, neither ${source.name}`,
-    `nor ${target.name}, is not a word in either language even when it is written in the`,
-    `${source.name} script, and it is not a misspelling of its ${source.name} equivalent:`,
-    'return an empty entries array and omit `correction` rather than translating it.',
+    //
+    // The borrowing clause came after, and is measured too: the rule alone
+    // turned `déjà vu`, `schadenfreude` and `bon appétit` under en → he from
+    // translated into empty — English uses them, but they are "of" French and
+    // German. "belongs only to" is the line between a loanword and `дякую`.
+    `The input is meant to be ${source.name}. A word or expression borrowed from another`,
+    `language that is in common use in ${source.name}, a loanword or loan phrase, is`,
+    `${source.name}: translate it as usual. A word that belongs only to a third language,`,
+    `neither ${source.name} nor ${target.name}, is not a word in either language even when it`,
+    `is written in the ${source.name} script, and it is not a misspelling of its`,
+    `${source.name} equivalent: return an empty entries array and omit \`correction\` rather`,
+    'than translating it.',
     // Phase 13. REPLACED, not supplemented. Left standing beside the correction
     // rules below it is a flat contradiction about exactly the input this phase
     // exists for: `thruot` is not a word in either language, so the old wording
