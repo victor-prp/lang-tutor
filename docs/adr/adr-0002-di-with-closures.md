@@ -51,9 +51,9 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   factory's return shape still satisfies `tsc` at every call site, so a regex can't
   distinguish "derived" from "coincidentally identical." Enforced by review; the list of
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
-  `createHealthRepo`, `createUserRepo`, `createDictRepo`, `createTransaction`, `createSessionService`,
-  `createUserService`, `createGeminiClient`, `createTranslationService`, `createServerDeps`,
-  `createApiClient`, `createRememberedUsernameStore`) is short enough to spot-check.
+  `createHealthRepo`, `createUserRepo`, `createEnrollmentRepo`, `createDictRepo`, `createTransaction`, `createSessionService`,
+  `createUserService`, `createEnrollmentService`, `createGeminiClient`, `createTranslationService`, `createServerDeps`,
+  `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`) is short enough to spot-check.
   `createGeminiClient` is annotated at its call site in `composition.ts` rather than at its
   definition, because ADR 0001 R10 forbids `providers/` from importing the contract it
   satisfies — the same arrangement as `createTransaction` and `Transaction`.
