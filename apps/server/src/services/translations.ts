@@ -8,6 +8,7 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { guardScript } from '../domain/languages';
 import {
   buildPrompt,
   buildRenderingPrompt,
@@ -406,6 +407,15 @@ export function createTranslationService({
       const text = input.text.trim();
       const { from, to } = input;
       const form = normalizeForm(text);
+
+      // Phase 16, spec §3. Before any read or model call: input whose letters are
+      // all in `to`'s script, or in neither language's, is answered here, so
+      // nothing it could have provoked reaches the shared dictionary.
+      const verdict = guardScript(form, from, to);
+      if (verdict !== 'pass') {
+        logger.info({ event: 'translation_guarded', from, to, reason: verdict });
+        return { text, from, to, kind: resolveKind(text, 'word'), senses: [], reason: verdict };
+      }
 
       // Step 1 of the flow. The hot path: a correctly spelled word resolves here
       // exactly as it does today, repair included, and pays nothing for this phase.

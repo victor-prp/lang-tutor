@@ -970,3 +970,47 @@ describe('the corrected-form probe', () => {
     expect(dict.reads).toHaveLength(1);
   });
 });
+
+describe('the script guard', () => {
+  it('answers Hebrew typed under ru → he as a wrong direction, with no read and no call', async () => {
+    const { service, llm, dict, logger } = serviceWith('must not be called');
+
+    const answer = await service.translate({ text: 'חלון', from: 'ru', to: 'he' });
+
+    expect(answer).toEqual({
+      text: 'חלון',
+      from: 'ru',
+      to: 'he',
+      kind: 'word',
+      senses: [],
+      reason: 'wrong_direction',
+    });
+    expect(llm.calls).toHaveLength(0);
+    expect(dict.reads).toHaveLength(0);
+    expect(logger.events).toContainEqual({
+      event: 'translation_guarded',
+      from: 'ru',
+      to: 'he',
+      reason: 'wrong_direction',
+    });
+  });
+
+  it('answers Latin typed under ru → he as out of pair', async () => {
+    const { service, llm, dict } = serviceWith('must not be called');
+
+    const answer = await service.translate({ text: 'window', from: 'ru', to: 'he' });
+
+    expect(answer.reason).toBe('out_of_pair');
+    expect(answer.senses).toEqual([]);
+    expect(llm.calls).toHaveLength(0);
+    expect(dict.reads).toHaveLength(0);
+  });
+
+  it('lets letterless input through to the normal path', async () => {
+    const { service, dict } = serviceWith('must not be called');
+
+    await service.translate({ text: '100%', from: 'en', to: 'he' }).catch(() => undefined);
+
+    expect(dict.reads.length).toBeGreaterThan(0);
+  });
+});

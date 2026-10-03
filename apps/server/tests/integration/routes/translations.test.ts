@@ -374,3 +374,24 @@ describe('POST /api/translations', () => {
     expect(body.senses[0].translation).toBe('גרון');
   });
 });
+
+describe('the script guard over the wire', () => {
+  it.each([
+    ['חלון', 'wrong_direction'],
+    ['window', 'out_of_pair'],
+  ])('answers %s under ru → he with reason %s and calls no model', async (text, reason) => {
+    const res = await translate({ text, from: 'ru', to: 'he' });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ from: 'ru', to: 'he', senses: [], reason });
+    expect(await countGeminiRequests(ns)).toBe(0);
+  });
+
+  it('refuses en ↔ ru with the standard 400 and calls no model', async () => {
+    const res = await translate({ text: 'window', from: 'en', to: 'ru' });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+    expect(await countGeminiRequests(ns)).toBe(0);
+  });
+});
