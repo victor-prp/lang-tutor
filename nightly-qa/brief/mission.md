@@ -77,6 +77,10 @@ Reading it first saves you the night. These are problems someone has already bee
 about, so do not spend your budget re-finding them. If you happen to pass one, a single
 line in the report saying it still reproduces is worth more than a finding.
 
+Issues labelled `known-issue` have been looked at and accepted: they wait for a UI
+redesign. Spend no turns re-establishing them. If you pass one anyway, match it as usual
+so it is recorded; that sighting is how a known issue that has got worse gets noticed.
+
 Reading it again at the end is the deduplication pass, and it is the part that keeps the
 tracker worth reading. For **every** finding, add a `match` field:
 
