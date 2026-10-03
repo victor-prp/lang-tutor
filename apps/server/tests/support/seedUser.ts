@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm';
+
 import type { Db } from '../../src/db/client';
-import { enrollments, users } from '../../src/db/schema';
+import { enrollments, sessions, users } from '../../src/db/schema';
 
 /** The id seedUser gives its learner's English enrollment. */
 export function enrollmentOf(userId: string): string {
@@ -58,4 +60,18 @@ export async function seedLegacyLearner(db: Db): Promise<{ enrollmentId: string 
     .values({ id: 'e_legacy', userId: 'u_legacy', sourceLanguage: 'en', targetLanguage: 'he' })
     .onConflictDoNothing();
   return { enrollmentId: 'e_legacy' };
+}
+
+/**
+ * The enrollment a session row is attributed to, read straight from
+ * `sessions.enrollment_id` — nothing on the wire echoes it. Here for the same
+ * reason as seedLegacyLearner: route tests may not reach the database
+ * themselves (ADR 0001).
+ */
+export async function enrollmentOfSession(db: Db, sessionId: string): Promise<string | undefined> {
+  const [row] = await db
+    .select({ enrollmentId: sessions.enrollmentId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId));
+  return row?.enrollmentId;
 }

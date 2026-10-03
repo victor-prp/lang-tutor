@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 
 import {
   enrollmentOf,
+  enrollmentOfSession,
   seedEnrollment,
   seedLegacyLearner,
   seedUser,
@@ -94,11 +95,15 @@ describe('POST /api/sessions', () => {
     await seedEnrollment(t.db, { id: 'e_u_1_ru', userId: 'u_1', targetLanguage: 'ru' });
     const app = buildTestApp();
     // The pool is keyed by the enrollment's pair and not by the learner: each
-    // session is walked to the end and every prompt is in its own pair's script.
+    // session is walked to the end, every prompt is in its own pair's script,
+    // and each session's row names the enrollment that started it.
     const walk = async (enrollmentId: string, script: RegExp) => {
       const started = await postJson(app, '/api/sessions', { enrollment_id: enrollmentId });
       expect(started.status).toBe(200);
       let current = await started.json();
+      // Spec §6: each session is attributed to its own enrollment, not merely
+      // drawn from its pair.
+      expect(await enrollmentOfSession(t.db, current.session_id)).toBe(enrollmentId);
       for (let i = 0; i < 10; i++) {
         expect(current.question.question).toMatch(script);
         current = await (
