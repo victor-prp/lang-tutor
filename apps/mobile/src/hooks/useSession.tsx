@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { Alert } from 'react-native';
 
-import type { ApiClient } from '@/api/client';
+import { ApiError, type ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { strings } from '@/strings';
 
@@ -58,13 +58,13 @@ type QuizState = {
 
 const SessionContext = createContext<SessionValue | null>(null);
 
-function handleApiFailure() {
+function handleApiFailure(message: string = strings.errorMessage) {
   // cancelable: false — Android otherwise lets the back button or a tap
   // outside dismiss this without invoking onPress, which would strand the
   // learner on a dead session screen with no way to get home.
   Alert.alert(
     strings.errorTitle,
-    strings.errorMessage,
+    message,
     [{ text: strings.errorAction, onPress: () => router.replace('/') }],
     { cancelable: false },
   );
@@ -98,7 +98,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // but the server is now the source of truth for progress and scoring.
   const [state, setState] = useState<QuizState | null>(null);
 
-  const { user } = useCurrentUser();
+  const { user, active } = useCurrentUser();
 
   // A ref, matching this file's existing stateRef idiom, so start()'s empty
   // dependency array stays correct: the callback must read the user who is
@@ -107,6 +107,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   // Mirrors `state` for use inside async callbacks that resolve after a
   // render has moved on (e.g. select()'s nextStep().catch()), where the
@@ -145,11 +150,13 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     void (async () => {
       try {
         const currentUser = userRef.current;
-        // Unreachable in practice — Home redirects to /login when logged out —
-        // but a session with no learner must fail loudly, not invent an id.
-        if (!currentUser) throw new Error('cannot start a session with no current user');
+        const enrollment = activeRef.current;
+        // Unreachable in practice — Home redirects to /login when logged out and
+        // to /enroll with no enrollment — but a session with no learner must fail
+        // loudly, not invent an id.
+        if (!currentUser || !enrollment) throw new Error('cannot start a session with no active enrollment');
         const userId = currentUser.id;
-        const response = await api.createSession({ user_id: userId });
+        const response = await api.createSession({ enrollment_id: enrollment.id });
         setState({
           sessionId: response.session_id,
           userId,
@@ -163,8 +170,10 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
           queued: null,
           advanceRequested: false,
         });
-      } catch {
-        handleApiFailure();
+      } catch (error) {
+        handleApiFailure(
+          error instanceof ApiError && error.status === 409 ? strings.sessionNoQuestions : undefined,
+        );
       }
     })();
   }, []);

@@ -8,10 +8,13 @@
 // Android, which is exactly how this shipped broken the first time.
 const isolateLtr = (text: string) => `\u2066${text}\u2069`;
 
+const LANGUAGE_NAMES: Record<string, string> = { he: 'עברית', en: 'אנגלית', ru: 'רוסית' };
+const languageName = (code: string): string => LANGUAGE_NAMES[code] ?? code;
+
 export const strings = {
   appTitle: 'lang tutor',
   homeSubtitle: 'תרגול אוצר מילים',
-  homeSetLabel: (count: number) => `${count} מילים באנגלית`,
+  homeSetLabel: (count: number, language: string) => `${count} מילים ב${language}`,
   start: 'התחל',
   questionInstruction: 'מה הפירוש?',
   progressLabel: (position: number, total: number) => isolateLtr(`${position} / ${total}`),
@@ -42,11 +45,20 @@ export const strings = {
   onboardingTargetLabel: 'שפה נלמדת',
   onboardingSubmit: 'יצירה',
   onboardingIncomplete: 'יש למלא את כל השדות',
-  onboardingSameLanguage: 'שפת האם והשפה הנלמדת חייבות להיות שונות',
   onboardingUsernameTaken: 'שם המשתמש כבר תפוס',
   onboardingRejected: 'אחד הפרטים אינו תקין',
   onboardingFailed: 'היצירה נכשלה, נסו שוב',
-  languageName: (code: string) => (code === 'he' ? 'עברית' : code === 'en' ? 'אנגלית' : code),
+  languageName,
+  learningLabel: (language: string) => `לומד/ת: ${language}`,
+  addLanguage: 'הוספת שפה',
+  enrollTitle: 'בחירת שפה ללימוד',
+  enrollExplanation: 'ההסברים יהיו בעברית',
+  enrollSubmit: 'התחלה',
+  enrollFailed: 'ההרשמה נכשלה, נסו שוב',
+  sessionNoQuestions: 'אין עדיין שאלות בשפה הזו',
+  translateWrongDirection: (language: string) => `נראה שזו מילה ב${language}`,
+  translateFlipRetry: 'החלף כיוון',
+  translateOutOfPair: (language: string) => `זו לא מילה ב${language}`,
   profileTitle: 'הפרופיל שלי',
   profileNameLabel: 'שם',
   profileAgeLabel: 'גיל',
@@ -56,8 +68,7 @@ export const strings = {
   translateTitle: 'תרגום',
   translatePlaceholder: 'מלה או ביטוי…',
   translateAction: 'תרגם',
-  translateDirection: (direction: string) =>
-    direction === 'he_en' ? 'מעברית לאנגלית' : 'מאנגלית לעברית',
+  translateDirection: (from: string, to: string) => `מ${languageName(from)} ל${languageName(to)}`,
   translateFlip: '⇄ החלף',
   translateTopSense: 'המשמעות הנפוצה',
   // Every sense is on screen, so this line is an orientation aid rather than a
