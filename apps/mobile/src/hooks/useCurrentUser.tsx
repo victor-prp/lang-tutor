@@ -59,30 +59,35 @@ export function CurrentUserProvider({
   // `user` first, so setting it early would flash home before the enroll
   // screen for a learner with none.
   const adopt = useCallback(
-    async (next: User) => {
-      const [list, rememberedId] = await Promise.all([
-        api.listEnrollments(next.id),
-        enrollmentStore.read(next.username),
-      ]);
+    async (next: User, list: Enrollment[], rememberedId: string | null) => {
       setEnrollments(list);
       setActiveId(chooseActive(list, rememberedId)?.id ?? null);
       setUser(next);
       setRememberedUsername(next.username);
       await usernameStore.write(next.username);
     },
-    [api, usernameStore, enrollmentStore],
+    [usernameStore],
   );
 
   const login = useCallback(
     async (username: string) => {
-      await adopt(await api.login({ username }));
+      const next = await api.login({ username });
+      const [list, rememberedId] = await Promise.all([
+        api.listEnrollments(next.id),
+        enrollmentStore.read(next.username),
+      ]);
+      await adopt(next, list, rememberedId);
     },
-    [api, adopt],
+    [api, enrollmentStore, adopt],
   );
 
+  // A user createUser just returned has no enrollments by definition, so there
+  // is nothing to fetch. Fetching anyway would let a failed list call leave the
+  // account created but the learner on the form, where a retry is a 409
+  // "username taken" rather than a hint to log in.
   const register = useCallback(
     async (input: CreateUserRequest) => {
-      await adopt(await api.createUser(input));
+      await adopt(await api.createUser(input), [], null);
     },
     [api, adopt],
   );
