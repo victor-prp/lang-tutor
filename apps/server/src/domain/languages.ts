@@ -121,5 +121,5 @@ export function isInScript(text: string, code: LanguageCode): boolean {
  * correction path rather than folded here.
  */
 export function stripStress(text: string): string {
-  return text.replace(/(\p{Script=Cyrillic})́/gu, '$1');
+  return text.replace(/(\p{Script=Cyrillic})\u0301/gu, '$1');
 }

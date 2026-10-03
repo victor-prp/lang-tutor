@@ -126,7 +126,10 @@ export function CurrentUserProvider({
   const switchTo = useCallback(
     (enrollmentId: string) => {
       setActiveId(enrollmentId);
-      if (user) void enrollmentStore.write(user.username, enrollmentId);
+      // The switch has already happened; failing to remember it only costs
+      // the choice at the next launch, so a storage failure is swallowed
+      // rather than left as an unhandled rejection.
+      if (user) enrollmentStore.write(user.username, enrollmentId).catch(() => {});
     },
     [user, enrollmentStore],
   );

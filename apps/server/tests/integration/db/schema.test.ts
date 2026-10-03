@@ -85,7 +85,7 @@ const VALID_OPTIONS = [
 ];
 
 describe('the migrated schema', () => {
-  it('creates all ten tables', async () => {
+  it('creates every table in TABLES', async () => {
     const result = await db.execute<{ table_name: string }>(sql`
       select table_name from information_schema.tables where table_schema = 'public'
     `);

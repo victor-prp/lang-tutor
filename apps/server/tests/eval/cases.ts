@@ -373,9 +373,10 @@ export const CASES: EvalCase[] = [
     acceptTop: ['כולם', 'הכל', 'הכול', 'כל'],
     expectNoCorrection: true,
   },
-  // Both readings are real: the noun "beret" and the verb берёт's е twin is
-  // the noun itself, so either top answer is acceptable — what is scored is
-  // that no correction is offered.
+  // `берет` is itself a word — the noun "beret" — and is also how `берёт`
+  // ("takes") is spelled with its ё written as е. Both readings are real, so
+  // either top answer is acceptable; what is scored is that no correction is
+  // offered.
   {
     label: 'ru: an е spelling that is itself a word is not a missing ё (берет)',
     text: 'берет',
