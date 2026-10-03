@@ -7,6 +7,8 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { stripStress } from './languages';
+
 /**
  * The pure core of the dictionary: how a model's entries become rows, how rows
  * become a response, and how a form is normalized before either happens.
@@ -51,7 +53,10 @@ function toResponseSense(sense: LlmSense, partOfSpeech: PartOfSpeech): Translati
  */
 export function mergeEntries(entries: LlmEntry[]): LlmEntry[] {
   const byLexeme = new Map<string, LlmEntry>();
-  for (const entry of entries) {
+  for (const raw of entries) {
+    // Phase 16. The lemma becomes half of dict_lexemes' unique key, so a stress
+    // mark the model added despite the prompt would be a second lexeme forever.
+    const entry = { ...raw, lemma: stripStress(raw.lemma) };
     const key = `${entry.lemma} ${entry.part_of_speech}`;
     const existing = byLexeme.get(key);
     if (existing) existing.senses = [...existing.senses, ...entry.senses];
@@ -94,7 +99,9 @@ export function flattenEntries(entries: LlmEntry[]): TranslationSense[] {
  * turns a hit into a silent miss.
  */
 export function normalizeForm(text: string): string {
-  const collapsed = text.trim().replace(/\s+/g, ' ');
+  // Phase 16. Stress first, before the single-token check, because a multi-word
+  // expression returns early below and must lose its stress marks too.
+  const collapsed = stripStress(text.trim().replace(/\s+/g, ' '));
 
   // A multi-word expression keeps its punctuation: it is part of the
   // expression, and two seeded ones — `How do you do?` and `Have a nice day!` —
