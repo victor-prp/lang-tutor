@@ -28,7 +28,11 @@ export function createSessionRepo(tx: Tx) {
      * `option_order` — unambiguous because `question_options_valid` guarantees
      * distinct texts within a question.
      */
-    insertSession: async (userId: string, picked: Question[]): Promise<string> => {
+    insertSession: async (
+      userId: string,
+      enrollmentId: string,
+      picked: Question[],
+    ): Promise<string> => {
       const rows = await tx
         .select({ id: questions.id, options: questions.options })
         .from(questions)
@@ -42,7 +46,10 @@ export function createSessionRepo(tx: Tx) {
         rows.map((row) => [row.id, canonicalOptions(row.options)]),
       );
 
-      const [session] = await tx.insert(sessions).values({ userId }).returning({ id: sessions.id });
+      const [session] = await tx
+        .insert(sessions)
+        .values({ userId, enrollmentId })
+        .returning({ id: sessions.id });
 
       await tx.insert(sessionQuestions).values(
         picked.map((question, position) => {

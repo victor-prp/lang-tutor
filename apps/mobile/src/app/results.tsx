@@ -57,7 +57,10 @@ export default function ResultsScreen() {
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.replace('/')}
+          // dismissTo, not replace: Results sits on top of the home that
+          // started the session, and replacing it would leave that home
+          // stale underneath a second one.
+          onPress={() => router.dismissTo('/')}
           style={styles.secondary}
         >
           <Text style={styles.secondaryLabel}>{strings.done}</Text>

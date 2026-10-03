@@ -2,11 +2,14 @@ import type { z } from 'zod';
 
 import type {
   AnswerRecordSchema,
+  CreateEnrollmentRequestSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   CreateUserRequestSchema,
+  EnrollmentSchema,
   ErrorSchema,
   HealthResponseSchema,
+  LanguageCodeSchema,
   LlmCorrectionSchema,
   LlmEntrySchema,
   LlmReconciliationSchema,
@@ -23,7 +26,7 @@ import type {
   QuestionSchema,
   ScoreSchema,
   TranslationCorrectionSchema,
-  TranslationDirectionSchema,
+  TranslationGuardReasonSchema,
   TranslationKindSchema,
   TranslationRequestSchema,
   TranslationResponseSchema,
@@ -55,7 +58,7 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type User = z.infer<typeof UserSchema>;
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
-export type TranslationDirection = z.infer<typeof TranslationDirectionSchema>;
+export type TranslationGuardReason = z.infer<typeof TranslationGuardReasonSchema>;
 export type TranslationKind = z.infer<typeof TranslationKindSchema>;
 export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;
 export type TranslationSense = z.infer<typeof TranslationSenseSchema>;
@@ -68,3 +71,6 @@ export type LlmSense = z.infer<typeof LlmSenseSchema>;
 export type LlmEntry = z.infer<typeof LlmEntrySchema>;
 export type LlmRendering = z.infer<typeof LlmRenderingSchema>;
 export type LlmReconciliation = z.infer<typeof LlmReconciliationSchema>;
+export type Enrollment = z.infer<typeof EnrollmentSchema>;
+export type CreateEnrollmentRequest = z.infer<typeof CreateEnrollmentRequestSchema>;
+export type LanguageCode = z.infer<typeof LanguageCodeSchema>;

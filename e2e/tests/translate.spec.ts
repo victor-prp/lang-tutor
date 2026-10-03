@@ -308,7 +308,7 @@ test('a misspelling shows the correction, and an alternative can be tapped', asy
 // submit is the reverse lookup rather than a repeat of the first one — which is
 // what the nightly QA agent caught (#29): a label that flipped, an input that
 // did not, and a resubmit that quietly went back the way it came.
-const directionLabel = (page: Page) => page.getByText(/^מ(אנגלית לעברית|עברית לאנגלית)$/);
+const directionLabel = (page: Page) => page.getByTestId('translate-direction');
 
 test('swapping direction puts the translation in the box and looks it up in reverse', async ({
   page,

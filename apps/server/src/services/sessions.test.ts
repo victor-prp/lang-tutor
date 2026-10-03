@@ -5,6 +5,7 @@ import { testRng } from '../../tests/support/testRng';
 import { SessionNotFound } from '../errors';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
+import type { EnrollmentRepo } from '../repo/enrollments';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
 import { createSessionService, type Transaction } from './sessions';
@@ -48,6 +49,20 @@ describe('repos', () => {
     },
   };
 
+  // The submit-answer cases never reach it; startSession is the one use case
+  // that does, and it is covered against real Postgres.
+  const enrollmentRepo: EnrollmentRepo = {
+    insertEnrollment: () => {
+      throw new Error('the session service must not create an enrollment');
+    },
+    listByUser: () => {
+      throw new Error('the session service must not list enrollments');
+    },
+    findById: () => {
+      throw new Error('the submit-answer use case must not read an enrollment');
+    },
+  };
+
   // Bound into the same transaction since phase 10, and untouched by these use
   // cases: reaching it here would mean the session service grew a second job.
   const dictRepo: DictRepo = {
@@ -78,7 +93,14 @@ describe('repos', () => {
   };
 
   function fakeTransaction(session: SessionRepo): Transaction {
-    return (run) => run({ session, question: questionRepo, user: userRepo, dict: dictRepo });
+    return (run) =>
+      run({
+        session,
+        question: questionRepo,
+        user: userRepo,
+        enrollment: enrollmentRepo,
+        dict: dictRepo,
+      });
   }
 
   it('throws SessionNotFound when the repository reports no such session', async () => {

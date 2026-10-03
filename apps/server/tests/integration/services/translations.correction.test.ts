@@ -99,9 +99,9 @@ describe('a corrected lookup, against a real database', () => {
       matchText: '"pledeg"',
     });
     const service = translations();
-    await service.translate({ text: 'pledge' });
+    await service.translate({ text: 'pledge', from: 'en', to: 'he' });
 
-    await expect(service.translate({ text: 'pledeg' })).rejects.toThrow();
+    await expect(service.translate({ text: 'pledeg', from: 'en', to: 'he' })).rejects.toThrow();
 
     expect(await readDictCorrections(t.db)).toHaveLength(0);
     expect(await countDictVariants(t.db, 'pledged')).toBe(0);
@@ -121,14 +121,14 @@ describe('a corrected lookup, against a real database', () => {
     });
     const service = translations();
 
-    await service.translate({ text: 'thruot' });
+    await service.translate({ text: 'thruot', from: 'en', to: 'he' });
     // The dictionary is truncated under the redirect's feet. CASCADE reaches the
     // variant, the senses and the translations; the redirect survives, because
     // nothing references it.
     await deleteLexemeByLemma(t.db, 'throat');
 
-    const recovered = await service.translate({ text: 'thruot' });
-    const third = await service.translate({ text: 'thruot' });
+    const recovered = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
+    const third = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
 
     expect(recovered.senses).toEqual(third.senses);
     // Two model calls, not three: the first lookup and the recovery. The third is
@@ -158,7 +158,7 @@ describe('a corrected lookup, against a real database', () => {
     // only the two expectations the brief lists, the direct `booked` call's
     // own reconciliation call matches the plain `"booked"` expectation below
     // (first-matching-wins) and throws TranslationUnreadable inside
-    // `reconcile`, failing `service.translate({ text: 'booked' })` itself —
+    // `reconcile`, failing `service.translate({ text: 'booked', from: 'en', to: 'he' })` itself —
     // never reaching the `bokked` probe this test is actually about.
     // Registered first, per the file's own rule: MockServer takes the first
     // matching expectation, and this reconciliation call's body also carries
@@ -178,13 +178,13 @@ describe('a corrected lookup, against a real database', () => {
       matchText: '"bokked"',
     });
     const service = translations();
-    const direct = await service.translate({ text: 'booked' });
+    const direct = await service.translate({ text: 'booked', from: 'en', to: 'he' });
 
     const variantsBefore = await countDictVariants(t.db);
     const sensesBefore = await countDictSenses(t.db);
     const translationsBefore = await countDictVarTranslations(t.db);
 
-    const corrected = await service.translate({ text: 'bokked' });
+    const corrected = await service.translate({ text: 'bokked', from: 'en', to: 'he' });
 
     expect(await countGeminiRequests(ns, '"bokked"')).toBe(1);
     expect(await countDictVariants(t.db)).toBe(variantsBefore);
@@ -246,11 +246,11 @@ describe('a corrected lookup, against a real database', () => {
       matchText: '"mintd"',
     });
     const service = translations();
-    await service.translate({ text: 'minted' });
-    await service.translate({ text: 'mint' }); // teaches the lexeme a third sense
+    await service.translate({ text: 'minted', from: 'en', to: 'he' });
+    await service.translate({ text: 'mint', from: 'en', to: 'he' }); // teaches the lexeme a third sense
 
-    const corrected = await service.translate({ text: 'mintd' });
-    const direct = await service.translate({ text: 'minted' });
+    const corrected = await service.translate({ text: 'mintd', from: 'en', to: 'he' });
+    const direct = await service.translate({ text: 'minted', from: 'en', to: 'he' });
 
     // Call 1 for `mintd`, and the repair — whose prompt's user part is `minted`,
     // so it is not counted here.
@@ -284,7 +284,7 @@ describe('a corrected lookup, against a real database', () => {
       matchText: '"thruot"',
     });
     const service = translations();
-    await service.translate({ text: 'throat' });
+    await service.translate({ text: 'throat', from: 'en', to: 'he' });
     await insertCorrection(t.db, {
       languageCode: 'en',
       typedForm: 'throte',
@@ -292,7 +292,7 @@ describe('a corrected lookup, against a real database', () => {
       alternatives: ['throaty'],
     });
 
-    const result = await service.translate({ text: 'thruot' });
+    const result = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
 
     expect(await countDictVariants(t.db, 'throte')).toBe(0);
     const redirects = await readDictCorrections(t.db);
@@ -340,11 +340,11 @@ describe('a corrected lookup, against a real database', () => {
       matchText: '"throats"',
     });
     const service = translations();
-    await service.translate({ text: 'thruot' }); // writes `throat` and the redirect
-    await service.translate({ text: 'throats' }); // teaches the lexeme a second sense
+    await service.translate({ text: 'thruot', from: 'en', to: 'he' }); // writes `throat` and the redirect
+    await service.translate({ text: 'throats', from: 'en', to: 'he' }); // teaches the lexeme a second sense
 
-    const viaTypo = await service.translate({ text: 'thruot' });
-    const viaWord = await service.translate({ text: 'throat' });
+    const viaTypo = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
+    const viaWord = await service.translate({ text: 'throat', from: 'en', to: 'he' });
 
     expect(viaTypo.kind).toEqual(viaWord.kind);
     expect(viaTypo.senses).toEqual(viaWord.senses);

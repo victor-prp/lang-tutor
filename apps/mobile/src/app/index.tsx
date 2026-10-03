@@ -1,7 +1,9 @@
 import { Redirect, router } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { availableTargets } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSession } from '@/hooks/useSession';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
@@ -10,8 +12,14 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 export default function HomeScreen() {
   const { start } = useSession();
-  const { user } = useCurrentUser();
+  const { user, enrollments, active, switchTo } = useCurrentUser();
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   if (!user) return <Redirect href="/login" />;
+  // Zero enrollments is a valid state (spec §5): sign-up, a login that finds
+  // none, or a sign-up whose second call never landed all arrive here.
+  if (!active) return <Redirect href="/enroll" />;
+
+  const canAdd = availableTargets(enrollments).length > 0;
 
   function onStart() {
     start();
@@ -32,8 +40,56 @@ export default function HomeScreen() {
         <Text style={styles.profileLinkLabel}>{user.display_name}</Text>
       </Pressable>
 
+      <Pressable
+        accessibilityRole="button"
+        testID="enrollment-switcher"
+        onPress={() => setSwitcherOpen((open) => !open)}
+        style={styles.switcher}
+      >
+        <Text style={styles.switcherLabel}>
+          {strings.learningLabel(strings.languageName(active.target_language))}
+        </Text>
+      </Pressable>
+
+      {switcherOpen ? (
+        <View style={styles.switcherList}>
+          {enrollments.map((enrollment) => (
+            <Pressable
+              key={enrollment.id}
+              accessibilityRole="button"
+              accessibilityState={{ selected: enrollment.id === active.id }}
+              testID={`enrollment-option-${enrollment.target_language}`}
+              onPress={() => {
+                switchTo(enrollment.id);
+                setSwitcherOpen(false);
+              }}
+              style={[styles.switcherItem, enrollment.id === active.id && styles.switcherItemActive]}
+            >
+              <Text style={styles.switcherItemLabel}>
+                {strings.languageName(enrollment.target_language)}
+              </Text>
+            </Pressable>
+          ))}
+          {canAdd ? (
+            <Pressable
+              accessibilityRole="button"
+              testID="enrollment-add"
+              onPress={() => {
+                setSwitcherOpen(false);
+                router.push('/enroll');
+              }}
+              style={styles.switcherItem}
+            >
+              <Text style={styles.switcherAddLabel}>{strings.addLanguage}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
       <View style={styles.card}>
-        <Text style={styles.cardLabel}>{strings.homeSetLabel(SESSION_LENGTH)}</Text>
+        <Text style={styles.cardLabel}>
+          {strings.homeSetLabel(SESSION_LENGTH, strings.languageName(active.target_language))}
+        </Text>
       </View>
 
       <Pressable accessibilityRole="button" testID="start-button" onPress={onStart} style={styles.button}>
@@ -112,5 +168,25 @@ const styles = StyleSheet.create({
   },
   profileLink: { alignSelf: 'flex-start', paddingVertical: spacing.xs },
   profileLinkLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
+  switcher: {
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  switcherLabel: { color: colors.text, fontSize: fontSizes.md, fontWeight: '700', writingDirection: 'rtl' },
+  switcherList: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  switcherItem: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md },
+  switcherItemActive: { backgroundColor: colors.background },
+  switcherItemLabel: { color: colors.text, fontSize: fontSizes.md, writingDirection: 'rtl' },
+  switcherAddLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700', writingDirection: 'rtl' },
   futureSpace: { flex: 1 },
 });

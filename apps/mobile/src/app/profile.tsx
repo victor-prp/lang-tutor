@@ -18,7 +18,7 @@ function Row({ label, value, testID }: { label: string; value: string; testID: s
 }
 
 export default function ProfileScreen() {
-  const { user, signOut } = useCurrentUser();
+  const { user, enrollments, signOut } = useCurrentUser();
 
   if (!user) return <Redirect href="/login" />;
 
@@ -42,7 +42,7 @@ export default function ProfileScreen() {
         />
         <Row
           label={strings.onboardingTargetLabel}
-          value={strings.languageName(user.target_language)}
+          value={enrollments.map((enrollment) => strings.languageName(enrollment.target_language)).join(', ')}
           testID="profile-target"
         />
       </View>

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { createTestServerDeps } from '../../support/serverDeps';
-import { InvalidLanguagePair, UsernameTaken, UserNotFound } from '../../../src/errors';
+import { UsernameTaken, UserNotFound } from '../../../src/errors';
 import type { UserService } from '../../../src/services/users';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
@@ -27,7 +27,6 @@ const REQUEST = {
   display_name: 'דנה',
   age: 34,
   native_language: 'he' as const,
-  target_language: 'en' as const,
 };
 
 describe('register', () => {
@@ -46,12 +45,6 @@ describe('register', () => {
     await expect(
       service.register({ ...REQUEST, display_name: 'אחרת' }),
     ).rejects.toBeInstanceOf(UsernameTaken);
-  });
-
-  it('refuses a matching language pair', async () => {
-    await expect(
-      service.register({ ...REQUEST, target_language: 'he' }),
-    ).rejects.toBeInstanceOf(InvalidLanguagePair);
   });
 });
 

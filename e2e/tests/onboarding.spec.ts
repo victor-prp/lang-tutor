@@ -21,8 +21,12 @@ test('a new learner can create an account and reach the home screen', async ({ p
   await page.getByTestId('onboarding-display-name').fill('יוני');
   await page.getByTestId('onboarding-age').fill('9');
   await page.getByTestId('native-he').click();
-  await page.getByTestId('target-en').click();
   await page.getByTestId('onboarding-submit').click();
+
+  // A new learner holds no enrollment yet, so the app asks for one first.
+  await expect(page.getByTestId('enroll-en')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('enroll-en').click();
+  await page.getByTestId('enroll-submit').click();
 
   // Landing on home is the assertion: it means the server issued an id and the
   // app adopted it.

@@ -18,6 +18,8 @@ const translateRoute = createRoute({
     'Returns every sense in one response, ranked with the most common first, so a client ' +
     'can show them all without a second request. An input that is not a word or ' +
     'expression yields 200 with an empty `senses` array — that is an answer, not a failure. ' +
+    'The client states the direction with `from` and `to`; supported pairs are Hebrew with ' +
+    'English and Hebrew with Russian, either way. ' +
     'NOTE: this endpoint calls a paid third-party model on every request and there is no ' +
     'rate limit in front of it.',
   request: {
@@ -30,9 +32,11 @@ const translateRoute = createRoute({
     200: {
       content: { 'application/json': { schema: TranslationResponseSchema } },
       description:
-        'The translation. `direction` is what the server detected, or the override that was ' +
-        'sent; `kind` describes the input. A `sentence` carries exactly one sense, with no ' +
-        'part of speech and no example.',
+        'The translation. `from` and `to` echo the request; `kind` describes the input. A ' +
+        '`sentence` carries exactly one sense, with no part of speech and no example. An empty ' +
+        '`senses` array with a `reason` means the input was refused before any model call: ' +
+        "`wrong_direction` when its letters are in `to`'s script, `out_of_pair` when they are in " +
+        "neither language's.",
     },
     400: {
       content: { 'application/json': { schema: ErrorSchema } },

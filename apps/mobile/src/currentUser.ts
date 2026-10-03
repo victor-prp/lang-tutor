@@ -28,3 +28,24 @@ export function createRememberedUsernameStore({ storage }: RememberedUsernameSto
 }
 
 export type RememberedUsernameStore = ReturnType<typeof createRememberedUsernameStore>;
+
+const ENROLLMENT_KEY_PREFIX = 'lang-tutor:enrollment:';
+
+/**
+ * Remembers which enrollment each username last had active on this device —
+ * the one piece of enrollment state that belongs to the device, exactly as the
+ * username does. Keyed per username so two learners sharing a phone never
+ * inherit each other's language. The enrollment list itself is never stored:
+ * it is a server fact, read fresh at every login.
+ */
+export function createRememberedEnrollmentStore({ storage }: RememberedUsernameStoreDeps) {
+  return {
+    read: (username: string): Promise<string | null> =>
+      storage.getItem(`${ENROLLMENT_KEY_PREFIX}${username}`),
+    write: async (username: string, enrollmentId: string): Promise<void> => {
+      await storage.setItem(`${ENROLLMENT_KEY_PREFIX}${username}`, enrollmentId);
+    },
+  };
+}
+
+export type RememberedEnrollmentStore = ReturnType<typeof createRememberedEnrollmentStore>;

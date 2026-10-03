@@ -62,7 +62,7 @@ export default function SessionScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable accessibilityRole="button" hitSlop={12} onPress={() => router.back()}>
+        <Pressable accessibilityRole="button" testID="session-back" hitSlop={12} onPress={() => router.back()}>
           <Text style={styles.back}>{'→'}</Text>
         </Pressable>
         <Text style={styles.counter} testID="progress-label">

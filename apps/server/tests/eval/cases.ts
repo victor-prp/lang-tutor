@@ -1,4 +1,4 @@
-import type { PartOfSpeech, TranslationDirection, TranslationKind } from '@lang-tutor/core/api';
+import type { LanguageCode, PartOfSpeech, TranslationKind } from '@lang-tutor/core/api';
 
 import type { StoredSense } from '../../src/domain/translation';
 
@@ -9,7 +9,9 @@ import type { StoredSense } from '../../src/domain/translation';
 export type EvalCase = {
   label: string;
   text: string;
-  direction?: TranslationDirection;
+  /** Defaults to en → he. */
+  from?: LanguageCode;
+  to?: LanguageCode;
   expectKind: TranslationKind;
   /** Accepted values for the highest-ranked sense. Empty when expectEmpty. */
   acceptTop: string[];
@@ -139,8 +141,10 @@ export const CASES: EvalCase[] = [
     expectNoCorrection: true,
   },
   {
-    label: 'the reverse direction, and that script detection agreed',
+    label: 'the reverse direction',
     text: 'מזלג',
+    from: 'he',
+    to: 'en',
     expectKind: 'word',
     acceptTop: ['fork'],
   },
@@ -317,6 +321,136 @@ export const CASES: EvalCase[] = [
   // position is one candidate), and it needs an eval run to confirm the model
   // agrees before it is trusted. Correction behaviour is currently measured in
   // English only.
+
+  // Phase 16 — Russian, explained in Hebrew. Each stresses one rule the language
+  // table added; spec §6 lists them.
+  {
+    label: 'ru: a verb keeps the aspect typed',
+    text: 'прочитала',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['קרא', 'קראה'],
+    expectLemma: 'прочитать',
+  },
+  {
+    label: 'ru: a noun case form belongs to its nominative singular',
+    text: 'книги',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['ספרים', 'ספר', 'של הספר'],
+    expectLemma: 'книга',
+  },
+  {
+    label: 'ru: an idiom by meaning, not word for word',
+    text: 'как дела?',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'phrase',
+    acceptTop: ['מה שלומך', 'מה שלומך?', 'מה נשמע', 'מה נשמע?', 'מה העניינים', 'מה העניינים?'],
+    rejectAny: ['איך מעשים', 'איך דברים'],
+  },
+  {
+    label: 'ru: a missing ё is a misspelling, corrected to the word',
+    text: 'елка',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['עץ אשוח', 'אשוח', 'עץ חג המולד'],
+    expectCorrection: 'ёлка',
+  },
+  // The counterweight to `елка`, as `running`, `booked` and `colour` are to
+  // phase 13's correction rule. Each is a real word in its е spelling with a ё
+  // twin — все/всё, берет/берёт, небо/нёбо — so a ё rule that misfires here
+  // writes a permanent redirect away from a correctly spelled word.
+  {
+    label: 'ru: an е spelling that is itself a word is not a missing ё (все)',
+    text: 'все',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['כולם', 'הכל', 'הכול', 'כל'],
+    expectNoCorrection: true,
+  },
+  // `берет` is itself a word — the noun "beret" — and is also how `берёт`
+  // ("takes") is spelled with its ё written as е. Both readings are real, so
+  // either top answer is acceptable; what is scored is that no correction is
+  // offered.
+  {
+    label: 'ru: an е spelling that is itself a word is not a missing ё (берет)',
+    text: 'берет',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['כומתה', 'לוקח', 'לוקחת'],
+    expectNoCorrection: true,
+  },
+  {
+    label: 'ru: an е spelling that is itself a word is not a missing ё (небо)',
+    text: 'небо',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['שמיים', 'שמים'],
+    expectNoCorrection: true,
+  },
+  {
+    label: 'ru: a same-script word of another language is not Russian',
+    text: 'дякую',
+    from: 'ru',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: [],
+    expectEmpty: true,
+  },
+  // The other side of `дякую`. The third-language rule first shipped without
+  // its borrowing clause and turned these from translated to empty under en → he,
+  // breaking learners who already used them: English uses them, but they are
+  // French and German by origin. Hebrew slang is the same check in the other
+  // direction — `סבבה` and `יאללה` are Arabic by origin and Hebrew by use.
+  {
+    label: 'a loan phrase in common use is the source language (déjà vu)',
+    text: 'déjà vu',
+    expectKind: 'phrase',
+    acceptTop: ["דז'", 'דז׳'],
+  },
+  {
+    label: 'a loanword in common use is the source language (schadenfreude)',
+    text: 'schadenfreude',
+    expectKind: 'word',
+    acceptTop: ['שמחה לאיד'],
+  },
+  {
+    label: 'a loan phrase in common use is the source language (bon appétit)',
+    text: 'bon appétit',
+    expectKind: 'phrase',
+    acceptTop: ['בתאבון', 'בתיאבון'],
+  },
+  {
+    label: 'he → en: Hebrew slang of Arabic origin is Hebrew (סבבה)',
+    text: 'סבבה',
+    from: 'he',
+    to: 'en',
+    expectKind: 'word',
+    acceptTop: ['ok', 'OK', 'Ok', 'cool', 'Cool', 'fine', 'great', 'alright', 'all right', 'sure'],
+  },
+  {
+    label: 'he → en: Hebrew slang of Arabic origin is Hebrew (יאללה)',
+    text: 'יאללה',
+    from: 'he',
+    to: 'en',
+    expectKind: 'word',
+    acceptTop: ['come on', 'Come on', "let's go", "Let's go", 'go', 'hurry', 'yalla'],
+  },
+  {
+    label: 'he → ru: a Hebrew word rendered in Russian',
+    text: 'חלון',
+    from: 'he',
+    to: 'ru',
+    expectKind: 'word',
+    acceptTop: ['окно'],
+  },
 ];
 
 /**
@@ -332,7 +466,9 @@ export type RenderingCase = {
   label: string;
   /** The form a learner typed — what the stored senses must be rendered for. */
   form: string;
-  direction?: TranslationDirection;
+  /** Defaults to en → he. */
+  from?: LanguageCode;
+  to?: LanguageCode;
   /** The lexeme being rendered: a lemma AND a part of speech, since phase 12. */
   lemma: string;
   partOfSpeech: PartOfSpeech;

@@ -33,13 +33,14 @@ export function createQuestionRepo(tx: Tx) {
   return {
     /**
      * The pool a session draws from: shared questions plus any belonging to
-     * this learner. Phase 4 only ever seeds shared ones, but the `user_id`
-     * branch is here from day one so a later phase adds rows, not a migration.
+     * this learner's enrollment. Phase 4 only ever seeds shared ones; the
+     * per-learner branch is keyed by the enrollment from phase 16, so a later
+     * phase adds rows, not a migration.
      */
     loadQuestionPool: async (
       targetLanguage: string,
       userLanguageCode: string,
-      userId: string,
+      owner: { userId: string; enrollmentId: string },
     ): Promise<Question[]> => {
       const rows = await tx
         .select({
@@ -52,7 +53,10 @@ export function createQuestionRepo(tx: Tx) {
         .innerJoin(dictVariants, eq(dictVariants.id, questions.promptVariantId))
         .where(
           and(
-            or(isNull(questions.userId), eq(questions.userId, userId)),
+            or(
+              isNull(questions.userId),
+              and(eq(questions.userId, owner.userId), eq(questions.enrollmentId, owner.enrollmentId)),
+            ),
             eq(questions.targetLanguage, targetLanguage),
             eq(questions.userLanguageCode, userLanguageCode),
           ),

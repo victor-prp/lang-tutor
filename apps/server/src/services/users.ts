@@ -1,6 +1,6 @@
 import type { CreateUserRequest, User } from '@lang-tutor/core/api';
 
-import { InvalidLanguagePair, UserNotFound } from '../errors';
+import { UserNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { Transaction } from './transaction';
 
@@ -20,13 +20,6 @@ export function createUserService({
 }) {
   return {
     register: async (input: CreateUserRequest): Promise<User> => {
-      // Checked before a transaction is opened: no write is attempted, so
-      // there is nothing to roll back. The database CHECK is the backstop for
-      // anything that reaches the table by another route.
-      if (input.native_language === input.target_language) {
-        throw new InvalidLanguagePair(input.native_language);
-      }
-
       const created = await transaction(({ user }) => user.insertUser(input));
 
       // After the transaction resolves, matching logCompletedSession: a commit

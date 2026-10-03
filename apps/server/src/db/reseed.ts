@@ -33,10 +33,13 @@ import { seedContent } from './seed';
  * the same kind of paid answer the dictionary is, and it is recoverable the same
  * way — `dict:export` before, `dict:restore` after, now carrying both files.
  *
+ * `dict_variant_renderings` would be reached by the cascade through dict_variants; it is named
+ * anyway so the list states every dictionary table a reseed empties.
+ *
  * The statement is written here and again in migration 0003 rather than shared
  * from one place: that migration is frozen history, this command is live.
  */
 export async function reseedContent(db: Db): Promise<void> {
-  await db.execute(sql`TRUNCATE dict_lexemes, dict_corrections, sessions CASCADE`);
+  await db.execute(sql`TRUNCATE dict_lexemes, dict_variant_renderings, dict_corrections, sessions CASCADE`);
   await seedContent(db);
 }

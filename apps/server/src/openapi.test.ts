@@ -18,19 +18,20 @@ describe('POST /api/sessions in the published document', () => {
     expect(doc.paths['/api/sessions'].post).toBeDefined();
   });
 
-  it('declares its 200, 400 and 404', async () => {
+  it('declares its 200, 400, 404 and 409', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths['/api/sessions'].post.responses).sort()).toEqual([
       '200',
       '400',
       '404',
+      '409',
     ]);
   });
 
   it('declares a JSON request body', async () => {
     const doc = await openApiDocument();
     const body = doc.paths['/api/sessions'].post.requestBody;
-    expect(body.content['application/json'].schema.required).toEqual(['user_id']);
+    expect(body.content['application/json'].schema.required).toEqual(['enrollment_id']);
   });
 
   // The published 400 must describe the body the server actually returns, which
@@ -96,7 +97,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all six paths and nothing else', async () => {
+  it('contains all seven paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/login',
@@ -104,7 +105,25 @@ describe('the document as a whole', () => {
       NEXT_STEP,
       '/api/translations',
       '/api/users',
+      '/api/users/{id}/enrollments',
       '/health',
+    ]);
+  });
+});
+
+describe('the enrollment endpoints in the published document', () => {
+  it('declares every status POST /api/users/{id}/enrollments can return', async () => {
+    const doc = await openApiDocument();
+    expect(
+      Object.keys(doc.paths['/api/users/{id}/enrollments'].post.responses).sort(),
+    ).toEqual(['201', '400', '404', '409']);
+  });
+
+  it('declares every status GET /api/users/{id}/enrollments can return', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths['/api/users/{id}/enrollments'].get.responses).sort()).toEqual([
+      '200',
+      '404',
     ]);
   });
 });
@@ -143,13 +162,16 @@ describe('the translation endpoint in the published document', () => {
 
     expect(Object.keys(schema.properties).sort()).toEqual([
       'correction',
-      'direction',
+      'from',
       'kind',
+      'reason',
       'senses',
       'text',
+      'to',
     ]);
     expect(schema.required).not.toContain('correction');
-    expect(schema.required.sort()).toEqual(['direction', 'kind', 'senses', 'text']);
+    expect(schema.required).not.toContain('reason');
+    expect(schema.required.sort()).toEqual(['from', 'kind', 'senses', 'text', 'to']);
 
     const correction = schema.properties.correction;
     expect(correction.properties).toHaveProperty('corrected_form');

@@ -40,10 +40,33 @@ export class UserNotFound extends Error {
   }
 }
 
-export class InvalidLanguagePair extends Error {
-  constructor(readonly languageCode: string) {
-    super(`native and target language are both ${languageCode}`);
-    this.name = 'InvalidLanguagePair';
+export class EnrollmentNotFound extends Error {
+  constructor(readonly enrollmentId: string) {
+    super(`no enrollment ${enrollmentId}`);
+    this.name = 'EnrollmentNotFound';
+  }
+}
+
+export class AlreadyEnrolled extends Error {
+  constructor(
+    readonly userId: string,
+    readonly targetLanguage: string,
+  ) {
+    super(`user ${userId} is already enrolled in ${targetLanguage}`);
+    this.name = 'AlreadyEnrolled';
+  }
+}
+
+/** A session draws SESSION_LENGTH questions; a pool smaller than that cannot
+ *  start one. Before phase 16 this surfaced as a plain Error from pickQuestions
+ *  and a 500. */
+export class InsufficientQuestions extends Error {
+  constructor(
+    readonly enrollmentId: string,
+    readonly available: number,
+  ) {
+    super(`enrollment ${enrollmentId} has ${available} questions, too few for a session`);
+    this.name = 'InsufficientQuestions';
   }
 }
 

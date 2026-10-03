@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import type { Db } from './client';
 
-const MIGRATIONS_FOLDER = path.join(__dirname, 'migrations');
+export const MIGRATIONS_FOLDER = path.join(__dirname, 'migrations');
 
 // Embedding options as jsonb gives up the constraints a separate
 // question_options table would have enforced. This function restores them, and
@@ -47,8 +47,14 @@ const CORRECTION_ALTERNATIVES_FUNCTION = sql`
     $$;
 `;
 
-export async function runMigrations(db: Db): Promise<void> {
+/** `folder` is a parameter so a migration test can stop at a chosen migration,
+ *  insert rows shaped by the schema of that moment, then migrate the rest. */
+export async function runMigrationsFrom(db: Db, folder: string): Promise<void> {
   await db.execute(OPTIONS_VALIDATION_FUNCTION);
   await db.execute(CORRECTION_ALTERNATIVES_FUNCTION);
-  await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+  await migrate(db, { migrationsFolder: folder });
+}
+
+export async function runMigrations(db: Db): Promise<void> {
+  await runMigrationsFrom(db, MIGRATIONS_FOLDER);
 }

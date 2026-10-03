@@ -55,7 +55,7 @@ describe('the app as production assembles it', () => {
       const res = await app.request('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
-        body: '{"user_id":"u1"}',
+        body: '{"enrollment_id":"e_u1"}',
       });
       expect(res.status).toBe(415);
       expect(await res.json()).toEqual({ error: 'invalid request' });

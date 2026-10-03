@@ -1,9 +1,9 @@
 import type {
+  LanguageCode,
   LlmEntry,
   LlmReconciliation,
   PartOfSpeech,
   TranslationCorrection,
-  TranslationDirection,
   TranslationKind,
   TranslationSense,
 } from '@lang-tutor/core/api';
@@ -11,7 +11,6 @@ import type {
 import {
   buildPrompt,
   buildRenderingPrompt,
-  detectDirection,
   normalizeSenses,
   parseLlmReconciliation,
   parseLlmTranslation,
@@ -37,7 +36,8 @@ import type { LlmClient } from '../../src/services/llm';
  * and the entries are exactly what the phase 10 tiers score.
  */
 export type ModelAnswer = {
-  direction: TranslationDirection;
+  from: LanguageCode;
+  to: LanguageCode;
   kind: TranslationKind;
   entries: LlmEntry[];
   senses: TranslationSense[];
@@ -48,15 +48,15 @@ export type ModelAnswer = {
 
 export async function askModel(
   llm: LlmClient,
-  input: { text: string; direction?: TranslationDirection },
+  input: { text: string; from: LanguageCode; to: LanguageCode },
 ): Promise<ModelAnswer> {
   const text = input.text.trim();
-  const direction = input.direction ?? detectDirection(text);
+  const { from, to } = input;
 
-  const raw = await llm(buildPrompt({ text, direction }));
+  const raw = await llm(buildPrompt({ text, from, to }));
   // An empty string is the contract's "no content" — a safety block, or a
   // candidate with no text. The input was refused; nothing is broken.
-  if (raw === '') return { direction, kind: resolveKind(text, 'word'), entries: [], senses: [] };
+  if (raw === '') return { from, to, kind: resolveKind(text, 'word'), entries: [], senses: [] };
 
   const parsed = parseLlmTranslation(raw);
   if (!parsed) throw new Error('the model response did not match the expected shape');
@@ -64,13 +64,14 @@ export async function askModel(
   // The service's step 4, verbatim. `kind` comes out of here computed against the
   // EFFECTIVE form, so it is the kind the server would actually have written onto
   // dict_variants — which is the only version of it worth scoring.
-  const resolved = resolveCorrection(parsed, { typedForm: normalizeForm(text), direction });
+  const resolved = resolveCorrection(parsed, { typedForm: normalizeForm(text), from, to });
   if (!resolved) throw new Error('the correction named a form in the other script');
   const { correction, kind } = resolved;
 
   const entries = mergeEntries(parsed.entries);
   return {
-    direction,
+    from,
+    to,
     kind,
     entries,
     senses: normalizeSenses(kind, flattenEntries(entries)),
@@ -96,7 +97,8 @@ export async function askRendering(
   llm: LlmClient,
   input: {
     form: string;
-    direction: TranslationDirection;
+    from: LanguageCode;
+    to: LanguageCode;
     lemma: string;
     partOfSpeech: PartOfSpeech;
     storedSenses: StoredSense[];

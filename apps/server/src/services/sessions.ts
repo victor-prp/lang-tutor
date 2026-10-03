@@ -1,6 +1,12 @@
 import type { SessionRecord } from '../domain/session';
-import { newSessionRecord, sessionScore, step } from '../domain/session';
-import { OptionOutOfRange, QuestionDesynced, SessionNotFound, UserNotFound } from '../errors';
+import { SESSION_LENGTH, newSessionRecord, sessionScore, step } from '../domain/session';
+import {
+  EnrollmentNotFound,
+  InsufficientQuestions,
+  OptionOutOfRange,
+  QuestionDesynced,
+  SessionNotFound,
+} from '../errors';
 import type { Logger } from '../logger';
 import type { Transaction } from './transaction';
 
@@ -36,20 +42,23 @@ export function createSessionService({
   logger: Logger;
 }) {
   return {
-    startSession: (userId: string): Promise<{ sessionId: string; record: SessionRecord }> =>
-      transaction(async ({ session, question, user }) => {
-        const learner = await user.findById(userId);
-        // No implicit creation. A session for an id nobody onboarded is a bug,
-        // and the route turns this into a 404.
-        if (!learner) throw new UserNotFound(userId);
+    startSession: (enrollmentId: string): Promise<{ sessionId: string; record: SessionRecord }> =>
+      transaction(async ({ session, question, enrollment }) => {
+        const enrolled = await enrollment.findById(enrollmentId);
+        // No implicit creation, as before for users. The route turns this into a 404.
+        if (!enrolled) throw new EnrollmentNotFound(enrollmentId);
 
         const pool = await question.loadQuestionPool(
-          learner.target_language,
-          learner.native_language,
-          userId,
+          enrolled.target_language,
+          enrolled.source_language,
+          { userId: enrolled.user_id, enrollmentId },
         );
-        const record = newSessionRecord(userId, pool, rng);
-        const sessionId = await session.insertSession(userId, record.questions);
+        // Checked here rather than left to pickQuestions, whose plain Error was a
+        // 500: a language with no seeded questions is an answer, not a failure.
+        if (pool.length < SESSION_LENGTH) throw new InsufficientQuestions(enrollmentId, pool.length);
+
+        const record = newSessionRecord(enrolled.user_id, pool, rng);
+        const sessionId = await session.insertSession(enrolled.user_id, enrollmentId, record.questions);
         return { sessionId, record };
       }),
 

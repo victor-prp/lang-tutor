@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
-import { seedUser } from '../../support/seedUser';
+import {
+  enrollmentOf,
+  enrollmentOfSession,
+  seedEnrollment,
+  seedLegacyLearner,
+  seedUser,
+} from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
@@ -42,7 +48,7 @@ function postJson(app: Hono, path: string, body: unknown) {
 describe('POST /api/sessions', () => {
   it('creates a session and returns the first question', async () => {
     const app = buildTestApp();
-    const res = await postJson(app, '/api/sessions', { user_id: 'u_1' });
+    const res = await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(typeof body.session_id).toBe('string');
@@ -50,7 +56,7 @@ describe('POST /api/sessions', () => {
     expect(body.question.id).toBeDefined();
   });
 
-  it('rejects a missing user_id', async () => {
+  it('rejects a missing enrollment_id', async () => {
     const app = buildTestApp();
     const res = await postJson(app, '/api/sessions', {});
     expect(res.status).toBe(400);
@@ -68,11 +74,51 @@ describe('POST /api/sessions', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid request' });
   });
-  it('returns 404 for a user id that was never onboarded', async () => {
+  it('returns 404 for an enrollment that does not exist', async () => {
     const app = buildTestApp();
-    const res = await postJson(app, '/api/sessions', { user_id: 'u_nobody' });
+    const res = await postJson(app, '/api/sessions', { enrollment_id: 'e_nobody' });
     expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: 'user not found' });
+    expect(await res.json()).toEqual({ error: 'enrollment not found' });
+  });
+
+  it('returns 409 when the pair has too few questions — a legacy English-native learner', async () => {
+    // native en, learning Hebrew: the seed holds no he/en questions. A 500 here
+    // is what this phase replaced.
+    const { enrollmentId } = await seedLegacyLearner(t.db);
+    const app = buildTestApp();
+    const res = await postJson(app, '/api/sessions', { enrollment_id: enrollmentId });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'not enough questions' });
+  });
+
+  it("draws each enrollment's own pair for one learner holding two", async () => {
+    await seedEnrollment(t.db, { id: 'e_u_1_ru', userId: 'u_1', targetLanguage: 'ru' });
+    const app = buildTestApp();
+    // The pool is keyed by the enrollment's pair and not by the learner: each
+    // session is walked to the end, every prompt is in its own pair's script,
+    // and each session's row names the enrollment that started it.
+    const walk = async (enrollmentId: string, script: RegExp) => {
+      const started = await postJson(app, '/api/sessions', { enrollment_id: enrollmentId });
+      expect(started.status).toBe(200);
+      let current = await started.json();
+      // Spec §6: each session is attributed to its own enrollment, not merely
+      // drawn from its pair.
+      expect(await enrollmentOfSession(t.db, current.session_id)).toBe(enrollmentId);
+      for (let i = 0; i < 10; i++) {
+        expect(current.question.question).toMatch(script);
+        current = await (
+          await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
+            user_id: 'u_1',
+            question_id: current.question.id,
+            option_index: current.question.correct_option,
+          })
+        ).json();
+      }
+      expect(current.complete).toBe(true);
+    };
+
+    await walk('e_u_1_ru', /^\p{Script=Cyrillic}[\p{Script=Cyrillic} ]*$/u);
+    await walk(enrollmentOf('u_1'), /^[A-Za-z][A-Za-z ?!']*$/);
   });
 });
 
@@ -103,7 +149,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('advances to the next question on a fresh answer', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
+    const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
 
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
       user_id: 'u_1',
@@ -119,7 +165,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('replays the same response when the same step is retried', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
+    const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
     const stepBody = {
       user_id: 'u_1',
       question_id: created.question.id,
@@ -137,7 +183,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it("409s when question_id does not match the session's current question", async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
+    const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
 
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
       user_id: 'u_1',
@@ -149,7 +195,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('completes the session on the 10th answer, returning score and missed_questions', async () => {
     const app = buildTestApp();
-    let current = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
+    let current = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
 
     let last;
     for (let i = 0; i < 10; i++) {
@@ -171,7 +217,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('tracks an incorrect answer in the final score and missed_questions', async () => {
     const app = buildTestApp();
-    let current = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
+    let current = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
     const firstQuestion = current.question;
     const wrongIndex = (firstQuestion.correct_option + 1) % firstQuestion.options.length;
 
@@ -206,7 +252,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('400s when option_index is past the last option', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { user_id: 'u_1' })).json();
+    const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
       user_id: 'u_1',
       question_id: created.question.id,

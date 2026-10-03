@@ -1,14 +1,11 @@
 import type { TranslationKind } from '@lang-tutor/core/api';
 
 import type { Db } from './client';
-import { content, optionsFor } from './content';
+import { content, optionsFor, recordingKey } from './content';
 import { recorded } from './content.generated';
 import { questions } from './schema';
 import { createTransaction } from './transaction';
 import { createDictRepo } from '../repo/dictionary';
-
-const TARGET_LANGUAGE = 'en';
-const USER_LANGUAGE = 'he';
 
 /**
  * Cheap insurance, not the primary guard — that is the recorder (the
@@ -58,7 +55,7 @@ export async function seedContent(db: Db): Promise<void> {
     const rows = [];
 
     for (const entry of content) {
-      const answer = recorded[entry.query];
+      const answer = recorded[recordingKey(entry)];
       if (!answer || answer.entries.length === 0) {
         throw new Error(
           `no recording for "${entry.query}". Run \`npm run content:generate -- ${entry.query}\`.`,
@@ -68,8 +65,8 @@ export async function seedContent(db: Db): Promise<void> {
 
       const { written } = await dict.persistEntries({
         form: entry.query,
-        languageCode: TARGET_LANGUAGE,
-        userLanguageCode: USER_LANGUAGE,
+        languageCode: entry.from,
+        userLanguageCode: entry.to,
         kind: answer.kind,
         entries: answer.entries,
       });
@@ -79,10 +76,11 @@ export async function seedContent(db: Db): Promise<void> {
       rows.push({
         id: entry.question_id,
         userId: null,
+        enrollmentId: null,
         senseId: written[0].senseIds[0],
         promptVariantId: written[0].variantId,
-        targetLanguage: TARGET_LANGUAGE,
-        userLanguageCode: USER_LANGUAGE,
+        targetLanguage: entry.from,
+        userLanguageCode: entry.to,
         type: 'multiple_choice',
         options: optionsFor(entry),
       });

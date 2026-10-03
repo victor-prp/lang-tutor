@@ -1,17 +1,17 @@
 import type {
+  LanguageCode,
   LlmEntry,
   PartOfSpeech,
-  TranslationDirection,
   TranslationKind,
   TranslationRequest,
   TranslationResponse,
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { guardScript } from '../domain/languages';
 import {
   buildPrompt,
   buildRenderingPrompt,
-  detectDirection,
   normalizeSenses,
   parseLlmReconciliation,
   parseLlmTranslation,
@@ -22,7 +22,6 @@ import {
 import {
   flattenEntries,
   kindForForm,
-  languagesFor,
   mergeEntries,
   normalizeForm,
   rowsToSenses,
@@ -55,7 +54,8 @@ import type { Transaction } from './transaction';
 async function reconcile(input: {
   llm: LlmClient;
   form: string;
-  direction: TranslationDirection;
+  from: LanguageCode;
+  to: LanguageCode;
   entries: LlmEntry[];
   stored: StoredSense[][];
   logger: Logger;
@@ -75,7 +75,8 @@ async function reconcile(input: {
       const raw = await input.llm(
         buildRenderingPrompt({
           form: input.form,
-          direction: input.direction,
+          from: input.from,
+          to: input.to,
           lemma: entry.lemma,
           partOfSpeech: entry.part_of_speech,
           storedSenses,
@@ -150,18 +151,16 @@ async function repairForm({
   llm,
   transaction,
   form,
-  direction,
+  from,
+  to,
   stale,
-  source,
-  target,
 }: {
   llm: LlmClient;
   transaction: Transaction;
   form: string;
-  direction: TranslationDirection;
+  from: LanguageCode;
+  to: LanguageCode;
   stale: StaleLexeme[];
-  source: string;
-  target: string;
 }): Promise<SenseRow[]> {
   // ONE transaction for every stale lexeme's senses, not one each. A
   // transaction per lexeme inside the Promise.all below would open N pooled
@@ -189,8 +188,8 @@ async function repairForm({
         const senses = await repos.dict.findSensesByLexeme({
           lemma: lexeme.lemma,
           partOfSpeech: lexeme.partOfSpeech,
-          languageCode: source,
-          userLanguageCode: target,
+          languageCode: from,
+          userLanguageCode: to,
         });
         return { senseVersion, senses };
       }),
@@ -204,7 +203,8 @@ async function repairForm({
       const raw = await llm(
         buildRenderingPrompt({
           form,
-          direction,
+          from,
+          to,
           lemma: lexeme.lemma,
           partOfSpeech: lexeme.partOfSpeech as PartOfSpeech,
           storedSenses: stored,
@@ -253,7 +253,7 @@ async function repairForm({
     for (const { lexeme, senseVersion, senses } of rendered) {
       await repos.dict.repairVariantRenderings({
         variantId: lexeme.variantId,
-        userLanguageCode: target,
+        userLanguageCode: to,
         // The version read above, before the model call — never re-read here.
         senseVersion,
         senses,
@@ -261,8 +261,8 @@ async function repairForm({
     }
     return repos.dict.findSensesByForm({
       form,
-      languageCode: source,
-      userLanguageCode: target,
+      languageCode: from,
+      userLanguageCode: to,
     });
   });
 }
@@ -306,26 +306,28 @@ async function serveForm({
   llm,
   transaction,
   form,
-  direction,
-  source,
-  target,
+  from,
+  to,
   logger,
 }: {
   llm: LlmClient;
   transaction: Transaction;
   form: string;
-  direction: TranslationDirection;
-  source: string;
-  target: string;
+  from: LanguageCode;
+  to: LanguageCode;
   logger: Logger;
 }): Promise<ServedForm | null> {
   const { rows, stale } = await transaction(async (repos) => ({
     rows: await repos.dict.findSensesByForm({
       form,
-      languageCode: source,
-      userLanguageCode: target,
+      languageCode: from,
+      userLanguageCode: to,
     }),
-    stale: await repos.dict.findStaleLexemesByForm({ form, languageCode: source }),
+    stale: await repos.dict.findStaleLexemesByForm({
+      form,
+      languageCode: from,
+      userLanguageCode: to,
+    }),
   }));
 
   // Checked FIRST: a variant with no renderings in this target language is a
@@ -338,10 +340,10 @@ async function serveForm({
     // lexeme knows, render it for THIS form and rank it for THIS form" is exactly
     // what a repair needs, and that prompt is eval-scored.
     try {
-      answerRows = await repairForm({ llm, transaction, form, direction, stale, source, target });
-      // Counts and direction, like every other event in this file. The learner's
+      answerRows = await repairForm({ llm, transaction, form, from, to, stale });
+      // Counts and the pair, like every other event in this file. The learner's
       // query text stays out of the log.
-      logger.info({ event: 'dict_repaired', direction, lexeme_count: stale.length });
+      logger.info({ event: 'dict_repaired', from, to, lexeme_count: stale.length });
     } catch (error) {
       // Deliberately NOT the fail-closed path. A failed repair writes nothing, so
       // the stored rows stand — correct when written, merely incomplete. Failing
@@ -403,21 +405,30 @@ export function createTranslationService({
       // The schema already trimmed this, but the service must not depend on the
       // order validators ran in.
       const text = input.text.trim();
-      const direction = input.direction ?? detectDirection(text);
-      const { source, target } = languagesFor(direction);
+      const { from, to } = input;
       const form = normalizeForm(text);
+
+      // Phase 16, spec §3. Before any read or model call: input whose letters are
+      // all in `to`'s script, or in neither language's, is answered here, so
+      // nothing it could have provoked reaches the shared dictionary.
+      const verdict = guardScript(form, from, to);
+      if (verdict !== 'pass') {
+        logger.info({ event: 'translation_guarded', from, to, reason: verdict });
+        return { text, from, to, kind: resolveKind(text, 'word'), senses: [], reason: verdict };
+      }
 
       // Step 1 of the flow. The hot path: a correctly spelled word resolves here
       // exactly as it does today, repair included, and pays nothing for this phase.
-      const direct = await serveForm({ llm, transaction, form, direction, source, target, logger });
+      const direct = await serveForm({ llm, transaction, form, from, to, logger });
       if (direct) {
         logger.info({
           event: 'dict_cache_hit',
-          direction,
+          from,
+          to,
           term_count: new Set(direct.rows.map((r) => r.lexemeId)).size,
           sense_count: direct.senses.length,
         });
-        return { text, direction, kind: direct.kind, senses: direct.senses };
+        return { text, from, to, kind: direct.kind, senses: direct.senses };
       }
 
       // Step 2. One indexed lookup, its own read — R8 permits it, and it is
@@ -429,7 +440,7 @@ export function createTranslationService({
       // passing a redirect lookup through a function that knows nothing about
       // redirects.
       const redirect = await transaction((repos) =>
-        repos.dict.findCorrectionByForm({ form, languageCode: source }),
+        repos.dict.findCorrectionByForm({ form, languageCode: from }),
       );
 
       if (redirect) {
@@ -442,20 +453,21 @@ export function createTranslationService({
           llm,
           transaction,
           form: redirect.correctedForm,
-          direction,
-          source,
-          target,
+          from,
+          to,
           logger,
         });
         if (served) {
           logger.info({
             event: 'dict_redirect_hit',
-            direction,
+            from,
+            to,
             alternative_count: redirect.alternatives.length,
           });
           return {
             text,
-            direction,
+            from,
+            to,
             kind: served.kind,
             senses: served.senses,
             correction: {
@@ -469,14 +481,14 @@ export function createTranslationService({
         // "the model declines" note.
       }
 
-      const raw = await llm(buildPrompt({ text, direction }));
+      const raw = await llm(buildPrompt({ text, from, to }));
 
       // An empty string is the contract's "no content" — a safety block, or a
       // candidate with no text. The input was refused; nothing is broken, and
       // nothing is written.
       if (raw === '') {
-        logger.info({ event: 'translation_no_content', direction });
-        return { text, direction, kind: resolveKind(text, 'word'), senses: [] };
+        logger.info({ event: 'translation_no_content', from, to });
+        return { text, from, to, kind: resolveKind(text, 'word'), senses: [] };
       }
 
       const parsed = parseLlmTranslation(raw);
@@ -487,7 +499,7 @@ export function createTranslationService({
       // both forms normalized and tidied, the effective form, and resolveKind
       // against that form. `null` means the answer cannot be used at all — the
       // fourth guard — and costs the same as an answer that failed to parse.
-      const resolved = resolveCorrection(parsed, { typedForm: form, direction });
+      const resolved = resolveCorrection(parsed, { typedForm: form, from, to });
       if (!resolved) throw new TranslationUnreadable(raw.slice(0, 200));
 
       // Step 5. `correction` is the MODEL's, never the redirect step 2 may have
@@ -514,9 +526,8 @@ export function createTranslationService({
           llm,
           transaction,
           form: effectiveForm,
-          direction,
-          source,
-          target,
+          from,
+          to,
           logger,
         });
 
@@ -531,17 +542,18 @@ export function createTranslationService({
               typedForm: form,
               correctedForm: correction.corrected_form,
               alternatives: correction.alternatives,
-              languageCode: source,
+              languageCode: from,
             }),
           );
           logger.info({
             event: 'dict_corrected',
-            direction,
+            from,
+            to,
             alternative_count: correction.alternatives.length,
           });
           // No call 2 and no persistEntries: the target already holds its own
           // renderings.
-          return { text, direction, kind: probe.kind, senses: probe.senses, correction };
+          return { text, from, to, kind: probe.kind, senses: probe.senses, correction };
         }
 
         // The chain. Made ONLY when the probe missed. Without it, step 8 would
@@ -550,16 +562,15 @@ export function createTranslationService({
         // "correct spellings win over redirects" rule: this phase's central defect
         // arriving by its own machinery.
         const hop = await transaction((repos) =>
-          repos.dict.findCorrectionByForm({ form: effectiveForm, languageCode: source }),
+          repos.dict.findCorrectionByForm({ form: effectiveForm, languageCode: from }),
         );
         if (hop) {
           const hopped = await serveForm({
             llm,
             transaction,
             form: hop.correctedForm,
-            direction,
-            source,
-            target,
+            from,
+            to,
             logger,
           });
           // ONE hop, no further: a chain whose second target has no rows fails the
@@ -577,18 +588,20 @@ export function createTranslationService({
               // Straight to the hop's target, never to the typo the model named.
               correctedForm: hop.correctedForm,
               alternatives: hop.alternatives,
-              languageCode: source,
+              languageCode: from,
             }),
           );
           logger.info({
             event: 'dict_corrected',
-            direction,
+            from,
+            to,
             alternative_count: hop.alternatives.length,
           });
           // The model's entries described the intermediate typo. Discarded unwritten.
           return {
             text,
-            direction,
+            from,
+            to,
             kind: hopped.kind,
             senses: hopped.senses,
             correction: hopCorrection,
@@ -608,8 +621,8 @@ export function createTranslationService({
       // reconciling one would spend a database round trip and possibly a second
       // model call on an answer that is then discarded.
       if (kind === 'sentence' || entries.length === 0) {
-        logger.info({ event: 'translated', direction, kind, sense_count: flattened.length });
-        return { text, direction, kind, senses: flattened };
+        logger.info({ event: 'translated', from, to, kind, sense_count: flattened.length });
+        return { text, from, to, kind, senses: flattened };
       }
 
       // Two independent calls name the same sense differently — `bank` returns
@@ -623,8 +636,8 @@ export function createTranslationService({
             repos.dict.findSensesByLexeme({
               lemma: entry.lemma,
               partOfSpeech: entry.part_of_speech,
-              languageCode: source,
-              userLanguageCode: target,
+              languageCode: from,
+              userLanguageCode: to,
             }),
           ),
         ),
@@ -636,7 +649,7 @@ export function createTranslationService({
         // costs the learner one retry. This deliberately differs from the
         // failed-write path below, which protects a correct answer whose
         // storage failed.
-        entries = await reconcile({ llm, form: effectiveForm, direction, entries, stored, logger });
+        entries = await reconcile({ llm, form: effectiveForm, from, to, entries, stored, logger });
         // Both return paths below read `flattened`; a stale one would serve the
         // un-reconciled renderings on the failed-write path only.
         flattened = normalizeSenses(kind, flattenEntries(entries));
@@ -646,8 +659,8 @@ export function createTranslationService({
         const { written, senses } = await transaction(async (repos) => {
           const result = await repos.dict.persistEntries({
             form: effectiveForm,
-            languageCode: source,
-            userLanguageCode: target,
+            languageCode: from,
+            userLanguageCode: to,
             kind,
             entries,
           });
@@ -662,7 +675,7 @@ export function createTranslationService({
               typedForm: form,
               correctedForm: correction.corrected_form,
               alternatives: correction.alternatives,
-              languageCode: source,
+              languageCode: from,
             });
           }
           return result;
@@ -675,24 +688,25 @@ export function createTranslationService({
         if (correction) {
           logger.info({
             event: 'dict_corrected',
-            direction,
+            from,
+            to,
             alternative_count: correction.alternatives.length,
           });
         }
-        logger.info({ event: 'translated', direction, kind, sense_count: senses.length });
-        return { text, direction, kind, senses, ...(correction ? { correction } : {}) };
+        logger.info({ event: 'translated', from, to, kind, sense_count: senses.length });
+        return { text, from, to, kind, senses, ...(correction ? { correction } : {}) };
       } catch (error) {
         // A failed write must not lose a translation the learner already paid
         // for. A broken persistence path shows up as this log line and as every
         // lookup costing a provider call — not as a 502 on a request the model
         // answered.
         logger.error('dict_persist_failed', error);
-        logger.info({ event: 'translated', direction, kind, sense_count: flattened.length });
+        logger.info({ event: 'translated', from, to, kind, sense_count: flattened.length });
         // The correction block is still attached: it describes the MODEL's answer,
         // which is true whether or not storage succeeded — the same reasoning that
         // keeps this path answering 200 with the senses the learner already paid
         // for. Only the redirect ROW is lost, and the next lookup writes it.
-        return { text, direction, kind, senses: flattened, ...(correction ? { correction } : {}) };
+        return { text, from, to, kind, senses: flattened, ...(correction ? { correction } : {}) };
       }
     },
   };

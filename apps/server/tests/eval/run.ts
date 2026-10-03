@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
+import { isInScript } from '../../src/domain/languages';
 import { createGeminiClient } from '../../src/providers/gemini';
 import type { LlmReconciliation } from '@lang-tutor/core/api';
 
@@ -30,7 +31,6 @@ import { CASES, RENDERING_CASES, type EvalCase, type RenderingCase } from './cas
 
 const TIER2_THRESHOLD = 0.85;
 const TIMEOUT_MS = 30_000;
-const HEBREW = /[֐-׿]/;
 
 /**
  * Cases run concurrently, not in parallel: each one is a single HTTP call this
@@ -146,12 +146,10 @@ function tier1(kase: EvalCase, result: ModelAnswer): Check[] {
     detail: result.entries.map((entry) => entry.part_of_speech).join(', '),
   });
 
-  if (result.direction === 'en_he') {
-    checks.push({
-      name: 'translation is in Hebrew script',
-      ok: senses.every((sense) => HEBREW.test(sense.translation)),
-    });
-  }
+  checks.push({
+    name: `translation is in ${result.to} script`,
+    ok: senses.every((sense) => isInScript(sense.translation, result.to)),
+  });
 
   if (result.kind === 'sentence') {
     // The server enforces this, so a failure here means normalizeSenses broke,
@@ -400,13 +398,12 @@ function renderingTier1(kase: RenderingCase, answer: LlmReconciliation): Check[]
     detail: senses.map((sense) => sense.sense_code).join(', '),
   });
 
-  if ((kase.direction ?? 'en_he') === 'en_he') {
-    checks.push({
-      name: 'every rendered translation is in Hebrew script',
-      ok: rendered.every((sense) => HEBREW.test(sense.translation!)),
-      detail: rendered.map((sense) => sense.translation).join(' | '),
-    });
-  }
+  const to = kase.to ?? 'he';
+  checks.push({
+    name: `every rendered translation is in ${to} script`,
+    ok: rendered.every((sense) => isInScript(sense.translation!, to)),
+    detail: rendered.map((sense) => sense.translation).join(' | '),
+  });
 
   return checks;
 }
@@ -508,10 +505,11 @@ async function main(): Promise<void> {
   // take the run down mid-flight.
   const scoreCase = async (kase: EvalCase): Promise<Row> => {
     try {
-      const result = await askModel(
-        llm,
-        kase.direction ? { text: kase.text, direction: kase.direction } : { text: kase.text },
-      );
+      const result = await askModel(llm, {
+        text: kase.text,
+        from: kase.from ?? 'en',
+        to: kase.to ?? 'he',
+      });
       return {
         label: kase.label,
         text: kase.text,
@@ -536,7 +534,8 @@ async function main(): Promise<void> {
     try {
       const answer = await askRendering(llm, {
         form: kase.form,
-        direction: kase.direction ?? 'en_he',
+        from: kase.from ?? 'en',
+        to: kase.to ?? 'he',
         lemma: kase.lemma,
         partOfSpeech: kase.partOfSpeech,
         storedSenses: kase.stored,
@@ -587,7 +586,7 @@ async function main(): Promise<void> {
     console.log(`\n[${mark}] ${row.text} — ${row.label}`);
     if (row.result) {
       console.log(
-        `       kind=${row.result.kind} direction=${row.result.direction} ` +
+        `       kind=${row.result.kind} ${row.result.from}→${row.result.to} ` +
           `senses=${row.result.senses.map((sense) => sense.translation).join(' | ') || '(none)'}`,
       );
       // Phase 13. Without this, a failing correction check says only that it was

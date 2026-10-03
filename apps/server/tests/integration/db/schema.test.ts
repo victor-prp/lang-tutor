@@ -7,7 +7,7 @@ import { createDb, type Db } from '../../../src/db/client';
 import { runMigrations } from '../../../src/db/migrate';
 import { sessions, users } from '../../../src/db/schema';
 import { ADMIN_URL, urlFor } from '../../support/dbNames';
-import { seedUser } from '../../support/seedUser';
+import { enrollmentOf, seedUser } from '../../support/seedUser';
 
 const DB_NAME = 'lang_tutor_schema_test';
 
@@ -37,10 +37,12 @@ afterAll(async () => {
 
 const TABLES = [
   'users',
+  'enrollments',
   'dict_lexemes',
   'dict_variants',
   'dict_senses',
   'dict_var_translations',
+  'dict_variant_renderings',
   'dict_corrections',
   'questions',
   'sessions',
@@ -83,7 +85,7 @@ const VALID_OPTIONS = [
 ];
 
 describe('the migrated schema', () => {
-  it('creates all ten tables', async () => {
+  it('creates every table in TABLES', async () => {
     const result = await db.execute<{ table_name: string }>(sql`
       select table_name from information_schema.tables where table_schema = 'public'
     `);
@@ -92,8 +94,8 @@ describe('the migrated schema', () => {
   });
 
   // Phase 8 dropped the he/en column defaults: onboarding always supplies the
-  // pair, so a default could only mask a bug. The columns are now required.
-  it('requires a language pair rather than defaulting one', async () => {
+  // language, so a default could only mask a bug. The column is still required.
+  it('requires a native language rather than defaulting one', async () => {
     await expect(
       db.execute(
         sql`insert into users (id, username, display_name, age) values ('u_defaults', 'u_defaults', 'x', 30)`,
@@ -103,7 +105,6 @@ describe('the migrated schema', () => {
     await seedUser(db, 'u_defaults');
     const [row] = await db.select().from(users).where(eq(users.id, 'u_defaults'));
     expect(row.nativeLanguage).toBe('he');
-    expect(row.targetLanguage).toBe('en');
   });
 
   it('accepts a well-formed options array', async () => {
@@ -150,7 +151,7 @@ describe('the migrated schema', () => {
 
   it('rejects an answer naming a question that is not in the session at that position', async () => {
     await seedUser(db, 'u_fk');
-    const [session] = await db.insert(sessions).values({ userId: 'u_fk' }).returning();
+    const [session] = await db.insert(sessions).values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk') }).returning();
     await db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)
       values (${session.id}, 0, 'q-ok', '{0,1,2,3}')
@@ -164,7 +165,7 @@ describe('the migrated schema', () => {
   });
 
   it('rejects a second answer at the same position', async () => {
-    const [session] = await db.insert(sessions).values({ userId: 'u_fk' }).returning();
+    const [session] = await db.insert(sessions).values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk') }).returning();
     await db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)
       values (${session.id}, 0, 'q-ok', '{0,1,2,3}')

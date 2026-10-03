@@ -4,7 +4,7 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { createServerDeps } from '../../src/composition';
 import { createFakeLogger } from '../support/fakes';
 import { createTestServerDeps } from '../support/serverDeps';
-import { seedUser } from '../support/seedUser';
+import { enrollmentOf, seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
 import { insertLexeme } from '../support/dictRows';
@@ -48,7 +48,7 @@ describe('createServerDeps', () => {
 
   it('assembles a session service that works against that database', async () => {
     const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
-    const { record } = await deps.sessions.startSession('u_1');
+    const { record } = await deps.sessions.startSession(enrollmentOf('u_1'));
     expect(record.questions).toHaveLength(SESSION_LENGTH);
   });
 
@@ -82,7 +82,7 @@ describe('createServerDeps', () => {
     // that the service received a transaction at all.
     const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
 
-    await expect(deps.translations.translate({ text: 'Ladder' })).resolves.toMatchObject({
+    await expect(deps.translations.translate({ text: 'Ladder', from: 'en', to: 'he' })).resolves.toMatchObject({
       kind: 'word',
       senses: [{ translation: 'סולם', part_of_speech: 'noun' }],
     });

@@ -2,10 +2,11 @@ import type {
   LlmEntry,
   LlmSense,
   PartOfSpeech,
-  TranslationDirection,
   TranslationKind,
   TranslationSense,
 } from '@lang-tutor/core/api';
+
+import { stripStress } from './languages';
 
 /**
  * The pure core of the dictionary: how a model's entries become rows, how rows
@@ -51,7 +52,10 @@ function toResponseSense(sense: LlmSense, partOfSpeech: PartOfSpeech): Translati
  */
 export function mergeEntries(entries: LlmEntry[]): LlmEntry[] {
   const byLexeme = new Map<string, LlmEntry>();
-  for (const entry of entries) {
+  for (const raw of entries) {
+    // Phase 16. The lemma becomes half of dict_lexemes' unique key, so a stress
+    // mark the model added despite the prompt would be a second lexeme forever.
+    const entry = { ...raw, lemma: stripStress(raw.lemma) };
     const key = `${entry.lemma} ${entry.part_of_speech}`;
     const existing = byLexeme.get(key);
     if (existing) existing.senses = [...existing.senses, ...entry.senses];
@@ -94,7 +98,9 @@ export function flattenEntries(entries: LlmEntry[]): TranslationSense[] {
  * turns a hit into a silent miss.
  */
 export function normalizeForm(text: string): string {
-  const collapsed = text.trim().replace(/\s+/g, ' ');
+  // Phase 16. Stress first, before the single-token check, because a multi-word
+  // expression returns early below and must lose its stress marks too.
+  const collapsed = stripStress(text.trim().replace(/\s+/g, ' '));
 
   // A multi-word expression keeps its punctuation: it is part of the
   // expression, and two seeded ones — `How do you do?` and `Have a nice day!` —
@@ -115,15 +121,6 @@ export function normalizeForm(text: string): string {
   // An input that is nothing but punctuation has no key to strip down to, and
   // an empty form would defeat the request schema's min(1) after the fact.
   return stripped === '' ? collapsed : stripped;
-}
-
-/** Both codes come from `direction` alone. No user id is involved, which is why
- *  the request schema did not have to change. */
-export function languagesFor(direction: TranslationDirection): {
-  source: string;
-  target: string;
-} {
-  return direction === 'en_he' ? { source: 'en', target: 'he' } : { source: 'he', target: 'en' };
 }
 
 /**

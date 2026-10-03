@@ -15,7 +15,13 @@ import {
   sessionScore,
   type SessionRecord,
 } from '../domain/session';
-import { OptionOutOfRange, QuestionDesynced, SessionNotFound, UserNotFound } from '../errors';
+import {
+  EnrollmentNotFound,
+  InsufficientQuestions,
+  OptionOutOfRange,
+  QuestionDesynced,
+  SessionNotFound,
+} from '../errors';
 import type { SessionService } from '../services/sessions';
 
 function buildNextStepResponse(
@@ -45,7 +51,7 @@ const createSessionRoute = createRoute({
   path: '/',
   tags: ['sessions'],
   summary: 'Start a session',
-  description: 'Draws ten questions and returns the first one.',
+  description: "Draws ten questions from the enrollment's language pair and returns the first one.",
   request: {
     body: { required: true, content: { 'application/json': { schema: CreateSessionRequestSchema } } },
   },
@@ -60,7 +66,12 @@ const createSessionRoute = createRoute({
     },
     404: {
       content: { 'application/json': { schema: ErrorSchema } },
-      description: 'No user has this `user_id`. Create one with POST /api/users first.',
+      description: 'No enrollment has this `enrollment_id`.',
+    },
+    409: {
+      content: { 'application/json': { schema: ErrorSchema } },
+      description:
+        "The enrollment's language pair has fewer than ten questions, so no session can start.",
     },
   },
 });
@@ -115,9 +126,9 @@ export function createSessionsRouter(sessions: SessionService) {
   });
 
   router.openapi(createSessionRoute, async (c) => {
-    const { user_id } = c.req.valid('json');
+    const { enrollment_id } = c.req.valid('json');
     try {
-      const { sessionId, record } = await sessions.startSession(user_id);
+      const { sessionId, record } = await sessions.startSession(enrollment_id);
       return c.json(
         {
           session_id: sessionId,
@@ -127,7 +138,10 @@ export function createSessionsRouter(sessions: SessionService) {
         200,
       );
     } catch (error) {
-      if (error instanceof UserNotFound) return c.json({ error: 'user not found' }, 404);
+      if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
+      if (error instanceof InsufficientQuestions) {
+        return c.json({ error: 'not enough questions' }, 409);
+      }
       throw error;
     }
   });

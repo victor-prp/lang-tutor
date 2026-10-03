@@ -5,7 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { createApiClient } from '@/api/client';
 import { requireEnvValue } from '@/config/requireEnvValue';
-import { createRememberedUsernameStore } from '@/currentUser';
+import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '@/currentUser';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { SessionProvider } from '@/hooks/useSession';
 import { TranslationProvider } from '@/hooks/useTranslation';
@@ -22,6 +22,7 @@ const baseUrl = requireEnvValue(process.env.EXPO_PUBLIC_API_URL, 'EXPO_PUBLIC_AP
 
 const api = createApiClient({ baseUrl, fetch: globalThis.fetch });
 const usernameStore = createRememberedUsernameStore({ storage: AsyncStorage });
+const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
 
 // RTL is set two different ways because the platforms disagree about how.
 //
@@ -45,7 +46,9 @@ export default function RootLayout() {
     // fallback provider, but relying on that is relying on an internal detail —
     // and on web the insets are zero without an explicit provider.
     <SafeAreaProvider>
-      <CurrentUserProvider api={api} usernameStore={usernameStore}>
+      <CurrentUserProvider api={api} usernameStore={usernameStore}
+        enrollmentStore={enrollmentStore}
+      >
         <SessionProvider api={api}>
           <TranslationProvider api={api}>
             <View style={styles.root} {...rtlProps}>

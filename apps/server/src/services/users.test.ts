@@ -5,7 +5,7 @@ import {
   createFakeTransaction,
   createInMemoryUserRepo,
 } from '../../tests/support/fakes';
-import { InvalidLanguagePair, UsernameTaken, UserNotFound } from '../errors';
+import { UsernameTaken, UserNotFound } from '../errors';
 import { createUserService } from './users';
 
 // The other half of this file's tests is
@@ -17,7 +17,6 @@ const REQUEST = {
   display_name: 'דנה',
   age: 34,
   native_language: 'he' as const,
-  target_language: 'en' as const,
 };
 
 function build() {
@@ -42,14 +41,6 @@ describe('register', () => {
     expect(logger.events).toEqual([
       { event: 'user_registered', user_id: user.id, username: 'dana' },
     ]);
-  });
-
-  it('rejects a matching language pair without writing anything', async () => {
-    const { service, repo } = build();
-    await expect(
-      service.register({ ...REQUEST, target_language: 'he' }),
-    ).rejects.toBeInstanceOf(InvalidLanguagePair);
-    expect(repo.rows).toEqual([]);
   });
 
   it('propagates UsernameTaken and logs nothing', async () => {

@@ -9,21 +9,28 @@ export function learnerFor(username: string): CreateUserRequest {
     display_name: 'דנה',
     age: 34,
     native_language: 'he',
-    target_language: 'en',
   };
 }
 
-/** Creates a learner over the same endpoint the app uses. There is no fixture
- *  seed and no test-only route: this is the production path. */
+/** Creates a learner AND their enrollment over the endpoints the app uses. No
+ *  fixture seed and no test-only route: this is the production path. */
 export async function createLearner(
   request: APIRequestContext,
   username: string,
+  targetLanguage: 'en' | 'ru' = 'en',
 ): Promise<User> {
   const res = await request.post(`${API_URL}/api/users`, { data: learnerFor(username) });
   if (!res.ok()) {
     throw new Error(`could not create ${username}: ${res.status()} ${await res.text()}`);
   }
-  return (await res.json()) as User;
+  const user = (await res.json()) as User;
+  const enrolled = await request.post(`${API_URL}/api/users/${user.id}/enrollments`, {
+    data: { source_language: 'he', target_language: targetLanguage },
+  });
+  if (!enrolled.ok()) {
+    throw new Error(`could not enroll ${username}: ${enrolled.status()} ${await enrolled.text()}`);
+  }
+  return user;
 }
 
 /** Drives the real login screen. The click is retried because a static export

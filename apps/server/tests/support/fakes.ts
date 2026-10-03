@@ -12,6 +12,7 @@ import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
 import type { CorrectionRow, PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
+import type { EnrollmentService } from '../../src/services/enrollments';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
@@ -56,12 +57,14 @@ export function createFakeAppDeps(): AppDeps {
     register: unreachable,
     login: unreachable,
   };
+  const enrollments: EnrollmentService = { enroll: unreachable, list: unreachable };
   const translations: TranslationService = {
     translate: unreachable,
   };
   return {
     sessions,
     users,
+    enrollments,
     translations,
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0 },
@@ -108,7 +111,6 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
         display_name: input.display_name,
         age: input.age,
         native_language: input.native_language,
-        target_language: input.target_language,
       };
       rows.push(user);
       return user;
@@ -136,6 +138,7 @@ function unreachableRepo<T extends object>(name: string): T {
 export function createFakeTransaction(repos: Partial<Repos>): Transaction {
   const bound: Repos = {
     user: repos.user ?? unreachableRepo('user repo'),
+    enrollment: repos.enrollment ?? unreachableRepo('enrollment repo'),
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),

@@ -5,6 +5,7 @@ import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 
 import type { AppDeps } from './composition';
+import { createEnrollmentsRouter } from './routes/enrollments';
 import { createSessionsRouter } from './routes/sessions';
 import { createTranslationsRouter } from './routes/translations';
 import { createUsersRouter } from './routes/users';
@@ -46,6 +47,7 @@ export function createApp(deps: AppDeps) {
   });
 
   app.route('/api', createUsersRouter(deps.users));
+  app.route('/api', createEnrollmentsRouter(deps.enrollments));
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   app.route('/api/sessions', createSessionsRouter(deps.sessions));
 
@@ -59,7 +61,7 @@ export function createApp(deps: AppDeps) {
       title: 'lang-tutor API',
       version: '0.1.0',
       description:
-        'Sessions of ten multiple-choice questions for Hebrew speakers learning English.',
+        'Sessions of ten multiple-choice questions for Hebrew speakers learning English or Russian.',
     },
   });
   app.get('/docs', Scalar({ url: '/openapi.json', pageTitle: 'lang-tutor API' }));

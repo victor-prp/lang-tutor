@@ -6,6 +6,7 @@ import { RepairWouldDropSense } from '../errors';
 import {
   dictCorrections,
   dictVarTranslations,
+  dictVariantRenderings,
   dictVariants,
   dictLexemes,
   dictSenses,
@@ -210,13 +211,16 @@ export function createDictRepo(tx: Tx) {
   };
 
   /**
-   * One row per lexeme this form belongs to, carrying both versions. No limit
-   * and no join to the translations: staleness is a property of the variant,
-   * not of the rows that happen to fit in an answer.
+   * One row per lexeme this form belongs to that has been rendered in
+   * `userLanguageCode`, carrying both versions. INNER join, not LEFT: a variant
+   * with no rendering in this language is never served in it, so it has nothing
+   * to repair from, and calling it stale would buy a model call that can only
+   * come back empty (plan deviation 2).
    */
   const findStaleLexemesByForm = async (input: {
     form: string;
     languageCode: string;
+    userLanguageCode: string;
   }): Promise<StaleLexeme[]> =>
     staleLexemes(
       await tx
@@ -226,10 +230,17 @@ export function createDictRepo(tx: Tx) {
           lemma: dictLexemes.lemma,
           partOfSpeech: dictLexemes.partOfSpeech,
           senseVersion: dictLexemes.senseVersion,
-          renderedSenseVersion: dictVariants.renderedSenseVersion,
+          renderedSenseVersion: dictVariantRenderings.renderedSenseVersion,
         })
         .from(dictVariants)
         .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
+        .innerJoin(
+          dictVariantRenderings,
+          and(
+            eq(dictVariantRenderings.variantId, dictVariants.id),
+            eq(dictVariantRenderings.userLanguageCode, input.userLanguageCode),
+          ),
+        )
         .where(
           and(
             eq(dictVariants.languageCode, input.languageCode),
@@ -549,13 +560,20 @@ export function createDictRepo(tx: Tx) {
           ],
         });
 
-      // 5b — this form is now rendered against that version. Read AFTER the
+      // 5b — this form is now rendered against that version, in this language. Read AFTER the
       // bump, never before: stamping the pre-bump value would leave the variant
       // permanently one behind and re-render it on every lookup forever.
       await tx
-        .update(dictVariants)
-        .set({ renderedSenseVersion: versioned.senseVersion })
-        .where(eq(dictVariants.id, variant.id));
+        .insert(dictVariantRenderings)
+        .values({
+          variantId: variant.id,
+          userLanguageCode: input.userLanguageCode,
+          renderedSenseVersion: versioned.senseVersion,
+        })
+        .onConflictDoUpdate({
+          target: [dictVariantRenderings.variantId, dictVariantRenderings.userLanguageCode],
+          set: { renderedSenseVersion: versioned.senseVersion },
+        });
 
       written.push({
         lemma: entry.lemma,
@@ -674,9 +692,16 @@ export function createDictRepo(tx: Tx) {
     );
 
     await tx
-      .update(dictVariants)
-      .set({ renderedSenseVersion: input.senseVersion })
-      .where(eq(dictVariants.id, input.variantId));
+      .insert(dictVariantRenderings)
+      .values({
+        variantId: input.variantId,
+        userLanguageCode: input.userLanguageCode,
+        renderedSenseVersion: input.senseVersion,
+      })
+      .onConflictDoUpdate({
+        target: [dictVariantRenderings.variantId, dictVariantRenderings.userLanguageCode],
+        set: { renderedSenseVersion: input.senseVersion },
+      });
   };
 
   return {

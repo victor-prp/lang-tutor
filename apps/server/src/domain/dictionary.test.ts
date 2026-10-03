@@ -5,7 +5,6 @@ import {
   entriesToRows,
   flattenEntries,
   kindForForm,
-  languagesFor,
   mergeEntries,
   normalizeForm,
   rowsToSenses,
@@ -172,13 +171,6 @@ describe('normalizeForm', () => {
 
   it('collapses a tab and a newline the same way as a space', () => {
     expect(normalizeForm('see\tyou\nlater')).toBe('see you later');
-  });
-});
-
-describe('languagesFor', () => {
-  it('reads an English term with Hebrew translations, and the mirror', () => {
-    expect(languagesFor('en_he')).toEqual({ source: 'en', target: 'he' });
-    expect(languagesFor('he_en')).toEqual({ source: 'he', target: 'en' });
   });
 });
 
@@ -386,5 +378,32 @@ describe('staleLexemes', () => {
   // was still set to the lexeme's. Counting translations would get this wrong.
   it('does not report a form that rendered fewer senses than its lexeme holds', () => {
     expect(staleLexemes([row({ senseVersion: 4, renderedSenseVersion: 4 })])).toEqual([]);
+  });
+});
+
+describe('normalizeForm and Russian stress', () => {
+  it('strips a stress mark so both spellings are one key', () => {
+    expect(normalizeForm('молоко́')).toBe('молоко');
+    expect(normalizeForm('доро́га до́ма')).toBe('дорога дома');
+  });
+
+  it('keeps ё', () => {
+    expect(normalizeForm('ёлка')).toBe('ёлка');
+  });
+
+  it('still strips trailing punctuation after stripping stress', () => {
+    expect(normalizeForm('молоко́?')).toBe('молоко');
+  });
+});
+
+describe('mergeEntries and Russian stress', () => {
+  it('strips stress from a lemma, so a stray mark cannot make a second lexeme', () => {
+    const merged = mergeEntries([
+      { lemma: 'молоко́', part_of_speech: 'noun', senses: [{ sense_code: 'milk', translation: 'חלב' }] },
+      { lemma: 'молоко', part_of_speech: 'noun', senses: [{ sense_code: 'milk_2', translation: 'חלב' }] },
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].lemma).toBe('молоко');
+    expect(merged[0].senses).toHaveLength(2);
   });
 });

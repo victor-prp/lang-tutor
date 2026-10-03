@@ -88,7 +88,7 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
     await persist('cooks', COOKS_PLUS_ONE); // teaches the NOUN a second sense
 
     const stale = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
 
     expect(stale).toHaveLength(1);
     expect(stale[0].partOfSpeech).toBe('noun');
@@ -98,7 +98,7 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
     const noun = await variantOf('cook', 'noun');          // one sense, rank 0
     await persist('cooks', COOKS_PLUS_ONE);                // the lexeme gains a second
     const [stale] = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
 
     const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
     const idOf = (code: string) => stored.find((s) => s.senseCode === code)!.senseId;
@@ -134,7 +134,7 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
     await variantOf('cook', 'noun');                 // one sense, rank 0
     await persist('cooks', COOKS_PLUS_ONE);          // the lexeme gains a second
     const [stale] = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
 
     // What `repairForm` reads before its model call.
     const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
@@ -164,7 +164,7 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
     // three senses. Re-reading the version inside the write would have stamped
     // 3 here and closed the door on `ships_cook` permanently.
     const after = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
     expect(after.map((row) => row.partOfSpeech)).toEqual(['noun']);
   });
 
@@ -172,7 +172,7 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
     await variantOf('cook', 'noun');
     await persist('cooks', COOKS_PLUS_ONE);
     const [stale] = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
 
     const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
 
@@ -188,7 +188,7 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
 
     expect(
       await withTx(t.db, (tx) =>
-        createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' })),
+        createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' })),
     ).toEqual([]);
   });
 });
@@ -223,7 +223,7 @@ describe('a repair may not drop a sense the form already renders', () => {
         ] },
     ]);
     const [stale] = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
     const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
     const idOf = (code: string) => stored.find((sense) => sense.senseCode === code)!.senseId;
 
@@ -250,7 +250,7 @@ describe('a repair may not drop a sense the form already renders', () => {
     expect(rows.map((row) => row.translation)).toEqual(['N-COOK', 'N-COOK-2']);
     expect(
       await withTx(t.db, (tx) =>
-        createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' })),
+        createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' })),
     ).toHaveLength(1);
   });
 
@@ -265,7 +265,7 @@ describe('a repair may not drop a sense the form already renders', () => {
         ] },
     ]);
     const [stale] = await withTx(t.db, (tx) =>
-      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en' }));
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
     const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
 
     await withTx(t.db, (tx) =>

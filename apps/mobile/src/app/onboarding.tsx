@@ -16,7 +16,7 @@ function LanguageChoice({
   value,
   onChange,
 }: {
-  prefix: 'native' | 'target';
+  prefix: 'native';
   value: LanguageCode;
   onChange: (code: LanguageCode) => void;
 }) {
@@ -46,7 +46,6 @@ export default function OnboardingScreen() {
   const [displayName, setDisplayName] = useState('');
   const [age, setAge] = useState('');
   const [nativeLanguage, setNativeLanguage] = useState<LanguageCode>('he');
-  const [targetLanguage, setTargetLanguage] = useState<LanguageCode>('en');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -64,10 +63,6 @@ export default function OnboardingScreen() {
       setError(strings.onboardingIncomplete);
       return;
     }
-    if (nativeLanguage === targetLanguage) {
-      setError(strings.onboardingSameLanguage);
-      return;
-    }
 
     setBusy(true);
     setError(null);
@@ -77,7 +72,6 @@ export default function OnboardingScreen() {
         display_name: displayName.trim(),
         age: parsedAge,
         native_language: nativeLanguage,
-        target_language: targetLanguage,
       });
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 409) {
@@ -127,8 +121,6 @@ export default function OnboardingScreen() {
       <Text style={styles.label}>{strings.onboardingNativeLabel}</Text>
       <LanguageChoice prefix="native" value={nativeLanguage} onChange={setNativeLanguage} />
 
-      <Text style={styles.label}>{strings.onboardingTargetLabel}</Text>
-      <LanguageChoice prefix="target" value={targetLanguage} onChange={setTargetLanguage} />
 
       {error ? (
         <Text testID="onboarding-error" style={styles.error}>

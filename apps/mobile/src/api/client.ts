@@ -1,7 +1,9 @@
 import type {
+  CreateEnrollmentRequest,
   CreateSessionRequest,
   CreateSessionResponse,
   CreateUserRequest,
+  Enrollment,
   LoginRequest,
   NextStepRequest,
   NextStepResponse,
@@ -35,6 +37,12 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
     return (await res.json()) as TResponse;
   }
 
+  async function getJson<TResponse>(path: string): Promise<TResponse> {
+    const res = await fetch(`${baseUrl}${path}`, { method: 'GET' });
+    if (!res.ok) throw new ApiError(res.status);
+    return (await res.json()) as TResponse;
+  }
+
   return {
     // Identification, not authentication: there is no password to send.
     login: (request: LoginRequest) => postJson<User>('/api/login', request),
@@ -45,6 +53,10 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request),
     translate: (request: TranslationRequest) =>
       postJson<TranslationResponse>('/api/translations', request),
+    listEnrollments: (userId: string) =>
+      getJson<Enrollment[]>(`/api/users/${encodeURIComponent(userId)}/enrollments`),
+    createEnrollment: (userId: string, request: CreateEnrollmentRequest) =>
+      postJson<Enrollment>(`/api/users/${encodeURIComponent(userId)}/enrollments`, request),
   };
 }
 

@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import type { LlmTranslation } from '@lang-tutor/core/api';
 
 import { loadGeminiConfig } from '../../src/config';
-import { content } from '../../src/db/content';
+import { content, parseRecordArgs, recordingKey } from '../../src/db/content';
 import { recorded } from '../../src/db/content.generated';
 import { createGeminiClient } from '../../src/providers/gemini';
 import { askModel } from './askModel';
@@ -57,16 +57,21 @@ async function main(): Promise<void> {
   // the whole file, and a reviewer skimming noise is how a bad recording gets
   // committed. With no filter it re-records everything, which is the
   // deliberate act.
-  const filter = process.argv[2];
-  const queries = content
-    .map((entry) => entry.query)
-    .filter((query) => !filter || query === filter);
+  const { filter, pair } = parseRecordArgs(process.argv.slice(2));
 
-  if (queries.length === 0) {
+  const matching = content.filter(
+    (entry) =>
+      (!filter || entry.query === filter) && (!pair || `${entry.from}-${entry.to}` === pair),
+  );
+
+  if (matching.length === 0) {
     throw new Error(
-      `no seeded query matches "${filter}". Known queries:\n  ` +
-        content.map((entry) => entry.query).join('\n  '),
+      `no seeded entry matches "${filter ?? ''}"${pair ? ` under ${pair}` : ''}. Known entries:\n  ` +
+        content.map((entry) => recordingKey(entry)).join('\n  '),
     );
+  }
+  if (filter && !pair && new Set(matching.map((entry) => `${entry.from}-${entry.to}`)).size > 1) {
+    throw new Error(`"${filter}" is seeded under more than one pair; add --pair <from>-<to>.`);
   }
 
   // Every placeholder entry has exactly one sense and no example — the
@@ -113,8 +118,9 @@ async function main(): Promise<void> {
   // these into one `{ ...recorded }` start — that is exactly what silently
   // reintroduces orphaned entries on an unfiltered re-record.
   const next: Record<string, LlmTranslation> = filter ? { ...recorded } : {};
-  for (const query of queries) {
-    const answer = await askModel(llm, { text: query });
+  for (const entry of matching) {
+    const { query } = entry;
+    const answer = await askModel(llm, { text: query, from: entry.from, to: entry.to });
     // A sentence is never persisted by a real lookup
     // (`services/translations.ts`), so recording one here would let
     // `db/seed.ts` store a dictionary row no lookup could ever have
@@ -129,7 +135,7 @@ async function main(): Promise<void> {
           'it as a word or phrase, then re-run.',
       );
     }
-    next[query] = { kind: answer.kind, entries: answer.entries };
+    next[recordingKey(entry)] = { kind: answer.kind, entries: answer.entries };
     const shape = answer.entries
       .map((entry) => `${entry.lemma}(${entry.senses.length})`)
       .join(' ');
@@ -137,7 +143,7 @@ async function main(): Promise<void> {
   }
 
   writeFileSync(OUTPUT, `${HEADER}${JSON.stringify(next, null, 2)};\n`);
-  console.log(`\nrecorded ${queries.length} of ${content.length} into ${OUTPUT}`);
+  console.log(`\nrecorded ${matching.length} of ${content.length} into ${OUTPUT}`);
   console.log('Read the diff before committing.');
 }
 

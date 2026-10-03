@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { createApp } from '../../src/app';
 import { createTestServerDeps } from '../support/serverDeps';
 import { createFakeLogger } from '../support/fakes';
-import { seedUser } from '../support/seedUser';
+import { enrollmentOf, seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
 
@@ -50,7 +50,7 @@ async function postJson(path: string, body: unknown) {
 
 describe('integration: a full session over real HTTP', () => {
   it('creates a session, answers all 10 questions correctly, and completes with a perfect score', async () => {
-    const created = await postJson('/api/sessions', { user_id: 'integration_user' });
+    const created = await postJson('/api/sessions', { enrollment_id: enrollmentOf('integration_user') });
     expect(created.status).toBe(200);
     expect(created.body.position).toEqual({ position: 1, total: 10 });
 
@@ -74,7 +74,7 @@ describe('integration: a full session over real HTTP', () => {
   });
 
   it('keeps a completed session readable, so a retry replays instead of 404ing', async () => {
-    const created = await postJson('/api/sessions', { user_id: 'restart_user' });
+    const created = await postJson('/api/sessions', { enrollment_id: enrollmentOf('restart_user') });
     const sessionId = created.body.session_id;
 
     let current = created.body;
