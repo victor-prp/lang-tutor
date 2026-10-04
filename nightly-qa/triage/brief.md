@@ -23,7 +23,8 @@ one file.
   hash — showing the behaviour was decided. Without one, rule 2 does not apply.
 - **duplicate needs an open, older issue** showing the same behaviour. The same
   fingerprint is not enough. Name the oldest one.
-- If you are unsure, say `"confidence": "low"`. A wrong confident answer is worse than an
+- `confidence` is exactly `"high"` or `"low"` — there is no `"medium"`. If you are unsure,
+  say `"low"`. A wrong confident answer is worse than an
   honest low one.
 - If no rule fits cleanly, or two do, add a rule gap with a concrete suggested change to
   `rules.md`.

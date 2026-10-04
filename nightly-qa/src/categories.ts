@@ -53,7 +53,10 @@ const decisionSchema = z.object({
   issue: z.number().int().positive(),
   category: z.enum(categories),
   duplicate_of: z.number().int().positive().optional(),
-  confidence: z.enum(['high', 'low']),
+  // Two steps, not the explorer's three. A session that reaches for "medium"
+  // is saying it is not sure, which is what low means: applied, and
+  // highlighted in the report. Anything else is still a broken file.
+  confidence: z.preprocess((v) => (v === 'medium' ? 'low' : v), z.enum(['high', 'low'])),
   rationale: z.string().min(1),
   evidence: z.array(z.string()).default([]),
 });
