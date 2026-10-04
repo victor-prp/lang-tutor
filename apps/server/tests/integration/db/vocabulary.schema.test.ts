@@ -52,7 +52,7 @@ describe('vocabulary_entries', () => {
       sql`select created_at from vocabulary_entries`,
     );
     expect(rows.rows).toHaveLength(1);
-    // Raw db.execute() returns timestamps as ISO 8601 strings. Verify the value
+    // Raw db.execute() returns timestamps as Postgres text format. Verify the value
     // is a valid timestamp close to now (within 60 seconds).
     const createdAt = rows.rows[0].created_at;
     expect(createdAt).toBeTruthy();
@@ -66,12 +66,12 @@ describe('vocabulary_entries', () => {
     await expect(insert()).rejects.toThrow(violating('vocabulary_entries_pkey'));
   });
 
-  it.each([
+  it.each<[Column, string]>([
     ['enrollment', 'vocabulary_entries_enrollment_fk'],
     ['sense', 'vocabulary_entries_sense_fk'],
     ['lexeme', 'vocabulary_entries_lexeme_fk'],
     ['variant', 'vocabulary_entries_variant_fk'],
-  ] as const)('rejects an unknown %s', async (column, constraint) => {
+  ])('rejects an unknown %s', async (column, constraint) => {
     await expect(insert({ [column]: 'nope' })).rejects.toThrow(violating(constraint));
   });
 
