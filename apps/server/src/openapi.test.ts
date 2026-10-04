@@ -97,9 +97,12 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all seven paths and nothing else', async () => {
+  it('contains all ten paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
+      '/api/enrollments/{id}/vocabulary',
+      '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
+      '/api/enrollments/{id}/vocabulary/words/{lexeme_id}',
       '/api/login',
       '/api/sessions',
       NEXT_STEP,
@@ -230,5 +233,19 @@ describe('GET /health in the published document', () => {
     const doc = await openApiDocument();
     const schema = doc.paths['/health'].get.responses['200'].content['application/json'].schema;
     expect(schema.required.sort()).toEqual(['database', 'lane', 'ok', 'port']);
+  });
+});
+
+describe('the vocabulary endpoints in the published document', () => {
+  const BASE = '/api/enrollments/{id}/vocabulary';
+
+  it.each([
+    [BASE, 'post', ['200', '400', '404']],
+    [BASE, 'get', ['200', '400', '404']],
+    [`${BASE}/senses/{sense_id}`, 'delete', ['204', '404']],
+    [`${BASE}/words/{lexeme_id}`, 'get', ['200', '404']],
+  ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths[path][method].responses).sort()).toEqual(statuses);
   });
 });

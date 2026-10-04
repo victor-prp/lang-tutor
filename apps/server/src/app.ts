@@ -9,6 +9,7 @@ import { createEnrollmentsRouter } from './routes/enrollments';
 import { createSessionsRouter } from './routes/sessions';
 import { createTranslationsRouter } from './routes/translations';
 import { createUsersRouter } from './routes/users';
+import { createVocabularyRouter } from './routes/vocabulary';
 
 // Readiness, not just liveness: the e2e suite waits on this before starting the
 // app, and a 503 here is what distinguishes "server booting" from "broken".
@@ -48,6 +49,7 @@ export function createApp(deps: AppDeps) {
 
   app.route('/api', createUsersRouter(deps.users));
   app.route('/api', createEnrollmentsRouter(deps.enrollments));
+  app.route('/api', createVocabularyRouter(deps.vocabulary));
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   app.route('/api/sessions', createSessionsRouter(deps.sessions));
 

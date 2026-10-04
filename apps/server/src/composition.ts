@@ -15,6 +15,7 @@ import type { LlmClient } from './services/llm';
 import { createSessionService, type SessionService } from './services/sessions';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
+import { createVocabularyService, type VocabularyService } from './services/vocabulary';
 
 /**
  * Which checkout this process belongs to, as published by /health. Data, not a
@@ -32,6 +33,7 @@ export type AppDeps = {
   users: UserService;
   enrollments: EnrollmentService;
   translations: TranslationService;
+  vocabulary: VocabularyService;
   health: HealthRepo;
   identity: ServerIdentity;
   logger: Logger;
@@ -83,6 +85,7 @@ export function createServerDeps(io: {
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations: createTranslationService({ llm, transaction, logger: io.logger }),
+    vocabulary: createVocabularyService({ transaction, logger: io.logger }),
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,
     logger: io.logger,
