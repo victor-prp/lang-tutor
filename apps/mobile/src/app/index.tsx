@@ -105,6 +105,15 @@ export default function HomeScreen() {
         <Text style={styles.secondaryButtonLabel}>{strings.translateEntry}</Text>
       </Pressable>
 
+      <Pressable
+        accessibilityRole="button"
+        testID="vocabulary-entry"
+        onPress={() => router.push('/vocabulary')}
+        style={styles.secondaryButton}
+      >
+        <Text style={styles.secondaryButtonLabel}>{strings.vocabularyEntry}</Text>
+      </Pressable>
+
       {/* Deliberately empty. Streak, points and daily-target widgets land here. */}
       <View style={styles.futureSpace} />
     </SafeAreaView>

@@ -9,6 +9,7 @@ import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { SessionProvider } from '@/hooks/useSession';
 import { TranslationProvider } from '@/hooks/useTranslation';
+import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { colors } from '@/theme';
 
 // Read directly off process.env.EXPO_PUBLIC_API_URL (not via an indirection)
@@ -51,9 +52,11 @@ export default function RootLayout() {
       >
         <SessionProvider api={api}>
           <TranslationProvider api={api}>
-            <View style={styles.root} {...rtlProps}>
-              <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-            </View>
+            <VocabularyProvider api={api}>
+              <View style={styles.root} {...rtlProps}>
+                <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+              </View>
+            </VocabularyProvider>
           </TranslationProvider>
         </SessionProvider>
       </CurrentUserProvider>
