@@ -143,3 +143,22 @@ test('a target that is not a known nightly-qa issue is refused, whatever meta.js
   assert.match(checked.refused[0].reason, /#12 is not a nightly-qa issue/);
   assert.match(checked.refused[1].reason, /#13 is not a nightly-qa issue/);
 });
+
+// Night of 2026-10-04: the session wrote "medium" for its two least certain
+// decisions - the explorer's confidence scale has three steps - and the whole
+// file was refused. Anything short of sure is low: applied, and highlighted.
+test('"medium" confidence is read as low, rather than failing the whole file', () => {
+  const raw = JSON.stringify({
+    decisions: [{ issue: 43, category: 'ux-polish', confidence: 'medium', rationale: 'r' }],
+  });
+  const parsed = parseCategoriesFile(raw);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.file.decisions[0].confidence, 'low');
+});
+
+test('any other confidence value still fails the whole file', () => {
+  const raw = JSON.stringify({
+    decisions: [{ issue: 43, category: 'ux-polish', confidence: 'certain', rationale: 'r' }],
+  });
+  assert.equal(parseCategoriesFile(raw).ok, false);
+});
