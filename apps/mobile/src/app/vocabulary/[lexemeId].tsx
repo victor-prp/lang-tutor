@@ -1,0 +1,150 @@
+import type { VocabularyWordDetail } from '@lang-tutor/core/api';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { useVocabulary } from '@/hooks/useVocabulary';
+import { strings } from '@/strings';
+import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { toggleOptimistically } from '@/vocabulary';
+
+export default function VocabularyWordScreen() {
+  const { lexemeId } = useLocalSearchParams<{ lexemeId: string }>();
+  const { loadWord, save, unsave } = useVocabulary();
+  const [word, setWord] = useState<VocabularyWordDetail | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [pending, setPending] = useState<Record<string, true>>({});
+  // Bumped when the word changes or the screen unmounts: a toggle that settles
+  // after that must not write into the next word's state.
+  const generation = useRef(0);
+
+  useEffect(() => {
+    let live = true;
+    setWord(null);
+    setLoadFailed(false);
+    setSaveFailed(false);
+    setPending({});
+    loadWord(lexemeId)
+      .then((detail) => live && setWord(detail))
+      .catch(() => live && setLoadFailed(true));
+    return () => {
+      live = false;
+      generation.current += 1;
+    };
+  }, [lexemeId, loadWord]);
+
+  // Optimistic, as on the translate screen. No save-all here: these senses are
+  // browsed, not just looked up (spec §5).
+  async function toggle(senseId: string) {
+    const sense = word?.senses.find((s) => s.sense_id === senseId);
+    if (!sense || pending[senseId]) return;
+    const mine = generation.current;
+    const ifCurrent = (run: () => void) => {
+      if (mine === generation.current) run();
+    };
+    setSaveFailed(false);
+    const ok = await toggleOptimistically({
+      next: !sense.saved,
+      apply: (saved) =>
+        ifCurrent(() =>
+          setWord(
+            (w) => w && { ...w, senses: w.senses.map((s) => (s.sense_id === senseId ? { ...s, saved } : s)) },
+          ),
+        ),
+      inFlight: (inFlight) =>
+        ifCurrent(() =>
+          setPending((current) => {
+            const rest = { ...current };
+            if (inFlight) rest[senseId] = true;
+            else delete rest[senseId];
+            return rest;
+          }),
+        ),
+      request: () => (sense.saved ? unsave(senseId) : save([{ sense_id: senseId, variant_id: sense.variant_id }])),
+    });
+    ifCurrent(() => setSaveFailed(!ok));
+  }
+
+  return (
+    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+      <Pressable accessibilityRole="button" testID="vocabulary-word-back" onPress={() => router.back()}>
+        <Text style={styles.link}>{strings.back}</Text>
+      </Pressable>
+
+      {loadFailed ? <Text style={styles.notice}>{strings.vocabularyLoadFailed}</Text> : null}
+      {saveFailed ? <Text style={styles.notice}>{strings.translateSaveFailed}</Text> : null}
+      {!word ? (
+        loadFailed ? null : <ActivityIndicator />
+      ) : (
+        <ScrollView contentContainerStyle={styles.list}>
+          <Text style={styles.lemma}>{word.lemma}</Text>
+          {strings.partOfSpeech(word.part_of_speech) ? (
+            <Text style={styles.meta}>{strings.partOfSpeech(word.part_of_speech)}</Text>
+          ) : null}
+          {word.senses.map((sense) => (
+            <View key={sense.sense_id} testID="vocabulary-sense" style={styles.card}>
+              <Text style={styles.translation}>{sense.translation}</Text>
+              {sense.form.toLowerCase() !== word.lemma.toLowerCase() ? (
+                <Text style={styles.meta}>{strings.vocabularyFromForm(sense.form)}</Text>
+              ) : null}
+              {sense.example ? (
+                <View style={styles.example}>
+                  <Text style={styles.exampleSource}>{sense.example.source}</Text>
+                  <Text style={styles.meta}>{sense.example.target}</Text>
+                </View>
+              ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: sense.saved, disabled: Boolean(pending[sense.sense_id]) }}
+                disabled={Boolean(pending[sense.sense_id])}
+                testID="vocabulary-sense-save"
+                onPress={() => void toggle(sense.sense_id)}
+                style={[styles.toggle, sense.saved && styles.toggleSaved]}
+              >
+                <Text style={[styles.toggleLabel, sense.saved && styles.toggleLabelSaved]}>
+                  {sense.saved ? strings.translateSaved : strings.translateSave}
+                </Text>
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm },
+  link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
+  list: { gap: spacing.sm, paddingBottom: spacing.xl },
+  lemma: { fontSize: fontSizes.xl, fontWeight: '700', color: colors.text },
+  meta: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  translation: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, writingDirection: 'rtl' },
+  example: { gap: spacing.xs },
+  exampleSource: { fontSize: fontSizes.md, color: colors.text },
+  // Same look as translate.tsx: unsaved is a filled primary button, saved is
+  // outlined with a primary label (white on the near-white ground is unreadable).
+  toggle: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+  },
+  toggleSaved: { backgroundColor: colors.background },
+  toggleLabel: { color: colors.onPrimary, fontSize: fontSizes.sm, fontWeight: '700' },
+  toggleLabelSaved: { color: colors.primary },
+  notice: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl' },
+});

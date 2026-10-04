@@ -6,6 +6,7 @@ import type { EnrollmentService } from './services/enrollments';
 import type { SessionService } from './services/sessions';
 import type { TranslationService } from './services/translations';
 import type { UserService } from './services/users';
+import type { VocabularyService } from './services/vocabulary';
 import { createFakeLogger } from '../tests/support/fakes';
 
 // A service that fails if it is called at all. Passing it alongside a health fake
@@ -43,12 +44,28 @@ const unreachableTranslations: TranslationService = {
   },
 };
 
+const unreachableVocabulary: VocabularyService = {
+  save: () => {
+    throw new Error('the health route must not reach the vocabulary service');
+  },
+  unsave: () => {
+    throw new Error('the health route must not reach the vocabulary service');
+  },
+  listWords: () => {
+    throw new Error('the health route must not reach the vocabulary service');
+  },
+  wordDetail: () => {
+    throw new Error('the health route must not reach the vocabulary service');
+  },
+};
+
 function depsWithPing(ok: boolean): AppDeps {
   return {
     sessions: unreachableSessions,
     users: unreachableUsers,
     enrollments: unreachableEnrollments,
     translations: unreachableTranslations,
+    vocabulary: unreachableVocabulary,
     health: { ping: async () => ok },
     identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001 },
     logger: createFakeLogger(),

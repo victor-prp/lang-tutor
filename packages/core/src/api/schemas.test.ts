@@ -6,17 +6,21 @@ import {
   CreateUserRequestSchema,
   LlmCorrectionSchema,
   LlmEntrySchema,
+  LlmSenseSchema,
   LlmTranslationSchema,
   PartOfSpeechSchema,
   LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
+  SaveVocabularyRequestSchema,
   TranslationCorrectionSchema,
   TranslationRequestSchema,
   TranslationResponseSchema,
   TranslationSenseSchema,
   UserSchema,
   UsernameSchema,
+  VocabularyPageQuerySchema,
+  VocabularyPageSchema,
 } from './schemas';
 import type { MissedQuestion, NextStepResponse, Position, Question, Score } from './types';
 
@@ -535,5 +539,92 @@ describe('CreateEnrollmentRequestSchema', () => {
   it('rejects the same language twice and an unknown code', () => {
     expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'he' }).success).toBe(false);
     expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'fr' }).success).toBe(false);
+  });
+});
+
+// Phase 18. The wire sense gained three fields; the MODEL's sense must not. It
+// travels to Gemini as responseSchema, where an extra property is either an
+// invitation to invent ids or one more state in a schema already at the
+// provider's limit (see LlmTranslationSchema's comment).
+describe('LlmSenseSchema after phase 18', () => {
+  it('still has exactly translation, example and sense_code', () => {
+    expect(Object.keys(LlmSenseSchema.shape).sort()).toEqual([
+      'example',
+      'sense_code',
+      'translation',
+    ]);
+  });
+});
+
+describe('TranslationRequestSchema with an enrollment', () => {
+  const base = { text: 'окно', from: 'ru', to: 'he' };
+
+  it('accepts a request without enrollment_id, as every client before phase 18 sends', () => {
+    expect(TranslationRequestSchema.safeParse(base).success).toBe(true);
+  });
+
+  it('accepts an enrollment_id', () => {
+    expect(TranslationRequestSchema.safeParse({ ...base, enrollment_id: 'e1' }).success).toBe(true);
+  });
+
+  it('rejects an empty enrollment_id', () => {
+    expect(TranslationRequestSchema.safeParse({ ...base, enrollment_id: '' }).success).toBe(false);
+  });
+});
+
+describe('TranslationSenseSchema ids', () => {
+  it('accepts a sense with ids and a saved flag', () => {
+    expect(
+      TranslationSenseSchema.safeParse({
+        translation: 'חלון',
+        sense_id: 's1',
+        variant_id: 'v1',
+        saved: false,
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe('SaveVocabularyRequestSchema', () => {
+  const entry = { sense_id: 's1', variant_id: 'v1' };
+
+  it('accepts one entry and twenty', () => {
+    expect(SaveVocabularyRequestSchema.safeParse({ entries: [entry] }).success).toBe(true);
+    expect(
+      SaveVocabularyRequestSchema.safeParse({ entries: Array(20).fill(entry) }).success,
+    ).toBe(true);
+  });
+
+  it('rejects none and twenty-one', () => {
+    expect(SaveVocabularyRequestSchema.safeParse({ entries: [] }).success).toBe(false);
+    expect(
+      SaveVocabularyRequestSchema.safeParse({ entries: Array(21).fill(entry) }).success,
+    ).toBe(false);
+  });
+
+  it('rejects an entry missing its variant', () => {
+    expect(SaveVocabularyRequestSchema.safeParse({ entries: [{ sense_id: 's1' }] }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('VocabularyPageQuerySchema', () => {
+  it('coerces a query-string limit', () => {
+    expect(VocabularyPageQuerySchema.parse({ limit: '50' })).toEqual({ limit: 50 });
+  });
+
+  it('leaves both fields optional', () => {
+    expect(VocabularyPageQuerySchema.parse({})).toEqual({});
+  });
+
+  it.each(['0', '101', 'abc', '1.5', ''])('rejects limit=%j', (limit) => {
+    expect(VocabularyPageQuerySchema.safeParse({ limit }).success).toBe(false);
+  });
+});
+
+describe('VocabularyPageSchema', () => {
+  it('accepts a last page', () => {
+    expect(VocabularyPageSchema.safeParse({ items: [], next_cursor: null }).success).toBe(true);
   });
 });

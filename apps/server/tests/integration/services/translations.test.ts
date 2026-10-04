@@ -76,7 +76,13 @@ describe('translate, against a real database', () => {
     const again = await service.translate({ text: '  LADDER  ', from: 'en', to: 'he' });
 
     expect(again.senses).toEqual([
-      { translation: 'סולם', part_of_speech: 'verb', example: { source: 'A sentence about ladder.', target: 'משפט.' } },
+      {
+        translation: 'סולם',
+        part_of_speech: 'verb',
+        example: { source: 'A sentence about ladder.', target: 'משפט.' },
+        sense_id: expect.any(String),
+        variant_id: expect.any(String),
+      },
     ]);
     // Deviation from the brief, confirmed by experiment: MockServer's REGEX
     // body match is case-insensitive by default (verified directly against
@@ -108,6 +114,8 @@ describe('translate, against a real database', () => {
         translation: 'סולם',
         part_of_speech: 'verb',
         example: { source: 'A sentence about ladder.', target: 'משפט.' },
+        sense_id: expect.any(String),
+        variant_id: expect.any(String),
       },
     ]);
     // The key is normalized; what the learner typed is still what comes back.

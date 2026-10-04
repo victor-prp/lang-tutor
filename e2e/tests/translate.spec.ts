@@ -74,7 +74,7 @@ async function openTranslate(page: Page, request: APIRequestContext, username: s
   }).toPass({ timeout: 30_000 });
 }
 
-test('a word shows every sense at once, ranked, and confirms a choice', async ({
+test('a word shows every sense at once, ranked, and saves one', async ({
   page,
   request,
 }) => {
@@ -95,8 +95,12 @@ test('a word shows every sense at once, ranked, and confirms a choice', async ({
   await expect(page.getByTestId('translate-top-sense')).toHaveCount(1);
   await expect(page.getByTestId('translate-sense').first()).toContainText('סולם');
 
-  await page.getByTestId('translate-choose').nth(1).click();
-  await expect(page.getByTestId('translate-chosen')).toHaveText('התרגום נשמר לאוצר המילים שלך');
+  // Every card can be saved on its own, and save-all is offered for three unsaved.
+  await expect(page.getByTestId('translate-save')).toHaveCount(3);
+  await expect(page.getByTestId('translate-save-all')).toBeVisible();
+  await page.getByTestId('translate-save').nth(1).click();
+  await expect(page.getByTestId('translate-save').nth(1)).toHaveText('נשמר ✓');
+  await expect(page.getByTestId('translate-save').nth(0)).toHaveText('שמור');
   await expect(page.getByTestId('translate-new-word')).toBeVisible();
 });
 
@@ -125,7 +129,7 @@ test('a sentence gets one translation, with neither a count nor a save button', 
   // One translation, so neither the count line nor the save button: a count of
   // one is noise, and a sentence is known not to belong in a vocabulary.
   await expect(page.getByTestId('translate-count')).toHaveCount(0);
-  await expect(page.getByTestId('translate-choose')).toHaveCount(0);
+  await expect(page.getByTestId('translate-save')).toHaveCount(0);
 });
 
 test('gibberish says so instead of inventing a translation', async ({ page, request }) => {
@@ -206,11 +210,6 @@ test('a word looked up twice is answered without the provider the second time', 
   await page.getByTestId('translate-submit').click();
   await expect(sense(page, 'עפיפון')).toBeVisible();
 
-  // Choosing is what reveals the "new word" control. It records nothing — as of
-  // phase 10 the rows were written when the answer arrived, so the tap confirms
-  // something that already happened.
-  await page.getByTestId('translate-choose').first().click();
-  await expect(page.getByTestId('translate-chosen')).toHaveText('התרגום נשמר לאוצר המילים שלך');
   await page.getByTestId('translate-new-word').click();
 
   // Nothing is left for the provider to answer with. An answer now can only

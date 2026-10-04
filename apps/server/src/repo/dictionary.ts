@@ -92,6 +92,8 @@ export function createDictRepo(tx: Tx) {
     tx
       .select({
         lexemeId: dictVariants.lexemeId,
+        senseId: dictSenses.id,
+        variantId: dictVariants.id,
         rank: dictVarTranslations.rank,
         entryRank: dictVariants.entryRank,
         partOfSpeech: dictLexemes.partOfSpeech,

@@ -12,6 +12,15 @@ import {
 import { ApiError, type ApiClient } from '@/api/client';
 import { flipped, lookupDirection, type LookupDirection } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import {
+  canSaveAll as canSaveAllOf,
+  savedStateOf,
+  toggleOptimistically,
+  topSense,
+  unsavedEntries,
+  withSaved,
+  type SavedState,
+} from '@/vocabulary';
 
 // Mirrors the SessionProvider shape: constructed at the composition root with
 // the api client passed in, so nothing here reaches for a module-level
@@ -23,8 +32,16 @@ export type TranslationValue = {
   text: string;
   setText: (value: string) => void;
   result: TranslationResponse | undefined;
-  chosenIndex: number | null;
-  choose: (index: number) => void;
+  /** sense_id → saved, for the senses that can be saved here (see savedStateOf). */
+  saved: SavedState;
+  /** Senses with a save or unsave in flight; their toggle is disabled, so a double
+   *  tap cannot race a save against an unsave. */
+  pending: Record<string, true>;
+  /** The last toggle failed and was reverted. Cleared by the next toggle or lookup. */
+  saveFailed: boolean;
+  toggleSave: (senseId: string) => void;
+  saveAll: () => void;
+  canSaveAll: boolean;
   /**
    * `override` exists for the correction banner's alternative chips. `submit()`
    * closes over the provider's `text` state, so `setText(alt)` followed by a bare
@@ -56,7 +73,9 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
   const [status, setStatus] = useState<TranslationStatus>('idle');
   const [text, setText] = useState('');
   const [result, setResult] = useState<TranslationResponse | undefined>(undefined);
-  const [chosenIndex, setChosenIndex] = useState<number | null>(null);
+  const [saved, setSaved] = useState<SavedState>({});
+  const [pending, setPending] = useState<Record<string, true>>({});
+  const [saveFailed, setSaveFailed] = useState(false);
   const { active } = useCurrentUser();
   const [direction, setDirection] = useState<LookupDirection | null>(
     active ? lookupDirection(active) : null,
@@ -68,7 +87,9 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
     setStatus('idle');
     setText('');
     setResult(undefined);
-    setChosenIndex(null);
+    setSaved({});
+    setPending({});
+    setSaveFailed(false);
   }, [active]);
 
   const run = useCallback(
@@ -77,10 +98,20 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
       if (!along || trimmed.length === 0 || trimmed.length > 100) return;
 
       setStatus('loading');
-      setChosenIndex(null);
+      setSaved({});
+      setPending({});
+      setSaveFailed(false);
       try {
-        const response = await api.translate({ text: trimmed, from: along.from, to: along.to });
+        const response = await api.translate({
+          text: trimmed,
+          from: along.from,
+          to: along.to,
+          // Phase 18. The server marks `saved` for a target-language lookup and
+          // nothing else; the client never decides which senses are saveable.
+          ...(active ? { enrollment_id: active.id } : {}),
+        });
         setResult(response);
+        setSaved(savedStateOf(response.senses));
         // An empty sense list is a successful answer about the input, not a
         // failure — a distinct state, not the error state.
         setStatus(response.senses.length === 0 ? 'empty' : 'answered');
@@ -93,7 +124,36 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
         setStatus('error');
       }
     },
-    [api],
+    [api, active],
+  );
+
+  // Optimistic: flip first, revert on failure (toggleOptimistically). `pending`
+  // keeps one request per sense in flight.
+  const send = useCallback(
+    async (entries: { sense_id: string; variant_id: string }[], next: boolean) => {
+      if (!active || entries.length === 0) return;
+      const ids = entries.map((entry) => entry.sense_id);
+      setSaveFailed(false);
+      const ok = await toggleOptimistically({
+        next,
+        apply: (value) => setSaved((current) => withSaved(current, ids, value)),
+        inFlight: (inFlight) =>
+          setPending((current) => {
+            const rest = { ...current };
+            for (const id of ids) {
+              if (inFlight) rest[id] = true;
+              else delete rest[id];
+            }
+            return rest;
+          }),
+        request: () =>
+          next
+            ? api.saveVocabulary(active.id, { entries })
+            : api.unsaveVocabulary(active.id, ids[0]),
+      });
+      setSaveFailed(!ok);
+    },
+    [api, active],
   );
 
   const value = useMemo<TranslationValue>(
@@ -102,17 +162,30 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
       text,
       setText,
       result,
-      chosenIndex,
-      choose: (index: number) => setChosenIndex(index),
+      saved,
+      pending,
+      saveFailed,
+      canSaveAll: result ? canSaveAllOf(result.senses, saved) : false,
+      toggleSave: (senseId: string) => {
+        const sense = result?.senses.find((s) => s.sense_id === senseId);
+        if (!sense?.variant_id || saved[senseId] === undefined || pending[senseId]) return;
+        void send([{ sense_id: senseId, variant_id: sense.variant_id }], !saved[senseId]);
+      },
+      saveAll: () => {
+        if (!result) return;
+        void send(
+          unsavedEntries(result.senses, saved).filter((entry) => !pending[entry.sense_id]),
+          true,
+        );
+      },
       direction,
       submit: (override?: string) => void run(override ?? text, direction),
       flip: () => {
         if (!direction) return;
         const next = flipped(direction);
         setDirection(next);
-        // The chosen sense if the learner has picked one, else the ranked first
-        // — the card wearing the badge.
-        const sense = result?.senses[chosenIndex ?? 0];
+        // The top-ranked sense: the card wearing the badge.
+        const sense = topSense(result?.senses ?? []);
         if (result && sense) {
           // Both halves, exactly as the correction chips call both: `run` must
           // not read the `text` this render still holds. The direction travels
@@ -133,10 +206,12 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
         setStatus('idle');
         setText('');
         setResult(undefined);
-        setChosenIndex(null);
+        setSaved({});
+        setPending({});
+        setSaveFailed(false);
       },
     }),
-    [status, text, result, chosenIndex, direction, run],
+    [status, text, result, saved, pending, saveFailed, send, direction, run],
   );
 
   return <TranslationContext.Provider value={value}>{children}</TranslationContext.Provider>;

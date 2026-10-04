@@ -17,6 +17,7 @@ import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
 import type { TranslationService } from '../../src/services/translations';
+import type { VocabularyService } from '../../src/services/vocabulary';
 import type { UserService } from '../../src/services/users';
 
 export type FakeLogger = Logger & {
@@ -61,11 +62,18 @@ export function createFakeAppDeps(): AppDeps {
   const translations: TranslationService = {
     translate: unreachable,
   };
+  const vocabulary: VocabularyService = {
+    save: unreachable,
+    unsave: unreachable,
+    listWords: unreachable,
+    wordDetail: unreachable,
+  };
   return {
     sessions,
     users,
     enrollments,
     translations,
+    vocabulary,
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0 },
     logger: createFakeLogger(),
@@ -142,6 +150,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),
+    vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
   };
   return (run) => run(bound);
 }

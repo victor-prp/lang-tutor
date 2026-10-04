@@ -71,6 +71,13 @@
       "when": 1791031371980,
       "tag": "0009_enrollments",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791112598629,
+      "tag": "0010_vocabulary_entries",
+      "breakpoints": true
     }
   ]
 }

@@ -41,7 +41,14 @@ describe('seedContent', () => {
           languageCode: entry.from,
           userLanguageCode: entry.to,
         });
-        expect(rowsToSenses(rows)).toEqual(
+        // The ids are database identity, not recorded content: compare everything
+        // else, and that each stored sense carries them.
+        const wire = rowsToSenses(rows);
+        for (const sense of wire) {
+          expect(sense.sense_id).toEqual(expect.any(String));
+          expect(sense.variant_id).toEqual(expect.any(String));
+        }
+        expect(wire.map(({ sense_id, variant_id, ...rest }) => rest)).toEqual(
           flattenEntries(mergeEntries(recorded[recordingKey(entry)].entries)),
         );
       }

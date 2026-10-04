@@ -176,6 +176,16 @@ export const TranslationSenseSchema = z.object({
   translation: z.string().min(1),
   part_of_speech: z.string().optional(),
   example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
+  // Phase 18. The dictionary rows this sense was served from, so a client can
+  // save it. Optional because two answers have none: a sentence is never
+  // stored, and a word whose write failed is still answered, with 200, from the
+  // model's reply.
+  sense_id: z.string().optional(),
+  variant_id: z.string().optional(),
+  // Present only when the request named an enrollment AND `from` is that
+  // enrollment's target language AND the sense has ids. Absent means "cannot be
+  // saved here", never "not saved".
+  saved: z.boolean().optional(),
 });
 
 export const TranslationRequestSchema = z
@@ -185,10 +195,13 @@ export const TranslationRequestSchema = z
     // reach the model in one call.
     text: z.string().trim().min(1).max(100),
     // Phase 16. Always stated by the client: there is no detection. The client
-    // reads the pair from the learner's active enrollment, so the endpoint
-    // stays anonymous — it never learns who asked.
+    // reads the pair from the learner's active enrollment.
     from: LanguageCodeSchema,
     to: LanguageCodeSchema,
+    // Phase 18. When present, the response marks which senses this enrollment
+    // has saved, and it is used for nothing else. This reverses phase 16's "the
+    // endpoint never learns who asked" — deliberately, and only for `saved`.
+    enrollment_id: z.string().min(1).optional(),
   })
   // Every supported pair includes Hebrew: {he,en} and {he,ru}. en↔ru is refused
   // here, before the model is ever called.
@@ -227,6 +240,69 @@ export const TranslationResponseSchema = z.object({
   reason: TranslationGuardReasonSchema.optional(),
 });
 
+// Phase 18 — an enrollment's word list. One entry per (enrollment, sense); the
+// form it was first saved from travels with it, because a sense has no wording
+// of its own.
+export const VocabularyEntryInputSchema = z.object({
+  sense_id: z.string().min(1),
+  variant_id: z.string().min(1),
+});
+
+// One card and save-all are the same call. Twenty is four lookups' worth of
+// senses, since a lookup answers with at most five.
+export const SaveVocabularyRequestSchema = z.object({
+  entries: z.array(VocabularyEntryInputSchema).min(1).max(20),
+});
+
+// Every sense of the request, saved now or already: saving is idempotent.
+export const SaveVocabularyResponseSchema = z.object({
+  saved_sense_ids: z.array(z.string()),
+});
+
+// Query-string values arrive as strings, hence coerce. A cursor is opaque: the
+// server decodes it and answers 400 when it cannot.
+export const VocabularyPageQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  cursor: z.string().min(1).optional(),
+});
+
+// One row per lexeme. `headline` is the lowest-ranked saved sense, in the
+// wording of the form it was saved from; `sense_count` counts the senses with
+// some rendering in the enrollment's source language — what the drill-down can
+// show.
+export const VocabularyWordSchema = z.object({
+  lexeme_id: z.string(),
+  lemma: z.string(),
+  part_of_speech: z.string(),
+  headline: z.object({ sense_id: z.string(), translation: z.string(), form: z.string() }),
+  saved_count: z.number().int(),
+  sense_count: z.number().int(),
+});
+
+export const VocabularyPageSchema = z.object({
+  items: z.array(VocabularyWordSchema),
+  next_cursor: z.string().nullable(),
+});
+
+// One sense in the drill-down. `variant_id` and `form` name the rendering shown:
+// the saved form for a saved sense, a representative one otherwise. Saving from
+// the drill-down records that variant.
+export const VocabularySenseSchema = z.object({
+  sense_id: z.string(),
+  variant_id: z.string(),
+  form: z.string(),
+  translation: z.string(),
+  example: z.object({ source: z.string(), target: z.string() }).optional(),
+  saved: z.boolean(),
+});
+
+export const VocabularyWordDetailSchema = z.object({
+  lexeme_id: z.string(),
+  lemma: z.string(),
+  part_of_speech: z.string(),
+  senses: z.array(VocabularySenseSchema),
+});
+
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from
 // phase 12 on: free text would make (book,"verb phrase") and (book,"verb_phrase")
 // two lexemes, and the pre-phase-12 data already held 80 spellings of ten ideas.
@@ -262,7 +338,14 @@ export const PartOfSpeechSchema = z.enum([
 // `.omit` rather than a fresh object: part_of_speech moved up to the entry, and
 // omitting it here is what makes a model that still puts one on a sense lose it
 // on parse rather than smuggle it through.
-export const LlmSenseSchema = TranslationSenseSchema.omit({ part_of_speech: true }).extend({
+export const LlmSenseSchema = TranslationSenseSchema.omit({
+  part_of_speech: true,
+  // Phase 18's wire-only fields. The model neither knows nor may invent them,
+  // and every property here travels to Gemini inside responseSchema.
+  sense_id: true,
+  variant_id: true,
+  saved: true,
+}).extend({
   sense_code: z.string().min(1).max(60),
 });
 

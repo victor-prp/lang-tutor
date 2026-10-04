@@ -15,6 +15,7 @@ import {
   mockNamespace,
   verifyGeminiHeader,
 } from '../../support/mockServer';
+import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -99,8 +100,15 @@ describe('POST /api/translations', () => {
           translation: 'סולם',
           part_of_speech: 'noun',
           example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
+          sense_id: expect.any(String),
+          variant_id: expect.any(String),
         },
-        { translation: 'דירוג', part_of_speech: 'noun' },
+        {
+          translation: 'דירוג',
+          part_of_speech: 'noun',
+          sense_id: expect.any(String),
+          variant_id: expect.any(String),
+        },
       ],
     });
   });
@@ -147,6 +155,41 @@ describe('POST /api/translations', () => {
       kind: 'sentence',
       senses: [{ translation: 'קראתי ספר.' }],
     });
+  });
+
+  // Spec §6: a sentence is never stored, so it has no sense to name and no
+  // `saved` to carry — even for an enrollment whose target is the language
+  // looked up from.
+  it('carries no ids and no saved flag on a sentence lookup with an enrollment', async () => {
+    await seedUser(t.db, 'u_1');
+    await expectGeminiJson(ns, {
+      kind: 'sentence',
+      entries: [
+        {
+          lemma: 'I read a book',
+          part_of_speech: 'verb',
+          senses: [{ translation: 'קראתי ספר.', sense_code: 'the_sentence' }],
+        },
+      ],
+    });
+
+    const res = await translate({
+      text: 'I read a book',
+      from: 'en',
+      to: 'he',
+      enrollment_id: enrollmentOf('u_1'),
+    });
+
+    expect(res.status).toBe(200);
+    const { kind, senses } = (await res.json()) as {
+      kind: string;
+      senses: Record<string, unknown>[];
+    };
+    expect(kind).toBe('sentence');
+    expect(senses).toHaveLength(1);
+    expect(senses[0]).not.toHaveProperty('saved');
+    expect(senses[0]).not.toHaveProperty('sense_id');
+    expect(senses[0]).not.toHaveProperty('variant_id');
   });
 
   it('returns 200 with an empty sense list for gibberish', async () => {

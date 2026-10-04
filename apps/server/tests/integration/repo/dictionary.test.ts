@@ -108,6 +108,8 @@ describe('findSensesByForm', () => {
     expect(await find('ladder')).toEqual([
       {
         lexemeId: expect.any(String),
+        senseId: expect.any(String),
+        variantId: expect.any(String),
         rank: 0,
         entryRank: 0,
         partOfSpeech: 'noun',
@@ -245,6 +247,8 @@ describe('persistEntries', () => {
       (await find('saw')).map((row) => ({
         translation: row.translation,
         part_of_speech: row.partOfSpeech,
+        sense_id: row.senseId,
+        variant_id: row.variantId,
       })),
     );
   });

@@ -5,7 +5,12 @@ import {
   TranslationResponseSchema,
 } from '@lang-tutor/core/api/schemas';
 
-import { LlmUnavailable, TranslationUnreadable } from '../errors';
+import {
+  EnrollmentNotFound,
+  LlmUnavailable,
+  PairNotEnrolled,
+  TranslationUnreadable,
+} from '../errors';
 import type { Logger } from '../logger';
 import type { TranslationService } from '../services/translations';
 
@@ -20,6 +25,9 @@ const translateRoute = createRoute({
     'expression yields 200 with an empty `senses` array — that is an answer, not a failure. ' +
     'The client states the direction with `from` and `to`; supported pairs are Hebrew with ' +
     'English and Hebrew with Russian, either way. ' +
+    "Optionally names the learner's `enrollment_id`; the response then marks, on a lookup " +
+    "from the enrollment's target language, which senses that enrollment has `saved`. The " +
+    'enrollment is used only for that. ' +
     'NOTE: this endpoint calls a paid third-party model on every request and there is no ' +
     'rate limit in front of it.',
   request: {
@@ -40,7 +48,12 @@ const translateRoute = createRoute({
     },
     400: {
       content: { 'application/json': { schema: ErrorSchema } },
-      description: 'The request body did not validate.',
+      description:
+        'The request body did not validate, or `enrollment_id` names an enrollment whose pair is not `from`/`to`.',
+    },
+    404: {
+      content: { 'application/json': { schema: ErrorSchema } },
+      description: 'No enrollment has the given `enrollment_id`.',
     },
     502: {
       content: { 'application/json': { schema: ErrorSchema } },
@@ -67,6 +80,8 @@ export function createTranslationsRouter(translations: TranslationService, logge
     try {
       return c.json(await translations.translate(input), 200);
     } catch (error) {
+      if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
+      if (error instanceof PairNotEnrolled) return c.json({ error: 'pair not enrolled' }, 400);
       // Two errors, one status: the learner can do nothing different about
       // either. Which one it was lives in the log, as `cause` — never in the
       // response, so the wire contract stays one message for both.

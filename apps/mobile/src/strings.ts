@@ -76,13 +76,28 @@ export const strings = {
   // Rendered only when there is more than one, because "1 משמעויות" is both
   // ungrammatical and pointless.
   translateSenseCount: (count: number) => `${count} משמעויות`,
-  translateChoose: 'זו המשמעות שחיפשתי',
-  translateChosen: 'התרגום נשמר לאוצר המילים שלך',
+  // Phase 18. The card's own toggle states the save, truthfully — which closes the
+  // caveat phase 10 carried on `התרגום נשמר לאוצר המילים שלך`, now deleted.
+  translateSave: 'שמור',
+  translateSaved: 'נשמר ✓',
+  translateSaveAll: 'שמור הכל',
+  translateSaveFailed: 'השמירה נכשלה, נסו שוב',
   translateNewWord: 'מלה חדשה',
   translateEmpty: 'לא מצאנו תרגום',
   translateUnavailable: 'התרגום לא זמין',
   translateRetry: 'נסה שוב',
   translateTooLong: 'עד 100 תווים',
+  vocabularyEntry: 'אוצר המילים שלי',
+  vocabularyTitle: (language: string) => `אוצר המילים שלי ב${languageName(language)}`,
+  vocabularyEmpty: 'עוד לא שמרת מילים. חפשו מילה בתרגום ולחצו על שמור.',
+  vocabularyGoTranslate: 'לתרגום',
+  vocabularyLoadFailed: 'הרשימה לא נטענה',
+  // "2/5": saved of total. Isolated for the reason progressLabel is: a run with
+  // no strong direction is reordered by the RTL layout on Android.
+  vocabularyMark: (saved: number, total: number) => isolateLtr(`${saved}/${total}`),
+  // FSI/PDI around the form, as in translateCorrectionNotice: a Cyrillic or Latin
+  // word inside a Hebrew sentence.
+  vocabularyFromForm: (form: string) => `מתוך \u2068${form}\u2069`,
   // U+2068 FSI and U+2069 PDI around each form. In the en_he direction this
   // banner embeds a Latin word inside a Hebrew RTL sentence, and without an
   // isolate the bidi algorithm reorders it against the wrong clause. The he_en

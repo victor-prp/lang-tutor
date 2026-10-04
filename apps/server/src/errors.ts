@@ -104,3 +104,42 @@ export class RepairWouldDropSense extends Error {
     this.name = 'RepairWouldDropSense';
   }
 }
+
+/** Phase 18. A translation named an enrollment whose pair is not the lookup's. */
+export class PairNotEnrolled extends Error {
+  constructor(
+    readonly enrollmentId: string,
+    readonly from: string,
+    readonly to: string,
+  ) {
+    super(`enrollment ${enrollmentId} does not cover ${from} → ${to}`);
+    this.name = 'PairNotEnrolled';
+  }
+}
+
+/** Phase 18. A save item failed a check: its sense is not in the enrollment's
+ *  target language, its variant is not a form of that lexeme, or that form has
+ *  no rendering of the sense in the enrollment's source language. */
+export class InvalidVocabularyEntry extends Error {
+  constructor(readonly senseId: string) {
+    super(`sense ${senseId} cannot be saved here`);
+    this.name = 'InvalidVocabularyEntry';
+  }
+}
+
+/** Phase 18. No lexeme with this id in the enrollment's target language. */
+export class LexemeNotFound extends Error {
+  constructor(readonly lexemeId: string) {
+    super(`no lexeme ${lexemeId}`);
+    this.name = 'LexemeNotFound';
+  }
+}
+
+/** Phase 18. A list cursor this server did not issue. A schema cannot see inside
+ *  the base64, so this is decided in domain/vocabulary.ts's decodeCursor. */
+export class InvalidCursor extends Error {
+  constructor() {
+    super('malformed vocabulary cursor');
+    this.name = 'InvalidCursor';
+  }
+}
