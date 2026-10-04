@@ -28,7 +28,8 @@ import {
   type SenseRow,
   type StaleLexeme,
 } from '../domain/dictionary';
-import { TranslationUnreadable } from '../errors';
+import { coversPair, markSaved } from '../domain/vocabulary';
+import { EnrollmentNotFound, PairNotEnrolled, TranslationUnreadable } from '../errors';
 import type { Logger } from '../logger';
 import type { RepairedRendering } from '../repo/dictionary';
 import type { LlmClient } from './llm';
@@ -370,7 +371,7 @@ async function serveForm({
  * "at most one write transaction" rule: a use case's *dependent* writes —
  * where either is wrong without the other — share one `transaction(...)`
  * call, while a write that is correct and idempotent on its own, whether or
- * not the others land, may be its own. This file now has nine
+ * not the others land, may be its own. This file now has eleven
  * `transaction(...)` call sites, and a single lookup can perform two writes
  * of either kind. Steps 8 and 9 are dependent and share one transaction:
  * persisting the answer's entries and persisting its redirect, because a
@@ -400,314 +401,351 @@ export function createTranslationService({
   transaction: Transaction;
   logger: Logger;
 }) {
-  return {
-    translate: async (input: TranslationRequest): Promise<TranslationResponse> => {
-      // The schema already trimmed this, but the service must not depend on the
-      // order validators ran in.
-      const text = input.text.trim();
-      const { from, to } = input;
-      const form = normalizeForm(text);
+  const lookup = async (input: TranslationRequest): Promise<TranslationResponse> => {
+    // The schema already trimmed this, but the service must not depend on the
+    // order validators ran in.
+    const text = input.text.trim();
+    const { from, to } = input;
+    const form = normalizeForm(text);
 
-      // Phase 16, spec §3. Before any read or model call: input whose letters are
-      // all in `to`'s script, or in neither language's, is answered here, so
-      // nothing it could have provoked reaches the shared dictionary.
-      const verdict = guardScript(form, from, to);
-      if (verdict !== 'pass') {
-        logger.info({ event: 'translation_guarded', from, to, reason: verdict });
-        return { text, from, to, kind: resolveKind(text, 'word'), senses: [], reason: verdict };
-      }
+    // Phase 16, spec §3. Before any read or model call: input whose letters are
+    // all in `to`'s script, or in neither language's, is answered here, so
+    // nothing it could have provoked reaches the shared dictionary.
+    const verdict = guardScript(form, from, to);
+    if (verdict !== 'pass') {
+      logger.info({ event: 'translation_guarded', from, to, reason: verdict });
+      return { text, from, to, kind: resolveKind(text, 'word'), senses: [], reason: verdict };
+    }
 
-      // Step 1 of the flow. The hot path: a correctly spelled word resolves here
-      // exactly as it does today, repair included, and pays nothing for this phase.
-      const direct = await serveForm({ llm, transaction, form, from, to, logger });
-      if (direct) {
+    // Step 1 of the flow. The hot path: a correctly spelled word resolves here
+    // exactly as it does today, repair included, and pays nothing for this phase.
+    const direct = await serveForm({ llm, transaction, form, from, to, logger });
+    if (direct) {
+      logger.info({
+        event: 'dict_cache_hit',
+        from,
+        to,
+        term_count: new Set(direct.rows.map((r) => r.lexemeId)).size,
+        sense_count: direct.senses.length,
+      });
+      return { text, from, to, kind: direct.kind, senses: direct.senses };
+    }
+
+    // Step 2. One indexed lookup, its own read — R8 permits it, and it is
+    // reached ONLY when the typed form has no rows, a path that otherwise costs
+    // a provider call measured in seconds.
+    //
+    // NOT folded into `serveForm`: that function owns its own read transaction,
+    // which is exactly what makes it reusable, and folding this in would mean
+    // passing a redirect lookup through a function that knows nothing about
+    // redirects.
+    const redirect = await transaction((repos) =>
+      repos.dict.findCorrectionByForm({ form, languageCode: from }),
+    );
+
+    if (redirect) {
+      // Step 3 is step 1 with a different argument, and that is the whole of the
+      // fix. A redirect hit is byte-identical to typing the correct spelling
+      // because the SAME function produces both, staleness probe and repair
+      // included. The correction block is attached AFTER serveForm returns and
+      // changes neither field it produced.
+      const served = await serveForm({
+        llm,
+        transaction,
+        form: redirect.correctedForm,
+        from,
+        to,
+        logger,
+      });
+      if (served) {
         logger.info({
-          event: 'dict_cache_hit',
+          event: 'dict_redirect_hit',
           from,
           to,
-          term_count: new Set(direct.rows.map((r) => r.lexemeId)).size,
-          sense_count: direct.senses.length,
+          alternative_count: redirect.alternatives.length,
         });
-        return { text, from, to, kind: direct.kind, senses: direct.senses };
-      }
-
-      // Step 2. One indexed lookup, its own read — R8 permits it, and it is
-      // reached ONLY when the typed form has no rows, a path that otherwise costs
-      // a provider call measured in seconds.
-      //
-      // NOT folded into `serveForm`: that function owns its own read transaction,
-      // which is exactly what makes it reusable, and folding this in would mean
-      // passing a redirect lookup through a function that knows nothing about
-      // redirects.
-      const redirect = await transaction((repos) =>
-        repos.dict.findCorrectionByForm({ form, languageCode: from }),
-      );
-
-      if (redirect) {
-        // Step 3 is step 1 with a different argument, and that is the whole of the
-        // fix. A redirect hit is byte-identical to typing the correct spelling
-        // because the SAME function produces both, staleness probe and repair
-        // included. The correction block is attached AFTER serveForm returns and
-        // changes neither field it produced.
-        const served = await serveForm({
-          llm,
-          transaction,
-          form: redirect.correctedForm,
+        return {
+          text,
           from,
           to,
-          logger,
-        });
-        if (served) {
-          logger.info({
-            event: 'dict_redirect_hit',
-            from,
-            to,
-            alternative_count: redirect.alternatives.length,
-          });
-          return {
-            text,
-            from,
-            to,
-            kind: served.kind,
-            senses: served.senses,
-            correction: {
-              corrected_form: redirect.correctedForm,
-              alternatives: redirect.alternatives,
-            },
-          };
-        }
-        // A miss falls through to the model with the redirect DISCARDED. It is
-        // deliberately not reused to rewrite the query: see Task 9's
-        // "the model declines" note.
+          kind: served.kind,
+          senses: served.senses,
+          correction: {
+            corrected_form: redirect.correctedForm,
+            alternatives: redirect.alternatives,
+          },
+        };
       }
+      // A miss falls through to the model with the redirect DISCARDED. It is
+      // deliberately not reused to rewrite the query: see Task 9's
+      // "the model declines" note.
+    }
 
-      const raw = await llm(buildPrompt({ text, from, to }));
+    const raw = await llm(buildPrompt({ text, from, to }));
 
-      // An empty string is the contract's "no content" — a safety block, or a
-      // candidate with no text. The input was refused; nothing is broken, and
-      // nothing is written.
-      if (raw === '') {
-        logger.info({ event: 'translation_no_content', from, to });
-        return { text, from, to, kind: resolveKind(text, 'word'), senses: [] };
-      }
+    // An empty string is the contract's "no content" — a safety block, or a
+    // candidate with no text. The input was refused; nothing is broken, and
+    // nothing is written.
+    if (raw === '') {
+      logger.info({ event: 'translation_no_content', from, to });
+      return { text, from, to, kind: resolveKind(text, 'word'), senses: [] };
+    }
 
-      const parsed = parseLlmTranslation(raw);
-      // `domain/` cannot throw this itself: R3 forbids it importing ../errors.
-      if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
+    const parsed = parseLlmTranslation(raw);
+    // `domain/` cannot throw this itself: R3 forbids it importing ../errors.
+    if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
 
-      // Step 4. One call, in domain/: the four guards, the empty-entries clearing,
-      // both forms normalized and tidied, the effective form, and resolveKind
-      // against that form. `null` means the answer cannot be used at all — the
-      // fourth guard — and costs the same as an answer that failed to parse.
-      const resolved = resolveCorrection(parsed, { typedForm: form, from, to });
-      if (!resolved) throw new TranslationUnreadable(raw.slice(0, 200));
+    // Step 4. One call, in domain/: the four guards, the empty-entries clearing,
+    // both forms normalized and tidied, the effective form, and resolveKind
+    // against that form. `null` means the answer cannot be used at all — the
+    // fourth guard — and costs the same as an answer that failed to parse.
+    const resolved = resolveCorrection(parsed, { typedForm: form, from, to });
+    if (!resolved) throw new TranslationUnreadable(raw.slice(0, 200));
 
-      // Step 5. `correction` is the MODEL's, never the redirect step 2 may have
-      // found: a model that declined to correct is answered on its own terms,
-      // because its examples were built around the input as typed and filing them
-      // under the correct spelling would be worse than a variant for the typo.
-      const { correction, effectiveForm, kind } = resolved;
+    // Step 5. `correction` is the MODEL's, never the redirect step 2 may have
+    // found: a model that declined to correct is answered on its own terms,
+    // because its examples were built around the input as typed and filing them
+    // under the correct spelling would be worse than a variant for the typo.
+    const { correction, effectiveForm, kind } = resolved;
 
-      // Step 5b — the corrected-form probe, only when a correction is present.
-      //
-      // The SAME function steps 1 and 3 call, repair included. Once the backfill
-      // lands this is the ordinary corrected miss: corrections resolve to common
-      // words, and common words already have rows. Without it, step 7 pays a
-      // reconciliation call whose result the write discards (every insert in
-      // persistEntries is DO NOTHING for a form that already has renderings), and
-      // step 8 runs persistEntries on a form that already has rows — a path phase
-      // 12's live flow never takes, because a hit returns at step 1 first. If call
-      // 1 ranks the entries differently from the stored variant, the variant insert
-      // collides on dict_variants_form_entry_rank_key — the safety net, which must
-      // raise — the catch answers 200, and the redirect is rolled back with the
-      // write. Two calls and a failed write on every lookup of that typo, forever.
-      if (correction) {
-        const probe = await serveForm({
-          llm,
-          transaction,
-          form: effectiveForm,
-          from,
-          to,
-          logger,
-        });
+    // Step 5b — the corrected-form probe, only when a correction is present.
+    //
+    // The SAME function steps 1 and 3 call, repair included. Once the backfill
+    // lands this is the ordinary corrected miss: corrections resolve to common
+    // words, and common words already have rows. Without it, step 7 pays a
+    // reconciliation call whose result the write discards (every insert in
+    // persistEntries is DO NOTHING for a form that already has renderings), and
+    // step 8 runs persistEntries on a form that already has rows — a path phase
+    // 12's live flow never takes, because a hit returns at step 1 first. If call
+    // 1 ranks the entries differently from the stored variant, the variant insert
+    // collides on dict_variants_form_entry_rank_key — the safety net, which must
+    // raise — the catch answers 200, and the redirect is rolled back with the
+    // write. Two calls and a failed write on every lookup of that typo, forever.
+    if (correction) {
+      const probe = await serveForm({
+        llm,
+        transaction,
+        form: effectiveForm,
+        from,
+        to,
+        logger,
+      });
 
-        if (probe) {
-          // A SECOND, INDEPENDENT write: the probe may already have committed the
-          // repair's transaction inside serveForm. Each is correct alone, each is
-          // idempotent, and a failure between them leaves a correct dictionary and
-          // one more provider call — ADR 0001 R8, fourth amendment. Contrast steps
-          // 8 and 9, which are dependent and share one transaction.
-          await transaction((repos) =>
-            repos.dict.persistCorrection({
-              typedForm: form,
-              correctedForm: correction.corrected_form,
-              alternatives: correction.alternatives,
-              languageCode: from,
-            }),
-          );
-          logger.info({
-            event: 'dict_corrected',
-            from,
-            to,
-            alternative_count: correction.alternatives.length,
-          });
-          // No call 2 and no persistEntries: the target already holds its own
-          // renderings.
-          return { text, from, to, kind: probe.kind, senses: probe.senses, correction };
-        }
-
-        // The chain. Made ONLY when the probe missed. Without it, step 8 would
-        // write a dict_variants row for a string this very table records as not a
-        // word — which then shadows that string's own redirect forever by the
-        // "correct spellings win over redirects" rule: this phase's central defect
-        // arriving by its own machinery.
-        const hop = await transaction((repos) =>
-          repos.dict.findCorrectionByForm({ form: effectiveForm, languageCode: from }),
+      if (probe) {
+        // A SECOND, INDEPENDENT write: the probe may already have committed the
+        // repair's transaction inside serveForm. Each is correct alone, each is
+        // idempotent, and a failure between them leaves a correct dictionary and
+        // one more provider call — ADR 0001 R8, fourth amendment. Contrast steps
+        // 8 and 9, which are dependent and share one transaction.
+        await transaction((repos) =>
+          repos.dict.persistCorrection({
+            typedForm: form,
+            correctedForm: correction.corrected_form,
+            alternatives: correction.alternatives,
+            languageCode: from,
+          }),
         );
-        if (hop) {
-          const hopped = await serveForm({
-            llm,
-            transaction,
-            form: hop.correctedForm,
-            from,
-            to,
-            logger,
-          });
-          // ONE hop, no further: a chain whose second target has no rows fails the
-          // lookup rather than reading on, so the number of reads a lookup makes
-          // never depends on data. It needs a chain AND a truncated dictionary.
-          if (!hopped) throw new TranslationUnreadable(raw.slice(0, 200));
-
-          const hopCorrection = {
-            corrected_form: hop.correctedForm,
-            alternatives: hop.alternatives,
-          };
-          await transaction((repos) =>
-            repos.dict.persistCorrection({
-              typedForm: form,
-              // Straight to the hop's target, never to the typo the model named.
-              correctedForm: hop.correctedForm,
-              alternatives: hop.alternatives,
-              languageCode: from,
-            }),
-          );
-          logger.info({
-            event: 'dict_corrected',
-            from,
-            to,
-            alternative_count: hop.alternatives.length,
-          });
-          // The model's entries described the intermediate typo. Discarded unwritten.
-          return {
-            text,
-            from,
-            to,
-            kind: hopped.kind,
-            senses: hopped.senses,
-            correction: hopCorrection,
-          };
-        }
+        logger.info({
+          event: 'dict_corrected',
+          from,
+          to,
+          alternative_count: correction.alternatives.length,
+        });
+        // No call 2 and no persistEntries: the target already holds its own
+        // renderings.
+        return { text, from, to, kind: probe.kind, senses: probe.senses, correction };
       }
 
-      let entries = mergeEntries(parsed.entries);
-      let flattened = normalizeSenses(kind, flattenEntries(entries));
-
-      // A sentence is not a vocabulary item, and caching "no translation" would
-      // freeze a transient answer into a permanent dictionary. Both keep
-      // costing on every repeat, deliberately.
-      //
-      // The reconciliation branch below sits AFTER this guard, not straight
-      // after mergeEntries: a sentence is never written to the dictionary, so
-      // reconciling one would spend a database round trip and possibly a second
-      // model call on an answer that is then discarded.
-      if (kind === 'sentence' || entries.length === 0) {
-        logger.info({ event: 'translated', from, to, kind, sense_count: flattened.length });
-        return { text, from, to, kind, senses: flattened };
-      }
-
-      // Two independent calls name the same sense differently — `bank` returns
-      // river_bank where `banks` returns river_edge — so matching on sense_code
-      // alone would silently duplicate a meaning. Where a lexeme already has
-      // senses, a second, smaller call reconciles by meaning instead. R8 permits
-      // this read: it precedes third-party I/O and opens no write.
-      const stored = await transaction((repos) =>
-        Promise.all(
-          entries.map((entry) =>
-            repos.dict.findSensesByLexeme({
-              lemma: entry.lemma,
-              partOfSpeech: entry.part_of_speech,
-              languageCode: from,
-              userLanguageCode: to,
-            }),
-          ),
-        ),
+      // The chain. Made ONLY when the probe missed. Without it, step 8 would
+      // write a dict_variants row for a string this very table records as not a
+      // word — which then shadows that string's own redirect forever by the
+      // "correct spellings win over redirects" rule: this phase's central defect
+      // arriving by its own machinery.
+      const hop = await transaction((repos) =>
+        repos.dict.findCorrectionByForm({ form: effectiveForm, languageCode: from }),
       );
+      if (hop) {
+        const hopped = await serveForm({
+          llm,
+          transaction,
+          form: hop.correctedForm,
+          from,
+          to,
+          logger,
+        });
+        // ONE hop, no further: a chain whose second target has no rows fails the
+        // lookup rather than reading on, so the number of reads a lookup makes
+        // never depends on data. It needs a chain AND a truncated dictionary.
+        if (!hopped) throw new TranslationUnreadable(raw.slice(0, 200));
 
-      if (stored.some((senses) => senses.length > 0)) {
-        // A failure here is NOT degraded into a partial write. The dictionary
-        // has no TTL, so a known-wrong row is permanent while a failed request
-        // costs the learner one retry. This deliberately differs from the
-        // failed-write path below, which protects a correct answer whose
-        // storage failed.
-        entries = await reconcile({ llm, form: effectiveForm, from, to, entries, stored, logger });
-        // Both return paths below read `flattened`; a stale one would serve the
-        // un-reconciled renderings on the failed-write path only.
-        flattened = normalizeSenses(kind, flattenEntries(entries));
+        const hopCorrection = {
+          corrected_form: hop.correctedForm,
+          alternatives: hop.alternatives,
+        };
+        await transaction((repos) =>
+          repos.dict.persistCorrection({
+            typedForm: form,
+            // Straight to the hop's target, never to the typo the model named.
+            correctedForm: hop.correctedForm,
+            alternatives: hop.alternatives,
+            languageCode: from,
+          }),
+        );
+        logger.info({
+          event: 'dict_corrected',
+          from,
+          to,
+          alternative_count: hop.alternatives.length,
+        });
+        // The model's entries described the intermediate typo. Discarded unwritten.
+        return {
+          text,
+          from,
+          to,
+          kind: hopped.kind,
+          senses: hopped.senses,
+          correction: hopCorrection,
+        };
       }
+    }
 
-      try {
-        const { written, senses } = await transaction(async (repos) => {
-          const result = await repos.dict.persistEntries({
-            form: effectiveForm,
+    let entries = mergeEntries(parsed.entries);
+    let flattened = normalizeSenses(kind, flattenEntries(entries));
+
+    // A sentence is not a vocabulary item, and caching "no translation" would
+    // freeze a transient answer into a permanent dictionary. Both keep
+    // costing on every repeat, deliberately.
+    //
+    // The reconciliation branch below sits AFTER this guard, not straight
+    // after mergeEntries: a sentence is never written to the dictionary, so
+    // reconciling one would spend a database round trip and possibly a second
+    // model call on an answer that is then discarded.
+    if (kind === 'sentence' || entries.length === 0) {
+      logger.info({ event: 'translated', from, to, kind, sense_count: flattened.length });
+      return { text, from, to, kind, senses: flattened };
+    }
+
+    // Two independent calls name the same sense differently — `bank` returns
+    // river_bank where `banks` returns river_edge — so matching on sense_code
+    // alone would silently duplicate a meaning. Where a lexeme already has
+    // senses, a second, smaller call reconciles by meaning instead. R8 permits
+    // this read: it precedes third-party I/O and opens no write.
+    const stored = await transaction((repos) =>
+      Promise.all(
+        entries.map((entry) =>
+          repos.dict.findSensesByLexeme({
+            lemma: entry.lemma,
+            partOfSpeech: entry.part_of_speech,
             languageCode: from,
             userLanguageCode: to,
-            kind,
-            entries,
-          });
-          // Step 9, in the SAME transaction as step 8. These two are DEPENDENT —
-          // a redirect must not point at a form with no rows — which is what makes
-          // phase 12's fail-closed rule cover this phase for free: a failed
-          // reconciliation call writes no entries AND no redirect. (Contrast the
-          // probe at step 5b, where a repair and a redirect are independent and
-          // idempotent and may be two transactions; ADR 0001 R8, fourth amendment.)
-          if (correction) {
-            await repos.dict.persistCorrection({
-              typedForm: form,
-              correctedForm: correction.corrected_form,
-              alternatives: correction.alternatives,
-              languageCode: from,
-            });
-          }
-          return result;
+          }),
+        ),
+      ),
+    );
+
+    if (stored.some((senses) => senses.length > 0)) {
+      // A failure here is NOT degraded into a partial write. The dictionary
+      // has no TTL, so a known-wrong row is permanent while a failed request
+      // costs the learner one retry. This deliberately differs from the
+      // failed-write path below, which protects a correct answer whose
+      // storage failed.
+      entries = await reconcile({ llm, form: effectiveForm, from, to, entries, stored, logger });
+      // Both return paths below read `flattened`; a stale one would serve the
+      // un-reconciled renderings on the failed-write path only.
+      flattened = normalizeSenses(kind, flattenEntries(entries));
+    }
+
+    try {
+      const { written, senses } = await transaction(async (repos) => {
+        const result = await repos.dict.persistEntries({
+          form: effectiveForm,
+          languageCode: from,
+          userLanguageCode: to,
+          kind,
+          entries,
         });
-        logger.info({
-          event: 'dict_persisted',
-          entry_count: written.length,
-          lexemes_created: written.filter((entry) => entry.created).length,
-        });
+        // Step 9, in the SAME transaction as step 8. These two are DEPENDENT —
+        // a redirect must not point at a form with no rows — which is what makes
+        // phase 12's fail-closed rule cover this phase for free: a failed
+        // reconciliation call writes no entries AND no redirect. (Contrast the
+        // probe at step 5b, where a repair and a redirect are independent and
+        // idempotent and may be two transactions; ADR 0001 R8, fourth amendment.)
         if (correction) {
-          logger.info({
-            event: 'dict_corrected',
-            from,
-            to,
-            alternative_count: correction.alternatives.length,
+          await repos.dict.persistCorrection({
+            typedForm: form,
+            correctedForm: correction.corrected_form,
+            alternatives: correction.alternatives,
+            languageCode: from,
           });
         }
-        logger.info({ event: 'translated', from, to, kind, sense_count: senses.length });
-        return { text, from, to, kind, senses, ...(correction ? { correction } : {}) };
-      } catch (error) {
-        // A failed write must not lose a translation the learner already paid
-        // for. A broken persistence path shows up as this log line and as every
-        // lookup costing a provider call — not as a 502 on a request the model
-        // answered.
-        logger.error('dict_persist_failed', error);
-        logger.info({ event: 'translated', from, to, kind, sense_count: flattened.length });
-        // The correction block is still attached: it describes the MODEL's answer,
-        // which is true whether or not storage succeeded — the same reasoning that
-        // keeps this path answering 200 with the senses the learner already paid
-        // for. Only the redirect ROW is lost, and the next lookup writes it.
-        return { text, from, to, kind, senses: flattened, ...(correction ? { correction } : {}) };
+        return result;
+      });
+      logger.info({
+        event: 'dict_persisted',
+        entry_count: written.length,
+        lexemes_created: written.filter((entry) => entry.created).length,
+      });
+      if (correction) {
+        logger.info({
+          event: 'dict_corrected',
+          from,
+          to,
+          alternative_count: correction.alternatives.length,
+        });
       }
+      logger.info({ event: 'translated', from, to, kind, sense_count: senses.length });
+      return { text, from, to, kind, senses, ...(correction ? { correction } : {}) };
+    } catch (error) {
+      // A failed write must not lose a translation the learner already paid
+      // for. A broken persistence path shows up as this log line and as every
+      // lookup costing a provider call — not as a 502 on a request the model
+      // answered.
+      logger.error('dict_persist_failed', error);
+      logger.info({ event: 'translated', from, to, kind, sense_count: flattened.length });
+      // The correction block is still attached: it describes the MODEL's answer,
+      // which is true whether or not storage succeeded — the same reasoning that
+      // keeps this path answering 200 with the senses the learner already paid
+      // for. Only the redirect ROW is lost, and the next lookup writes it.
+      return { text, from, to, kind, senses: flattened, ...(correction ? { correction } : {}) };
+    }
+  };
+
+  return {
+    /**
+     * Phase 18. The lookup above is unchanged; this wraps it.
+     *
+     * Before it, the enrollment is read and checked, so an unknown enrollment
+     * (404) or a pair it does not cover (400) costs no model call. After it, ONE
+     * read marks which senses this enrollment has saved, on a target-language
+     * lookup only: the senses of a reverse lookup belong to the source-language
+     * lexeme, which this enrollment does not learn (spec §1). Both are reads, each
+     * its own transaction — R8 permits them; neither writes.
+     *
+     * `enrollment_id` is used for `saved` and nothing else. Any other use of it on
+     * this path is a new decision, not an extension of this one.
+     */
+    translate: async (input: TranslationRequest): Promise<TranslationResponse> => {
+      const enrollmentId = input.enrollment_id;
+      const enrollment =
+        enrollmentId === undefined
+          ? null
+          : await transaction((repos) => repos.enrollment.findById(enrollmentId));
+      if (enrollmentId !== undefined) {
+        if (!enrollment) throw new EnrollmentNotFound(enrollmentId);
+        if (!coversPair(enrollment, input.from, input.to)) {
+          throw new PairNotEnrolled(enrollmentId, input.from, input.to);
+        }
+      }
+
+      const response = await lookup(input);
+      if (!enrollment || input.from !== enrollment.target_language) return response;
+
+      const senseIds = response.senses.flatMap((sense) => (sense.sense_id ? [sense.sense_id] : []));
+      if (senseIds.length === 0) return response;
+      const saved = await transaction((repos) =>
+        repos.vocabulary.findSavedSenseIds({ enrollmentId: enrollment.id, senseIds }),
+      );
+      return { ...response, senses: markSaved(response.senses, new Set(saved)) };
     },
   };
 }

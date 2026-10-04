@@ -132,17 +132,23 @@ describe('the enrollment endpoints in the published document', () => {
 });
 
 describe('the translation endpoint in the published document', () => {
-  it('publishes the translation endpoint with all three statuses', async () => {
+  it('publishes the translation endpoint with all four statuses', async () => {
     const doc = await openApiDocument();
     const path = doc.paths['/api/translations']?.post;
     expect(path).toBeDefined();
-    expect(Object.keys(path.responses).sort()).toEqual(['200', '400', '502']);
+    expect(Object.keys(path.responses).sort()).toEqual(['200', '400', '404', '502']);
+  });
+
+  it('says the endpoint learns the enrollment, and uses it only for `saved`', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths['/api/translations'].post.description).toMatch(/enrollment_id/);
+    expect(doc.paths['/api/translations'].post.description).toMatch(/only/i);
   });
 
   it('declares the error body it actually returns for a translation failure', async () => {
     const doc = await openApiDocument();
     const responses = doc.paths['/api/translations'].post.responses;
-    for (const status of ['400', '502']) {
+    for (const status of ['400', '404', '502']) {
       const schema = responses[status].content['application/json'].schema;
       expect(schema.properties).toHaveProperty('error');
     }

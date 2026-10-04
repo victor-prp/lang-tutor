@@ -130,6 +130,10 @@ export function normalizeForm(text: string): string {
  */
 export type SenseRow = {
   lexemeId: string;
+  /** Phase 18: the sense and the form this row renders, so the wire can name
+   *  what a client saves. */
+  senseId: string;
+  variantId: string;
   rank: number;
   entryRank: number;
   partOfSpeech: string | null;
@@ -238,11 +242,16 @@ export function staleLexemes(rows: StaleLexemeRow[]): StaleLexeme[] {
  *
  * A response carries `example` only when both halves are present: `example` is
  * legally optional, and half of one is not an example. Nothing here can emit
- * `sense_code`, because nothing here reads it.
+ * `sense_code`, because nothing here reads it. From phase 18 it emits the sense
+ * and variant ids: identity, not model output.
  */
 export function rowsToSenses(rows: SenseRow[]): TranslationSense[] {
   return rows.map((row) => {
-    const sense: TranslationSense = { translation: row.translation };
+    const sense: TranslationSense = {
+      translation: row.translation,
+      sense_id: row.senseId,
+      variant_id: row.variantId,
+    };
     if (row.partOfSpeech) sense.part_of_speech = row.partOfSpeech;
     if (row.exampleSource && row.exampleTarget) {
       sense.example = { source: row.exampleSource, target: row.exampleTarget };
