@@ -48,11 +48,17 @@ const violating = (constraint: string) =>
 describe('vocabulary_entries', () => {
   it('accepts an entry and stamps created_at', async () => {
     await insert();
-    const rows = await t.db.execute<{ created_at: Date }>(
+    const rows = await t.db.execute<{ created_at: string }>(
       sql`select created_at from vocabulary_entries`,
     );
     expect(rows.rows).toHaveLength(1);
-    expect(rows.rows[0].created_at).toBeInstanceOf(Date);
+    // Raw db.execute() returns timestamps as ISO 8601 strings. Verify the value
+    // is a valid timestamp close to now (within 60 seconds).
+    const createdAt = rows.rows[0].created_at;
+    expect(createdAt).toBeTruthy();
+    const parsedTime = Date.parse(createdAt);
+    expect(parsedTime).not.toBeNaN();
+    expect(Math.abs(parsedTime - Date.now())).toBeLessThan(60_000);
   });
 
   it('holds one entry per (enrollment, sense) — the research decision as a constraint', async () => {
