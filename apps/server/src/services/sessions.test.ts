@@ -8,6 +8,7 @@ import type { SessionRepo } from '../repo/sessions';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
+import type { VocabularyRepo } from '../repo/vocabulary';
 import { createSessionService, type Transaction } from './sessions';
 
 // The transaction seam is the repositories, so running the callback against
@@ -92,6 +93,23 @@ describe('repos', () => {
     },
   };
 
+  // Bound into the same transaction since phase 18, and untouched by these use
+  // cases: reaching it here would mean the session service grew a second job.
+  const forbidden = () => {
+    throw new Error('the session service must not touch the vocabulary tables');
+  };
+  const vocabularyRepo: VocabularyRepo = {
+    findSaveable: forbidden,
+    insertEntries: forbidden,
+    deleteEntry: forbidden,
+    findSavedSenseIds: forbidden,
+    findWordsPage: forbidden,
+    findWordSummaries: forbidden,
+    findLexeme: forbidden,
+    findLexemeRenderings: forbidden,
+    findSavedInLexeme: forbidden,
+  };
+
   function fakeTransaction(session: SessionRepo): Transaction {
     return (run) =>
       run({
@@ -100,6 +118,7 @@ describe('repos', () => {
         user: userRepo,
         enrollment: enrollmentRepo,
         dict: dictRepo,
+        vocabulary: vocabularyRepo,
       });
   }
 

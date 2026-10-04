@@ -142,6 +142,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),
+    vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
   };
   return (run) => run(bound);
 }

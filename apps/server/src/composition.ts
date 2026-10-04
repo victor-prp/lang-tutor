@@ -9,6 +9,7 @@ import { createSessionRepo } from './repo/sessions';
 import { createEnrollmentRepo } from './repo/enrollments';
 import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
+import { createVocabularyRepo } from './repo/vocabulary';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
 import type { LlmClient } from './services/llm';
 import { createSessionService, type SessionService } from './services/sessions';
@@ -62,6 +63,7 @@ export function createServerDeps(io: {
     user: createUserRepo(tx),
     enrollment: createEnrollmentRepo(tx),
     dict: createDictRepo(tx),
+    vocabulary: createVocabularyRepo(tx),
   }));
 
   // The one place in the repo that names both `createGeminiClient` and
