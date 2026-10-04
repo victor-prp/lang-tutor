@@ -59,7 +59,19 @@ export function createVocabularyService({
         });
         const passed = new Set(saveable.map((row) => `${row.senseId} ${row.variantId}`));
         const refused = asked.find((entry) => !passed.has(`${entry.sense_id} ${entry.variant_id}`));
-        if (refused) throw new InvalidVocabularyEntry(refused.sense_id);
+        if (refused) {
+          // The 400 body is fixed; the sense that caused it is only in the log.
+          // Logged before the throw, inside the transaction, so it is recorded
+          // even though the rollback follows. Logger has no warn level, so this
+          // is an info event like every other.
+          logger.info({
+            event: 'vocabulary_entry_refused',
+            enrollment_id: enrollmentId,
+            sense_id: refused.sense_id,
+            variant_id: refused.variant_id,
+          });
+          throw new InvalidVocabularyEntry(refused.sense_id);
+        }
         await repos.vocabulary.insertEntries({ enrollmentId, entries: saveable });
       });
       logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length });

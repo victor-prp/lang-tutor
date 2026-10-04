@@ -80,11 +80,11 @@ export function createTranslationsRouter(translations: TranslationService, logge
     try {
       return c.json(await translations.translate(input), 200);
     } catch (error) {
+      if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
+      if (error instanceof PairNotEnrolled) return c.json({ error: 'pair not enrolled' }, 400);
       // Two errors, one status: the learner can do nothing different about
       // either. Which one it was lives in the log, as `cause` — never in the
       // response, so the wire contract stays one message for both.
-      if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
-      if (error instanceof PairNotEnrolled) return c.json({ error: 'pair not enrolled' }, 400);
       if (error instanceof LlmUnavailable || error instanceof TranslationUnreadable) {
         logger.error('translation unavailable', error);
         return c.json({ error: 'translation unavailable' }, 502);

@@ -3,13 +3,14 @@ import { Hono } from 'hono';
 
 import { createVocabularyRouter } from '../../../src/routes/vocabulary';
 import { insertLexeme } from '../../support/dictRows';
-import { createFakeLogger } from '../../support/fakes';
+import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { seedEnrollment, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 
 let t: TestDb;
+let logger: FakeLogger;
 const RU = 'e_ru';
 
 // A Russian word with two senses rendered in Hebrew by one form.
@@ -36,6 +37,7 @@ async function russianWord(lemma: string, form = lemma) {
 
 beforeEach(async () => {
   t = await createTestDb();
+  logger = createFakeLogger();
   await seedUser(t.db, 'u_1'); // also holds e_u_1, English
   await seedEnrollment(t.db, { id: RU, userId: 'u_1', targetLanguage: 'ru' });
 });
@@ -44,7 +46,7 @@ afterEach(async () => {
 });
 
 function app() {
-  const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+  const deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7) });
   const hono = new Hono();
   hono.route('/api', createVocabularyRouter(deps.vocabulary));
   return hono;
@@ -111,6 +113,13 @@ describe('POST /api/enrollments/{id}/vocabulary', () => {
     ]);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid vocabulary entry' });
+    // The body names nothing; the log names the refused sense (spec §4).
+    expect(logger.events).toContainEqual({
+      event: 'vocabulary_entry_refused',
+      enrollment_id: RU,
+      sense_id: english.senseIds[0],
+      variant_id: english.variantIds[0],
+    });
     expect(((await (await list(RU)).json()) as Page).items).toEqual([]);
   });
 
