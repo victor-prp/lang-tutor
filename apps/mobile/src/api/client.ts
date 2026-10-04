@@ -7,9 +7,13 @@ import type {
   LoginRequest,
   NextStepRequest,
   NextStepResponse,
+  SaveVocabularyRequest,
+  SaveVocabularyResponse,
   TranslationRequest,
   TranslationResponse,
   User,
+  VocabularyPage,
+  VocabularyWordDetail,
 } from '@lang-tutor/core/api';
 
 export class ApiError extends Error {
@@ -43,6 +47,14 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
     return (await res.json()) as TResponse;
   }
 
+  async function deleteResource(path: string): Promise<void> {
+    const res = await fetch(`${baseUrl}${path}`, { method: 'DELETE' });
+    if (!res.ok) throw new ApiError(res.status);
+  }
+
+  const vocabularyPath = (enrollmentId: string) =>
+    `/api/enrollments/${encodeURIComponent(enrollmentId)}/vocabulary`;
+
   return {
     // Identification, not authentication: there is no password to send.
     login: (request: LoginRequest) => postJson<User>('/api/login', request),
@@ -57,6 +69,19 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       getJson<Enrollment[]>(`/api/users/${encodeURIComponent(userId)}/enrollments`),
     createEnrollment: (userId: string, request: CreateEnrollmentRequest) =>
       postJson<Enrollment>(`/api/users/${encodeURIComponent(userId)}/enrollments`, request),
+    saveVocabulary: (enrollmentId: string, request: SaveVocabularyRequest) =>
+      postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request),
+    unsaveVocabulary: (enrollmentId: string, senseId: string) =>
+      deleteResource(`${vocabularyPath(enrollmentId)}/senses/${encodeURIComponent(senseId)}`),
+    listVocabulary: (enrollmentId: string, query: { cursor?: string; limit?: number }) => {
+      const params = new URLSearchParams();
+      if (query.cursor !== undefined) params.set('cursor', query.cursor);
+      if (query.limit !== undefined) params.set('limit', String(query.limit));
+      const search = params.toString();
+      return getJson<VocabularyPage>(`${vocabularyPath(enrollmentId)}${search ? `?${search}` : ''}`);
+    },
+    vocabularyWord: (enrollmentId: string, lexemeId: string) =>
+      getJson<VocabularyWordDetail>(`${vocabularyPath(enrollmentId)}/words/${encodeURIComponent(lexemeId)}`),
   };
 }
 

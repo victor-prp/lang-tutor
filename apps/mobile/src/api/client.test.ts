@@ -213,4 +213,44 @@ describe('api/client', () => {
       buildClient(mockFetch).createEnrollment('u1', { source_language: 'he', target_language: 'ru' }),
     ).rejects.toEqual(new ApiError(409));
   });
+
+  it('saveVocabulary posts the entries to the enrollment', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_sense_ids: ['s1'] }) }));
+    const client = buildClient(mockFetch);
+    await client.saveVocabulary('e 1', { entries: [{ sense_id: 's1', variant_id: 'v1' }] });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/enrollments/e%201/vocabulary',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ entries: [{ sense_id: 's1', variant_id: 'v1' }] }) }),
+    );
+  });
+
+  it('unsaveVocabulary sends DELETE and reads no body', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 204 }));
+    const client = buildClient(mockFetch);
+    await client.unsaveVocabulary('e1', 's1');
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary/senses/s1', {
+      method: 'DELETE',
+    });
+  });
+
+  it('listVocabulary passes cursor and limit as a query string, and nothing when absent', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: [], next_cursor: null }) }));
+    const client = buildClient(mockFetch);
+    await client.listVocabulary('e1', { cursor: 'a+b', limit: 50 });
+    await client.listVocabulary('e1', {});
+    expect(mockFetch).toHaveBeenNthCalledWith(1, 'http://test.local/api/enrollments/e1/vocabulary?cursor=a%2Bb&limit=50', { method: 'GET' });
+    expect(mockFetch).toHaveBeenNthCalledWith(2, 'http://test.local/api/enrollments/e1/vocabulary', { method: 'GET' });
+  });
+
+  it('vocabularyWord gets one word', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    const client = buildClient(mockFetch);
+    await client.vocabularyWord('e1', 'lx1');
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary/words/lx1', { method: 'GET' });
+  });
+
+  it('unsaveVocabulary throws ApiError on failure', async () => {
+    const client = buildClient(jest.fn(async () => ({ ok: false, status: 404 })));
+    await expect(client.unsaveVocabulary('e1', 's1')).rejects.toBeInstanceOf(ApiError);
+  });
 });
