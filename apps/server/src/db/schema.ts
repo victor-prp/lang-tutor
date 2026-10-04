@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   check,
   foreignKey,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -212,6 +213,12 @@ export const dictVarTranslations = pgTable(
       t.rank,
     ),
     check('dict_var_translations_rank_nonneg', sql`${t.rank} >= 0`),
+    // Phase 18. The primary key leads with variant_id, so "which renderings does
+    // this SENSE have in this language" — the vocabulary list's sense_count and
+    // the drill-down's representative rendering — would otherwise scan the
+    // dictionary's largest table. findSensesByLexeme's join on tr.sense_id
+    // benefits too.
+    index('dict_var_translations_sense_language_idx').on(t.senseId, t.userLanguageCode),
   ],
 );
 
@@ -304,6 +311,75 @@ export const dictCorrections = pgTable(
     // Matching on an expression index is exactly what
     // dict_variants_form_entry_rank_key does.
     uniqueIndex('dict_corrections_form_key').on(t.languageCode, sql`lower(${t.typedForm})`),
+  ],
+);
+
+/**
+ * Phase 18. A learner's word list, one row per (enrollment, sense): the research
+ * verdict, held as a primary key. Saving a meaning again from another form is ON
+ * CONFLICT DO NOTHING, so the first form wins.
+ *
+ * `variant_id` is the form the sense was first saved from. It is not part of the
+ * key; it is here because a sense has no wording of its own — translations and
+ * examples live on dict_var_translations, per form — and the saved form is the
+ * one rendering certain to exist.
+ *
+ * `lexeme_id` is a copy of dict_senses.lexeme_id. A sense never changes lexeme,
+ * so the copy cannot go stale (dict_variants.language_code's reasoning), and it
+ * keeps dict_senses out of every vocabulary read.
+ *
+ * **No FK to dict_var_translations**, though (variant, sense, language) would be
+ * the tightest constraint: repairVariantRenderings deletes and re-inserts a
+ * variant's renderings, which a statement-level FK would reject. The service
+ * checks the rendering at save time; the repair's "may not drop a sense" rule
+ * keeps it true afterwards.
+ *
+ * **No index on sense_id, variant_id or lexeme_id alone.** Postgres does not
+ * index the referencing side of an FK, so a cascade from ONE deleted dictionary
+ * row would scan this table. Nothing deletes dictionary rows one at a time:
+ * db:reseed's TRUNCATE ... CASCADE does no lookups, and the dictionary has no
+ * TTL. A phase that adds a per-row delete adds the index it needs.
+ *
+ * No user_id: sessions and questions carry one for their composite FK; an entry
+ * reaches its learner through its enrollment, and nothing queries by user.
+ */
+export const vocabularyEntries = pgTable(
+  'vocabulary_entries',
+  {
+    enrollmentId: text('enrollment_id').notNull(),
+    senseId: text('sense_id').notNull(),
+    lexemeId: text('lexeme_id').notNull(),
+    variantId: text('variant_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'vocabulary_entries_pkey', columns: [t.enrollmentId, t.senseId] }),
+    foreignKey({
+      name: 'vocabulary_entries_enrollment_fk',
+      columns: [t.enrollmentId],
+      foreignColumns: [enrollments.id],
+    }),
+    foreignKey({
+      name: 'vocabulary_entries_sense_fk',
+      columns: [t.senseId],
+      foreignColumns: [dictSenses.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'vocabulary_entries_lexeme_fk',
+      columns: [t.lexemeId],
+      foreignColumns: [dictLexemes.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'vocabulary_entries_variant_fk',
+      columns: [t.variantId],
+      foreignColumns: [dictVariants.id],
+    }).onDelete('cascade'),
+    // Every read is scoped to one enrollment, which is what keeps the table's
+    // total size irrelevant. created_at is a trailing KEY column rather than
+    // INCLUDE (drizzle-kit cannot express INCLUDE); either way the list page's
+    // GROUP BY lexeme_id / max(created_at) is an index-only scan of one
+    // enrollment's slice.
+    index('vocabulary_entries_enrollment_lexeme_idx').on(t.enrollmentId, t.lexemeId, t.createdAt),
   ],
 );
 
