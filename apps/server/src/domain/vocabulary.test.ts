@@ -13,10 +13,23 @@ import {
 } from './vocabulary';
 
 describe('the cursor', () => {
+  const cursorOf = (savedAt: string, lexemeId: string) =>
+    Buffer.from(JSON.stringify([savedAt, lexemeId]), 'utf8').toString('base64url');
   const cursor = { savedAt: '2026-10-04 12:00:00.123456+00', lexemeId: 'lx-1' };
 
   it('round-trips', () => {
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
+  });
+
+  it('accepts a leap day in a leap year and every offset form the server issues', () => {
+    for (const savedAt of [
+      '2028-02-29 23:59:59.999999+00',
+      '2026-10-04 12:00:00.1-08',
+      '2026-10-04 12:00:00+05:45',
+      '2026-10-04 00:00:00-03:30',
+    ]) {
+      expect(decodeCursor(cursorOf(savedAt, 'lx-1'))).toEqual({ savedAt, lexemeId: 'lx-1' });
+    }
   });
 
   it('round-trips a whole second and an offset with minutes', () => {
@@ -30,6 +43,14 @@ describe('the cursor', () => {
     ['a junk timestamp', Buffer.from('["yesterday","lx-1"]').toString('base64url')],
     ['an empty lexeme id', Buffer.from('["2026-10-04 12:00:00+00",""]').toString('base64url')],
     ['three elements', Buffer.from('["2026-10-04 12:00:00+00","a","b"]').toString('base64url')],
+    ['a well-shaped but out-of-range timestamp', cursorOf('2026-13-45 25:61:00+00', 'lx-1')],
+    ['a day the month does not have', cursorOf('2026-02-30 12:00:00+00', 'lx-1')],
+    ['a leap day in a common year', cursorOf('2026-02-29 12:00:00+00', 'lx-1')],
+    ['an hour of 24', cursorOf('2026-10-04 24:00:00+00', 'lx-1')],
+    ['a second of 60', cursorOf('2026-10-04 12:00:60+00', 'lx-1')],
+    ['an offset of 99 hours', cursorOf('2026-10-04 12:00:00+99', 'lx-1')],
+    ['an offset with 75 minutes', cursorOf('2026-10-04 12:00:00+05:75', 'lx-1')],
+    ['a lexeme id containing NUL', cursorOf('2026-10-04 12:00:00+00', 'lx\u0000-1')],
   ])('refuses %s', (_label, raw) => {
     expect(decodeCursor(raw)).toBeNull();
   });

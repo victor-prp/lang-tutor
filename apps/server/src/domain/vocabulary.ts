@@ -19,7 +19,26 @@ export type VocabularyCursor = { savedAt: string; lexemeId: string };
 // What `timestamptz::text` prints under DateStyle ISO: `2026-10-04 12:00:00.123456+00`.
 // Anything else is refused here, because the repository casts it with
 // ::timestamptz and a junk string there would be a 500 rather than a 400.
-const PG_TIMESTAMPTZ = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?[+-]\d{2}(:\d{2})?$/;
+const PG_TIMESTAMPTZ =
+  /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?[+-](\d{2})(?::(\d{2}))?$/;
+
+// Well-shaped is not enough: `2026-13-45 25:61:00+00` matches the pattern and
+// makes the cast raise, which is a 500. So the fields are range-checked too, the
+// day against its month's length.
+function isRealTimestamptz(text: string): boolean {
+  const m = PG_TIMESTAMPTZ.exec(text);
+  if (!m) return false;
+  const [year, month, day, hour, minute, second, offsetHour] = m.slice(1, 8).map(Number);
+  const offsetMinute = m[8] === undefined ? 0 : Number(m[8]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  if (offsetHour > 15 || offsetMinute > 59) return false;
+  // Day 0 of the next month is the last day of this one. setUTCFullYear, not
+  // Date.UTC, so a year below 100 is not read as 19xx.
+  const lastOfMonth = new Date(0);
+  lastOfMonth.setUTCFullYear(year, month, 0);
+  return day <= lastOfMonth.getUTCDate();
+}
 
 export function encodeCursor(cursor: VocabularyCursor): string {
   return Buffer.from(JSON.stringify([cursor.savedAt, cursor.lexemeId]), 'utf8').toString(
@@ -37,8 +56,11 @@ export function decodeCursor(raw: string): VocabularyCursor | null {
   }
   if (!Array.isArray(parsed) || parsed.length !== 2) return null;
   const [savedAt, lexemeId] = parsed as unknown[];
-  if (typeof savedAt !== 'string' || !PG_TIMESTAMPTZ.test(savedAt)) return null;
-  if (typeof lexemeId !== 'string' || lexemeId.length === 0) return null;
+  if (typeof savedAt !== 'string' || !isRealTimestamptz(savedAt)) return null;
+  // A NUL cannot be a Postgres text parameter: it would raise there, a 500.
+  if (typeof lexemeId !== 'string' || lexemeId.length === 0 || lexemeId.includes('\u0000')) {
+    return null;
+  }
   return { savedAt, lexemeId };
 }
 

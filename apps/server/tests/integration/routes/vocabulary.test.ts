@@ -169,6 +169,17 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
     expect(await res.json()).toEqual({ error: 'invalid request' });
   });
 
+  // Shaped like a cursor the server issues, but the timestamp is not a time:
+  // without the range check the ::timestamptz cast raises and this is a 500.
+  it('answers 400, not 500, for a well-shaped cursor with an impossible timestamp', async () => {
+    const forged = Buffer.from(JSON.stringify(['2026-13-45 25:61:00+00', 'lx-1']), 'utf8').toString(
+      'base64url',
+    );
+    const res = await list(RU, `?cursor=${encodeURIComponent(forged)}`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+
   it('answers 404 for an unknown enrollment', async () => {
     expect((await list('e_nobody')).status).toBe(404);
   });
