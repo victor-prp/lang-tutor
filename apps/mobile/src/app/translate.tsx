@@ -171,27 +171,41 @@ export default function TranslateScreen() {
             </Text>
           ) : null}
 
+          {t.canSaveAll ? (
+            <Pressable
+              accessibilityRole="button"
+              testID="translate-save-all"
+              onPress={t.saveAll}
+              style={styles.secondaryButton}
+            >
+              <Text style={styles.secondaryLabel}>{strings.translateSaveAll}</Text>
+            </Pressable>
+          ) : null}
+          {t.saveFailed ? (
+            <Text testID="translate-save-failed" style={styles.noticeText}>
+              {strings.translateSaveFailed}
+            </Text>
+          ) : null}
+
           {senses.map((sense, index) => (
             <SenseCard
               key={`${sense.translation}-${index}`}
               sense={sense}
               isTop={index === 0 && !isSentence}
-              chosen={t.chosenIndex === index}
-              showChoose={!isSentence && t.chosenIndex === null}
-              onChoose={() => t.choose(index)}
+              saveState={sense.sense_id ? t.saved[sense.sense_id] : undefined}
+              pending={sense.sense_id ? Boolean(t.pending[sense.sense_id]) : false}
+              onToggle={() => sense.sense_id && t.toggleSave(sense.sense_id)}
             />
           ))}
 
-          {t.chosenIndex !== null ? (
-            <Pressable
-              accessibilityRole="button"
-              testID="translate-new-word"
-              onPress={t.reset}
-              style={styles.secondaryButton}
-            >
-              <Text style={styles.secondaryLabel}>{strings.translateNewWord}</Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            testID="translate-new-word"
+            onPress={t.reset}
+            style={styles.secondaryButton}
+          >
+            <Text style={styles.secondaryLabel}>{strings.translateNewWord}</Text>
+          </Pressable>
         </ScrollView>
       ) : null}
     </SafeAreaView>
@@ -201,25 +215,22 @@ export default function TranslateScreen() {
 function SenseCard({
   sense,
   isTop,
-  chosen,
-  showChoose,
-  onChoose,
+  saveState,
+  pending,
+  onToggle,
 }: {
   sense: TranslationSense;
   isTop: boolean;
-  chosen: boolean;
-  showChoose: boolean;
-  onChoose: () => void;
+  saveState: boolean | undefined;
+  pending: boolean;
+  onToggle: () => void;
 }) {
   const partOfSpeech = sense.part_of_speech
     ? strings.partOfSpeech(sense.part_of_speech)
     : undefined;
 
   return (
-    <View
-      testID="translate-sense"
-      style={[styles.card, isTop && styles.cardTop, chosen && styles.cardChosen]}
-    >
+    <View testID="translate-sense" style={[styles.card, isTop && styles.cardTop]}>
       {isTop ? (
         <Text testID="translate-top-sense" style={styles.badge}>
           {strings.translateTopSense}
@@ -235,23 +246,20 @@ function SenseCard({
         </View>
       ) : null}
 
-      {chosen ? (
-        <Text testID="translate-chosen" style={styles.chosenLabel}>
-          {strings.translateChosen}
-        </Text>
-      ) : null}
-
-      {/* The card's own button selects it, not the card body: these cards are
-          read and compared, and a tap-anywhere card turns reading into
-          accidental choosing. */}
-      {showChoose ? (
+      {/* The card's own button saves it, not the card body: these cards are read
+          and compared, and a tap-anywhere card turns reading into saving. */}
+      {saveState !== undefined ? (
         <Pressable
           accessibilityRole="button"
-          testID="translate-choose"
-          onPress={onChoose}
-          style={styles.chooseButton}
+          accessibilityState={{ selected: saveState, disabled: pending }}
+          disabled={pending}
+          testID="translate-save"
+          onPress={onToggle}
+          style={[styles.chooseButton, saveState && styles.savedButton]}
         >
-          <Text style={styles.chooseLabel}>{strings.translateChoose}</Text>
+          <Text style={[styles.chooseLabel, saveState && styles.savedLabel]}>
+            {saveState ? strings.translateSaved : strings.translateSave}
+          </Text>
         </Pressable>
       ) : null}
     </View>
@@ -312,11 +320,6 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   cardTop: { borderColor: colors.primary, borderWidth: 2 },
-  cardChosen: {
-    borderColor: colors.correct,
-    borderWidth: 2,
-    backgroundColor: colors.correctSurface,
-  },
   badge: {
     color: colors.primary,
     fontSize: fontSizes.sm,
@@ -345,13 +348,6 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.sm,
     writingDirection: 'rtl',
   },
-  chosenLabel: {
-    marginTop: spacing.sm,
-    color: colors.correct,
-    fontSize: fontSizes.sm,
-    fontWeight: '700',
-    writingDirection: 'rtl',
-  },
   chooseButton: {
     marginTop: spacing.md,
     backgroundColor: colors.primary,
@@ -360,6 +356,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   chooseLabel: { color: colors.onPrimary, fontSize: fontSizes.sm, fontWeight: '700' },
+  // Saved: an outlined button, so נשמר ✓ is primary on a light ground (white on
+  // the near-white background would be unreadable).
+  savedButton: {
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  savedLabel: { color: colors.primary },
   secondaryButton: {
     borderWidth: 1,
     borderColor: colors.border,

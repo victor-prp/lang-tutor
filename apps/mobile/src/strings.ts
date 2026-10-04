@@ -76,8 +76,12 @@ export const strings = {
   // Rendered only when there is more than one, because "1 משמעויות" is both
   // ungrammatical and pointless.
   translateSenseCount: (count: number) => `${count} משמעויות`,
-  translateChoose: 'זו המשמעות שחיפשתי',
-  translateChosen: 'התרגום נשמר לאוצר המילים שלך',
+  // Phase 18. The card's own toggle states the save, truthfully — which closes the
+  // caveat phase 10 carried on `התרגום נשמר לאוצר המילים שלך`, now deleted.
+  translateSave: 'שמור',
+  translateSaved: 'נשמר ✓',
+  translateSaveAll: 'שמור הכל',
+  translateSaveFailed: 'השמירה נכשלה, נסו שוב',
   translateNewWord: 'מלה חדשה',
   translateEmpty: 'לא מצאנו תרגום',
   translateUnavailable: 'התרגום לא זמין',
