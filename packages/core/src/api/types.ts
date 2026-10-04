@@ -24,6 +24,8 @@ import type {
   PartOfSpeechSchema,
   PositionSchema,
   QuestionSchema,
+  SaveVocabularyRequestSchema,
+  SaveVocabularyResponseSchema,
   ScoreSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
@@ -32,6 +34,12 @@ import type {
   TranslationResponseSchema,
   TranslationSenseSchema,
   UserSchema,
+  VocabularyEntryInputSchema,
+  VocabularyPageQuerySchema,
+  VocabularyPageSchema,
+  VocabularySenseSchema,
+  VocabularyWordDetailSchema,
+  VocabularyWordSchema,
 } from './schemas';
 
 // Every type here is inferred. The alternative — schemas on the server and
@@ -74,3 +82,11 @@ export type LlmReconciliation = z.infer<typeof LlmReconciliationSchema>;
 export type Enrollment = z.infer<typeof EnrollmentSchema>;
 export type CreateEnrollmentRequest = z.infer<typeof CreateEnrollmentRequestSchema>;
 export type LanguageCode = z.infer<typeof LanguageCodeSchema>;
+export type VocabularyEntryInput = z.infer<typeof VocabularyEntryInputSchema>;
+export type SaveVocabularyRequest = z.infer<typeof SaveVocabularyRequestSchema>;
+export type SaveVocabularyResponse = z.infer<typeof SaveVocabularyResponseSchema>;
+export type VocabularyPageQuery = z.infer<typeof VocabularyPageQuerySchema>;
+export type VocabularyWord = z.infer<typeof VocabularyWordSchema>;
+export type VocabularyPage = z.infer<typeof VocabularyPageSchema>;
+export type VocabularySense = z.infer<typeof VocabularySenseSchema>;
+export type VocabularyWordDetail = z.infer<typeof VocabularyWordDetailSchema>;
