@@ -1,7 +1,7 @@
-import { and, eq, sql, type SQL } from 'drizzle-orm';
+import { eq, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import { dictLexemes, vocabularyEntries } from '../db/schema';
+import { dictLexemes } from '../db/schema';
 import type {
   LexemeRendering,
   LexemeRow,
@@ -19,7 +19,7 @@ export type SaveableEntry = { senseId: string; variantId: string; lexemeId: stri
 const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}`), sql`, `);
 
 /**
- * Every read this repository runs, as a builder. Exported so
+ * Every statement the hot paths of this repository run, as a builder. Exported so
  * tests/integration/repo/vocabulary.plan.test.ts can EXPLAIN exactly these
  * statements at volume: a plan test of hand-copied SQL would prove something
  * about a query nobody runs.
@@ -29,6 +29,25 @@ const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}
  * §3, "Cost of every query").
  */
 export const vocabularyQueries = {
+  /** Save: a primary-key insert. Named conflict target, not bare: only the PK
+   *  may be swallowed, so an FK violation still raises. First form wins — a
+   *  sense already saved keeps the variant it was saved from. */
+  insertEntries: (input: { enrollmentId: string; entries: SaveableEntry[] }): SQL => sql`
+    INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+    VALUES ${sql.join(
+      input.entries.map(
+        (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.variantId})`,
+      ),
+      sql`, `,
+    )}
+    ON CONFLICT (enrollment_id, sense_id) DO NOTHING`,
+
+  /** Unsave: a primary-key delete. */
+  deleteEntry: (input: { enrollmentId: string; senseId: string }): SQL => sql`
+    DELETE FROM vocabulary_entries
+    WHERE enrollment_id = ${input.enrollmentId}
+      AND sense_id = ${input.senseId}`,
+
   /** Which asked pairs may be saved: the sense's lexeme is in the target
    *  language, the variant belongs to that lexeme, and the variant renders the
    *  sense in the source language. PK lookups throughout. */
@@ -162,22 +181,11 @@ export function createVocabularyRepo(tx: Tx) {
     /** First form wins: a sense already saved keeps the variant it was saved from. */
     insertEntries: async (input: { enrollmentId: string; entries: SaveableEntry[] }): Promise<void> => {
       if (input.entries.length === 0) return;
-      await tx
-        .insert(vocabularyEntries)
-        .values(input.entries.map((entry) => ({ enrollmentId: input.enrollmentId, ...entry })))
-        // Named, not bare: only the PK may be swallowed. An FK violation must raise.
-        .onConflictDoNothing({ target: [vocabularyEntries.enrollmentId, vocabularyEntries.senseId] });
+      await tx.execute(vocabularyQueries.insertEntries(input));
     },
 
     deleteEntry: async (input: { enrollmentId: string; senseId: string }): Promise<void> => {
-      await tx
-        .delete(vocabularyEntries)
-        .where(
-          and(
-            eq(vocabularyEntries.enrollmentId, input.enrollmentId),
-            eq(vocabularyEntries.senseId, input.senseId),
-          ),
-        );
+      await tx.execute(vocabularyQueries.deleteEntry(input));
     },
 
     findSavedSenseIds: async (input: { enrollmentId: string; senseIds: string[] }): Promise<string[]> => {

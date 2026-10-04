@@ -65,6 +65,26 @@ async function explain(query: SQL): Promise<Explained> {
   return result.rows[0]['QUERY PLAN'][0];
 }
 
+// EXPLAIN ANALYZE of a write executes it, so a write is explained inside a
+// transaction that is always rolled back: the heavy fixture stays as loaded.
+class Rollback extends Error {}
+async function explainWrite(query: SQL): Promise<Explained> {
+  let plan: Explained | undefined;
+  await t.db
+    .transaction(async (tx) => {
+      const result = await tx.execute<{ 'QUERY PLAN': Explained[] }>(
+        sql`explain (analyze, format json) ${query}`,
+      );
+      plan = result.rows[0]['QUERY PLAN'][0];
+      throw new Rollback();
+    })
+    .catch((error: unknown) => {
+      if (!(error instanceof Rollback)) throw error;
+    });
+  if (!plan) throw new Error('no plan was captured');
+  return plan;
+}
+
 const nodes = (node: PlanNode): PlanNode[] => [node, ...(node.Plans ?? []).flatMap(nodes)];
 const seqScans = (plan: Explained) =>
   nodes(plan.Plan)
@@ -99,6 +119,19 @@ describe('every vocabulary read at volume', () => {
     ['savedInLexeme', () => vocabularyQueries.savedInLexeme({ enrollmentId: HEAVY, lexemeId: 'pl7' })],
   ])('%s scans no watched table sequentially', async (_name, build) => {
     const plan = await explain(build());
+    expect(seqScans(plan)).toEqual([]);
+  });
+
+  // Save and unsave, spec §3: a primary-key insert and a primary-key delete,
+  // against the heavy enrollment so a table-sized scan would show.
+  it.each([
+    ['insertEntries', () => vocabularyQueries.insertEntries({
+      enrollmentId: 'pe2',
+      entries: [{ senseId: 'ps300', lexemeId: 'pl300', variantId: 'pv300' }],
+    })],
+    ['deleteEntry', () => vocabularyQueries.deleteEntry({ enrollmentId: HEAVY, senseId: 'ps5' })],
+  ])('%s scans no watched table sequentially', async (_name, build) => {
+    const plan = await explainWrite(build());
     expect(seqScans(plan)).toEqual([]);
   });
 
