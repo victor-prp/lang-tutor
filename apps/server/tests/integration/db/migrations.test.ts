@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
 import { createDb } from '../../../src/db/client';
+import { nextSource } from '../../../src/domain/session';
+import { createSessionRepo } from '../../../src/repo/sessions';
 import { runMigrations, runMigrationsFrom } from '../../../src/db/migrate';
 import { ADMIN_URL, testDbName, urlFor } from '../../support/dbNames';
 import { migrationsUpTo } from '../../support/migrations';
@@ -133,5 +135,11 @@ describe('0011_session_status', () => {
       { id: '00000000-0000-0000-0000-000000000002', status: 'skipped', source: 'seed' },
       { id: '00000000-0000-0000-0000-000000000003', status: 'skipped', source: 'seed' },
     ]);
+
+    // And the next session afterwards is `list`: the enrollment's newest
+    // session is a closed one, so the seed is behind it.
+    const latest = await db.transaction((tx) => createSessionRepo(tx).findLatest('e_1'));
+    expect(latest).toMatchObject({ status: 'skipped', source: 'seed' });
+    expect(nextSource(latest !== undefined)).toBe('list');
   });
 });

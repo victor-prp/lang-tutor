@@ -1,9 +1,7 @@
 # Phase 19 — Next enrollment session
 
-- **Status:** Design approved section by section, 2026-10-05. Awaiting review of this written
-  spec before planning.
-  Implemented on branch phase-19-next-enrollment-session; deviations from the approved design
-  are folded in.
+- **Status:** Design approved section by section, 2026-10-05; implemented on branch
+  phase-19-next-enrollment-session. Deviations from the approved design are folded in.
 - **Date:** 2026-10-05
 - **Source:** the one-pager `drafts/2026-10-04-next-enrollment-session-one-pager.md`, the design
   dialogue recorded here, and a side research on job infrastructure
