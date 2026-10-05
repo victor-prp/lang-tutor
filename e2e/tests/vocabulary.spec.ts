@@ -80,12 +80,14 @@ test('a Russian learner saves senses, browses the list, and changes it from the 
   await expect(senses).toHaveCount(2);
   await expect(senses.nth(0)).toContainText('קראה');
   await expect(toggle(0)).toHaveText('נשמר ✓');
+  // Enabled first: the toggle stays disabled until the word is read again, so the
+  // label is then checked against what the re-read left, and in the same row.
   await tapAndWaitForWrite(page, toggle(1));
-  await expect(toggle(1)).toHaveText('נשמר ✓');
   await expect(toggle(1)).toBeEnabled();
+  await expect(toggle(1)).toHaveText('נשמר ✓');
   await tapAndWaitForWrite(page, toggle(0));
-  await expect(toggle(0)).toHaveText('שמור');
   await expect(toggle(0)).toBeEnabled();
+  await expect(toggle(0)).toHaveText('שמור');
 
   // Back on the list the counts agree: one of two saved, and прочитать moved to
   // the top, because its newest save is now the newest of all.

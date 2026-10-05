@@ -10,7 +10,7 @@ import { useVocabulary } from '@/hooks/useVocabulary';
 import { dimensionRows } from '@/progress';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
-import { toggleOptimistically } from '@/vocabulary';
+import { keepSenseOrder, toggleOptimistically } from '@/vocabulary';
 
 export default function VocabularyWordScreen() {
   const { lexemeId } = useLocalSearchParams<{ lexemeId: string }>();
@@ -70,11 +70,12 @@ export default function VocabularyWordScreen() {
         // Saving or unsaving moves the server's progress rows (unsave deletes them, a
         // new save starts at level 1), so the flipped `saved` alone leaves this screen
         // showing levels the server no longer has. Read the word again, inside the
-        // request so the toggle stays disabled until it lands. A failed read keeps the
-        // word on screen: the toggle itself succeeded.
+        // request so the toggle stays disabled until it lands, and keep the senses in
+        // the order on screen: the server lists saved ones first. A failed read keeps
+        // the word on screen: the toggle itself succeeded.
         try {
           const detail = await loadWord(lexemeId);
-          ifCurrent(() => setWord(detail));
+          ifCurrent(() => setWord((shown) => (shown ? keepSenseOrder(shown, detail) : detail)));
         } catch {
           // keep the current word
         }

@@ -1,9 +1,10 @@
 import { describe, expect, it, jest } from '@jest/globals';
-import type { TranslationSense, VocabularyWord } from '@lang-tutor/core/api';
+import type { TranslationSense, VocabularySense, VocabularyWord, VocabularyWordDetail } from '@lang-tutor/core/api';
 
 import {
   appendPage,
   canSaveAll,
+  keepSenseOrder,
   savedStateOf,
   showsMark,
   toggleOptimistically,
@@ -123,5 +124,50 @@ describe('showsMark', () => {
   it('marks a word with more than one sense', () => {
     expect(showsMark(word('a', { sense_count: 2 }))).toBe(true);
     expect(showsMark(word('a', { sense_count: 1 }))).toBe(false);
+  });
+});
+
+describe('keepSenseOrder', () => {
+  const sense = (sense_id: string, saved: boolean, level?: number): VocabularySense => ({
+    sense_id,
+    variant_id: 'v1',
+    form: 'прочитала',
+    translation: `tr-${sense_id}`,
+    saved,
+    ...(level === undefined
+      ? {}
+      : {
+          progress: {
+            level,
+            dimensions: {
+              written_receptive: level,
+              written_productive: 1,
+              spoken_receptive: 1,
+              spoken_productive: 1,
+              spelling: 1,
+            },
+          },
+        }),
+  });
+  const detail = (level: number | null, senses: VocabularySense[]): VocabularyWordDetail => ({
+    lexeme_id: 'lx',
+    lemma: 'прочитать',
+    part_of_speech: 'verb',
+    level,
+    senses,
+  });
+
+  // The server lists saved senses first. A re-read after a toggle must not move
+  // the row under the learner's finger.
+  it('takes the fresh word but keeps the senses in the order on screen', () => {
+    const shown = detail(2, [sense('a', true, 2), sense('b', false)]);
+    const fresh = detail(1, [sense('b', true, 1), sense('a', false)]);
+    expect(keepSenseOrder(shown, fresh)).toEqual(detail(1, [sense('a', false), sense('b', true, 1)]));
+  });
+
+  it('puts a sense the screen did not show last, and drops one the server no longer has', () => {
+    const shown = detail(1, [sense('a', true, 1), sense('gone', false)]);
+    const fresh = detail(1, [sense('new', false), sense('a', true, 1)]);
+    expect(keepSenseOrder(shown, fresh).senses.map((s) => s.sense_id)).toEqual(['a', 'new']);
   });
 });
