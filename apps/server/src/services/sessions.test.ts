@@ -61,7 +61,7 @@ describe('repos', () => {
     },
   };
 
-  // The submit-answer cases never reach it; startSession is the one use case
+  // The submit-answer cases never reach it; createNextSession is the one use case
   // that does, and it is covered against real Postgres.
   const enrollmentRepo: EnrollmentRepo = {
     insertEnrollment: () => {

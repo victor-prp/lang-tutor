@@ -128,7 +128,8 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(createSessionRoute, async (c) => {
     const { enrollment_id } = c.req.valid('json');
     try {
-      const { sessionId, record } = await sessions.startSession(enrollment_id);
+      const { sessionId } = await sessions.createNextSession(enrollment_id);
+      const record = await sessions.getSession(sessionId);
       return c.json(
         {
           session_id: sessionId,

@@ -50,7 +50,8 @@ describe('createServerDeps', () => {
 
   it('assembles a session service that works against that database', async () => {
     const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
-    const { record } = await deps.sessions.startSession(enrollmentOf('u_1'));
+    const { sessionId } = await deps.sessions.createNextSession(enrollmentOf('u_1'));
+    const record = await deps.sessions.getSession(sessionId);
     expect(record.questions).toHaveLength(SESSION_LENGTH);
   });
 

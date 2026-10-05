@@ -12,7 +12,16 @@ import { createFakeLogger } from '../tests/support/fakes';
 // A service that fails if it is called at all. Passing it alongside a health fake
 // proves the health route never reaches the service, rather than assuming it.
 const unreachableSessions: SessionService = {
-  startSession: () => {
+  createNextSession: () => {
+    throw new Error('the health route must not reach the session service');
+  },
+  getSession: () => {
+    throw new Error('the health route must not reach the session service');
+  },
+  currentSession: () => {
+    throw new Error('the health route must not reach the session service');
+  },
+  skipSession: () => {
     throw new Error('the health route must not reach the session service');
   },
   submitAnswer: () => {

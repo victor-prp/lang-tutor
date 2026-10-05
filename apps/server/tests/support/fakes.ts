@@ -52,7 +52,10 @@ export function createFakeAppDeps(): AppDeps {
     throw new Error('a document-shape test must not reach a collaborator');
   };
   const sessions: SessionService = {
-    startSession: unreachable,
+    createNextSession: unreachable,
+    getSession: unreachable,
+    currentSession: unreachable,
+    skipSession: unreachable,
     submitAnswer: unreachable,
   };
   const users: UserService = {
