@@ -3,8 +3,10 @@ import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LevelBadge } from '@/components/LevelBadge';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
+import { practisedRows } from '@/progress';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -27,7 +29,7 @@ export default function ResultsScreen() {
     return <Redirect href="/" />;
   }
 
-  const { correctCount, total, missedQuestions } = session;
+  const { correctCount, total, missedQuestions, progress } = session;
 
   // Creates the next session and goes home, rather than straight into a quiz:
   // a list session is still preparing at this moment. Home shows its state,
@@ -50,6 +52,28 @@ export default function ResultsScreen() {
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Text style={styles.headline}>{headlineFor(correctCount, total)}</Text>
         <Text style={styles.score} testID="results-score">{strings.scoreLabel(correctCount, total)}</Text>
+
+        {progress.length > 0 ? (
+          <View style={styles.missed} testID="practised-section">
+            <Text style={styles.missedTitle}>{strings.resultsPractisedTitle}</Text>
+            {practisedRows(progress).map((row) => (
+              <View key={row.sense_id} style={[styles.missedRow, row.raised && styles.raisedRow]} testID="practised-row">
+                <View style={styles.missedCellStart}>
+                  <Text style={styles.missedPrompt}>{row.form}</Text>
+                </View>
+                <View style={styles.missedCellEnd}>
+                  <Text style={styles.missedAnswer}>{row.translation}</Text>
+                  <LevelBadge level={row.level_after} testID="practised-level" />
+                  {row.raised ? (
+                    <Text style={styles.raised} testID="practised-raised">
+                      {strings.levelRaised(row.level_after)}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {missedQuestions.length > 0 ? (
           <View style={styles.missed}>
@@ -80,6 +104,7 @@ export default function ResultsScreen() {
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          testID="results-done"
           // dismissTo, not replace: Results sits on top of the home that
           // started the session, and replacing it would leave that home
           // stale underneath a second one.
@@ -147,6 +172,14 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.muted,
+    writingDirection: 'rtl',
+  },
+  raisedRow: { borderColor: colors.primary, borderWidth: 2 },
+  raised: {
+    fontSize: fontSizes.sm,
+    lineHeight: lineHeights.sm,
+    fontWeight: '700',
+    color: colors.primary,
     writingDirection: 'rtl',
   },
   actions: { paddingBottom: spacing.lg, gap: spacing.sm },
