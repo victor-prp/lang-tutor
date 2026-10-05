@@ -1,4 +1,5 @@
 import { Redirect, router } from 'expo-router';
+import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,6 +18,10 @@ function headlineFor(correct: number, total: number): string {
 export default function ResultsScreen() {
   const session = useSession();
   const next = useNextSession();
+  // A ref guards re-entry (state is stale between two taps in one frame); the
+  // state only drives the disabled look.
+  const inFlight = useRef(false);
+  const [busy, setBusy] = useState(false);
 
   if (!session.hasSession) {
     return <Redirect href="/" />;
@@ -28,8 +33,16 @@ export default function ResultsScreen() {
   // a list session is still preparing at this moment. Home shows its state,
   // or why there is none (no saved words).
   async function onNextSession() {
-    await next.create().catch(() => undefined);
-    router.dismissTo('/');
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      await next.create().catch(() => undefined);
+      router.dismissTo('/');
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
   }
 
   return (
@@ -59,8 +72,9 @@ export default function ResultsScreen() {
         <Pressable
           accessibilityRole="button"
           testID="results-next-session"
+          disabled={busy}
           onPress={() => void onNextSession()}
-          style={styles.primary}
+          style={[styles.primary, busy && styles.primaryDisabled]}
         >
           <Text style={styles.primaryLabel}>{strings.nextSession}</Text>
         </Pressable>
@@ -142,6 +156,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
+  primaryDisabled: { opacity: 0.6 },
   primaryLabel: {
     color: colors.onPrimary,
     fontSize: fontSizes.md,

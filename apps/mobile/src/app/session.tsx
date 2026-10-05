@@ -1,6 +1,6 @@
 import type { Question } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -42,6 +42,8 @@ function renderQuestion(
 export default function SessionScreen() {
   const session = useSession();
   const next = useNextSession();
+  // Re-entry guard: a fast double tap on skip must not stack two confirms.
+  const skipping = useRef(false);
 
   // Results replaces Session in the stack, so backing out of Results reaches
   // Home rather than a finished quiz.
@@ -53,17 +55,22 @@ export default function SessionScreen() {
 
   async function onSkip() {
     const sessionId = session.sessionId;
-    if (!sessionId) return;
-    const sure = await confirm({
-      title: strings.skipConfirmTitle,
-      message: strings.skipConfirmMessage,
-      confirm: strings.skip,
-      cancel: strings.cancel,
-    });
-    if (!sure) return;
-    // A failure needs nothing more here: home re-reads the state on focus.
-    await next.skip(sessionId).catch(() => undefined);
-    router.dismissTo('/');
+    if (!sessionId || skipping.current) return;
+    skipping.current = true;
+    try {
+      const sure = await confirm({
+        title: strings.skipConfirmTitle,
+        message: strings.skipConfirmMessage,
+        confirm: strings.skip,
+        cancel: strings.cancel,
+      });
+      if (!sure) return;
+      // A failure needs nothing more here: home re-reads the state on focus.
+      await next.skip(sessionId).catch(() => undefined);
+      router.dismissTo('/');
+    } finally {
+      skipping.current = false;
+    }
   }
 
   if (!session.hasSession) {
