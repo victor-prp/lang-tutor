@@ -110,7 +110,8 @@ const getSessionRoute = createRoute({
   path: '/sessions/{id}',
   tags: ['sessions'],
   summary: 'Read a session',
-  description: 'Its status, progress, and the current question while it is ready. Serves resume and the poll.',
+  description:
+    'Its status, position, and the current question while it is ready. A completed session also carries `progress`: each practised saved word with its level before and after. Serves resume and the poll.',
   request: { params: sessionIdParam },
   responses: {
     200: { content: { 'application/json': { schema: SessionViewSchema } }, description: 'The session.' },
@@ -123,7 +124,8 @@ const skipSessionRoute = createRoute({
   path: '/sessions/{id}/skip',
   tags: ['sessions'],
   summary: 'Skip a session',
-  description: 'Ends a preparing or ready session. Skipping a skipped session is a no-op.',
+  description:
+    'Ends a preparing or ready session. The answers given before the skip count toward progress. Skipping a skipped session is a no-op.',
   request: { params: sessionIdParam },
   responses: {
     200: { content: { 'application/json': { schema: SkipSessionResponseSchema } }, description: 'The session is skipped.' },

@@ -16,8 +16,9 @@ import type {
 /** A pair that passed `findSaveable`, carrying the lexeme id the entry copies. */
 export type SaveableEntry = { senseId: string; variantId: string; lexemeId: string };
 
-// `IN (...)` from a list. Every caller guards the empty list first: `IN ()` is a
-// syntax error, and an empty list has an obvious answer that needs no query.
+// `IN (...)` from a list. `IN ()` is a syntax error, so a caller either guards an
+// empty list first (an empty list has an obvious answer that needs no query) or
+// passes a list that is never empty (wordsPage's LIVE_DIMENSIONS).
 const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}`), sql`, `);
 
 // A word's badge: the rounded mean of its saved senses' live-dimension levels,
@@ -144,6 +145,11 @@ export const vocabularyQueries = {
     const having: SQL[] = [];
     if (input.level !== null) having.push(sql`${LEVEL} = ${input.level}`);
     if (input.after) having.push(afterCursor(input.after));
+    // The join below is an inner join: an entry with no live-dimension progress
+    // rows drops out of the list, while the detail reads the same entry as level 1
+    // (senseProgressOf's fallback). Acceptable because it cannot happen today: the
+    // only writer of entries (insertEntries) creates their rows in the same
+    // statement, and the migration backfilled the older ones.
     return sql`
       SELECT ve.lexeme_id, ${SAVED_AT}::text AS last_saved_at, ${LEVEL} AS level
       FROM vocabulary_entries ve

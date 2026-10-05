@@ -8,7 +8,7 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 // Spec §6. On a small table the planner rightly prefers a sequential scan, so
 // the plan shape only means something at volume: ~200k entries over ~1k
 // enrollments, plus one heavy enrollment with 20k. The assertion is the ABSENCE
-// of a Seq Scan on the two big tables — the part of a plan that stays stable
+// of a Seq Scan on the three big tables — the part of a plan that stays stable
 // across Postgres versions — and an Execution Time budget for the list page.
 //
 // If one of these fails, read the plan in the failure before touching the

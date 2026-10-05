@@ -18,7 +18,8 @@ export type SessionEvidence = {
   answers: AnsweredQuestion[];
 };
 
-// `IN (...)` from a list. Every caller guards the empty list first.
+// `IN (...)` from a list. `IN ()` is a syntax error: the caller guards an empty
+// list first (findRows does) or passes a list that is never empty.
 const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}`), sql`, `);
 
 /**
