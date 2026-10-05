@@ -1,30 +1,80 @@
-import { Redirect, router } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Redirect, router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ApiError } from '@/api/client';
 import { availableTargets } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
+import { POLL_INTERVAL_MS, homeActionOf, shouldPoll, type HomeAction } from '@/nextSession';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 export default function HomeScreen() {
-  const { start } = useSession();
+  const { enter } = useSession();
+  const next = useNextSession();
   const { user, enrollments, active, switchTo } = useCurrentUser();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // Fresh on every focus: back from a session, from translate, after a switch.
+  const { reload } = next;
+  useFocusEffect(
+    useCallback(() => {
+      reload();
+    }, [reload]),
+  );
+
+  // While preparing, and only while this screen is focused.
+  const polling = shouldPoll(next.current);
+  useFocusEffect(
+    useCallback(() => {
+      if (!polling) return undefined;
+      const timer = setInterval(reload, POLL_INTERVAL_MS);
+      return () => clearInterval(timer);
+    }, [polling, reload]),
+  );
+
   if (!user) return <Redirect href="/login" />;
   // Zero enrollments is a valid state (spec §5): sign-up, a login that finds
   // none, or a sign-up whose second call never landed all arrive here.
   if (!active) return <Redirect href="/enroll" />;
 
   const canAdd = availableTargets(enrollments).length > 0;
+  const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
 
-  function onStart() {
-    start();
+  function enterSession(sessionId: string) {
+    enter(sessionId);
     router.push('/session');
   }
+
+  // One action at a time: a double tap must not send two creates. The server
+  // would refuse the second one anyway (session_open).
+  async function run(work: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await work();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'not enough questions') {
+        Alert.alert(strings.errorTitle, strings.sessionNoQuestions);
+      }
+      // Anything else: home re-reads the state (create and skip both reload),
+      // and that state is the explanation.
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const create = () =>
+    run(async () => {
+      const created = await next.create();
+      if (created.status === 'ready') enterSession(created.session_id);
+    });
+  const skip = (sessionId: string) => run(() => next.skip(sessionId));
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -86,15 +136,21 @@ export default function HomeScreen() {
         </View>
       ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.cardLabel}>
-          {strings.homeSetLabel(SESSION_LENGTH, strings.languageName(active.target_language))}
-        </Text>
-      </View>
+      {action?.kind === 'start-seed' ? (
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>
+            {strings.homeSetLabel(SESSION_LENGTH, strings.languageName(active.target_language))}
+          </Text>
+        </View>
+      ) : next.current ? (
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>
+            {strings.homeSavedLabel(next.current.saved_count, strings.languageName(active.target_language))}
+          </Text>
+        </View>
+      ) : null}
 
-      <Pressable accessibilityRole="button" testID="start-button" onPress={onStart} style={styles.button}>
-        <Text style={styles.buttonLabel}>{strings.start}</Text>
-      </Pressable>
+      <SessionAction action={action} busy={busy} onCreate={create} onEnter={enterSession} onSkip={skip} />
 
       <Pressable
         accessibilityRole="button"
@@ -118,6 +174,86 @@ export default function HomeScreen() {
       <View style={styles.futureSpace} />
     </SafeAreaView>
   );
+}
+
+function SessionAction({
+  action,
+  busy,
+  onCreate,
+  onEnter,
+  onSkip,
+}: {
+  action: HomeAction | null;
+  busy: boolean;
+  onCreate: () => void;
+  onEnter: (sessionId: string) => void;
+  onSkip: (sessionId: string) => void;
+}) {
+  const primary = (testID: string, label: string, onPress: () => void) => (
+    <Pressable
+      accessibilityRole="button"
+      testID={testID}
+      disabled={busy}
+      onPress={onPress}
+      style={[styles.button, busy && styles.buttonDisabled]}
+    >
+      <Text style={styles.buttonLabel}>{label}</Text>
+    </Pressable>
+  );
+  const skip = (sessionId: string) => (
+    <Pressable
+      accessibilityRole="button"
+      testID="home-skip"
+      disabled={busy}
+      onPress={() => onSkip(sessionId)}
+      style={styles.secondaryButton}
+    >
+      <Text style={styles.secondaryButtonLabel}>{strings.skip}</Text>
+    </Pressable>
+  );
+
+  if (!action) return <ActivityIndicator testID="home-loading" />;
+  switch (action.kind) {
+    case 'start-seed':
+      return primary('start-button', strings.start, onCreate);
+    case 'create':
+      return primary('create-button', strings.createQuestions, onCreate);
+    case 'save-words-first':
+      return (
+        <Text testID="save-words-first" style={styles.notice}>
+          {strings.saveWordsFirst}
+        </Text>
+      );
+    case 'preparing':
+      return (
+        <>
+          <View testID="preparing-label" style={[styles.button, styles.buttonDisabled, styles.preparing]}>
+            <ActivityIndicator color={colors.onPrimary} />
+            <Text style={styles.buttonLabel}>{strings.preparingQuestions}</Text>
+          </View>
+          {skip(action.sessionId)}
+        </>
+      );
+    case 'start':
+    case 'resume':
+      return (
+        <>
+          {primary('start-button', action.kind === 'start' ? strings.start : strings.resume, () =>
+            onEnter(action.sessionId),
+          )}
+          {skip(action.sessionId)}
+        </>
+      );
+    case 'failed':
+      return (
+        <>
+          <Text testID="preparation-failed" style={styles.notice}>
+            {strings.preparationFailed}
+          </Text>
+          {primary('create-button', strings.createQuestions, onCreate)}
+        </>
+      );
+  }
 }
 
 const styles = StyleSheet.create({
@@ -160,6 +296,14 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     fontWeight: '700',
+  },
+  buttonDisabled: { opacity: 0.6 },
+  preparing: { flexDirection: 'row', justifyContent: 'center', gap: spacing.sm },
+  notice: {
+    fontSize: fontSizes.md,
+    lineHeight: lineHeights.md,
+    color: colors.muted,
+    writingDirection: 'rtl',
   },
   secondaryButton: {
     backgroundColor: colors.surface,

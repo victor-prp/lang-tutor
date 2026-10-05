@@ -2,6 +2,7 @@ import { Redirect, router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
@@ -15,6 +16,7 @@ function headlineFor(correct: number, total: number): string {
 
 export default function ResultsScreen() {
   const session = useSession();
+  const next = useNextSession();
 
   if (!session.hasSession) {
     return <Redirect href="/" />;
@@ -22,10 +24,12 @@ export default function ResultsScreen() {
 
   const { correctCount, total, missedQuestions } = session;
 
-  // A new session, then replace: Results never stacks up behind itself.
-  function onPractiseAgain() {
-    session.start();
-    router.replace('/session');
+  // Creates the next session and goes home, rather than straight into a quiz:
+  // a list session is still preparing at this moment. Home shows its state,
+  // or why there is none (no saved words).
+  async function onNextSession() {
+    await next.create().catch(() => undefined);
+    router.dismissTo('/');
   }
 
   return (
@@ -52,8 +56,13 @@ export default function ResultsScreen() {
       </ScrollView>
 
       <View style={styles.actions}>
-        <Pressable accessibilityRole="button" onPress={onPractiseAgain} style={styles.primary}>
-          <Text style={styles.primaryLabel}>{strings.practiseAgain}</Text>
+        <Pressable
+          accessibilityRole="button"
+          testID="results-next-session"
+          onPress={() => void onNextSession()}
+          style={styles.primary}
+        >
+          <Text style={styles.primaryLabel}>{strings.nextSession}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"

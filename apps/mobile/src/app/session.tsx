@@ -7,6 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { ProgressBar } from '@/components/ProgressBar';
+import { confirm } from '@/confirm';
+import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
@@ -39,6 +41,7 @@ function renderQuestion(
 
 export default function SessionScreen() {
   const session = useSession();
+  const next = useNextSession();
 
   // Results replaces Session in the stack, so backing out of Results reaches
   // Home rather than a finished quiz.
@@ -47,6 +50,21 @@ export default function SessionScreen() {
       router.replace('/results');
     }
   }, [session.hasSession, session.complete]);
+
+  async function onSkip() {
+    const sessionId = session.sessionId;
+    if (!sessionId) return;
+    const sure = await confirm({
+      title: strings.skipConfirmTitle,
+      message: strings.skipConfirmMessage,
+      confirm: strings.skip,
+      cancel: strings.cancel,
+    });
+    if (!sure) return;
+    // A failure needs nothing more here: home re-reads the state on focus.
+    await next.skip(sessionId).catch(() => undefined);
+    router.dismissTo('/');
+  }
 
   if (!session.hasSession) {
     return <Redirect href="/" />;
@@ -65,9 +83,14 @@ export default function SessionScreen() {
         <Pressable accessibilityRole="button" testID="session-back" hitSlop={12} onPress={() => router.back()}>
           <Text style={styles.back}>{'→'}</Text>
         </Pressable>
-        <Text style={styles.counter} testID="progress-label">
-          {strings.progressLabel(session.position, session.total)}
-        </Text>
+        <View style={styles.headerEnd}>
+          <Text style={styles.counter} testID="progress-label">
+            {strings.progressLabel(session.position, session.total)}
+          </Text>
+          <Pressable accessibilityRole="button" testID="session-skip" hitSlop={12} onPress={() => void onSkip()}>
+            <Text style={styles.skip}>{strings.skip}</Text>
+          </Pressable>
+        </View>
       </View>
 
       <ProgressBar position={session.position} total={session.total} />
@@ -104,6 +127,8 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontWeight: '700',
   },
+  headerEnd: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  skip: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, fontWeight: '700' },
   // Bottom padding keeps the last option clear of the overlaid banner.
   body: { paddingTop: spacing.xl, paddingBottom: spacing.xxl * 4 },
 });
