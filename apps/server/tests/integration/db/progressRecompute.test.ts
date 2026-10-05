@@ -3,15 +3,19 @@ import { sql } from 'drizzle-orm';
 
 import { recomputeProgress } from '../../../src/db/progressRecompute';
 import { insertLexeme } from '../../support/dictRows';
+import { createFakeLogger } from '../../support/fakes';
 import {
   insertAnsweredSession,
   insertProgressRows,
   readProgress,
   readSnapshot,
+  saveSessionSenses,
   setLevel,
 } from '../../support/progressRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
+import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
+import { testRng } from '../../support/testRng';
 
 let t: TestDb;
 const E = enrollmentOf('u_1');
@@ -97,5 +101,58 @@ describe('recomputeProgress', () => {
     const once = await readProgress(t.db, E);
     await recomputeProgress(t.db);
     expect(await readProgress(t.db, E)).toEqual(once);
+  });
+
+  // The docstring on recomputeProgress says this test keeps it in step with
+  // recordProgress in services/sessions.ts. That holds only if the live path's
+  // output is the expectation, so none of it is computed by hand here: real
+  // sessions run through the session service, and the recompute must write
+  // back exactly what that service already wrote.
+  //
+  // One completed and one skipped session, each the seed session of its own
+  // learner: a second session for the same learner is a list session, which the
+  // prepare-session job fills through the language model, so it is out of reach
+  // of a test with no MockServer.
+  it('writes back exactly what the live path wrote', async () => {
+    await seedUser(t.db, 'u_2');
+    const E2 = enrollmentOf('u_2');
+    const { sessions: live } = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+
+    const answer = (sessionId: string, q: { id: string; correct_option: number; options: unknown[] }, right: boolean) =>
+      live.submitAnswer(sessionId, q.id, right ? q.correct_option : (q.correct_option + 1) % q.options.length);
+
+    // Completed: three saved senses, answered right, wrong, right; the other
+    // seven questions are about unsaved senses and must change nothing.
+    const { sessionId: completed } = await live.createNextSession(E);
+    const completedRecord = await live.getSession(completed);
+    await saveSessionSenses(t.db, { sessionId: completed, enrollmentId: E, positions: [0, 1, 2] });
+    for (const [i, q] of completedRecord.questions.entries()) await answer(completed, q, i !== 1);
+    expect((await live.getSession(completed)).status).toBe('completed');
+
+    // Skipped: two saved senses, one answered right and one wrong, then the skip.
+    const { sessionId: skipped } = await live.createNextSession(E2);
+    const skippedRecord = await live.getSession(skipped);
+    await saveSessionSenses(t.db, { sessionId: skipped, enrollmentId: E2, positions: [0, 1] });
+    await answer(skipped, skippedRecord.questions[0], true);
+    await answer(skipped, skippedRecord.questions[1], false);
+    await live.skipSession(skipped);
+
+    const written = async () => ({
+      first: await readProgress(t.db, E),
+      second: await readProgress(t.db, E2),
+      completedSnapshot: await readSnapshot(t.db, completed),
+      skippedSnapshot: await readSnapshot(t.db, skipped),
+    });
+    const before = await written();
+    // Guards against comparing two empty results, and against a recompute that
+    // would agree with a live path that wrote nothing.
+    expect(before.completedSnapshot).toHaveLength(15);
+    expect(before.skippedSnapshot).toHaveLength(10);
+    expect(before.first.some((row) => row.level === 2)).toBe(true);
+    expect(before.second.some((row) => row.lastWrongOn !== null)).toBe(true);
+
+    expect(await recomputeProgress(t.db)).toEqual({ sessions: 2 });
+
+    expect(await written()).toEqual(before);
   });
 });
