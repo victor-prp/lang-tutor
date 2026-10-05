@@ -32,6 +32,45 @@ export const ScoreSchema = z.object({
   total: z.number().int(),
 });
 
+// Phase 20. Knowledge per saved sense: five dimensions, each with a level from
+// 1 to 5 that only rises. packages/core/src/domain/progress.ts holds the same
+// list as DIMENSIONS, and a test keeps the two equal.
+export const KnowledgeDimensionSchema = z.enum([
+  'written_receptive',
+  'written_productive',
+  'spoken_receptive',
+  'spoken_productive',
+  'spelling',
+]);
+
+export const LevelSchema = z.number().int().min(1).max(5);
+
+// A saved sense's badge and its five levels. Only a saved sense has one.
+export const SenseProgressSchema = z.object({
+  level: LevelSchema,
+  dimensions: z.object({
+    written_receptive: LevelSchema,
+    written_productive: LevelSchema,
+    spoken_receptive: LevelSchema,
+    spoken_productive: LevelSchema,
+    spelling: LevelSchema,
+  }),
+});
+
+// One practised saved sense on the results screen. Both levels are badges over
+// the live dimensions. `form` is the prompt the learner saw; `translation` is
+// the right answer.
+export const SessionProgressItemSchema = z.object({
+  sense_id: z.string(),
+  form: z.string(),
+  translation: z.string(),
+  level_before: LevelSchema,
+  level_after: LevelSchema,
+});
+
+// How the word list is ordered. The level sorts break a tie by newest save.
+export const VocabularySortSchema = z.enum(['newest', 'level_asc', 'level_desc']);
+
 // Phase 19. A session's lifecycle: preparing → ready → completed, or skipped /
 // failed. "In progress" is not a status: it is `ready` with answers.
 export const SessionStatusSchema = z.enum(['preparing', 'ready', 'completed', 'skipped', 'failed']);
