@@ -1,3 +1,5 @@
+import type { Dimension } from '@lang-tutor/core/domain';
+
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
 //
 // A label like "1 / 10" holds no strong directional character, so Android
@@ -12,7 +14,7 @@ const LANGUAGE_NAMES: Record<string, string> = { he: 'עברית', en: 'אנגל
 const languageName = (code: string): string => LANGUAGE_NAMES[code] ?? code;
 
 // Phase 20. The five knowledge dimensions, as the word detail names them.
-const DIMENSION_NAMES: Record<string, string> = {
+const DIMENSION_NAMES: Record<Dimension, string> = {
   written_receptive: 'זיהוי בכתב',
   written_productive: 'כתיבה',
   spoken_receptive: 'הבנת הנשמע',
@@ -129,7 +131,7 @@ export const strings = {
   // Phase 20. Five levels, feminine to agree with מילה (spec §5).
   levelName: (level: number): string => ['חדשה', 'נחשפה', 'מוכרת', 'ידועה', 'בשליטה'][level - 1] ?? '',
   levelRaised: (level: number) => `עלתה לרמה ${level}`,
-  dimensionName: (dimension: string): string => DIMENSION_NAMES[dimension] ?? dimension,
+  dimensionName: (dimension: Dimension): string => DIMENSION_NAMES[dimension],
   notPractised: 'טרם תורגל',
   sortNewest: 'חדשות',
   sortLevelAsc: 'רמה עולה',

@@ -65,7 +65,20 @@ export default function VocabularyWordScreen() {
             return rest;
           }),
         ),
-      request: () => (sense.saved ? unsave(senseId) : save([{ sense_id: senseId, variant_id: sense.variant_id }])),
+      request: async () => {
+        await (sense.saved ? unsave(senseId) : save([{ sense_id: senseId, variant_id: sense.variant_id }]));
+        // Saving or unsaving moves the server's progress rows (unsave deletes them, a
+        // new save starts at level 1), so the flipped `saved` alone leaves this screen
+        // showing levels the server no longer has. Read the word again, inside the
+        // request so the toggle stays disabled until it lands. A failed read keeps the
+        // word on screen: the toggle itself succeeded.
+        try {
+          const detail = await loadWord(lexemeId);
+          ifCurrent(() => setWord(detail));
+        } catch {
+          // keep the current word
+        }
+      },
     });
     ifCurrent(() => setSaveFailed(!ok));
   }
