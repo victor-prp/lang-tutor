@@ -23,4 +23,12 @@ if [ "${LANE_SLOT:-0}" != "0" ] && docker ps --format '{{.Image}}' 2>/dev/null |
 fi
 
 docker compose up -d --wait db mockserver || exit 1
-bash scripts/wait-for-mockserver.sh
+bash scripts/wait-for-mockserver.sh || exit 1
+
+# The pg-boss dashboard, for people only: no test reads it, so CI (which sets
+# CI=true) never pays for the image pull and the package download. Not
+# --wait-ed either, so a slow first download never holds up db:up.
+if [ -z "${CI:-}" ]; then
+  docker compose up -d pgboss-dashboard
+  echo "pg-boss dashboard: http://localhost:3000"
+fi
