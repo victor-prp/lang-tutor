@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import { DIMENSIONS } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
 import { assemblePage } from '../../../src/domain/vocabulary';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createVocabularyRepo } from '../../../src/repo/vocabulary';
 import { insertLexeme } from '../../support/dictRows';
+import { readProgress } from '../../support/progressRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -119,6 +121,23 @@ describe('insertEntries and deleteEntry', () => {
     expect(await repo((r) => r.findSavedInLexeme({ enrollmentId: E, lexemeId: kite.lexemeId }))).toEqual([
       pair(TOY, KITES),
     ]);
+  });
+
+  it('gives a new entry its five level 1 progress rows, and a repeat adds none', async () => {
+    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITES)] }));
+    const rows = await readProgress(t.db, E);
+    expect(rows.map((row) => row.dimension).sort()).toEqual([...DIMENSIONS].sort());
+    expect(rows.every((row) => row.senseId === kite.senseIds[TOY] && row.level === 1)).toBe(true);
+  });
+
+  it('takes the progress rows with the entry, and a re-save starts again at level 1', async () => {
+    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
+    await t.db.execute(sql`update sense_progress set level = 3`);
+    await repo((r) => r.deleteEntry({ enrollmentId: E, senseId: kite.senseIds[TOY] }));
+    expect(await readProgress(t.db, E)).toEqual([]);
+    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
+    expect((await readProgress(t.db, E)).every((row) => row.level === 1)).toBe(true);
   });
 
   it('deletes idempotently', async () => {

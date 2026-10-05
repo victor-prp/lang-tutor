@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { createFakeLlmClient, createFakeLogger } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import { SessionNotFound } from '../errors';
+import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { EnrollmentRepo } from '../repo/enrollments';
@@ -123,6 +124,21 @@ describe('repos', () => {
     countEntries: forbidden,
   };
 
+  // Phase 20. The one case here never completes or skips a session, so it never
+  // reaches the progress rule.
+  const unreachableProgress = () => {
+    throw new Error('this case must not touch the progress tables');
+  };
+  const progressRepo: ProgressRepo = {
+    findSessionEvidence: unreachableProgress,
+    findRows: unreachableProgress,
+    updateRows: unreachableProgress,
+    insertSnapshot: unreachableProgress,
+    findSnapshot: unreachableProgress,
+    resetAll: unreachableProgress,
+    listEndedSessions: unreachableProgress,
+  };
+
   function fakeTransaction(session: SessionRepo): Transaction {
     return (run) =>
       run({
@@ -132,6 +148,7 @@ describe('repos', () => {
         enrollment: enrollmentRepo,
         dict: dictRepo,
         vocabulary: vocabularyRepo,
+        progress: progressRepo,
         jobs: {
           enqueue: () => {
             throw new Error('the submit-answer use case must not enqueue a job');

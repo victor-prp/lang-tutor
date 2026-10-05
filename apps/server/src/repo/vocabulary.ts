@@ -1,3 +1,4 @@
+import { DIMENSIONS } from '@lang-tutor/core/domain';
 import { asc, eq, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
@@ -29,18 +30,30 @@ const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}
  * §3, "Cost of every query").
  */
 export const vocabularyQueries = {
-  /** Save: a primary-key insert. Named conflict target, not bare: only the PK
+  /** Save: a primary-key insert, and the five progress rows of every entry it
+   *  creates, in one statement. Named conflict target, not bare: only the PK
    *  may be swallowed, so an FK violation still raises. First form wins — a
-   *  sense already saved keeps the variant it was saved from. */
+   *  sense already saved keeps its variant, and RETURNING leaves it out, so its
+   *  progress is untouched. */
   insertEntries: (input: { enrollmentId: string; entries: SaveableEntry[] }): SQL => sql`
-    INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
-    VALUES ${sql.join(
-      input.entries.map(
-        (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.variantId})`,
-      ),
+    WITH inserted AS (
+      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+      VALUES ${sql.join(
+        input.entries.map(
+          (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.variantId})`,
+        ),
+        sql`, `,
+      )}
+      ON CONFLICT (enrollment_id, sense_id) DO NOTHING
+      RETURNING enrollment_id, sense_id
+    )
+    INSERT INTO sense_progress (enrollment_id, sense_id, dimension)
+    SELECT i.enrollment_id, i.sense_id, d.dimension
+    FROM inserted i
+    CROSS JOIN (VALUES ${sql.join(
+      DIMENSIONS.map((dimension) => sql`(${dimension}::text)`),
       sql`, `,
-    )}
-    ON CONFLICT (enrollment_id, sense_id) DO NOTHING`,
+    )}) AS d(dimension)`,
 
   /** Unsave: a primary-key delete. */
   deleteEntry: (input: { enrollmentId: string; senseId: string }): SQL => sql`

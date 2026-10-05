@@ -171,6 +171,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),
     vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
+    progress: repos.progress ?? unreachableRepo('progress repo'),
     jobs: repos.jobs ?? unreachableRepo('jobs repo'),
   };
   return (run) => run(bound);

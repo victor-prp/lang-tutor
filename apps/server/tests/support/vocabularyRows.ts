@@ -1,6 +1,7 @@
 import type { Db } from '../../src/db/client';
-import { vocabularyEntries } from '../../src/db/schema';
+import { createVocabularyRepo } from '../../src/repo/vocabulary';
 import { insertLexeme } from './dictRows';
+import { withTx } from './withTx';
 
 /**
  * One lexeme with one form rendering each translation as its own sense, every
@@ -39,13 +40,13 @@ export async function seedSavedSenses(
     ],
   });
   const variantId = word.variantIds[0];
-  await db.insert(vocabularyEntries).values(
-    word.senseIds.map((senseId) => ({
+  // Through the repository, so each entry gets its five progress rows exactly
+  // as a real save writes them.
+  await withTx(db, (tx) =>
+    createVocabularyRepo(tx).insertEntries({
       enrollmentId: input.enrollmentId,
-      senseId,
-      lexemeId: word.lexemeId,
-      variantId,
-    })),
+      entries: word.senseIds.map((senseId) => ({ senseId, variantId, lexemeId: word.lexemeId })),
+    }),
   );
   return { lexemeId: word.lexemeId, variantId, senseIds: word.senseIds };
 }
