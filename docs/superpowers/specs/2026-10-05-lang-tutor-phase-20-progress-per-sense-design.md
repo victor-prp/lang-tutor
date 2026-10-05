@@ -150,13 +150,16 @@ the app has an exercise type that feeds it. The list query receives the set as a
   nearest integer, ties up.
 - **A word's badge** on the list is the mean over its saved senses and the live dimensions,
   rounded the same way. One number per row, across senses.
-- Both are computed by `badge(levels)` in `packages/core` (§3), so server and app agree.
+- The server computes every level the app shows; the app computes none. The detail and the
+  results use `badge(levels)` in `packages/core` (§3). The list computes its word level in SQL,
+  `floor(avg(level) + 0.5)`, the same arithmetic, because it sorts and filters by it.
 
 ### Migration
 
 One drizzle migration creates both tables and inserts five level 1 rows for every existing
-`vocabulary_entries` row. No session is re-evaluated: only answers given while saved count,
-and nothing was saved before phase 18.
+`vocabulary_entries` row. It credits no earlier practice: phase 19's list sessions were answers
+about saved senses, and they exist in any database that ran phase 19. Every entry starts at
+level 1, and `db:progress:recompute` (§3), run once after migrating, credits that practice.
 
 ### Indexes
 
@@ -211,8 +214,8 @@ ADR 0001 R3: no clock, no randomness. The day is passed in.
   practised today reaches level 2 today.
 
 - **`badge(levels)`**: the rounded mean described in §2, exported from `packages/core/domain`
-  because the app's detail screen computes a sense badge from five levels with the same
-  arithmetic.
+  beside `DIMENSIONS` and `LIVE_DIMENSIONS` so the arithmetic has one definition. The server
+  calls it; the app computes no level and shows the ones it is sent.
 
 - `DIMENSIONS`, `LIVE_DIMENSIONS`, `GAP_DAYS` and `CAPPED_MAX_LEVEL` sit beside them.
 
@@ -229,7 +232,7 @@ same transaction as the status change:
    recorded, so it is now; a skip has no timestamp of its own, and the last answer is the
    only end time both this path and the recompute can read, so neither needs a new column;
 4. write the changed rows, and one `session_progress` row for each of the five dimensions of
-   every sense that received evidence.
+   every sense the session practised.
 
 These are **dependent writes** with the status change (ADR 0001 R8): a completed or skipped
 session with no progress written, or progress written for a session that did not end, would
@@ -254,7 +257,13 @@ It lives in `apps/server/src/db/progressRecompute.ts`, behind a `--recompute-pro
 `db/cli.ts`, and is not a service. ADR 0001 R4 forbids `db/` from importing `services/`, and
 `db/cli.ts` is the CLI's composition root. So it repeats the session service's orchestration
 over the same repository and domain functions, and an integration test checks that a
-recompute writes back exactly what the live path wrote.
+recompute writes back what the live path wrote: exactly, for sessions about senses still saved
+since before their last answer.
+
+Two divergences are accepted. The recompute deletes every `session_progress` row and rebuilds
+only the senses saved now and saved by each session's last answer, so a sense unsaved since, or
+an earlier save period of a re-saved sense, loses its snapshot rows. And a sense saved between a
+session's last answer and its skip is counted by the live path but not by the recompute.
 
 ## 4. API
 
@@ -415,7 +424,8 @@ progress rules sit in pure functions in `apps/mobile/src/progress.ts`, and the t
 - the migration gives every existing entry five level 1 rows.
 - the read route returns a completed session's `progress` block.
 - the recompute rebuilds the same rows from the log, and writes back exactly what the live path
-  wrote.
+  wrote for sessions about senses still saved since before their last answer; the two divergences
+  named in §3 are accepted.
 
 ### E2E
 
