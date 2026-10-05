@@ -9,6 +9,7 @@ import { withTx } from '../../support/withTx';
 import type { Tx } from '../../../src/db/client';
 import { newSessionRecord } from '../../../src/domain/session';
 import { sessions } from '../../../src/db/schema';
+import { SessionOpen } from '../../../src/errors';
 import { createQuestionRepo } from '../../../src/repo/questions';
 import { createSessionRepo } from '../../../src/repo/sessions';
 
@@ -27,10 +28,7 @@ afterEach(async () => {
 async function startSession(tx: Tx, userId = 'u_1') {
   const sessionRepo = createSessionRepo(tx);
   const questionRepo = createQuestionRepo(tx);
-  const pool = await questionRepo.loadQuestionPool('en', 'he', {
-    userId,
-    enrollmentId: enrollmentOf(userId),
-  });
+  const pool = await questionRepo.loadQuestionPool('en', 'he');
   const record = newSessionRecord(userId, pool, testRng(7));
   const sessionId = await sessionRepo.insertSession(userId, enrollmentOf(userId), record.questions);
   return { sessionRepo, sessionId, record };
@@ -168,5 +166,54 @@ describe('completeSession', () => {
       await sessionRepo.completeSession(sessionId);
       expect(await sessionRepo.loadSession(sessionId)).toBeDefined();
     });
+  });
+});
+
+describe('session state (phase 19)', () => {
+  const E = enrollmentOf('u_1');
+  const repo = <T>(fn: (r: ReturnType<typeof createSessionRepo>) => Promise<T>) =>
+    withTx(t.db, (tx) => fn(createSessionRepo(tx)));
+
+  it('inserts a preparing list session, and refuses a second open one', async () => {
+    const id = await repo((r) => r.insertPreparingSession('u_1', E));
+    const state = await repo((r) => r.findState(id));
+    expect(state).toEqual({ id, userId: 'u_1', enrollmentId: E, status: 'preparing', source: 'list' });
+    await expect(repo((r) => r.insertPreparingSession('u_1', E))).rejects.toBeInstanceOf(SessionOpen);
+  });
+
+  it('refuses a seed session while one is open, as SessionOpen', async () => {
+    await repo((r) => r.insertPreparingSession('u_1', E));
+    await expect(withTx(t.db, (tx) => startSession(tx))).rejects.toBeInstanceOf(SessionOpen);
+  });
+
+  it('transitions only from the statuses named', async () => {
+    const id = await repo((r) => r.insertPreparingSession('u_1', E));
+    expect(await repo((r) => r.transition(id, ['ready'], 'skipped'))).toBe(false);
+    expect(await repo((r) => r.transition(id, ['preparing'], 'ready'))).toBe(true);
+    expect((await repo((r) => r.findState(id)))?.status).toBe('ready');
+  });
+
+  it('answers undefined, never a 22P02, for a malformed id', async () => {
+    expect(await repo((r) => r.findState('nope'))).toBeUndefined();
+    expect(await repo((r) => r.transition('nope', ['ready'], 'skipped'))).toBe(false);
+  });
+
+  it('summarises the newest session: answered and total', async () => {
+    expect(await repo((r) => r.findLatest(E))).toBeUndefined();
+    const { sessionId, record } = await withTx(t.db, (tx) => startSession(tx));
+    await repo((r) => r.insertAnswer(sessionId, 0, record.questions[0].id, 0));
+    expect(await repo((r) => r.findLatest(E))).toEqual({
+      id: sessionId,
+      status: 'ready',
+      source: 'seed',
+      answered: 1,
+      total: SESSION_LENGTH,
+    });
+  });
+
+  it('loadSession reports status and source', async () => {
+    const { sessionId } = await withTx(t.db, (tx) => startSession(tx));
+    const loaded = await repo((r) => r.loadSession(sessionId));
+    expect(loaded).toMatchObject({ status: 'ready', source: 'seed' });
   });
 });

@@ -11,6 +11,7 @@ import type { StoredSense } from '../../src/domain/translation';
 import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
+import type { JobRepo } from '../../src/repo/jobs';
 import type { CorrectionRow, PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
@@ -51,8 +52,13 @@ export function createFakeAppDeps(): AppDeps {
     throw new Error('a document-shape test must not reach a collaborator');
   };
   const sessions: SessionService = {
-    startSession: unreachable,
+    createNextSession: unreachable,
+    getSession: unreachable,
+    currentSession: unreachable,
+    skipSession: unreachable,
     submitAnswer: unreachable,
+    prepareSession: unreachable,
+    failPreparation: unreachable,
   };
   const users: UserService = {
     register: unreachable,
@@ -98,6 +104,20 @@ export function createFakeLlmClient(...replies: (string | Error)[]) {
   };
 
   return Object.assign(client, { calls });
+}
+
+export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown }[] };
+
+/** Records what a use case enqueued. No queue behind it: a unit test asserts
+ *  the call, the integration suite asserts the job row. */
+export function createFakeJobRepo(): FakeJobRepo {
+  const enqueued: { name: string; data: unknown }[] = [];
+  return {
+    enqueued,
+    enqueue: async (name, data) => {
+      enqueued.push({ name, data });
+    },
+  };
 }
 
 // A repository a unit test can hold in its head: the same contract, backed by
@@ -151,6 +171,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),
     vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
+    jobs: repos.jobs ?? unreachableRepo('jobs repo'),
   };
   return (run) => run(bound);
 }

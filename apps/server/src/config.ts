@@ -6,6 +6,7 @@ export type Config = {
   port: number;
   poolMax: number;
   translationTimeoutMs: number;
+  sessionGenerationTimeoutMs: number;
 };
 
 // The one place this default lives. Both composition roots read it from here.
@@ -16,6 +17,10 @@ const DEFAULT_DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/lang_t
 // indefinitely. Configurable so a test can inject a short budget instead of
 // paying this in wall-clock time on every run.
 const DEFAULT_TRANSLATION_TIMEOUT_MS = 25_000;
+
+// Phase 19. One call writes three wrong options for up to ten words, a longer
+// answer than any lookup. Expiry of the job (240 s, db/jobs.ts) is twice this.
+const DEFAULT_SESSION_GENERATION_TIMEOUT_MS = 120_000;
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   return {
@@ -28,6 +33,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     port: Number(env.PORT) || 3001,
     poolMax: Number(env.PG_POOL_MAX) || 5,
     translationTimeoutMs: Number(env.TRANSLATION_TIMEOUT_MS) || DEFAULT_TRANSLATION_TIMEOUT_MS,
+    sessionGenerationTimeoutMs:
+      Number(env.SESSION_GENERATION_TIMEOUT_MS) || DEFAULT_SESSION_GENERATION_TIMEOUT_MS,
   };
 }
 

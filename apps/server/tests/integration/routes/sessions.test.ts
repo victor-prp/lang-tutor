@@ -33,7 +33,7 @@ afterEach(async () => {
 function buildTestApp() {
   const app = new Hono();
   const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
-  app.route('/api/sessions', createSessionsRouter(deps.sessions));
+  app.route('/api', createSessionsRouter(deps.sessions));
   return app;
 }
 
@@ -45,15 +45,35 @@ function postJson(app: Hono, path: string, body: unknown) {
   });
 }
 
+function getJson(app: Hono, path: string) {
+  return app.request(path, { method: 'GET' });
+}
+
+// Loose on purpose: a walk reassigns it from next-step responses, which share
+// the session id and the question but carry `complete` too.
+type SeedView = {
+  session_id: string;
+  question: { id: string; question: string; options: string[]; correct_option: number };
+  position: unknown;
+  complete?: boolean;
+};
+
+/** The seed session and its first question, the way the app now gets them:
+ *  create, then read. */
+async function startSeed(app: Hono, enrollmentId: string) {
+  const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentId })).json();
+  const view = await (await getJson(app, `/api/sessions/${created.session_id}`)).json();
+  return view as SeedView;
+}
+
 describe('POST /api/sessions', () => {
-  it('creates a session and returns the first question', async () => {
+  it('creates the seed session: 201, ready, seed', async () => {
     const app = buildTestApp();
     const res = await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     const body = await res.json();
     expect(typeof body.session_id).toBe('string');
-    expect(body.position).toEqual({ position: 1, total: 10 });
-    expect(body.question.id).toBeDefined();
+    expect(body).toMatchObject({ status: 'ready', source: 'seed' });
   });
 
   it('rejects a missing enrollment_id', async () => {
@@ -98,9 +118,7 @@ describe('POST /api/sessions', () => {
     // session is walked to the end, every prompt is in its own pair's script,
     // and each session's row names the enrollment that started it.
     const walk = async (enrollmentId: string, script: RegExp) => {
-      const started = await postJson(app, '/api/sessions', { enrollment_id: enrollmentId });
-      expect(started.status).toBe(200);
-      let current = await started.json();
+      let current = await startSeed(app, enrollmentId);
       // Spec §6: each session is attributed to its own enrollment, not merely
       // drawn from its pair.
       expect(await enrollmentOfSession(t.db, current.session_id)).toBe(enrollmentId);
@@ -149,7 +167,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('advances to the next question on a fresh answer', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
+    const created = await startSeed(app, enrollmentOf('u_1'));
 
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
       user_id: 'u_1',
@@ -165,7 +183,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('replays the same response when the same step is retried', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
+    const created = await startSeed(app, enrollmentOf('u_1'));
     const stepBody = {
       user_id: 'u_1',
       question_id: created.question.id,
@@ -183,7 +201,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it("409s when question_id does not match the session's current question", async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
+    const created = await startSeed(app, enrollmentOf('u_1'));
 
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
       user_id: 'u_1',
@@ -195,7 +213,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('completes the session on the 10th answer, returning score and missed_questions', async () => {
     const app = buildTestApp();
-    let current = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
+    let current = await startSeed(app, enrollmentOf('u_1'));
 
     let last;
     for (let i = 0; i < 10; i++) {
@@ -217,7 +235,7 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('tracks an incorrect answer in the final score and missed_questions', async () => {
     const app = buildTestApp();
-    let current = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
+    let current = await startSeed(app, enrollmentOf('u_1'));
     const firstQuestion = current.question;
     const wrongIndex = (firstQuestion.correct_option + 1) % firstQuestion.options.length;
 
@@ -252,12 +270,106 @@ describe('POST /api/sessions/:id/next-step', () => {
 
   it('400s when option_index is past the last option', async () => {
     const app = buildTestApp();
-    const created = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1') })).json();
+    const created = await startSeed(app, enrollmentOf('u_1'));
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
       user_id: 'u_1',
       question_id: created.question.id,
       option_index: 99,
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('phase 19 session routes', () => {
+  const E = () => enrollmentOf('u_1');
+
+  it('GET /api/sessions/:id returns the view with the current question', async () => {
+    const app = buildTestApp();
+    const view = await startSeed(app, E());
+    expect(view).toMatchObject({ status: 'ready', source: 'seed', position: { position: 1, total: 10 } });
+    expect(view.question.id).toBeDefined();
+  });
+
+  it('GET /api/sessions/:id is 404 for an unknown and a malformed id alike', async () => {
+    const app = buildTestApp();
+    for (const id of ['00000000-0000-0000-0000-000000000000', 'nope']) {
+      const res = await getJson(app, `/api/sessions/${id}`);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'session not found' });
+    }
+  });
+
+  it('a second create while one is open is 409 session_open', async () => {
+    const app = buildTestApp();
+    await postJson(app, '/api/sessions', { enrollment_id: E() });
+    const res = await postJson(app, '/api/sessions', { enrollment_id: E() });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'session_open' });
+  });
+
+  it('skip is 200 twice, and then the next create asks for saved words', async () => {
+    const app = buildTestApp();
+    const { session_id } = await startSeed(app, E());
+    for (let i = 0; i < 2; i++) {
+      const res = await postJson(app, `/api/sessions/${session_id}/skip`, {});
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ session_id, status: 'skipped' });
+    }
+    const next = await postJson(app, '/api/sessions', { enrollment_id: E() });
+    expect(next.status).toBe(409);
+    expect(await next.json()).toEqual({ error: 'no_saved_words' });
+  });
+
+  it('skip of an unknown session is 404', async () => {
+    const res = await postJson(buildTestApp(), '/api/sessions/00000000-0000-0000-0000-000000000000/skip', {});
+    expect(res.status).toBe(404);
+  });
+
+  it('answering a skipped session is 409 session_not_ready', async () => {
+    const app = buildTestApp();
+    const view = await startSeed(app, E());
+    await postJson(app, `/api/sessions/${view.session_id}/skip`, {});
+    const res = await postJson(app, `/api/sessions/${view.session_id}/next-step`, {
+      user_id: 'u_1',
+      question_id: view.question.id,
+      option_index: 0,
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'session_not_ready' });
+  });
+
+  it('skip of a completed session is 409 session_not_skippable', async () => {
+    const app = buildTestApp();
+    let current: { session_id: string; question: { id: string } | null } = await startSeed(app, E());
+    const sessionId = current.session_id;
+    while (current.question) {
+      const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, {
+        user_id: 'u_1',
+        question_id: current.question.id,
+        option_index: 0,
+      });
+      current = await res.json();
+    }
+    const res = await postJson(app, `/api/sessions/${sessionId}/skip`, {});
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'session_not_skippable' });
+  });
+
+  it('GET current answers before, during and after a session, and 404s an unknown enrollment', async () => {
+    const app = buildTestApp();
+    const before = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
+    expect(before).toEqual({ current: null, next_source: 'seed', saved_count: 0 });
+
+    const { session_id } = await startSeed(app, E());
+    const during = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
+    expect(during).toEqual({
+      current: { session_id, status: 'ready', source: 'seed', answered: 0, total: 10 },
+      next_source: 'list',
+      saved_count: 0,
+    });
+
+    const missing = await getJson(app, '/api/enrollments/e_nobody/sessions/current');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'enrollment not found' });
   });
 });

@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { Alert } from 'react-native';
 
-import { ApiError, type ApiClient } from '@/api/client';
+import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { strings } from '@/strings';
 
@@ -27,7 +27,11 @@ export type SessionValue = {
   complete: boolean;
   correctCount: number;
   missedQuestions: MissedQuestion[];
-  start: () => void;
+  /** The session id while one is loaded, for skip. */
+  sessionId: string | null;
+  /** Loads a ready session and continues from its current question. Starting
+   *  and resuming are the same call: the server knows how far it got. */
+  enter: (sessionId: string) => void;
   select: (optionIndex: number) => void;
   next: () => void;
 };
@@ -98,20 +102,15 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // but the server is now the source of truth for progress and scoring.
   const [state, setState] = useState<QuizState | null>(null);
 
-  const { user, active } = useCurrentUser();
+  const { user } = useCurrentUser();
 
-  // A ref, matching this file's existing stateRef idiom, so start()'s empty
+  // A ref, matching this file's existing stateRef idiom, so enter()'s
   // dependency array stays correct: the callback must read the user who is
   // logged in when it fires, not the one captured when it was created.
   const userRef = useRef(user);
   useEffect(() => {
     userRef.current = user;
   }, [user]);
-
-  const activeRef = useRef(active);
-  useEffect(() => {
-    activeRef.current = active;
-  }, [active]);
 
   // Mirrors `state` for use inside async callbacks that resolve after a
   // render has moved on (e.g. select()'s nextStep().catch()), where the
@@ -122,61 +121,54 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     stateRef.current = state;
   }, [state]);
 
-  const start = useCallback(() => {
-    // Installed synchronously, before the async chain below runs, so that
-    // `hasSession` flips true on the same render start() is called. Both
-    // callers (Home's onStart, Results' onPractiseAgain) navigate
-    // synchronously right after calling start() — if hasSession stayed
-    // false (or a stale `complete: true` stayed live) until createSession
-    // resolved, SessionScreen's own redirect/back-to-results logic would
-    // bounce the learner away before the real session ever lands.
-    //
-    // sessionId/userId are placeholders, never actually read: select()
-    // bails out whenever `state.question` is undefined, which holds for
-    // this pending state for as long as it's live.
-    setState({
-      sessionId: '',
-      userId: '',
-      question: undefined,
-      position: 0,
-      total: SESSION_LENGTH,
-      selectedOption: null,
-      complete: false,
-      correctCount: 0,
-      missedQuestions: [],
-      queued: null,
-      advanceRequested: false,
-    });
-    void (async () => {
-      try {
-        const currentUser = userRef.current;
-        const enrollment = activeRef.current;
-        // Unreachable in practice — Home redirects to /login when logged out and
-        // to /enroll with no enrollment — but a session with no learner must fail
-        // loudly, not invent an id.
-        if (!currentUser || !enrollment) throw new Error('cannot start a session with no active enrollment');
-        const userId = currentUser.id;
-        const response = await api.createSession({ enrollment_id: enrollment.id });
-        setState({
-          sessionId: response.session_id,
-          userId,
-          question: response.question,
-          position: response.position.position,
-          total: response.position.total,
-          selectedOption: null,
-          complete: false,
-          correctCount: 0,
-          missedQuestions: [],
-          queued: null,
-          advanceRequested: false,
-        });
-      } catch (error) {
-        handleApiFailure(
-          error instanceof ApiError && error.status === 409 ? strings.sessionNoQuestions : undefined,
-        );
-      }
-    })();
-  }, []);
+  const enter = useCallback(
+    (sessionId: string) => {
+      // Installed synchronously, before the read below, so `hasSession` flips
+      // true on the same render enter() is called. Home navigates right after
+      // calling it, and SessionScreen redirects home while hasSession is false.
+      // `question` stays undefined until the read lands, which keeps select()
+      // inert meanwhile.
+      setState({
+        sessionId,
+        userId: '',
+        question: undefined,
+        position: 0,
+        total: SESSION_LENGTH,
+        selectedOption: null,
+        complete: false,
+        correctCount: 0,
+        missedQuestions: [],
+        queued: null,
+        advanceRequested: false,
+      });
+      void (async () => {
+        try {
+          const currentUser = userRef.current;
+          // Unreachable in practice (home redirects to /login when logged out),
+          // but a session with no learner must fail loudly, not invent an id.
+          if (!currentUser) throw new Error('cannot enter a session with no learner');
+          const view = await api.getSession(sessionId);
+          if (view.status !== 'ready' || !view.question) {
+            throw new Error(`session ${sessionId} is ${view.status}`);
+          }
+          setState((latest) =>
+            latest?.sessionId === sessionId
+              ? {
+                  ...latest,
+                  userId: currentUser.id,
+                  question: view.question!,
+                  position: view.position.position,
+                  total: view.position.total,
+                }
+              : latest,
+          );
+        } catch {
+          if (stateRef.current?.sessionId === sessionId) handleApiFailure();
+        }
+      })();
+    },
+    [api],
+  );
 
   // Reads `state` directly (and depends on it) rather than going through
   // setState's updater-function form, because the updater form is invoked
@@ -242,7 +234,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         complete: false,
         correctCount: 0,
         missedQuestions: [],
-        start,
+        sessionId: null,
+        enter,
         select,
         next,
       };
@@ -257,11 +250,12 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       complete: state.complete,
       correctCount: state.correctCount,
       missedQuestions: state.missedQuestions,
-      start,
+      sessionId: state.sessionId,
+      enter,
       select,
       next,
     };
-  }, [state, start, select, next]);
+  }, [state, enter, select, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

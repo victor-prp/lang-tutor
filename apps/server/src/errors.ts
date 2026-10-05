@@ -143,3 +143,55 @@ export class InvalidCursor extends Error {
     this.name = 'InvalidCursor';
   }
 }
+
+/** Phase 19. The enrollment already has a preparing or ready session
+ *  (sessions_one_open_per_enrollment). */
+export class SessionOpen extends Error {
+  constructor(readonly enrollmentId: string) {
+    super(`enrollment ${enrollmentId} already has an open session`);
+    this.name = 'SessionOpen';
+  }
+}
+
+/** Phase 19. The next session is built from the saved list, and it is empty. */
+export class NoSavedWords extends Error {
+  constructor(readonly enrollmentId: string) {
+    super(`enrollment ${enrollmentId} has no saved words to practise`);
+    this.name = 'NoSavedWords';
+  }
+}
+
+/** Phase 19. Only a preparing or ready session can be skipped. */
+export class SessionNotSkippable extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly status: string,
+  ) {
+    super(`session ${sessionId} is ${status} and cannot be skipped`);
+    this.name = 'SessionNotSkippable';
+  }
+}
+
+/** Phase 19. An answer to a session that is not ready: still preparing, skipped
+ *  or failed. A completed session keeps today's replay path. */
+export class SessionNotReady extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly status: string,
+  ) {
+    super(`session ${sessionId} is ${status}, not ready`);
+    this.name = 'SessionNotReady';
+  }
+}
+
+/** Phase 19. The model's distractors were unreadable or failed validation.
+ *  Thrown inside the job so pg-boss retries it; never on the wire. */
+export class InvalidDistractors extends Error {
+  constructor(
+    readonly sessionId: string,
+    readonly reason: string,
+  ) {
+    super(`distractors for session ${sessionId} were refused: ${reason}`);
+    this.name = 'InvalidDistractors';
+  }
+}

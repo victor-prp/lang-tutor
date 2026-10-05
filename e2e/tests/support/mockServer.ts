@@ -76,3 +76,20 @@ export async function expectGeminiFailure(
   });
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
+
+/** Phase 19. Any model answer, not only a translation: the distractor call's
+ *  `{ items: [...] }`. The spec clears the namespace first, so this is the only
+ *  expectation and needs no body match. */
+export async function expectGeminiPayload(request: APIRequestContext, payload: unknown): Promise<void> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      httpRequest: { method: 'POST', path },
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: envelope(payload),
+      },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}

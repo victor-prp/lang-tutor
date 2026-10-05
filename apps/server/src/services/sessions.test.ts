@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { createFakeLogger } from '../../tests/support/fakes';
+import { createFakeLlmClient, createFakeLogger } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import { SessionNotFound } from '../errors';
 import type { QuestionRepo } from '../repo/questions';
@@ -26,6 +26,11 @@ describe('repos', () => {
       loadSession: notStubbed,
       insertAnswer: notStubbed,
       completeSession: notStubbed,
+      insertPreparingSession: notStubbed,
+      insertSessionQuestions: notStubbed,
+      findState: notStubbed,
+      transition: notStubbed,
+      findLatest: notStubbed,
       ...overrides,
     };
   }
@@ -33,6 +38,12 @@ describe('repos', () => {
   const questionRepo: QuestionRepo = {
     loadQuestionPool: () => {
       throw new Error('submitAnswer must not load the question pool');
+    },
+    findGenerationContext: () => {
+      throw new Error('submitAnswer must not read the generation context');
+    },
+    insertGeneratedQuestions: () => {
+      throw new Error('submitAnswer must not write generated questions');
     },
   };
 
@@ -50,7 +61,7 @@ describe('repos', () => {
     },
   };
 
-  // The submit-answer cases never reach it; startSession is the one use case
+  // The submit-answer cases never reach it; createNextSession is the one use case
   // that does, and it is covered against real Postgres.
   const enrollmentRepo: EnrollmentRepo = {
     insertEnrollment: () => {
@@ -108,6 +119,8 @@ describe('repos', () => {
     findLexeme: forbidden,
     findLexemeRenderings: forbidden,
     findSavedInLexeme: forbidden,
+    listSavedSenses: forbidden,
+    countEntries: forbidden,
   };
 
   function fakeTransaction(session: SessionRepo): Transaction {
@@ -119,6 +132,11 @@ describe('repos', () => {
         enrollment: enrollmentRepo,
         dict: dictRepo,
         vocabulary: vocabularyRepo,
+        jobs: {
+          enqueue: () => {
+            throw new Error('the submit-answer use case must not enqueue a job');
+          },
+        },
       });
   }
 
@@ -127,6 +145,7 @@ describe('repos', () => {
       transaction: fakeTransaction(sessionRepoWith({ loadSession: async () => undefined })),
       rng: testRng(7),
       logger: createFakeLogger(),
+      llm: createFakeLlmClient(''),
     });
 
     await expect(

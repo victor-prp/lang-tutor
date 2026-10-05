@@ -14,11 +14,7 @@ describe('api/client', () => {
     const mockFetch = jest.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({
-        session_id: 's1',
-        question: { id: 'q1' },
-        position: { position: 1, total: 10 },
-      }),
+      json: async () => ({ session_id: 's1', status: 'ready', source: 'seed' }),
     }));
     const client = buildClient(mockFetch);
 
@@ -66,6 +62,34 @@ describe('api/client', () => {
 
     await expect(client.createSession({ enrollment_id: 'e1' })).rejects.toBeInstanceOf(ApiError);
     await expect(client.createSession({ enrollment_id: 'e1' })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('getSession, skipSession and currentSession reach their paths', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    const client = buildClient(mockFetch);
+
+    await client.getSession('s 1');
+    await client.skipSession('s1');
+    await client.currentSession('e1');
+
+    expect(mockFetch).toHaveBeenNthCalledWith(1, 'http://test.local/api/sessions/s%201', expect.objectContaining({ method: 'GET' }));
+    expect(mockFetch).toHaveBeenNthCalledWith(2, 'http://test.local/api/sessions/s1/skip', expect.objectContaining({ method: 'POST' }));
+    expect(mockFetch).toHaveBeenNthCalledWith(3, 'http://test.local/api/enrollments/e1/sessions/current', expect.objectContaining({ method: 'GET' }));
+  });
+
+  it("carries a failure's error code, so the app can tell two 409s apart", async () => {
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 409, json: async () => ({ error: 'no_saved_words' }) }));
+    await expect(buildClient(mockFetch).createSession({ enrollment_id: 'e1' })).rejects.toMatchObject({
+      status: 409,
+      code: 'no_saved_words',
+    });
+  });
+
+  it('leaves the code undefined when the failure body is not JSON', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 500, json: async () => { throw new Error('html'); } }));
+    const failure = await buildClient(mockFetch).currentSession('e1').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).code).toBeUndefined();
   });
 
   it('login posts the username to /api/login', async () => {

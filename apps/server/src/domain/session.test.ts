@@ -1,11 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
-import type { AnswerRecord, Question } from '@lang-tutor/core/api';
+import type { AnswerRecord, Question, SessionStatus } from '@lang-tutor/core/api';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import {
   currentQuestion,
+  isCurrent,
+  isOpen,
   missedQuestions,
   newSessionRecord,
+  nextSource,
+  pickSenses,
   positionOf,
   sessionScore,
   step,
@@ -23,6 +27,17 @@ function makeQuestion(n: number): Question {
   };
 }
 
+// Not tests/support/testRng: ADR 0001 R3 greps domain/ for any parent-directory
+// import, test files included, so a domain test cannot reach tests/support.
+// Same LCG.
+function testRng(seed: number): () => number {
+  let value = seed;
+  return () => {
+    value = (value * 1103515245 + 12345) % 2147483648;
+    return value / 2147483648;
+  };
+}
+
 const POOL: Question[] = Array.from({ length: 16 }, (_, i) => makeQuestion(i));
 
 function makeRecord(questions: Question[], answers: AnswerRecord[] = []): SessionRecord {
@@ -32,6 +47,8 @@ function makeRecord(questions: Question[], answers: AnswerRecord[] = []): Sessio
     answers,
     complete: answers.length === questions.length,
     completed_at: null,
+    status: answers.length === questions.length ? 'completed' : 'ready',
+    source: 'seed',
   };
 }
 
@@ -164,5 +181,54 @@ describe('sessionScore and missedQuestions', () => {
     expect(missedQuestions(record)).toEqual([
       { question: q1, correct_answer: q1.options[q1.correct_option] },
     ]);
+  });
+});
+
+describe('pickSenses', () => {
+  const entries = Array.from({ length: 12 }, (_, i) => ({ senseId: `s${i}` }));
+
+  it('takes at most `max`, with no repeats', () => {
+    const picked = pickSenses(entries, 10, testRng(3));
+    expect(picked).toHaveLength(10);
+    expect(new Set(picked.map((e) => e.senseId)).size).toBe(10);
+  });
+
+  it('takes all of a shorter list', () => {
+    expect(pickSenses(entries.slice(0, 4), 10, testRng(3))).toHaveLength(4);
+  });
+
+  it('is a pure function of the rng, and leaves its input alone', () => {
+    const copy = [...entries];
+    expect(pickSenses(entries, 10, testRng(5))).toEqual(pickSenses(entries, 10, testRng(5)));
+    expect(entries).toEqual(copy);
+  });
+});
+
+describe('nextSource and status sets', () => {
+  const ALL: SessionStatus[] = ['preparing', 'ready', 'completed', 'skipped', 'failed'];
+
+  it('starts with the seed and moves to the list once any session exists', () => {
+    expect(nextSource(false)).toBe('seed');
+    expect(nextSource(true)).toBe('list');
+  });
+
+  it('counts preparing and ready as open; failed is current but not open', () => {
+    expect(ALL.filter(isOpen)).toEqual(['preparing', 'ready']);
+    expect(ALL.filter(isCurrent)).toEqual(['preparing', 'ready', 'failed']);
+  });
+});
+
+describe('step and status', () => {
+  it('marks the record completed on its last answer', () => {
+    let record = newSessionRecord('u1', POOL, () => 0.5);
+    expect(record.status).toBe('ready');
+    expect(record.source).toBe('seed');
+    for (const question of [...record.questions]) {
+      const outcome = step(record, question.id, 0);
+      if (outcome.status !== 'advanced') throw new Error(outcome.status);
+      record = outcome.record;
+    }
+    expect(record.complete).toBe(true);
+    expect(record.status).toBe('completed');
   });
 });

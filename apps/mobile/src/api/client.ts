@@ -3,12 +3,15 @@ import type {
   CreateSessionRequest,
   CreateSessionResponse,
   CreateUserRequest,
+  CurrentSessionResponse,
   Enrollment,
   LoginRequest,
   NextStepRequest,
   NextStepResponse,
   SaveVocabularyRequest,
   SaveVocabularyResponse,
+  SessionView,
+  SkipSessionResponse,
   TranslationRequest,
   TranslationResponse,
   User,
@@ -17,8 +20,23 @@ import type {
 } from '@lang-tutor/core/api';
 
 export class ApiError extends Error {
-  constructor(public readonly status: number) {
-    super(`API request failed with status ${status}`);
+  // `code` is the body's `error` string when there is one: the server answers
+  // several 409s (session_open, no_saved_words, …) that the status alone
+  // cannot tell apart.
+  constructor(
+    public readonly status: number,
+    public readonly code?: string,
+  ) {
+    super(`API request failed with status ${status}${code ? ` (${code})` : ''}`);
+  }
+}
+
+async function failureOf(res: Response): Promise<ApiError> {
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    return new ApiError(res.status, typeof body.error === 'string' ? body.error : undefined);
+  } catch {
+    return new ApiError(res.status);
   }
 }
 
@@ -37,19 +55,19 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new ApiError(res.status);
+    if (!res.ok) throw await failureOf(res);
     return (await res.json()) as TResponse;
   }
 
   async function getJson<TResponse>(path: string): Promise<TResponse> {
     const res = await fetch(`${baseUrl}${path}`, { method: 'GET' });
-    if (!res.ok) throw new ApiError(res.status);
+    if (!res.ok) throw await failureOf(res);
     return (await res.json()) as TResponse;
   }
 
   async function deleteResource(path: string): Promise<void> {
     const res = await fetch(`${baseUrl}${path}`, { method: 'DELETE' });
-    if (!res.ok) throw new ApiError(res.status);
+    if (!res.ok) throw await failureOf(res);
   }
 
   const vocabularyPath = (enrollmentId: string) =>
@@ -63,6 +81,12 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       postJson<CreateSessionResponse>('/api/sessions', request),
     nextStep: (sessionId: string, request: NextStepRequest) =>
       postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request),
+    getSession: (sessionId: string) =>
+      getJson<SessionView>(`/api/sessions/${encodeURIComponent(sessionId)}`),
+    skipSession: (sessionId: string) =>
+      postJson<SkipSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/skip`, {}),
+    currentSession: (enrollmentId: string) =>
+      getJson<CurrentSessionResponse>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/sessions/current`),
     translate: (request: TranslationRequest) =>
       postJson<TranslationResponse>('/api/translations', request),
     listEnrollments: (userId: string) =>

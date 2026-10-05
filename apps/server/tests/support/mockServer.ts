@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
 
+import { DISTRACTOR_MARKER } from '../../src/domain/distractors';
 import { geminiResponse } from './geminiResponse';
 
 // tests/support/ is the test composition root, so naming a concrete URL and
@@ -238,4 +239,28 @@ export async function countGeminiRequests(ns: string, matchText?: string): Promi
     throw new Error(`MockServer retrieve returned ${res.status}: ${await res.text()}`);
   }
   return ((await res.json()) as unknown[]).length;
+}
+
+/**
+ * Phase 19. The distractor call's answer: the same three wrong options for
+ * q1 to q10, so one stub fits any session of up to ten questions. Matched on
+ * DISTRACTOR_MARKER, which only that prompt carries, so a translation stub in
+ * the same namespace cannot answer it.
+ */
+export async function expectDistractors(ns: string, opts: { delayMs?: number } = {}): Promise<void> {
+  const items = Array.from({ length: 10 }, (_, i) => ({
+    key: `q${i + 1}`,
+    distractors: ['דלת', 'קיר', 'תקרה'],
+  }));
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${DISTRACTOR_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ items })),
+        ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
+      },
+    },
+  });
 }

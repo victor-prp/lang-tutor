@@ -3,6 +3,7 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { createServerDeps } from '../../src/composition';
 import { createFakeLogger } from '../support/fakes';
+import { unstartedBoss } from '../support/jobs';
 import { createTestServerDeps } from '../support/serverDeps';
 import { enrollmentOf, seedUser } from '../support/seedUser';
 import { createTestDb, type TestDb } from '../support/testDb';
@@ -36,7 +37,9 @@ describe('createServerDeps', () => {
       fetch: globalThis.fetch,
       gemini: { apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/never-registered', model: 'm' },
       translationTimeoutMs: 25_000,
+      sessionGenerationTimeoutMs: 120_000,
       identity: { lane: 'test', database: 'test_db', port: 0 },
+      boss: unstartedBoss(t.db),
     });
     expect(deps.logger).toBe(logger);
   });
@@ -48,7 +51,8 @@ describe('createServerDeps', () => {
 
   it('assembles a session service that works against that database', async () => {
     const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
-    const { record } = await deps.sessions.startSession(enrollmentOf('u_1'));
+    const { sessionId } = await deps.sessions.createNextSession(enrollmentOf('u_1'));
+    const record = await deps.sessions.getSession(sessionId);
     expect(record.questions).toHaveLength(SESSION_LENGTH);
   });
 

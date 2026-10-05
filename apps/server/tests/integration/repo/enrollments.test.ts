@@ -68,8 +68,11 @@ describe('enrollments repository', () => {
   it('rejects a session whose user does not own the enrollment', async () => {
     const [ofU2] = await repo((r) => r.listByUser('u_2'));
     await expect(
-      t.db.execute(sql`insert into sessions (user_id, enrollment_id) values ('u_1', ${ofU2.id})`),
-    ).rejects.toThrow();
+      t.db.execute(
+        sql`insert into sessions (user_id, enrollment_id, status, source)
+            values ('u_1', ${ofU2.id}, 'skipped', 'seed')`,
+      ),
+    ).rejects.toMatchObject({ cause: { code: '23503', constraint: 'sessions_enrollment_fk' } });
   });
 
   it('rejects a per-learner question carrying only half its owner', async () => {

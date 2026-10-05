@@ -48,13 +48,19 @@ async function postJson(path: string, body: unknown) {
   return { status: res.status, body: await res.json() };
 }
 
+async function getJson(path: string) {
+  const res = await fetch(`${baseUrl}${path}`);
+  return { status: res.status, body: await res.json() };
+}
+
 describe('integration: a full session over real HTTP', () => {
   it('creates a session, answers all 10 questions correctly, and completes with a perfect score', async () => {
     const created = await postJson('/api/sessions', { enrollment_id: enrollmentOf('integration_user') });
-    expect(created.status).toBe(200);
-    expect(created.body.position).toEqual({ position: 1, total: 10 });
+    expect(created.status).toBe(201);
+    const view = await getJson(`/api/sessions/${created.body.session_id}`);
+    expect(view.body.position).toEqual({ position: 1, total: 10 });
 
-    let current = created.body;
+    let current = view.body;
     let last;
     for (let i = 0; i < 10; i++) {
       const res = await postJson(`/api/sessions/${current.session_id}/next-step`, {
@@ -77,7 +83,8 @@ describe('integration: a full session over real HTTP', () => {
     const created = await postJson('/api/sessions', { enrollment_id: enrollmentOf('restart_user') });
     const sessionId = created.body.session_id;
 
-    let current = created.body;
+    const view = await getJson(`/api/sessions/${sessionId}`);
+    let current = view.body;
     let lastQuestionId = current.question.id;
     let lastOptionIndex = current.question.correct_option;
     let last;

@@ -18,10 +18,10 @@ describe('POST /api/sessions in the published document', () => {
     expect(doc.paths['/api/sessions'].post).toBeDefined();
   });
 
-  it('declares its 200, 400, 404 and 409', async () => {
+  it('declares its 201, 400, 404 and 409', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths['/api/sessions'].post.responses).sort()).toEqual([
-      '200',
+      '201',
       '400',
       '404',
       '409',
@@ -97,15 +97,18 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all ten paths and nothing else', async () => {
+  it('contains all thirteen paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
+      '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
       '/api/enrollments/{id}/vocabulary/words/{lexeme_id}',
       '/api/login',
       '/api/sessions',
+      '/api/sessions/{id}',
       NEXT_STEP,
+      '/api/sessions/{id}/skip',
       '/api/translations',
       '/api/users',
       '/api/users/{id}/enrollments',
@@ -253,5 +256,15 @@ describe('the vocabulary endpoints in the published document', () => {
   ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths[path][method].responses).sort()).toEqual(statuses);
+  });
+});
+
+describe('phase 19 paths in the published document', () => {
+  it('publishes read, skip and current', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths['/api/sessions/{id}'].get).toBeDefined();
+    expect(Object.keys(doc.paths['/api/sessions/{id}/skip'].post.responses).sort()).toEqual(['200', '404', '409']);
+    expect(Object.keys(doc.paths['/api/enrollments/{id}/sessions/current'].get.responses).sort()).toEqual(['200', '404']);
+    expect(Object.keys(doc.paths[NEXT_STEP].post.responses)).toContain('409');
   });
 });

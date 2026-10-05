@@ -1,7 +1,8 @@
 import type { Question } from '@lang-tutor/core/api';
-import { and, asc, eq, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
+import type { GenerationContext } from '../domain/distractors';
 import { questions, dictVariants, type QuestionOption } from '../db/schema';
 
 /** Options as authored, ordered by their canonical position. */
@@ -32,15 +33,13 @@ export function questionFrom(
 export function createQuestionRepo(tx: Tx) {
   return {
     /**
-     * The pool a session draws from: shared questions plus any belonging to
-     * this learner's enrollment. Phase 4 only ever seeds shared ones; the
-     * per-learner branch is keyed by the enrollment from phase 16, so a later
-     * phase adds rows, not a migration.
+     * The seed pool: shared questions only. Phase 19 writes enrollment-owned
+     * questions for list sessions, and a seed session must never draw one —
+     * the per-learner branch phase 16 left here would have let it.
      */
     loadQuestionPool: async (
       targetLanguage: string,
       userLanguageCode: string,
-      owner: { userId: string; enrollmentId: string },
     ): Promise<Question[]> => {
       const rows = await tx
         .select({
@@ -53,10 +52,7 @@ export function createQuestionRepo(tx: Tx) {
         .innerJoin(dictVariants, eq(dictVariants.id, questions.promptVariantId))
         .where(
           and(
-            or(
-              isNull(questions.userId),
-              and(eq(questions.userId, owner.userId), eq(questions.enrollmentId, owner.enrollmentId)),
-            ),
+            isNull(questions.userId),
             eq(questions.targetLanguage, targetLanguage),
             eq(questions.userLanguageCode, userLanguageCode),
           ),
@@ -67,6 +63,100 @@ export function createQuestionRepo(tx: Tx) {
         .orderBy(asc(questions.id));
 
       return rows.map((row) => questionFrom(row, null));
+    },
+
+    /**
+     * What generation needs for each pick: the saved form, its lexeme, and that
+     * form's rendering of the sense in the source language. In pick order. A
+     * pick whose rows are gone (a db:reseed between request and job) is
+     * dropped rather than failing the whole session.
+     */
+    findGenerationContext: async (input: {
+      picks: { senseId: string; variantId: string }[];
+      sourceLanguage: string;
+    }): Promise<GenerationContext[]> => {
+      if (input.picks.length === 0) return [];
+      const rows = await tx.execute<{
+        sense_id: string;
+        variant_id: string;
+        lexeme_id: string;
+        form: string;
+        lemma: string;
+        part_of_speech: string;
+        translation: string;
+      }>(sql`
+        SELECT tr.sense_id, tr.variant_id, l.id AS lexeme_id, v.form, l.lemma, l.part_of_speech, tr.translation
+        FROM (VALUES ${sql.join(
+          input.picks.map((pick) => sql`(${pick.senseId}::text, ${pick.variantId}::text)`),
+          sql`, `,
+        )}) AS asked(sense_id, variant_id)
+        JOIN dict_var_translations tr ON tr.sense_id = asked.sense_id
+                                     AND tr.variant_id = asked.variant_id
+                                     AND tr.user_language_code = ${input.sourceLanguage}
+        JOIN dict_variants v          ON v.id = tr.variant_id
+        JOIN dict_lexemes l           ON l.id = v.lexeme_id`);
+      const found = new Map(rows.rows.map((row) => [`${row.sense_id} ${row.variant_id}`, row]));
+      return input.picks.flatMap((pick) => {
+        const row = found.get(`${pick.senseId} ${pick.variantId}`);
+        return row
+          ? [
+              {
+                senseId: row.sense_id,
+                variantId: row.variant_id,
+                lexemeId: row.lexeme_id,
+                form: row.form,
+                lemma: row.lemma,
+                partOfSpeech: row.part_of_speech,
+                translation: row.translation,
+              },
+            ]
+          : [];
+      });
+    },
+
+    /** One list session's questions, owned by its enrollment. Ids come from the
+     *  database, as users.id does, so no randomness enters this layer. */
+    insertGeneratedQuestions: async (input: {
+      userId: string;
+      enrollmentId: string;
+      targetLanguage: string;
+      userLanguageCode: string;
+      questions: {
+        senseId: string;
+        variantId: string;
+        form: string;
+        lexemeId: string;
+        options: QuestionOption[];
+      }[];
+    }): Promise<Question[]> => {
+      if (input.questions.length === 0) return [];
+      const rows = await tx
+        .insert(questions)
+        .values(
+          input.questions.map((question) => ({
+            id: sql<string>`gen_random_uuid()::text`,
+            userId: input.userId,
+            enrollmentId: input.enrollmentId,
+            senseId: question.senseId,
+            promptVariantId: question.variantId,
+            targetLanguage: input.targetLanguage,
+            userLanguageCode: input.userLanguageCode,
+            type: 'multiple_choice',
+            options: question.options,
+          })),
+        )
+        .returning({ id: questions.id });
+      return rows.map((row, index) =>
+        questionFrom(
+          {
+            id: row.id,
+            options: input.questions[index].options,
+            form: input.questions[index].form,
+            lexemeId: input.questions[index].lexemeId,
+          },
+          null,
+        ),
+      );
     },
   };
 }

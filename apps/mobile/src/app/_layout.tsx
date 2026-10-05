@@ -7,6 +7,7 @@ import { createApiClient } from '@/api/client';
 import { requireEnvValue } from '@/config/requireEnvValue';
 import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '@/currentUser';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
+import { NextSessionProvider } from '@/hooks/useNextSession';
 import { SessionProvider } from '@/hooks/useSession';
 import { TranslationProvider } from '@/hooks/useTranslation';
 import { VocabularyProvider } from '@/hooks/useVocabulary';
@@ -50,15 +51,17 @@ export default function RootLayout() {
       <CurrentUserProvider api={api} usernameStore={usernameStore}
         enrollmentStore={enrollmentStore}
       >
-        <SessionProvider api={api}>
-          <TranslationProvider api={api}>
-            <VocabularyProvider api={api}>
-              <View style={styles.root} {...rtlProps}>
-                <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-              </View>
-            </VocabularyProvider>
-          </TranslationProvider>
-        </SessionProvider>
+        <NextSessionProvider api={api}>
+          <SessionProvider api={api}>
+            <TranslationProvider api={api}>
+              <VocabularyProvider api={api}>
+                <View style={styles.root} {...rtlProps}>
+                  <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                </View>
+              </VocabularyProvider>
+            </TranslationProvider>
+          </SessionProvider>
+        </NextSessionProvider>
       </CurrentUserProvider>
     </SafeAreaProvider>
   );

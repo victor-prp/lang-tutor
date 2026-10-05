@@ -32,6 +32,14 @@ export const ScoreSchema = z.object({
   total: z.number().int(),
 });
 
+// Phase 19. A session's lifecycle: preparing → ready → completed, or skipped /
+// failed. "In progress" is not a status: it is `ready` with answers.
+export const SessionStatusSchema = z.enum(['preparing', 'ready', 'completed', 'skipped', 'failed']);
+
+// Where a session's questions came from: the shared seed, or the enrollment's
+// saved senses.
+export const SessionSourceSchema = z.enum(['seed', 'list']);
+
 export const MissedQuestionSchema = z.object({
   question: QuestionSchema,
   correct_answer: z.string(),
@@ -46,10 +54,22 @@ export const CreateSessionRequestSchema = z.object({
   enrollment_id: z.string().min(1),
 });
 
+// Phase 19. Creating a session no longer returns its first question: a list
+// session has none until its job has run. The app reads the session instead.
 export const CreateSessionResponseSchema = z.object({
   session_id: z.string(),
-  question: QuestionSchema,
+  status: SessionStatusSchema,
+  source: SessionSourceSchema,
+});
+
+// Phase 19. One session as resume and the poll read it. `question` is the
+// current one while the session is ready and unfinished, and null otherwise.
+export const SessionViewSchema = z.object({
+  session_id: z.string(),
+  status: SessionStatusSchema,
+  source: SessionSourceSchema,
   position: PositionSchema,
+  question: QuestionSchema.nullable(),
 });
 
 export const NextStepRequestSchema = z.object({
@@ -77,6 +97,28 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     missed_questions: z.array(MissedQuestionSchema),
   }),
 ]);
+
+// Phase 19. The home screen's one read. `current` is the enrollment's newest
+// session when it is preparing, ready or failed (never completed or skipped).
+// `total` is how many questions it holds, so 0 while preparing.
+export const CurrentSessionSchema = z.object({
+  session_id: z.string(),
+  status: SessionStatusSchema,
+  source: SessionSourceSchema,
+  answered: z.number().int(),
+  total: z.number().int(),
+});
+
+export const CurrentSessionResponseSchema = z.object({
+  current: CurrentSessionSchema.nullable(),
+  next_source: SessionSourceSchema,
+  saved_count: z.number().int(),
+});
+
+export const SkipSessionResponseSchema = z.object({
+  session_id: z.string(),
+  status: z.literal('skipped'),
+});
 
 // The failure body every endpoint can return. Until this phase this shape lived
 // only inside handler code; declaring it here is what lets each route publish
@@ -443,4 +485,14 @@ export const LlmReconciliationSchema = z.object({
   // Ranked FOR THE QUERIED FORM. Stored codes reused where the meaning matches;
   // a new code only for a reading the stored list does not contain.
   senses: z.array(LlmRenderingSchema).max(5),
+});
+
+// Phase 19. The model's answer when asked for a session's wrong options. `key`
+// is echoed from the request (q1, q2, …) rather than a sense id: a short key is
+// one the model cannot mistype. Exactly three per item, so the schema itself
+// says what a usable answer is.
+export const LlmDistractorsSchema = z.object({
+  items: z
+    .array(z.object({ key: z.string(), distractors: z.array(z.string()).length(3) }))
+    .max(10),
 });

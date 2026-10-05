@@ -563,3 +563,60 @@ export const RENDERING_CASES: RenderingCase[] = [
     expectReused: ['financial_institution', 'river_bank'],
   },
 ];
+
+/**
+ * Phase 19. One distractor call per case, as a list session makes it. Tier 1 is
+ * the contract: every item answered with three distinct wrong options, none the
+ * answer, all in the answer's script. Tier 2 is the failure that matters most
+ * to a learner, a "wrong" option that is right: `synonyms` lists known right
+ * answers that must never appear.
+ */
+export type DistractorCase = {
+  label: string;
+  from: LanguageCode;
+  to: LanguageCode;
+  items: {
+    form: string;
+    lemma: string;
+    partOfSpeech: PartOfSpeech;
+    translation: string;
+    synonyms: string[];
+  }[];
+};
+
+export const DISTRACTOR_CASES: DistractorCase[] = [
+  {
+    label: 'Russian words of four parts of speech',
+    from: 'ru',
+    to: 'he',
+    items: [
+      { form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', synonyms: ['סיימה לקרוא', 'קראה עד הסוף'] },
+      { form: 'окно', lemma: 'окно', partOfSpeech: 'noun', translation: 'חלון', synonyms: ['אשנב', 'צוהר'] },
+      { form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', synonyms: ['במהירות', 'חיש'] },
+      { form: 'красивая', lemma: 'красивый', partOfSpeech: 'adjective', translation: 'יפה', synonyms: ['נאה', 'יפהפייה'] },
+    ],
+  },
+  {
+    label: 'English everyday words, where synonyms are easy to offer',
+    from: 'en',
+    to: 'he',
+    items: [
+      { form: 'difficult', lemma: 'difficult', partOfSpeech: 'adjective', translation: 'קשה', synonyms: ['מסובך', 'מורכב'] },
+      { form: 'friend', lemma: 'friend', partOfSpeech: 'noun', translation: 'חבר', synonyms: ['ידיד', 'רע'] },
+      { form: 'to remember', lemma: 'remember', partOfSpeech: 'verb', translation: 'לזכור', synonyms: ['להיזכר', 'לא לשכוח'] },
+      { form: 'thank you', lemma: 'thank you', partOfSpeech: 'interjection', translation: 'תודה', synonyms: ['תודה רבה', 'תודה לך'] },
+    ],
+  },
+  {
+    label: 'Polysemous word saved as two senses in one batch',
+    from: 'ru',
+    to: 'he',
+    items: [
+      { form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', synonyms: ['קשת'] },
+      { form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'קשת', synonyms: ['בצל'] },
+      { form: 'ключ', lemma: 'ключ', partOfSpeech: 'noun', translation: 'מפתח', synonyms: ['מעיין'] },
+      { form: 'ключ', lemma: 'ключ', partOfSpeech: 'noun', translation: 'מעיין', synonyms: ['מפתח'] },
+      { form: 'окно', lemma: 'окно', partOfSpeech: 'noun', translation: 'חלון', synonyms: ['אשנב', 'צוהר'] },
+    ],
+  },
+];

@@ -3,6 +3,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import path from 'node:path';
 
 import type { Db } from './client';
+import { installJobs } from './jobs';
 
 export const MIGRATIONS_FOLDER = path.join(__dirname, 'migrations');
 
@@ -53,6 +54,10 @@ export async function runMigrationsFrom(db: Db, folder: string): Promise<void> {
   await db.execute(OPTIONS_VALIDATION_FUNCTION);
   await db.execute(CORRECTION_ALTERNATIVES_FUNCTION);
   await migrate(db, { migrationsFolder: folder });
+  // Phase 19. pg-boss's schema and queues, after the app's own tables. They
+  // share nothing, so the order is only about failing on the app's migration
+  // first.
+  await installJobs(db);
 }
 
 export async function runMigrations(db: Db): Promise<void> {

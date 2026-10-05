@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13)
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -52,6 +52,8 @@ the server's holds the session state machine only a server has (`step`, `Session
 | R7 | anywhere | — | `console` outside `logger.ts` and `index.ts`/`db/cli.ts` |
 | R10 | `providers/` | `fetch`, its own transport types, `errors`, `logger` | `routes/`, `services/`, `domain/`, `repo/`, `db/`, `app.ts`, `composition.ts` |
 | R11 | `providers/` | — | **anything, from anywhere but `composition.ts`** — every consumer depends on a contract type declared in `services/` (`LlmClient` is the first), and only the composition root knows which provider satisfies it |
+
+**Phase 19:** `src/worker.ts` is the second entry point beside `app.ts`, with the same obligation. It maps queue names to service calls and holds no logic. See [ADR 0007](adr-0007-background-jobs.md).
 
 R2 forbids `db/` outright, including the handle types. This is stricter than it
 looks and the reason is not stylistic: `Db` is `NodePgDatabase<typeof schema>`, so
