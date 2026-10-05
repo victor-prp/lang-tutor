@@ -409,7 +409,7 @@ export function buildPrompt(input: {
  * tolerance for a formatting habit, not for a wrong shape — the schema still
  * decides whether the content is acceptable.
  */
-function unfence(raw: string): string {
+export function unfence(raw: string): string {
   const fenced = raw.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
   return fenced ? fenced[1] : raw;
 }

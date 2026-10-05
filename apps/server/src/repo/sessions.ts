@@ -1,4 +1,4 @@
-import type { AnswerRecord, Question } from '@lang-tutor/core/api';
+import type { AnswerRecord, Question, SessionSource, SessionStatus } from '@lang-tutor/core/api';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
@@ -84,6 +84,8 @@ export function createSessionRepo(tx: Tx) {
           id: sessions.id,
           userId: sessions.userId,
           completedAt: sessions.completedAt,
+          status: sessions.status,
+          source: sessions.source,
         })
         .from(sessions)
         .where(eq(sessions.id, sessionId))
@@ -131,6 +133,8 @@ export function createSessionRepo(tx: Tx) {
         answers: answerRecords,
         complete: session.completedAt !== null,
         completed_at: session.completedAt === null ? null : session.completedAt.getTime(),
+        status: session.status as SessionStatus,
+        source: session.source as SessionSource,
       };
     },
 

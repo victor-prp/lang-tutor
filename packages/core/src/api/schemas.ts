@@ -32,6 +32,14 @@ export const ScoreSchema = z.object({
   total: z.number().int(),
 });
 
+// Phase 19. A session's lifecycle: preparing → ready → completed, or skipped /
+// failed. "In progress" is not a status: it is `ready` with answers.
+export const SessionStatusSchema = z.enum(['preparing', 'ready', 'completed', 'skipped', 'failed']);
+
+// Where a session's questions came from: the shared seed, or the enrollment's
+// saved senses.
+export const SessionSourceSchema = z.enum(['seed', 'list']);
+
 export const MissedQuestionSchema = z.object({
   question: QuestionSchema,
   correct_answer: z.string(),
@@ -443,4 +451,14 @@ export const LlmReconciliationSchema = z.object({
   // Ranked FOR THE QUERIED FORM. Stored codes reused where the meaning matches;
   // a new code only for a reading the stored list does not contain.
   senses: z.array(LlmRenderingSchema).max(5),
+});
+
+// Phase 19. The model's answer when asked for a session's wrong options. `key`
+// is echoed from the request (q1, q2, …) rather than a sense id: a short key is
+// one the model cannot mistype. Exactly three per item, so the schema itself
+// says what a usable answer is.
+export const LlmDistractorsSchema = z.object({
+  items: z
+    .array(z.object({ key: z.string(), distractors: z.array(z.string()).length(3) }))
+    .max(10),
 });
