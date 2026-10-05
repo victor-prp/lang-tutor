@@ -105,6 +105,7 @@ const word = (lexeme_id: string, over: Partial<VocabularyWord> = {}): Vocabulary
   headline: { sense_id: `s-${lexeme_id}`, translation: 't', form: lexeme_id },
   saved_count: 1,
   sense_count: 1,
+  level: 1,
   ...over,
 });
 

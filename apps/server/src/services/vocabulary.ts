@@ -6,10 +6,12 @@ import type {
   VocabularyPageQuery,
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
+import { LIVE_DIMENSIONS } from '@lang-tutor/core/domain';
 
 import {
   assemblePage,
   buildWordDetail,
+  cursorAfter,
   decodeCursor,
   encodeCursor,
   firstPerSense,
@@ -89,27 +91,36 @@ export function createVocabularyService({
     /**
      * Keyset pagination. One extra row is read to learn whether a next page
      * exists; the cursor is the last row KEPT — from the page rows, never from
-     * the assembled items, which may be one short (assemblePage's comment).
+     * the assembled items, which may be one short (assemblePage's comment). A
+     * cursor issued under another sort is refused: it names a position in a
+     * different order.
      */
     listWords: async (enrollmentId: string, query: VocabularyPageQuery): Promise<VocabularyPage> => {
       const limit = query.limit ?? DEFAULT_PAGE_SIZE;
+      const sort = query.sort ?? 'newest';
+      const level = query.level ?? null;
       const after = query.cursor === undefined ? null : decodeCursor(query.cursor);
-      if (query.cursor !== undefined && !after) throw new InvalidCursor();
+      if (query.cursor !== undefined && (!after || after.sort !== sort)) throw new InvalidCursor();
 
       return transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
-        const read = await repos.vocabulary.findWordsPage({ enrollmentId, limit: limit + 1, after });
+        const read = await repos.vocabulary.findWordsPage({
+          enrollmentId,
+          limit: limit + 1,
+          after,
+          sort,
+          level,
+          live: LIVE_DIMENSIONS,
+        });
         const rows = read.slice(0, limit);
         const summaries = await repos.vocabulary.findWordSummaries({
           enrollmentId,
           lexemeIds: rows.map((row) => row.lexemeId),
           sourceLanguage: enrolled.source_language,
         });
-        const last = rows[rows.length - 1];
         return {
           items: assemblePage(rows, summaries),
-          next_cursor:
-            read.length > limit ? encodeCursor({ savedAt: last.lastSavedAt, lexemeId: last.lexemeId }) : null,
+          next_cursor: read.length > limit ? encodeCursor(cursorAfter(sort, rows[rows.length - 1])) : null,
         };
       });
     },

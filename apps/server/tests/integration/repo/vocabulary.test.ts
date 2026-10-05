@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import { DIMENSIONS } from '@lang-tutor/core/domain';
+import { DIMENSIONS, LIVE_DIMENSIONS } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
-import { assemblePage } from '../../../src/domain/vocabulary';
+import { assemblePage, type VocabularyCursor } from '../../../src/domain/vocabulary';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createVocabularyRepo } from '../../../src/repo/vocabulary';
 import { insertLexeme } from '../../support/dictRows';
-import { readProgress } from '../../support/progressRows';
+import { insertProgressRows, readProgress, setLevel } from '../../support/progressRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -78,6 +78,9 @@ const pair = (sense: number, variant: number) => ({
   senseId: kite.senseIds[sense],
   variantId: kite.variantIds[variant],
 });
+
+// What every phase 18 test meant by a page: newest first, no filter.
+const NEWEST = { sort: 'newest' as const, level: null, live: LIVE_DIMENSIONS };
 
 describe('findSaveable', () => {
   const ask = (entries: { senseId: string; variantId: string }[], target = 'en', source = 'he') =>
@@ -162,6 +165,8 @@ async function saveAt(lexemeId: string, senseId: string, variantId: string, at: 
   await t.db.execute(sql`
     insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id, created_at)
     values (${E}, ${senseId}, ${lexemeId}, ${variantId}, ${at}::timestamptz)`);
+  // An entry with no progress rows has no level, and the list leaves it out.
+  await insertProgressRows(t.db, E, [senseId]);
 }
 
 async function lexemes(n: number) {
@@ -196,15 +201,16 @@ describe('findWordsPage', () => {
     await saveAt(b.lexemeId, b.senseId, b.variantId, '2026-10-04 12:00:00.000003+00');
     await saveAt(c.lexemeId, c.senseId, c.variantId, '2026-10-04 12:00:00.000002+00');
 
-    const first = await repo((r) => r.findWordsPage({ enrollmentId: E, limit: 2, after: null }));
+    const first = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 2, after: null }));
     expect(first.map((row) => row.lexemeId)).toEqual([b.lexemeId, c.lexemeId]);
 
     const last = first[first.length - 1];
     const rest = await repo((r) =>
       r.findWordsPage({
+        ...NEWEST,
         enrollmentId: E,
         limit: 2,
-        after: { savedAt: last.lastSavedAt, lexemeId: last.lexemeId },
+        after: { sort: 'newest', savedAt: last.lastSavedAt, lexemeId: last.lexemeId },
       }),
     );
     // Same millisecond, different microsecond: a Date-based cursor would lose `a`.
@@ -214,9 +220,75 @@ describe('findWordsPage', () => {
   it("groups a lexeme's senses into one row at its newest save", async () => {
     await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 13:00:00+00');
-    const page = await repo((r) => r.findWordsPage({ enrollmentId: E, limit: 50, after: null }));
+    const page = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 50, after: null }));
     expect(page).toHaveLength(1);
     expect(page[0].lastSavedAt).toMatch(/^2026-10-04 13:00:00/);
+  });
+
+  async function leveled(levels: number[]) {
+    const words = await lexemes(levels.length);
+    for (const [i, word] of words.entries()) {
+      await saveAt(word.lexemeId, word.senseId, word.variantId, `2026-10-04 12:00:0${i}+00`);
+      await setLevel(t.db, { enrollmentId: E, senseId: word.senseId, level: levels[i] });
+    }
+    return words.map((word) => word.lexemeId);
+  }
+  const wordsPage = (input: {
+    sort: 'newest' | 'level_asc' | 'level_desc';
+    level?: number | null;
+    after?: VocabularyCursor;
+    limit?: number;
+  }) =>
+    repo((r) =>
+      r.findWordsPage({
+        enrollmentId: E,
+        limit: input.limit ?? 50,
+        after: input.after ?? null,
+        sort: input.sort,
+        level: input.level ?? null,
+        live: LIVE_DIMENSIONS,
+      }),
+    );
+
+  it('gives each row its level', async () => {
+    const [w0] = await leveled([3]);
+    expect(await wordsPage({ sort: 'newest' })).toEqual([{ lexemeId: w0, lastSavedAt: expect.any(String), level: 3 }]);
+  });
+
+  it("averages a word's saved senses, rounding a tie up", async () => {
+    await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
+    await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:01+00');
+    await setLevel(t.db, { enrollmentId: E, senseId: kite.senseIds[TOY], level: 2 });
+    await setLevel(t.db, { enrollmentId: E, senseId: kite.senseIds[BIRD], level: 3 });
+    expect((await wordsPage({ sort: 'newest' }))[0].level).toBe(3);
+  });
+
+  it('reads only the live dimensions', async () => {
+    const [w] = await lexemes(1);
+    await saveAt(w.lexemeId, w.senseId, w.variantId, '2026-10-04 12:00:00+00');
+    await setLevel(t.db, { enrollmentId: E, senseId: w.senseId, level: 5, dimension: 'spelling' });
+    expect(await wordsPage({ sort: 'newest' })).toEqual([expect.objectContaining({ lexemeId: w.lexemeId, level: 1 })]);
+  });
+
+  it('sorts by level both ways, the newer save first within a level', async () => {
+    const [low, highOld, highNew, mid] = await leveled([1, 4, 4, 2]);
+    expect((await wordsPage({ sort: 'level_desc' })).map((r) => r.lexemeId)).toEqual([highNew, highOld, mid, low]);
+    expect((await wordsPage({ sort: 'level_asc' })).map((r) => r.lexemeId)).toEqual([low, mid, highNew, highOld]);
+  });
+
+  it('filters to one level under any sort', async () => {
+    const [, highOld, highNew] = await leveled([1, 4, 4, 2]);
+    expect((await wordsPage({ sort: 'newest', level: 4 })).map((r) => r.lexemeId)).toEqual([highNew, highOld]);
+    expect(await wordsPage({ sort: 'level_asc', level: 3 })).toEqual([]);
+  });
+
+  it.each(['level_asc', 'level_desc'] as const)('continues a %s walk strictly after its cursor', async (sort) => {
+    await leveled([2, 1, 2, 3, 1]);
+    const all = await wordsPage({ sort });
+    const first = await wordsPage({ sort, limit: 2 });
+    const last = first[first.length - 1];
+    const rest = await wordsPage({ sort, after: { sort, savedAt: last.lastSavedAt, lexemeId: last.lexemeId, level: last.level } });
+    expect([...first, ...rest].map((r) => r.lexemeId)).toEqual(all.map((r) => r.lexemeId));
   });
 });
 
@@ -280,7 +352,7 @@ describe('findWordSummaries', () => {
     await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     await t.db.execute(sql`delete from dict_var_translations
       where sense_id = ${kite.senseIds[BIRD]} and variant_id = ${kite.variantIds[KITE]}`);
-    const rows = await repo((r) => r.findWordsPage({ enrollmentId: E, limit: 50, after: null }));
+    const rows = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 50, after: null }));
     const summaries = await repo((r) =>
       r.findWordSummaries({
         enrollmentId: E,
@@ -354,7 +426,7 @@ describe('a repaired variant', () => {
     expect(await repo((r) => r.findSavedInLexeme({ enrollmentId: E, lexemeId: kite.lexemeId }))).toEqual([
       pair(TOY, KITES),
     ]);
-    const page = await repo((r) => r.findWordsPage({ enrollmentId: E, limit: 50, after: null }));
+    const page = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 50, after: null }));
     expect(page.map((row) => row.lexemeId)).toEqual([kite.lexemeId]);
     expect(
       await repo((r) =>

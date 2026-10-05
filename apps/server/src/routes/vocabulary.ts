@@ -50,12 +50,17 @@ const listRoute = createRoute({
   tags: ['vocabulary'],
   summary: "List an enrollment's words",
   description:
-    'One item per word (lexeme), newest save first, keyset-paginated: pass `next_cursor` back as ' +
-    '`cursor`. A word saved into again moves to the top; it is never served twice in one walk.',
+    'One item per word (lexeme), each with its level. Ordered newest save first by default, or by ' +
+    'level (`sort=level_asc` or `level_desc`, ties newest first); `level` keeps one level only. ' +
+    'Keyset-paginated: pass `next_cursor` back as `cursor`, with the same sort. A word saved into ' +
+    'again moves to the top; it is never served twice in one walk.',
   request: { params: enrollmentParams, query: VocabularyPageQuerySchema },
   responses: {
     200: json(VocabularyPageSchema, 'One page; `next_cursor` is null on the last.'),
-    400: json(ErrorSchema, '`limit` is outside 1–100, or `cursor` was not issued by this server.'),
+    400: json(
+      ErrorSchema,
+      '`limit` is outside 1–100, `sort` or `level` is not one of the published values, or `cursor` was not issued by this server under this sort.',
+    ),
     404: NOT_ENROLLED,
   },
 });

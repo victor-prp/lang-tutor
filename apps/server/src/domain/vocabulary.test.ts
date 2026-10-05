@@ -4,6 +4,7 @@ import {
   assemblePage,
   buildWordDetail,
   coversPair,
+  cursorAfter,
   decodeCursor,
   encodeCursor,
   firstPerSense,
@@ -15,7 +16,7 @@ import {
 describe('the cursor', () => {
   const cursorOf = (savedAt: string, lexemeId: string) =>
     Buffer.from(JSON.stringify([savedAt, lexemeId]), 'utf8').toString('base64url');
-  const cursor = { savedAt: '2026-10-04 12:00:00.123456+00', lexemeId: 'lx-1' };
+  const cursor = { sort: 'newest' as const, savedAt: '2026-10-04 12:00:00.123456+00', lexemeId: 'lx-1' };
 
   it('round-trips', () => {
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
@@ -28,12 +29,12 @@ describe('the cursor', () => {
       '2026-10-04 12:00:00+05:45',
       '2026-10-04 00:00:00-03:30',
     ]) {
-      expect(decodeCursor(cursorOf(savedAt, 'lx-1'))).toEqual({ savedAt, lexemeId: 'lx-1' });
+      expect(decodeCursor(cursorOf(savedAt, 'lx-1'))).toEqual({ sort: 'newest', savedAt, lexemeId: 'lx-1' });
     }
   });
 
   it('round-trips a whole second and an offset with minutes', () => {
-    const plain = { savedAt: '2026-10-04 12:00:00+05:30', lexemeId: 'lx-2' };
+    const plain = { sort: 'newest' as const, savedAt: '2026-10-04 12:00:00+05:30', lexemeId: 'lx-2' };
     expect(decodeCursor(encodeCursor(plain))).toEqual(plain);
   });
 
@@ -54,6 +55,50 @@ describe('the cursor', () => {
   ])('refuses %s', (_label, raw) => {
     expect(decodeCursor(raw)).toBeNull();
   });
+
+  // Review Focus 5: a phase 18 cursor an app already holds.
+  it('reads a two-element cursor as a newest-sort cursor', () => {
+    expect(decodeCursor(cursorOf('2026-10-04 12:00:00+00', 'lx-1'))).toEqual({
+      sort: 'newest',
+      savedAt: '2026-10-04 12:00:00+00',
+      lexemeId: 'lx-1',
+    });
+  });
+
+  it('round-trips a level-sort cursor', () => {
+    for (const sort of ['level_asc', 'level_desc'] as const) {
+      const levelCursor = { sort, savedAt: '2026-10-04 12:00:00.5+00', lexemeId: 'lx-3', level: 4 };
+      expect(decodeCursor(encodeCursor(levelCursor))).toEqual(levelCursor);
+    }
+  });
+
+  const fourOf = (sort: unknown, level: unknown) =>
+    Buffer.from(JSON.stringify(['2026-10-04 12:00:00+00', 'lx-1', sort, level]), 'utf8').toString('base64url');
+
+  it.each([
+    ['an unknown sort', fourOf('oldest', 2)],
+    ['newest in the four-element form', fourOf('newest', 2)],
+    ['level 0', fourOf('level_asc', 0)],
+    ['level 6', fourOf('level_asc', 6)],
+    ['a fractional level', fourOf('level_desc', 2.5)],
+    ['a level as a string', fourOf('level_desc', '2')],
+  ])('refuses a level cursor with %s', (_label, raw) => {
+    expect(decodeCursor(raw)).toBeNull();
+  });
+});
+
+describe('cursorAfter', () => {
+  const row = { lexemeId: 'lx-9', lastSavedAt: '2026-10-04 12:00:00+00', level: 2 };
+
+  it('carries the level only for a level sort', () => {
+    expect(cursorAfter('newest', row)).toEqual({ sort: 'newest', savedAt: row.lastSavedAt, lexemeId: 'lx-9' });
+    expect(cursorAfter('level_desc', row)).toEqual({
+      sort: 'level_desc',
+      savedAt: row.lastSavedAt,
+      lexemeId: 'lx-9',
+      level: 2,
+    });
+  });
 });
 
 const summary = (lexemeId: string, over: Partial<WordSummary> = {}): WordSummary => ({
@@ -71,8 +116,8 @@ const summary = (lexemeId: string, over: Partial<WordSummary> = {}): WordSummary
 describe('assemblePage', () => {
   it('keeps the page order, not the summaries order', () => {
     const rows = [
-      { lexemeId: 'b', lastSavedAt: 't2' },
-      { lexemeId: 'a', lastSavedAt: 't1' },
+      { lexemeId: 'b', lastSavedAt: 't2', level: 3 },
+      { lexemeId: 'a', lastSavedAt: 't1', level: 1 },
     ];
     const page = assemblePage(rows, [summary('a'), summary('b')]);
     expect(page.map((w) => w.lexeme_id)).toEqual(['b', 'a']);
@@ -83,6 +128,7 @@ describe('assemblePage', () => {
       headline: { sense_id: 's-b', translation: 'tr-b', form: 'form-b' },
       saved_count: 1,
       sense_count: 2,
+      level: 3,
     });
   });
 
@@ -90,8 +136,8 @@ describe('assemblePage', () => {
   // headline to show. It is dropped, not served half-empty.
   it('drops a page row with no summary', () => {
     const rows = [
-      { lexemeId: 'a', lastSavedAt: 't2' },
-      { lexemeId: 'gone', lastSavedAt: 't1' },
+      { lexemeId: 'a', lastSavedAt: 't2', level: 1 },
+      { lexemeId: 'gone', lastSavedAt: 't1', level: 1 },
     ];
     expect(assemblePage(rows, [summary('a')]).map((w) => w.lexeme_id)).toEqual(['a']);
   });

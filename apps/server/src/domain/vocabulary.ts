@@ -1,12 +1,16 @@
 import type {
   TranslationSense,
   VocabularyEntryInput,
+  VocabularySort,
   VocabularyWord,
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
+import { MAX_LEVEL, MIN_LEVEL } from '@lang-tutor/core/domain';
 
 /**
- * Where the next list page starts: the last row's newest save and its lexeme id.
+ * Where the next list page starts: the last row's newest save and its lexeme
+ * id, and under a level sort its level too. The sort is in the cursor so one
+ * replayed under another sort is refused rather than read as a wrong position.
  *
  * `savedAt` is Postgres's own text for a timestamptz, never a JS Date. A Date
  * keeps milliseconds and created_at keeps microseconds, so a cursor rounded down
@@ -14,7 +18,9 @@ import type {
  * repository prints it with `::text` and casts it back with `::timestamptz`, and
  * the round trip is exact.
  */
-export type VocabularyCursor = { savedAt: string; lexemeId: string };
+export type VocabularyCursor =
+  | { sort: 'newest'; savedAt: string; lexemeId: string }
+  | { sort: 'level_asc' | 'level_desc'; savedAt: string; lexemeId: string; level: number };
 
 // What `timestamptz::text` prints under DateStyle ISO: `2026-10-04 12:00:00.123456+00`.
 // Anything else is refused here, because the repository casts it with
@@ -40,10 +46,14 @@ function isRealTimestamptz(text: string): boolean {
   return day <= lastOfMonth.getUTCDate();
 }
 
+/** A newest-sort cursor keeps phase 18's two-element form, so a cursor an app
+ *  already holds stays valid. A level-sort cursor carries four elements. */
 export function encodeCursor(cursor: VocabularyCursor): string {
-  return Buffer.from(JSON.stringify([cursor.savedAt, cursor.lexemeId]), 'utf8').toString(
-    'base64url',
-  );
+  const fields =
+    cursor.sort === 'newest'
+      ? [cursor.savedAt, cursor.lexemeId]
+      : [cursor.savedAt, cursor.lexemeId, cursor.sort, cursor.level];
+  return Buffer.from(JSON.stringify(fields), 'utf8').toString('base64url');
 }
 
 /** `null` for anything this server did not issue. The caller turns that into a 400. */
@@ -54,18 +64,31 @@ export function decodeCursor(raw: string): VocabularyCursor | null {
   } catch {
     return null;
   }
-  if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-  const [savedAt, lexemeId] = parsed as unknown[];
+  if (!Array.isArray(parsed) || (parsed.length !== 2 && parsed.length !== 4)) return null;
+  const [savedAt, lexemeId, sort, level] = parsed as unknown[];
   if (typeof savedAt !== 'string' || !isRealTimestamptz(savedAt)) return null;
   // A NUL cannot be a Postgres text parameter: it would raise there, a 500.
   if (typeof lexemeId !== 'string' || lexemeId.length === 0 || lexemeId.includes('\u0000')) {
     return null;
   }
-  return { savedAt, lexemeId };
+  if (parsed.length === 2) return { sort: 'newest', savedAt, lexemeId };
+  if (sort !== 'level_asc' && sort !== 'level_desc') return null;
+  if (typeof level !== 'number' || !Number.isInteger(level) || level < MIN_LEVEL || level > MAX_LEVEL) {
+    return null;
+  }
+  return { sort, savedAt, lexemeId, level };
 }
 
-/** One row of the grouped keyset read, in page order. */
-export type WordPageRow = { lexemeId: string; lastSavedAt: string };
+/** One row of the grouped keyset read, in page order. `level` is the word's
+ *  badge: the rounded mean over its saved senses and the live dimensions. */
+export type WordPageRow = { lexemeId: string; lastSavedAt: string; level: number };
+
+/** The cursor that continues after `row` under `sort`. */
+export function cursorAfter(sort: VocabularySort, row: WordPageRow): VocabularyCursor {
+  return sort === 'newest'
+    ? { sort, savedAt: row.lastSavedAt, lexemeId: row.lexemeId }
+    : { sort, savedAt: row.lastSavedAt, lexemeId: row.lexemeId, level: row.level };
+}
 
 /** What the page's enrichment read returns per lexeme. Declared here rather than
  *  imported from the repository: R3 keeps this layer ignorant of Drizzle. */
@@ -107,6 +130,7 @@ export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): Voc
         },
         saved_count: s.savedCount,
         sense_count: s.senseCount,
+        level: row.level,
       },
     ];
   });

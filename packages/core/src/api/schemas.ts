@@ -349,6 +349,10 @@ export const SaveVocabularyResponseSchema = z.object({
 export const VocabularyPageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   cursor: z.string().min(1).optional(),
+  // Phase 20. Order, and one level only. A cursor carries the sort it was
+  // issued under, and the server refuses it under another.
+  sort: VocabularySortSchema.optional(),
+  level: z.coerce.number().int().min(1).max(5).optional(),
 });
 
 // One row per lexeme. `headline` is the lowest-ranked saved sense, in the
@@ -362,6 +366,8 @@ export const VocabularyWordSchema = z.object({
   headline: z.object({ sense_id: z.string(), translation: z.string(), form: z.string() }),
   saved_count: z.number().int(),
   sense_count: z.number().int(),
+  // Phase 20. The word's badge: the rounded mean over its saved senses and the live dimensions.
+  level: LevelSchema,
 });
 
 export const VocabularyPageSchema = z.object({
