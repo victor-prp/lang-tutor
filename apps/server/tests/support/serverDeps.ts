@@ -29,7 +29,7 @@ export function createTestServerDeps(io: {
   /** A started boss for tests that enqueue (startTestBoss). By default an
    *  unstarted one, so an unexpected enqueue fails loudly. */
   boss?: PgBoss;
-  /** Phase 19, wired in Task 8. */
+  /** Phase 19. The budget of one distractor call; defaults to production's. */
   sessionGenerationTimeoutMs?: number;
 }): AppDeps {
   return createServerDeps({
@@ -43,6 +43,7 @@ export function createTestServerDeps(io: {
       model: 'test-model',
     },
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
+    sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? 120_000,
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0 },
     boss: io.boss ?? unstartedBoss(io.db),
   });

@@ -48,6 +48,7 @@ export async function main(): Promise<void> {
     fetch: globalThis.fetch,
     gemini,
     translationTimeoutMs: config.translationTimeoutMs,
+    sessionGenerationTimeoutMs: config.sessionGenerationTimeoutMs,
     // Resolved here, in the one place that reads the environment: app.ts must
     // not learn that a lane exists.
     identity: {

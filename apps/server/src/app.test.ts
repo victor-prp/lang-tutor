@@ -27,6 +27,12 @@ const unreachableSessions: SessionService = {
   submitAnswer: () => {
     throw new Error('the health route must not reach the session service');
   },
+  prepareSession: () => {
+    throw new Error('the health route must not reach the session service');
+  },
+  failPreparation: () => {
+    throw new Error('the health route must not reach the session service');
+  },
 };
 
 const unreachableUsers: UserService = {

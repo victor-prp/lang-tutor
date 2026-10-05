@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { createFakeLogger } from '../../tests/support/fakes';
+import { createFakeLlmClient, createFakeLogger } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import { SessionNotFound } from '../errors';
 import type { QuestionRepo } from '../repo/questions';
@@ -145,6 +145,7 @@ describe('repos', () => {
       transaction: fakeTransaction(sessionRepoWith({ loadSession: async () => undefined })),
       rng: testRng(7),
       logger: createFakeLogger(),
+      llm: createFakeLlmClient(''),
     });
 
     await expect(

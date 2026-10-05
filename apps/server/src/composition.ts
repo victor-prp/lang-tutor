@@ -57,6 +57,9 @@ export function createServerDeps(io: {
   // inject a short budget instead of paying a slow provider's delay in
   // wall-clock time — see config.ts's TRANSLATION_TIMEOUT_MS default.
   translationTimeoutMs: number;
+  // Phase 19. The budget of one distractor call: a session's whole batch is one
+  // long answer, so it gets its own, longer than a lookup's.
+  sessionGenerationTimeoutMs: number;
   identity: ServerIdentity;
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
@@ -87,8 +90,18 @@ export function createServerDeps(io: {
     timeoutMs: io.translationTimeoutMs,
   });
 
+  // Phase 19. The same provider with its own budget: a session's distractors
+  // are one long answer, and a lookup's 25 s would cut it off.
+  const sessionLlm: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.sessionGenerationTimeoutMs,
+  });
+
   return {
-    sessions: createSessionService({ transaction, rng: io.rng, logger: io.logger }),
+    sessions: createSessionService({ transaction, rng: io.rng, logger: io.logger, llm: sessionLlm }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations: createTranslationService({ llm, transaction, logger: io.logger }),

@@ -57,6 +57,8 @@ export function createFakeAppDeps(): AppDeps {
     currentSession: unreachable,
     skipSession: unreachable,
     submitAnswer: unreachable,
+    prepareSession: unreachable,
+    failPreparation: unreachable,
   };
   const users: UserService = {
     register: unreachable,

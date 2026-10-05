@@ -18,6 +18,7 @@ describe('loadConfig', () => {
       port: 3001,
       poolMax: 5,
       translationTimeoutMs: 25_000,
+      sessionGenerationTimeoutMs: 120_000,
     });
   });
 
@@ -36,6 +37,7 @@ describe('loadConfig', () => {
       port: 8080,
       poolMax: 20,
       translationTimeoutMs: 12_000,
+      sessionGenerationTimeoutMs: 120_000,
     });
   });
 
@@ -43,6 +45,11 @@ describe('loadConfig', () => {
     expect(loadConfig({ PORT: 'nonsense', PG_POOL_MAX: '' }).port).toBe(3001);
     expect(loadConfig({ PORT: 'nonsense', PG_POOL_MAX: '' }).poolMax).toBe(5);
     expect(loadConfig({ TRANSLATION_TIMEOUT_MS: 'nonsense' }).translationTimeoutMs).toBe(25_000);
+  });
+
+  it('defaults the session generation budget to 120 s and reads SESSION_GENERATION_TIMEOUT_MS', () => {
+    expect(loadConfig({}).sessionGenerationTimeoutMs).toBe(120_000);
+    expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '5000' }).sessionGenerationTimeoutMs).toBe(5_000);
   });
 
   it('still works with no Gemini settings at all, so db:migrate is unaffected', () => {
