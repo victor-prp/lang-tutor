@@ -140,7 +140,10 @@ describe('insertEntries and deleteEntry', () => {
     await repo((r) => r.deleteEntry({ enrollmentId: E, senseId: kite.senseIds[TOY] }));
     expect(await readProgress(t.db, E)).toEqual([]);
     await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
-    expect((await readProgress(t.db, E)).every((row) => row.level === 1)).toBe(true);
+    // The count first: `every` is true of an empty array.
+    const rows = await readProgress(t.db, E);
+    expect(rows).toHaveLength(5);
+    expect(rows.every((row) => row.level === 1)).toBe(true);
   });
 
   it('deletes idempotently', async () => {

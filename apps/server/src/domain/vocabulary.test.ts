@@ -286,7 +286,7 @@ describe('buildWordDetail', () => {
     expect(detail.senses[1]).not.toHaveProperty('progress');
   });
 
-  it("gives the word the rounded mean of its saved senses' badges, ties up", () => {
+  it("gives the word one flat mean over every saved sense's live-dimension levels, rounded once, ties up", () => {
     const detail = buildWordDetail(
       LEXEME,
       [rendering({ senseId: 's1' }), rendering({ senseId: 's2' })],

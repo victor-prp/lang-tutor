@@ -87,6 +87,10 @@ describe('findSessionEvidence', () => {
   });
 
   // Review Focus 1: a session across UTC midnight counts for its last answer's day.
+  // The read runs under a session TimeZone that is not UTC: the test database is
+  // UTC, so a dropped `AT TIME ZONE 'UTC'` would otherwise change nothing. In
+  // Sao Paulo the last answer is 2026-10-05 21:01, and only the explicit zone
+  // makes it the 6th.
   it('dates a session by the UTC day of its last answer', async () => {
     const sessionId = await insertAnsweredSession(t.db, {
       userId: 'u_1',
@@ -98,7 +102,11 @@ describe('findSessionEvidence', () => {
         { position: 1, correct: true, at: '2026-10-05 21:01:00-03' },
       ],
     });
-    expect((await repo((r) => r.findSessionEvidence(sessionId)))?.day).toBe('2026-10-06');
+    const evidence = await withTx(t.db, async (tx) => {
+      await tx.execute(sql`SET LOCAL TimeZone = 'America/Sao_Paulo'`);
+      return createProgressRepo(tx).findSessionEvidence(sessionId);
+    });
+    expect(evidence?.day).toBe('2026-10-06');
   });
 
   it('answers undefined for a session with no answers', async () => {
@@ -204,12 +212,17 @@ describe("the recompute's reads", () => {
         rows: [{ senseId: kite.senseIds[0], dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 }],
       }),
     );
-    await t.db.execute(sql`update sense_progress set level = 4, last_step_on = '2026-10-02'`);
+    await t.db.execute(
+      sql`update sense_progress set level = 4, last_step_on = '2026-10-02', last_wrong_on = '2026-10-01'`,
+    );
     expect(await readSnapshot(t.db, sessionId)).toHaveLength(1);
 
     await repo((r) => r.resetAll());
 
-    expect((await readProgress(t.db, E)).every((row) => row.level === 1 && row.lastStepOn === null)).toBe(true);
+    // The count first: `every` is true of an empty array.
+    const rows = await readProgress(t.db, E);
+    expect(rows).toHaveLength(5);
+    expect(rows.every((row) => row.level === 1 && row.lastStepOn === null && row.lastWrongOn === null)).toBe(true);
     expect(await readSnapshot(t.db, sessionId)).toEqual([]);
   });
 
