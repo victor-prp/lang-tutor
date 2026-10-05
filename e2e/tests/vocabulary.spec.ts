@@ -1,38 +1,12 @@
-import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { clearGemini, expectGemini } from './support/mockServer';
+import { lookUp, tapUntil } from './support/interactions';
+import { LUK, PROCHITALA } from './support/lexemes';
+import { clearGemini } from './support/mockServer';
 import { createLearner, logIn } from './support/users';
 
 test.setTimeout(180_000);
 
-// Strings the seed does not contain, so each lookup reaches MockServer once and
-// is written to the e2e database. The lexemes are new, so no reconciliation call.
-const PROCHITALA = {
-  kind: 'word' as const,
-  entries: [
-    {
-      lemma: 'прочитать',
-      part_of_speech: 'verb',
-      senses: [
-        { translation: 'קראה', sense_code: 'read_through' },
-        { translation: 'הקריאה', sense_code: 'read_aloud' },
-      ],
-    },
-  ],
-};
-const LUK = {
-  kind: 'word' as const,
-  entries: [
-    {
-      lemma: 'лук',
-      part_of_speech: 'noun',
-      senses: [
-        { translation: 'בצל', sense_code: 'onion' },
-        { translation: 'קשת', sense_code: 'bow' },
-      ],
-    },
-  ],
-};
 const BATZAL = {
   kind: 'word' as const,
   entries: [{ lemma: 'בצל', part_of_speech: 'noun', senses: [{ translation: 'лук', sense_code: 'onion' }] }],
@@ -42,27 +16,12 @@ test.beforeEach(async ({ request }) => {
   await clearGemini(request);
 });
 
-// Retried: a static export serves markup before React hydrates, so an early click
-// is a silent no-op (the pattern session.spec.ts and translate.spec.ts use).
-async function tapUntil(page: Page, testId: string, visible: string) {
-  await expect(async () => {
-    await page.getByTestId(testId).click();
-    await expect(page.getByTestId(visible).first()).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
-}
-
-async function lookUp(page: Page, request: APIRequestContext, text: string, payload: unknown) {
-  await clearGemini(request);
-  await expectGemini(request, payload as Parameters<typeof expectGemini>[1]);
-  await page.getByTestId('translate-input').fill(text);
-  await page.getByTestId('translate-submit').click();
-  await expect(page.getByTestId('translate-sense').first()).toBeVisible();
-}
-
 // A toggle or save-all flips its label optimistically, so the label proves
 // nothing about the write. Wait for the vocabulary POST/DELETE itself to
 // answer before anything navigates or reloads the list; callers then also
 // wait for the toggle to be enabled again (it is disabled while in flight).
+// Local, not in support/interactions.ts: that one waits for a POST only, and this
+// spec also unsaves.
 async function tapAndWaitForWrite(page: Page, button: Locator) {
   const written = page.waitForResponse(
     (res) =>

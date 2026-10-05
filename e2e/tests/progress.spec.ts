@@ -1,69 +1,20 @@
-import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
-import { clearGemini, expectGemini, expectGeminiPayload } from './support/mockServer';
+import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
+import { LUK, PROCHITALA } from './support/lexemes';
+import { clearGemini, expectGeminiPayload } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { createLearner, logIn } from './support/users';
 
 test.setTimeout(180_000);
 
-// The same new lexemes next-session.spec.ts uses: four senses, two words.
-const PROCHITALA = {
-  kind: 'word' as const,
-  entries: [
-    {
-      lemma: 'прочитать',
-      part_of_speech: 'verb',
-      senses: [
-        { translation: 'קראה', sense_code: 'read_through' },
-        { translation: 'הקריאה', sense_code: 'read_aloud' },
-      ],
-    },
-  ],
-};
-const LUK = {
-  kind: 'word' as const,
-  entries: [
-    {
-      lemma: 'лук',
-      part_of_speech: 'noun',
-      senses: [
-        { translation: 'בצל', sense_code: 'onion' },
-        { translation: 'קשת', sense_code: 'bow' },
-      ],
-    },
-  ],
-};
+const DIMENSIONS = ['written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling'];
 const WRONG = ['דלת', 'קיר', 'תקרה'];
 const DISTRACTORS = {
   items: Array.from({ length: 10 }, (_, i) => ({ key: `q${i + 1}`, distractors: WRONG })),
 };
-
-// Retried: a static export serves markup before React hydrates, so an early
-// click is a silent no-op (the pattern the other specs use).
-async function tapUntil(page: Page, testId: string, visible: string) {
-  await expect(async () => {
-    await page.getByTestId(testId).click();
-    await expect(page.getByTestId(visible).first()).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
-}
-
-async function lookUp(page: Page, request: APIRequestContext, text: string, payload: unknown) {
-  await clearGemini(request);
-  await expectGemini(request, payload as Parameters<typeof expectGemini>[1]);
-  await page.getByTestId('translate-input').fill(text);
-  await page.getByTestId('translate-submit').click();
-  await expect(page.getByTestId('translate-sense').first()).toBeVisible();
-}
-
-async function tapAndWaitForWrite(page: Page, button: Locator) {
-  const written = page.waitForResponse(
-    (res) => /\/api\/enrollments\/[^/]+\/vocabulary/.test(res.url()) && res.request().method() === 'POST',
-  );
-  await button.click();
-  expect((await written).ok()).toBe(true);
-}
 
 test('a session moves the words it practised up the ladder, and the list sorts and filters by level', async ({
   page,
@@ -122,11 +73,12 @@ test('a session moves the words it practised up the ladder, and the list sorts a
   await expect(words.filter({ hasText: 'лук' }).getByTestId('vocabulary-word-level-name')).toHaveText('נחשפה');
   await expect(words.filter({ hasText: 'прочитать' }).getByTestId('vocabulary-word-level-name')).toHaveText('חדשה');
 
-  // 5. Sort both ways.
-  await page.getByTestId('vocabulary-sort-level_desc').click();
-  await expect(words.first()).toContainText('лук');
+  // 5. Sort both ways. The default order puts лук (saved second) first, so ascending
+  // is the first tap that has to change the order and descending the second.
   await page.getByTestId('vocabulary-sort-level_asc').click();
   await expect(words.first()).toContainText('прочитать');
+  await page.getByTestId('vocabulary-sort-level_desc').click();
+  await expect(words.first()).toContainText('лук');
 
   // 6. Filter, an empty level, and clearing it.
   await page.getByTestId('vocabulary-level-2').click();
@@ -142,8 +94,16 @@ test('a session moves the words it practised up the ladder, and the list sorts a
   // 7. A word's detail: five dimensions, one live.
   await words.filter({ hasText: 'лук' }).click();
   await expect(page.getByTestId('vocabulary-sense-level')).toHaveCount(2);
+  // Each of the two saved senses shows all five dimensions, and one is live: the
+  // other four read "not practised yet" (8 of 10).
+  for (const dimension of DIMENSIONS) {
+    await expect(page.getByTestId(`vocabulary-dimension-${dimension}`)).toHaveCount(2);
+  }
+  const dimensionRows = page.locator('[data-testid^="vocabulary-dimension-"]');
+  await expect(dimensionRows).toHaveCount(10);
   await expect(page.getByTestId('vocabulary-dimension-written_receptive').first()).toContainText('נחשפה');
   await expect(page.getByTestId('vocabulary-dimension-spelling').first()).toContainText('טרם תורגל');
+  await expect(dimensionRows.filter({ hasText: 'טרם תורגל' })).toHaveCount(8);
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
