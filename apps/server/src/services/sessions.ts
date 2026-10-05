@@ -280,9 +280,14 @@ export function createSessionService({
     },
 
     /** The dead-letter handler: retries are spent or the job expired. Marks the
-     *  session failed only while it is still preparing, so a skip stays a skip. */
+     *  session failed only while it is still preparing, so a skip stays a skip.
+     *  It parses the session id alone: a payload prepareSession refused on every
+     *  attempt (an older deploy, a hand-made job) reaches here unchanged, and
+     *  refusing it again would leave the session preparing forever. */
     failPreparation: async (data: unknown): Promise<void> => {
-      const { session_id: sessionId } = PrepareSessionPayloadSchema.parse(data);
+      const { session_id: sessionId } = PrepareSessionPayloadSchema.pick({
+        session_id: true,
+      }).parse(data);
       const marked = await transaction(({ session }) =>
         session.transition(sessionId, ['preparing'], 'failed'),
       );

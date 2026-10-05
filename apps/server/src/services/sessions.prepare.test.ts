@@ -116,6 +116,9 @@ describe('prepareSession', () => {
     const partial = world({ context: CONTEXT.slice(1), reply: JSON.stringify({ items: [{ key: 'q1', distractors: ['שום', 'גזר', 'כרוב'] }] }) });
     await partial.service.prepareSession(PAYLOAD);
     expect(JSON.parse(partial.llm.calls[0].user).items).toHaveLength(1);
+    const [written] = partial.calls.generated as { questions: unknown[] }[];
+    expect(written.questions).toHaveLength(1);
+    expect(partial.calls.sessionQuestions[0]).toHaveLength(1);
 
     const none = world({ context: [] });
     await expect(none.service.prepareSession(PAYLOAD)).rejects.toBeInstanceOf(InvalidDistractors);
@@ -139,6 +142,12 @@ describe('prepareSession', () => {
     await expect(world({ reply: 'nope' }).service.prepareSession(PAYLOAD)).rejects.toBeInstanceOf(InvalidDistractors);
   });
 
+  it('throws, writing nothing, when the model call fails', async () => {
+    const { service, calls } = world({ reply: new Error('provider down') });
+    await expect(service.prepareSession(PAYLOAD)).rejects.toThrow('provider down');
+    expect(calls.transitions).toEqual([]);
+  });
+
   it('rejects a payload that is not one (an older deploy, a hand-made job)', async () => {
     await expect(world({}).service.prepareSession({ session_id: SESSION })).rejects.toThrow();
   });
@@ -148,6 +157,14 @@ describe('failPreparation', () => {
   it('marks failed only from preparing', async () => {
     const { service, calls } = world({});
     await service.failPreparation(PAYLOAD);
+    expect(calls.transitions).toEqual(['preparing→failed']);
+  });
+
+  // The dead-letter job carries the data prepareSession refused. If this threw
+  // too, the session would stay preparing forever.
+  it('still marks failed when the payload has no picks', async () => {
+    const { service, calls } = world({});
+    await service.failPreparation({ session_id: SESSION });
     expect(calls.transitions).toEqual(['preparing→failed']);
   });
 });
