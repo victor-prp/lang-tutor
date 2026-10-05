@@ -1,13 +1,47 @@
+import type { VocabularySort } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LevelBadge } from '@/components/LevelBadge';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useVocabulary } from '@/hooks/useVocabulary';
+import { nextLevelFilter } from '@/progress';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 import { showsMark } from '@/vocabulary';
+
+const SORTS: { sort: VocabularySort; label: string }[] = [
+  { sort: 'newest', label: strings.sortNewest },
+  { sort: 'level_asc', label: strings.sortLevelAsc },
+  { sort: 'level_desc', label: strings.sortLevelDesc },
+];
+const LEVELS = [1, 2, 3, 4, 5];
+
+function Chip({
+  label,
+  selected,
+  onPress,
+  testID,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      testID={testID}
+      onPress={onPress}
+      style={[styles.chip, selected && styles.chipSelected]}
+    >
+      <Text style={[styles.chipLabel, selected && styles.chipLabelSelected]}>{label}</Text>
+    </Pressable>
+  );
+}
 
 export default function VocabularyScreen() {
   const { active } = useCurrentUser();
@@ -33,6 +67,29 @@ export default function VocabularyScreen() {
         <Text style={styles.notice}>{strings.vocabularyLoadFailed}</Text>
       ) : null}
 
+      <View style={styles.chips}>
+        {SORTS.map(({ sort, label }) => (
+          <Chip
+            key={sort}
+            testID={`vocabulary-sort-${sort}`}
+            label={label}
+            selected={v.query.sort === sort}
+            onPress={() => v.setQuery({ ...v.query, sort })}
+          />
+        ))}
+      </View>
+      <View style={styles.chips}>
+        {LEVELS.map((level) => (
+          <Chip
+            key={level}
+            testID={`vocabulary-level-${level}`}
+            label={strings.levelName(level)}
+            selected={v.query.level === level}
+            onPress={() => v.setQuery({ ...v.query, level: nextLevelFilter(v.query.level, level) })}
+          />
+        ))}
+      </View>
+
       <FlatList
         data={v.words}
         keyExtractor={(word) => word.lexeme_id}
@@ -42,14 +99,18 @@ export default function VocabularyScreen() {
         onRefresh={v.reload}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
-          v.status === 'ready' ? (
+          v.status !== 'ready' ? null : v.query.level !== null ? (
+            <View testID="vocabulary-empty-level" style={styles.empty}>
+              <Text style={styles.notice}>{strings.vocabularyEmptyLevel}</Text>
+            </View>
+          ) : (
             <View testID="vocabulary-empty" style={styles.empty}>
               <Text style={styles.notice}>{strings.vocabularyEmpty}</Text>
               <Pressable accessibilityRole="button" onPress={() => router.push('/translate')}>
                 <Text style={styles.link}>{strings.vocabularyGoTranslate}</Text>
               </Pressable>
             </View>
-          ) : null
+          )
         }
         renderItem={({ item }) => {
           const partOfSpeech = strings.partOfSpeech(item.part_of_speech);
@@ -68,6 +129,7 @@ export default function VocabularyScreen() {
                   </Text>
                 ) : null}
               </View>
+              <LevelBadge level={item.level} testID="vocabulary-word-level" />
               {partOfSpeech ? <Text style={styles.meta}>{partOfSpeech}</Text> : null}
               <Text style={styles.translation}>{item.headline.translation}</Text>
             </Pressable>
@@ -97,6 +159,17 @@ const styles = StyleSheet.create({
   mark: { fontSize: fontSizes.sm, color: colors.muted },
   meta: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
   translation: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text, writingDirection: 'rtl' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  chip: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipLabel: { fontSize: fontSizes.sm, color: colors.text },
+  chipLabelSelected: { color: colors.onPrimary, fontWeight: '700' },
   empty: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },
   notice: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl', textAlign: 'center' },
 });

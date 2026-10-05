@@ -1,10 +1,13 @@
 import type { VocabularyWordDetail } from '@lang-tutor/core/api';
+import { LIVE_DIMENSIONS } from '@lang-tutor/core/domain';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LevelBadge } from '@/components/LevelBadge';
 import { useVocabulary } from '@/hooks/useVocabulary';
+import { dimensionRows } from '@/progress';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 import { toggleOptimistically } from '@/vocabulary';
@@ -80,6 +83,7 @@ export default function VocabularyWordScreen() {
       ) : (
         <ScrollView contentContainerStyle={styles.list}>
           <Text style={styles.lemma}>{word.lemma}</Text>
+          {word.level !== null ? <LevelBadge level={word.level} testID="vocabulary-detail-level" /> : null}
           {strings.partOfSpeech(word.part_of_speech) ? (
             <Text style={styles.meta}>{strings.partOfSpeech(word.part_of_speech)}</Text>
           ) : null}
@@ -93,6 +97,17 @@ export default function VocabularyWordScreen() {
                 <View style={styles.example}>
                   <Text style={styles.exampleSource}>{sense.example.source}</Text>
                   <Text style={styles.meta}>{sense.example.target}</Text>
+                </View>
+              ) : null}
+              {sense.saved && sense.progress ? (
+                <View style={styles.progress}>
+                  <LevelBadge level={sense.progress.level} testID="vocabulary-sense-level" />
+                  {dimensionRows(sense.progress, LIVE_DIMENSIONS).map(({ dimension, level }) => (
+                    <View key={dimension} style={styles.dimensionRow} testID={`vocabulary-dimension-${dimension}`}>
+                      <Text style={styles.meta}>{strings.dimensionName(dimension)}</Text>
+                      <Text style={styles.meta}>{level === null ? strings.notPractised : strings.levelName(level)}</Text>
+                    </View>
+                  ))}
                 </View>
               ) : null}
               <Pressable
@@ -131,6 +146,8 @@ const styles = StyleSheet.create({
   },
   translation: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, writingDirection: 'rtl' },
   example: { gap: spacing.xs },
+  progress: { gap: spacing.xs },
+  dimensionRow: { flexDirection: 'row', justifyContent: 'space-between' },
   exampleSource: { fontSize: fontSizes.md, color: colors.text },
   // Same look as translate.tsx: unsaved is a filled primary button, saved is
   // outlined with a primary label (white on the near-white ground is unreadable).

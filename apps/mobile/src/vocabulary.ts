@@ -66,8 +66,10 @@ export async function toggleOptimistically(toggle: OptimisticToggle): Promise<bo
 }
 
 /** A word can move to the top between pages and be served on a refresh while an
- *  older copy is loaded; the server never serves one twice in a walk, but a
- *  refresh racing a scroll can. The first copy stays. */
+ *  older copy is loaded. Under the newest sort the server never serves one twice
+ *  in a walk, but a refresh racing a scroll can. Under a level sort a word whose
+ *  level changes mid-walk may be served again, or passed over; dropping repeats
+ *  by lexeme id makes the first harmless. The first copy stays. */
 export function appendPage(loaded: VocabularyWord[], page: VocabularyWord[]): VocabularyWord[] {
   const seen = new Set(loaded.map((word) => word.lexeme_id));
   return [...loaded, ...page.filter((word) => !seen.has(word.lexeme_id))];
