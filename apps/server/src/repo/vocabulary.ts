@@ -127,8 +127,11 @@ export const vocabularyQueries = {
    *
    * The timestamp goes out as `::text` and comes back with `::timestamptz` —
    * microseconds intact; see VocabularyCursor. The comparison is strictly
-   * "after the cursor", so a word that moves between pages is never served
-   * twice in one walk.
+   * "after the cursor". Under the newest sort a word saved into again only
+   * moves to the top, behind the cursor, so it is never served twice in one
+   * walk. Under a level sort its key moves both ways mid-walk (a save lowers
+   * the mean, a finished session raises it), so a word whose level changes may
+   * be served again or passed over.
    */
   wordsPage: (input: {
     enrollmentId: string;

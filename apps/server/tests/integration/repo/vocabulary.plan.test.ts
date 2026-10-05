@@ -18,7 +18,7 @@ const WATCHED = ['vocabulary_entries', 'dict_var_translations', 'sense_progress'
 const HEAVY = 'pe1';
 const BUDGET_MS = 50;
 
-type PlanNode = { 'Node Type': string; 'Relation Name'?: string; Plans?: PlanNode[] };
+type PlanNode = { 'Node Type': string; 'Relation Name'?: string; 'Index Name'?: string; Plans?: PlanNode[] };
 type Explained = { Plan: PlanNode; 'Execution Time': number };
 
 let t: TestDb;
@@ -100,8 +100,27 @@ const seqScans = (plan: Explained) =>
     .filter((n) => n['Node Type'] === 'Seq Scan' && WATCHED.includes(n['Relation Name'] ?? ''))
     .map((n) => n['Relation Name']);
 
+const indexesUsed = (plan: Explained) => nodes(plan.Plan).flatMap((n) => (n['Index Name'] ? [n['Index Name']] : []));
+
 const FIRST_50 = Array.from({ length: 50 }, (_, i) => `pl${i + 1}`);
 const PAGE = { enrollmentId: HEAVY, limit: 51, level: null, live: LIVE_DIMENSIONS };
+
+// Every shape of the list page. Each reads progress through the covering index.
+const WORDS_PAGES: [string, () => SQL][] = [
+  ['wordsPage, first page', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'newest', after: null })],
+  ['wordsPage, after a cursor', () => vocabularyQueries.wordsPage({
+    ...PAGE,
+    sort: 'newest',
+    after: { sort: 'newest', savedAt: '2000-01-01 00:00:00+00', lexemeId: 'pl1' },
+  })],
+  ['wordsPage, level_asc first page', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'level_asc', after: null })],
+  ['wordsPage, level_desc after a cursor', () => vocabularyQueries.wordsPage({
+    ...PAGE,
+    sort: 'level_desc',
+    after: { sort: 'level_desc', level: 3, savedAt: '2000-01-01 00:00:00+00', lexemeId: 'pl1' },
+  })],
+  ['wordsPage, one level', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'newest', level: 2, after: null })],
+];
 
 describe('every vocabulary read at volume', () => {
   it.each([
@@ -114,19 +133,7 @@ describe('every vocabulary read at volume', () => {
       enrollmentId: HEAVY,
       senseIds: ['ps1', 'ps2', 'ps3', 'ps4', 'ps5'],
     })],
-    ['wordsPage, first page', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'newest', after: null })],
-    ['wordsPage, after a cursor', () => vocabularyQueries.wordsPage({
-      ...PAGE,
-      sort: 'newest',
-      after: { sort: 'newest', savedAt: '2000-01-01 00:00:00+00', lexemeId: 'pl1' },
-    })],
-    ['wordsPage, level_asc first page', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'level_asc', after: null })],
-    ['wordsPage, level_desc after a cursor', () => vocabularyQueries.wordsPage({
-      ...PAGE,
-      sort: 'level_desc',
-      after: { sort: 'level_desc', level: 3, savedAt: '2000-01-01 00:00:00+00', lexemeId: 'pl1' },
-    })],
-    ['wordsPage, one level', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'newest', level: 2, after: null })],
+    ...WORDS_PAGES,
     ['wordSummaries', () => vocabularyQueries.wordSummaries({
       enrollmentId: HEAVY,
       lexemeIds: FIRST_50,
@@ -137,6 +144,13 @@ describe('every vocabulary read at volume', () => {
   ])('%s scans no watched table sequentially', async (_name, build) => {
     const plan = await explain(build());
     expect(seqScans(plan)).toEqual([]);
+  });
+
+  // The scan check alone is not enough: a bitmap scan on sense_progress_pkey
+  // dodges it, and the budget below is met without the index (35 ms measured).
+  it.each(WORDS_PAGES)('%s reads progress through sense_progress_enrollment_dimension_idx', async (_name, build) => {
+    const plan = await explain(build());
+    expect(indexesUsed(plan)).toContain('sense_progress_enrollment_dimension_idx');
   });
 
   // Save and unsave, spec §3: a primary-key insert and a primary-key delete,

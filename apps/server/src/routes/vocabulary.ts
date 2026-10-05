@@ -52,8 +52,9 @@ const listRoute = createRoute({
   description:
     'One item per word (lexeme), each with its level. Ordered newest save first by default, or by ' +
     'level (`sort=level_asc` or `level_desc`, ties newest first); `level` keeps one level only. ' +
-    'Keyset-paginated: pass `next_cursor` back as `cursor`, with the same sort. A word saved into ' +
-    'again moves to the top; it is never served twice in one walk.',
+    'Keyset-paginated: pass `next_cursor` back as `cursor`, with the same sort. Under the newest ' +
+    'sort a word saved into again moves to the top and is never served twice in one walk; under a ' +
+    'level sort a word whose level changes mid-walk may be served again or passed over.',
   request: { params: enrollmentParams, query: VocabularyPageQuerySchema },
   responses: {
     200: json(VocabularyPageSchema, 'One page; `next_cursor` is null on the last.'),
