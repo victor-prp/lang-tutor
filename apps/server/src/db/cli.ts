@@ -6,6 +6,7 @@ import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, listLaneDatabases } from './lanes';
 import { runMigrations } from './migrate';
+import { recomputeProgress } from './progressRecompute';
 import { reseedContent } from './reseed';
 import { seedContent } from './seed';
 import {
@@ -174,6 +175,14 @@ async function main(): Promise<void> {
     }
 
     await runMigrations(db);
+
+    // Phase 20. After migrating, so the progress tables exist; before the seed,
+    // which a recompute has no reason to touch.
+    if (process.argv.includes('--recompute-progress')) {
+      const { sessions } = await recomputeProgress(db);
+      console.log(`recomputed progress in ${databaseUrl} from ${sessions} ended sessions`);
+      return;
+    }
 
     if (importFrom) {
       const records = fromJsonl(readFileSync(importFrom, 'utf8'));
