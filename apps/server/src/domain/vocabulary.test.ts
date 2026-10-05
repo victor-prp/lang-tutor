@@ -1,5 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
+import { DIMENSIONS } from '@lang-tutor/core/domain';
 
+import type { ProgressRow } from './progress';
 import {
   assemblePage,
   buildWordDetail,
@@ -165,6 +167,7 @@ describe('buildWordDetail', () => {
         rendering({ variantId: 'v-past', form: 'прочитала', translation: 'קראה' }),
       ],
       [{ senseId: 's1', variantId: 'v-past' }],
+      [],
     );
     expect(detail.senses).toEqual([
       { sense_id: 's1', variant_id: 'v-past', form: 'прочитала', translation: 'קראה', saved: true },
@@ -178,6 +181,7 @@ describe('buildWordDetail', () => {
         rendering({ variantId: 'v-past', form: 'прочитала', translation: 'קראה' }),
         rendering({ variantId: 'v-lemma', form: 'Прочитать', translation: 'לקרוא' }),
       ],
+      [],
       [],
     );
     expect(detail.senses[0]).toMatchObject({ variant_id: 'v-lemma', saved: false });
@@ -194,6 +198,7 @@ describe('buildWordDetail', () => {
         rendering({ senseId: 's3', variantId: 'v-d', form: 'прочитали', rank: 2 }),
       ],
       [],
+      [],
     );
     const shown = Object.fromEntries(detail.senses.map((s) => [s.sense_id, s.variant_id]));
     expect(shown).toEqual({ s1: 'v-b', s2: 'v-b', s3: 'v-c' });
@@ -206,6 +211,7 @@ describe('buildWordDetail', () => {
       LEXEME,
       [rendering({ variantId: 'v-lemma', form: 'прочитать' })],
       [{ senseId: 's1', variantId: 'v-gone' }],
+      [],
     );
     expect(detail.senses).toEqual([
       expect.objectContaining({ sense_id: 's1', variant_id: 'v-lemma', saved: true }),
@@ -222,6 +228,7 @@ describe('buildWordDetail', () => {
         rendering({ senseId: 's-d', rank: 1 }),
       ],
       [{ senseId: 's-b', variantId: 'v1' }],
+      [],
     );
     expect(detail.senses.map((s) => s.sense_id)).toEqual(['s-b', 's-a', 's-c', 's-d']);
   });
@@ -234,6 +241,7 @@ describe('buildWordDetail', () => {
         rendering({ senseId: 's2', rank: 1, exampleSource: 'half', exampleTarget: null }),
       ],
       [],
+      [],
     );
     expect(detail.senses[0].example).toEqual({
       source: 'Я прочитала книгу.',
@@ -243,12 +251,53 @@ describe('buildWordDetail', () => {
   });
 
   it('carries the lexeme fields', () => {
-    expect(buildWordDetail(LEXEME, [], [])).toEqual({
+    expect(buildWordDetail(LEXEME, [], [], [])).toEqual({
       lexeme_id: 'lx',
       lemma: 'прочитать',
       part_of_speech: 'verb',
+      level: null,
       senses: [],
     });
+  });
+
+  const levels = (senseId: string, written: number): ProgressRow[] =>
+    DIMENSIONS.map((dimension) => ({
+      senseId,
+      dimension,
+      level: dimension === 'written_receptive' ? written : 1,
+      lastStepOn: null,
+      lastWrongOn: null,
+    }));
+
+  it('gives a saved sense its badge and five levels, and an unsaved one neither', () => {
+    const detail = buildWordDetail(
+      LEXEME,
+      [rendering({ senseId: 's1' }), rendering({ senseId: 's2', rank: 1, translation: 'להקריא' })],
+      [{ senseId: 's1', variantId: 'v1' }],
+      levels('s1', 3),
+    );
+    expect(detail.senses[0]).toMatchObject({
+      sense_id: 's1',
+      progress: {
+        level: 3,
+        dimensions: { written_receptive: 3, written_productive: 1, spoken_receptive: 1, spoken_productive: 1, spelling: 1 },
+      },
+    });
+    expect(detail.senses[1]).not.toHaveProperty('progress');
+  });
+
+  it("gives the word the rounded mean of its saved senses' badges, ties up", () => {
+    const detail = buildWordDetail(
+      LEXEME,
+      [rendering({ senseId: 's1' }), rendering({ senseId: 's2' })],
+      [{ senseId: 's1', variantId: 'v1' }, { senseId: 's2', variantId: 'v1' }],
+      [...levels('s1', 2), ...levels('s2', 3)],
+    );
+    expect(detail.level).toBe(3);
+  });
+
+  it('gives a word with nothing saved no level', () => {
+    expect(buildWordDetail(LEXEME, [rendering({})], [], []).level).toBeNull();
   });
 });
 

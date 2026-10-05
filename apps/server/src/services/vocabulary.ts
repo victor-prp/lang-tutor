@@ -137,7 +137,12 @@ export function createVocabularyService({
           userLanguageCode: enrolled.source_language,
         });
         const saved = await repos.vocabulary.findSavedInLexeme({ enrollmentId, lexemeId });
-        return buildWordDetail(lexeme, renderings, saved);
+        const progress = await repos.progress.findRows({
+          enrollmentId,
+          senseIds: saved.map((entry) => entry.senseId),
+          savedBy: null,
+        });
+        return buildWordDetail(lexeme, renderings, saved, progress);
       }),
   };
 }

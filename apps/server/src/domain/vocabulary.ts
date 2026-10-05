@@ -1,11 +1,14 @@
 import type {
+  SenseProgress,
   TranslationSense,
   VocabularyEntryInput,
   VocabularySort,
   VocabularyWord,
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
-import { MAX_LEVEL, MIN_LEVEL } from '@lang-tutor/core/domain';
+import { DIMENSIONS, LIVE_DIMENSIONS, MAX_LEVEL, MIN_LEVEL, badge, type Dimension } from '@lang-tutor/core/domain';
+
+import type { ProgressRow } from './progress';
 
 /**
  * Where the next list page starts: the last row's newest save and its lexeme
@@ -157,6 +160,17 @@ export type LexemeRendering = {
 
 export type SavedEntry = { senseId: string; variantId: string };
 
+/** A saved sense's five levels and its badge over the live dimensions. A
+ *  dimension with no row reads as level 1: every entry has five rows, so that
+ *  only guards a broken fixture. */
+function senseProgressOf(rows: ProgressRow[]): SenseProgress {
+  const byDimension = new Map(rows.map((row) => [row.dimension, row.level]));
+  const levelOf = (dimension: Dimension) => byDimension.get(dimension) ?? MIN_LEVEL;
+  const dimensions = {} as SenseProgress['dimensions'];
+  for (const dimension of DIMENSIONS) dimensions[dimension] = levelOf(dimension);
+  return { level: badge(LIVE_DIMENSIONS.map(levelOf)), dimensions };
+}
+
 /**
  * The drill-down: every sense the lexeme can show in this language, each in one
  * rendering, saved senses first.
@@ -171,11 +185,17 @@ export type SavedEntry = { senseId: string; variantId: string };
  * representative and stays saved. Ranks compared across forms are approximate —
  * rank is per form — and that is accepted: it orders a short list, it ranks
  * nothing that is stored.
+ *
+ * Phase 20: a saved sense carries its five levels; the word carries the rounded
+ * mean over every saved sense's live dimensions, the same number the list
+ * shows, or null when nothing is saved. `progress` holds the rows of every
+ * saved sense, including one with no rendering to show.
  */
 export function buildWordDetail(
   lexeme: LexemeRow,
   renderings: LexemeRendering[],
   saved: SavedEntry[],
+  progress: ProgressRow[],
 ): VocabularyWordDetail {
   const savedVariant = new Map(saved.map((entry) => [entry.senseId, entry.variantId]));
   const perVariant = new Map<string, number>();
@@ -210,10 +230,17 @@ export function buildWordDetail(
       a.rendering.senseId.localeCompare(b.rendering.senseId),
   );
 
+  const progressBySense = new Map<string, ProgressRow[]>();
+  for (const row of progress) {
+    progressBySense.set(row.senseId, [...(progressBySense.get(row.senseId) ?? []), row]);
+  }
+  const live = progress.filter((row) => LIVE_DIMENSIONS.includes(row.dimension));
+
   return {
     lexeme_id: lexeme.lexemeId,
     lemma: lexeme.lemma,
     part_of_speech: lexeme.partOfSpeech,
+    level: live.length === 0 ? null : badge(live.map((row) => row.level)),
     senses: shown.map(({ rendering: r, saved: isSaved }) => ({
       sense_id: r.senseId,
       variant_id: r.variantId,
@@ -223,6 +250,9 @@ export function buildWordDetail(
         ? { example: { source: r.exampleSource, target: r.exampleTarget } }
         : {}),
       saved: isSaved,
+      ...(isSaved && progressBySense.has(r.senseId)
+        ? { progress: senseProgressOf(progressBySense.get(r.senseId)!) }
+        : {}),
     })),
   };
 }

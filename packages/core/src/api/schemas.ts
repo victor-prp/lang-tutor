@@ -385,12 +385,16 @@ export const VocabularySenseSchema = z.object({
   translation: z.string(),
   example: z.object({ source: z.string(), target: z.string() }).optional(),
   saved: z.boolean(),
+  // Phase 20. Present on a saved sense only: its badge and five levels.
+  progress: SenseProgressSchema.optional(),
 });
 
 export const VocabularyWordDetailSchema = z.object({
   lexeme_id: z.string(),
   lemma: z.string(),
   part_of_speech: z.string(),
+  // Phase 20. The word's badge, as on the list; null when nothing is saved.
+  level: LevelSchema.nullable(),
   senses: z.array(VocabularySenseSchema),
 });
 

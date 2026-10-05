@@ -291,6 +291,28 @@ describe('GET /api/enrollments/{id}/vocabulary/words/{lexeme_id}', () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'enrollment not found' });
   });
+
+  it('shows a saved sense with its five levels, an unsaved one with none, and the word with its level', async () => {
+    const rama = await russianWord('рама');
+    await save(RU, [{ sense_id: rama.senseIds[0], variant_id: rama.variantIds[0] }]);
+    await setLevel(t.db, { enrollmentId: RU, senseId: rama.senseIds[0], level: 3 });
+
+    const body = (await (await detail(RU, rama.lexemeId)).json()) as {
+      level: number | null;
+      senses: { sense_id: string; progress?: unknown }[];
+    };
+    expect(body.level).toBe(3);
+    expect(body.senses.find((s) => s.sense_id === rama.senseIds[0])?.progress).toEqual({
+      level: 3,
+      dimensions: { written_receptive: 3, written_productive: 1, spoken_receptive: 1, spoken_productive: 1, spelling: 1 },
+    });
+    expect(body.senses.find((s) => s.sense_id === rama.senseIds[1])).not.toHaveProperty('progress');
+  });
+
+  it('gives a word with nothing saved no level', async () => {
+    const rama = await russianWord('рама');
+    expect(((await (await detail(RU, rama.lexemeId)).json()) as { level: unknown }).level).toBeNull();
+  });
 });
 
 describe('levels on the list (phase 20)', () => {

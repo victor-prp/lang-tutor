@@ -86,7 +86,8 @@ const detailRoute = createRoute({
   summary: 'One word, with every sense it can show',
   description:
     "Every sense of the lexeme that has a rendering in the enrollment's source language, saved " +
-    'senses first. A saved sense is shown in the form it was saved from.',
+    'senses first. A saved sense is shown in the form it was saved from.' +
+    ' A saved sense carries its level in each knowledge dimension; the word carries its overall level, null when nothing is saved.',
   request: { params: z.object({ id: z.string(), lexeme_id: z.string() }) },
   responses: {
     200: json(VocabularyWordDetailSchema, 'The word, possibly with nothing saved.'),
