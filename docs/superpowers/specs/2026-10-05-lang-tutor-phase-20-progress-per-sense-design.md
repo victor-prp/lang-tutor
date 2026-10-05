@@ -135,8 +135,9 @@ session_progress
 One row for every dimension of every saved sense the session practised, moved or not: all
 five, not only the ones that received evidence. A row nothing moved has
 `level_before = level_after`. The results badge averages over every live dimension, so a live
-dimension the session did not exercise still needs its level at that moment. The rows let the
-results screen be re-read after a reload, and a recompute replays them.
+dimension the session did not exercise still needs its level at that moment. The rows let a
+client re-read a completed session's results; the app does not (§5). A recompute rebuilds them
+from the answer log.
 
 ### Live dimensions
 
@@ -302,8 +303,8 @@ progress: [{ sense_id, form, translation, level_before, level_after }]
 One item per practised sense that was saved, in session order. `form` is the prompt the learner
 saw, `translation` the correct answer. The levels are badges over the live dimensions, computed
 from `session_progress`, so the app does no arithmetic. The read route carries the same block
-for a completed session, which is what makes the results survive a reload. A seed session with
-nothing saved returns `[]`.
+for a completed session, so a client can re-read its results; the app does not (§5). A seed
+session with nothing saved returns `[]`.
 
 In the session service, `submitAnswer` and `getSession` return `SessionResult = SessionRecord &
 { progress: ProgressChange[] }`. It is an intersection, so every existing caller that reads
