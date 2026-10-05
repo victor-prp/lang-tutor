@@ -1,5 +1,5 @@
 import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -18,7 +18,10 @@ export default function HomeScreen() {
   const next = useNextSession();
   const { user, enrollments, active, switchTo } = useCurrentUser();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // A ref guards re-entry (state is stale between two taps in one frame); the
+  // state only drives the disabled look.
   const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
 
   // Fresh on every focus: back from a session, from translate, after a switch.
   const { reload } = next;
@@ -54,7 +57,8 @@ export default function HomeScreen() {
   // One action at a time: a double tap must not send two creates. The server
   // would refuse the second one anyway (session_open).
   async function run(work: () => Promise<void>) {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await work();
@@ -65,6 +69,7 @@ export default function HomeScreen() {
       // Anything else: home re-reads the state (create and skip both reload),
       // and that state is the explanation.
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -150,7 +155,15 @@ export default function HomeScreen() {
         </View>
       ) : null}
 
-      <SessionAction action={action} busy={busy} onCreate={create} onEnter={enterSession} onSkip={skip} />
+      <SessionAction
+        action={action}
+        loadFailed={next.loadFailed}
+        busy={busy}
+        onRetry={reload}
+        onCreate={create}
+        onEnter={enterSession}
+        onSkip={skip}
+      />
 
       <Pressable
         accessibilityRole="button"
@@ -178,13 +191,17 @@ export default function HomeScreen() {
 
 function SessionAction({
   action,
+  loadFailed,
   busy,
+  onRetry,
   onCreate,
   onEnter,
   onSkip,
 }: {
   action: HomeAction | null;
+  loadFailed: boolean;
   busy: boolean;
+  onRetry: () => void;
   onCreate: () => void;
   onEnter: (sessionId: string) => void;
   onSkip: (sessionId: string) => void;
@@ -212,7 +229,24 @@ function SessionAction({
     </Pressable>
   );
 
-  if (!action) return <ActivityIndicator testID="home-loading" />;
+  if (!action) {
+    if (!loadFailed) return <ActivityIndicator testID="home-loading" />;
+    return (
+      <>
+        <Text testID="home-load-failed" style={styles.notice}>
+          {strings.homeLoadFailed}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          testID="home-retry"
+          onPress={onRetry}
+          style={styles.secondaryButton}
+        >
+          <Text style={styles.secondaryButtonLabel}>{strings.translateRetry}</Text>
+        </Pressable>
+      </>
+    );
+  }
   switch (action.kind) {
     case 'start-seed':
       return primary('start-button', strings.start, onCreate);

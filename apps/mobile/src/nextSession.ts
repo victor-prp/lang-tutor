@@ -22,7 +22,10 @@ export function homeActionOf(state: CurrentSessionResponse): HomeAction {
       ? { kind: 'resume', sessionId: current.session_id }
       : { kind: 'start', sessionId: current.session_id };
   }
-  if (current?.status === 'failed') return { kind: 'failed' };
+  if (current?.status === 'failed') {
+    // Offering create with nothing saved would answer 409 no_saved_words and loop.
+    return state.saved_count > 0 ? { kind: 'failed' } : { kind: 'save-words-first' };
+  }
   if (state.next_source === 'seed') return { kind: 'start-seed' };
   return state.saved_count > 0 ? { kind: 'create' } : { kind: 'save-words-first' };
 }
@@ -41,4 +44,14 @@ export function currentFor(
   activeId: string | undefined,
 ): CurrentSessionResponse | null {
   return stored !== null && stored.enrollmentId === activeId ? stored.state : null;
+}
+
+/** Whether home has nothing to show because the first read for the active
+ *  enrollment failed. A read already shown wins: a failed poll keeps it. */
+export function loadFailedFor(
+  failedEnrollmentId: string | null,
+  activeId: string | undefined,
+  current: CurrentSessionResponse | null,
+): boolean {
+  return current === null && activeId !== undefined && failedEnrollmentId === activeId;
 }

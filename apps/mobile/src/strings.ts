@@ -24,6 +24,7 @@ export const strings = {
   skipConfirmTitle: 'לדלג על התרגול?',
   skipConfirmMessage: 'התרגול יסתיים, והתשובות שנתת בו לא ייספרו.',
   saveWordsFirst: 'כדי לתרגל, שמרו קודם מילים במסך התרגום.',
+  homeLoadFailed: 'טעינת התרגול נכשלה. אפשר לנסות שוב.',
   preparationFailed: 'יצירת השאלות נכשלה. אפשר לנסות שוב.',
   homeSavedLabel: (count: number, language: string) => `${count} משמעויות שמורות ב${language}`,
   questionInstruction: 'מה הפירוש?',

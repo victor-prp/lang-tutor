@@ -10,7 +10,7 @@ import {
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { currentFor, type StoredCurrent } from '@/nextSession';
+import { currentFor, loadFailedFor, type StoredCurrent } from '@/nextSession';
 
 // Phase 19. The active enrollment's session state for the home screen: what
 // is current, where the next session comes from, and the two actions on it.
@@ -19,6 +19,8 @@ import { currentFor, type StoredCurrent } from '@/nextSession';
 // it rather than guessing the result.
 export type NextSessionValue = {
   current: CurrentSessionResponse | null;
+  /** The first read for the active enrollment failed and nothing is shown. */
+  loadFailed: boolean;
   reload: () => void;
   create: () => Promise<CreateSessionResponse>;
   skip: (sessionId: string) => Promise<void>;
@@ -35,15 +37,23 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   // the home screen's own focus effect (children first) and discard its read.
   const [stored, setStored] = useState<StoredCurrent | null>(null);
   const current = currentFor(stored, active?.id);
+  // Keyed the same way, so a failure about one enrollment is never shown for
+  // another. A successful read for it clears the failure.
+  const [failedFor, setFailedFor] = useState<string | null>(null);
+  const loadFailed = loadFailedFor(failedFor, active?.id, current);
 
   const reload = useCallback(() => {
     if (!active) return;
     const enrollmentId = active.id;
     void api
       .currentSession(enrollmentId)
-      .then((state) => setStored({ enrollmentId, state }))
-      // Kept as it was: the next focus or poll tries again.
-      .catch(() => undefined);
+      .then((state) => {
+        setStored({ enrollmentId, state });
+        setFailedFor((failed) => (failed === enrollmentId ? null : failed));
+      })
+      // A state already shown stays as it was and the next focus or poll tries
+      // again; with none shown, home offers a retry instead of a spinner.
+      .catch(() => setFailedFor(enrollmentId));
   }, [api, active]);
 
   const create = useCallback(async () => {
@@ -66,7 +76,10 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
     [api, reload],
   );
 
-  const value = useMemo(() => ({ current, reload, create, skip }), [current, reload, create, skip]);
+  const value = useMemo(
+    () => ({ current, loadFailed, reload, create, skip }),
+    [current, loadFailed, reload, create, skip],
+  );
   return <NextSessionContext.Provider value={value}>{children}</NextSessionContext.Provider>;
 }
 
