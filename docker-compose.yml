@@ -39,5 +39,34 @@ services:
     # this container needs is a first-party file every checkout must have,
     # which is exactly the coupling that makes one shared instance unsafe.
 
+  # The pg-boss web dashboard (http://localhost:3000): queues, jobs, retries and
+  # the dead-letter queue (ADR 0007). It reads lane 0's database, the one this
+  # compose file creates; compose itself only runs from lane 0 (ADR 0006), and
+  # 3000 is outside every lane's ports (3001/8081 plus a thousand per slot).
+  # pg-boss publishes no image, so the pinned npm package runs in a plain Node
+  # image, with the npm cache in a volume so a restart does not re-download it.
+  # Bound to 127.0.0.1 because it has no login and can retry, cancel and delete
+  # jobs. Local only: `npm run db:up` skips it in CI.
+  pgboss-dashboard:
+    image: node:24-alpine
+    command: ['npx', '-y', '@pg-boss/dashboard@1.10.0']
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/lang_tutor
+      PGBOSS_SCHEMA: pgboss
+      PORT: '3000'
+      HOST: 0.0.0.0
+    ports:
+      - '127.0.0.1:3000:3000'
+    volumes:
+      - pgboss-dashboard-npm:/root/.npm
+    depends_on:
+      db:
+        condition: service_healthy
+    # Before the first `npm run db:migrate` there is no pgboss schema yet: the
+    # dashboard keeps running and answers 500, then works once the migration
+    # has installed it, with no restart. The restart policy is for real crashes.
+    restart: unless-stopped
+
 volumes:
   lang-tutor-pgdata:
+  pgboss-dashboard-npm:

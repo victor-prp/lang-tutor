@@ -195,7 +195,7 @@ server URL from `apps/mobile/.env.local`, which Expo auto-loads and git ignores 
 ```bash
 npm install
 cp apps/mobile/.env.example apps/mobile/.env.local
-npm run db:up        # Postgres + MockServer  (requires Docker)
+npm run db:up        # Postgres + MockServer + pg-boss dashboard  (requires Docker)
 npm run db:migrate   # schema + shared dictionary seed
 npm run server       # terminal 1
 npm run mobile       # terminal 2
@@ -212,9 +212,16 @@ npm run mobile       # terminal 2
 > stored form realises nor how that form should be rendered, so there is nothing to
 > migrate them from; clearing is not a shortcut here but the only honest option.
 
-`npm run db:up` starts two containers: Postgres, and a MockServer instance that stands in for
-the Gemini API in every test bucket. Integration and e2e tests register their own expectations
-against it per test, so no test needs network access or an API key.
+`npm run db:up` starts three containers: Postgres, a MockServer instance that stands in for
+the Gemini API in every test bucket, and the pg-boss dashboard. Integration and e2e tests
+register their own expectations against MockServer per test, so no test needs network access
+or an API key.
+
+The dashboard, at <http://localhost:3000>, shows lane 0's background-job queues
+(`prepare-session` and its dead-letter queue, [ADR 0007](docs/adr/adr-0007-background-jobs.md)).
+A queue's job list opens filtered to **Pending**; pick **Completed** or **All States** to see jobs
+that already ran. Finished jobs are kept for a day. It listens on `127.0.0.1` only, since it
+has no login and can retry, cancel and delete jobs, and CI does not start it.
 
 Then press `w` for the browser, or scan the QR code with Expo Go on a phone. The
 interface is Hebrew and right-to-left; browser and native RTL are not identical, so
@@ -433,7 +440,7 @@ falls back to the `postgres` maintenance database — that is one specific datab
 
 ```bash
 npm test            # unit tests only — no Docker, no database, whole monorepo
-npm run db:up       # docker compose up -d --wait db  (requires Docker)
+npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI)  (requires Docker)
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
