@@ -1,6 +1,5 @@
 import { serve } from '@hono/node-server';
-import { sql } from 'drizzle-orm';
-import { PgBoss, fromDrizzle } from 'pg-boss';
+import { PgBoss } from 'pg-boss';
 
 import { createApp } from './app';
 import { databaseNameFrom, loadConfig, loadGeminiConfig } from './config';
@@ -8,6 +7,7 @@ import { createServerDeps } from './composition';
 import { createDb } from './db/client';
 import { JOB_SCHEMA } from './db/jobs';
 import { createConsoleLogger } from './logger';
+import { registerWorkers } from './worker';
 
 // The process composition root: the only place that reads the environment, names
 // a concrete logger or randomness source, opens a pool, or binds a port. Naming
@@ -26,17 +26,17 @@ export async function main(): Promise<void> {
     onError: (error) => logger.error('idle postgres client', error),
   });
 
-  // Started here because starting is I/O and composition performs none: the
-  // jobs repository's send() resolves its queue through a cache start() fills.
-  // The schema and queues were installed by the migrations, so migrate is off;
-  // no worker runs yet, so supervise, cron and the registry are off too.
+  // Phase 19. pg-boss on the same database, with a small pool of its own so job
+  // polling never queues behind requests. migrate is off: db:migrate installed
+  // the schema (db/jobs.ts), so a server that finds it missing fails loudly here
+  // instead of migrating behind the operator's back. schedule is off (no cron);
+  // supervision stays on, because workers now run and expiry and retry are its job.
   const boss = new PgBoss({
-    db: fromDrizzle(db, sql),
+    connectionString: config.databaseUrl,
     schema: JOB_SCHEMA,
+    max: 2,
     migrate: false,
-    supervise: false,
     schedule: false,
-    registerInstance: false,
   });
   boss.on('error', (error) => logger.error('pg-boss', error));
   await boss.start();
@@ -59,6 +59,8 @@ export async function main(): Promise<void> {
     boss,
   });
 
+  await registerWorkers(boss, deps.sessions, { pollingIntervalSeconds: 2 });
+
   const server = serve(
     { fetch: createApp(deps).fetch, port: config.port, hostname: '0.0.0.0' },
     (info) => {
@@ -66,13 +68,19 @@ export async function main(): Promise<void> {
     },
   );
 
+  // HTTP first, so no new session is created mid-shutdown; then the workers
+  // drain (a generation in flight finishes, or expires and is retried
+  // elsewhere); the pool last, since both of the others use it. A stop that
+  // rejects is logged, and the pool is still closed and the process still exits.
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    process.on(signal, () => {
+    process.once(signal, () => {
       server.close(() => {
         void boss
-          .stop({ graceful: true, timeout: 5_000 })
-          .then(close)
-          .then(() => process.exit(0));
+          .stop({ graceful: true, timeout: 30_000 })
+          .catch((error: unknown) => logger.error('pg-boss stop', error))
+          .then(() => close())
+          .catch((error: unknown) => logger.error('pool close', error))
+          .finally(() => process.exit(0));
       });
     });
   }
@@ -81,5 +89,8 @@ export async function main(): Promise<void> {
 // Importing this file must not start a server — the pattern e2e/globalSetup.ts
 // already uses.
 if (require.main === module) {
-  void main();
+  main().catch((error: unknown) => {
+    console.error('lang-tutor server failed to start', error);
+    process.exit(1);
+  });
 }
