@@ -8,6 +8,7 @@ import {
   seedLegacyLearner,
   seedUser,
 } from '../../support/seedUser';
+import { saveSessionSenses } from '../../support/progressRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
@@ -371,5 +372,57 @@ describe('phase 19 session routes', () => {
     const missing = await getJson(app, '/api/enrollments/e_nobody/sessions/current');
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: 'enrollment not found' });
+  });
+});
+
+describe('the progress block (phase 20)', () => {
+  type Item = { sense_id: string; form: string; translation: string; level_before: number; level_after: number };
+  type Step = { complete: boolean; question: SeedView['question'] | null; progress?: Item[] };
+
+  /** Answers all ten questions right; returns the last response and the questions asked. */
+  async function answerAll(app: Hono, first: SeedView) {
+    const asked: SeedView['question'][] = [];
+    let current = first.question;
+    let last: Step = { complete: false, question: current };
+    for (let i = 0; i < 10; i += 1) {
+      asked.push(current);
+      last = (await (
+        await postJson(app, `/api/sessions/${first.session_id}/next-step`, {
+          user_id: 'u_1',
+          question_id: current.id,
+          option_index: current.correct_option,
+        })
+      ).json()) as Step;
+      if (!last.complete) current = last.question!;
+    }
+    return { last, asked };
+  }
+
+  it('the completing answer carries what the session did to the saved words, and a read repeats it', async () => {
+    const app = buildTestApp();
+    const first = await startSeed(app, enrollmentOf('u_1'));
+    const [s0, s1] = await saveSessionSenses(t.db, {
+      sessionId: first.session_id,
+      enrollmentId: enrollmentOf('u_1'),
+      positions: [0, 1],
+    });
+
+    const { last, asked } = await answerAll(app, first);
+    expect(last.complete).toBe(true);
+    expect(last.progress).toEqual([
+      { sense_id: s0, form: asked[0].question, translation: asked[0].options[asked[0].correct_option], level_before: 1, level_after: 2 },
+      { sense_id: s1, form: asked[1].question, translation: asked[1].options[asked[1].correct_option], level_before: 1, level_after: 2 },
+    ]);
+
+    const read = await (await getJson(app, `/api/sessions/${first.session_id}`)).json();
+    expect(read.progress).toEqual(last.progress);
+  });
+
+  it('is empty for an open session, and for one about words that are not saved', async () => {
+    const app = buildTestApp();
+    const first = await startSeed(app, enrollmentOf('u_1'));
+    expect((first as SeedView & { progress: unknown }).progress).toEqual([]);
+    const { last } = await answerAll(app, first);
+    expect(last.progress).toEqual([]);
   });
 });

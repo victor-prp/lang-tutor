@@ -109,6 +109,8 @@ export const SessionViewSchema = z.object({
   source: SessionSourceSchema,
   position: PositionSchema,
   question: QuestionSchema.nullable(),
+  // Phase 20. What a completed session did to the saved words; empty otherwise.
+  progress: z.array(SessionProgressItemSchema),
 });
 
 export const NextStepRequestSchema = z.object({
@@ -134,6 +136,8 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     complete: z.literal(true),
     score: ScoreSchema,
     missed_questions: z.array(MissedQuestionSchema),
+    // Phase 20. Every practised saved sense, with its badge before and after.
+    progress: z.array(SessionProgressItemSchema),
   }),
 ]);
 
