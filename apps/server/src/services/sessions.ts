@@ -1,5 +1,5 @@
 import type { SessionSource, SessionStatus } from '@lang-tutor/core/api';
-import { pickQuestions } from '@lang-tutor/core/domain';
+import { LIVE_DIMENSIONS, pickQuestions } from '@lang-tutor/core/domain';
 
 import {
   buildDistractorPrompt,
@@ -9,6 +9,7 @@ import {
   validateDistractors,
 } from '../domain/distractors';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
+import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
 import type { SessionRecord, SessionSummary } from '../domain/session';
 import {
   SESSION_LENGTH,
@@ -34,7 +35,7 @@ import {
 } from '../errors';
 import type { Logger } from '../logger';
 import type { LlmClient } from './llm';
-import type { Transaction } from './transaction';
+import type { Repos, Transaction } from './transaction';
 
 export type { Transaction } from './transaction';
 
@@ -49,6 +50,40 @@ function logCompletedSession(logger: Logger, sessionId: string, record: SessionR
     answers: record.answers,
     score: sessionScore(record),
   });
+}
+
+/** A session as the routes answer it: the record, and what it did to the
+ *  learner's saved words, which is empty until it is completed. */
+export type SessionResult = SessionRecord & { progress: ProgressChange[] };
+
+/**
+ * Phase 20. Runs the progress rule over an ended session's answers, inside the
+ * transaction that ended it. The status change and these writes are dependent
+ * (ADR 0001 R8, spec §3): an ended session without its progress, or progress
+ * for a session that did not end, would each be wrong.
+ *
+ * A sense with no rows is not saved, so it is skipped: that is the whole of
+ * "only answers given while saved count". A session with no answers has no
+ * evidence and writes nothing.
+ */
+async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
+  const evidence = await repos.progress.findSessionEvidence(sessionId);
+  if (!evidence) return;
+  const rows = await repos.progress.findRows({
+    enrollmentId: evidence.enrollmentId,
+    senseIds: [...new Set(evidence.answers.map((answer) => answer.senseId))],
+    savedBy: null,
+  });
+  if (rows.length === 0) return;
+  const outcome = evaluateSession(rows, evidence.answers, evidence.day);
+  await repos.progress.updateRows({ enrollmentId: evidence.enrollmentId, rows: outcome.changed });
+  await repos.progress.insertSnapshot({ sessionId, rows: outcome.snapshot });
+}
+
+/** What a completed session did, as badges. Empty for any other status. */
+async function progressOf(repos: Repos, sessionId: string, record: SessionRecord): Promise<ProgressChange[]> {
+  if (record.status !== 'completed') return [];
+  return progressChanges(await repos.progress.findSnapshot(sessionId), LIVE_DIMENSIONS);
 }
 
 /**
@@ -117,12 +152,13 @@ export function createSessionService({
         return { sessionId, status: 'preparing' as const, source: 'list' as const };
       }),
 
-    /** Resume and the poll both read through this. */
-    getSession: (sessionId: string): Promise<SessionRecord> =>
-      transaction(async ({ session }) => {
-        const record = await session.loadSession(sessionId);
+    /** Resume and the poll both read through this. A completed session also
+     *  carries what it did to the saved words. */
+    getSession: (sessionId: string): Promise<SessionResult> =>
+      transaction(async (repos) => {
+        const record = await repos.session.loadSession(sessionId);
         if (!record) throw new SessionNotFound(sessionId);
-        return record;
+        return { ...record, progress: await progressOf(repos, sessionId, record) };
       }),
 
     /** What the home screen needs in one read. */
@@ -142,15 +178,19 @@ export function createSessionService({
     /**
      * Ends a preparing or ready session. Idempotent on `skipped`. A job still
      * generating for it finds the status changed at its final, conditional
-     * write and writes nothing.
+     * write and writes nothing. A skip counts the answers given before it toward
+     * progress.
      */
     skipSession: async (sessionId: string): Promise<void> => {
-      const skipped = await transaction(async ({ session }) => {
-        const state = await session.findState(sessionId);
+      const skipped = await transaction(async (repos) => {
+        const state = await repos.session.findState(sessionId);
         if (!state) throw new SessionNotFound(sessionId);
         if (state.status === 'skipped') return false;
         if (!isOpen(state.status)) throw new SessionNotSkippable(sessionId, state.status);
-        return session.transition(sessionId, ['preparing', 'ready'], 'skipped');
+        const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped');
+        // Phase 20. The answers given before the skip are real answers.
+        if (changed) await recordProgress(repos, sessionId);
+        return changed;
       });
       if (skipped) logger.info({ event: 'session_skipped', session_id: sessionId });
     },
@@ -159,12 +199,12 @@ export function createSessionService({
       sessionId: string,
       questionId: string,
       optionIndex: number,
-    ): Promise<SessionRecord> => {
+    ): Promise<SessionResult> => {
       // The transaction returns its outcome and the log fires after it resolves:
       // a commit that fails after completeSession must not leave a log claiming a
       // session the database never recorded.
-      const { record, justCompleted } = await transaction(async ({ session }) => {
-        const loaded = await session.loadSession(sessionId);
+      const { result, justCompleted } = await transaction(async (repos) => {
+        const loaded = await repos.session.loadSession(sessionId);
         if (!loaded) throw new SessionNotFound(sessionId);
 
         // Phase 19. Preparing, skipped and failed sessions take no answers. A
@@ -179,25 +219,28 @@ export function createSessionService({
         if (outcome.status === 'invalid_question') throw new QuestionDesynced(questionId);
         if (outcome.status === 'out_of_range') throw new OptionOutOfRange(optionIndex);
         // A replay reports justCompleted: false, so retrying a completed session
-        // logs nothing — exactly today's behaviour.
+        // logs nothing and writes no progress.
         if (outcome.status === 'replayed') {
-          return { record: outcome.record, justCompleted: false };
+          const progress = await progressOf(repos, sessionId, outcome.record);
+          return { result: { ...outcome.record, progress }, justCompleted: false };
         }
 
-        await session.insertAnswer(sessionId, loaded.answers.length, questionId, optionIndex);
+        await repos.session.insertAnswer(sessionId, loaded.answers.length, questionId, optionIndex);
 
         if (outcome.justCompleted) {
-          await session.completeSession(sessionId);
+          await repos.session.completeSession(sessionId);
+          await recordProgress(repos, sessionId);
         }
 
-        return { record: outcome.record, justCompleted: outcome.justCompleted };
+        const progress = await progressOf(repos, sessionId, outcome.record);
+        return { result: { ...outcome.record, progress }, justCompleted: outcome.justCompleted };
       });
 
       if (justCompleted) {
-        logCompletedSession(logger, sessionId, record);
+        logCompletedSession(logger, sessionId, result);
       }
 
-      return record;
+      return result;
     },
 
     /**

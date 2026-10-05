@@ -29,6 +29,7 @@
     "db:down": "docker compose down",
     "db:migrate": "bash scripts/lane-env.sh npm run db:migrate --workspace apps/server",
     "db:reseed": "bash scripts/lane-env.sh npm run db:reseed --workspace apps/server",
+    "db:progress:recompute": "bash scripts/lane-env.sh npm run db:progress:recompute --workspace apps/server",
     "dict:export": "bash scripts/lane-env.sh npm run dict:export --workspace apps/server",
     "dict:restore": "bash scripts/lane-env.sh npm run dict:restore --workspace apps/server",
     "eval": "npm run eval --workspace apps/server",

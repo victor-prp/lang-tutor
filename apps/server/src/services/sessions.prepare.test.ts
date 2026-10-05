@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Enrollment, Question } from '@lang-tutor/core/api';
 
-import { createFakeLlmClient, createFakeLogger, createFakeTransaction } from '../../tests/support/fakes';
+import { createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { GenerationContext } from '../domain/distractors';
 import type { SessionState } from '../domain/session';
@@ -10,17 +10,6 @@ import type { EnrollmentRepo } from '../repo/enrollments';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
-
-// Only the methods a case names exist; any other reach fails with its name.
-function stub<T extends object>(methods: Partial<T>): T {
-  return new Proxy(methods, {
-    get: (target, property) =>
-      (target as Record<string | symbol, unknown>)[property] ??
-      (() => {
-        throw new Error(`${String(property)} is not stubbed`);
-      }),
-  }) as T;
-}
 
 const SESSION = '11111111-1111-1111-1111-111111111111';
 const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'preparing', source: 'list' };

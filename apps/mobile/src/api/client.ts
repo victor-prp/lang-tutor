@@ -16,6 +16,7 @@ import type {
   TranslationResponse,
   User,
   VocabularyPage,
+  VocabularySort,
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
 
@@ -97,10 +98,15 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request),
     unsaveVocabulary: (enrollmentId: string, senseId: string) =>
       deleteResource(`${vocabularyPath(enrollmentId)}/senses/${encodeURIComponent(senseId)}`),
-    listVocabulary: (enrollmentId: string, query: { cursor?: string; limit?: number }) => {
+    listVocabulary: (
+      enrollmentId: string,
+      query: { cursor?: string; limit?: number; sort?: VocabularySort; level?: number },
+    ) => {
       const params = new URLSearchParams();
       if (query.cursor !== undefined) params.set('cursor', query.cursor);
       if (query.limit !== undefined) params.set('limit', String(query.limit));
+      if (query.sort !== undefined) params.set('sort', query.sort);
+      if (query.level !== undefined) params.set('level', String(query.level));
       const search = params.toString();
       return getJson<VocabularyPage>(`${vocabularyPath(enrollmentId)}${search ? `?${search}` : ''}`);
     },

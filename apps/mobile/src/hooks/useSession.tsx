@@ -1,4 +1,4 @@
-import type { MissedQuestion, Question, Score } from '@lang-tutor/core/api';
+import type { MissedQuestion, Question, Score, SessionProgressItem } from '@lang-tutor/core/api';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { router } from 'expo-router';
 import {
@@ -27,6 +27,8 @@ export type SessionValue = {
   complete: boolean;
   correctCount: number;
   missedQuestions: MissedQuestion[];
+  /** Phase 20. Each practised saved word with its level before and after. */
+  progress: SessionProgressItem[];
   /** The session id while one is loaded, for skip. */
   sessionId: string | null;
   /** Loads a ready session and continues from its current question. Starting
@@ -41,7 +43,7 @@ export type SessionValue = {
 // since `select` cannot fire again until a new question is on screen.
 type Queued =
   | { complete: false; question: Question; position: number }
-  | { complete: true; score: Score; missedQuestions: MissedQuestion[] };
+  | { complete: true; score: Score; missedQuestions: MissedQuestion[]; progress: SessionProgressItem[] };
 
 type QuizState = {
   sessionId: string;
@@ -53,6 +55,7 @@ type QuizState = {
   complete: boolean;
   correctCount: number;
   missedQuestions: MissedQuestion[];
+  progress: SessionProgressItem[];
   queued: Queued | null;
   // Set when Continue is tapped before the background next-step call has
   // resolved. Applied the moment that call does resolve, so the learner
@@ -82,6 +85,7 @@ function applyQueued(current: QuizState, queued: Queued): QuizState {
       complete: true,
       correctCount: queued.score.correct,
       missedQuestions: queued.missedQuestions,
+      progress: queued.progress,
       selectedOption: null,
       queued: null,
       advanceRequested: false,
@@ -138,6 +142,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         complete: false,
         correctCount: 0,
         missedQuestions: [],
+        progress: [],
         queued: null,
         advanceRequested: false,
       });
@@ -193,7 +198,12 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       })
         .then((response) => {
           const queued: Queued = response.complete
-            ? { complete: true, score: response.score, missedQuestions: response.missed_questions }
+            ? {
+                complete: true,
+                score: response.score,
+                missedQuestions: response.missed_questions,
+                progress: response.progress,
+              }
             : { complete: false, question: response.question, position: response.position.position };
           setState((latest) => {
             if (!latest || latest.sessionId !== sessionId) return latest;
@@ -234,6 +244,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         complete: false,
         correctCount: 0,
         missedQuestions: [],
+        progress: [],
         sessionId: null,
         enter,
         select,
@@ -250,6 +261,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       complete: state.complete,
       correctCount: state.correctCount,
       missedQuestions: state.missedQuestions,
+      progress: state.progress,
       sessionId: state.sessionId,
       enter,
       select,

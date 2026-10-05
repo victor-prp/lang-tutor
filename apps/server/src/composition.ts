@@ -7,6 +7,7 @@ import type { Logger } from './logger';
 import { createGeminiClient } from './providers/gemini';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createJobRepo } from './repo/jobs';
+import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
 import { createEnrollmentRepo } from './repo/enrollments';
@@ -75,6 +76,7 @@ export function createServerDeps(io: {
     enrollment: createEnrollmentRepo(tx),
     dict: createDictRepo(tx),
     vocabulary: createVocabularyRepo(tx),
+    progress: createProgressRepo(tx),
     jobs: createJobRepo(tx, io.boss),
   }));
 

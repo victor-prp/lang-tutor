@@ -85,6 +85,13 @@
       "when": 1791206509998,
       "tag": "0011_session_status",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791218568294,
+      "tag": "0012_sense_progress",
+      "breakpoints": true
     }
   ]
 }

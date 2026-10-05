@@ -11,12 +11,12 @@ import {
 } from '@lang-tutor/core/api/schemas';
 import { z } from 'zod';
 
+import type { ProgressChange } from '../domain/progress';
 import {
   currentQuestion,
   missedQuestions,
   positionOf,
   sessionScore,
-  type SessionRecord,
 } from '../domain/session';
 import {
   EnrollmentNotFound,
@@ -29,42 +29,52 @@ import {
   SessionNotSkippable,
   SessionOpen,
 } from '../errors';
-import type { SessionService } from '../services/sessions';
+import type { SessionResult, SessionService } from '../services/sessions';
 
 const failure = (description: string) => ({
   content: { 'application/json': { schema: ErrorSchema } },
   description,
 });
 
+const progressItem = (change: ProgressChange) => ({
+  sense_id: change.senseId,
+  form: change.form,
+  translation: change.translation,
+  level_before: change.levelBefore,
+  level_after: change.levelAfter,
+});
+
 function buildNextStepResponse(
   sessionId: string,
-  record: SessionRecord,
+  result: SessionResult,
 ): z.infer<typeof NextStepResponseSchema> {
-  if (record.complete) {
+  if (result.complete) {
     return {
       session_id: sessionId,
       question: null,
-      position: positionOf(record),
+      position: positionOf(result),
       complete: true,
-      score: sessionScore(record),
-      missed_questions: missedQuestions(record),
+      score: sessionScore(result),
+      missed_questions: missedQuestions(result),
+      progress: result.progress.map(progressItem),
     };
   }
   return {
     session_id: sessionId,
-    question: currentQuestion(record)!,
-    position: positionOf(record),
+    question: currentQuestion(result)!,
+    position: positionOf(result),
     complete: false,
   };
 }
 
-function sessionView(sessionId: string, record: SessionRecord): z.infer<typeof SessionViewSchema> {
+function sessionView(sessionId: string, result: SessionResult): z.infer<typeof SessionViewSchema> {
   return {
     session_id: sessionId,
-    status: record.status,
-    source: record.source,
-    position: positionOf(record),
-    question: record.status === 'ready' ? (currentQuestion(record) ?? null) : null,
+    status: result.status,
+    source: result.source,
+    position: positionOf(result),
+    question: result.status === 'ready' ? (currentQuestion(result) ?? null) : null,
+    progress: result.progress.map(progressItem),
   };
 }
 
@@ -100,7 +110,8 @@ const getSessionRoute = createRoute({
   path: '/sessions/{id}',
   tags: ['sessions'],
   summary: 'Read a session',
-  description: 'Its status, progress, and the current question while it is ready. Serves resume and the poll.',
+  description:
+    'Its status, position, and the current question while it is ready. A completed session also carries `progress`: each practised saved word with its level before and after. Serves resume and the poll.',
   request: { params: sessionIdParam },
   responses: {
     200: { content: { 'application/json': { schema: SessionViewSchema } }, description: 'The session.' },
@@ -113,7 +124,8 @@ const skipSessionRoute = createRoute({
   path: '/sessions/{id}/skip',
   tags: ['sessions'],
   summary: 'Skip a session',
-  description: 'Ends a preparing or ready session. Skipping a skipped session is a no-op.',
+  description:
+    'Ends a preparing or ready session. The answers given before the skip count toward progress. Skipping a skipped session is a no-op.',
   request: { params: sessionIdParam },
   responses: {
     200: { content: { 'application/json': { schema: SkipSessionResponseSchema } }, description: 'The session is skipped.' },
@@ -137,7 +149,7 @@ const nextStepRoute = createRoute({
     200: {
       content: { 'application/json': { schema: NextStepResponseSchema } },
       description:
-        'The answer was recorded. `complete: false` carries the next question; `complete: true` carries the score and the missed questions.',
+        'The answer was recorded. `complete: false` carries the next question; `complete: true` carries the score and the missed questions. The completing response also carries `progress`: each practised saved word with its level before and after.',
     },
     400: failure('The request body did not validate, or `option_index` is out of range.'),
     404: failure('No session has this id.'),

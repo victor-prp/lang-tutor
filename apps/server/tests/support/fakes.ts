@@ -159,6 +159,17 @@ function unreachableRepo<T extends object>(name: string): T {
   });
 }
 
+// Only the methods a case names exist; any other reach fails with its name.
+export function stub<T extends object>(methods: Partial<T>): T {
+  return new Proxy(methods, {
+    get: (target, property) =>
+      (target as Record<string | symbol, unknown>)[property] ??
+      (() => {
+        throw new Error(`${String(property)} is not stubbed`);
+      }),
+  }) as T;
+}
+
 /** Runs `run` immediately with whichever repositories the test named; every
  *  other one throws with the method that was reached for. No rollback, by
  *  design: a fake that pretended to roll back would be asserting a database
@@ -171,6 +182,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),
     vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
+    progress: repos.progress ?? unreachableRepo('progress repo'),
     jobs: repos.jobs ?? unreachableRepo('jobs repo'),
   };
   return (run) => run(bound);

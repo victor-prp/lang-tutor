@@ -1,3 +1,5 @@
+import type { VocabularySort } from '@lang-tutor/core/api';
+import { DIMENSIONS, type Dimension } from '@lang-tutor/core/domain';
 import { asc, eq, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
@@ -14,9 +16,40 @@ import type {
 /** A pair that passed `findSaveable`, carrying the lexeme id the entry copies. */
 export type SaveableEntry = { senseId: string; variantId: string; lexemeId: string };
 
-// `IN (...)` from a list. Every caller guards the empty list first: `IN ()` is a
-// syntax error, and an empty list has an obvious answer that needs no query.
+// `IN (...)` from a list. `IN ()` is a syntax error, so a caller either guards an
+// empty list first (an empty list has an obvious answer that needs no query) or
+// passes a list that is never empty (wordsPage's LIVE_DIMENSIONS).
 const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}`), sql`, `);
+
+// A word's badge: the rounded mean of its saved senses' live-dimension levels,
+// ties up. badge() in packages/core is the same arithmetic in TypeScript.
+const LEVEL = sql`floor(avg(p.level) + 0.5)::int`;
+const SAVED_AT = sql`max(ve.created_at)`;
+
+function orderBy(sort: VocabularySort): SQL {
+  switch (sort) {
+    case 'newest':
+      return sql`${SAVED_AT} DESC, ve.lexeme_id DESC`;
+    case 'level_asc':
+      return sql`${LEVEL} ASC, ${SAVED_AT} DESC, ve.lexeme_id DESC`;
+    case 'level_desc':
+      return sql`${LEVEL} DESC, ${SAVED_AT} DESC, ve.lexeme_id DESC`;
+  }
+}
+
+/** Strictly after the cursor in the order orderBy gives. level_asc mixes
+ *  directions, so it cannot be one row comparison. */
+function afterCursor(after: VocabularyCursor): SQL {
+  const position = sql`(${after.savedAt}::timestamptz, ${after.lexemeId}::text)`;
+  switch (after.sort) {
+    case 'newest':
+      return sql`(${SAVED_AT}, ve.lexeme_id) < ${position}`;
+    case 'level_desc':
+      return sql`(${LEVEL}, ${SAVED_AT}, ve.lexeme_id) < (${after.level}::int, ${after.savedAt}::timestamptz, ${after.lexemeId}::text)`;
+    case 'level_asc':
+      return sql`(${LEVEL} > ${after.level}::int OR (${LEVEL} = ${after.level}::int AND (${SAVED_AT}, ve.lexeme_id) < ${position}))`;
+  }
+}
 
 /**
  * Every statement the hot paths of this repository run, as a builder. Exported so
@@ -29,18 +62,30 @@ const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}
  * §3, "Cost of every query").
  */
 export const vocabularyQueries = {
-  /** Save: a primary-key insert. Named conflict target, not bare: only the PK
+  /** Save: a primary-key insert, and the five progress rows of every entry it
+   *  creates, in one statement. Named conflict target, not bare: only the PK
    *  may be swallowed, so an FK violation still raises. First form wins — a
-   *  sense already saved keeps the variant it was saved from. */
+   *  sense already saved keeps its variant, and RETURNING leaves it out, so its
+   *  progress is untouched. */
   insertEntries: (input: { enrollmentId: string; entries: SaveableEntry[] }): SQL => sql`
-    INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
-    VALUES ${sql.join(
-      input.entries.map(
-        (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.variantId})`,
-      ),
+    WITH inserted AS (
+      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+      VALUES ${sql.join(
+        input.entries.map(
+          (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.variantId})`,
+        ),
+        sql`, `,
+      )}
+      ON CONFLICT (enrollment_id, sense_id) DO NOTHING
+      RETURNING enrollment_id, sense_id
+    )
+    INSERT INTO sense_progress (enrollment_id, sense_id, dimension)
+    SELECT i.enrollment_id, i.sense_id, d.dimension
+    FROM inserted i
+    CROSS JOIN (VALUES ${sql.join(
+      DIMENSIONS.map((dimension) => sql`(${dimension}::text)`),
       sql`, `,
-    )}
-    ON CONFLICT (enrollment_id, sense_id) DO NOTHING`,
+    )}) AS d(dimension)`,
 
   /** Unsave: a primary-key delete. */
   deleteEntry: (input: { enrollmentId: string; senseId: string }): SQL => sql`
@@ -77,30 +122,46 @@ export const vocabularyQueries = {
       AND sense_id IN (${inList(input.senseIds)})`,
 
   /**
-   * One page of lexemes, newest save first. The grouping is an index-only scan
-   * of this enrollment's slice of (enrollment_id, lexeme_id, created_at).
+   * One page of lexemes with their level, in the asked order, optionally one
+   * level only. The join reads this enrollment's live-dimension progress rows
+   * through sense_progress_enrollment_dimension_idx, an index-only scan.
    *
    * The timestamp goes out as `::text` and comes back with `::timestamptz` —
-   * microseconds intact; see VocabularyCursor. The row comparison is strictly
-   * "after the cursor" in DESC order, so a word that moves to the top between
-   * pages is never served twice.
+   * microseconds intact; see VocabularyCursor. The comparison is strictly
+   * "after the cursor". Under the newest sort a word saved into again only
+   * moves to the top, behind the cursor, so it is never served twice in one
+   * walk. Under a level sort its key moves both ways mid-walk (a save lowers
+   * the mean, a finished session raises it), so a word whose level changes may
+   * be served again or passed over.
    */
   wordsPage: (input: {
     enrollmentId: string;
     limit: number;
     after: VocabularyCursor | null;
-  }): SQL => sql`
-    SELECT lexeme_id, max(created_at)::text AS last_saved_at
-    FROM vocabulary_entries
-    WHERE enrollment_id = ${input.enrollmentId}
-    GROUP BY lexeme_id
-    ${
-      input.after
-        ? sql`HAVING (max(created_at), lexeme_id) < (${input.after.savedAt}::timestamptz, ${input.after.lexemeId}::text)`
-        : sql``
-    }
-    ORDER BY max(created_at) DESC, lexeme_id DESC
-    LIMIT ${input.limit}`,
+    sort: VocabularySort;
+    level: number | null;
+    live: readonly Dimension[];
+  }): SQL => {
+    const having: SQL[] = [];
+    if (input.level !== null) having.push(sql`${LEVEL} = ${input.level}`);
+    if (input.after) having.push(afterCursor(input.after));
+    // The join below is an inner join: an entry with no live-dimension progress
+    // rows drops out of the list, while the detail reads the same entry as level 1
+    // (senseProgressOf's fallback). Acceptable because it cannot happen today: the
+    // only writer of entries (insertEntries) creates their rows in the same
+    // statement, and the migration backfilled the older ones.
+    return sql`
+      SELECT ve.lexeme_id, ${SAVED_AT}::text AS last_saved_at, ${LEVEL} AS level
+      FROM vocabulary_entries ve
+      JOIN sense_progress p ON p.enrollment_id = ve.enrollment_id
+                           AND p.sense_id = ve.sense_id
+                           AND p.dimension IN (${inList([...input.live])})
+      WHERE ve.enrollment_id = ${input.enrollmentId}
+      GROUP BY ve.lexeme_id
+      ${having.length > 0 ? sql`HAVING ${sql.join(having, sql` AND `)}` : sql``}
+      ORDER BY ${orderBy(input.sort)}
+      LIMIT ${input.limit}`;
+  },
 
   /**
    * One row per lexeme of a page: the headline, the two counts. The LATERAL is
@@ -217,11 +278,18 @@ export function createVocabularyRepo(tx: Tx) {
       enrollmentId: string;
       limit: number;
       after: VocabularyCursor | null;
+      sort: VocabularySort;
+      level: number | null;
+      live: readonly Dimension[];
     }): Promise<WordPageRow[]> => {
-      const rows = await tx.execute<{ lexeme_id: string; last_saved_at: string }>(
+      const rows = await tx.execute<{ lexeme_id: string; last_saved_at: string; level: number }>(
         vocabularyQueries.wordsPage(input),
       );
-      return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, lastSavedAt: row.last_saved_at }));
+      return rows.rows.map((row) => ({
+        lexemeId: row.lexeme_id,
+        lastSavedAt: row.last_saved_at,
+        level: row.level,
+      }));
     },
 
     findWordSummaries: async (input: {

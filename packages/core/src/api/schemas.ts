@@ -32,6 +32,45 @@ export const ScoreSchema = z.object({
   total: z.number().int(),
 });
 
+// Phase 20. Knowledge per saved sense: five dimensions, each with a level from
+// 1 to 5 that only rises. packages/core/src/domain/progress.ts holds the same
+// list as DIMENSIONS, and a test keeps the two equal.
+export const KnowledgeDimensionSchema = z.enum([
+  'written_receptive',
+  'written_productive',
+  'spoken_receptive',
+  'spoken_productive',
+  'spelling',
+]);
+
+export const LevelSchema = z.number().int().min(1).max(5);
+
+// A saved sense's badge and its five levels. Only a saved sense has one.
+export const SenseProgressSchema = z.object({
+  level: LevelSchema,
+  dimensions: z.object({
+    written_receptive: LevelSchema,
+    written_productive: LevelSchema,
+    spoken_receptive: LevelSchema,
+    spoken_productive: LevelSchema,
+    spelling: LevelSchema,
+  }),
+});
+
+// One practised saved sense on the results screen. Both levels are badges over
+// the live dimensions. `form` is the prompt the learner saw; `translation` is
+// the right answer.
+export const SessionProgressItemSchema = z.object({
+  sense_id: z.string(),
+  form: z.string(),
+  translation: z.string(),
+  level_before: LevelSchema,
+  level_after: LevelSchema,
+});
+
+// How the word list is ordered. The level sorts break a tie by newest save.
+export const VocabularySortSchema = z.enum(['newest', 'level_asc', 'level_desc']);
+
 // Phase 19. A session's lifecycle: preparing → ready → completed, or skipped /
 // failed. "In progress" is not a status: it is `ready` with answers.
 export const SessionStatusSchema = z.enum(['preparing', 'ready', 'completed', 'skipped', 'failed']);
@@ -70,6 +109,8 @@ export const SessionViewSchema = z.object({
   source: SessionSourceSchema,
   position: PositionSchema,
   question: QuestionSchema.nullable(),
+  // Phase 20. What a completed session did to the saved words; empty otherwise.
+  progress: z.array(SessionProgressItemSchema),
 });
 
 export const NextStepRequestSchema = z.object({
@@ -95,6 +136,8 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     complete: z.literal(true),
     score: ScoreSchema,
     missed_questions: z.array(MissedQuestionSchema),
+    // Phase 20. Every practised saved sense, with its badge before and after.
+    progress: z.array(SessionProgressItemSchema),
   }),
 ]);
 
@@ -306,6 +349,10 @@ export const SaveVocabularyResponseSchema = z.object({
 export const VocabularyPageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   cursor: z.string().min(1).optional(),
+  // Phase 20. Order, and one level only. A cursor carries the sort it was
+  // issued under, and the server refuses it under another.
+  sort: VocabularySortSchema.optional(),
+  level: z.coerce.number().int().min(1).max(5).optional(),
 });
 
 // One row per lexeme. `headline` is the lowest-ranked saved sense, in the
@@ -319,6 +366,8 @@ export const VocabularyWordSchema = z.object({
   headline: z.object({ sense_id: z.string(), translation: z.string(), form: z.string() }),
   saved_count: z.number().int(),
   sense_count: z.number().int(),
+  // Phase 20. The word's badge: the rounded mean over its saved senses and the live dimensions.
+  level: LevelSchema,
 });
 
 export const VocabularyPageSchema = z.object({
@@ -336,12 +385,16 @@ export const VocabularySenseSchema = z.object({
   translation: z.string(),
   example: z.object({ source: z.string(), target: z.string() }).optional(),
   saved: z.boolean(),
+  // Phase 20. Present on a saved sense only: its badge and five levels.
+  progress: SenseProgressSchema.optional(),
 });
 
 export const VocabularyWordDetailSchema = z.object({
   lexeme_id: z.string(),
   lemma: z.string(),
   part_of_speech: z.string(),
+  // Phase 20. The word's badge, as on the list; null when nothing is saved.
+  level: LevelSchema.nullable(),
   senses: z.array(VocabularySenseSchema),
 });
 

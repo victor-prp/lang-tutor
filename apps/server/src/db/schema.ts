@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -383,6 +384,58 @@ export const vocabularyEntries = pgTable(
   ],
 );
 
+/**
+ * Phase 20. How well a learner knows one saved sense, per knowledge dimension
+ * (spec §2). Five rows per vocabulary entry, written with it in the save
+ * transaction (repo/vocabulary.ts insertEntries), so "not practised" is a level
+ * 1 row and never a missing one, and a dimension that goes live later needs no
+ * backfill.
+ *
+ * The level only rises. The two dates are the whole state the step rule needs
+ * (domain/progress.ts): the UTC day of the last step and of the last mistake.
+ * mode 'string' because node-postgres would otherwise turn a date into a JS Date
+ * at local midnight.
+ *
+ * The FK into vocabulary_entries cascades: unsaving a sense drops its progress,
+ * and a re-save starts at level 1. Only answers given while a sense is saved
+ * count.
+ *
+ * The dimension CHECK lists the same five names as DIMENSIONS in
+ * packages/core. A literal, because drizzle-kit reads this file on its own; the
+ * schema tests insert every DIMENSIONS value, which keeps the two equal.
+ *
+ * sense_progress_enrollment_dimension_idx serves the list's level sort and
+ * filter as an index-only scan of one enrollment's live-dimension rows.
+ * Measured while planning at the plan test's volume: 35 ms without it, 12 ms
+ * with it, for a 20k-word enrollment's first page. `level` is a key column
+ * rather than INCLUDE because drizzle-kit cannot express INCLUDE.
+ */
+export const senseProgress = pgTable(
+  'sense_progress',
+  {
+    enrollmentId: text('enrollment_id').notNull(),
+    senseId: text('sense_id').notNull(),
+    dimension: text('dimension').notNull(),
+    level: integer('level').notNull().default(1),
+    lastStepOn: date('last_step_on', { mode: 'string' }),
+    lastWrongOn: date('last_wrong_on', { mode: 'string' }),
+  },
+  (t) => [
+    primaryKey({ name: 'sense_progress_pkey', columns: [t.enrollmentId, t.senseId, t.dimension] }),
+    foreignKey({
+      name: 'sense_progress_entry_fk',
+      columns: [t.enrollmentId, t.senseId],
+      foreignColumns: [vocabularyEntries.enrollmentId, vocabularyEntries.senseId],
+    }).onDelete('cascade'),
+    check(
+      'sense_progress_dimension_known',
+      sql`${t.dimension} in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')`,
+    ),
+    check('sense_progress_level_range', sql`${t.level} between 1 and 5`),
+    index('sense_progress_enrollment_dimension_idx').on(t.enrollmentId, t.dimension, t.senseId, t.level),
+  ],
+);
+
 export const questions = pgTable(
   'questions',
   {
@@ -508,5 +561,41 @@ export const answers = pgTable(
       ],
     }).onDelete('cascade'),
     check('answers_selected_option_position_nonneg', sql`${t.selectedOptionPosition} >= 0`),
+  ],
+);
+
+/**
+ * Phase 20. What one ended session did to each progress row of each saved
+ * sense it practised: all five dimensions, moved or not. It is what lets the
+ * results be read again after the session ended, and what the recompute
+ * rebuilds. No FK to sense_progress: on the live path a sense unsaved later
+ * keeps its history here, and the results of an old session still read. A
+ * recompute rebuilds only what the current saves can explain, so it drops the
+ * rows of a sense unsaved since.
+ */
+export const sessionProgress = pgTable(
+  'session_progress',
+  {
+    sessionId: uuid('session_id').notNull(),
+    senseId: text('sense_id').notNull(),
+    dimension: text('dimension').notNull(),
+    levelBefore: integer('level_before').notNull(),
+    levelAfter: integer('level_after').notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'session_progress_pkey', columns: [t.sessionId, t.senseId, t.dimension] }),
+    foreignKey({
+      name: 'session_progress_session_fk',
+      columns: [t.sessionId],
+      foreignColumns: [sessions.id],
+    }).onDelete('cascade'),
+    check(
+      'session_progress_dimension_known',
+      sql`${t.dimension} in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')`,
+    ),
+    check(
+      'session_progress_levels_valid',
+      sql`${t.levelBefore} between 1 and 5 and ${t.levelAfter} between ${t.levelBefore} and 5`,
+    ),
   ],
 );

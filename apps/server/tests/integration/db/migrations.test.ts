@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { afterEach, describe, expect, it } from '@jest/globals';
+import { DIMENSIONS } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
 import { createDb } from '../../../src/db/client';
@@ -141,5 +142,47 @@ describe('0011_session_status', () => {
     const latest = await db.transaction((tx) => createSessionRepo(tx).findLatest('e_1'));
     expect(latest).toMatchObject({ status: 'skipped', source: 'seed' });
     expect(nextSource(latest !== undefined)).toBe('list');
+  });
+});
+
+describe('0012_sense_progress', () => {
+  it('gives every existing entry five level 1 rows', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0011_session_status'));
+
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech)
+        values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code)
+        values ('s1', 'l1', 'toy'), ('s2', 'l1', 'bird');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 0), ('v1', 's2', 'he', 'דיה', 1);
+      insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+        values ('e_1', 's1', 'l1', 'v1'), ('e_1', 's2', 'l1', 'v1');
+    `);
+
+    await runMigrations(db);
+
+    const rows = await db.execute<{
+      sense_id: string;
+      dimension: string;
+      level: number;
+      last_step_on: string | null;
+      last_wrong_on: string | null;
+    }>(sql`select sense_id, dimension, level, last_step_on, last_wrong_on
+           from sense_progress order by sense_id, dimension`);
+    expect(rows.rows).toHaveLength(10);
+    for (const sense of ['s1', 's2']) {
+      expect(rows.rows.filter((r) => r.sense_id === sense).map((r) => r.dimension).sort()).toEqual(
+        [...DIMENSIONS].sort(),
+      );
+    }
+    expect(rows.rows.every((r) => r.level === 1 && r.last_step_on === null && r.last_wrong_on === null)).toBe(true);
   });
 });

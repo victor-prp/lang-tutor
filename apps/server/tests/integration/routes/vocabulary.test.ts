@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { createVocabularyRouter } from '../../../src/routes/vocabulary';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
+import { setLevel } from '../../support/progressRows';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { seedEnrollment, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -83,6 +84,7 @@ describe('POST /api/enrollments/{id}/vocabulary', () => {
         headline: { sense_id: rama.senseIds[0], translation: 'рама-1', form: 'рама' },
         saved_count: 1,
         sense_count: 2,
+        level: 1,
       },
     ]);
     expect(page.next_cursor).toBeNull();
@@ -288,5 +290,115 @@ describe('GET /api/enrollments/{id}/vocabulary/words/{lexeme_id}', () => {
     const res = await detail('e_nobody', rama.lexemeId);
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'enrollment not found' });
+  });
+
+  it('shows a saved sense with its five levels, an unsaved one with none, and the word with its level', async () => {
+    const rama = await russianWord('рама');
+    await save(RU, [{ sense_id: rama.senseIds[0], variant_id: rama.variantIds[0] }]);
+    await setLevel(t.db, { enrollmentId: RU, senseId: rama.senseIds[0], level: 3 });
+
+    const body = (await (await detail(RU, rama.lexemeId)).json()) as {
+      level: number | null;
+      senses: { sense_id: string; progress?: unknown }[];
+    };
+    expect(body.level).toBe(3);
+    expect(body.senses.find((s) => s.sense_id === rama.senseIds[0])?.progress).toEqual({
+      level: 3,
+      dimensions: { written_receptive: 3, written_productive: 1, spoken_receptive: 1, spoken_productive: 1, spelling: 1 },
+    });
+    expect(body.senses.find((s) => s.sense_id === rama.senseIds[1])).not.toHaveProperty('progress');
+  });
+
+  it('gives a word with nothing saved no level', async () => {
+    const rama = await russianWord('рама');
+    expect(((await (await detail(RU, rama.lexemeId)).json()) as { level: unknown }).level).toBeNull();
+  });
+});
+
+describe('levels on the list (phase 20)', () => {
+  type Leveled = { items: { lexeme_id: string; level: number }[]; next_cursor: string | null };
+  const ids = async (query: string) => ((await (await list(RU, query)).json()) as Leveled).items.map((i) => i.lexeme_id);
+
+  async function savedWord(lemma: string, level: number) {
+    const word = await russianWord(lemma);
+    await save(RU, [{ sense_id: word.senseIds[0], variant_id: word.variantIds[0] }]);
+    await setLevel(t.db, { enrollmentId: RU, senseId: word.senseIds[0], level });
+    return word.lexemeId;
+  }
+
+  async function walk(query: string): Promise<Leveled['items']> {
+    const seen: Leveled['items'] = [];
+    let cursor: string | null = null;
+    do {
+      const page = (await (
+        await list(RU, `${query}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+      ).json()) as Leveled;
+      seen.push(...page.items);
+      cursor = page.next_cursor;
+    } while (cursor);
+    return seen;
+  }
+
+  it('shows a newly saved word at level 1', async () => {
+    const id = await savedWord('арка', 1);
+    expect(((await (await list(RU)).json()) as Leveled).items).toEqual([
+      expect.objectContaining({ lexeme_id: id, level: 1 }),
+    ]);
+  });
+
+  it("averages a word's saved senses, rounding a tie up", async () => {
+    const word = await russianWord('рама');
+    await save(RU, word.senseIds.map((senseId) => ({ sense_id: senseId, variant_id: word.variantIds[0] })));
+    await setLevel(t.db, { enrollmentId: RU, senseId: word.senseIds[0], level: 2 });
+    await setLevel(t.db, { enrollmentId: RU, senseId: word.senseIds[1], level: 3 });
+    expect(((await (await list(RU)).json()) as Leveled).items[0].level).toBe(3);
+  });
+
+  it('sorts by level both ways, the newer save first within a level', async () => {
+    const low = await savedWord('арка', 1);
+    const highOld = await savedWord('бак', 4);
+    const highNew = await savedWord('вал', 4);
+    const mid = await savedWord('газ', 2);
+    expect(await ids('?sort=level_desc')).toEqual([highNew, highOld, mid, low]);
+    expect(await ids('?sort=level_asc')).toEqual([low, mid, highNew, highOld]);
+  });
+
+  it('filters to one level', async () => {
+    await savedWord('арка', 1);
+    const highOld = await savedWord('бак', 4);
+    const highNew = await savedWord('вал', 4);
+    expect(await ids('?level=4')).toEqual([highNew, highOld]);
+    expect(await ids('?level=3')).toEqual([]);
+  });
+
+  it('walks a level sort page by page without repeating or losing a word', async () => {
+    for (let i = 0; i < 12; i += 1) await savedWord(`слово${i}`, (i % 5) + 1);
+    const seen = await walk('?sort=level_asc&limit=5');
+    expect(seen).toHaveLength(12);
+    expect(new Set(seen.map((item) => item.lexeme_id)).size).toBe(12);
+    expect(seen.map((item) => item.level)).toEqual([...seen.map((item) => item.level)].sort((a, b) => a - b));
+  });
+
+  // Review Focus 4: a filtered, level-sorted walk.
+  it('walks a filtered level sort page by page', async () => {
+    for (let i = 0; i < 9; i += 1) await savedWord(`слово${i}`, i % 3 === 0 ? 2 : 1);
+    const seen = await walk('?sort=level_desc&level=2&limit=2');
+    expect(seen).toHaveLength(3);
+    expect(seen.every((item) => item.level === 2)).toBe(true);
+    expect(new Set(seen.map((item) => item.lexeme_id)).size).toBe(3);
+  });
+
+  it('answers 400 for a cursor replayed under another sort', async () => {
+    for (let i = 0; i < 3; i += 1) await savedWord(`слово${i}`, 1);
+    const page = (await (await list(RU, '?limit=1')).json()) as Leveled;
+    const res = await list(RU, `?sort=level_asc&cursor=${encodeURIComponent(page.next_cursor!)}`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+
+  it.each(['?sort=oldest', '?level=0', '?level=6', '?level=two'])('answers 400 for %s', async (query) => {
+    const res = await list(RU, query);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
   });
 });

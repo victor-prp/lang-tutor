@@ -34,6 +34,7 @@
     "db:check": "drizzle-kit check",
     "db:migrate": "tsx src/db/cli.ts",
     "db:reseed": "tsx src/db/cli.ts --reseed",
+    "db:progress:recompute": "tsx src/db/cli.ts --recompute-progress",
     "dict:export": "tsx src/db/cli.ts --export-dict",
     "dict:restore": "tsx src/db/cli.ts --import-dict",
     "eval": "tsx tests/eval/run.ts",

@@ -22,7 +22,14 @@ import {
   VocabularyPageQuerySchema,
   VocabularyPageSchema,
 } from './schemas';
-import type { MissedQuestion, NextStepResponse, Position, Question, Score } from './types';
+import type {
+  MissedQuestion,
+  NextStepResponse,
+  Position,
+  Question,
+  Score,
+  SessionProgressItem,
+} from './types';
 
 const QUESTION: Question = {
   id: 'q1',
@@ -93,6 +100,7 @@ describe('NextStepResponseSchema', () => {
       complete: true,
       score: { correct: 9, total: 10 },
       missed_questions: [{ question: QUESTION, correct_answer: 'כלב' }],
+      progress: [{ sense_id: 'se1', form: 'dog', translation: 'כלב', level_before: 1, level_after: 2 }],
     });
 
     // Both the runtime assertion and the narrowing below are the test: if the
@@ -104,6 +112,7 @@ describe('NextStepResponseSchema', () => {
     expect(score).toEqual({ correct: 9, total: 10 });
     expect(missed[0].correct_answer).toBe('כלב');
     expect(value.question).toBeNull();
+    expect(value.progress[0].level_after).toBe(2);
   });
 
   it('rejects a completed step that omits score', () => {
@@ -112,6 +121,19 @@ describe('NextStepResponseSchema', () => {
       question: null,
       position: { position: 10, total: 10 },
       complete: true,
+      missed_questions: [],
+      progress: [],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects a completed step that omits progress', () => {
+    const parsed = NextStepResponseSchema.safeParse({
+      session_id: 's1',
+      question: null,
+      position: { position: 10, total: 10 },
+      complete: true,
+      score: { correct: 9, total: 10 },
       missed_questions: [],
     });
     expect(parsed.success).toBe(false);
@@ -136,6 +158,7 @@ const nextStepShapeIsPinned: Exact<
       complete: true;
       score: Score;
       missed_questions: MissedQuestion[];
+      progress: SessionProgressItem[];
     }
 > = true;
 void nextStepShapeIsPinned;

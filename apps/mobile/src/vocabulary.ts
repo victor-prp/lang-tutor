@@ -1,4 +1,9 @@
-import type { TranslationSense, VocabularyEntryInput, VocabularyWord } from '@lang-tutor/core/api';
+import type {
+  TranslationSense,
+  VocabularyEntryInput,
+  VocabularyWord,
+  VocabularyWordDetail,
+} from '@lang-tutor/core/api';
 
 /** sense_id → saved, for the senses the server said can be saved here. A sense
  *  absent from the map gets no toggle: a reverse lookup, a sentence, a failed
@@ -66,11 +71,23 @@ export async function toggleOptimistically(toggle: OptimisticToggle): Promise<bo
 }
 
 /** A word can move to the top between pages and be served on a refresh while an
- *  older copy is loaded; the server never serves one twice in a walk, but a
- *  refresh racing a scroll can. The first copy stays. */
+ *  older copy is loaded. Under the newest sort the server never serves one twice
+ *  in a walk, but a refresh racing a scroll can. Under a level sort a word whose
+ *  level changes mid-walk may be served again, or passed over; dropping repeats
+ *  by lexeme id makes the first harmless. The first copy stays. */
 export function appendPage(loaded: VocabularyWord[], page: VocabularyWord[]): VocabularyWord[] {
   const seen = new Set(loaded.map((word) => word.lexeme_id));
   return [...loaded, ...page.filter((word) => !seen.has(word.lexeme_id))];
+}
+
+/** A word read again after a toggle, in the order the screen already shows. The
+ *  server lists saved senses first, so taking its order would move the sense just
+ *  tapped out from under the learner's finger. A sense new to the screen goes
+ *  last; one the server no longer lists is dropped. */
+export function keepSenseOrder(shown: VocabularyWordDetail, fresh: VocabularyWordDetail): VocabularyWordDetail {
+  const position = new Map(shown.senses.map((sense, i) => [sense.sense_id, i]));
+  const at = (senseId: string) => position.get(senseId) ?? shown.senses.length;
+  return { ...fresh, senses: [...fresh.senses].sort((a, b) => at(a.sense_id) - at(b.sense_id)) };
 }
 
 export function showsMark(word: VocabularyWord): boolean {
