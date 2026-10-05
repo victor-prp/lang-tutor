@@ -2,6 +2,8 @@
 
 - **Status:** Design approved section by section, 2026-10-05. Awaiting review of this written
   spec before planning.
+  Implemented on branch phase-19-next-enrollment-session; deviations from the approved design
+  are folded in.
 - **Date:** 2026-10-05
 - **Source:** the one-pager `drafts/2026-10-04-next-enrollment-session-one-pager.md`, the design
   dialogue recorded here, and a side research on job infrastructure
@@ -116,8 +118,9 @@ No schema change. The owner columns phase 16 left on `questions` are written for
 - **A generated question is an enrollment-owned row:**
   - `user_id` and `enrollment_id` are the session's;
   - `sense_id` is the saved sense, and `prompt_variant_id` is the entry's saved form;
-  - `options` holds the correct translation and three distractors, with the correct option at an
-    rng-chosen canonical position;
+  - `options` holds the correct translation and three distractors, with the correct option at
+    canonical position 0. The shown order is shuffled per session by `pickQuestions`, so storing
+    it first gives nothing away;
   - `id` is a fresh uuid.
 - **`session_questions` points at those rows exactly as it does at seed questions**, so
   `loadSession`, `step`, scoring and the answer path are unchanged.
@@ -137,9 +140,10 @@ One drizzle migration adds both columns and the index.
 - Every existing session becomes `source = 'seed'`, so each existing enrollment's next session
   is built from its list, as the rule says.
 
-The pg-boss schema is installed by `db:migrate` in the same step as drizzle's migrations, not
-lazily at `boss.start()`. The integration buckets clone a template database, so `pgboss` must
-already be in the template.
+The pg-boss schema is installed by `db/jobs.ts` (`installJobs`), which `runMigrations` calls
+right after drizzle's migrations, not lazily at `boss.start()`. Every place that migrates a
+database therefore installs it, with no new call site. The integration buckets clone a template
+database, so `pgboss` must already be in the template.
 
 ## 3. Job infrastructure in the server
 
@@ -153,9 +157,12 @@ Two functions. `schedule` waits for its first consumer.
 - **`handle` is registration, in a new `worker.ts`**, a sibling of `app.ts`. `app.ts` maps
   routes to service calls, and `worker.ts` maps queue names to service calls with each queue's
   options. It holds no logic.
-- **`services/jobs.ts` holds types only:** job names, payload types and the `JobQueue` type, as
-  `services/llm.ts` does for the LLM. Each handler parses its payload with zod, because a payload
-  enqueued by an older deploy can reach a newer worker.
+- **`domain/jobs.ts` holds the job names and their payload schemas.** They live in `domain/`
+  rather than `services/` because `repo/jobs.ts` and `db/jobs.ts` need the names, and ADR 0001 R4
+  forbids `repo/` and `db/` from importing `services/`.
+- **The service methods pg-boss calls take `unknown` and parse the payload with zod themselves.**
+  That keeps `worker.ts` free of logic, and a payload enqueued by an older deploy that reaches a
+  newer worker fails loudly.
 
 ### Lifecycle
 
@@ -185,16 +192,18 @@ nothing in this design has to change to make it.
 | `deleteAfterSeconds` | 86 400 | one day of history, not the 7-day default |
 
 **Every terminal failure goes through the dead-letter queue.** Its handler,
-`sessions.failPreparation(sessionId)`, sets `failed` only while the status is still
-`preparing`. Exhausted retries and expired jobs both end there, so nothing needs a sweeper.
+`sessions.failPreparation(data)`, sets `failed` only while the status is still `preparing`.
+Exhausted retries and expired jobs both end there, so nothing needs a sweeper. It parses only
+`session_id` from the payload, so a payload that `prepareSession` refused on every attempt
+still ends the session `failed`.
 
 ### ADR 0007 — Background jobs
 
-Written with the `create-adr` skill, with `scripts/check-adr-0007-jobs.sh`. Rules:
+Written with the `create-adr` skill, with `scripts/check-adr-0007-background-jobs.sh`. Rules:
 
-1. `pg-boss` is imported only by `index.ts`, `db/migrate.ts`, `composition.ts`, `worker.ts` and
-   `repo/jobs.ts`. `new PgBoss` appears only in `index.ts` and `db/migrate.ts`, the two places
-   that already open connections.
+1. `pg-boss` is imported only by `index.ts`, `composition.ts`, `worker.ts`, `db/jobs.ts` and
+   `repo/jobs.ts`. `new PgBoss` appears only in `index.ts` and `db/jobs.ts`, the two places that
+   already open connections.
 2. No `.send(` or `.insert(` on the boss outside `repo/jobs.ts`, so every enqueue goes through a
    transaction.
 3. `.work(` appears only in `worker.ts`.
@@ -227,10 +236,11 @@ so far.
 ### Read — `GET /sessions/{id}` (new)
 
 ```
-→ 200 { session_id, status, source, position, total, question? }
+→ 200 { session_id, status, source, position: { position, total }, question: Question | null }
 ```
 
-`question` is the current one while the session is `ready` and incomplete. This route serves
+`position` and `question` have the shapes next-step uses. `question` is the current one while the
+session is `ready` and incomplete, and `null` otherwise. This route serves
 resume and the poll. `id` stays `z.string()`, so a malformed id is a 404, as on next-step.
 
 ### Current — `GET /enrollments/{id}/sessions/current` (new)
@@ -244,7 +254,7 @@ resume and the poll. `id` stays `z.string()`, so a malformed id is a 404, as on 
 - `current` is the enrollment's newest session if its status is `preparing`, `ready` or `failed`,
   and `null` otherwise. A failed session stays visible until the next create, so a failure is
   never silent.
-- `total` is the number of picks while `preparing`.
+- `total` is the number of questions the session holds, so 0 while `preparing`.
 
 ### Skip — `POST /sessions/{id}/skip` (new)
 
@@ -370,7 +380,8 @@ Against real Postgres and pg-boss on the cloned database, with MockServer standi
 - **Transactional enqueue:** a create whose transaction rolls back leaves no job, and a committed
   one leaves exactly one.
 - **Failure:** MockServer answers 500 three times, and the session ends `failed` via the
-  dead-letter queue. pg-boss's `TestClock` advances the backoff without sleeping.
+  dead-letter queue. The test runs in real time, not on `TestClock`: two retries with a backoff
+  starting at 1 s finish in under 10 s.
 - **Skip races:** skipped while preparing, the job's finish writes nothing.
 - **One open session:** a second create is 409 `session_open`.
 - **Migration:** old completed and unfinished sessions map to `completed` and `skipped`, and the
@@ -384,7 +395,10 @@ Against real Postgres and pg-boss on the cloned database, with MockServer standi
 2. They save four senses on the translate screen.
 3. They tap **צור שאלות**, wait for **התחל**, and every prompt is one of those four forms.
 4. A skip mid-session returns home.
-5. A second enrollment with an empty list shows the "save some words first" state.
+5. The "save some words first" state is covered after skipping the seed: a fresh enrollment's
+   first session is the seed by §2's next-source rule, so an enrollment with an empty list does
+   not reach it directly. Enrollment isolation is pinned by a server integration test instead:
+   `currentSession` keeps one enrollment's session out of another's.
 
 MockServer serves the distractor answer, in the e2e namespace.
 
