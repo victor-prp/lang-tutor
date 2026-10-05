@@ -3,15 +3,14 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { currentFor, type StoredCurrent } from '@/nextSession';
 
 // Phase 19. The active enrollment's session state for the home screen: what
 // is current, where the next session comes from, and the two actions on it.
@@ -29,25 +28,20 @@ const NextSessionContext = createContext<NextSessionValue | null>(null);
 
 export function NextSessionProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
   const { active } = useCurrentUser();
-  const [current, setCurrent] = useState<CurrentSessionResponse | null>(null);
-  // Bumped on every enrollment switch. A read that lands for an older
-  // enrollment is dropped, so a slow answer about Russian cannot overwrite
-  // English's state just after the switch.
-  const generation = useRef(0);
-
-  useEffect(() => {
-    generation.current += 1;
-    setCurrent(null);
-  }, [active]);
+  // Keyed by the enrollment the read was about, not cleared on a switch: a
+  // slow answer about Russian lands under Russian's id and is simply never
+  // shown while English is active, and the newest read for the active
+  // enrollment always lands. Clearing in an effect instead would run after
+  // the home screen's own focus effect (children first) and discard its read.
+  const [stored, setStored] = useState<StoredCurrent | null>(null);
+  const current = currentFor(stored, active?.id);
 
   const reload = useCallback(() => {
     if (!active) return;
-    const mine = generation.current;
+    const enrollmentId = active.id;
     void api
-      .currentSession(active.id)
-      .then((state) => {
-        if (mine === generation.current) setCurrent(state);
-      })
+      .currentSession(enrollmentId)
+      .then((state) => setStored({ enrollmentId, state }))
       // Kept as it was: the next focus or poll tries again.
       .catch(() => undefined);
   }, [api, active]);

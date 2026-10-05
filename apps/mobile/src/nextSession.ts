@@ -30,3 +30,15 @@ export function homeActionOf(state: CurrentSessionResponse): HomeAction {
 export function shouldPoll(state: CurrentSessionResponse | null): boolean {
   return state?.current?.status === 'preparing';
 }
+
+/** A read of the current session, tagged with the enrollment it was about. */
+export type StoredCurrent = { enrollmentId: string; state: CurrentSessionResponse };
+
+/** What to show for the active enrollment. A read stored for any other
+ *  enrollment (a slow answer that landed after a switch) is never shown. */
+export function currentFor(
+  stored: StoredCurrent | null,
+  activeId: string | undefined,
+): CurrentSessionResponse | null {
+  return stored !== null && stored.enrollmentId === activeId ? stored.state : null;
+}

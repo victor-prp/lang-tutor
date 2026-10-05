@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { CurrentSessionResponse } from '@lang-tutor/core/api';
 
-import { homeActionOf, shouldPoll } from './nextSession';
+import { currentFor, homeActionOf, shouldPoll } from './nextSession';
 
 const none = (next_source: 'seed' | 'list', saved_count = 0): CurrentSessionResponse => ({
   current: null,
@@ -35,5 +35,20 @@ describe('shouldPoll', () => {
     expect(shouldPoll(withCurrent('failed'))).toBe(false);
     expect(shouldPoll(none('list', 3))).toBe(false);
     expect(shouldPoll(null)).toBe(false);
+  });
+});
+
+describe('currentFor', () => {
+  const stored = { enrollmentId: 'en', state: none('seed') };
+
+  it('shows the state stored for the active enrollment', () => {
+    expect(currentFor(stored, 'en')).toBe(stored.state);
+  });
+  it('hides a state stored for another enrollment', () => {
+    expect(currentFor(stored, 'ru')).toBeNull();
+  });
+  it('is null with nothing stored, or no active enrollment', () => {
+    expect(currentFor(null, 'en')).toBeNull();
+    expect(currentFor(stored, undefined)).toBeNull();
   });
 });
