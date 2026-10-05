@@ -2,24 +2,13 @@ import { describe, expect, it } from '@jest/globals';
 import type { Question } from '@lang-tutor/core/api';
 import { DIMENSIONS } from '@lang-tutor/core/domain';
 
-import { createFakeLlmClient, createFakeLogger, createFakeTransaction } from '../../tests/support/fakes';
+import { createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { ProgressRow, SnapshotRead } from '../domain/progress';
 import type { SessionRecord, SessionState } from '../domain/session';
 import type { ProgressRepo, SessionEvidence } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
-
-// Only the methods a case names exist; any other reach fails with its name.
-function stub<T extends object>(methods: Partial<T>): T {
-  return new Proxy(methods, {
-    get: (target, property) =>
-      (target as Record<string | symbol, unknown>)[property] ??
-      (() => {
-        throw new Error(`${String(property)} is not stubbed`);
-      }),
-  }) as T;
-}
 
 const SESSION = '22222222-2222-2222-2222-222222222222';
 const DAY = '2026-10-05';
