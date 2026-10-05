@@ -112,7 +112,7 @@ grep -rnE "['\"\`/]lang_tutor" e2e scripts package.json \
 
 # R3 — a start-or-test script that bypasses the wrapper
 for key in server mobile e2e test:integration db:up db:migrate db:reseed \
-           dict:export dict:restore lane:list lane:down; do
+           db:progress:recompute dict:export dict:restore lane:list lane:down; do
   line=$(grep -E "^    \"$key\": " package.json)
   printf '%s' "$line" | grep -q 'lane-env.sh' || echo "$line"
 done
