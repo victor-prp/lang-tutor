@@ -48,7 +48,7 @@ export function createSessionRepo(tx: Tx) {
 
       const [session] = await tx
         .insert(sessions)
-        .values({ userId, enrollmentId })
+        .values({ userId, enrollmentId, status: 'ready', source: 'seed' })
         .returning({ id: sessions.id });
 
       await tx.insert(sessionQuestions).values(
@@ -164,7 +164,10 @@ export function createSessionRepo(tx: Tx) {
     },
 
     completeSession: (sessionId: string): Promise<unknown> =>
-      tx.update(sessions).set({ completedAt: sql`now()` }).where(eq(sessions.id, sessionId)),
+      tx
+        .update(sessions)
+        .set({ completedAt: sql`now()`, status: 'completed' })
+        .where(eq(sessions.id, sessionId)),
   };
 }
 

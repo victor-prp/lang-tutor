@@ -426,8 +426,16 @@ export const sessions = pgTable(
     // enrollment its own learner holds.
     enrollmentId: text('enrollment_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    // NULL = in progress. There is no separate `complete` column.
+    // Set together with status = 'completed', and only then
+    // (sessions_completed_consistent).
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    // Phase 19. preparing → ready → completed, or skipped / failed. "In progress"
+    // is not a status: it is `ready` with at least one answer. No default:
+    // every insert says which one it is, so a default could only hide a bug.
+    status: text('status').notNull(),
+    // Phase 19. Where the questions came from: the shared seed, or the
+    // enrollment's saved senses.
+    source: text('source').notNull(),
   },
   (t) => [
     foreignKey({
@@ -435,6 +443,25 @@ export const sessions = pgTable(
       columns: [t.userId, t.enrollmentId],
       foreignColumns: [enrollments.userId, enrollments.id],
     }),
+    check(
+      'sessions_status_known',
+      sql`${t.status} in ('preparing', 'ready', 'completed', 'skipped', 'failed')`,
+    ),
+    check('sessions_source_known', sql`${t.source} in ('seed', 'list')`),
+    check(
+      'sessions_completed_consistent',
+      sql`(${t.status} = 'completed') = (${t.completedAt} is not null)`,
+    ),
+    // The one-open-session rule as a constraint. A concurrent second create
+    // fails here and becomes a 409, which no read-then-insert check could
+    // promise.
+    uniqueIndex('sessions_one_open_per_enrollment')
+      .on(t.enrollmentId)
+      .where(sql`${t.status} in ('preparing', 'ready')`),
+    // The home screen's read: one enrollment's newest session. Nothing indexed
+    // sessions by enrollment before, and this read runs on every focus and every
+    // 3 s poll.
+    index('sessions_enrollment_created_idx').on(t.enrollmentId, t.createdAt),
   ],
 );
 

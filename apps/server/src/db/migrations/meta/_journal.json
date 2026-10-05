@@ -78,6 +78,13 @@
       "when": 1791112598629,
       "tag": "0010_vocabulary_entries",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791206509998,
+      "tag": "0011_session_status",
+      "breakpoints": true
     }
   ]
 }

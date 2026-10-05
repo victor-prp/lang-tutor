@@ -7,7 +7,7 @@ import { createDb, type Db } from '../../../src/db/client';
 import { runMigrations } from '../../../src/db/migrate';
 import { sessions, users } from '../../../src/db/schema';
 import { ADMIN_URL, urlFor } from '../../support/dbNames';
-import { enrollmentOf, seedUser } from '../../support/seedUser';
+import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
 
 const DB_NAME = 'lang_tutor_schema_test';
 
@@ -152,7 +152,10 @@ describe('the migrated schema', () => {
 
   it('rejects an answer naming a question that is not in the session at that position', async () => {
     await seedUser(db, 'u_fk');
-    const [session] = await db.insert(sessions).values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk') }).returning();
+    const [session] = await db
+      .insert(sessions)
+      .values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk'), status: 'skipped', source: 'seed' })
+      .returning();
     await db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)
       values (${session.id}, 0, 'q-ok', '{0,1,2,3}')
@@ -166,7 +169,10 @@ describe('the migrated schema', () => {
   });
 
   it('rejects a second answer at the same position', async () => {
-    const [session] = await db.insert(sessions).values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk') }).returning();
+    const [session] = await db
+      .insert(sessions)
+      .values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk'), status: 'skipped', source: 'seed' })
+      .returning();
     await db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)
       values (${session.id}, 0, 'q-ok', '{0,1,2,3}')
@@ -293,5 +299,51 @@ describe('the migrated schema', () => {
         }),
       }),
     );
+  });
+});
+
+describe('sessions status (phase 19)', () => {
+  // This file shares one migrated database across its tests, so each test here
+  // takes a learner of its own rather than a fixed 'u_1'.
+  async function learner(id: string): Promise<{ first: string; second: string }> {
+    await seedUser(db, id);
+    await seedEnrollment(db, { id: `${enrollmentOf(id)}_ru`, userId: id, targetLanguage: 'ru' });
+    return { first: enrollmentOf(id), second: `${enrollmentOf(id)}_ru` };
+  }
+
+  it('allows one open session per enrollment', async () => {
+    const { first } = await learner('u_open');
+    await db.execute(sql`insert into sessions (user_id, enrollment_id, status, source)
+                         values ('u_open', ${first}, 'ready', 'seed')`);
+    await expect(
+      db.execute(sql`insert into sessions (user_id, enrollment_id, status, source)
+                     values ('u_open', ${first}, 'preparing', 'list')`),
+    ).rejects.toMatchObject({ cause: { code: '23505' } });
+  });
+
+  it('does not count skipped, failed or completed sessions as open', async () => {
+    const { first, second } = await learner('u_closed');
+    await db.execute(sql`
+      insert into sessions (user_id, enrollment_id, status, source, completed_at) values
+        ('u_closed', ${first}, 'skipped', 'seed', null),
+        ('u_closed', ${first}, 'failed', 'list', null),
+        ('u_closed', ${first}, 'completed', 'list', now()),
+        ('u_closed', ${first}, 'ready', 'list', null),
+        ('u_closed', ${second}, 'preparing', 'list', null)`);
+  });
+
+  it('rejects an unknown status or source, and a completed status without completed_at', async () => {
+    const { first } = await learner('u_checks');
+    for (const values of [
+      sql`('u_checks', ${first}, 'paused', 'seed', null)`,
+      sql`('u_checks', ${first}, 'ready', 'quiz', null)`,
+      sql`('u_checks', ${first}, 'completed', 'seed', null)`,
+      sql`('u_checks', ${first}, 'ready', 'seed', now())`,
+    ]) {
+      await expect(
+        db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, completed_at)
+                       values ${values}`),
+      ).rejects.toMatchObject({ cause: { code: '23514' } });
+    }
   });
 });

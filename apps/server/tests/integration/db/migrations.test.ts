@@ -106,3 +106,32 @@ describe('0009_enrollments', () => {
     expect(column.rows).toHaveLength(0);
   });
 });
+
+describe('0011_session_status', () => {
+  it('marks finished sessions completed, unfinished ones skipped, and every one seed', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0010_vocabulary_entries'));
+
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'en');
+      insert into sessions (id, user_id, enrollment_id, completed_at) values
+        ('00000000-0000-0000-0000-000000000001', 'u_1', 'e_1', now()),
+        ('00000000-0000-0000-0000-000000000002', 'u_1', 'e_1', null),
+        ('00000000-0000-0000-0000-000000000003', 'u_1', 'e_1', null);
+    `);
+
+    await runMigrations(db);
+
+    const rows = await db.execute<{ id: string; status: string; source: string }>(
+      sql`select id, status, source from sessions order by id`,
+    );
+    expect(rows.rows).toEqual([
+      { id: '00000000-0000-0000-0000-000000000001', status: 'completed', source: 'seed' },
+      { id: '00000000-0000-0000-0000-000000000002', status: 'skipped', source: 'seed' },
+      { id: '00000000-0000-0000-0000-000000000003', status: 'skipped', source: 'seed' },
+    ]);
+  });
+});
