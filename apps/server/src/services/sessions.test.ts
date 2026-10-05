@@ -119,6 +119,11 @@ describe('repos', () => {
         enrollment: enrollmentRepo,
         dict: dictRepo,
         vocabulary: vocabularyRepo,
+        jobs: {
+          enqueue: () => {
+            throw new Error('the submit-answer use case must not enqueue a job');
+          },
+        },
       });
   }
 

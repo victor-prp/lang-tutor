@@ -1,6 +1,9 @@
+import type { PgBoss } from 'pg-boss';
+
 import { createServerDeps, type AppDeps } from '../../src/composition';
 import type { Db } from '../../src/db/client';
 import type { Logger } from '../../src/logger';
+import { unstartedBoss } from './jobs';
 
 /**
  * Production's assembly with test-shaped I/O. Exists so a change to
@@ -23,6 +26,11 @@ export function createTestServerDeps(io: {
   geminiBaseUrl?: string;
   translationTimeoutMs?: number;
   identity?: { lane: string; database: string; port: number };
+  /** A started boss for tests that enqueue (startTestBoss). By default an
+   *  unstarted one, so an unexpected enqueue fails loudly. */
+  boss?: PgBoss;
+  /** Phase 19, wired in Task 8. */
+  sessionGenerationTimeoutMs?: number;
 }): AppDeps {
   return createServerDeps({
     db: io.db,
@@ -36,5 +44,6 @@ export function createTestServerDeps(io: {
     },
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0 },
+    boss: io.boss ?? unstartedBoss(io.db),
   });
 }

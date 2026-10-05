@@ -1,16 +1,19 @@
 import { serve } from '@hono/node-server';
+import { sql } from 'drizzle-orm';
+import { PgBoss, fromDrizzle } from 'pg-boss';
 
 import { createApp } from './app';
 import { databaseNameFrom, loadConfig, loadGeminiConfig } from './config';
 import { createServerDeps } from './composition';
 import { createDb } from './db/client';
+import { JOB_SCHEMA } from './db/jobs';
 import { createConsoleLogger } from './logger';
 
 // The process composition root: the only place that reads the environment, names
 // a concrete logger or randomness source, opens a pool, or binds a port. Naming
 // concrete things is what this file is for; everything it calls is a pure
 // function a test can call with fakes.
-export function main(): void {
+export async function main(): Promise<void> {
   const config = loadConfig(process.env);
   // Before the pool: a misconfigured server should fail without having opened
   // a connection it will never use.
@@ -22,6 +25,21 @@ export function main(): void {
     max: config.poolMax,
     onError: (error) => logger.error('idle postgres client', error),
   });
+
+  // Started here because starting is I/O and composition performs none: the
+  // jobs repository's send() resolves its queue through a cache start() fills.
+  // The schema and queues were installed by the migrations, so migrate is off;
+  // no worker runs yet, so supervise, cron and the registry are off too.
+  const boss = new PgBoss({
+    db: fromDrizzle(db, sql),
+    schema: JOB_SCHEMA,
+    migrate: false,
+    supervise: false,
+    schedule: false,
+    registerInstance: false,
+  });
+  boss.on('error', (error) => logger.error('pg-boss', error));
+  await boss.start();
 
   const deps = createServerDeps({
     db,
@@ -37,6 +55,7 @@ export function main(): void {
       database: databaseNameFrom(config.databaseUrl),
       port: config.port,
     },
+    boss,
   });
 
   const server = serve(
@@ -49,7 +68,10 @@ export function main(): void {
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.on(signal, () => {
       server.close(() => {
-        void close().then(() => process.exit(0));
+        void boss
+          .stop({ graceful: true, timeout: 5_000 })
+          .then(close)
+          .then(() => process.exit(0));
       });
     });
   }
@@ -58,5 +80,5 @@ export function main(): void {
 // Importing this file must not start a server — the pattern e2e/globalSetup.ts
 // already uses.
 if (require.main === module) {
-  main();
+  void main();
 }

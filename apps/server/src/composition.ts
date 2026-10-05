@@ -1,9 +1,12 @@
+import type { PgBoss } from 'pg-boss';
+
 import type { GeminiConfig } from './config';
 import type { Db } from './db/client';
 import { createTransaction } from './db/transaction';
 import type { Logger } from './logger';
 import { createGeminiClient } from './providers/gemini';
 import { createHealthRepo, type HealthRepo } from './repo/health';
+import { createJobRepo } from './repo/jobs';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
 import { createEnrollmentRepo } from './repo/enrollments';
@@ -55,6 +58,9 @@ export function createServerDeps(io: {
   // wall-clock time — see config.ts's TRANSLATION_TIMEOUT_MS default.
   translationTimeoutMs: number;
   identity: ServerIdentity;
+  // Phase 19. Constructed and started in main() — starting it is I/O, and
+  // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
+  boss: PgBoss;
 }): AppDeps {
   // Binding the repositories to a transaction is assembly, which is what this
   // file is for. Doing it here is what lets services/ take a transaction rather
@@ -66,6 +72,7 @@ export function createServerDeps(io: {
     enrollment: createEnrollmentRepo(tx),
     dict: createDictRepo(tx),
     vocabulary: createVocabularyRepo(tx),
+    jobs: createJobRepo(tx, io.boss),
   }));
 
   // The one place in the repo that names both `createGeminiClient` and
