@@ -22,12 +22,21 @@ import { join } from 'node:path';
 import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
+import { normalizeForm } from '../../src/domain/dictionary';
+import { distractorItems, validateDistractors } from '../../src/domain/distractors';
 import { isInScript } from '../../src/domain/languages';
 import { createGeminiClient } from '../../src/providers/gemini';
-import type { LlmReconciliation } from '@lang-tutor/core/api';
+import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askModel, askRendering, type ModelAnswer } from './askModel';
-import { CASES, RENDERING_CASES, type EvalCase, type RenderingCase } from './cases';
+import { askDistractors, askModel, askRendering, type ModelAnswer } from './askModel';
+import {
+  CASES,
+  DISTRACTOR_CASES,
+  RENDERING_CASES,
+  type DistractorCase,
+  type EvalCase,
+  type RenderingCase,
+} from './cases';
 
 const TIER2_THRESHOLD = 0.85;
 const TIMEOUT_MS = 30_000;
@@ -57,6 +66,8 @@ type Row = {
   /** Set instead of `result` on a rendering row — the second call answers a
    *  different shape, and the scorecard prints whichever is present. */
   rendering?: LlmReconciliation;
+  /** Set on a distractor row, the third call's answer. */
+  distractors?: LlmDistractors;
   error?: string;
 };
 
@@ -463,6 +474,48 @@ function renderingTier2(kase: RenderingCase, answer: LlmReconciliation): Check[]
   return checks;
 }
 
+/** Phase 19. The items as prepareSession builds them, keyed q1, q2, …. */
+function itemsOf(kase: DistractorCase) {
+  return distractorItems(
+    kase.items.map((item, index) => ({
+      senseId: `s${index}`,
+      variantId: `v${index}`,
+      lexemeId: `l${index}`,
+      form: item.form,
+      lemma: item.lemma,
+      partOfSpeech: item.partOfSpeech,
+      translation: item.translation,
+    })),
+  );
+}
+
+function distractorTier1(kase: DistractorCase, answer: LlmDistractors): Check[] {
+  const verdict = validateDistractors(itemsOf(kase), answer);
+  const all = answer.items.flatMap((item) => item.distractors);
+  return [
+    { name: 'every item answered with three distinct wrong options', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
+    {
+      name: `every wrong option is in ${kase.to} script`,
+      ok: all.every((text) => isInScript(text, kase.to)),
+      detail: all.join(' | '),
+    },
+  ];
+}
+
+function distractorTier2(kase: DistractorCase, answer: LlmDistractors): Check[] {
+  const items = itemsOf(kase);
+  const same = (a: string, b: string) => normalizeForm(a).toLowerCase() === normalizeForm(b).toLowerCase();
+  return kase.items.map((item, index) => {
+    const offered = answer.items.find((answered) => answered.key === items[index].key)?.distractors ?? [];
+    const offenders = offered.filter((text) => item.synonyms.some((synonym) => same(text, synonym)));
+    return {
+      name: `${item.form}: no wrong option is a known right answer`,
+      ok: offenders.length === 0,
+      detail: offenders.length ? offenders.join(', ') : offered.join(' | '),
+    };
+  });
+}
+
 async function main(): Promise<void> {
   // Exits non-zero with a clear message rather than skipping quietly: a green
   // "0 cases ran" is the one outcome worse than a red suite.
@@ -486,8 +539,11 @@ async function main(): Promise<void> {
   const renderingCases = RENDERING_CASES.filter((kase) =>
     matches(kase.label, kase.form, kase.lemma),
   );
+  const distractorCases = DISTRACTOR_CASES.filter((kase) =>
+    matches(kase.label, ...kase.items.map((item) => item.form)),
+  );
   if (filter) console.log(`filter "${filter}"`);
-  if (cases.length + renderingCases.length === 0) {
+  if (cases.length + renderingCases.length + distractorCases.length === 0) {
     throw new Error(`filter "${filter}" matched no case`);
   }
 
@@ -558,15 +614,38 @@ async function main(): Promise<void> {
     }
   };
 
-  // Both call sites of the provider, scored in one run and one scorecard. They
+  const scoreDistractors = async (kase: DistractorCase): Promise<Row> => {
+    const text = kase.items.map((item) => item.form).join(', ');
+    try {
+      const answer = await askDistractors(llm, { from: kase.from, to: kase.to, items: itemsOf(kase) });
+      return {
+        label: kase.label,
+        text,
+        tier1: distractorTier1(kase, answer),
+        tier2: distractorTier2(kase, answer),
+        distractors: answer,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  // Every call site of the provider, scored in one run and one scorecard. They
   // share the concurrency budget rather than each taking their own: the quota
   // they compete for is the same one.
   const started = Date.now();
-  const [translationRows, renderingRows] = await Promise.all([
+  const [translationRows, renderingRows, distractorRows] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
+    mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
   ]);
-  const rows = [...translationRows, ...renderingRows];
+  const rows = [...translationRows, ...renderingRows, ...distractorRows];
   const elapsedMs = Date.now() - started;
 
   // Scorecard. Every case prints its actual output, so a drop is diagnosable
@@ -609,6 +688,11 @@ async function main(): Promise<void> {
         }`,
       );
     }
+    if (row.distractors) {
+      console.log(
+        `       ${row.distractors.items.map((item) => `${item.key}=${item.distractors.join('/')}`).join(' | ')}`,
+      );
+    }
     for (const check of [...t1Bad, ...t2Bad]) {
       console.log(
         `       ${t1Bad.includes(check) ? 'T1' : 'T2'} ${check.name}: ${check.detail ?? ''}`,
@@ -621,7 +705,7 @@ async function main(): Promise<void> {
     `\ntier 1: ${tier1Failures} failure(s) (must be 0)\n` +
       `tier 2: ${tier2Passed}/${tier2Total} = ${(score * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
-      `${cases.length} translation + ${renderingCases.length} rendering cases in ` +
+      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );

@@ -1,5 +1,6 @@
 import type {
   LanguageCode,
+  LlmDistractors,
   LlmEntry,
   LlmReconciliation,
   PartOfSpeech,
@@ -8,6 +9,11 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import {
+  buildDistractorPrompt,
+  parseLlmDistractors,
+  type DistractorItem,
+} from '../../src/domain/distractors';
 import {
   buildPrompt,
   buildRenderingPrompt,
@@ -112,4 +118,17 @@ export async function askRendering(
   const parsed = parseLlmReconciliation(raw);
   if (!parsed) throw new Error('the rendering response did not match the expected shape');
   return parsed;
+}
+
+/** Phase 19. The real distractor prompt and parser, as prepareSession uses
+ *  them, minus the database. Throws on an unreadable answer: tier 1 then
+ *  records it as a failed call. */
+export async function askDistractors(
+  llm: LlmClient,
+  input: { from: LanguageCode; to: LanguageCode; items: DistractorItem[] },
+): Promise<LlmDistractors> {
+  const raw = await llm(buildDistractorPrompt(input));
+  const answer = raw === '' ? null : parseLlmDistractors(raw);
+  if (!answer) throw new Error(`unreadable distractor answer: ${raw.slice(0, 200)}`);
+  return answer;
 }
