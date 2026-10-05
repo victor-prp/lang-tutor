@@ -21,7 +21,16 @@ import {
   SessionOpen,
 } from '../../../src/errors';
 import { createTestServerDeps } from '../../support/serverDeps';
+import type { SessionRecord } from '../../../src/domain/session';
 import type { SessionService } from '../../../src/services/sessions';
+import type { VocabularyService } from '../../../src/services/vocabulary';
+import {
+  failInsertsInto,
+  readProgress,
+  readSnapshot,
+  saveSessionSenses,
+  sessionDay,
+} from '../../support/progressRows';
 
 // The other half of this file's tests is src/services/sessions.test.ts, which
 // covers the cases the repository-factory seam makes reachable without Postgres.
@@ -29,6 +38,7 @@ import type { SessionService } from '../../../src/services/sessions';
 let t: TestDb;
 let logger: FakeLogger;
 let service: SessionService;
+let vocabulary: VocabularyService;
 
 let boss: PgBoss;
 
@@ -38,7 +48,9 @@ beforeEach(async () => {
   await seedUser(t.db, 'u_2');
   logger = createFakeLogger();
   boss = await startTestBoss(t.db);
-  service = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss }).sessions;
+  const deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss });
+  service = deps.sessions;
+  vocabulary = deps.vocabulary;
 });
 
 afterEach(async () => {
@@ -265,5 +277,114 @@ describe('rng', () => {
     expect(b.questions.map((question) => question.id)).toEqual(
       a.questions.map((question) => question.id),
     );
+  });
+});
+
+describe('progress (phase 20)', () => {
+  const E = enrollmentOf('u_1');
+
+  /** The seed, with the senses of its first three questions saved. */
+  async function seedWithSavedSenses() {
+    const { sessionId, record } = await startSeed(E);
+    const saved = await saveSessionSenses(t.db, { sessionId, enrollmentId: E, positions: [0, 1, 2] });
+    return { sessionId, record, saved };
+  }
+
+  async function answer(sessionId: string, q: SessionRecord['questions'][number], right: boolean) {
+    return service.submitAnswer(sessionId, q.id, right ? q.correct_option : (q.correct_option + 1) % q.options.length);
+  }
+
+  async function answerAll(sessionId: string, record: SessionRecord, wrongAt: number[] = []) {
+    let last;
+    for (const [i, q] of record.questions.entries()) last = await answer(sessionId, q, !wrongAt.includes(i));
+    return last!;
+  }
+
+  const receptive = (rows: Awaited<ReturnType<typeof readProgress>>, senseId: string) =>
+    rows.find((row) => row.senseId === senseId && row.dimension === 'written_receptive');
+
+  it('completing a session lifts each saved sense answered right, and records what it did', async () => {
+    const { sessionId, record, saved } = await seedWithSavedSenses();
+    const result = await answerAll(sessionId, record, [1]);
+    const day = await sessionDay(t.db, sessionId);
+    const rows = await readProgress(t.db, E);
+
+    expect(receptive(rows, saved[0])).toMatchObject({ level: 2, lastStepOn: day, lastWrongOn: null });
+    expect(receptive(rows, saved[1])).toMatchObject({ level: 1, lastStepOn: null, lastWrongOn: day });
+    expect(receptive(rows, saved[2])).toMatchObject({ level: 2, lastStepOn: day });
+    expect(rows.filter((row) => row.dimension !== 'written_receptive').every((row) => row.level === 1)).toBe(true);
+    expect(await readSnapshot(t.db, sessionId)).toHaveLength(15);
+    expect(result.progress.map((p) => [p.senseId, p.levelBefore, p.levelAfter])).toEqual([
+      [saved[0], 1, 2],
+      [saved[1], 1, 1],
+      [saved[2], 1, 2],
+    ]);
+  });
+
+  it('a skip counts the answers given before it', async () => {
+    const { sessionId, record, saved } = await seedWithSavedSenses();
+    await answer(sessionId, record.questions[0], true);
+    await service.skipSession(sessionId);
+    const rows = await readProgress(t.db, E);
+    expect(receptive(rows, saved[0])).toMatchObject({ level: 2 });
+    expect(rows.filter((row) => row.senseId !== saved[0]).every((row) => row.level === 1)).toBe(true);
+    expect(await readSnapshot(t.db, sessionId)).toHaveLength(5);
+  });
+
+  it('a skip with no answers writes nothing', async () => {
+    const { sessionId } = await seedWithSavedSenses();
+    await service.skipSession(sessionId);
+    expect((await readProgress(t.db, E)).every((row) => row.level === 1 && row.lastWrongOn === null)).toBe(true);
+    expect(await readSnapshot(t.db, sessionId)).toEqual([]);
+  });
+
+  it('answers about senses that are not saved write nothing', async () => {
+    const { sessionId, record } = await startSeed(E);
+    const result = await answerAll(sessionId, record);
+    expect(await readProgress(t.db, E)).toEqual([]);
+    expect(await readSnapshot(t.db, sessionId)).toEqual([]);
+    expect(result.progress).toEqual([]);
+  });
+
+  // Review Focus 2: a sense unsaved while its session is open.
+  it('a sense unsaved mid-session is left out when the session completes', async () => {
+    const { sessionId, record, saved } = await seedWithSavedSenses();
+    await answer(sessionId, record.questions[0], true);
+    await vocabulary.unsave(E, saved[0]);
+    for (const q of record.questions.slice(1)) await answer(sessionId, q, true);
+
+    const finished = await service.getSession(sessionId);
+    expect(finished.status).toBe('completed');
+    const rows = await readProgress(t.db, E);
+    expect(rows.some((row) => row.senseId === saved[0])).toBe(false);
+    expect(receptive(rows, saved[1])).toMatchObject({ level: 2 });
+    expect(finished.progress.map((p) => p.senseId)).toEqual([saved[1], saved[2]]);
+  });
+
+  it('completion and its progress are one transaction', async () => {
+    const { sessionId, record } = await seedWithSavedSenses();
+    for (const q of record.questions.slice(0, 9)) await answer(sessionId, q, true);
+    await failInsertsInto(t.db, 'session_progress');
+    await expect(answer(sessionId, record.questions[9], true)).rejects.toThrow();
+    const after = await service.getSession(sessionId);
+    expect(after).toMatchObject({ status: 'ready', complete: false });
+    expect(after.answers).toHaveLength(9);
+    expect((await readProgress(t.db, E)).every((row) => row.level === 1)).toBe(true);
+  });
+
+  it('a skip and its progress are one transaction', async () => {
+    const { sessionId, record } = await seedWithSavedSenses();
+    await answer(sessionId, record.questions[0], true);
+    await failInsertsInto(t.db, 'session_progress');
+    await expect(service.skipSession(sessionId)).rejects.toThrow();
+    expect((await service.getSession(sessionId)).status).toBe('ready');
+    expect((await readProgress(t.db, E)).every((row) => row.level === 1)).toBe(true);
+  });
+
+  it('getSession answers a completed session with the change it made', async () => {
+    const { sessionId, record, saved } = await seedWithSavedSenses();
+    const finished = await answerAll(sessionId, record);
+    expect(finished.progress.map((p) => p.senseId)).toEqual(saved);
+    expect((await service.getSession(sessionId)).progress).toEqual(finished.progress);
   });
 });
