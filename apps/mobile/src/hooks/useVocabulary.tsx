@@ -100,6 +100,9 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
     (next: VocabularyQuery) => {
       queryRef.current = next;
       setQueryState(next);
+      // The old cursor belongs to the old query: with it kept, a failed first page
+      // would leave loadMore continuing the old list under the new query.
+      setCursor(null);
       void fetchPage(null, true, next);
     },
     [fetchPage],
