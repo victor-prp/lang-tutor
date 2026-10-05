@@ -568,8 +568,10 @@ export const answers = pgTable(
  * Phase 20. What one ended session did to each progress row of each saved
  * sense it practised: all five dimensions, moved or not. It is what lets the
  * results be read again after the session ended, and what the recompute
- * rebuilds. No FK to sense_progress: a sense unsaved later keeps its history
- * here, and the results of an old session still read.
+ * rebuilds. No FK to sense_progress: on the live path a sense unsaved later
+ * keeps its history here, and the results of an old session still read. A
+ * recompute rebuilds only what the current saves can explain, so it drops the
+ * rows of a sense unsaved since.
  */
 export const sessionProgress = pgTable(
   'session_progress',

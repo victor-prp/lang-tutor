@@ -135,6 +135,7 @@ describe('repos', () => {
     updateRows: unreachableProgress,
     insertSnapshot: unreachableProgress,
     findSnapshot: unreachableProgress,
+    lockSessions: unreachableProgress,
     resetAll: unreachableProgress,
     listEndedSessions: unreachableProgress,
   };

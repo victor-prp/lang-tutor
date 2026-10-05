@@ -1,7 +1,8 @@
 -- Phase 20. Progress per saved sense, and what each ended session did to it.
--- Every entry saved before this phase gets its five rows at level 1: nothing
--- was practised from a saved list before phase 19, and only answers given
--- while a sense is saved count, so no session is re-evaluated.
+-- Every entry saved before this phase gets its five rows at level 1. The
+-- migration does not credit the practice of phase 19's list sessions, which
+-- were answers about saved senses: run `npm run db:progress:recompute` once
+-- after migrating and it does.
 CREATE TABLE "sense_progress" (
 	"enrollment_id" text NOT NULL,
 	"sense_id" text NOT NULL,

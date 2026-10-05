@@ -28,8 +28,8 @@ const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}
  *
  * No row locks: an enrollment's progress is written only when one of its
  * sessions ends, its sessions end one at a time (the session row is locked by
- * loadSession and findState, and at most one is open), and the recompute is
- * an offline command.
+ * loadSession and findState, and at most one is open), and the recompute holds
+ * a table lock on sessions (lockSessions) so no session ends while it runs.
  */
 export function createProgressRepo(tx: Tx) {
   return {
@@ -167,6 +167,13 @@ export function createProgressRepo(tx: Tx) {
         translation: canonicalOptions(row.options).find((option) => option.is_correct)!.text,
         position: row.position,
       }));
+    },
+
+    /** Recompute only: SHARE mode on sessions, held to the end of the transaction.
+     *  It conflicts with the ROW EXCLUSIVE lock a session status UPDATE takes, so
+     *  no session ends while it is held; reads and FOR UPDATE row locks pass. */
+    lockSessions: async (): Promise<void> => {
+      await tx.execute(sql`LOCK TABLE sessions IN SHARE MODE`);
     },
 
     /** Recompute only: every row back to level 1, and no session's snapshot. */
