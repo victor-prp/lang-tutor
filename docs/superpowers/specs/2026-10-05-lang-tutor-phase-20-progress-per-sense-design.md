@@ -1,7 +1,7 @@
 # Phase 20 — Progress per sense
 
-- **Status:** Design approved section by section, 2026-10-05. Awaiting review of this written
-  spec before planning.
+- **Status:** Design approved section by section, 2026-10-05; implemented on branch
+  phase-20-progress-per-sense. Deviations from the approved design are folded in.
 - **Date:** 2026-10-05
 - **Source:** the one-pager `drafts/2026-10-05-progress-per-sense-one-pager.md`, the design
   dialogue recorded here, and a side research on knowledge dimensions
@@ -132,8 +132,11 @@ session_progress
   PRIMARY KEY (session_id, sense_id, dimension)
 ```
 
-One row for every sense and dimension a session gave evidence for, moved or not. It is what
-lets the results screen be re-read after a reload, and what a recompute replays.
+One row for every dimension of every saved sense the session practised, moved or not: all
+five, not only the ones that received evidence. A row nothing moved has
+`level_before = level_after`. The results badge averages over every live dimension, so a live
+dimension the session did not exercise still needs its level at that moment. The rows let the
+results screen be re-read after a reload, and a recompute replays them.
 
 ### Live dimensions
 
@@ -157,9 +160,15 @@ and nothing was saved before phase 18.
 ### Indexes
 
 The list's level sort and filter aggregate over one enrollment's entries, which
-`vocabulary_entries_enrollment_lexeme_idx` already narrows, and reach `sense_progress` by
-primary key from there. A query-plan test at phase 18's volume (§7) decides whether a covering
-index is needed; none is added on a guess.
+`vocabulary_entries_enrollment_lexeme_idx` already narrows.
+
+**`sense_progress_enrollment_dimension_idx (enrollment_id, dimension, sense_id, level)`** is a
+covering index, added from the start, that serves them as an index-only scan of one
+enrollment's live-dimension rows. It was measured while planning at the plan test's volume: a
+20k-word enrollment's first page took 35 ms without it and 12 ms with it, for every sort. The
+plan test (§7) pins it. It asserts that every list query shape uses this index, because the
+50 ms budget alone is not enough: a planted drop of the index made those assertions fail while
+the budget still passed.
 
 ## 3. The rule
 
@@ -167,11 +176,11 @@ index is needed; none is added on a guess.
 
 ADR 0001 R3: no clock, no randomness. The day is passed in.
 
-- **`evidenceFor(question, answer)`** maps one answered question to pieces of evidence,
-  `{ dimension, correct, capped }`. Today every question is multiple choice target to Hebrew,
-  so it returns one uncapped `written_receptive` piece. The table below is the cases later
-  exercise types add; it is recorded so the state and the rule need no change when they
-  arrive.
+- **`evidenceFor(answer)`** maps one answered question, an `AnsweredQuestion`
+  (`{ senseId, type, correct }`), to pieces of evidence, `{ dimension, correct, capped }`. Today
+  every question is multiple choice target to Hebrew, so it returns one uncapped
+  `written_receptive` piece. The table below is the cases later exercise types add; it is
+  recorded so the state and the rule need no change when they arrive.
 
   | Dimension | Full credit from | Capped at 3 from | Downward credit from |
   |---|---|---|---|
@@ -204,8 +213,7 @@ ADR 0001 R3: no clock, no randomness. The day is passed in.
   because the app's detail screen computes a sense badge from five levels with the same
   arithmetic.
 
-- `DIMENSIONS`, `LIVE_DIMENSIONS`, `GAP_DAYS` and `LEVEL_CAP_FOR_CAPPED_EVIDENCE` sit beside
-  them.
+- `DIMENSIONS`, `LIVE_DIMENSIONS`, `GAP_DAYS` and `CAPPED_MAX_LEVEL` sit beside them.
 
 ### Where it runs
 
@@ -219,8 +227,8 @@ same transaction as the status change:
    UTC date of the session's last answer**. A completion's last answer is the one being
    recorded, so it is now; a skip has no timestamp of its own, and the last answer is the
    only end time both this path and the recompute can read, so neither needs a new column;
-4. write the changed rows, and one `session_progress` row per sense and dimension that
-   received evidence.
+4. write the changed rows, and one `session_progress` row for each of the five dimensions of
+   every sense that received evidence.
 
 These are **dependent writes** with the status change (ADR 0001 R8): a completed or skipped
 session with no progress written, or progress written for a session that did not end, would
@@ -241,6 +249,12 @@ Nothing is built against it.
 and `vocabulary_entries.created_at`, replaying ended sessions in order through the same
 `advance`. For when the rule changes. Nothing runs it automatically.
 
+It lives in `apps/server/src/db/progressRecompute.ts`, behind a `--recompute-progress` flag on
+`db/cli.ts`, and is not a service. ADR 0001 R4 forbids `db/` from importing `services/`, and
+`db/cli.ts` is the CLI's composition root. So it repeats the session service's orchestration
+over the same repository and domain functions, and an integration test checks that a
+recompute writes back exactly what the live path wrote.
+
 ## 4. API
 
 All schemas live in `packages/core` (ADR 0003); every route uses `createRoute`. Three payloads
@@ -257,11 +271,18 @@ level  1..5                                      only words whose badge is exact
 
 Each word gains `level: 1..5`. The cursor encodes the sort it was issued under and that sort's
 key; a cursor replayed under another sort is a 400 `InvalidCursor`, like a malformed one today.
+A newest cursor keeps phase 18's two-element encoding, so one already in flight stays valid. A
+level-sort cursor carries four elements: the save time, the lexeme id, the sort and the level.
 Under a level sort, ties break by newest save and then lexeme id, so paging is stable.
+
+Under the newest sort a word is never served twice in one walk. Under a level sort, a word
+whose level changes mid-walk (a save lowers its mean, a finished session raises it) may be
+served again or passed over.
 
 ### Detail — `GET /enrollments/{id}/vocabulary/words/{lexeme_id}` (changed)
 
-The word gains `level`. Each **saved** sense gains:
+The word gains `level`, which is `null` for a word with nothing saved. The route answers 200
+for such a word, and it has no badge. Each **saved** sense gains:
 
 ```
 progress: { level, dimensions: { written_receptive, written_productive,
@@ -283,6 +304,10 @@ saw, `translation` the correct answer. The levels are badges over the live dimen
 from `session_progress`, so the app does no arithmetic. The read route carries the same block
 for a completed session, which is what makes the results survive a reload. A seed session with
 nothing saved returns `[]`.
+
+In the session service, `submitAnswer` and `getSession` return `SessionResult = SessionRecord &
+{ progress: ProgressChange[] }`. It is an intersection, so every existing caller that reads
+record fields keeps compiling.
 
 ### Errors
 
@@ -334,8 +359,9 @@ session. Headline and score are unchanged.
 
 ### State
 
-The results screen reads `progress` from the completed session the way it reads the score.
-`useSession` passes it through. Nothing new is stored on the device.
+The results screen reads `progress` from the completing next-step response the way it reads the
+score. `useSession` passes it through. The read route carries the block too, as §4 says, but the
+app does not need it. Nothing new is stored on the device.
 
 ## 6. Errors
 
@@ -361,12 +387,18 @@ The results screen reads `progress` from the completed session the way it reads 
 
 ### Unit, mobile
 
-- `LevelBadge` renders the right pips and name for each level.
-- the list sends `sort` and `level`, reloads from the first page when either changes, and
-  shows the level-specific empty state.
-- the detail renders five dimensions with טרם תורגל for the four not live.
-- the results screen lists practised words, highlights the ones that rose, sorts them first,
-  and renders nothing for an empty list.
+Mobile tests in this repo are pure-module tests: nothing renders a component. The screens'
+progress rules sit in pure functions in `apps/mobile/src/progress.ts`, and the tests call them.
+
+- `pipsFor`, the pure function `LevelBadge` draws its pips from, fills as many of the five as
+  the level. This is what the badge test covers.
+- the api client sends `sort` and `level` when given.
+- `dimensionRows` lists the five dimensions in order, with no level for the four not live,
+  which the detail shows as טרם תורגל.
+- `practisedRows` puts the words that rose first, each group in session order, and is empty for
+  an empty list.
+- the list's reload from the first page and its level-specific empty state are covered end to
+  end (`e2e/tests/progress.spec.ts`), not by unit tests.
 
 ### Integration, real Postgres
 
@@ -377,11 +409,12 @@ The results screen reads `progress` from the completed session the way it reads 
 - an answer on an unsaved sense writes nothing.
 - the list sorts by level both ways with stable ties, filters by level, and pages through a
   level sort without repeating or skipping.
-- a query-plan test for the level sort at phase 18's volume, which decides §2's index
-  question.
+- a query-plan test at phase 18's volume that pins §2's covering index: every list query shape
+  uses it, and the first page stays within the 50 ms budget.
 - the migration gives every existing entry five level 1 rows.
 - the read route returns a completed session's `progress` block.
-- the recompute script rebuilds the same rows from the log.
+- the recompute rebuilds the same rows from the log, and writes back exactly what the live path
+  wrote.
 
 ### E2E
 
