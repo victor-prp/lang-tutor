@@ -51,7 +51,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api', createEnrollmentsRouter(deps.enrollments));
   app.route('/api', createVocabularyRouter(deps.vocabulary));
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
-  app.route('/api/sessions', createSessionsRouter(deps.sessions));
+  app.route('/api', createSessionsRouter(deps.sessions));
 
   // Registered after the routes they describe, so the document is generated
   // from a fully-populated router. Always on: no auth, no secrets, and an
@@ -63,7 +63,7 @@ export function createApp(deps: AppDeps) {
       title: 'lang-tutor API',
       version: '0.1.0',
       description:
-        'Sessions of ten multiple-choice questions for Hebrew speakers learning English or Russian.',
+        'Practice sessions for Hebrew speakers learning English or Russian: a seeded first session, then sessions built from the words each learner saves.',
     },
   });
   app.get('/docs', Scalar({ url: '/openapi.json', pageTitle: 'lang-tutor API' }));

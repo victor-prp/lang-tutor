@@ -54,10 +54,22 @@ export const CreateSessionRequestSchema = z.object({
   enrollment_id: z.string().min(1),
 });
 
+// Phase 19. Creating a session no longer returns its first question: a list
+// session has none until its job has run. The app reads the session instead.
 export const CreateSessionResponseSchema = z.object({
   session_id: z.string(),
-  question: QuestionSchema,
+  status: SessionStatusSchema,
+  source: SessionSourceSchema,
+});
+
+// Phase 19. One session as resume and the poll read it. `question` is the
+// current one while the session is ready and unfinished, and null otherwise.
+export const SessionViewSchema = z.object({
+  session_id: z.string(),
+  status: SessionStatusSchema,
+  source: SessionSourceSchema,
   position: PositionSchema,
+  question: QuestionSchema.nullable(),
 });
 
 export const NextStepRequestSchema = z.object({
@@ -85,6 +97,28 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     missed_questions: z.array(MissedQuestionSchema),
   }),
 ]);
+
+// Phase 19. The home screen's one read. `current` is the enrollment's newest
+// session when it is preparing, ready or failed (never completed or skipped).
+// `total` is how many questions it holds, so 0 while preparing.
+export const CurrentSessionSchema = z.object({
+  session_id: z.string(),
+  status: SessionStatusSchema,
+  source: SessionSourceSchema,
+  answered: z.number().int(),
+  total: z.number().int(),
+});
+
+export const CurrentSessionResponseSchema = z.object({
+  current: CurrentSessionSchema.nullable(),
+  next_source: SessionSourceSchema,
+  saved_count: z.number().int(),
+});
+
+export const SkipSessionResponseSchema = z.object({
+  session_id: z.string(),
+  status: z.literal('skipped'),
+});
 
 // The failure body every endpoint can return. Until this phase this shape lived
 // only inside handler code; declaring it here is what lets each route publish

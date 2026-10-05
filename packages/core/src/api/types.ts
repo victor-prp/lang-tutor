@@ -6,6 +6,8 @@ import type {
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   CreateUserRequestSchema,
+  CurrentSessionResponseSchema,
+  CurrentSessionSchema,
   EnrollmentSchema,
   ErrorSchema,
   HealthResponseSchema,
@@ -30,6 +32,8 @@ import type {
   ScoreSchema,
   SessionSourceSchema,
   SessionStatusSchema,
+  SessionViewSchema,
+  SkipSessionResponseSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
   TranslationKindSchema,
@@ -96,3 +100,7 @@ export type VocabularyWordDetail = z.infer<typeof VocabularyWordDetailSchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type SessionSource = z.infer<typeof SessionSourceSchema>;
 export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;
+export type SessionView = z.infer<typeof SessionViewSchema>;
+export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
+export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;
+export type SkipSessionResponse = z.infer<typeof SkipSessionResponseSchema>;
