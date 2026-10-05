@@ -2,7 +2,7 @@ import type { AnswerRecord, Question, SessionSource, SessionStatus } from '@lang
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import type { SessionRecord } from '../domain/session';
+import type { SessionRecord, SessionState, SessionSummary } from '../domain/session';
 import {
   answers,
   questions,
@@ -11,6 +11,8 @@ import {
   dictVariants,
   type QuestionOption,
 } from '../db/schema';
+import { SessionOpen } from '../errors';
+import { isUniqueViolation } from './pgErrors';
 import { canonicalOptions, questionFrom } from './questions';
 
 // `sessions.id` is a `uuid` column: a malformed value makes Postgres raise
@@ -21,54 +23,139 @@ import { canonicalOptions, questionFrom } from './questions';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function createSessionRepo(tx: Tx) {
+  // The one-open-session index (sessions_one_open_per_enrollment) is the only
+  // unique constraint on this table, so a unique violation here means exactly
+  // "this enrollment already has an open session".
+  async function insertSessionRow(values: {
+    userId: string;
+    enrollmentId: string;
+    status: SessionStatus;
+    source: SessionSource;
+  }): Promise<string> {
+    try {
+      const [row] = await tx.insert(sessions).values(values).returning({ id: sessions.id });
+      return row.id;
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new SessionOpen(values.enrollmentId);
+      throw error;
+    }
+  }
+
+  /**
+   * `picked` comes from `pickQuestions`, so its options are already shuffled.
+   * Each option's text is mapped back to its canonical position to build
+   * `option_order` — unambiguous because `question_options_valid` guarantees
+   * distinct texts within a question.
+   */
+  async function insertSessionQuestions(sessionId: string, picked: Question[]): Promise<void> {
+    const rows = await tx
+      .select({ id: questions.id, options: questions.options })
+      .from(questions)
+      .where(
+        inArray(
+          questions.id,
+          picked.map((question) => question.id),
+        ),
+      );
+    const canonicalById = new Map<string, QuestionOption[]>(
+      rows.map((row) => [row.id, canonicalOptions(row.options)]),
+    );
+
+    await tx.insert(sessionQuestions).values(
+      picked.map((question, position) => {
+        const canonical = canonicalById.get(question.id);
+        if (!canonical) throw new Error(`question ${question.id} is not in the database`);
+        return {
+          sessionId,
+          position,
+          questionId: question.id,
+          optionOrder: question.options.map((text) => {
+            const index = canonical.findIndex((option) => option.text === text);
+            if (index < 0) throw new Error(`option "${text}" is not on question ${question.id}`);
+            return index;
+          }),
+        };
+      }),
+    );
+  }
+
   return {
-    /**
-     * `picked` comes from `pickQuestions`, so its options are already shuffled.
-     * Each option's text is mapped back to its canonical position to build
-     * `option_order` — unambiguous because `question_options_valid` guarantees
-     * distinct texts within a question.
-     */
+    /** A seed session: ready at once, its questions drawn from the shared pool. */
     insertSession: async (
       userId: string,
       enrollmentId: string,
       picked: Question[],
     ): Promise<string> => {
+      const sessionId = await insertSessionRow({ userId, enrollmentId, status: 'ready', source: 'seed' });
+      await insertSessionQuestions(sessionId, picked);
+      return sessionId;
+    },
+
+    /** A list session: no questions until prepare-session writes them. */
+    insertPreparingSession: (userId: string, enrollmentId: string): Promise<string> =>
+      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list' }),
+
+    insertSessionQuestions,
+
+    /** Locks the row, so a status read here and changed later in the same
+     *  transaction cannot race a concurrent skip or job. */
+    findState: async (sessionId: string): Promise<SessionState | undefined> => {
+      if (!UUID_RE.test(sessionId)) return undefined;
+      const [row] = await tx
+        .select({
+          id: sessions.id,
+          userId: sessions.userId,
+          enrollmentId: sessions.enrollmentId,
+          status: sessions.status,
+          source: sessions.source,
+        })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId))
+        .for('update');
+      return row
+        ? { ...row, status: row.status as SessionStatus, source: row.source as SessionSource }
+        : undefined;
+    },
+
+    /** A conditional status change: true when the row was in one of `from`.
+     *  Conditional so a job finishing after a skip changes nothing. */
+    transition: async (
+      sessionId: string,
+      from: SessionStatus[],
+      to: SessionStatus,
+    ): Promise<boolean> => {
+      if (!UUID_RE.test(sessionId)) return false;
       const rows = await tx
-        .select({ id: questions.id, options: questions.options })
-        .from(questions)
-        .where(
-          inArray(
-            questions.id,
-            picked.map((question) => question.id),
-          ),
-        );
-      const canonicalById = new Map<string, QuestionOption[]>(
-        rows.map((row) => [row.id, canonicalOptions(row.options)]),
-      );
-
-      const [session] = await tx
-        .insert(sessions)
-        .values({ userId, enrollmentId, status: 'ready', source: 'seed' })
+        .update(sessions)
+        .set({ status: to })
+        .where(and(eq(sessions.id, sessionId), inArray(sessions.status, from)))
         .returning({ id: sessions.id });
+      return rows.length > 0;
+    },
 
-      await tx.insert(sessionQuestions).values(
-        picked.map((question, position) => {
-          const canonical = canonicalById.get(question.id);
-          if (!canonical) throw new Error(`question ${question.id} is not in the database`);
-          return {
-            sessionId: session.id,
-            position,
-            questionId: question.id,
-            optionOrder: question.options.map((text) => {
-              const index = canonical.findIndex((option) => option.text === text);
-              if (index < 0) throw new Error(`option "${text}" is not on question ${question.id}`);
-              return index;
-            }),
-          };
-        }),
-      );
-
-      return session.id;
+    /** The enrollment's newest session. At most one session is open, and a new
+     *  one can only start once it is closed, so an open session is always the
+     *  newest: this one read answers both "what is current" and "has there been
+     *  any". Served by sessions_enrollment_created_idx. */
+    findLatest: async (enrollmentId: string): Promise<SessionSummary | undefined> => {
+      const rows = await tx.execute<{
+        id: string;
+        status: string;
+        source: string;
+        answered: number;
+        total: number;
+      }>(sql`
+        SELECT s.id, s.status, s.source,
+               (SELECT count(*) FROM answers a WHERE a.session_id = s.id)::int AS answered,
+               (SELECT count(*) FROM session_questions q WHERE q.session_id = s.id)::int AS total
+        FROM sessions s
+        WHERE s.enrollment_id = ${enrollmentId}
+        ORDER BY s.created_at DESC, s.id DESC
+        LIMIT 1`);
+      const row = rows.rows[0];
+      return row
+        ? { ...row, status: row.status as SessionStatus, source: row.source as SessionSource }
+        : undefined;
     },
 
     /**

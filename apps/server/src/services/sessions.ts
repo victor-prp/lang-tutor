@@ -51,7 +51,6 @@ export function createSessionService({
         const pool = await question.loadQuestionPool(
           enrolled.target_language,
           enrolled.source_language,
-          { userId: enrolled.user_id, enrollmentId },
         );
         // Checked here rather than left to pickQuestions, whose plain Error was a
         // 500: a language with no seeded questions is an answer, not a failure.

@@ -26,6 +26,11 @@ describe('repos', () => {
       loadSession: notStubbed,
       insertAnswer: notStubbed,
       completeSession: notStubbed,
+      insertPreparingSession: notStubbed,
+      insertSessionQuestions: notStubbed,
+      findState: notStubbed,
+      transition: notStubbed,
+      findLatest: notStubbed,
       ...overrides,
     };
   }
@@ -33,6 +38,12 @@ describe('repos', () => {
   const questionRepo: QuestionRepo = {
     loadQuestionPool: () => {
       throw new Error('submitAnswer must not load the question pool');
+    },
+    findGenerationContext: () => {
+      throw new Error('submitAnswer must not read the generation context');
+    },
+    insertGeneratedQuestions: () => {
+      throw new Error('submitAnswer must not write generated questions');
     },
   };
 
@@ -108,6 +119,8 @@ describe('repos', () => {
     findLexeme: forbidden,
     findLexemeRenderings: forbidden,
     findSavedInLexeme: forbidden,
+    listSavedSenses: forbidden,
+    countEntries: forbidden,
   };
 
   function fakeTransaction(session: SessionRepo): Transaction {

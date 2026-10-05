@@ -1,7 +1,7 @@
-import { eq, sql, type SQL } from 'drizzle-orm';
+import { asc, eq, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import { dictLexemes } from '../db/schema';
+import { dictLexemes, vocabularyEntries } from '../db/schema';
 import type {
   LexemeRendering,
   LexemeRow,
@@ -192,6 +192,25 @@ export function createVocabularyRepo(tx: Tx) {
       if (input.senseIds.length === 0) return [];
       const rows = await tx.execute<{ sense_id: string }>(vocabularyQueries.savedSenseIds(input));
       return rows.rows.map((row) => row.sense_id);
+    },
+
+    /** Every saved sense of one enrollment, for picking a list session. Bounded
+     *  by what one person saves by hand. Ordered so a seeded rng picks
+     *  reproducibly. */
+    listSavedSenses: async (
+      enrollmentId: string,
+    ): Promise<{ senseId: string; variantId: string }[]> =>
+      tx
+        .select({ senseId: vocabularyEntries.senseId, variantId: vocabularyEntries.variantId })
+        .from(vocabularyEntries)
+        .where(eq(vocabularyEntries.enrollmentId, enrollmentId))
+        .orderBy(asc(vocabularyEntries.senseId)),
+
+    countEntries: async (enrollmentId: string): Promise<number> => {
+      const rows = await tx.execute<{ n: number }>(
+        sql`SELECT count(*)::int AS n FROM vocabulary_entries WHERE enrollment_id = ${enrollmentId}`,
+      );
+      return rows.rows[0].n;
     },
 
     findWordsPage: async (input: {

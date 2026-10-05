@@ -5,6 +5,7 @@ import { assemblePage } from '../../../src/domain/vocabulary';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createVocabularyRepo } from '../../../src/repo/vocabulary';
 import { insertLexeme } from '../../support/dictRows';
+import { seedSavedSenses } from '../../support/vocabularyRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
@@ -348,5 +349,23 @@ describe('a repaired variant', () => {
         savedCount: 1,
       }),
     ]);
+  });
+});
+
+describe('the saved list for sessions (phase 19)', () => {
+  it('lists every saved sense with its form, and counts them', async () => {
+    const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'onion', translations: ['בצל', 'קשת'] });
+    const listed = await repo((r) => r.listSavedSenses(E));
+    expect(listed).toHaveLength(2);
+    expect(new Set(listed.map((e) => e.senseId))).toEqual(new Set(word.senseIds));
+    expect(listed.every((e) => e.variantId === word.variantId)).toBe(true);
+    expect(await repo((r) => r.countEntries(E))).toBe(2);
+  });
+
+  it('lists and counts nothing for an enrollment that saved nothing', async () => {
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'onion', translations: ['בצל'] });
+    await seedUser(t.db, 'u_2');
+    expect(await repo((r) => r.listSavedSenses(enrollmentOf('u_2')))).toEqual([]);
+    expect(await repo((r) => r.countEntries(enrollmentOf('u_2')))).toBe(0);
   });
 });
