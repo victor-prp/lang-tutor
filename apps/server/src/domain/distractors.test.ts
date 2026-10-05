@@ -32,6 +32,10 @@ describe('buildDistractorPrompt', () => {
     expect(prompt.system).toContain(DISTRACTOR_MARKER);
   });
 
+  it('tells the model that items sharing a word must not offer each other’s answers', () => {
+    expect(prompt.system).toContain('share a word');
+  });
+
   it('carries the target writing rules: no nikud in Hebrew', () => {
     expect(prompt.system).toContain('no nikud');
   });
@@ -105,6 +109,64 @@ describe('validateDistractors', () => {
 
   it('refuses two equal distractors', () => {
     expect(validateDistractors(ITEMS, answer(['כתבה', 'כתבה', 'ראתה'])).ok).toBe(false);
+  });
+
+  // The comparison is the validator's own: a multi-word answer keeps its mark
+  // in a dictionary key, but here "the same option" ignores it, and nikud.
+  describe('multi-word answers and pointed copies', () => {
+    const phrase = distractorItems([
+      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'большое спасибо', lemma: 'спасибо', partOfSpeech: 'phrase', translation: 'תודה רבה' },
+    ]);
+    const one = (distractors: string[]) => ({ items: [{ key: 'q1', distractors }] });
+
+    it.each([['תודה רבה.'], ['תודה רבה!'], ['תודה  רבה'], ['תודה רבה…'], ['תודה רבה?!']])(
+      'refuses the multi-word answer in disguise: %j',
+      (disguised) => {
+        expect(validateDistractors(phrase, one(['כתבה', disguised, 'ראתה'])).ok).toBe(false);
+      },
+    );
+
+    it('accepts a different multi-word option', () => {
+      expect(validateDistractors(phrase, one(['בבקשה רבה', 'להתראות', 'ערב טוב'])).ok).toBe(true);
+    });
+
+    it('refuses a pointed copy of the answer', () => {
+      expect(validateDistractors(ITEMS, answer(['כתבה', 'קָרָאָה', 'ראתה'])).ok).toBe(false);
+    });
+
+    it('counts two distractors that differ only in points, marks or spacing as equal', () => {
+      expect(validateDistractors(phrase, one(['כתבה', 'כָּתְבָה', 'כתבה.'])).ok).toBe(false);
+      expect(validateDistractors(phrase, one(['שמעה רבה', 'שמעה  רבה!', 'ראתה'])).ok).toBe(false);
+    });
+  });
+
+  // Review: save-all stores every sense of a word, so one batch can hold the
+  // same form twice. One sense's translation is a right answer on the other.
+  describe('another saved meaning of the same word', () => {
+    const polysemy = distractorItems([
+      { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל' },
+      { senseId: 's2', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'קשת' },
+      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'хлеб', lemma: 'хлеб', partOfSpeech: 'noun', translation: 'לחם' },
+    ]);
+    const batch = (q1: string[], q3: string[] = ['חלב', 'גבינה', 'ביצה']) => ({
+      items: [
+        { key: 'q1', distractors: q1 },
+        { key: 'q2', distractors: ['שום', 'גזר', 'תפוח'] },
+        { key: 'q3', distractors: q3 },
+      ],
+    });
+
+    it('refuses a distractor that is the other sense’s translation, even in disguise', () => {
+      for (const offered of ['קשת', 'קשת.', 'קֶשֶׁת']) {
+        const verdict = validateDistractors(polysemy, batch(['חציל', offered, 'מלפפון']));
+        expect(verdict.ok).toBe(false);
+        if (!verdict.ok) expect(verdict.reason).toContain('q1');
+      }
+    });
+
+    it('accepts the same text on an item of a different word', () => {
+      expect(validateDistractors(polysemy, batch(['חציל', 'מלפפון', 'עגבניה'], ['קשת', 'חלב', 'ביצה'])).ok).toBe(true);
+    });
   });
 });
 

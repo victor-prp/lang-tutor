@@ -607,4 +607,16 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
       { form: 'thank you', lemma: 'thank you', partOfSpeech: 'interjection', translation: 'תודה', synonyms: ['תודה רבה', 'תודה לך'] },
     ],
   },
+  {
+    label: 'Polysemous word saved as two senses in one batch',
+    from: 'ru',
+    to: 'he',
+    items: [
+      { form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', synonyms: ['קשת'] },
+      { form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'קשת', synonyms: ['בצל'] },
+      { form: 'ключ', lemma: 'ключ', partOfSpeech: 'noun', translation: 'מפתח', synonyms: ['מעיין'] },
+      { form: 'ключ', lemma: 'ключ', partOfSpeech: 'noun', translation: 'מעיין', synonyms: ['מפתח'] },
+      { form: 'окно', lemma: 'окно', partOfSpeech: 'noun', translation: 'חלון', synonyms: ['אשנב', 'צוהר'] },
+    ],
+  },
 ];

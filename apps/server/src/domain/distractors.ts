@@ -1,8 +1,7 @@
 import type { LlmDistractors } from '@lang-tutor/core/api';
 import { LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
 
-import { normalizeForm } from './dictionary';
-import { LANGUAGES, type Language, type LanguageCode } from './languages';
+import { LANGUAGES, stripStress, type Language, type LanguageCode } from './languages';
 import { unfence } from './translation';
 
 /**
@@ -81,6 +80,7 @@ export function buildDistractorPrompt(input: {
     'A wrong answer must never be right: not the translation itself, not a synonym of it, and',
     'not another valid translation of the word.',
     'The three wrong answers of an item must differ from each other.',
+    'When several items share a word, none of an item\'s wrong answers may be another item\'s correct answer.',
     'Answer every item, using its key exactly as given.',
     ...answers.writing,
   ].join('\n');
@@ -110,10 +110,16 @@ export function parseLlmDistractors(raw: string): LlmDistractors | null {
   return result.success ? result.data : null;
 }
 
-// What "the same option" means: the dictionary-key normalisation (whitespace,
-// a trailing sentence mark, stress), then case. Stricter than the database's
-// question_options_valid, which compares exact text.
-const comparable = (text: string): string => normalizeForm(text).toLowerCase();
+// What "the same option" means: whitespace collapsed, Hebrew points and
+// cantillation gone, stress gone, a trailing sentence mark gone whatever the
+// word count, then case. normalizeForm is a dictionary-key function and keeps
+// a multi-word expression's punctuation, so it is no help here. Stricter than
+// the database's question_options_valid, which compares exact text.
+const comparable = (text: string): string =>
+  stripStress(text.replace(/[\u0591-\u05C7]/gu, '').replace(/\s+/g, ' '))
+    .replace(/[\s.,;:!?…،؛؟]+$/u, '')
+    .trim()
+    .toLowerCase();
 
 /**
  * All or nothing: a session is either fully generated or the attempt fails and
@@ -132,6 +138,16 @@ export function validateDistractors(items: DistractorItem[], answer: LlmDistract
     const all = [item.translation, ...texts].map(comparable);
     if (new Set(all).size !== all.length) {
       return { ok: false, reason: `${item.key} repeats the answer or another wrong answer` };
+    }
+    // Save-all stores every sense of a word, so the batch can hold the same
+    // form twice; the other sense's translation is a right answer here.
+    const siblings = new Set(
+      items
+        .filter((other) => other !== item && comparable(other.form) === comparable(item.form))
+        .map((other) => comparable(other.translation)),
+    );
+    if (all.slice(1).some((text) => siblings.has(text))) {
+      return { ok: false, reason: `${item.key} offers another meaning of the same word as a wrong answer` };
     }
     byKey.set(item.key, texts);
   }
