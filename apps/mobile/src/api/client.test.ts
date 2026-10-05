@@ -39,6 +39,7 @@ describe('api/client', () => {
       complete: true,
       score: { correct: 10, total: 10 },
       missed_questions: [],
+      progress: [],
     };
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => responseBody }));
     const client = buildClient(mockFetch);
@@ -264,6 +265,13 @@ describe('api/client', () => {
     await client.listVocabulary('e1', {});
     expect(mockFetch).toHaveBeenNthCalledWith(1, 'http://test.local/api/enrollments/e1/vocabulary?cursor=a%2Bb&limit=50', { method: 'GET' });
     expect(mockFetch).toHaveBeenNthCalledWith(2, 'http://test.local/api/enrollments/e1/vocabulary', { method: 'GET' });
+  });
+
+  it('listVocabulary passes sort and level when given', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: [], next_cursor: null }) }));
+    const client = buildClient(mockFetch);
+    await client.listVocabulary('e1', { sort: 'level_desc', level: 2 });
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary?sort=level_desc&level=2', { method: 'GET' });
   });
 
   it('vocabularyWord gets one word', async () => {

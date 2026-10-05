@@ -11,6 +11,15 @@ const isolateLtr = (text: string) => `\u2066${text}\u2069`;
 const LANGUAGE_NAMES: Record<string, string> = { he: 'עברית', en: 'אנגלית', ru: 'רוסית' };
 const languageName = (code: string): string => LANGUAGE_NAMES[code] ?? code;
 
+// Phase 20. The five knowledge dimensions, as the word detail names them.
+const DIMENSION_NAMES: Record<string, string> = {
+  written_receptive: 'זיהוי בכתב',
+  written_productive: 'כתיבה',
+  spoken_receptive: 'הבנת הנשמע',
+  spoken_productive: 'דיבור',
+  spelling: 'איות',
+};
+
 export const strings = {
   appTitle: 'lang tutor',
   homeSubtitle: 'תרגול אוצר מילים',
@@ -117,6 +126,16 @@ export const strings = {
   translateCorrectionNotice: (typed: string, corrected: string) =>
     `לא מצאנו את ⁨${typed}⁩ — מציגים תוצאות עבור ⁨${corrected}⁩`,
   translateDidYouMean: 'האם התכוונת ל:',
+  // Phase 20. Five levels, feminine to agree with מילה (spec §5).
+  levelName: (level: number): string => ['חדשה', 'נחשפה', 'מוכרת', 'ידועה', 'בשליטה'][level - 1] ?? '',
+  levelRaised: (level: number) => `עלתה לרמה ${level}`,
+  dimensionName: (dimension: string): string => DIMENSION_NAMES[dimension] ?? dimension,
+  notPractised: 'טרם תורגל',
+  sortNewest: 'חדשות',
+  sortLevelAsc: 'רמה עולה',
+  sortLevelDesc: 'רמה יורדת',
+  vocabularyEmptyLevel: 'אין מילים ברמה הזו',
+  resultsPractisedTitle: 'המילים שתרגלת',
   // Known parts of speech only. An unfamiliar value returns undefined and the
   // screen omits the line, so a value the model invents tomorrow degrades to a
   // missing label rather than a broken card — the same reason the wire keeps
