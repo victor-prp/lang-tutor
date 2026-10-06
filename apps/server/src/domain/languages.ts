@@ -103,6 +103,16 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
       'An Italian word typed without its written accent is a misspelling: correct "piu" to',
       '"più" and "gia" to "già". This does not apply when the unaccented spelling is itself a',
       'different word, as e is beside è and la beside là.',
+      // Measured: without it `window` came back corrected to `finestra` in 3
+      // of 3 calls. The guard stops a Cyrillic or Hebrew word for free, but an
+      // English one shares Italian's script, and the shared third-language rule
+      // alone lost to the correction rules, which read `window` as "plausibly
+      // intended". Italian's own line, because English is the third language a
+      // Hebrew-speaking learner of Italian is likeliest to type.
+      'English is a third language here: an English word typed as Italian, such as "house", is',
+      'neither Italian nor a misspelling of its Italian translation. Return an empty entries',
+      'array for it and omit `correction`, unless Italian has borrowed the word, as it has',
+      '"weekend".',
     ],
     // Italian has several past tenses. The passato prossimo is the one of
     // everyday speech, which is what a beginner meets (spec D5).

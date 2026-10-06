@@ -451,6 +451,128 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['окно'],
   },
+
+  // Phase 22 — Italian, explained in Hebrew. Each stresses one rule the Italian
+  // entry added (spec §3). The prompt's own examples are different words, so
+  // these measure the rules rather than recall of the examples.
+  {
+    label: 'it: a conjugated verb belongs to its infinitive',
+    text: 'parlo',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    // The case is about the lemma. The model glosses a present-tense verb with the
+    // infinitive as often as with the participle, and both mean the right thing.
+    acceptTop: ['מדבר', 'אני מדבר', 'מדברת', 'אני מדברת', 'אני מדבר/ת', 'מדבר/ת', 'לדבר'],
+    expectLemma: 'parlare',
+  },
+  {
+    label: 'it: a plural noun belongs to its singular',
+    text: 'libri',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['ספרים', 'ספר'],
+    expectLemma: 'libro',
+  },
+  {
+    label: 'it: a feminine adjective belongs to its masculine singular',
+    text: 'bella',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['יפה', 'יפהפייה', 'יפהפיה'],
+    expectLemma: 'bello',
+  },
+  {
+    label: 'it: an idiom by meaning, not word for word',
+    text: 'in bocca al lupo',
+    from: 'it',
+    to: 'he',
+    expectKind: 'phrase',
+    acceptTop: ['בהצלחה', 'בהצלחה!'],
+    rejectAny: ['בפה של הזאב', 'בפי הזאב', 'בפה של זאב'],
+  },
+  {
+    label: 'it: a missing accent is a misspelling, corrected to the word (perche)',
+    text: 'perche',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['למה', 'מדוע', 'כי', 'מפני ש', 'מפני', 'בגלל ש', 'כיוון ש'],
+    expectCorrection: 'perché',
+  },
+  {
+    label: 'it: a missing accent is a misspelling, corrected to the word (citta)',
+    text: 'citta',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['עיר'],
+    expectCorrection: 'città',
+  },
+  // The counterweights, as все, берет and небо are to the ё rule: each is a real
+  // word without its accent, so a misfiring rule writes a permanent redirect
+  // away from a correctly spelled word.
+  {
+    label: 'it: an unaccented spelling that is itself a word is not a missing accent (se)',
+    text: 'se',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['אם'],
+    expectNoCorrection: true,
+  },
+  {
+    label: 'it: an unaccented spelling that is itself a word is not a missing accent (papa)',
+    text: 'papa',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['אפיפיור', 'האפיפיור', 'אבא'],
+    expectNoCorrection: true,
+  },
+  {
+    label: 'it: an English word is not Italian, though the guard passes it',
+    text: 'window',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: [],
+    expectEmpty: true,
+  },
+  // The counterweight to `window`, as `déjà vu` is to the third-language rule:
+  // Italian really uses this English word, so it is Italian and translates.
+  {
+    label: 'it: an English loanword Italian uses is Italian (computer)',
+    text: 'computer',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['מחשב'],
+    expectNoCorrection: true,
+  },
+  {
+    label: 'he → it: a Hebrew word rendered in Italian',
+    text: 'חלון',
+    from: 'he',
+    to: 'it',
+    expectKind: 'word',
+    acceptTop: ['finestra'],
+  },
+  {
+    // Not הלך: that is also the Hebrew dictionary headword of the verb, so the
+    // infinitive `andare` is a fair answer to it. הלכנו is past and nothing else.
+    // It always loses the tier 2 stem check: the lemma ללכת is no substring of
+    // an example built around הלכנו, a limit of that heuristic for Hebrew.
+    label: 'he → it: a Hebrew past tense takes the passato prossimo',
+    text: 'הלכנו',
+    from: 'he',
+    to: 'it',
+    expectKind: 'word',
+    acceptTop: ['siamo andati', 'siamo andate', 'è andato', 'abbiamo camminato'],
+    rejectTop: ['andammo', 'andavamo', 'andare', 'camminammo', 'camminare'],
+  },
 ];
 
 /**
@@ -585,6 +707,17 @@ export type DistractorCase = {
 };
 
 export const DISTRACTOR_CASES: DistractorCase[] = [
+  {
+    label: 'Italian words of four parts of speech',
+    from: 'it',
+    to: 'he',
+    items: [
+      { form: 'parlo', lemma: 'parlare', partOfSpeech: 'verb', translation: 'מדבר', synonyms: ['משוחח', 'אומר'] },
+      { form: 'casa', lemma: 'casa', partOfSpeech: 'noun', translation: 'בית', synonyms: ['דירה', 'מעון'] },
+      { form: 'sempre', lemma: 'sempre', partOfSpeech: 'adverb', translation: 'תמיד', synonyms: ['כל הזמן', 'לעולם'] },
+      { form: 'bella', lemma: 'bello', partOfSpeech: 'adjective', translation: 'יפה', synonyms: ['נאה', 'יפהפייה'] },
+    ],
+  },
   {
     label: 'Russian words of four parts of speech',
     from: 'ru',
