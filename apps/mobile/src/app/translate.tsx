@@ -268,7 +268,9 @@ function SenseCard({
         </Text>
       ) : null}
       <View style={styles.spoken}>
-        <Text style={[styles.translation, styles.grow]}>{sense.translation}</Text>
+        <Text style={[styles.translation, styles.grow, { writingDirection: strings.textDirection(to) }]}>
+          {sense.translation}
+        </Text>
         <SpeakButton text={sense.translation} language={to} testID="speak-translation" />
       </View>
       {partOfSpeech ? <Text style={styles.partOfSpeech}>{partOfSpeech}</Text> : null}
@@ -278,11 +280,15 @@ function SenseCard({
           {/* An example is written in `from` then `to`; whichever half is in
               the language being learned speaks. */}
           <View style={styles.spoken}>
-            <Text style={[styles.exampleSource, styles.grow]}>{sense.example.source}</Text>
+            <Text style={[styles.exampleSource, styles.grow, { writingDirection: strings.textDirection(from) }]}>
+              {sense.example.source}
+            </Text>
             <SpeakButton text={sense.example.source} language={from} testID="speak-example" />
           </View>
           <View style={styles.spoken}>
-            <Text style={[styles.exampleTarget, styles.grow]}>{sense.example.target}</Text>
+            <Text style={[styles.exampleTarget, styles.grow, { writingDirection: strings.textDirection(to) }]}>
+              {sense.example.target}
+            </Text>
             <SpeakButton text={sense.example.target} language={to} testID="speak-example" />
           </View>
         </View>
@@ -368,12 +374,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     writingDirection: 'rtl',
   },
+  // Direction comes from each line's language (strings.textDirection): a
+  // translation and an example's halves are Hebrew in one lookup direction and
+  // the target language in the other.
   translation: {
     fontSize: fontSizes.xl,
     lineHeight: lineHeights.xl,
     fontWeight: '700',
     color: colors.text,
-    writingDirection: 'rtl',
   },
   partOfSpeech: { color: colors.muted, fontSize: fontSizes.sm, writingDirection: 'rtl' },
   example: {
@@ -388,7 +396,6 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: fontSizes.sm,
     lineHeight: lineHeights.sm,
-    writingDirection: 'rtl',
   },
   chooseButton: {
     marginTop: spacing.md,

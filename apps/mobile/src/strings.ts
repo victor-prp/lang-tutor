@@ -14,6 +14,11 @@ const isolateLtr = (text: string) => `\u2066${text}\u2069`;
 const LANGUAGE_NAMES: Record<string, string> = { he: 'עברית', en: 'אנגלית', ru: 'רוסית', it: 'איטלקית' };
 const languageName = (code: string): string => LANGUAGE_NAMES[code] ?? code;
 
+// Phase 23. The direction of a string written in `code`, for a line whose
+// language is known: Hebrew alone is right-to-left. Forcing rtl on a he → it
+// lookup's Italian put an example's full stop at the start of its line.
+const textDirection = (code: string): 'rtl' | 'ltr' => (code === 'he' ? 'rtl' : 'ltr');
+
 // Phase 20. The five knowledge dimensions, as the word detail names them.
 const DIMENSION_NAMES: Record<Dimension, string> = {
   written_receptive: 'זיהוי בכתב',
@@ -89,6 +94,7 @@ export const strings = {
   onboardingRejected: 'אחד הפרטים אינו תקין',
   onboardingFailed: 'היצירה נכשלה, נסו שוב',
   languageName,
+  textDirection,
   learningLabel: (language: string) => `לומד/ת: ${language}`,
   addLanguage: 'הוספת שפה',
   enrollTitle: 'בחירת שפה ללימוד',

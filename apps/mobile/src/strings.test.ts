@@ -10,3 +10,14 @@ describe('language names', () => {
     expect(strings.vocabularyTitle('it')).toBe('אוצר המילים שלי באיטלקית');
   });
 });
+
+describe('textDirection', () => {
+  // Phase 23. A he → it lookup's Italian was forced right-to-left, which put an
+  // example's full stop at the start of its line.
+  it('is right-to-left for Hebrew only', () => {
+    expect(strings.textDirection('he')).toBe('rtl');
+    expect(strings.textDirection('it')).toBe('ltr');
+    expect(strings.textDirection('en')).toBe('ltr');
+    expect(strings.textDirection('ru')).toBe('ltr');
+  });
+});
