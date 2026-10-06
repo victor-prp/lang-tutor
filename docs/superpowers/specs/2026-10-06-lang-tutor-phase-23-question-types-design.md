@@ -1,9 +1,15 @@
 # Phase 23 — More question types
 
-- **Status:** Designed autonomously on 2026-10-06. Victor scoped the phase in the one-pager, then
-  asked for the design to be made without questions ("I trust your decisions; user experience and
-  good architecture are very important"), planned, built and opened as a PR. Every decision is in
-  §1 with its reason, so each one can be overturned in review.
+- **Status:** Implemented on branch `phase-23-question-types`. Designed autonomously on
+  2026-10-06: Victor scoped the phase in the one-pager, then asked for the design to be made
+  without questions ("I trust your decisions; user experience and good architecture are very
+  important"), planned, built and opened as a PR. Every decision is in §1 with its reason, so each
+  one can be overturned in review. Deviations found while building: `QuestionType` lives in
+  `packages/core/src/domain`, not `api/types.ts`, which ADR 0003 R3 keeps to `z.infer`s;
+  `AnswerRecord` gains an optional `verdict`, so the server reads the verdict `evaluate` gave
+  rather than judging twice; the results' missed rows read word → meaning whichever way the card
+  asked (`missedPair`); and the banner's line is a first-strong isolate, so the e2e helper that
+  strips isolates now strips U+2066–U+2069.
 - **Date:** 2026-10-06
 - **Source:** the one-pager `drafts/2026-10-06-question-types-one-pager.md`. `drafts/` is
   gitignored, so everything this spec depends on is restated below.
