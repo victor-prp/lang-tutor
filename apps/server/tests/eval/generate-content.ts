@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import type { LlmTranslation } from '@lang-tutor/core/api';
 
 import { loadGeminiConfig } from '../../src/config';
-import { content, parseRecordArgs, recordingKey } from '../../src/db/content';
+import { content, parseRecordArgs, recordingBase, recordingKey } from '../../src/db/content';
 import { recorded } from '../../src/db/content.generated';
 import { createGeminiClient } from '../../src/providers/gemini';
 import { askModel } from './askModel';
@@ -109,15 +109,15 @@ async function main(): Promise<void> {
   // A burst that trips a per-minute limit would poison the recording with a
   // 429 rather than merely slowing it down.
   //
-  // A filtered run must preserve every entry it does not touch, so it starts
-  // from the existing `recorded` map and the loop below overwrites only the
-  // named query. An unfiltered run starts empty instead: `queries` is then
-  // every query `content` currently lists, and the loop fills `next` from
-  // that list alone, so a query since removed from `content` is pruned
-  // rather than carried over from the stale `recorded` map. Do not collapse
-  // these into one `{ ...recorded }` start — that is exactly what silently
-  // reintroduces orphaned entries on an unfiltered re-record.
-  const next: Record<string, LlmTranslation> = filter ? { ...recorded } : {};
+  // A filtered run (by query or by pair) must preserve every entry it does not
+  // touch, so it starts from the existing `recorded` map and the loop below
+  // overwrites only what it matched. An unfiltered run starts empty instead:
+  // `queries` is then every query `content` currently lists, and the loop fills
+  // `next` from that list alone, so a query since removed from `content` is
+  // pruned rather than carried over from the stale `recorded` map. Do not
+  // collapse these into one `{ ...recorded }` start — that is exactly what
+  // silently reintroduces orphaned entries on an unfiltered re-record.
+  const next: Record<string, LlmTranslation> = recordingBase(recorded, { filter, pair });
   for (const entry of matching) {
     const { query } = entry;
     const answer = await askModel(llm, { text: query, from: entry.from, to: entry.to });

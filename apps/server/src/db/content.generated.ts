@@ -548,5 +548,267 @@ export const recorded: Record<string, LlmTranslation> = {
         ]
       }
     ]
+  },
+  "it-he:finestra": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "finestra",
+        "part_of_speech": "noun",
+        "senses": [
+          {
+            "translation": "חלון",
+            "example": {
+              "source": "Ho aperto la finestra per far entrare aria fresca.",
+              "target": "פתחתי את החלון כדי להכניס אוויר צח."
+            },
+            "sense_code": "architectural_opening"
+          },
+          {
+            "translation": "חלון",
+            "example": {
+              "source": "La nuova finestra del browser si è aperta automaticamente.",
+              "target": "חלון הדפדפן החדש נפתח אוטומטית."
+            },
+            "sense_code": "computer_interface"
+          },
+          {
+            "translation": "חלון זמן",
+            "example": {
+              "source": "Abbiamo una piccola finestra di tempo per completare il progetto.",
+              "target": "יש לנו חלון זמן קצר להשלים את הפרויקט."
+            },
+            "sense_code": "opportunity_time_slot"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:libro": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "libro",
+        "part_of_speech": "noun",
+        "senses": [
+          {
+            "translation": "ספר",
+            "example": {
+              "source": "Ho letto un libro interessante la scorsa settimana.",
+              "target": "קראתי ספר מעניין בשבוע שעבר."
+            },
+            "sense_code": "bound_pages_work"
+          },
+          {
+            "translation": "ספר",
+            "example": {
+              "source": "Il primo libro della Bibbia è la Genesi.",
+              "target": "הספר הראשון בתנ\"ך הוא בראשית."
+            },
+            "sense_code": "literary_division"
+          },
+          {
+            "translation": "פנקס",
+            "example": {
+              "source": "Il contabile ha registrato tutte le transazioni nel libro mastro.",
+              "target": "רואה החשבון רשם את כל העסקאות בספר החשבונות."
+            },
+            "sense_code": "record_ledger"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:acqua": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "acqua",
+        "part_of_speech": "noun",
+        "senses": [
+          {
+            "translation": "מים",
+            "example": {
+              "source": "Ho sete, vorrei un bicchiere d'acqua.",
+              "target": "אני צמא, הייתי רוצה כוס מים."
+            },
+            "sense_code": "liquid_substance"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:amico": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "amico",
+        "part_of_speech": "noun",
+        "senses": [
+          {
+            "translation": "חבר",
+            "example": {
+              "source": "Marco è il mio migliore amico.",
+              "target": "מרקו הוא החבר הכי טוב שלי."
+            },
+            "sense_code": "male_friend"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:difficile": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "difficile",
+        "part_of_speech": "adjective",
+        "senses": [
+          {
+            "translation": "קשה",
+            "example": {
+              "source": "L'esame di matematica era molto difficile.",
+              "target": "מבחן המתמטיקה היה קשה מאוד."
+            },
+            "sense_code": "not_easy"
+          },
+          {
+            "translation": "תובעני",
+            "example": {
+              "source": "È un cliente difficile da accontentare.",
+              "target": "הוא לקוח תובעני שקשה לרצות."
+            },
+            "sense_code": "demanding_person"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:ricordare": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "ricordare",
+        "part_of_speech": "verb",
+        "senses": [
+          {
+            "translation": "לזכור",
+            "example": {
+              "source": "Non riesco a ricordare il suo nome.",
+              "target": "אני לא מצליח לזכור את שמו."
+            },
+            "sense_code": "to_remember"
+          },
+          {
+            "translation": "להזכיר",
+            "example": {
+              "source": "Mi ha ricordato di comprare il pane.",
+              "target": "הוא הזכיר לי לקנות לחם."
+            },
+            "sense_code": "to_remind"
+          },
+          {
+            "translation": "להיזכר",
+            "example": {
+              "source": "Ricordo ancora quel giorno come fosse ieri.",
+              "target": "אני עדיין נזכר באותו יום כאילו היה אתמול."
+            },
+            "sense_code": "to_recall"
+          },
+          {
+            "translation": "להזכיר",
+            "example": {
+              "source": "Il suo viso ricorda quello di sua madre.",
+              "target": "פניו מזכירות את פני אמו."
+            },
+            "sense_code": "to_resemble"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:per favore": {
+    "kind": "phrase",
+    "entries": [
+      {
+        "lemma": "per favore",
+        "part_of_speech": "adverb",
+        "senses": [
+          {
+            "translation": "בבקשה",
+            "example": {
+              "source": "Puoi passarmi il sale, per favore?",
+              "target": "אתה יכול להעביר לי את המלח, בבקשה?"
+            },
+            "sense_code": "polite_request"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:buongiorno": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "buongiorno",
+        "part_of_speech": "interjection",
+        "senses": [
+          {
+            "translation": "בוקר טוב",
+            "example": {
+              "source": "Quando sono entrato in ufficio, ho detto buongiorno a tutti.",
+              "target": "כשנכנסתי למשרד, אמרתי בוקר טוב לכולם."
+            },
+            "sense_code": "morning_greeting"
+          },
+          {
+            "translation": "יום טוב",
+            "example": {
+              "source": "Ci siamo incontrati per strada e ci siamo detti buongiorno.",
+              "target": "נפגשנו ברחוב ואמרנו זה לזה יום טוב."
+            },
+            "sense_code": "daytime_greeting"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:grazie mille": {
+    "kind": "phrase",
+    "entries": [
+      {
+        "lemma": "grazie mille",
+        "part_of_speech": "interjection",
+        "senses": [
+          {
+            "translation": "תודה רבה",
+            "example": {
+              "source": "Grazie mille per il tuo aiuto con il progetto.",
+              "target": "תודה רבה על עזרתך עם הפרויקט."
+            },
+            "sense_code": "expression_of_gratitude"
+          }
+        ]
+      }
+    ]
+  },
+  "it-he:arrivederci": {
+    "kind": "word",
+    "entries": [
+      {
+        "lemma": "arrivederci",
+        "part_of_speech": "interjection",
+        "senses": [
+          {
+            "translation": "להתראות",
+            "example": {
+              "source": "È tardi, devo andare, arrivederci!",
+              "target": "מאוחר, אני חייב ללכת, להתראות!"
+            },
+            "sense_code": "farewell_greeting"
+          }
+        ]
+      }
+    ]
   }
 };
