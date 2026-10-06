@@ -22,7 +22,14 @@ if [ "${LANE_SLOT:-0}" != "0" ] && docker ps --format '{{.Image}}' 2>/dev/null |
   exit 1
 fi
 
-docker compose up -d --wait db mockserver || exit 1
+# In CI, docker-compose.ci.yml turns Postgres durability off: the database dies
+# with the job, and syncing to disk was most of what the integration suite waited
+# on. Never locally, where the same Postgres holds every lane's data.
+if [ -n "${CI:-}" ]; then
+  docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait db mockserver || exit 1
+else
+  docker compose up -d --wait db mockserver || exit 1
+fi
 bash scripts/wait-for-mockserver.sh || exit 1
 
 # The pg-boss dashboard, for people only: no test reads it, so CI (which sets
