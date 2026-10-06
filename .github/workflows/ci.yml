@@ -89,6 +89,19 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      # Jest records each test file's duration in its cache and starts the slowest
+      # files first. A fresh runner has no timings, so Jest falls back to file
+      # size, and the query-plan test, the slowest by far, started 26 s in and ran
+      # last, setting the step's wall time. This restores the newest previous
+      # run's cache, by prefix, and saves this run's under a key of its own. After
+      # npm ci, which would otherwise delete it with node_modules.
+      - name: Cache Jest timings
+        uses: actions/cache@v6
+        with:
+          path: apps/server/node_modules/.cache/jest
+          key: jest-integration-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            jest-integration-${{ runner.os }}-
       # Must come after checkout: it reads docker-compose.yml from the tree. The
       # `services:` block this replaces duplicated the postgres:17 image and its
       # healthcheck; `--wait` blocks on the compose healthcheck exactly as that

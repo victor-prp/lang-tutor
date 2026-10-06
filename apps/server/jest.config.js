@@ -37,6 +37,12 @@ module.exports = {
       testMatch: ['<rootDir>/tests/integration/**/*.test.ts'],
       // serial/ is the integration-serial project below, run after this one.
       testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/integration/serial/'],
+      // A known path, so CI can restore it between runs (ci.yml, "Cache Jest
+      // timings"). Jest records each file's duration here and starts the slowest
+      // files first; with no timings it falls back to file size, and on a fresh
+      // runner the query-plan test, the slowest by far, started 26 s in and ran
+      // last, setting the step's wall time.
+      cacheDirectory: '<rootDir>/node_modules/.cache/jest',
       globalSetup: '<rootDir>/tests/support/globalSetup.ts',
       globalTeardown: '<rootDir>/tests/support/globalTeardown.ts',
       restoreMocks: true,
