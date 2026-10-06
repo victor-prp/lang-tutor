@@ -55,6 +55,14 @@ r4_jest() { grep -n 'eval' apps/server/jest.config.js; }
 
 r4_src() { grep -rn 'tests/eval' apps/server/src --include='*.ts'; }
 
+# Comment lines are skipped: the files that stopped dropping say why in prose.
+r7() {
+  grep -rniE "drop database|dropDatabases\(|dropLaneDatabases\(" apps/server/tests/integration \
+      --include='*.test.ts' \
+    | grep -v '^apps/server/tests/integration/serial/' \
+    | grep -vE '^[^:]+:[0-9]+:\s*(//|\*)'
+}
+
 echo "Checking apps/server against ADR 0004 (test topology)"
 echo
 
@@ -65,13 +73,14 @@ check "R4  no *.test.ts under tests/ outside tests/integration/"      r4
 check "R5  the unit Jest project declares no globalSetup"             r5
 check "R4  no Jest project picks up an eval file"                     r4_jest
 check "R4  nothing under tests/eval/ is imported by src/"             r4_src
+check "R7  only tests/integration/serial/ drops a database"           r7
 
 echo
 if [ "$status" -ne 0 ]; then
   echo "Test topology check FAILED. See docs/adr/adr-0004-test-topology.md" >&2
   echo "for what each rule protects and why." >&2
 else
-  echo "Test topology check passed: 7 rules, no violations."
+  echo "Test topology check passed: 8 rules, no violations."
 fi
 
 exit "$status"

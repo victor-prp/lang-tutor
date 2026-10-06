@@ -82,10 +82,18 @@ R11's command exempts it.
   that boundary greppable; this bullet exists so the exception is not later mistaken
   for a gap in R1-R4. Enforced by review at the point a new file is added to
   `tests/integration/`.
+- **R7 — Only `tests/integration/serial/` drops a database.** A `DROP DATABASE` waits
+  for a server-wide checkpoint, and while the integration project's workers clone a
+  database per test, that checkpoint has gigabytes to write. Three files that dropped
+  inside the parallel run sat idle for 17 to 45 s each on CI and set the suite's wall
+  time, a cost that grew with every test added anywhere. A test that needs a database
+  to be absent uses a fresh name instead; a database a test made is left for the next
+  run's sweep. A test whose subject is dropping lives in `serial/`, which the
+  `integration-serial` Jest project runs after the parallel run, on a quiet server.
 
 ## How to detect a violation
 
-`npm run lint:arch` runs the seven commands below alongside the other ADRs';
+`npm run lint:arch` runs the eight commands below alongside the other ADRs';
 `scripts/check-adr-0004-test-topology.sh` mirrors this block verbatim. Each command
 must print nothing.
 
@@ -112,6 +120,12 @@ grep -n "eval" apps/server/jest.config.js
 
 # R4 — nothing under tests/eval/ is imported by src/
 grep -rn "tests/eval" apps/server/src --include='*.ts'
+
+# R7 — only tests/integration/serial/ drops a database (comment lines skipped)
+grep -rniE "drop database|dropDatabases\(|dropLaneDatabases\(" apps/server/tests/integration \
+    --include='*.test.ts' \
+  | grep -v '^apps/server/tests/integration/serial/' \
+  | grep -vE '^[^:]+:[0-9]+:\s*(//|\*)'
 ```
 
 ### What the rules cover
