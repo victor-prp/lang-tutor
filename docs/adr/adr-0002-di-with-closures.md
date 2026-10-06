@@ -1,7 +1,7 @@
 # ADR 0002: Dependency injection via closures, constructed only at a composition root
 
 - **Status:** Accepted
-- **Date:** 2026-09-06
+- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md),
   *"Closure-based dependency injection is mandatory"*, and
   [phase 5 design](../superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md),
@@ -34,7 +34,7 @@ other file receives what it needs as a parameter and stays swappable for a test'
 
 | # | Subject | Must not appear outside a composition root |
 |---|---|---|
-| R1 | Concrete I/O/randomness implementations | `Math.random` (server); `@react-native-async-storage/async-storage`, `expo-crypto` imports (mobile) |
+| R1 | Concrete I/O/randomness implementations | `Math.random` (server); `@react-native-async-storage/async-storage`, `expo-crypto`, `expo-speech`, `expo-audio` imports (mobile) |
 | R2 | `process.env` | any read of `process.env`, in either app |
 | R3 | Module-level exported singletons | `export const x = createX(...)` / `export const x = new X(...)` at module scope |
 | R4 | `jest.mock` | anywhere in `apps/server` or `apps/mobile` |
@@ -53,7 +53,7 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
   `createHealthRepo`, `createUserRepo`, `createEnrollmentRepo`, `createDictRepo`, `createVocabularyRepo`, `createProgressRepo`, `createTransaction`, `createSessionService`,
   `createUserService`, `createEnrollmentService`, `createGeminiClient`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
-  `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`) is short enough to spot-check.
+  `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`, `createSpeaker`) is short enough to spot-check.
   `createGeminiClient` is annotated at its call site in `composition.ts` rather than at its
   definition, because ADR 0001 R10 forbids `providers/` from importing the contract it
   satisfies — the same arrangement as `createTransaction` and `Transaction`.
@@ -71,7 +71,7 @@ mirrors this block verbatim. Each command must print nothing.
 ```bash
 # R1 — concrete I/O/randomness implementations named only at a composition root
 grep -rn "Math\.random" apps/server/src --include='*.ts' | grep -v -e '/index\.ts:' -e '\.test\.ts:'
-grep -rln "from '@react-native-async-storage/async-storage'\|from 'expo-crypto'" apps/mobile/src --include='*.ts' --include='*.tsx' | grep -v '_layout\.tsx'
+grep -rln "from '@react-native-async-storage/async-storage'\|from 'expo-crypto'\|from 'expo-speech'\|from 'expo-audio'" apps/mobile/src --include='*.ts' --include='*.tsx' | grep -v '_layout\.tsx'
 
 # R2 — process.env read only at a composition root
 grep -rn "process\.env" apps/server/src apps/mobile/src --include='*.ts' --include='*.tsx' \
@@ -118,6 +118,10 @@ grep -rnE "(rng|onError|randomUUID|logger|storage|fetch)\s*=\s*[^,}]+[,}]" apps/
 - `jest.mock` is a symptom, not a tool: `jest.spyOn(console, 'log')` in the pre-phase-5
   `services/sessions.test.ts` was exactly this signal, and it also mutated process-global
   state across a Jest worker.
+- `expo-speech` and `expo-audio` joined R1 in phase 23. A device's speech engine is I/O in
+  exactly the sense AsyncStorage is, and keeping it at the root is what lets
+  `src/speech.ts` be tested with a fake engine. It is also what keeps a later move to
+  server-generated audio a change to one file.
 
 ## Related
 

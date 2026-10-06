@@ -34,7 +34,7 @@ check() {
 
 r1_rng()   { grep -rn "Math\.random" apps/server/src --include='*.ts' | grep -v -e '/index\.ts:' -e '\.test\.ts:'; }
 r1_mobile() {
-  grep -rln "from '@react-native-async-storage/async-storage'\|from 'expo-crypto'" apps/mobile/src --include='*.ts' --include='*.tsx' \
+  grep -rln "from '@react-native-async-storage/async-storage'\|from 'expo-crypto'\|from 'expo-speech'\|from 'expo-audio'" apps/mobile/src --include='*.ts' --include='*.tsx' \
     | grep -v '_layout\.tsx'
 }
 
@@ -64,7 +64,7 @@ echo "Checking apps/server and apps/mobile against ADR 0002 (DI via closures)"
 echo
 
 check "R1  Math.random named only at a composition root"           r1_rng
-check "R1  AsyncStorage/expo-crypto imported only at _layout.tsx"   r1_mobile
+check "R1  AsyncStorage/expo-crypto/expo-speech/expo-audio imported only at _layout.tsx" r1_mobile
 check "R2  process.env read only at a composition root"            r2
 check "R3  no module-level exported singleton"                     r3
 check "R4  no jest.mock"                                            r4
