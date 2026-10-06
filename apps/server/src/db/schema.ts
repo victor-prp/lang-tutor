@@ -413,7 +413,7 @@ export const vocabularyEntries = pgTable(
  * packages/core. A literal, because drizzle-kit reads this file on its own; the
  * schema tests insert every DIMENSIONS value, which keeps the two equal.
  *
- * sense_progress_enrollment_dimension_idx serves the list's level sort and
+ * sense_progress_enrollment_dimension_idx serves the list's level and
  * filter as an index-only scan of one enrollment's live-dimension rows.
  * Measured while planning at the plan test's volume: 35 ms without it, 12 ms
  * with it, for a 20k-word enrollment's first page. `level` is a key column

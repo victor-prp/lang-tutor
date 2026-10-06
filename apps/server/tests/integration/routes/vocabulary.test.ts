@@ -416,7 +416,8 @@ describe('GET /api/enrollments/{id}/vocabulary/word', () => {
     expect(await wrongLanguage.json()).toEqual({ error: 'word not found' });
   });
 
-  it.each(['', '?lemma='])('answers 400 for a missing or empty lemma: "%s"', async (query) => {
+  // %00 decodes to U+0000, which Postgres refuses in a text parameter: it must fail validation, not reach the query.
+  it.each(['', '?lemma=', '?lemma=%00'])('answers 400 for a missing, empty or NUL-holding lemma: "%s"', async (query) => {
     const res = await app().request(`/api/enrollments/${RU}/vocabulary/word${query}`);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid request' });

@@ -125,6 +125,10 @@ describe('partsOfSpeechLabel', () => {
     expect(partsOfSpeechLabel(['noun', 'verb'])).toBe('שם עצם · פועל');
   });
 
+  it('names a determiner and a numeral', () => {
+    expect(partsOfSpeechLabel(['determiner', 'numeral'])).toBe('מגדיר · שם מספר');
+  });
+
   it('drops a code with no name, and is empty for none', () => {
     expect(partsOfSpeechLabel(['noun', 'particle'])).toBe('שם עצם');
     expect(partsOfSpeechLabel([])).toBe('');

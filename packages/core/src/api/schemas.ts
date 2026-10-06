@@ -396,9 +396,10 @@ export const VocabularyWordDetailSchema = z.object({
 });
 
 // Phase 21. A query parameter rather than a path segment: a lemma may hold a
-// space or a slash. Matched exactly.
+// space or a slash. Matched exactly. U+0000 is refused here: Hono decodes %00 into
+// the string, and Postgres raises on a NUL in a text parameter, which would be a 500.
 export const VocabularyWordQuerySchema = z.object({
-  lemma: z.string().min(1),
+  lemma: z.string().min(1).regex(/^[^\u0000]*$/),
 });
 
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from

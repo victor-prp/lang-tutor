@@ -37,7 +37,7 @@ function afterCursor(after: VocabularyCursor): SQL {
  * statements at volume: a plan test of hand-copied SQL would prove something
  * about a query nobody runs.
  *
- * Every one is scoped to ONE enrollment or ONE lexeme and served by an index
+ * Every one is scoped to ONE enrollment or ONE lemma and served by an index
  * leading with it — that is what keeps the table's total size irrelevant (spec
  * §3, "Cost of every query").
  */

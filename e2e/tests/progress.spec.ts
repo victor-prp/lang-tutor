@@ -75,17 +75,23 @@ test('a session moves the words it practised up the ladder, and the list filters
 
   // 5. No sorts any more, and the filter opens on "all".
   await expect(page.locator('[data-testid^="vocabulary-sort-"]')).toHaveCount(0);
-  await expect(page.getByTestId('vocabulary-level-all')).toBeVisible();
+  const levelAll = page.getByTestId('vocabulary-level-all');
+  const level2 = page.getByTestId('vocabulary-level-2');
+  await expect(levelAll).toHaveText('הכל');
+  await expect(levelAll).toHaveAttribute('aria-selected', 'true');
 
   // 6. Filter to a level, an empty level, and "all" to clear it.
-  await page.getByTestId('vocabulary-level-2').click();
+  await level2.click();
   await expect(words).toHaveCount(1);
   await expect(words.first()).toContainText('лук');
-  await page.getByTestId('vocabulary-level-all').click();
+  await expect(levelAll).toHaveAttribute('aria-selected', 'false');
+  await expect(level2).toHaveAttribute('aria-selected', 'true');
+  await levelAll.click();
   await expect(words).toHaveCount(2);
+  await expect(levelAll).toHaveAttribute('aria-selected', 'true');
   await page.getByTestId('vocabulary-level-4').click();
   await expect(page.getByTestId('vocabulary-empty-level')).toBeVisible();
-  await page.getByTestId('vocabulary-level-all').click();
+  await levelAll.click();
   await expect(words).toHaveCount(2);
 
   // 7. A word's detail: five dimensions, one live.

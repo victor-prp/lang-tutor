@@ -27,6 +27,9 @@ function Chip({
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected }}
+      // react-native-web 0.21 does not render accessibilityState, so on web this
+      // is the only thing that puts the selected state in the DOM (and in a test).
+      aria-selected={selected}
       testID={testID}
       onPress={onPress}
       style={[styles.chip, selected && styles.chipSelected]}
