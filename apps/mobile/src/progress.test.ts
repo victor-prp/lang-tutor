@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { SenseProgress, SessionProgressItem } from '@lang-tutor/core/api';
 
-import { dimensionRows, pipsFor, practisedRows } from './progress';
+import { dimensionRows, missedPair, pipsFor, practisedRows } from './progress';
 import { strings } from './strings';
 
 describe('pipsFor', () => {
@@ -13,17 +13,23 @@ describe('pipsFor', () => {
 });
 
 describe('practisedRows', () => {
-  const item = (sense_id: string, level_before: number, level_after: number): SessionProgressItem => ({
+  const item = (
+    sense_id: string,
+    level_before: number,
+    level_after: number,
+    raised: SessionProgressItem['raised'] = [],
+  ): SessionProgressItem => ({
     sense_id,
     form: `form-${sense_id}`,
     translation: `tr-${sense_id}`,
     level_before,
     level_after,
+    raised,
   });
 
-  it('puts the words that moved up first, each group in session order', () => {
+  it('puts the words whose badge rose first, each group in session order', () => {
     const rows = practisedRows([item('a', 1, 1), item('b', 1, 2), item('c', 2, 2), item('d', 3, 4)]);
-    expect(rows.map((row) => [row.sense_id, row.raised])).toEqual([
+    expect(rows.map((row) => [row.sense_id, row.badgeRaised])).toEqual([
       ['b', true],
       ['d', true],
       ['a', false],
@@ -31,8 +37,56 @@ describe('practisedRows', () => {
     ]);
   });
 
+  // Phase 23 (spec D11): a dimension can rise without the badge.
+  it('puts a word that only moved a dimension after the badge risers, before the rest', () => {
+    const rows = practisedRows([
+      item('a', 1, 1),
+      item('b', 1, 2, ['written_receptive', 'written_productive']),
+      item('c', 1, 1, ['written_productive']),
+    ]);
+    expect(rows.map((row) => [row.sense_id, row.badgeRaised, row.progressed])).toEqual([
+      ['b', true, false],
+      ['c', false, true],
+      ['a', false, false],
+    ]);
+  });
+
   it('is empty for no progress', () => {
     expect(practisedRows([])).toEqual([]);
+  });
+});
+
+// Phase 23. A missed row always reads word → meaning, whichever way round the
+// card asked it.
+describe('missedPair', () => {
+  it('reads a missed choice as its prompt and right option', () => {
+    expect(
+      missedPair({
+        question: { id: 'c', type: 'multiple_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+        correct_answer: 'בית',
+      }),
+    ).toEqual({ word: 'casa', meaning: 'בית' });
+  });
+
+  it('turns a reversed or typed card round', () => {
+    expect(
+      missedPair({
+        question: { id: 't', type: 'typed_translation', vocab_term_id: 'l', question: 'חלון', part_of_speech: 'noun', answer: 'finestra', lemma: 'finestra', alternatives: [] },
+        correct_answer: 'finestra',
+      }),
+    ).toEqual({ word: 'finestra', meaning: 'חלון' });
+    expect(
+      missedPair({
+        question: { id: 'r', type: 'reverse_choice', vocab_term_id: 'l', question: 'בית', part_of_speech: 'noun', options: ['porta', 'casa'], correct_option: 1 },
+        correct_answer: 'casa',
+      }),
+    ).toEqual({ word: 'casa', meaning: 'בית' });
+  });
+});
+
+describe('dimensionsRaised', () => {
+  it('names the dimensions that rose', () => {
+    expect(strings.dimensionsRaised(['written_productive', 'spelling'])).toBe('התקדמות: כתיבה, איות');
   });
 });
 

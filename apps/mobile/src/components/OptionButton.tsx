@@ -6,6 +6,8 @@ export type OptionVisualState = 'idle' | 'correct' | 'wrong' | 'dimmed';
 
 type Props = {
   label: string;
+  /** Phase 23. A reversed card's options are target-language words. */
+  direction: 'rtl' | 'ltr';
   state: OptionVisualState;
   disabled: boolean;
   minHeight?: number;
@@ -14,7 +16,7 @@ type Props = {
   onMeasure: (height: number) => void;
 };
 
-export function OptionButton({ label, state, disabled, minHeight, testID, onPress, onMeasure }: Props) {
+export function OptionButton({ label, direction, state, disabled, minHeight, testID, onPress, onMeasure }: Props) {
   function handleLayout(event: LayoutChangeEvent) {
     onMeasure(event.nativeEvent.layout.height);
   }
@@ -33,7 +35,9 @@ export function OptionButton({ label, state, disabled, minHeight, testID, onPres
         pressed && !disabled ? styles.pressed : null,
       ]}
     >
-      <Text style={[styles.label, state === 'dimmed' ? styles.labelDimmed : null]}>{label}</Text>
+      <Text style={[styles.label, { writingDirection: direction }, state === 'dimmed' ? styles.labelDimmed : null]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -53,7 +57,6 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     color: colors.text,
-    writingDirection: 'rtl',
   },
   labelDimmed: { color: colors.muted },
 });

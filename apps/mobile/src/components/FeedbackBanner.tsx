@@ -2,18 +2,23 @@ import { useEffect, useRef } from 'react';
 import { Animated, Pressable, StyleSheet, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { Feedback } from '@/feedback';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 type Props = {
-  isCorrect: boolean;
-  correctAnswer: string;
+  feedback: Feedback;
   onContinue: () => void;
 };
 
+// U+2068 FSI ... U+2069 PDI: the line may be a target-language word inside a
+// right-to-left banner, and isolating it keeps its punctuation in place.
+const isolate = (text: string) => `\u2068${text}\u2069`;
+
 const HIDDEN_OFFSET = 200;
 
-export function FeedbackBanner({ isCorrect, correctAnswer, onContinue }: Props) {
+export function FeedbackBanner({ feedback, onContinue }: Props) {
+  const isCorrect = feedback.tone === 'correct';
   const translateY = useRef(new Animated.Value(HIDDEN_OFFSET)).current;
   // The banner is absolutely positioned, so it sits outside the screen's
   // SafeAreaView padding and would otherwise run under the Android nav bar.
@@ -26,7 +31,7 @@ export function FeedbackBanner({ isCorrect, correctAnswer, onContinue }: Props) 
       duration: 220,
       useNativeDriver: true,
     }).start();
-  }, [translateY, correctAnswer]);
+  }, [translateY, feedback.title, feedback.line]);
 
   return (
     <Animated.View
@@ -37,10 +42,14 @@ export function FeedbackBanner({ isCorrect, correctAnswer, onContinue }: Props) 
         { paddingBottom: insets.bottom + spacing.xl, transform: [{ translateY }] },
       ]}
     >
-      <Text style={[styles.title, isCorrect ? styles.titleCorrect : styles.titleWrong]}>
-        {isCorrect ? strings.feedbackCorrect : strings.feedbackWrong}
+      <Text style={[styles.title, isCorrect ? styles.titleCorrect : styles.titleWrong]} testID="feedback-title">
+        {feedback.title}
       </Text>
-      {isCorrect ? null : <Text style={styles.answer}>{correctAnswer}</Text>}
+      {feedback.line === null ? null : (
+        <Text style={styles.answer} testID="feedback-line">
+          {isolate(feedback.line)}
+        </Text>
+      )}
       <Pressable accessibilityRole="button" testID="continue-button" onPress={onContinue} style={styles.button}>
         <Text style={styles.buttonLabel}>{strings.continueLabel}</Text>
       </Pressable>

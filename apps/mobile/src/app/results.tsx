@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LevelBadge } from '@/components/LevelBadge';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
-import { practisedRows } from '@/progress';
+import { missedPair, practisedRows } from '@/progress';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -57,16 +57,26 @@ export default function ResultsScreen() {
           <View style={styles.missed} testID="practised-section">
             <Text style={styles.missedTitle}>{strings.resultsPractisedTitle}</Text>
             {practisedRows(progress).map((row) => (
-              <View key={row.sense_id} style={[styles.missedRow, row.raised && styles.raisedRow]} testID="practised-row">
+              <View
+                key={row.sense_id}
+                style={[styles.missedRow, row.badgeRaised && styles.raisedRow, row.progressed && styles.progressedRow]}
+                testID="practised-row"
+              >
                 <View style={styles.missedCellStart}>
                   <Text style={styles.missedPrompt}>{row.form}</Text>
                 </View>
                 <View style={styles.missedCellEnd}>
                   <Text style={styles.missedAnswer}>{row.translation}</Text>
                   <LevelBadge level={row.level_after} testID="practised-level" />
-                  {row.raised ? (
+                  {row.badgeRaised ? (
                     <Text style={styles.raised} testID="practised-raised">
                       {strings.levelRaised(row.level_after)}
+                    </Text>
+                  ) : null}
+                  {/* Phase 23 (spec D11): a dimension rose, the badge did not. */}
+                  {row.progressed ? (
+                    <Text style={styles.progressed} testID="practised-progressed">
+                      {strings.dimensionsRaised(row.raised)}
                     </Text>
                   ) : null}
                 </View>
@@ -78,16 +88,19 @@ export default function ResultsScreen() {
         {missedQuestions.length > 0 ? (
           <View style={styles.missed}>
             <Text style={styles.missedTitle}>{strings.resultsMissedTitle}</Text>
-            {missedQuestions.map(({ question, correct_answer }) => (
-              <View key={question.id} style={styles.missedRow} testID="missed-row">
-                <View style={styles.missedCellStart}>
-                  <Text style={styles.missedPrompt}>{question.question}</Text>
+            {missedQuestions.map((missed) => {
+              const { word, meaning } = missedPair(missed);
+              return (
+                <View key={missed.question.id} style={styles.missedRow} testID="missed-row">
+                  <View style={styles.missedCellStart}>
+                    <Text style={styles.missedPrompt}>{word}</Text>
+                  </View>
+                  <View style={styles.missedCellEnd}>
+                    <Text style={styles.missedAnswer}>{meaning}</Text>
+                  </View>
                 </View>
-                <View style={styles.missedCellEnd}>
-                  <Text style={styles.missedAnswer}>{correct_answer}</Text>
-                </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ) : null}
       </ScrollView>
@@ -175,10 +188,17 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
   },
   raisedRow: { borderColor: colors.primary, borderWidth: 2 },
+  progressedRow: { borderColor: colors.primary },
   raised: {
     fontSize: fontSizes.sm,
     lineHeight: lineHeights.sm,
     fontWeight: '700',
+    color: colors.primary,
+    writingDirection: 'rtl',
+  },
+  progressed: {
+    fontSize: fontSizes.sm,
+    lineHeight: lineHeights.sm,
     color: colors.primary,
     writingDirection: 'rtl',
   },
