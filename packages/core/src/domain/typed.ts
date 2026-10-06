@@ -42,8 +42,17 @@ function bare(text: string): string {
 
 const same = (a: string, b: string) => a === b || bare(a) === bare(b);
 
-/** Without diacritics: `perché` → `perche`, `ёлка` → `елка`. */
-const undotted = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').normalize('NFC');
+/** Without diacritics: `perché` → `perche`, `ёлка` → `елка`. The breve stays:
+ *  й is its own letter, not a marked и, so `мои` is another word than `мой`. */
+const undotted = (text: string) =>
+  text
+    .normalize('NFD')
+    .replace(/(?!\u0306)\p{M}/gu, '')
+    .normalize('NFC');
+
+/** An accent written the ASCII way, as a mark after the vowel at a word's end
+ *  (`piu'`, `perche'`), read as no accent: never worse than leaving it out. */
+const markAsAccent = (text: string) => text.replace(/([aeiou])['´`](?=\s|$)/gu, '$1');
 
 /** True when at most one edit turns `a` into `b`: an insertion, a deletion, a
  *  substitution, or a swap of two neighbouring letters (optimal string
@@ -72,7 +81,7 @@ const letterCount = (text: string) => (text.match(/\p{L}/gu) ?? []).length;
 function nearMiss(typed: string, target: string): boolean {
   const t = bare(typed);
   const w = bare(target);
-  if (undotted(t) === undotted(w)) return true;
+  if (undotted(markAsAccent(t)) === undotted(w)) return true;
   return letterCount(w) >= NEAR_MISS_MIN_LETTERS && oneEditApart(t, w);
 }
 

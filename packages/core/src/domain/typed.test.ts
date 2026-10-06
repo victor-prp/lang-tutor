@@ -57,6 +57,27 @@ describe('judgeTyped', () => {
     expect(judgeTyped(q('ёлка'), 'елка')).toBe('near_miss');
   });
 
+  // Review: the ASCII way of writing an Italian accent is an apostrophe after
+  // the vowel. It must never do worse than leaving the accent out.
+  it('is a near miss for an accent written as an apostrophe after the vowel', () => {
+    expect(judgeTyped(q('più'), "piu'")).toBe('near_miss');
+    expect(judgeTyped(q('perché'), "perche'")).toBe('near_miss');
+    expect(judgeTyped(q('città'), 'citta’')).toBe('near_miss');
+    expect(judgeTyped(q('città'), 'citta`')).toBe('near_miss');
+    expect(judgeTyped(q('città'), 'citta´')).toBe('near_miss');
+  });
+
+  it("keeps a real apostrophe exact: po' is spelt that way", () => {
+    expect(judgeTyped(q("po'"), "po'")).toBe('exact');
+    expect(judgeTyped(q("po'"), 'po’')).toBe('exact');
+  });
+
+  // Review: й is its own letter, not a dotted и, so мои is another word.
+  it('does not read й as и with a mark', () => {
+    expect(judgeTyped(q('мой'), 'мои')).toBe('wrong');
+    expect(judgeTyped(q('чай'), 'чаи')).toBe('wrong');
+  });
+
   it('is a near miss for one edit on a word of five letters or more', () => {
     expect(judgeTyped(q('finestra'), 'finestar')).toBe('near_miss');
     expect(judgeTyped(q('finestra'), 'fineestra')).toBe('near_miss');
