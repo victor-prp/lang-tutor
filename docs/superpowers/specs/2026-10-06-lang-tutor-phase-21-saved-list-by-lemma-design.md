@@ -369,8 +369,8 @@ Renamed from `[lexemeId].tsx`, a static route reading `lemma` from its search pa
 2. **`vocabulary.spec.ts`, existing test:** unchanged in behaviour; it navigates through the
    lemma route.
 3. **`progress.spec.ts`:** the sort steps are replaced by a check that no sort chip exists and
-   that "הכל" is visible when the list opens. The filter step selects a level, then taps "הכל"
-   to clear it; the empty-level step clears the same way.
+   that "הכל" is selected when the list opens (the test reads its `aria-selected`). The filter
+   step selects a level, then taps "הכל" to clear it; the empty-level step clears the same way.
 
 ### Eval
 
