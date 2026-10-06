@@ -24,7 +24,7 @@ const translateRoute = createRoute({
     'can show them all without a second request. An input that is not a word or ' +
     'expression yields 200 with an empty `senses` array — that is an answer, not a failure. ' +
     'The client states the direction with `from` and `to`; supported pairs are Hebrew with ' +
-    'English and Hebrew with Russian, either way. ' +
+    'English, Hebrew with Russian and Hebrew with Italian, either way. ' +
     "Optionally names the learner's `enrollment_id`; the response then marks, on a lookup " +
     "from the enrollment's target language, which senses that enrollment has `saved`. The " +
     'enrollment is used only for that. ' +

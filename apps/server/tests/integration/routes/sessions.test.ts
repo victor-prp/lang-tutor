@@ -139,6 +139,45 @@ describe('POST /api/sessions', () => {
     await walk('e_u_1_ru', /^\p{Script=Cyrillic}[\p{Script=Cyrillic} ]*$/u);
     await walk(enrollmentOf('u_1'), /^[A-Za-z][A-Za-z ?!']*$/);
   });
+
+  // Phase 22. English and Italian share a script, so the regexes above cannot
+  // tell their pools apart. The ten Italian seed queries are named here, as the
+  // seed's own test names its counts: every Italian prompt is one of them, and
+  // no English prompt is.
+  it('draws Italian, never English, for a learner holding both', async () => {
+    const ITALIAN = new Set([
+      'finestra',
+      'libro',
+      'acqua',
+      'amico',
+      'difficile',
+      'ricordare',
+      'per favore',
+      'buongiorno',
+      'grazie mille',
+      'arrivederci',
+    ]);
+    await seedEnrollment(t.db, { id: 'e_u_1_it', userId: 'u_1', targetLanguage: 'it' });
+    const app = buildTestApp();
+    const walk = async (enrollmentId: string, isItalian: boolean) => {
+      let current = await startSeed(app, enrollmentId);
+      expect(await enrollmentOfSession(t.db, current.session_id)).toBe(enrollmentId);
+      for (let i = 0; i < 10; i++) {
+        expect(ITALIAN.has(current.question.question)).toBe(isItalian);
+        current = await (
+          await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
+            user_id: 'u_1',
+            question_id: current.question.id,
+            option_index: current.question.correct_option,
+          })
+        ).json();
+      }
+      expect(current.complete).toBe(true);
+    };
+
+    await walk('e_u_1_it', true);
+    await walk(enrollmentOf('u_1'), false);
+  });
 });
 
 describe('POST /api/sessions/:id/next-step', () => {

@@ -50,6 +50,14 @@ describe('POST /api/users/{id}/enrollments', () => {
     expect(await again.json()).toEqual({ error: 'already enrolled' });
   });
 
+  it('enrolls in Italian beside English, and only once', async () => {
+    const app = buildTestApp();
+    const res = await post(app, 'u_1', { source_language: 'he', target_language: 'it' });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ source_language: 'he', target_language: 'it' });
+    expect((await post(app, 'u_1', { source_language: 'he', target_language: 'it' })).status).toBe(409);
+  });
+
   it('answers 400 with the standard body for an English source', async () => {
     const res = await post(buildTestApp(), 'u_1', { source_language: 'en', target_language: 'ru' });
     expect(res.status).toBe(400);

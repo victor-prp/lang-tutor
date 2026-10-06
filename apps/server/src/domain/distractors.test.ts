@@ -23,6 +23,14 @@ describe('distractorItems', () => {
   });
 });
 
+describe('buildDistractorPrompt for Italian', () => {
+  it('names Italian and Hebrew', () => {
+    const prompt = buildDistractorPrompt({ items: ITEMS, from: 'it', to: 'he' });
+    expect(prompt.system).toContain('Italian');
+    expect(prompt.system).toContain('Hebrew');
+  });
+});
+
 describe('buildDistractorPrompt', () => {
   const prompt = buildDistractorPrompt({ items: ITEMS, from: 'ru', to: 'he' });
 

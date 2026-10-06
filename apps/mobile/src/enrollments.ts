@@ -7,9 +7,9 @@ import type { Enrollment, LanguageCode } from '@lang-tutor/core/api';
 
 /** What a learner can enroll in today: every enrollment is Hebrew-explained,
  *  so Hebrew itself is not on offer. */
-export const ENROLLABLE_TARGETS: readonly LanguageCode[] = ['en', 'ru'];
+export const ENROLLABLE_TARGETS: readonly LanguageCode[] = ['en', 'ru', 'it'];
 
-const KNOWN: readonly LanguageCode[] = ['he', 'en', 'ru'];
+const KNOWN: readonly LanguageCode[] = ['he', 'en', 'ru', 'it'];
 
 /** The wire sends language codes as plain strings; requests need the enum. */
 export function asLanguageCode(code: string): LanguageCode {

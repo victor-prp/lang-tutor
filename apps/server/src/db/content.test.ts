@@ -3,7 +3,14 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import { normalizeForm } from '../domain/dictionary';
 import { isInScript } from '../domain/languages';
-import { content, correctAnswerFor, optionsFor, parseRecordArgs, recordingKey } from './content';
+import {
+  content,
+  correctAnswerFor,
+  optionsFor,
+  parseRecordArgs,
+  recordingBase,
+  recordingKey,
+} from './content';
 import { recorded } from './content.generated';
 
 const LONG_PROMPT_LENGTH = 15;
@@ -99,7 +106,7 @@ describe('the pair-aware seed', () => {
       const pair = `${entry.from}-${entry.to}`;
       counts.set(pair, (counts.get(pair) ?? 0) + 1);
     }
-    expect([...counts.keys()].sort()).toEqual(['en-he', 'ru-he']);
+    expect([...counts.keys()].sort()).toEqual(['en-he', 'it-he', 'ru-he']);
     for (const count of counts.values()) expect(count).toBeGreaterThanOrEqual(SESSION_LENGTH);
   });
 
@@ -140,5 +147,21 @@ describe('parseRecordArgs', () => {
   it('refuses --pair with no value', () => {
     expect(() => parseRecordArgs(['окно', '--pair'])).toThrow('--pair needs a value');
     expect(() => parseRecordArgs(['--pair', '--other'])).toThrow('--pair needs a value');
+  });
+});
+
+describe('recordingBase', () => {
+  const existing = { 'en-he:window': 1, 'ru-he:окно': 2 };
+
+  it('keeps every other recording when a run is narrowed by a pair alone', () => {
+    expect(recordingBase(existing, { pair: 'it-he' })).toEqual(existing);
+  });
+
+  it('keeps every other recording when a run is narrowed by a query', () => {
+    expect(recordingBase(existing, { filter: 'window' })).toEqual(existing);
+  });
+
+  it('starts empty when a run is narrowed by neither, so a removed query is pruned', () => {
+    expect(recordingBase(existing, {})).toEqual({});
   });
 });

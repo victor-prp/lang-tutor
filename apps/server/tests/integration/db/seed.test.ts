@@ -70,17 +70,18 @@ describe('seedContent', () => {
     expect(await t.db.select().from(dictLexemes)).toHaveLength(lexemes.size);
   });
 
-  it('seeds ten ru → he questions and thirteen en → he', async () => {
+  it('seeds ten ru → he, ten it → he and thirteen en → he questions', async () => {
     const rows = await t.db.select().from(questions);
     const count = (target: string) =>
       rows.filter((row) => row.targetLanguage === target && row.userLanguageCode === 'he').length;
     expect(count('ru')).toBe(10);
+    expect(count('it')).toBe(10);
     expect(count('en')).toBe(13);
   });
 
   it('gives every variant its language and its entry rank', async () => {
     for (const variant of await t.db.select().from(dictVariants)) {
-      expect(['en', 'ru']).toContain(variant.languageCode);
+      expect(['en', 'ru', 'it']).toContain(variant.languageCode);
       expect(variant.entryRank).toBeGreaterThanOrEqual(0);
       expect(['word', 'phrase', 'sentence']).toContain(variant.kind);
     }
@@ -206,7 +207,7 @@ describe('seedContent', () => {
     for (const row of await t.db.select().from(questions)) {
       expect(row.userId).toBeNull();
       expect(row.enrollmentId).toBeNull();
-      expect(['en', 'ru']).toContain(row.targetLanguage);
+      expect(['en', 'ru', 'it']).toContain(row.targetLanguage);
       expect(row.userLanguageCode).toBe('he');
       expect(row.type).toBe('multiple_choice');
     }

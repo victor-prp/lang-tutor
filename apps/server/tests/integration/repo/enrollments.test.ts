@@ -44,6 +44,13 @@ describe('enrollments repository', () => {
     expect(list[0].id).toBe(ru.id);
   });
 
+  it('accepts an Italian enrollment at the database', async () => {
+    const created = await repo((r) =>
+      r.insertEnrollment({ userId: 'u_1', sourceLanguage: 'he', targetLanguage: 'it' }),
+    );
+    expect(created.target_language).toBe('it');
+  });
+
   it('refuses a second enrollment in the same target', async () => {
     await expect(
       repo((r) => r.insertEnrollment({ userId: 'u_1', sourceLanguage: 'he', targetLanguage: 'en' })),
