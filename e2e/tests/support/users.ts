@@ -17,7 +17,7 @@ export function learnerFor(username: string): CreateUserRequest {
 export async function createLearner(
   request: APIRequestContext,
   username: string,
-  targetLanguage: 'en' | 'ru' = 'en',
+  targetLanguage: 'en' | 'ru' | 'it' = 'en',
 ): Promise<User> {
   const res = await request.post(`${API_URL}/api/users`, { data: learnerFor(username) });
   if (!res.ok()) {

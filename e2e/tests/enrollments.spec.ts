@@ -11,6 +11,10 @@ test.beforeEach(async ({ request }) => {
 
 const CYRILLIC = /\p{Script=Cyrillic}/u;
 const LATIN = /\p{Script=Latin}/u;
+// Latin like English, so an Italian prompt is checked against the seeded
+// queries themselves rather than against a script.
+const ITALIAN_SEED =
+  /^(finestra|libro|acqua|amico|difficile|ricordare|per favore|buongiorno|grazie mille|arrivederci)$/;
 
 async function startSession(page: Page) {
   await expect(async () => {
@@ -134,4 +138,39 @@ test('a learner adds English, switches both ways, and the choice survives signin
   await page.getByTestId('switch-user-button').click();
   await logIn(page, 'e2e_switcher');
   await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: רוסית');
+});
+
+test('a learner adds Italian from the switcher and gets an Italian session', async ({
+  page,
+  request,
+}) => {
+  await createLearner(request, 'e2e_it_session', 'en');
+  await logIn(page, 'e2e_it_session');
+
+  await page.getByTestId('enrollment-switcher').click();
+  await page.getByTestId('enrollment-add').click();
+  await page.getByTestId('enroll-it').click();
+  await page.getByTestId('enroll-submit').click();
+  await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: איטלקית');
+
+  await startSession(page);
+  await expect(page.getByTestId('question-prompt')).toHaveText(ITALIAN_SEED);
+});
+
+test('an Italian lookup opens it → he and is served from the seed', async ({ page, request }) => {
+  // No Gemini expectation is registered: finestra is seeded, and a flip with
+  // nothing looked up changes the direction without a request.
+  await createLearner(request, 'e2e_it_lookup', 'it');
+  await logIn(page, 'e2e_it_lookup');
+  await openTranslate(page);
+
+  await expect(page.getByTestId('translate-direction')).toHaveText('מאיטלקית לעברית');
+  await page.getByTestId('translate-flip').click();
+  await expect(page.getByTestId('translate-direction')).toHaveText('מעברית לאיטלקית');
+  await page.getByTestId('translate-flip').click();
+  await expect(page.getByTestId('translate-direction')).toHaveText('מאיטלקית לעברית');
+
+  await page.getByTestId('translate-input').fill('finestra');
+  await page.getByTestId('translate-submit').click();
+  await expect(page.getByTestId('translate-sense').first()).toBeVisible();
 });

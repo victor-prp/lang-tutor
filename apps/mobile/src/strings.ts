@@ -11,7 +11,7 @@ import type { Dimension } from '@lang-tutor/core/domain';
 // Android, which is exactly how this shipped broken the first time.
 const isolateLtr = (text: string) => `\u2066${text}\u2069`;
 
-const LANGUAGE_NAMES: Record<string, string> = { he: 'עברית', en: 'אנגלית', ru: 'רוסית' };
+const LANGUAGE_NAMES: Record<string, string> = { he: 'עברית', en: 'אנגלית', ru: 'רוסית', it: 'איטלקית' };
 const languageName = (code: string): string => LANGUAGE_NAMES[code] ?? code;
 
 // Phase 20. The five knowledge dimensions, as the word detail names them.

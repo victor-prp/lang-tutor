@@ -14,6 +14,7 @@ const enrollment = (id: string, target: string, source = 'he'): Enrollment => ({
 // The server lists newest first.
 const ru = enrollment('e-ru', 'ru');
 const en = enrollment('e-en', 'en');
+const italian = enrollment('e-it', 'it');
 
 describe('chooseActive', () => {
   it('takes the remembered enrollment when it is still held', () => {
@@ -35,13 +36,14 @@ describe('chooseActive', () => {
 
 describe('availableTargets', () => {
   it('offers every enrollable target not yet taken', () => {
-    expect(availableTargets([])).toEqual(['en', 'ru']);
-    expect(availableTargets([ru])).toEqual(['en']);
-    expect(availableTargets([ru, en])).toEqual([]);
+    expect(availableTargets([])).toEqual(['en', 'ru', 'it']);
+    expect(availableTargets([ru])).toEqual(['en', 'it']);
+    expect(availableTargets([ru, en])).toEqual(['it']);
+    expect(availableTargets([italian, ru, en])).toEqual([]);
   });
 
   it('ignores a legacy target outside the enrollable set', () => {
-    expect(availableTargets([enrollment('e-he', 'he', 'en')])).toEqual(['en', 'ru']);
+    expect(availableTargets([enrollment('e-he', 'he', 'en')])).toEqual(['en', 'ru', 'it']);
   });
 });
 
@@ -50,11 +52,16 @@ describe('lookupDirection', () => {
     expect(lookupDirection(ru)).toEqual({ from: 'ru', to: 'he' });
     expect(flipped(lookupDirection(ru))).toEqual({ from: 'he', to: 'ru' });
   });
+
+  it('opens an Italian enrollment on it → he', () => {
+    expect(lookupDirection(italian)).toEqual({ from: 'it', to: 'he' });
+  });
 });
 
 describe('asLanguageCode', () => {
   it('narrows a known code and refuses an unknown one', () => {
     expect(asLanguageCode('ru')).toBe('ru');
+    expect(asLanguageCode('it')).toBe('it');
     expect(() => asLanguageCode('fr')).toThrow();
   });
 });
