@@ -1,9 +1,11 @@
 # Phase 22 — Italian as a target
 
-- **Status:** Design decided autonomously on 2026-10-06. Victor scoped the phase in the one-pager,
-  then asked for the design to be made from the app's context without questions, planned and
-  built. Every decision is recorded in §1 with its reason, so each one can be overturned in
-  review.
+- **Status:** Implemented on branch `phase-22-italian-target`. The design was decided autonomously
+  on 2026-10-06: Victor scoped the phase in the one-pager, then asked for the design to be made
+  from the app's context without questions, planned and built. Every decision is recorded in §1
+  with its reason, so each one can be overturned in review. Deviations found while building are
+  folded in below: Italian's own English rule (D2), two eval cases changed or added (§3), and the
+  recorder's pair-only run fixed (§2).
 - **Date:** 2026-10-06
 - **Source:** the one-pager `drafts/2026-10-06-italian-target-one-pager.md`. `drafts/` is
   gitignored, so everything this spec depends on is restated below.
@@ -69,9 +71,13 @@ one-pager's parked question about Latin script. Since phase 16 the client states
 from the active enrollment, so nothing is detected from the script. The guard's job is to catch a
 wrong-script input before a model call. Under `it → he`, Hebrew input gets `wrong_direction` and
 Cyrillic gets `out_of_pair` exactly as for Russian. English typed under `it → he` passes the
-guard, like Ukrainian `дякую` under `ru → he`. It reaches the model, whose third-language rule
-("the input is meant to be Italian") returns empty entries, and the screen shows the existing "no
-results" state. An eval case locks this in (§3).
+guard, like Ukrainian `дякую` under `ru → he`. It reaches the model, which returns empty entries,
+and the screen shows the existing "no results" state. An eval case locks this in (§3).
+
+The shared third-language rule was not enough on its own: `window` came back corrected to
+`finestra` in 3 of 3 calls, because the correction rules read it as "plausibly intended". So
+Italian's `asSource` names English as a third language, with `weekend` as a loanword Italian
+really uses. The line is in Italian's entry, so the en/he and ru/he prompts are unchanged.
 
 **D3. A missing accent is a misspelling, corrected through phase 13.** This answers the parked
 question about *perche*. A learner on a phone keyboard will often type `perche`, `citta`, `piu`.
@@ -139,7 +145,7 @@ language code.
   |---|---|
   | `name` | `Italian` |
   | `letters` | `/\p{Script=Latin}/u` |
-  | `asSource` | the citation rule (D4); the missing-accent rule with its exception (D3) |
+  | `asSource` | the citation rule (D4); the missing-accent rule with its exception (D3); English as a third language (D2) |
   | `asTarget` | the passato prossimo rule (D5) |
   | `writing` | write every accent the word has, grave or acute: `però`, `così`, `più` |
 
@@ -154,6 +160,11 @@ language code.
 Ten `it → he` rows (D7), with `question_id`s `q-it-<query>`. `content.generated.ts` gains their
 recordings from a real `npm run content:generate -- --pair it-he` run, read before committing.
 `seed.ts` needs no change: it is pair-aware since phase 16.
+
+The recorder had a latent defect. A `--pair` run with no query started from an empty map, so it
+wrote that pair's recordings and dropped every other pair's. A run narrowed by a query or by a
+pair now merges, through `recordingBase` in `db/content.ts`, which is unit-tested beside
+`parseRecordArgs`.
 
 ### Mobile
 
@@ -208,8 +219,14 @@ Italian cases join `CASES`, counted toward tier 2 like every other. Each locks o
 | `se` | it → he | `אם`, no correction: an unaccented word is not a missing accent |
 | `papa` | it → he | no correction: `papa` is itself a word |
 | `window` | it → he | empty: an English word is not Italian (D2) |
+| `computer` | it → he | `מחשב`, no correction: a loanword Italian uses is Italian (D2's counterweight) |
 | `חלון` | he → it | `finestra` |
-| `הלך` | he → it | `è andato`, never `andò` or `andare` (D5) |
+| `הלכנו` | he → it | `siamo andati`, never `andammo` or `andare` (D5) |
+
+`הלכנו`, not `הלך`: `הלך` is also the Hebrew dictionary headword of the verb, so `andare` is a fair
+answer to it. The `הלכנו` case always loses the tier 2 stem check, because the Hebrew lemma `ללכת`
+is not a substring of an example built around `הלכנו`. That is a limit of the heuristic for
+Hebrew inflections.
 
 `DISTRACTOR_CASES` gains "Italian words of four parts of speech". An Italian case that scores
 poorly is a prompt problem to fix, never a reason to lower `TIER2_THRESHOLD`.
