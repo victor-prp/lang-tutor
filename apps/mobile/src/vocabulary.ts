@@ -5,6 +5,8 @@ import type {
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
 
+import { strings } from '@/strings';
+
 /** sense_id → saved, for the senses the server said can be saved here. A sense
  *  absent from the map gets no toggle: a reverse lookup, a sentence, a failed
  *  write. The server decides; the screen only reads this. */
@@ -71,13 +73,21 @@ export async function toggleOptimistically(toggle: OptimisticToggle): Promise<bo
 }
 
 /** A word can move to the top between pages and be served on a refresh while an
- *  older copy is loaded. Under the newest sort the server never serves one twice
- *  in a walk, but a refresh racing a scroll can. Under a level sort a word whose
- *  level changes mid-walk may be served again, or passed over; dropping repeats
- *  by lexeme id makes the first harmless. The first copy stays. */
+ *  older copy is loaded. The server never serves one twice in a walk, but a
+ *  refresh racing a scroll can. Dropping repeats by lemma makes that harmless.
+ *  The first copy stays. */
 export function appendPage(loaded: VocabularyWord[], page: VocabularyWord[]): VocabularyWord[] {
-  const seen = new Set(loaded.map((word) => word.lexeme_id));
-  return [...loaded, ...page.filter((word) => !seen.has(word.lexeme_id))];
+  const seen = new Set(loaded.map((word) => word.lemma));
+  return [...loaded, ...page.filter((word) => !seen.has(word.lemma))];
+}
+
+/** A row's parts of speech, named in Hebrew and joined: a merged word says it is
+ *  merged. A code with no Hebrew name is left out rather than shown raw. */
+export function partsOfSpeechLabel(codes: string[]): string {
+  return codes
+    .map((code) => strings.partOfSpeech(code))
+    .filter((name): name is string => Boolean(name))
+    .join(' · ');
 }
 
 /** A word read again after a toggle, in the order the screen already shows. The

@@ -130,12 +130,10 @@ export const strings = {
   translateDidYouMean: 'האם התכוונת ל:',
   // Phase 20. Five levels, feminine to agree with מילה (spec §5).
   levelName: (level: number): string => ['חדשה', 'נחשפה', 'מוכרת', 'ידועה', 'בשליטה'][level - 1] ?? '',
+  levelAll: 'הכל',
   levelRaised: (level: number) => `עלתה לרמה ${level}`,
   dimensionName: (dimension: Dimension): string => DIMENSION_NAMES[dimension],
   notPractised: 'טרם תורגל',
-  sortNewest: 'חדשות',
-  sortLevelAsc: 'רמה עולה',
-  sortLevelDesc: 'רמה יורדת',
   vocabularyEmptyLevel: 'אין מילים ברמה הזו',
   resultsPractisedTitle: 'המילים שתרגלת',
   // Known parts of speech only. An unfamiliar value returns undefined and the

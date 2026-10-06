@@ -79,9 +79,6 @@ const pair = (sense: number, variant: number) => ({
   variantId: kite.variantIds[variant],
 });
 
-// What every phase 18 test meant by a page: newest first, no filter.
-const NEWEST = { sort: 'newest' as const, level: null, live: LIVE_DIMENSIONS };
-
 describe('findSaveable', () => {
   const ask = (entries: { senseId: string; variantId: string }[], target = 'en', source = 'he') =>
     repo((r) => r.findSaveable({ entries, targetLanguage: target, sourceLanguage: source }));
@@ -204,35 +201,113 @@ async function lexemes(n: number) {
   return out;
 }
 
+const page = (input: { after?: VocabularyCursor; limit?: number; level?: number | null } = {}) =>
+  repo((r) =>
+    r.findWordsPage({
+      enrollmentId: E,
+      limit: input.limit ?? 50,
+      after: input.after ?? null,
+      level: input.level ?? null,
+      live: LIVE_DIMENSIONS,
+    }),
+  );
+const summaries = (lemmas: string[]) =>
+  repo((r) => r.findWordSummaries({ enrollmentId: E, lemmas, targetLanguage: 'en', sourceLanguage: 'he' }));
+
+/** `kite` the verb: a second lexeme of the lemma, its form at entry rank 1. */
+async function kiteVerb() {
+  return insertLexeme(t.db, {
+    lemma: 'kite',
+    languageCode: 'en',
+    partOfSpeech: 'verb',
+    userLanguageCode: 'he',
+    senses: [{ senseCode: 'fly' }],
+    variants: [
+      {
+        form: 'kite',
+        kind: 'word',
+        entryRank: 1,
+        translations: [
+          { senseCode: 'fly', rank: 0, translation: 'להטיס עפיפון', exampleSource: null, exampleTarget: null },
+        ],
+      },
+    ],
+  });
+}
+
 describe('findWordsPage', () => {
-  it('orders lexemes by their newest save, keeps microseconds, and continues strictly after a cursor', async () => {
+  it('orders lemmas by their newest save, keeps microseconds, and continues strictly after a cursor', async () => {
     const [a, b, c] = await lexemes(3);
     await saveAt(a.lexemeId, a.senseId, a.variantId, '2026-10-04 12:00:00.000001+00');
     await saveAt(b.lexemeId, b.senseId, b.variantId, '2026-10-04 12:00:00.000003+00');
     await saveAt(c.lexemeId, c.senseId, c.variantId, '2026-10-04 12:00:00.000002+00');
 
-    const first = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 2, after: null }));
-    expect(first.map((row) => row.lexemeId)).toEqual([b.lexemeId, c.lexemeId]);
+    const first = await page({ limit: 2 });
+    expect(first.map((row) => row.lemma)).toEqual(['word1', 'word2']);
 
     const last = first[first.length - 1];
-    const rest = await repo((r) =>
-      r.findWordsPage({
-        ...NEWEST,
-        enrollmentId: E,
-        limit: 2,
-        after: { sort: 'newest', savedAt: last.lastSavedAt, lexemeId: last.lexemeId },
-      }),
-    );
+    const rest = await page({ limit: 2, after: { savedAt: last.lastSavedAt, lemma: last.lemma } });
     // Same millisecond, different microsecond: a Date-based cursor would lose `a`.
-    expect(rest.map((row) => row.lexemeId)).toEqual([a.lexemeId]);
+    expect(rest.map((row) => row.lemma)).toEqual(['word0']);
+  });
+
+  it('breaks a tie on the save time by lemma, descending, and continues through it', async () => {
+    const words = await lexemes(3);
+    for (const w of words) await saveAt(w.lexemeId, w.senseId, w.variantId, '2026-10-04 12:00:00+00');
+    expect((await page()).map((row) => row.lemma)).toEqual(['word2', 'word1', 'word0']);
+    const [first] = await page({ limit: 1 });
+    expect((await page({ after: { savedAt: first.lastSavedAt, lemma: first.lemma } })).map((r) => r.lemma)).toEqual([
+      'word1',
+      'word0',
+    ]);
   });
 
   it("groups a lexeme's senses into one row at its newest save", async () => {
     await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 13:00:00+00');
-    const page = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 50, after: null }));
-    expect(page).toHaveLength(1);
-    expect(page[0].lastSavedAt).toMatch(/^2026-10-04 13:00:00/);
+    const rows = await page();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lastSavedAt).toMatch(/^2026-10-04 13:00:00/);
+  });
+
+  it('groups two lexemes of one lemma into one row, at the newer save, with one level', async () => {
+    const verb = await kiteVerb();
+    await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
+    await saveAt(verb.lexemeId, verb.senseIds[0], verb.variantIds[0], '2026-10-04 14:00:00+00');
+    await setLevel(t.db, { enrollmentId: E, senseId: kite.senseIds[TOY], level: 5 });
+    await setLevel(t.db, { enrollmentId: E, senseId: verb.senseIds[0], level: 2 });
+    expect(await page()).toEqual([{ lemma: 'kite', lastSavedAt: expect.stringMatching(/^2026-10-04 14:00:00/), level: 4 }]);
+    // The filter sees the merged level, not either lexeme's.
+    expect((await page({ level: 4 })).map((r) => r.lemma)).toEqual(['kite']);
+    expect(await page({ level: 5 })).toEqual([]);
+    expect(await page({ level: 2 })).toEqual([]);
+  });
+
+  // Review Focus 2.
+  it('keeps lemmas that differ only in case apart', async () => {
+    const may = await insertLexeme(t.db, {
+      lemma: 'May',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'month' }],
+      variants: [{ form: 'May', kind: 'word', entryRank: 0, translations: [
+        { senseCode: 'month', rank: 0, translation: 'מאי', exampleSource: null, exampleTarget: null },
+      ] }],
+    });
+    const mayVerb = await insertLexeme(t.db, {
+      lemma: 'may',
+      languageCode: 'en',
+      partOfSpeech: 'verb',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'might' }],
+      variants: [{ form: 'may', kind: 'word', entryRank: 1, translations: [
+        { senseCode: 'might', rank: 0, translation: 'עשוי', exampleSource: null, exampleTarget: null },
+      ] }],
+    });
+    await saveAt(may.lexemeId, may.senseIds[0], may.variantIds[0], '2026-10-04 12:00:00+00');
+    await saveAt(mayVerb.lexemeId, mayVerb.senseIds[0], mayVerb.variantIds[0], '2026-10-04 12:00:01+00');
+    expect((await page()).map((r) => r.lemma)).toEqual(['may', 'May']);
   });
 
   async function leveled(levels: number[]) {
@@ -241,28 +316,12 @@ describe('findWordsPage', () => {
       await saveAt(word.lexemeId, word.senseId, word.variantId, `2026-10-04 12:00:0${i}+00`);
       await setLevel(t.db, { enrollmentId: E, senseId: word.senseId, level: levels[i] });
     }
-    return words.map((word) => word.lexemeId);
+    return words.map((_, i) => `word${i}`);
   }
-  const wordsPage = (input: {
-    sort: 'newest' | 'level_asc' | 'level_desc';
-    level?: number | null;
-    after?: VocabularyCursor;
-    limit?: number;
-  }) =>
-    repo((r) =>
-      r.findWordsPage({
-        enrollmentId: E,
-        limit: input.limit ?? 50,
-        after: input.after ?? null,
-        sort: input.sort,
-        level: input.level ?? null,
-        live: LIVE_DIMENSIONS,
-      }),
-    );
 
   it('gives each row its level', async () => {
     const [w0] = await leveled([3]);
-    expect(await wordsPage({ sort: 'newest' })).toEqual([{ lexemeId: w0, lastSavedAt: expect.any(String), level: 3 }]);
+    expect(await page()).toEqual([{ lemma: w0, lastSavedAt: expect.any(String), level: 3 }]);
   });
 
   it("averages a word's saved senses, rounding a tie up", async () => {
@@ -270,35 +329,23 @@ describe('findWordsPage', () => {
     await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:01+00');
     await setLevel(t.db, { enrollmentId: E, senseId: kite.senseIds[TOY], level: 2 });
     await setLevel(t.db, { enrollmentId: E, senseId: kite.senseIds[BIRD], level: 3 });
-    expect((await wordsPage({ sort: 'newest' }))[0].level).toBe(3);
+    expect((await page())[0].level).toBe(3);
   });
 
   it('reads only the live dimensions', async () => {
     const [w] = await lexemes(1);
     await saveAt(w.lexemeId, w.senseId, w.variantId, '2026-10-04 12:00:00+00');
     await setLevel(t.db, { enrollmentId: E, senseId: w.senseId, level: 5, dimension: 'spelling' });
-    expect(await wordsPage({ sort: 'newest' })).toEqual([expect.objectContaining({ lexemeId: w.lexemeId, level: 1 })]);
+    expect(await page()).toEqual([expect.objectContaining({ lemma: 'word0', level: 1 })]);
   });
 
-  it('sorts by level both ways, the newer save first within a level', async () => {
-    const [low, highOld, highNew, mid] = await leveled([1, 4, 4, 2]);
-    expect((await wordsPage({ sort: 'level_desc' })).map((r) => r.lexemeId)).toEqual([highNew, highOld, mid, low]);
-    expect((await wordsPage({ sort: 'level_asc' })).map((r) => r.lexemeId)).toEqual([low, mid, highNew, highOld]);
-  });
-
-  it('filters to one level under any sort', async () => {
+  it('filters to one level, newest first, and continues a filtered walk after its cursor', async () => {
     const [, highOld, highNew] = await leveled([1, 4, 4, 2]);
-    expect((await wordsPage({ sort: 'newest', level: 4 })).map((r) => r.lexemeId)).toEqual([highNew, highOld]);
-    expect(await wordsPage({ sort: 'level_asc', level: 3 })).toEqual([]);
-  });
-
-  it.each(['level_asc', 'level_desc'] as const)('continues a %s walk strictly after its cursor', async (sort) => {
-    await leveled([2, 1, 2, 3, 1]);
-    const all = await wordsPage({ sort });
-    const first = await wordsPage({ sort, limit: 2 });
-    const last = first[first.length - 1];
-    const rest = await wordsPage({ sort, after: { sort, savedAt: last.lastSavedAt, lexemeId: last.lexemeId, level: last.level } });
-    expect([...first, ...rest].map((r) => r.lexemeId)).toEqual(all.map((r) => r.lexemeId));
+    expect((await page({ level: 4 })).map((r) => r.lemma)).toEqual([highNew, highOld]);
+    expect(await page({ level: 3 })).toEqual([]);
+    const [first] = await page({ level: 4, limit: 1 });
+    const rest = await page({ level: 4, after: { savedAt: first.lastSavedAt, lemma: first.lemma } });
+    expect(rest.map((r) => r.lemma)).toEqual([highOld]);
   });
 });
 
@@ -307,21 +354,33 @@ describe('findWordSummaries', () => {
     // bird is rank 1 in `kite`; toy is rank 0 in `kites`, so toy headlines.
     await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITES], '2026-10-04 13:00:00+00');
-    expect(
-      await repo((r) =>
-        r.findWordSummaries({ enrollmentId: E, lexemeIds: [kite.lexemeId], sourceLanguage: 'he' }),
-      ),
-    ).toEqual([
+    expect(await summaries(['kite'])).toEqual([
       {
-        lexemeId: kite.lexemeId,
         lemma: 'kite',
-        partOfSpeech: 'noun',
+        partsOfSpeech: ['noun'],
         headlineSenseId: kite.senseIds[TOY],
         headlineTranslation: 'עפיפונים',
         headlineForm: 'kites',
         savedCount: 2,
         senseCount: 2,
       },
+    ]);
+  });
+
+  it('counts and names parts of speech across every lexeme of the lemma', async () => {
+    const verb = await kiteVerb();
+    await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
+    await saveAt(verb.lexemeId, verb.senseIds[0], verb.variantIds[0], '2026-10-04 13:00:00+00');
+    expect(await summaries(['kite'])).toEqual([
+      expect.objectContaining({ lemma: 'kite', partsOfSpeech: ['noun', 'verb'], savedCount: 2, senseCount: 3 }),
+    ]);
+  });
+
+  it('names only the parts of speech that have a saved sense, but counts every sense', async () => {
+    await kiteVerb();
+    await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
+    expect(await summaries(['kite'])).toEqual([
+      expect.objectContaining({ partsOfSpeech: ['noun'], savedCount: 1, senseCount: 3 }),
     ]);
   });
 
@@ -336,48 +395,29 @@ describe('findWordSummaries', () => {
        where variant_id = ${kite.variantIds[KITE]} and sense_id = ${kite.senseIds[BIRD]}`);
     await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITES], '2026-10-04 13:00:00+00');
     await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
-    const [summary] = await repo((r) =>
-      r.findWordSummaries({ enrollmentId: E, lexemeIds: [kite.lexemeId], sourceLanguage: 'he' }),
-    );
+    const [summary] = await summaries(['kite']);
     // bird was saved first.
     expect(summary.headlineSenseId).toBe(kite.senseIds[BIRD]);
   });
 
-  // Review Focus 5, at the source.
-  it('returns no summary for a lexeme whose saved senses have no rendering left', async () => {
+  it('returns no summary for a lemma whose saved senses have no rendering left', async () => {
     await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     await t.db.execute(sql`delete from dict_var_translations
       where sense_id = ${kite.senseIds[BIRD]} and variant_id = ${kite.variantIds[KITE]}`);
-    expect(
-      await repo((r) =>
-        r.findWordSummaries({ enrollmentId: E, lexemeIds: [kite.lexemeId], sourceLanguage: 'he' }),
-      ),
-    ).toEqual([]);
+    expect(await summaries(['kite'])).toEqual([]);
   });
 
-  // Review Focus 5, end to end over the repo's reads: the page still names the
-  // lexeme (so the cursor, taken from page rows, advances) while the word, having
-  // nothing to headline, is dropped rather than returned headline-less.
   it('drops such a word from an assembled page while its page row still advances the cursor', async () => {
     await saveAt(kite.lexemeId, kite.senseIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     await t.db.execute(sql`delete from dict_var_translations
       where sense_id = ${kite.senseIds[BIRD]} and variant_id = ${kite.variantIds[KITE]}`);
-    const rows = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 50, after: null }));
-    const summaries = await repo((r) =>
-      r.findWordSummaries({
-        enrollmentId: E,
-        lexemeIds: rows.map((row) => row.lexemeId),
-        sourceLanguage: 'he',
-      }),
-    );
-    expect(rows.map((row) => row.lexemeId)).toEqual([kite.lexemeId]);
-    expect(assemblePage(rows, summaries)).toEqual([]);
+    const rows = await page();
+    expect(rows.map((row) => row.lemma)).toEqual(['kite']);
+    expect(assemblePage(rows, await summaries(rows.map((row) => row.lemma)))).toEqual([]);
   });
 
-  it('answers nothing for no lexemes', async () => {
-    expect(
-      await repo((r) => r.findWordSummaries({ enrollmentId: E, lexemeIds: [], sourceLanguage: 'he' })),
-    ).toEqual([]);
+  it('answers nothing for no lemmas', async () => {
+    expect(await summaries([])).toEqual([]);
   });
 });
 
@@ -474,13 +514,8 @@ describe('a repaired variant', () => {
     });
 
     expect(await repo((r) => r.findSavedInLemma({ enrollmentId: E, lemma: 'kite' }))).toEqual([pair(TOY, KITES)]);
-    const page = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 50, after: null }));
-    expect(page.map((row) => row.lexemeId)).toEqual([kite.lexemeId]);
-    expect(
-      await repo((r) =>
-        r.findWordSummaries({ enrollmentId: E, lexemeIds: [kite.lexemeId], sourceLanguage: 'he' }),
-      ),
-    ).toEqual([
+    expect((await page()).map((row) => row.lemma)).toEqual(['kite']);
+    expect(await summaries(['kite'])).toEqual([
       expect.objectContaining({
         headlineSenseId: kite.senseIds[TOY],
         headlineTranslation: 'עפיפונים מתוקנים',

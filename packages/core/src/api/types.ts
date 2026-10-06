@@ -49,7 +49,6 @@ import type {
   VocabularyPageQuerySchema,
   VocabularyPageSchema,
   VocabularySenseSchema,
-  VocabularySortSchema,
   VocabularyWordDetailSchema,
   VocabularyWordQuerySchema,
   VocabularyWordSchema,
@@ -114,4 +113,3 @@ export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
 export type SenseProgress = z.infer<typeof SenseProgressSchema>;
 export type SessionProgressItem = z.infer<typeof SessionProgressItemSchema>;
 export type SkipSessionResponse = z.infer<typeof SkipSessionResponseSchema>;
-export type VocabularySort = z.infer<typeof VocabularySortSchema>;

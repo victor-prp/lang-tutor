@@ -17,12 +17,25 @@ import {
 } from './vocabulary';
 
 describe('the cursor', () => {
-  const cursorOf = (savedAt: string, lexemeId: string) =>
-    Buffer.from(JSON.stringify([savedAt, lexemeId]), 'utf8').toString('base64url');
-  const cursor = { sort: 'newest' as const, savedAt: '2026-10-04 12:00:00.123456+00', lexemeId: 'lx-1' };
+  const cursorOf = (savedAt: string, lemma: string) =>
+    Buffer.from(JSON.stringify(['lemma', savedAt, lemma]), 'utf8').toString('base64url');
+  const raw = (value: unknown) => Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+  const cursor = { savedAt: '2026-10-04 12:00:00.123456+00', lemma: 'знать' };
 
-  it('round-trips', () => {
+  it('round-trips, as a tagged three-element array', () => {
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
+    expect(JSON.parse(Buffer.from(encodeCursor(cursor), 'base64url').toString('utf8'))).toEqual([
+      'lemma',
+      cursor.savedAt,
+      'знать',
+    ]);
+  });
+
+  it('round-trips a lemma with a space and a slash', () => {
+    for (const lemma of ['всё равно', 'и/или']) {
+      const c = { savedAt: '2026-10-04 12:00:00+00', lemma };
+      expect(decodeCursor(encodeCursor(c))).toEqual(c);
+    }
   });
 
   it('accepts a leap day in a leap year and every offset form the server issues', () => {
@@ -32,85 +45,48 @@ describe('the cursor', () => {
       '2026-10-04 12:00:00+05:45',
       '2026-10-04 00:00:00-03:30',
     ]) {
-      expect(decodeCursor(cursorOf(savedAt, 'lx-1'))).toEqual({ sort: 'newest', savedAt, lexemeId: 'lx-1' });
+      expect(decodeCursor(cursorOf(savedAt, 'kite'))).toEqual({ savedAt, lemma: 'kite' });
     }
-  });
-
-  it('round-trips a whole second and an offset with minutes', () => {
-    const plain = { sort: 'newest' as const, savedAt: '2026-10-04 12:00:00+05:30', lexemeId: 'lx-2' };
-    expect(decodeCursor(encodeCursor(plain))).toEqual(plain);
   });
 
   it.each([
     ['not base64 json', '!!!'],
-    ['an object', Buffer.from('{"a":1}').toString('base64url')],
-    ['a junk timestamp', Buffer.from('["yesterday","lx-1"]').toString('base64url')],
-    ['an empty lexeme id', Buffer.from('["2026-10-04 12:00:00+00",""]').toString('base64url')],
-    ['three elements', Buffer.from('["2026-10-04 12:00:00+00","a","b"]').toString('base64url')],
-    ['a well-shaped but out-of-range timestamp', cursorOf('2026-13-45 25:61:00+00', 'lx-1')],
-    ['a day the month does not have', cursorOf('2026-02-30 12:00:00+00', 'lx-1')],
-    ['a leap day in a common year', cursorOf('2026-02-29 12:00:00+00', 'lx-1')],
-    ['an hour of 24', cursorOf('2026-10-04 24:00:00+00', 'lx-1')],
-    ['a second of 60', cursorOf('2026-10-04 12:00:60+00', 'lx-1')],
-    ['an offset of 99 hours', cursorOf('2026-10-04 12:00:00+99', 'lx-1')],
-    ['an offset with 75 minutes', cursorOf('2026-10-04 12:00:00+05:75', 'lx-1')],
-    ['a lexeme id containing NUL', cursorOf('2026-10-04 12:00:00+00', 'lx\u0000-1')],
-  ])('refuses %s', (_label, raw) => {
-    expect(decodeCursor(raw)).toBeNull();
-  });
-
-  // Review Focus 5: a phase 18 cursor an app already holds.
-  it('reads a two-element cursor as a newest-sort cursor', () => {
-    expect(decodeCursor(cursorOf('2026-10-04 12:00:00+00', 'lx-1'))).toEqual({
-      sort: 'newest',
-      savedAt: '2026-10-04 12:00:00+00',
-      lexemeId: 'lx-1',
-    });
-  });
-
-  it('round-trips a level-sort cursor', () => {
-    for (const sort of ['level_asc', 'level_desc'] as const) {
-      const levelCursor = { sort, savedAt: '2026-10-04 12:00:00.5+00', lexemeId: 'lx-3', level: 4 };
-      expect(decodeCursor(encodeCursor(levelCursor))).toEqual(levelCursor);
-    }
-  });
-
-  const fourOf = (sort: unknown, level: unknown) =>
-    Buffer.from(JSON.stringify(['2026-10-04 12:00:00+00', 'lx-1', sort, level]), 'utf8').toString('base64url');
-
-  it.each([
-    ['an unknown sort', fourOf('oldest', 2)],
-    ['newest in the four-element form', fourOf('newest', 2)],
-    ['level 0', fourOf('level_asc', 0)],
-    ['level 6', fourOf('level_asc', 6)],
-    ['a fractional level', fourOf('level_desc', 2.5)],
-    ['a level as a string', fourOf('level_desc', '2')],
-  ])('refuses a level cursor with %s', (_label, raw) => {
-    expect(decodeCursor(raw)).toBeNull();
+    ['an object', raw({ a: 1 })],
+    ['a junk timestamp', cursorOf('yesterday', 'kite')],
+    ['an empty lemma', cursorOf('2026-10-04 12:00:00+00', '')],
+    ['a lemma that is not a string', raw(['lemma', '2026-10-04 12:00:00+00', 7])],
+    ['a lemma containing NUL', cursorOf('2026-10-04 12:00:00+00', 'ki\u0000te')],
+    ['a wrong tag', raw(['lexeme', '2026-10-04 12:00:00+00', 'kite'])],
+    // Review Focus 3: cursors an app may hold from before this phase.
+    ['a phase 18 newest cursor', raw(['2026-10-04 12:00:00+00', 'lx-1'])],
+    ['a phase 20 level cursor', raw(['2026-10-04 12:00:00+00', 'lx-1', 'level_asc', 2])],
+    ['a well-shaped but out-of-range timestamp', cursorOf('2026-13-45 25:61:00+00', 'kite')],
+    ['a day the month does not have', cursorOf('2026-02-30 12:00:00+00', 'kite')],
+    ['a leap day in a common year', cursorOf('2026-02-29 12:00:00+00', 'kite')],
+    ['an hour of 24', cursorOf('2026-10-04 24:00:00+00', 'kite')],
+    ['a second of 60', cursorOf('2026-10-04 12:00:60+00', 'kite')],
+    ['an offset of 99 hours', cursorOf('2026-10-04 12:00:00+99', 'kite')],
+    ['an offset with 75 minutes', cursorOf('2026-10-04 12:00:00+05:75', 'kite')],
+  ])('refuses %s', (_label, value) => {
+    expect(decodeCursor(value)).toBeNull();
   });
 });
 
 describe('cursorAfter', () => {
-  const row = { lexemeId: 'lx-9', lastSavedAt: '2026-10-04 12:00:00+00', level: 2 };
-
-  it('carries the level only for a level sort', () => {
-    expect(cursorAfter('newest', row)).toEqual({ sort: 'newest', savedAt: row.lastSavedAt, lexemeId: 'lx-9' });
-    expect(cursorAfter('level_desc', row)).toEqual({
-      sort: 'level_desc',
-      savedAt: row.lastSavedAt,
-      lexemeId: 'lx-9',
-      level: 2,
+  it('continues after the row', () => {
+    expect(cursorAfter({ lemma: 'kite', lastSavedAt: '2026-10-04 12:00:00+00', level: 2 })).toEqual({
+      savedAt: '2026-10-04 12:00:00+00',
+      lemma: 'kite',
     });
   });
 });
 
-const summary = (lexemeId: string, over: Partial<WordSummary> = {}): WordSummary => ({
-  lexemeId,
-  lemma: `lemma-${lexemeId}`,
-  partOfSpeech: 'noun',
-  headlineSenseId: `s-${lexemeId}`,
-  headlineTranslation: `tr-${lexemeId}`,
-  headlineForm: `form-${lexemeId}`,
+const summary = (lemma: string, over: Partial<WordSummary> = {}): WordSummary => ({
+  lemma,
+  partsOfSpeech: ['noun'],
+  headlineSenseId: `s-${lemma}`,
+  headlineTranslation: `tr-${lemma}`,
+  headlineForm: `form-${lemma}`,
   savedCount: 1,
   senseCount: 2,
   ...over,
@@ -119,15 +95,14 @@ const summary = (lexemeId: string, over: Partial<WordSummary> = {}): WordSummary
 describe('assemblePage', () => {
   it('keeps the page order, not the summaries order', () => {
     const rows = [
-      { lexemeId: 'b', lastSavedAt: 't2', level: 3 },
-      { lexemeId: 'a', lastSavedAt: 't1', level: 1 },
+      { lemma: 'b', lastSavedAt: 't2', level: 3 },
+      { lemma: 'a', lastSavedAt: 't1', level: 1 },
     ];
-    const page = assemblePage(rows, [summary('a'), summary('b')]);
-    expect(page.map((w) => w.lexeme_id)).toEqual(['b', 'a']);
+    const page = assemblePage(rows, [summary('a'), summary('b', { partsOfSpeech: ['noun', 'verb'] })]);
+    expect(page.map((w) => w.lemma)).toEqual(['b', 'a']);
     expect(page[0]).toEqual({
-      lexeme_id: 'b',
-      lemma: 'lemma-b',
-      part_of_speech: 'noun',
+      lemma: 'b',
+      parts_of_speech: ['noun', 'verb'],
       headline: { sense_id: 's-b', translation: 'tr-b', form: 'form-b' },
       saved_count: 1,
       sense_count: 2,
@@ -135,14 +110,12 @@ describe('assemblePage', () => {
     });
   });
 
-  // Review Focus 5: a word whose saved senses lost every rendering has no
-  // headline to show. It is dropped, not served half-empty.
   it('drops a page row with no summary', () => {
     const rows = [
-      { lexemeId: 'a', lastSavedAt: 't2', level: 1 },
-      { lexemeId: 'gone', lastSavedAt: 't1', level: 1 },
+      { lemma: 'a', lastSavedAt: 't2', level: 1 },
+      { lemma: 'gone', lastSavedAt: 't1', level: 1 },
     ];
-    expect(assemblePage(rows, [summary('a')]).map((w) => w.lexeme_id)).toEqual(['a']);
+    expect(assemblePage(rows, [summary('a')]).map((w) => w.lemma)).toEqual(['a']);
   });
 });
 

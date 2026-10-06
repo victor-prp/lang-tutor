@@ -86,7 +86,7 @@ const list = (enrollmentId: string, query = '') =>
 const detail = (enrollmentId: string, lemma: string) =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary/word?lemma=${encodeURIComponent(lemma)}`);
 
-type Page = { items: { lexeme_id: string; saved_count: number; sense_count: number }[]; next_cursor: string | null };
+type Page = { items: { lemma: string; saved_count: number; sense_count: number; parts_of_speech: string[] }[]; next_cursor: string | null };
 
 describe('POST /api/enrollments/{id}/vocabulary', () => {
   it('saves a sense, and the list shows its word', async () => {
@@ -98,9 +98,8 @@ describe('POST /api/enrollments/{id}/vocabulary', () => {
     const page = (await (await list(RU)).json()) as Page;
     expect(page.items).toEqual([
       {
-        lexeme_id: rama.lexemeId,
         lemma: 'рама',
-        part_of_speech: 'noun',
+        parts_of_speech: ['noun'],
         headline: { sense_id: rama.senseIds[0], translation: 'рама-1', form: 'рама' },
         saved_count: 1,
         sense_count: 2,
@@ -203,7 +202,7 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
   // Shaped like a cursor the server issues, but the timestamp is not a time:
   // without the range check the ::timestamptz cast raises and this is a 500.
   it('answers 400, not 500, for a well-shaped cursor with an impossible timestamp', async () => {
-    const forged = Buffer.from(JSON.stringify(['2026-13-45 25:61:00+00', 'lx-1']), 'utf8').toString(
+    const forged = Buffer.from(JSON.stringify(['lemma', '2026-13-45 25:61:00+00', 'рама']), 'utf8').toString(
       'base64url',
     );
     const res = await list(RU, `?cursor=${encodeURIComponent(forged)}`);
@@ -239,7 +238,7 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
       for (let n = 0; ; n += 1) {
         const query = `?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
         const page = (await (await list(RU, query)).json()) as Page;
-        seen.push(...page.items.map((item) => item.lexeme_id));
+        seen.push(...page.items.map((item) => item.lemma));
         if (onPage) await onPage(n);
         if (!page.next_cursor) return seen;
         cursor = page.next_cursor;
@@ -249,8 +248,8 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
     it('returns every word exactly once, newest first', async () => {
       const seen = await walk();
       expect(seen).toHaveLength(120);
-      expect(seen[0]).toBe(words[119].lexemeId);
-      expect(seen[119]).toBe(words[0].lexemeId);
+      expect(seen[0]).toBe('слово119');
+      expect(seen[119]).toBe('слово0');
       expect(new Set(seen).size).toBe(120);
     });
 
@@ -261,22 +260,90 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
           await save(RU, [{ sense_id: moved.senseIds[1], variant_id: moved.variantIds[0] }]);
         }
       });
-      // The moved word is now before the cursor: this walk does not see it again,
-      // and sees every other word exactly once.
       expect(new Set(seen).size).toBe(seen.length);
       expect(seen).toHaveLength(119);
-      expect(seen).not.toContain(moved.lexemeId);
-      // A refresh starts with it.
+      expect(seen).not.toContain('слово10');
       const fresh = (await (await list(RU, '?limit=1')).json()) as Page;
-      expect(fresh.items[0]).toMatchObject({ lexeme_id: moved.lexemeId, saved_count: 2 });
+      expect(fresh.items[0]).toMatchObject({ lemma: 'слово10', saved_count: 2 });
+    });
+
+    // Review Focus 5: the save lands in the word's OTHER lexeme.
+    it("neither duplicates nor loses a word that gains a save in another lexeme of its lemma mid-walk", async () => {
+      const verb = await russianVerb('слово10', 'לדבר');
+      const seen = await walk(async (n) => {
+        if (n === 0) await save(RU, [{ sense_id: verb.senseIds[0], variant_id: verb.variantIds[0] }]);
+      });
+      expect(new Set(seen).size).toBe(seen.length);
+      expect(seen).toHaveLength(119);
+      expect(seen).not.toContain('слово10');
+      const fresh = (await (await list(RU, '?limit=1')).json()) as Page;
+      expect(fresh.items[0]).toMatchObject({ lemma: 'слово10', saved_count: 2, parts_of_speech: ['noun', 'verb'] });
     });
 
     it("drops a word whose last sense is unsaved", async () => {
       await unsave(RU, words[50].senseIds[0]);
       const seen = await walk();
       expect(seen).toHaveLength(119);
-      expect(seen).not.toContain(words[50].lexemeId);
+      expect(seen).not.toContain('слово50');
     });
+  });
+
+  describe('a lemma with two lexemes', () => {
+    it('is one row with both parts of speech, counts across both, and one level', async () => {
+      const noun = await russianWord('знать');
+      const verb = await russianVerb('знать', 'לדעת');
+      await save(RU, [
+        { sense_id: noun.senseIds[0], variant_id: noun.variantIds[0] },
+        { sense_id: verb.senseIds[0], variant_id: verb.variantIds[0] },
+      ]);
+      await setLevel(t.db, { enrollmentId: RU, senseId: noun.senseIds[0], level: 1 });
+      await setLevel(t.db, { enrollmentId: RU, senseId: verb.senseIds[0], level: 4 });
+
+      const body = (await (await list(RU)).json()) as { items: Record<string, unknown>[] };
+      expect(body.items).toEqual([
+        {
+          lemma: 'знать',
+          parts_of_speech: ['noun', 'verb'],
+          headline: expect.objectContaining({ sense_id: expect.any(String) }),
+          saved_count: 2,
+          sense_count: 3,
+          level: 3,
+        },
+      ]);
+    });
+
+    // Review Focus 4.
+    it('keeps the row when the last saved sense of one lexeme is unsaved', async () => {
+      const noun = await russianWord('знать');
+      const verb = await russianVerb('знать', 'לדעת');
+      await save(RU, [
+        { sense_id: noun.senseIds[0], variant_id: noun.variantIds[0] },
+        { sense_id: verb.senseIds[0], variant_id: verb.variantIds[0] },
+      ]);
+      await setLevel(t.db, { enrollmentId: RU, senseId: verb.senseIds[0], level: 5 });
+      await unsave(RU, noun.senseIds[0]);
+
+      const body = (await (await list(RU)).json()) as Page & { items: { level: number }[] };
+      expect(body.items).toEqual([
+        expect.objectContaining({ lemma: 'знать', parts_of_speech: ['verb'], saved_count: 1, sense_count: 3, level: 5 }),
+      ]);
+    });
+  });
+
+  // Review Focus 3.
+  it.each([
+    ['a phase 18 cursor', ['2026-10-04 12:00:00+00', 'lx-1']],
+    ['a phase 20 level cursor', ['2026-10-04 12:00:00+00', 'lx-1', 'level_asc', 2]],
+  ])('answers 400 for %s', async (_label, fields) => {
+    const old = Buffer.from(JSON.stringify(fields), 'utf8').toString('base64url');
+    const res = await list(RU, `?cursor=${encodeURIComponent(old)}`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+
+  it('ignores a sort an older app still sends', async () => {
+    const res = await list(RU, '?sort=level_asc');
+    expect(res.status).toBe(200);
   });
 });
 
@@ -383,14 +450,14 @@ describe('GET /api/enrollments/{id}/vocabulary/word', () => {
 });
 
 describe('levels on the list (phase 20)', () => {
-  type Leveled = { items: { lexeme_id: string; level: number }[]; next_cursor: string | null };
-  const ids = async (query: string) => ((await (await list(RU, query)).json()) as Leveled).items.map((i) => i.lexeme_id);
+  type Leveled = { items: { lemma: string; level: number }[]; next_cursor: string | null };
+  const lemmas = async (query: string) => ((await (await list(RU, query)).json()) as Leveled).items.map((i) => i.lemma);
 
   async function savedWord(lemma: string, level: number) {
     const word = await russianWord(lemma);
     await save(RU, [{ sense_id: word.senseIds[0], variant_id: word.variantIds[0] }]);
     await setLevel(t.db, { enrollmentId: RU, senseId: word.senseIds[0], level });
-    return word.lexemeId;
+    return lemma;
   }
 
   async function walk(query: string): Promise<Leveled['items']> {
@@ -407,10 +474,8 @@ describe('levels on the list (phase 20)', () => {
   }
 
   it('shows a newly saved word at level 1', async () => {
-    const id = await savedWord('арка', 1);
-    expect(((await (await list(RU)).json()) as Leveled).items).toEqual([
-      expect.objectContaining({ lexeme_id: id, level: 1 }),
-    ]);
+    const lemma = await savedWord('арка', 1);
+    expect(((await (await list(RU)).json()) as Leveled).items).toEqual([expect.objectContaining({ lemma, level: 1 })]);
   });
 
   it("averages a word's saved senses, rounding a tie up", async () => {
@@ -421,49 +486,23 @@ describe('levels on the list (phase 20)', () => {
     expect(((await (await list(RU)).json()) as Leveled).items[0].level).toBe(3);
   });
 
-  it('sorts by level both ways, the newer save first within a level', async () => {
-    const low = await savedWord('арка', 1);
-    const highOld = await savedWord('бак', 4);
-    const highNew = await savedWord('вал', 4);
-    const mid = await savedWord('газ', 2);
-    expect(await ids('?sort=level_desc')).toEqual([highNew, highOld, mid, low]);
-    expect(await ids('?sort=level_asc')).toEqual([low, mid, highNew, highOld]);
-  });
-
-  it('filters to one level', async () => {
+  it('filters to one level, newest first', async () => {
     await savedWord('арка', 1);
     const highOld = await savedWord('бак', 4);
     const highNew = await savedWord('вал', 4);
-    expect(await ids('?level=4')).toEqual([highNew, highOld]);
-    expect(await ids('?level=3')).toEqual([]);
+    expect(await lemmas('?level=4')).toEqual([highNew, highOld]);
+    expect(await lemmas('?level=3')).toEqual([]);
   });
 
-  it('walks a level sort page by page without repeating or losing a word', async () => {
-    for (let i = 0; i < 12; i += 1) await savedWord(`слово${i}`, (i % 5) + 1);
-    const seen = await walk('?sort=level_asc&limit=5');
-    expect(seen).toHaveLength(12);
-    expect(new Set(seen.map((item) => item.lexeme_id)).size).toBe(12);
-    expect(seen.map((item) => item.level)).toEqual([...seen.map((item) => item.level)].sort((a, b) => a - b));
-  });
-
-  // Review Focus 4: a filtered, level-sorted walk.
-  it('walks a filtered level sort page by page', async () => {
+  it('walks a filtered list page by page without repeating or losing a word', async () => {
     for (let i = 0; i < 9; i += 1) await savedWord(`слово${i}`, i % 3 === 0 ? 2 : 1);
-    const seen = await walk('?sort=level_desc&level=2&limit=2');
+    const seen = await walk('?level=2&limit=2');
     expect(seen).toHaveLength(3);
     expect(seen.every((item) => item.level === 2)).toBe(true);
-    expect(new Set(seen.map((item) => item.lexeme_id)).size).toBe(3);
+    expect(new Set(seen.map((item) => item.lemma)).size).toBe(3);
   });
 
-  it('answers 400 for a cursor replayed under another sort', async () => {
-    for (let i = 0; i < 3; i += 1) await savedWord(`слово${i}`, 1);
-    const page = (await (await list(RU, '?limit=1')).json()) as Leveled;
-    const res = await list(RU, `?sort=level_asc&cursor=${encodeURIComponent(page.next_cursor!)}`);
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: 'invalid request' });
-  });
-
-  it.each(['?sort=oldest', '?level=0', '?level=6', '?level=two'])('answers 400 for %s', async (query) => {
+  it.each(['?level=0', '?level=6', '?level=two'])('answers 400 for %s', async (query) => {
     const res = await list(RU, query);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid request' });

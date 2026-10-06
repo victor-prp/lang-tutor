@@ -1,6 +1,5 @@
 import type {
   VocabularyEntryInput,
-  VocabularySort,
   VocabularyWord,
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
@@ -24,16 +23,16 @@ import { appendPage } from '@/vocabulary';
 // cross-screen cache; the list reloads on focus.
 export type VocabularyStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-/** How the list is asked for: its order and, optionally, one level. */
-export type VocabularyQuery = { sort: VocabularySort; level: number | null };
-const DEFAULT_QUERY: VocabularyQuery = { sort: 'newest', level: null };
+/** How the list is asked for: optionally, one level. */
+export type VocabularyQuery = { level: number | null };
+const DEFAULT_QUERY: VocabularyQuery = { level: null };
 
 export type VocabularyValue = {
   words: VocabularyWord[];
   status: VocabularyStatus;
   hasMore: boolean;
   query: VocabularyQuery;
-  /** A new order or filter: reloads from the first page. */
+  /** A new filter: reloads from the first page. */
   setQuery: (query: VocabularyQuery) => void;
   /** From the top: on focus, on pull-to-refresh, after an enrollment switch. */
   reload: () => void;
@@ -67,7 +66,6 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
       try {
         const page = await api.listVocabulary(active.id, {
           ...(after ? { cursor: after } : {}),
-          sort: asked.sort,
           ...(asked.level !== null ? { level: asked.level } : {}),
         });
         if (mine !== generation.current) return;

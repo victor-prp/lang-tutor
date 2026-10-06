@@ -47,7 +47,7 @@ beforeAll(async () => {
        select '${HEAVY}', 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval
        from generate_series(1, 20000) s`,
     // Phase 20. Five progress rows per entry, levels spread over 1–5 so a level
-    // sort has real work to do. `& 2147483647` keeps hashtext non-negative
+    // filter has real work to do. `& 2147483647` keeps hashtext non-negative
     // without abs(), which overflows on the one negative int4 with no positive.
     `insert into sense_progress (enrollment_id, sense_id, dimension, level)
        select ve.enrollment_id, ve.sense_id, d, 1 + ((hashtext(ve.sense_id || d) & 2147483647) % 5)
@@ -102,24 +102,17 @@ const seqScans = (plan: Explained) =>
 
 const indexesUsed = (plan: Explained) => nodes(plan.Plan).flatMap((n) => (n['Index Name'] ? [n['Index Name']] : []));
 
-const FIRST_50 = Array.from({ length: 50 }, (_, i) => `pl${i + 1}`);
+const FIRST_50 = Array.from({ length: 50 }, (_, i) => `слово${i + 1}`);
 const PAGE = { enrollmentId: HEAVY, limit: 51, level: null, live: LIVE_DIMENSIONS };
 
 // Every shape of the list page. Each reads progress through the covering index.
 const WORDS_PAGES: [string, () => SQL][] = [
-  ['wordsPage, first page', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'newest', after: null })],
+  ['wordsPage, first page', () => vocabularyQueries.wordsPage({ ...PAGE, after: null })],
   ['wordsPage, after a cursor', () => vocabularyQueries.wordsPage({
     ...PAGE,
-    sort: 'newest',
-    after: { sort: 'newest', savedAt: '2000-01-01 00:00:00+00', lexemeId: 'pl1' },
+    after: { savedAt: '2000-01-01 00:00:00+00', lemma: 'слово1' },
   })],
-  ['wordsPage, level_asc first page', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'level_asc', after: null })],
-  ['wordsPage, level_desc after a cursor', () => vocabularyQueries.wordsPage({
-    ...PAGE,
-    sort: 'level_desc',
-    after: { sort: 'level_desc', level: 3, savedAt: '2000-01-01 00:00:00+00', lexemeId: 'pl1' },
-  })],
-  ['wordsPage, one level', () => vocabularyQueries.wordsPage({ ...PAGE, sort: 'newest', level: 2, after: null })],
+  ['wordsPage, one level', () => vocabularyQueries.wordsPage({ ...PAGE, level: 2, after: null })],
 ];
 
 describe('every vocabulary read at volume', () => {
@@ -136,7 +129,8 @@ describe('every vocabulary read at volume', () => {
     ...WORDS_PAGES,
     ['wordSummaries', () => vocabularyQueries.wordSummaries({
       enrollmentId: HEAVY,
-      lexemeIds: FIRST_50,
+      lemmas: FIRST_50,
+      targetLanguage: 'ru',
       sourceLanguage: 'he',
     })],
     ['lemmaLexemes', () => vocabularyQueries.lemmaLexemes({ languageCode: 'ru', lemma: 'слово7' })],
@@ -180,17 +174,14 @@ describe('every vocabulary read at volume', () => {
 
   it(`serves the heavy enrollment's first list page in under ${BUDGET_MS} ms`, async () => {
     // Warm once, so the budget measures the plan rather than a cold cache.
-    await explain(vocabularyQueries.wordsPage({ ...PAGE, sort: 'newest', after: null }));
-    const plan = await explain(vocabularyQueries.wordsPage({ ...PAGE, sort: 'newest', after: null }));
+    await explain(vocabularyQueries.wordsPage({ ...PAGE, after: null }));
+    const plan = await explain(vocabularyQueries.wordsPage({ ...PAGE, after: null }));
     expect(plan['Execution Time']).toBeLessThan(BUDGET_MS);
   });
 
-  it.each(['level_asc', 'level_desc'] as const)(
-    `serves the heavy enrollment's first %s page in under ${BUDGET_MS} ms`,
-    async (sort) => {
-      await explain(vocabularyQueries.wordsPage({ ...PAGE, sort, after: null }));
-      const plan = await explain(vocabularyQueries.wordsPage({ ...PAGE, sort, after: null }));
-      expect(plan['Execution Time']).toBeLessThan(BUDGET_MS);
-    },
-  );
+  it(`serves the heavy enrollment's first one-level page in under ${BUDGET_MS} ms`, async () => {
+    await explain(vocabularyQueries.wordsPage({ ...PAGE, level: 2, after: null }));
+    const plan = await explain(vocabularyQueries.wordsPage({ ...PAGE, level: 2, after: null }));
+    expect(plan['Execution Time']).toBeLessThan(BUDGET_MS);
+  });
 });

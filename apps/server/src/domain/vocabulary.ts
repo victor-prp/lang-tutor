@@ -2,18 +2,15 @@ import type {
   SenseProgress,
   TranslationSense,
   VocabularyEntryInput,
-  VocabularySort,
   VocabularyWord,
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
-import { DIMENSIONS, LIVE_DIMENSIONS, MAX_LEVEL, MIN_LEVEL, badge, type Dimension } from '@lang-tutor/core/domain';
+import { DIMENSIONS, LIVE_DIMENSIONS, MIN_LEVEL, badge, type Dimension } from '@lang-tutor/core/domain';
 
 import type { ProgressRow } from './progress';
 
 /**
- * Where the next list page starts: the last row's newest save and its lexeme
- * id, and under a level sort its level too. The sort is in the cursor so one
- * replayed under another sort is refused rather than read as a wrong position.
+ * Where the next list page starts: the last row's newest save and its lemma.
  *
  * `savedAt` is Postgres's own text for a timestamptz, never a JS Date. A Date
  * keeps milliseconds and created_at keeps microseconds, so a cursor rounded down
@@ -21,9 +18,12 @@ import type { ProgressRow } from './progress';
  * repository prints it with `::text` and casts it back with `::timestamptz`, and
  * the round trip is exact.
  */
-export type VocabularyCursor =
-  | { sort: 'newest'; savedAt: string; lexemeId: string }
-  | { sort: 'level_asc' | 'level_desc'; savedAt: string; lexemeId: string; level: number };
+export type VocabularyCursor = { savedAt: string; lemma: string };
+
+// Phase 21. The leading tag is what makes a phase 18 or phase 20 cursor — two or
+// four elements, keyed by lexeme id — decode to null and answer 400, rather than
+// be read as a position among lemmas.
+const CURSOR_TAG = 'lemma';
 
 // What `timestamptz::text` prints under DateStyle ISO: `2026-10-04 12:00:00.123456+00`.
 // Anything else is refused here, because the repository casts it with
@@ -49,14 +49,8 @@ function isRealTimestamptz(text: string): boolean {
   return day <= lastOfMonth.getUTCDate();
 }
 
-/** A newest-sort cursor keeps phase 18's two-element form, so a cursor an app
- *  already holds stays valid. A level-sort cursor carries four elements. */
 export function encodeCursor(cursor: VocabularyCursor): string {
-  const fields =
-    cursor.sort === 'newest'
-      ? [cursor.savedAt, cursor.lexemeId]
-      : [cursor.savedAt, cursor.lexemeId, cursor.sort, cursor.level];
-  return Buffer.from(JSON.stringify(fields), 'utf8').toString('base64url');
+  return Buffer.from(JSON.stringify([CURSOR_TAG, cursor.savedAt, cursor.lemma]), 'utf8').toString('base64url');
 }
 
 /** `null` for anything this server did not issue. The caller turns that into a 400. */
@@ -67,38 +61,30 @@ export function decodeCursor(raw: string): VocabularyCursor | null {
   } catch {
     return null;
   }
-  if (!Array.isArray(parsed) || (parsed.length !== 2 && parsed.length !== 4)) return null;
-  const [savedAt, lexemeId, sort, level] = parsed as unknown[];
+  if (!Array.isArray(parsed) || parsed.length !== 3) return null;
+  const [tag, savedAt, lemma] = parsed as unknown[];
+  if (tag !== CURSOR_TAG) return null;
   if (typeof savedAt !== 'string' || !isRealTimestamptz(savedAt)) return null;
   // A NUL cannot be a Postgres text parameter: it would raise there, a 500.
-  if (typeof lexemeId !== 'string' || lexemeId.length === 0 || lexemeId.includes('\u0000')) {
-    return null;
-  }
-  if (parsed.length === 2) return { sort: 'newest', savedAt, lexemeId };
-  if (sort !== 'level_asc' && sort !== 'level_desc') return null;
-  if (typeof level !== 'number' || !Number.isInteger(level) || level < MIN_LEVEL || level > MAX_LEVEL) {
-    return null;
-  }
-  return { sort, savedAt, lexemeId, level };
+  if (typeof lemma !== 'string' || lemma.length === 0 || lemma.includes('\u0000')) return null;
+  return { savedAt, lemma };
 }
 
 /** One row of the grouped keyset read, in page order. `level` is the word's
- *  badge: the rounded mean over its saved senses and the live dimensions. */
-export type WordPageRow = { lexemeId: string; lastSavedAt: string; level: number };
+ *  badge: the rounded mean over every saved sense of the lemma and the live
+ *  dimensions. */
+export type WordPageRow = { lemma: string; lastSavedAt: string; level: number };
 
-/** The cursor that continues after `row` under `sort`. */
-export function cursorAfter(sort: VocabularySort, row: WordPageRow): VocabularyCursor {
-  return sort === 'newest'
-    ? { sort, savedAt: row.lastSavedAt, lexemeId: row.lexemeId }
-    : { sort, savedAt: row.lastSavedAt, lexemeId: row.lexemeId, level: row.level };
+/** The cursor that continues after `row`. */
+export function cursorAfter(row: WordPageRow): VocabularyCursor {
+  return { savedAt: row.lastSavedAt, lemma: row.lemma };
 }
 
-/** What the page's enrichment read returns per lexeme. Declared here rather than
+/** What the page's enrichment read returns per lemma. Declared here rather than
  *  imported from the repository: R3 keeps this layer ignorant of Drizzle. */
 export type WordSummary = {
-  lexemeId: string;
   lemma: string;
-  partOfSpeech: string;
+  partsOfSpeech: string[];
   headlineSenseId: string;
   headlineTranslation: string;
   headlineForm: string;
@@ -107,8 +93,8 @@ export type WordSummary = {
 };
 
 /**
- * Page rows to the wire, in PAGE order. The enrichment read is keyed by lexeme
- * id and comes back in whatever order Postgres chose.
+ * Page rows to the wire, in PAGE order. The enrichment read is keyed by lemma
+ * and comes back in whatever order Postgres chose.
  *
  * A row with no summary is dropped. The enrichment read inner-joins each saved
  * entry to its saved form's rendering, so a word whose saved senses lost every
@@ -117,15 +103,14 @@ export type WordSummary = {
  * taken from the page rows, not from this output — still advances.
  */
 export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): VocabularyWord[] {
-  const byLexeme = new Map(summaries.map((s) => [s.lexemeId, s]));
+  const byLemma = new Map(summaries.map((s) => [s.lemma, s]));
   return rows.flatMap((row) => {
-    const s = byLexeme.get(row.lexemeId);
+    const s = byLemma.get(row.lemma);
     if (!s) return [];
     return [
       {
-        lexeme_id: s.lexemeId,
         lemma: s.lemma,
-        part_of_speech: s.partOfSpeech,
+        parts_of_speech: s.partsOfSpeech,
         headline: {
           sense_id: s.headlineSenseId,
           translation: s.headlineTranslation,

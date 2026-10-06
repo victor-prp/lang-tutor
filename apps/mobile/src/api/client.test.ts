@@ -267,11 +267,11 @@ describe('api/client', () => {
     expect(mockFetch).toHaveBeenNthCalledWith(2, 'http://test.local/api/enrollments/e1/vocabulary', { method: 'GET' });
   });
 
-  it('listVocabulary passes sort and level when given', async () => {
+  it('listVocabulary passes a level when given, and never a sort', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: [], next_cursor: null }) }));
     const client = buildClient(mockFetch);
-    await client.listVocabulary('e1', { sort: 'level_desc', level: 2 });
-    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary?sort=level_desc&level=2', { method: 'GET' });
+    await client.listVocabulary('e1', { level: 2 });
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary?level=2', { method: 'GET' });
   });
 
   // Review Focus 1: a lemma travels as an encoded query parameter.
