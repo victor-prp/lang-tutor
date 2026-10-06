@@ -141,7 +141,10 @@ language code.
   | `letters` | `/\p{Script=Latin}/u` |
   | `asSource` | the citation rule (D4); the missing-accent rule with its exception (D3) |
   | `asTarget` | the passato prossimo rule (D5) |
-  | `writing` | write every accent the word has, grave or acute as its spelling requires: `perché`, `città`, `più` |
+  | `writing` | write every accent the word has, grave or acute: `però`, `così`, `più` |
+
+  The rules' own examples are deliberately different words from the eval cases (§3), so the
+  evals measure the rules rather than recall of the examples.
 
 - **`app.ts`** and **`routes/translations.ts`:** the published descriptions name Italian beside
   Russian.
