@@ -13,6 +13,7 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
 import { createTestServerDeps } from '../../support/serverDeps';
+import { content } from '../../../src/db/content';
 import { createSessionsRouter } from '../../../src/routes/sessions';
 
 let t: TestDb;
@@ -138,6 +139,34 @@ describe('POST /api/sessions', () => {
 
     await walk('e_u_1_ru', /^\p{Script=Cyrillic}[\p{Script=Cyrillic} ]*$/u);
     await walk(enrollmentOf('u_1'), /^[A-Za-z][A-Za-z ?!']*$/);
+  });
+
+  // Phase 22. English and Italian share a script, so the regexes above cannot
+  // tell their pools apart; this compares every prompt against the exact
+  // seeded queries of its pair instead.
+  it('draws Italian, never English, for a learner holding both', async () => {
+    await seedEnrollment(t.db, { id: 'e_u_1_it', userId: 'u_1', targetLanguage: 'it' });
+    const app = buildTestApp();
+    const queriesOf = (from: string) =>
+      new Set(content.filter((entry) => entry.from === from).map((entry) => entry.query));
+    const walk = async (enrollmentId: string, expected: Set<string>) => {
+      let current = await startSeed(app, enrollmentId);
+      expect(await enrollmentOfSession(t.db, current.session_id)).toBe(enrollmentId);
+      for (let i = 0; i < 10; i++) {
+        expect(expected.has(current.question.question)).toBe(true);
+        current = await (
+          await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
+            user_id: 'u_1',
+            question_id: current.question.id,
+            option_index: current.question.correct_option,
+          })
+        ).json();
+      }
+      expect(current.complete).toBe(true);
+    };
+
+    await walk('e_u_1_it', queriesOf('it'));
+    await walk(enrollmentOf('u_1'), queriesOf('en'));
   });
 });
 
