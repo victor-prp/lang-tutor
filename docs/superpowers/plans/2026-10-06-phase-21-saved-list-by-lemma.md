@@ -14,7 +14,7 @@
 
 - **You work in the worktree** `/Users/victorprp/git/lang-tutor/.claude/worktrees/phase-21-saved-list-by-lemma`, on branch `phase-21-saved-list-by-lemma`. Never `cd` to, read from, or write into `/Users/victorprp/git/lang-tutor` itself: that is the main checkout, on `master`, with a live server.
 - **Never hardcode a port or a database name** (ADR 0006). Run one integration test file through the lane wrapper:
-  `bash scripts/lane-env.sh npm run test:integration -w apps/server -- <paths>`
+  `bash scripts/lane-env.sh npm run test:integration -w apps/server -- --runTestsByPath <paths>` (without `--runTestsByPath`, `--selectProjects` reads the paths as project names and runs the whole project)
 - `npm` and `docker` are not on a tool shell's `PATH`. Prefix commands with `export PATH="/opt/homebrew/bin:$PATH";`.
 - **Wire contract** (ADR 0003): every request and response schema lives in `packages/core/src/api/schemas.ts`; `types.ts` only exports `z.infer<...>` types; `index.ts` only re-exports types. Routes are declared with `createRoute` and `router.openapi`.
 - **Layering** (ADR 0001): `domain/` imports only `@lang-tutor/core`; `services/` imports repo types only; `routes/` never imports `repo/` or `db/`.
@@ -181,7 +181,7 @@ describe('0013_vocabulary_entries_lemma', () => {
 
 - [ ] **Step 3: Run the two test files and watch them fail**
 
-Run: `export PATH="/opt/homebrew/bin:$PATH"; bash scripts/lane-env.sh npm run test:integration -w apps/server -- tests/integration/db/vocabulary.schema.test.ts tests/integration/db/migrations.test.ts`
+Run: `export PATH="/opt/homebrew/bin:$PATH"; bash scripts/lane-env.sh npm run test:integration -w apps/server -- --runTestsByPath tests/integration/db/vocabulary.schema.test.ts tests/integration/db/migrations.test.ts`
 Expected: FAIL. The inserts fail with `column "lemma" of relation "vocabulary_entries" does not exist`, the index list still names `vocabulary_entries_enrollment_lexeme_idx`, and `migrationsUpTo('0012_sense_progress')` followed by `runMigrations` leaves no `lemma` column.
 
 - [ ] **Step 4: Change the schema**
@@ -261,7 +261,7 @@ Expected: `db:check` passes, the second `db:generate` reports nothing to generat
 
 - [ ] **Step 6: Run the two test files and watch them pass**
 
-Run: `export PATH="/opt/homebrew/bin:$PATH"; bash scripts/lane-env.sh npm run test:integration -w apps/server -- tests/integration/db/vocabulary.schema.test.ts tests/integration/db/migrations.test.ts`
+Run: `export PATH="/opt/homebrew/bin:$PATH"; bash scripts/lane-env.sh npm run test:integration -w apps/server -- --runTestsByPath tests/integration/db/vocabulary.schema.test.ts tests/integration/db/migrations.test.ts`
 Expected: PASS.
 
 - [ ] **Step 7: Write the failing repository tests for save**
@@ -309,7 +309,7 @@ async function saveAt(lexemeId: string, senseId: string, variantId: string, at: 
 
 - [ ] **Step 8: Run it and watch it fail**
 
-Run: `export PATH="/opt/homebrew/bin:$PATH"; bash scripts/lane-env.sh npm run test:integration -w apps/server -- tests/integration/repo/vocabulary.test.ts`
+Run: `export PATH="/opt/homebrew/bin:$PATH"; bash scripts/lane-env.sh npm run test:integration -w apps/server -- --runTestsByPath tests/integration/repo/vocabulary.test.ts`
 Expected: FAIL. `findSaveable` returns no `lemma`; `insertEntries` violates the NOT NULL on `lemma`; the TypeScript in `entry` is accepted by Jest's Babel transform, so the failures are runtime ones.
 
 - [ ] **Step 9: Make save write the lemma**
@@ -1299,7 +1299,7 @@ Before trusting that assertion, prove it can fire: temporarily change `savedInLe
 
 - [ ] **Step 12: Run the server tests and watch them pass**
 
-Run: `export PATH="/opt/homebrew/bin:$PATH"; npm run typecheck -w apps/server && npm test -w apps/server && bash scripts/lane-env.sh npm run test:integration -w apps/server -- tests/integration/repo/vocabulary.test.ts tests/integration/routes/vocabulary.test.ts tests/integration/repo/vocabulary.plan.test.ts`
+Run: `export PATH="/opt/homebrew/bin:$PATH"; npm run typecheck -w apps/server && npm test -w apps/server && bash scripts/lane-env.sh npm run test:integration -w apps/server -- --runTestsByPath tests/integration/repo/vocabulary.test.ts tests/integration/routes/vocabulary.test.ts tests/integration/repo/vocabulary.plan.test.ts`
 Expected: PASS. If a plan-test case fails, read the plan in its output before changing anything: the fix is a query shape, never a looser assertion.
 
 - [ ] **Step 13: Write the failing app tests**
@@ -2398,7 +2398,7 @@ The budget tests: keep the newest first-page test with `vocabularyQueries.wordsP
 
 - [ ] **Step 9: Run the server tests and watch them pass**
 
-Run: `export PATH="/opt/homebrew/bin:$PATH"; npm run typecheck -w packages/core -w apps/server && npm test -w apps/server && bash scripts/lane-env.sh npm run test:integration -w apps/server -- tests/integration/repo/vocabulary.test.ts tests/integration/routes/vocabulary.test.ts tests/integration/repo/vocabulary.plan.test.ts`
+Run: `export PATH="/opt/homebrew/bin:$PATH"; npm run typecheck -w packages/core -w apps/server && npm test -w apps/server && bash scripts/lane-env.sh npm run test:integration -w apps/server -- --runTestsByPath tests/integration/repo/vocabulary.test.ts tests/integration/routes/vocabulary.test.ts tests/integration/repo/vocabulary.plan.test.ts`
 Expected: PASS. The plan test's first page was measured at 13.4 ms for this query shape while designing; a budget failure means a plan changed, so read the plan in the output.
 
 - [ ] **Step 10: Write the failing app tests**
