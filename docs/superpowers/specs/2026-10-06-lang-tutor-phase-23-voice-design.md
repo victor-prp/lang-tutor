@@ -1,9 +1,12 @@
 # Phase 23 — Voice for words, phrases and sentences
 
-- **Status:** Designed autonomously on 2026-10-06. Victor scoped the phase in the one-pager,
-  then asked for the design to be made without questions, planned, built and opened as a PR,
-  naming user experience and good architecture as what matters most. Every decision is
-  recorded in §1 with its reason, so each one can be overturned in review.
+- **Status:** Implemented on branch `phase-23-voice`. The design was decided autonomously on
+  2026-10-06. Victor scoped the phase in the one-pager, then asked for the design to be made
+  without questions, planned, built and opened as a PR, naming user experience and good
+  architecture as what matters most. Every decision is recorded in §1 with its reason, so each
+  one can be overturned in review. Two deviations were found while building and are folded in:
+  - a Hebrew → target lookup's lines now take their direction from their language (§2);
+  - the audio mode is set on iOS only (D8).
 - **Date:** 2026-10-06
 - **Source:** the one-pager `drafts/2026-10-06-voice-one-pager.md`. `drafts/` is gitignored,
   so everything this spec depends on is restated below.
@@ -202,7 +205,11 @@ accessibility label is **השמעה** ("play"), its state reports `selected` whi
 - `src/app/results.tsx`: speakers on practised and missed rows.
 - `src/app/vocabulary/index.tsx`: the row restructure (D10) and its speaker.
 - `src/app/vocabulary/word.tsx`: speakers on the lemma and each example.
-- `src/strings.ts`: `speak: 'השמעה'`.
+- `src/strings.ts`: `speak: 'השמעה'`, and `textDirection(language)`. A screenshot taken while
+  building showed that a Hebrew → target lookup forced its target-language translation and
+  example right-to-left, so an Italian example's full stop led its line and the word sat away
+  from its speaker. That bug predates this phase. Each lookup line now takes its direction from
+  the language the response says it is in, so those lines align left, beside their speaker.
 
 ### Architecture
 
@@ -221,6 +228,7 @@ None. The voiced strings are already on the wire, and so are their languages.
 
 ### Unit (`apps/mobile/src/speech.test.ts`)
 
+- `createSpeaker` sets the audio mode on iOS only, never on Android or the web.
 - `voiceTags`: the preferred tag when present; another region of the same language when it is
   not; `it_IT` and lowercase tags normalised; a Hebrew voice never makes Hebrew speakable; a
   language with no voice is absent; Android gets primary subtags.
