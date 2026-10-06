@@ -186,3 +186,37 @@ describe('0012_sense_progress', () => {
     expect(rows.rows.every((r) => r.level === 1 && r.last_step_on === null && r.last_wrong_on === null)).toBe(true);
   });
 });
+
+describe('0013_vocabulary_entries_lemma', () => {
+  it("gives every existing entry its lexeme's lemma", async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0012_sense_progress'));
+
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech)
+        values ('l1', 'en', 'kite', 'noun'), ('l2', 'en', 'kite', 'verb');
+      insert into dict_senses (id, lexeme_id, sense_code)
+        values ('s1', 'l1', 'toy'), ('s2', 'l2', 'fly');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0), ('v2', 'l2', 'en', 'kite', 'word', 1);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 0), ('v2', 's2', 'he', 'להטיס', 0);
+      insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+        values ('e_1', 's1', 'l1', 'v1'), ('e_1', 's2', 'l2', 'v2');
+    `);
+
+    await runMigrations(db);
+
+    const rows = await db.execute<{ sense_id: string; lemma: string }>(
+      sql`select sense_id, lemma from vocabulary_entries order by sense_id`,
+    );
+    expect(rows.rows).toEqual([
+      { sense_id: 's1', lemma: 'kite' },
+      { sense_id: 's2', lemma: 'kite' },
+    ]);
+  });
+});

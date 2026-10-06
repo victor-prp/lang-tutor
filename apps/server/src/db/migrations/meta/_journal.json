@@ -92,6 +92,13 @@
       "when": 1791218568294,
       "tag": "0012_sense_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791276803463,
+      "tag": "0013_vocabulary_entries_lemma",
+      "breakpoints": true
     }
   ]
 }

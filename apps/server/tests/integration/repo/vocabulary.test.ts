@@ -86,8 +86,8 @@ describe('findSaveable', () => {
   const ask = (entries: { senseId: string; variantId: string }[], target = 'en', source = 'he') =>
     repo((r) => r.findSaveable({ entries, targetLanguage: target, sourceLanguage: source }));
 
-  it('passes a pair whose form renders the sense in the source language, with its lexeme', async () => {
-    expect(await ask([pair(TOY, KITES)])).toEqual([{ ...pair(TOY, KITES), lexemeId: kite.lexemeId }]);
+  it('passes a pair whose form renders the sense in the source language, with its lexeme and lemma', async () => {
+    expect(await ask([pair(TOY, KITES)])).toEqual([{ ...pair(TOY, KITES), lexemeId: kite.lexemeId, lemma: 'kite' }]);
   });
 
   it('refuses a form that does not render that sense', async () => {
@@ -116,7 +116,15 @@ describe('findSaveable', () => {
 });
 
 describe('insertEntries and deleteEntry', () => {
-  const entry = (sense: number, variant: number) => ({ ...pair(sense, variant), lexemeId: kite.lexemeId });
+  const entry = (sense: number, variant: number) => ({ ...pair(sense, variant), lexemeId: kite.lexemeId, lemma: 'kite' });
+
+  it("writes the lexeme's lemma onto the entry", async () => {
+    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITES)] }));
+    const rows = await t.db.execute<{ lemma: string }>(
+      sql`select lemma from vocabulary_entries where enrollment_id = ${E}`,
+    );
+    expect(rows.rows).toEqual([{ lemma: 'kite' }]);
+  });
 
   it('keeps the first form when the same sense is saved again', async () => {
     await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITES)] }));
@@ -166,8 +174,9 @@ describe('insertEntries and deleteEntry', () => {
 // a test chose, not against how fast two transactions happened to commit.
 async function saveAt(lexemeId: string, senseId: string, variantId: string, at: string) {
   await t.db.execute(sql`
-    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id, created_at)
-    values (${E}, ${senseId}, ${lexemeId}, ${variantId}, ${at}::timestamptz)`);
+    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at)
+    values (${E}, ${senseId}, ${lexemeId}, (select lemma from dict_lexemes where id = ${lexemeId}),
+            ${variantId}, ${at}::timestamptz)`);
   // An entry with no progress rows has no level, and the list leaves it out.
   await insertProgressRows(t.db, E, [senseId]);
 }

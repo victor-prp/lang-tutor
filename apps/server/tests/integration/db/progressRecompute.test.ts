@@ -48,8 +48,9 @@ afterEach(async () => {
 
 async function savedAt(at: string) {
   await t.db.execute(sql`
-    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id, created_at)
-    values (${E}, ${kite.senseIds[0]}, ${kite.lexemeId}, ${kite.variantIds[0]}, ${at}::timestamptz)`);
+    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at)
+    values (${E}, ${kite.senseIds[0]}, ${kite.lexemeId}, (select lemma from dict_lexemes where id = ${kite.lexemeId}),
+            ${kite.variantIds[0]}, ${at}::timestamptz)`);
   await insertProgressRows(t.db, E, [kite.senseIds[0]]);
 }
 

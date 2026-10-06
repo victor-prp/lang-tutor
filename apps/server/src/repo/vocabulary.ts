@@ -13,8 +13,8 @@ import type {
   WordSummary,
 } from '../domain/vocabulary';
 
-/** A pair that passed `findSaveable`, carrying the lexeme id the entry copies. */
-export type SaveableEntry = { senseId: string; variantId: string; lexemeId: string };
+/** A pair that passed `findSaveable`, carrying the lexeme id and lemma the entry copies. */
+export type SaveableEntry = { senseId: string; variantId: string; lexemeId: string; lemma: string };
 
 // `IN (...)` from a list. `IN ()` is a syntax error, so a caller either guards an
 // empty list first (an empty list has an obvious answer that needs no query) or
@@ -69,10 +69,10 @@ export const vocabularyQueries = {
    *  progress is untouched. */
   insertEntries: (input: { enrollmentId: string; entries: SaveableEntry[] }): SQL => sql`
     WITH inserted AS (
-      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id)
       VALUES ${sql.join(
         input.entries.map(
-          (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.variantId})`,
+          (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.lemma}, ${e.variantId})`,
         ),
         sql`, `,
       )}
@@ -101,7 +101,7 @@ export const vocabularyQueries = {
     targetLanguage: string;
     sourceLanguage: string;
   }): SQL => sql`
-    SELECT s.id AS sense_id, v.id AS variant_id, l.id AS lexeme_id
+    SELECT s.id AS sense_id, v.id AS variant_id, l.id AS lexeme_id, l.lemma
     FROM (VALUES ${sql.join(
       input.entries.map((e) => sql`(${e.senseId}::text, ${e.variantId}::text)`),
       sql`, `,
@@ -229,13 +229,14 @@ export function createVocabularyRepo(tx: Tx) {
       sourceLanguage: string;
     }): Promise<SaveableEntry[]> => {
       if (input.entries.length === 0) return [];
-      const rows = await tx.execute<{ sense_id: string; variant_id: string; lexeme_id: string }>(
+      const rows = await tx.execute<{ sense_id: string; variant_id: string; lexeme_id: string; lemma: string }>(
         vocabularyQueries.saveable(input),
       );
       return rows.rows.map((row) => ({
         senseId: row.sense_id,
         variantId: row.variant_id,
         lexemeId: row.lexeme_id,
+        lemma: row.lemma,
       }));
     },
 
