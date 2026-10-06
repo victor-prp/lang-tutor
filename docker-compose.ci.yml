@@ -1,0 +1,21 @@
+# CI only. scripts/db-up.sh layers this over docker-compose.yml when CI is set,
+# which GitHub Actions does on every job; a local `npm run db:up` never reads it.
+#
+# A CI database lives for one job and is thrown away with the runner, so
+# durability buys nothing there, and on the runner's disk it is most of what the
+# integration suite waits on: every per-test clone syncs WAL and data files, and
+# the query-plan test's million-row load does the same. Measured on the parallel
+# integration step with three workers: 41 s with these on, 29 s with them off.
+#
+# Never apply this to the local database. With fsync off, a crash of Docker or the
+# machine can corrupt the shared dictionary that every lane reads.
+services:
+  db:
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off

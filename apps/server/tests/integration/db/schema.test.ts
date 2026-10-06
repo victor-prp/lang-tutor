@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
@@ -6,10 +8,16 @@ import { eq } from 'drizzle-orm';
 import { createDb, type Db } from '../../../src/db/client';
 import { runMigrations } from '../../../src/db/migrate';
 import { sessions, users } from '../../../src/db/schema';
-import { ADMIN_URL, urlFor } from '../../support/dbNames';
+import { ADMIN_URL, testDbName, urlFor } from '../../support/dbNames';
 import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
 
-const DB_NAME = 'lang_tutor_schema_test';
+// Created from scratch rather than cloned, because what is under test is the
+// migrations themselves. Named like a per-test database so the next run's sweep
+// reclaims it, and never dropped here: a DROP DATABASE waits for a server-wide
+// checkpoint, which the other workers' clones keep slow, and it made this file
+// the integration suite's long pole (45 s on CI for 18 tests that need 2 s).
+// The random suffix also keeps two lanes running the suite at once apart.
+const DB_NAME = testDbName('schema', randomUUID().slice(0, 8));
 
 let admin: ReturnType<typeof createDb>;
 let handle: ReturnType<typeof createDb>;
@@ -17,23 +25,16 @@ let db: Db;
 
 beforeAll(async () => {
   admin = createDb(ADMIN_URL, { max: 1, onError: () => {} });
-  await admin.db.execute(sql.raw(`drop database if exists ${DB_NAME} with (force)`));
   await admin.db.execute(sql.raw(`create database ${DB_NAME}`));
   handle = createDb(urlFor(DB_NAME), { onError: () => {} });
   db = handle.db;
   await runMigrations(db);
 }, 60_000);
 
-// The same 60 seconds `beforeAll` takes, and for the same reason: this hook runs
-// `drop database ... with (force)` too, which waits on connection termination and
-// is the slowest thing either hook does. The asymmetry was latent until phase 13
-// made this bucket heavier — one more migration and about thirty more tests — and
-// CI crossed the 30-second default while every one of the 224 tests passed.
 afterAll(async () => {
   await handle.close();
-  await admin.db.execute(sql.raw(`drop database if exists ${DB_NAME} with (force)`));
   await admin.close();
-}, 60_000);
+});
 
 const TABLES = [
   'users',
