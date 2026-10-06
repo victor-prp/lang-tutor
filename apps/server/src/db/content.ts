@@ -127,7 +127,8 @@ export const content: ContentEntry[] = [
   { from: 'ru', to: 'he', query: 'до свидания', question_id: 'q-ru-do-svidaniya', distractors: ['ברוך הבא', 'תודה', 'בהצלחה'], correct_option: 2 },
   // Phase 22. it → he, the Russian set's mix again: nouns, an adjective, a verb
   // and set phrases. Hebrew distractors are hand-written. No שלום beside
-  // buongiorno or arrivederci, where it would be a second right answer.
+  // buongiorno or arrivederci, where it would be a second right answer, and no
+  // להתראות beside buongiorno, which Italian also says on leaving.
   { from: 'it', to: 'he', query: 'finestra', question_id: 'q-it-finestra', distractors: ['דלת', 'קיר', 'תקרה'], correct_option: 1 },
   { from: 'it', to: 'he', query: 'libro', question_id: 'q-it-libro', distractors: ['מחברת', 'עיתון', 'מכתב'], correct_option: 3 },
   { from: 'it', to: 'he', query: 'acqua', question_id: 'q-it-acqua', distractors: ['חלב', 'מיץ', 'יין'], correct_option: 0 },
@@ -135,7 +136,7 @@ export const content: ContentEntry[] = [
   { from: 'it', to: 'he', query: 'difficile', question_id: 'q-it-difficile', distractors: ['קל', 'מהיר', 'חשוב'], correct_option: 1 },
   { from: 'it', to: 'he', query: 'ricordare', question_id: 'q-it-ricordare', distractors: ['לשכוח', 'לחשוב', 'לדעת'], correct_option: 0 },
   { from: 'it', to: 'he', query: 'per favore', question_id: 'q-it-per-favore', distractors: ['תודה', 'סליחה', 'להתראות'], correct_option: 2 },
-  { from: 'it', to: 'he', query: 'buongiorno', question_id: 'q-it-buongiorno', distractors: ['ערב טוב', 'לילה טוב', 'להתראות'], correct_option: 0 },
+  { from: 'it', to: 'he', query: 'buongiorno', question_id: 'q-it-buongiorno', distractors: ['ערב טוב', 'לילה טוב', 'שבוע טוב'], correct_option: 0 },
   { from: 'it', to: 'he', query: 'grazie mille', question_id: 'q-it-grazie-mille', distractors: ['בבקשה', 'סליחה רבה', 'להתראות'], correct_option: 3 },
   { from: 'it', to: 'he', query: 'arrivederci', question_id: 'q-it-arrivederci', distractors: ['ברוך הבא', 'תודה', 'בהצלחה'], correct_option: 1 },
 ];

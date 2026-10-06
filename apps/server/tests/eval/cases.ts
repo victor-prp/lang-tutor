@@ -552,6 +552,26 @@ export const CASES: EvalCase[] = [
     acceptTop: ['מחשב'],
     expectNoCorrection: true,
   },
+  // And the false friends: Italian words spelled like English ones, which a
+  // beginner types first. A misfiring English rule would answer them empty.
+  {
+    label: 'it: an Italian word spelled like an English one is Italian (come)',
+    text: 'come',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['איך', 'כמו', 'כיצד'],
+    expectNoCorrection: true,
+  },
+  {
+    label: 'it: an Italian word spelled like an English one is Italian (camera)',
+    text: 'camera',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['חדר', 'חדר שינה'],
+    expectNoCorrection: true,
+  },
   {
     label: 'he → it: a Hebrew word rendered in Italian',
     text: 'חלון',
