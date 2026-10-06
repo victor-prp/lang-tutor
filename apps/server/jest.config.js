@@ -35,6 +35,8 @@ module.exports = {
       displayName: 'integration',
       testEnvironment: 'node',
       testMatch: ['<rootDir>/tests/integration/**/*.test.ts'],
+      // serial/ is the integration-serial project below, run after this one.
+      testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/integration/serial/'],
       globalSetup: '<rootDir>/tests/support/globalSetup.ts',
       globalTeardown: '<rootDir>/tests/support/globalTeardown.ts',
       restoreMocks: true,
@@ -44,6 +46,21 @@ module.exports = {
       // inherit this from the top level, so it is set on both — unlike
       // `testTimeout` above, which is only valid at the top level. Which
       // options inherit is per-option; check the validation warnings.
+      transformIgnorePatterns: ['/node_modules/(?!@scalar)/'],
+    },
+    {
+      // Integration tests that DROP DATABASE, run by `test:integration` only
+      // after the project above has finished. A drop waits for a server-wide
+      // checkpoint, and while that project's workers clone a database per test
+      // the checkpoint has gigabytes to write: the dropping files sat idle for
+      // 17 to 45 s each and set the suite's wall time. Alone, they take 2 s.
+      // No globalSetup: these files make their own databases and use no
+      // template, and a second sweep would only re-drop the first run's clones.
+      displayName: 'integration-serial',
+      testEnvironment: 'node',
+      testMatch: ['<rootDir>/tests/integration/serial/**/*.test.ts'],
+      restoreMocks: true,
+      resetMocks: true,
       transformIgnorePatterns: ['/node_modules/(?!@scalar)/'],
     },
   ],

@@ -1,4 +1,6 @@
-import { afterAll, describe, expect, it } from '@jest/globals';
+import { randomUUID } from 'node:crypto';
+
+import { describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
 import { createDb } from '../../../src/db/client';
@@ -9,13 +11,15 @@ import {
   parseLaneComment,
 } from '../../../src/db/ensureDatabase';
 import { loadConfig } from '../../../src/config';
-import { ADMIN_URL, urlFor } from '../../support/dbNames';
-import { DROP_TIMEOUT_MS, dropDatabases } from '../../support/dropDatabases';
+import { ADMIN_URL, testDbName, urlFor } from '../../support/dbNames';
 
-// A name of its own, outside the t_ sweep patterns, because this test creates a
-// database the way a lane does rather than the way the harness does — and drops
-// it itself in afterEach.
-const NAME = 'lang_tutor_ensure_probe';
+// Fresh names for every run, named like per-test databases so the next run's
+// sweep reclaims them, and never dropped here: a DROP DATABASE waits for a
+// server-wide checkpoint, which the other workers' clones keep slow. A name no
+// run has used before is also how "does not exist yet" is arranged without a
+// drop, and it keeps two lanes running the suite at once apart.
+const fresh = (label: string) => testDbName(label, randomUUID().slice(0, 8));
+const NAME = fresh('ensure_probe');
 
 const STAMP = {
   lane: 'ensure_probe',
@@ -34,26 +38,19 @@ async function admin<T>(fn: (db: ReturnType<typeof createDb>['db']) => Promise<T
   }
 }
 
-// Once for the file, not after every test. See tests/support/dropDatabases.ts:
-// a DROP DATABASE waits on a checkpoint that this suite's other workers keep
-// busy, so it is far too expensive to pay five times over.
-afterAll(() => dropDatabases([NAME]), DROP_TIMEOUT_MS);
-
 describe('ensureDatabase', () => {
   it('creates the database when it does not exist', async () => {
-    // The one drop inside a test, and the reason is the assertion below: this is
-    // the only case that needs the database to be absent, and saying so here is
-    // what keeps it from depending on which test ran before it.
-    await dropDatabases([NAME]);
-
-    const created = await ensureDatabase(urlFor(NAME), STAMP);
+    // A name of its own rather than NAME, so this does not depend on which test
+    // ran before it.
+    const absent = fresh('ensure_absent');
+    const created = await ensureDatabase(urlFor(absent), STAMP);
     expect(created).toBe(true);
 
     const found = await admin((db) =>
-      db.execute<{ datname: string }>(sql`select datname from pg_database where datname = ${NAME}`),
+      db.execute<{ datname: string }>(sql`select datname from pg_database where datname = ${absent}`),
     );
     expect(found.rows).toHaveLength(1);
-  }, DROP_TIMEOUT_MS);
+  });
 
   it('is idempotent: a second call creates nothing and does not throw', async () => {
     await ensureDatabase(urlFor(NAME), STAMP);

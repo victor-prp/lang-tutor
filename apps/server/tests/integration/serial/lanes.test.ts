@@ -7,6 +7,13 @@ import { dropLaneDatabases, listLaneDatabases } from '../../../src/db/lanes';
 import { ADMIN_URL, urlFor } from '../../support/dbNames';
 import { DROP_TIMEOUT_MS, dropDatabases } from '../../support/dropDatabases';
 
+// In serial/, which runs after the parallel integration run has finished,
+// because dropping databases is what this file tests. A DROP DATABASE waits for
+// a server-wide checkpoint, and while the parallel run's workers are cloning a
+// database per test that wait took this file from 2 s to between 17 and 29 s.
+// On a quiet server it is fast again. jest.config.js's integration-serial
+// project is the mechanism.
+
 const LANE = 'lanes_probe';
 const MADE = [
   `lang_tutor_${LANE}`,

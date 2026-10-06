@@ -51,8 +51,9 @@ script (which carries them in its pattern), and `apps/server/src/config.ts` (lan
 defaults, which ADR 0002 puts in a composition root and which is outside R1's subject
 anyway).
 
-R2 does not cover `apps/server/tests/`: `tests/integration/db/lanes.test.ts` and
-`ensureDatabase.test.ts` name databases because naming them is their subject.
+R2 does not cover `apps/server/tests/`: `tests/integration/serial/lanes.test.ts` and
+`tests/integration/db/ensureDatabase.test.ts` name databases because naming them is
+their subject.
 
 ## Rules that are not import rules
 
