@@ -5,6 +5,7 @@ import {
   appendPage,
   canSaveAll,
   keepSenseOrder,
+  partsOfSpeechLabel,
   savedStateOf,
   showsMark,
   toggleOptimistically,
@@ -99,11 +100,10 @@ describe('toggleOptimistically', () => {
   });
 });
 
-const word = (lexeme_id: string, over: Partial<VocabularyWord> = {}): VocabularyWord => ({
-  lexeme_id,
-  lemma: lexeme_id,
-  part_of_speech: 'noun',
-  headline: { sense_id: `s-${lexeme_id}`, translation: 't', form: lexeme_id },
+const word = (lemma: string, over: Partial<VocabularyWord> = {}): VocabularyWord => ({
+  lemma,
+  parts_of_speech: ['noun'],
+  headline: { sense_id: `s-${lemma}`, translation: 't', form: lemma },
   saved_count: 1,
   sense_count: 1,
   level: 1,
@@ -112,11 +112,26 @@ const word = (lexeme_id: string, over: Partial<VocabularyWord> = {}): Vocabulary
 
 describe('appendPage', () => {
   it('appends, dropping a word already loaded', () => {
-    expect(appendPage([word('a'), word('b')], [word('b'), word('c')]).map((w) => w.lexeme_id)).toEqual([
-      'a',
-      'b',
-      'c',
-    ]);
+    expect(appendPage([word('a'), word('b')], [word('b'), word('c')]).map((w) => w.lemma)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('partsOfSpeechLabel', () => {
+  it('names one part of speech', () => {
+    expect(partsOfSpeechLabel(['noun'])).toBe('שם עצם');
+  });
+
+  it('joins several, in the order given', () => {
+    expect(partsOfSpeechLabel(['noun', 'verb'])).toBe('שם עצם · פועל');
+  });
+
+  it('names a determiner and a numeral', () => {
+    expect(partsOfSpeechLabel(['determiner', 'numeral'])).toBe('מגדיר · שם מספר');
+  });
+
+  it('drops a code with no name, and is empty for none', () => {
+    expect(partsOfSpeechLabel(['noun', 'particle'])).toBe('שם עצם');
+    expect(partsOfSpeechLabel([])).toBe('');
   });
 });
 
@@ -133,6 +148,7 @@ describe('keepSenseOrder', () => {
     variant_id: 'v1',
     form: 'прочитала',
     translation: `tr-${sense_id}`,
+    part_of_speech: 'verb',
     saved,
     ...(level === undefined
       ? {}
@@ -150,9 +166,7 @@ describe('keepSenseOrder', () => {
         }),
   });
   const detail = (level: number | null, senses: VocabularySense[]): VocabularyWordDetail => ({
-    lexeme_id: 'lx',
     lemma: 'прочитать',
-    part_of_speech: 'verb',
     level,
     senses,
   });

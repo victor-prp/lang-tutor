@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { lookUp, tapUntil } from './support/interactions';
-import { LUK, PROCHITALA } from './support/lexemes';
+import { LUK, PROCHITALA, ZNAT } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
 import { createLearner, logIn } from './support/users';
 
@@ -95,4 +95,50 @@ test('a Russian learner saves senses, browses the list, and changes it from the 
   await expect(words.nth(0)).toContainText('прочитать');
   await expect(words.nth(0).getByTestId('vocabulary-mark')).toContainText(/1\/2/);
   await expect(words.nth(0)).toContainText('הקריאה');
+});
+
+test('a word saved in two parts of speech is one row, and its detail labels each sense', async ({
+  page,
+  request,
+}) => {
+  await createLearner(request, 'e2e_vocab_merge_ru', 'ru');
+  await logIn(page, 'e2e_vocab_merge_ru');
+  await tapUntil(page, 'translate-entry', 'translate-input');
+
+  // Both lexemes of знать, in one tap.
+  await lookUp(page, request, 'знать', ZNAT);
+  const save = page.getByTestId('translate-save');
+  await expect(save).toHaveCount(2);
+  await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
+  await expect(save).toHaveText(['נשמר ✓', 'נשמר ✓']);
+
+  // One row, both saved senses counted, both parts of speech named.
+  await page.getByTestId('translate-back').click();
+  await tapUntil(page, 'vocabulary-entry', 'vocabulary-word');
+  const words = page.getByTestId('vocabulary-word');
+  await expect(words).toHaveCount(1);
+  await expect(words.first()).toContainText('знать');
+  await expect(words.first()).toContainText('שם עצם · פועל');
+  await expect(words.first().getByTestId('vocabulary-mark')).toContainText(/2\/2/);
+
+  // The detail: two cards, saved first and then by part of speech, so the noun
+  // comes first. Each names its part of speech.
+  await words.first().click();
+  const senses = page.getByTestId('vocabulary-sense');
+  await expect(senses).toHaveCount(2);
+  await expect(senses.nth(0).getByTestId('vocabulary-sense-pos')).toHaveText('שם עצם');
+  await expect(senses.nth(0)).toContainText('אצולה');
+  await expect(senses.nth(1).getByTestId('vocabulary-sense-pos')).toHaveText('פועל');
+  await expect(senses.nth(1)).toContainText('לדעת');
+
+  // Unsave the noun. The row stays, now one of two, naming only the verb.
+  const toggle = senses.nth(0).getByTestId('vocabulary-sense-save');
+  await tapAndWaitForWrite(page, toggle);
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toHaveText('שמור');
+  await page.getByTestId('vocabulary-word-back').click();
+  await expect(words).toHaveCount(1);
+  await expect(words.first().getByTestId('vocabulary-mark')).toContainText(/1\/2/);
+  await expect(words.first()).toContainText('פועל');
+  await expect(words.first()).not.toContainText('שם עצם');
 });

@@ -33,12 +33,12 @@ afterEach(async () => {
   await t.close();
 });
 
-type Column = 'enrollment' | 'sense' | 'lexeme' | 'variant';
+type Column = 'enrollment' | 'sense' | 'lexeme' | 'lemma' | 'variant';
 const insert = (over: Partial<Record<Column, string>> = {}) =>
   t.db.execute(sql`
-    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id)
     values (${over.enrollment ?? enrollmentOf('u_1')}, ${over.sense ?? kite.senseIds[0]},
-            ${over.lexeme ?? kite.lexemeId}, ${over.variant ?? kite.variantIds[0]})`);
+            ${over.lexeme ?? kite.lexemeId}, ${over.lemma ?? 'kite'}, ${over.variant ?? kite.variantIds[0]})`);
 
 const violating = (constraint: string) =>
   expect.objectContaining({
@@ -69,10 +69,31 @@ describe('vocabulary_entries', () => {
   it.each<[Column, string]>([
     ['enrollment', 'vocabulary_entries_enrollment_fk'],
     ['sense', 'vocabulary_entries_sense_fk'],
-    ['lexeme', 'vocabulary_entries_lexeme_fk'],
+    ['lexeme', 'vocabulary_entries_lexeme_lemma_fk'],
+    ['lemma', 'vocabulary_entries_lexeme_lemma_fk'],
     ['variant', 'vocabulary_entries_variant_fk'],
   ])('rejects an unknown %s', async (column, constraint) => {
     await expect(insert({ [column]: 'nope' })).rejects.toThrow(violating(constraint));
+  });
+
+  it("rejects a lemma that is not its lexeme's, even one another lexeme has", async () => {
+    await insertLexeme(t.db, {
+      lemma: 'fly',
+      languageCode: 'en',
+      partOfSpeech: 'verb',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'move' }],
+      variants: [],
+    });
+    await expect(insert({ lemma: 'fly' })).rejects.toThrow(violating('vocabulary_entries_lexeme_lemma_fk'));
+  });
+
+  it('requires a lemma', async () => {
+    await expect(
+      t.db.execute(sql`
+        insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+        values (${enrollmentOf('u_1')}, ${kite.senseIds[0]}, ${kite.lexemeId}, ${kite.variantIds[0]})`),
+    ).rejects.toThrow(expect.objectContaining({ cause: expect.objectContaining({ message: expect.stringContaining('lemma') }) }));
   });
 
   it('is wiped with the dictionary by TRUNCATE ... CASCADE, as db:reseed does', async () => {
@@ -87,10 +108,10 @@ describe('vocabulary_entries', () => {
       select indexname, indexdef from pg_indexes where tablename = 'vocabulary_entries'
       order by indexname`);
     expect(rows.rows.map((r) => r.indexname)).toEqual([
-      'vocabulary_entries_enrollment_lexeme_idx',
+      'vocabulary_entries_enrollment_lemma_idx',
       'vocabulary_entries_pkey',
     ]);
-    expect(rows.rows[0].indexdef).toContain('(enrollment_id, lexeme_id, created_at)');
+    expect(rows.rows[0].indexdef).toContain('(enrollment_id, lemma, created_at)');
   });
 
   it('indexes dict_var_translations by sense and language', async () => {

@@ -127,11 +127,11 @@ export class InvalidVocabularyEntry extends Error {
   }
 }
 
-/** Phase 18. No lexeme with this id in the enrollment's target language. */
-export class LexemeNotFound extends Error {
-  constructor(readonly lexemeId: string) {
-    super(`no lexeme ${lexemeId}`);
-    this.name = 'LexemeNotFound';
+/** Phase 21. No lexeme with this lemma in the enrollment's target language. */
+export class WordNotFound extends Error {
+  constructor(readonly lemma: string) {
+    super(`no word ${lemma}`);
+    this.name = 'WordNotFound';
   }
 }
 

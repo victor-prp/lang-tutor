@@ -13,7 +13,7 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 import { keepSenseOrder, toggleOptimistically } from '@/vocabulary';
 
 export default function VocabularyWordScreen() {
-  const { lexemeId } = useLocalSearchParams<{ lexemeId: string }>();
+  const { lemma } = useLocalSearchParams<{ lemma: string }>();
   const { loadWord, save, unsave } = useVocabulary();
   const [word, setWord] = useState<VocabularyWordDetail | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -29,14 +29,14 @@ export default function VocabularyWordScreen() {
     setLoadFailed(false);
     setSaveFailed(false);
     setPending({});
-    loadWord(lexemeId)
+    loadWord(lemma)
       .then((detail) => live && setWord(detail))
       .catch(() => live && setLoadFailed(true));
     return () => {
       live = false;
       generation.current += 1;
     };
-  }, [lexemeId, loadWord]);
+  }, [lemma, loadWord]);
 
   // Optimistic, as on the translate screen. No save-all here: these senses are
   // browsed, not just looked up (spec §5).
@@ -74,7 +74,7 @@ export default function VocabularyWordScreen() {
         // the order on screen: the server lists saved ones first. A failed read keeps
         // the word on screen: the toggle itself succeeded.
         try {
-          const detail = await loadWord(lexemeId);
+          const detail = await loadWord(lemma);
           ifCurrent(() => setWord((shown) => (shown ? keepSenseOrder(shown, detail) : detail)));
         } catch {
           // keep the current word
@@ -98,11 +98,13 @@ export default function VocabularyWordScreen() {
         <ScrollView contentContainerStyle={styles.list}>
           <Text style={styles.lemma}>{word.lemma}</Text>
           {word.level !== null ? <LevelBadge level={word.level} testID="vocabulary-detail-level" /> : null}
-          {strings.partOfSpeech(word.part_of_speech) ? (
-            <Text style={styles.meta}>{strings.partOfSpeech(word.part_of_speech)}</Text>
-          ) : null}
           {word.senses.map((sense) => (
             <View key={sense.sense_id} testID="vocabulary-sense" style={styles.card}>
+              {strings.partOfSpeech(sense.part_of_speech) ? (
+                <Text testID="vocabulary-sense-pos" style={styles.meta}>
+                  {strings.partOfSpeech(sense.part_of_speech)}
+                </Text>
+              ) : null}
               <Text style={styles.translation}>{sense.translation}</Text>
               {sense.form.toLowerCase() !== word.lemma.toLowerCase() ? (
                 <Text style={styles.meta}>{strings.vocabularyFromForm(sense.form)}</Text>

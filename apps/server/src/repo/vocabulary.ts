@@ -1,20 +1,19 @@
-import type { VocabularySort } from '@lang-tutor/core/api';
 import { DIMENSIONS, type Dimension } from '@lang-tutor/core/domain';
 import { asc, eq, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import { dictLexemes, vocabularyEntries } from '../db/schema';
+import { vocabularyEntries } from '../db/schema';
 import type {
   LexemeRendering,
-  LexemeRow,
   SavedEntry,
   VocabularyCursor,
+  WordLexeme,
   WordPageRow,
   WordSummary,
 } from '../domain/vocabulary';
 
-/** A pair that passed `findSaveable`, carrying the lexeme id the entry copies. */
-export type SaveableEntry = { senseId: string; variantId: string; lexemeId: string };
+/** A pair that passed `findSaveable`, carrying the lexeme id and lemma the entry copies. */
+export type SaveableEntry = { senseId: string; variantId: string; lexemeId: string; lemma: string };
 
 // `IN (...)` from a list. `IN ()` is a syntax error, so a caller either guards an
 // empty list first (an empty list has an obvious answer that needs no query) or
@@ -26,29 +25,10 @@ const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}
 const LEVEL = sql`floor(avg(p.level) + 0.5)::int`;
 const SAVED_AT = sql`max(ve.created_at)`;
 
-function orderBy(sort: VocabularySort): SQL {
-  switch (sort) {
-    case 'newest':
-      return sql`${SAVED_AT} DESC, ve.lexeme_id DESC`;
-    case 'level_asc':
-      return sql`${LEVEL} ASC, ${SAVED_AT} DESC, ve.lexeme_id DESC`;
-    case 'level_desc':
-      return sql`${LEVEL} DESC, ${SAVED_AT} DESC, ve.lexeme_id DESC`;
-  }
-}
-
-/** Strictly after the cursor in the order orderBy gives. level_asc mixes
- *  directions, so it cannot be one row comparison. */
+/** Strictly after the cursor in the list's one order: newest save first, lemma
+ *  descending on a tie. */
 function afterCursor(after: VocabularyCursor): SQL {
-  const position = sql`(${after.savedAt}::timestamptz, ${after.lexemeId}::text)`;
-  switch (after.sort) {
-    case 'newest':
-      return sql`(${SAVED_AT}, ve.lexeme_id) < ${position}`;
-    case 'level_desc':
-      return sql`(${LEVEL}, ${SAVED_AT}, ve.lexeme_id) < (${after.level}::int, ${after.savedAt}::timestamptz, ${after.lexemeId}::text)`;
-    case 'level_asc':
-      return sql`(${LEVEL} > ${after.level}::int OR (${LEVEL} = ${after.level}::int AND (${SAVED_AT}, ve.lexeme_id) < ${position}))`;
-  }
+  return sql`(${SAVED_AT}, ve.lemma) < (${after.savedAt}::timestamptz, ${after.lemma}::text)`;
 }
 
 /**
@@ -57,7 +37,7 @@ function afterCursor(after: VocabularyCursor): SQL {
  * statements at volume: a plan test of hand-copied SQL would prove something
  * about a query nobody runs.
  *
- * Every one is scoped to ONE enrollment or ONE lexeme and served by an index
+ * Every one is scoped to ONE enrollment or ONE lemma and served by an index
  * leading with it — that is what keeps the table's total size irrelevant (spec
  * §3, "Cost of every query").
  */
@@ -69,10 +49,10 @@ export const vocabularyQueries = {
    *  progress is untouched. */
   insertEntries: (input: { enrollmentId: string; entries: SaveableEntry[] }): SQL => sql`
     WITH inserted AS (
-      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
+      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id)
       VALUES ${sql.join(
         input.entries.map(
-          (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.variantId})`,
+          (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.lemma}, ${e.variantId})`,
         ),
         sql`, `,
       )}
@@ -101,7 +81,7 @@ export const vocabularyQueries = {
     targetLanguage: string;
     sourceLanguage: string;
   }): SQL => sql`
-    SELECT s.id AS sense_id, v.id AS variant_id, l.id AS lexeme_id
+    SELECT s.id AS sense_id, v.id AS variant_id, l.id AS lexeme_id, l.lemma
     FROM (VALUES ${sql.join(
       input.entries.map((e) => sql`(${e.senseId}::text, ${e.variantId}::text)`),
       sql`, `,
@@ -122,23 +102,20 @@ export const vocabularyQueries = {
       AND sense_id IN (${inList(input.senseIds)})`,
 
   /**
-   * One page of lexemes with their level, in the asked order, optionally one
-   * level only. The join reads this enrollment's live-dimension progress rows
-   * through sense_progress_enrollment_dimension_idx, an index-only scan.
+   * One page of lemmas with their level, newest save first, optionally one level
+   * only. The join reads this enrollment's live-dimension progress rows through
+   * sense_progress_enrollment_dimension_idx, an index-only scan, and the grouping
+   * is on the entry's own copy of the lemma, so no dictionary row is read.
    *
    * The timestamp goes out as `::text` and comes back with `::timestamptz` —
    * microseconds intact; see VocabularyCursor. The comparison is strictly
-   * "after the cursor". Under the newest sort a word saved into again only
-   * moves to the top, behind the cursor, so it is never served twice in one
-   * walk. Under a level sort its key moves both ways mid-walk (a save lowers
-   * the mean, a finished session raises it), so a word whose level changes may
-   * be served again or passed over.
+   * "after the cursor". A word saved into again, in any of its lexemes, only
+   * moves to the top, behind the cursor, so it is never served twice in one walk.
    */
   wordsPage: (input: {
     enrollmentId: string;
     limit: number;
     after: VocabularyCursor | null;
-    sort: VocabularySort;
     level: number | null;
     live: readonly Dimension[];
   }): SQL => {
@@ -151,45 +128,58 @@ export const vocabularyQueries = {
     // only writer of entries (insertEntries) creates their rows in the same
     // statement, and the migration backfilled the older ones.
     return sql`
-      SELECT ve.lexeme_id, ${SAVED_AT}::text AS last_saved_at, ${LEVEL} AS level
+      SELECT ve.lemma, ${SAVED_AT}::text AS last_saved_at, ${LEVEL} AS level
       FROM vocabulary_entries ve
       JOIN sense_progress p ON p.enrollment_id = ve.enrollment_id
                            AND p.sense_id = ve.sense_id
                            AND p.dimension IN (${inList([...input.live])})
       WHERE ve.enrollment_id = ${input.enrollmentId}
-      GROUP BY ve.lexeme_id
+      GROUP BY ve.lemma
       ${having.length > 0 ? sql`HAVING ${sql.join(having, sql` AND `)}` : sql``}
-      ORDER BY ${orderBy(input.sort)}
+      ORDER BY ${SAVED_AT} DESC, ve.lemma DESC
       LIMIT ${input.limit}`;
   },
 
   /**
-   * One row per lexeme of a page: the headline, the two counts. The LATERAL is
-   * an INNER join on purpose — a word with no rendered saved sense has nothing
-   * to headline and is dropped (assemblePage's comment).
+   * One row per lemma of a page: the headline, the saved parts of speech, the two
+   * counts. The LATERAL is an INNER join on purpose — a word with no rendered saved
+   * sense has nothing to headline and is dropped (assemblePage's comment).
    *
    * Headline: lowest rank in its own saved form, then the earliest save, then
-   * sense id — deterministic, and all inside SQL so no timestamp crosses into
-   * TypeScript.
+   * sense id, across every lexeme of the lemma — deterministic, and all inside SQL
+   * so no timestamp crosses into TypeScript. `sense_count` counts the senses of
+   * every lexeme with the lemma in the target language, found through
+   * dict_lexemes_language_lemma_pos_key.
    */
   wordSummaries: (input: {
     enrollmentId: string;
-    lexemeIds: string[];
+    lemmas: string[];
+    targetLanguage: string;
     sourceLanguage: string;
   }): SQL => sql`
-    SELECT l.id AS lexeme_id, l.lemma, l.part_of_speech,
+    SELECT w.lemma,
            h.sense_id AS headline_sense_id,
            h.translation AS headline_translation,
            h.form AS headline_form,
+           (SELECT array_agg(DISTINCT l.part_of_speech ORDER BY l.part_of_speech)
+              FROM vocabulary_entries c
+              JOIN dict_lexemes l ON l.id = c.lexeme_id
+             WHERE c.enrollment_id = ${input.enrollmentId}
+               AND c.lemma = w.lemma) AS parts_of_speech,
            (SELECT count(*) FROM vocabulary_entries c
              WHERE c.enrollment_id = ${input.enrollmentId}
-               AND c.lexeme_id = l.id)::int AS saved_count,
-           (SELECT count(*) FROM dict_senses s
-             WHERE s.lexeme_id = l.id
+               AND c.lemma = w.lemma)::int AS saved_count,
+           (SELECT count(*) FROM dict_lexemes l
+              JOIN dict_senses s ON s.lexeme_id = l.id
+             WHERE l.language_code = ${input.targetLanguage}
+               AND l.lemma = w.lemma
                AND EXISTS (SELECT 1 FROM dict_var_translations r
                             WHERE r.sense_id = s.id
                               AND r.user_language_code = ${input.sourceLanguage}))::int AS sense_count
-    FROM dict_lexemes l
+    FROM (VALUES ${sql.join(
+      input.lemmas.map((lemma) => sql`(${lemma}::text)`),
+      sql`, `,
+    )}) AS w(lemma)
     JOIN LATERAL (
       SELECT ve.sense_id, tr.translation, v.form
       FROM vocabulary_entries ve
@@ -198,27 +188,38 @@ export const vocabularyQueries = {
                                    AND tr.user_language_code = ${input.sourceLanguage}
       JOIN dict_variants v          ON v.id = ve.variant_id
       WHERE ve.enrollment_id = ${input.enrollmentId}
-        AND ve.lexeme_id = l.id
+        AND ve.lemma = w.lemma
       ORDER BY tr.rank, ve.created_at, ve.sense_id
       LIMIT 1
-    ) h ON true
-    WHERE l.id IN (${inList(input.lexemeIds)})`,
+    ) h ON true`,
 
-  /** Every rendering of one lexeme's senses in one language, by any form. */
-  lexemeRenderings: (input: { lexemeId: string; userLanguageCode: string }): SQL => sql`
-    SELECT tr.sense_id, tr.variant_id, v.form, tr.rank, tr.translation,
+  /** Every lexeme with this lemma in one language, through
+   *  dict_lexemes_language_lemma_pos_key. Exact match, case included. */
+  lemmaLexemes: (input: { languageCode: string; lemma: string }): SQL => sql`
+    SELECT id AS lexeme_id, part_of_speech FROM dict_lexemes
+    WHERE language_code = ${input.languageCode}
+      AND lemma = ${input.lemma}
+    ORDER BY part_of_speech`,
+
+  /** Every rendering of the senses of every lexeme with this lemma, in one user
+   *  language, by any form, each with its lexeme. */
+  lemmaRenderings: (input: { languageCode: string; lemma: string; userLanguageCode: string }): SQL => sql`
+    SELECT s.lexeme_id, tr.sense_id, tr.variant_id, v.form, tr.rank, tr.translation,
            tr.example_source, tr.example_target
-    FROM dict_senses s
+    FROM dict_lexemes l
+    JOIN dict_senses s            ON s.lexeme_id = l.id
     JOIN dict_var_translations tr ON tr.sense_id = s.id
                                  AND tr.user_language_code = ${input.userLanguageCode}
     JOIN dict_variants v          ON v.id = tr.variant_id
-    WHERE s.lexeme_id = ${input.lexemeId}`,
+    WHERE l.language_code = ${input.languageCode}
+      AND l.lemma = ${input.lemma}`,
 
-  /** One lexeme's saved senses in one enrollment. */
-  savedInLexeme: (input: { enrollmentId: string; lexemeId: string }): SQL => sql`
+  /** One lemma's saved senses in one enrollment, through
+   *  vocabulary_entries_enrollment_lemma_idx. */
+  savedInLemma: (input: { enrollmentId: string; lemma: string }): SQL => sql`
     SELECT sense_id, variant_id FROM vocabulary_entries
     WHERE enrollment_id = ${input.enrollmentId}
-      AND lexeme_id = ${input.lexemeId}`,
+      AND lemma = ${input.lemma}`,
 };
 
 export function createVocabularyRepo(tx: Tx) {
@@ -229,13 +230,14 @@ export function createVocabularyRepo(tx: Tx) {
       sourceLanguage: string;
     }): Promise<SaveableEntry[]> => {
       if (input.entries.length === 0) return [];
-      const rows = await tx.execute<{ sense_id: string; variant_id: string; lexeme_id: string }>(
+      const rows = await tx.execute<{ sense_id: string; variant_id: string; lexeme_id: string; lemma: string }>(
         vocabularyQueries.saveable(input),
       );
       return rows.rows.map((row) => ({
         senseId: row.sense_id,
         variantId: row.variant_id,
         lexemeId: row.lexeme_id,
+        lemma: row.lemma,
       }));
     },
 
@@ -278,30 +280,25 @@ export function createVocabularyRepo(tx: Tx) {
       enrollmentId: string;
       limit: number;
       after: VocabularyCursor | null;
-      sort: VocabularySort;
       level: number | null;
       live: readonly Dimension[];
     }): Promise<WordPageRow[]> => {
-      const rows = await tx.execute<{ lexeme_id: string; last_saved_at: string; level: number }>(
+      const rows = await tx.execute<{ lemma: string; last_saved_at: string; level: number }>(
         vocabularyQueries.wordsPage(input),
       );
-      return rows.rows.map((row) => ({
-        lexemeId: row.lexeme_id,
-        lastSavedAt: row.last_saved_at,
-        level: row.level,
-      }));
+      return rows.rows.map((row) => ({ lemma: row.lemma, lastSavedAt: row.last_saved_at, level: row.level }));
     },
 
     findWordSummaries: async (input: {
       enrollmentId: string;
-      lexemeIds: string[];
+      lemmas: string[];
+      targetLanguage: string;
       sourceLanguage: string;
     }): Promise<WordSummary[]> => {
-      if (input.lexemeIds.length === 0) return [];
+      if (input.lemmas.length === 0) return [];
       const rows = await tx.execute<{
-        lexeme_id: string;
         lemma: string;
-        part_of_speech: string;
+        parts_of_speech: string[];
         headline_sense_id: string;
         headline_translation: string;
         headline_form: string;
@@ -309,9 +306,8 @@ export function createVocabularyRepo(tx: Tx) {
         sense_count: number;
       }>(vocabularyQueries.wordSummaries(input));
       return rows.rows.map((row) => ({
-        lexemeId: row.lexeme_id,
         lemma: row.lemma,
-        partOfSpeech: row.part_of_speech,
+        partsOfSpeech: row.parts_of_speech,
         headlineSenseId: row.headline_sense_id,
         headlineTranslation: row.headline_translation,
         headlineForm: row.headline_form,
@@ -320,24 +316,20 @@ export function createVocabularyRepo(tx: Tx) {
       }));
     },
 
-    findLexeme: async (lexemeId: string): Promise<LexemeRow | undefined> => {
-      const [row] = await tx
-        .select({
-          lexemeId: dictLexemes.id,
-          lemma: dictLexemes.lemma,
-          partOfSpeech: dictLexemes.partOfSpeech,
-          languageCode: dictLexemes.languageCode,
-        })
-        .from(dictLexemes)
-        .where(eq(dictLexemes.id, lexemeId));
-      return row;
+    findLemmaLexemes: async (input: { languageCode: string; lemma: string }): Promise<WordLexeme[]> => {
+      const rows = await tx.execute<{ lexeme_id: string; part_of_speech: string }>(
+        vocabularyQueries.lemmaLexemes(input),
+      );
+      return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, partOfSpeech: row.part_of_speech }));
     },
 
-    findLexemeRenderings: async (input: {
-      lexemeId: string;
+    findLemmaRenderings: async (input: {
+      languageCode: string;
+      lemma: string;
       userLanguageCode: string;
     }): Promise<LexemeRendering[]> => {
       const rows = await tx.execute<{
+        lexeme_id: string;
         sense_id: string;
         variant_id: string;
         form: string;
@@ -345,8 +337,9 @@ export function createVocabularyRepo(tx: Tx) {
         translation: string;
         example_source: string | null;
         example_target: string | null;
-      }>(vocabularyQueries.lexemeRenderings(input));
+      }>(vocabularyQueries.lemmaRenderings(input));
       return rows.rows.map((row) => ({
+        lexemeId: row.lexeme_id,
         senseId: row.sense_id,
         variantId: row.variant_id,
         form: row.form,
@@ -357,9 +350,9 @@ export function createVocabularyRepo(tx: Tx) {
       }));
     },
 
-    findSavedInLexeme: async (input: { enrollmentId: string; lexemeId: string }): Promise<SavedEntry[]> => {
+    findSavedInLemma: async (input: { enrollmentId: string; lemma: string }): Promise<SavedEntry[]> => {
       const rows = await tx.execute<{ sense_id: string; variant_id: string }>(
-        vocabularyQueries.savedInLexeme(input),
+        vocabularyQueries.savedInLemma(input),
       );
       return rows.rows.map((row) => ({ senseId: row.sense_id, variantId: row.variant_id }));
     },

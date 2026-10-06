@@ -68,9 +68,6 @@ export const SessionProgressItemSchema = z.object({
   level_after: LevelSchema,
 });
 
-// How the word list is ordered. The level sorts break a tie by newest save.
-export const VocabularySortSchema = z.enum(['newest', 'level_asc', 'level_desc']);
-
 // Phase 19. A session's lifecycle: preparing → ready → completed, or skipped /
 // failed. "In progress" is not a status: it is `ready` with answers.
 export const SessionStatusSchema = z.enum(['preparing', 'ready', 'completed', 'skipped', 'failed']);
@@ -349,20 +346,18 @@ export const SaveVocabularyResponseSchema = z.object({
 export const VocabularyPageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   cursor: z.string().min(1).optional(),
-  // Phase 20. Order, and one level only. A cursor carries the sort it was
-  // issued under, and the server refuses it under another.
-  sort: VocabularySortSchema.optional(),
+  // Phase 20. One level only.
   level: z.coerce.number().int().min(1).max(5).optional(),
 });
 
-// One row per lexeme. `headline` is the lowest-ranked saved sense, in the
-// wording of the form it was saved from; `sense_count` counts the senses with
-// some rendering in the enrollment's source language — what the drill-down can
-// show.
+// Phase 21: one row per lemma. `headline` is the lowest-ranked saved sense, in
+// the wording of the form it was saved from; `parts_of_speech` are its saved
+// senses' parts of speech, distinct and ascending; `sense_count` counts the senses
+// of every lexeme with the lemma that have some rendering in the enrollment's
+// source language — what the drill-down can show.
 export const VocabularyWordSchema = z.object({
-  lexeme_id: z.string(),
   lemma: z.string(),
-  part_of_speech: z.string(),
+  parts_of_speech: z.array(z.string()),
   headline: z.object({ sense_id: z.string(), translation: z.string(), form: z.string() }),
   saved_count: z.number().int(),
   sense_count: z.number().int(),
@@ -383,19 +378,28 @@ export const VocabularySenseSchema = z.object({
   variant_id: z.string(),
   form: z.string(),
   translation: z.string(),
+  // Phase 21. The detail spans every lexeme of a lemma, so each sense names its own.
+  part_of_speech: z.string(),
   example: z.object({ source: z.string(), target: z.string() }).optional(),
   saved: z.boolean(),
   // Phase 20. Present on a saved sense only: its badge and five levels.
   progress: SenseProgressSchema.optional(),
 });
 
+// Phase 21. One word is every lexeme with this lemma in the enrollment's target
+// language.
 export const VocabularyWordDetailSchema = z.object({
-  lexeme_id: z.string(),
   lemma: z.string(),
-  part_of_speech: z.string(),
   // Phase 20. The word's badge, as on the list; null when nothing is saved.
   level: LevelSchema.nullable(),
   senses: z.array(VocabularySenseSchema),
+});
+
+// Phase 21. A query parameter rather than a path segment: a lemma may hold a
+// space or a slash. Matched exactly. U+0000 is refused here: Hono decodes %00 into
+// the string, and Postgres raises on a NUL in a text parameter, which would be a 500.
+export const VocabularyWordQuerySchema = z.object({
+  lemma: z.string().min(1).regex(/^[^\u0000]*$/),
 });
 
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from

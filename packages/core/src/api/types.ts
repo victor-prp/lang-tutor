@@ -49,8 +49,8 @@ import type {
   VocabularyPageQuerySchema,
   VocabularyPageSchema,
   VocabularySenseSchema,
-  VocabularySortSchema,
   VocabularyWordDetailSchema,
+  VocabularyWordQuerySchema,
   VocabularyWordSchema,
 } from './schemas';
 
@@ -102,6 +102,7 @@ export type VocabularyWord = z.infer<typeof VocabularyWordSchema>;
 export type VocabularyPage = z.infer<typeof VocabularyPageSchema>;
 export type VocabularySense = z.infer<typeof VocabularySenseSchema>;
 export type VocabularyWordDetail = z.infer<typeof VocabularyWordDetailSchema>;
+export type VocabularyWordQuery = z.infer<typeof VocabularyWordQuerySchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type SessionSource = z.infer<typeof SessionSourceSchema>;
 export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;
@@ -112,4 +113,3 @@ export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
 export type SenseProgress = z.infer<typeof SenseProgressSchema>;
 export type SessionProgressItem = z.infer<typeof SessionProgressItemSchema>;
 export type SkipSessionResponse = z.infer<typeof SkipSessionResponseSchema>;
-export type VocabularySort = z.infer<typeof VocabularySortSchema>;

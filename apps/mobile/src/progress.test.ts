@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { SenseProgress, SessionProgressItem } from '@lang-tutor/core/api';
 
-import { dimensionRows, nextLevelFilter, pipsFor, practisedRows } from './progress';
+import { dimensionRows, pipsFor, practisedRows } from './progress';
 import { strings } from './strings';
 
 describe('pipsFor', () => {
@@ -53,17 +53,13 @@ describe('dimensionRows', () => {
   });
 });
 
-describe('nextLevelFilter', () => {
-  it('selects a level, and clears it when tapped again', () => {
-    expect(nextLevelFilter(null, 2)).toBe(2);
-    expect(nextLevelFilter(2, 4)).toBe(4);
-    expect(nextLevelFilter(4, 4)).toBeNull();
-  });
-});
-
 describe('level names', () => {
   it('names the five levels, feminine to agree with מילה', () => {
     expect([1, 2, 3, 4, 5].map(strings.levelName)).toEqual(['חדשה', 'נחשפה', 'מוכרת', 'ידועה', 'בשליטה']);
+  });
+
+  it('names the filter that shows every level', () => {
+    expect(strings.levelAll).toBe('הכל');
   });
 
   it('names each dimension', () => {

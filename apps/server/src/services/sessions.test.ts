@@ -117,9 +117,9 @@ describe('repos', () => {
     findSavedSenseIds: forbidden,
     findWordsPage: forbidden,
     findWordSummaries: forbidden,
-    findLexeme: forbidden,
-    findLexemeRenderings: forbidden,
-    findSavedInLexeme: forbidden,
+    findLemmaLexemes: forbidden,
+    findLemmaRenderings: forbidden,
+    findSavedInLemma: forbidden,
     listSavedSenses: forbidden,
     countEntries: forbidden,
   };

@@ -1,3 +1,4 @@
+import type { PartOfSpeech } from '@lang-tutor/core/api';
 import type { Dimension } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
@@ -21,6 +22,23 @@ const DIMENSION_NAMES: Record<Dimension, string> = {
   spoken_productive: 'דיבור',
   spelling: 'איות',
 };
+
+// Phase 21. A Record over the closed wire set, so the compiler refuses an
+// eleventh part of speech that has no Hebrew name. `phrase` is not a code of
+// PartOfSpeechSchema (kind records phrase-ness), so it is merged in below.
+const PART_OF_SPEECH_NAMES: Record<PartOfSpeech, string> = {
+  noun: 'שם עצם',
+  verb: 'פועל',
+  adjective: 'שם תואר',
+  adverb: 'תואר הפועל',
+  pronoun: 'כינוי גוף',
+  preposition: 'מלת יחס',
+  conjunction: 'מלת חיבור',
+  determiner: 'מגדיר',
+  interjection: 'מלת קריאה',
+  numeral: 'שם מספר',
+};
+const PART_OF_SPEECH_LOOKUP: Record<string, string> = { ...PART_OF_SPEECH_NAMES, phrase: 'ביטוי' };
 
 export const strings = {
   appTitle: 'lang tutor',
@@ -130,28 +148,18 @@ export const strings = {
   translateDidYouMean: 'האם התכוונת ל:',
   // Phase 20. Five levels, feminine to agree with מילה (spec §5).
   levelName: (level: number): string => ['חדשה', 'נחשפה', 'מוכרת', 'ידועה', 'בשליטה'][level - 1] ?? '',
+  levelAll: 'הכל',
   levelRaised: (level: number) => `עלתה לרמה ${level}`,
   dimensionName: (dimension: Dimension): string => DIMENSION_NAMES[dimension],
   notPractised: 'טרם תורגל',
-  sortNewest: 'חדשות',
-  sortLevelAsc: 'רמה עולה',
-  sortLevelDesc: 'רמה יורדת',
   vocabularyEmptyLevel: 'אין מילים ברמה הזו',
   resultsPractisedTitle: 'המילים שתרגלת',
   // Known parts of speech only. An unfamiliar value returns undefined and the
   // screen omits the line, so a value the model invents tomorrow degrades to a
   // missing label rather than a broken card — the same reason the wire keeps
   // this field a plain string.
-  partOfSpeech: (value: string): string | undefined =>
-    ({
-      noun: 'שם עצם',
-      verb: 'פועל',
-      adjective: 'שם תואר',
-      adverb: 'תואר הפועל',
-      preposition: 'מלת יחס',
-      pronoun: 'כינוי גוף',
-      conjunction: 'מלת חיבור',
-      interjection: 'מלת קריאה',
-      phrase: 'ביטוי',
-    })[value.toLowerCase()],
+  partOfSpeech: (value: string): string | undefined => {
+    const key = value.toLowerCase();
+    return Object.hasOwn(PART_OF_SPEECH_LOOKUP, key) ? PART_OF_SPEECH_LOOKUP[key] : undefined;
+  },
 } as const;

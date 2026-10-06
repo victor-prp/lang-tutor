@@ -6,6 +6,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../../src/db/client';
 import {
   answers,
+  dictLexemes,
   dictVariants,
   questions,
   senseProgress,
@@ -108,17 +109,19 @@ export async function saveSessionSenses(
       senseId: questions.senseId,
       variantId: questions.promptVariantId,
       lexemeId: dictVariants.lexemeId,
+      lemma: dictLexemes.lemma,
     })
     .from(sessionQuestions)
     .innerJoin(questions, eq(questions.id, sessionQuestions.questionId))
     .innerJoin(dictVariants, eq(dictVariants.id, questions.promptVariantId))
+    .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
     .where(eq(sessionQuestions.sessionId, input.sessionId))
     .orderBy(asc(sessionQuestions.position));
   const picked = rows.filter((row) => input.positions.includes(row.position));
   await withTx(db, (tx) =>
     createVocabularyRepo(tx).insertEntries({
       enrollmentId: input.enrollmentId,
-      entries: picked.map(({ senseId, variantId, lexemeId }) => ({ senseId, variantId, lexemeId })),
+      entries: picked.map(({ senseId, variantId, lexemeId, lemma }) => ({ senseId, variantId, lexemeId, lemma })),
     }),
   );
   return picked.map((row) => row.senseId);

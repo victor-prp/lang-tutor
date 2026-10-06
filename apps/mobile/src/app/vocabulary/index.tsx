@@ -1,4 +1,3 @@
-import type { VocabularySort } from '@lang-tutor/core/api';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -7,16 +6,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LevelBadge } from '@/components/LevelBadge';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useVocabulary } from '@/hooks/useVocabulary';
-import { nextLevelFilter } from '@/progress';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
-import { showsMark } from '@/vocabulary';
+import { partsOfSpeechLabel, showsMark } from '@/vocabulary';
 
-const SORTS: { sort: VocabularySort; label: string }[] = [
-  { sort: 'newest', label: strings.sortNewest },
-  { sort: 'level_asc', label: strings.sortLevelAsc },
-  { sort: 'level_desc', label: strings.sortLevelDesc },
-];
 const LEVELS = [1, 2, 3, 4, 5];
 
 function Chip({
@@ -34,6 +27,9 @@ function Chip({
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected }}
+      // react-native-web 0.21 does not render accessibilityState, so on web this
+      // is the only thing that puts the selected state in the DOM (and in a test).
+      aria-selected={selected}
       testID={testID}
       onPress={onPress}
       style={[styles.chip, selected && styles.chipSelected]}
@@ -68,31 +64,30 @@ export default function VocabularyScreen() {
       ) : null}
 
       <View style={styles.chips}>
-        {SORTS.map(({ sort, label }) => (
-          <Chip
-            key={sort}
-            testID={`vocabulary-sort-${sort}`}
-            label={label}
-            selected={v.query.sort === sort}
-            onPress={() => v.setQuery({ ...v.query, sort })}
-          />
-        ))}
-      </View>
-      <View style={styles.chips}>
+        <Chip
+          testID="vocabulary-level-all"
+          label={strings.levelAll}
+          selected={v.query.level === null}
+          onPress={() => {
+            if (v.query.level !== null) v.setQuery({ level: null });
+          }}
+        />
         {LEVELS.map((level) => (
           <Chip
             key={level}
             testID={`vocabulary-level-${level}`}
             label={strings.levelName(level)}
             selected={v.query.level === level}
-            onPress={() => v.setQuery({ ...v.query, level: nextLevelFilter(v.query.level, level) })}
+            onPress={() => {
+              if (v.query.level !== level) v.setQuery({ level });
+            }}
           />
         ))}
       </View>
 
       <FlatList
         data={v.words}
-        keyExtractor={(word) => word.lexeme_id}
+        keyExtractor={(word) => word.lemma}
         onEndReached={v.loadMore}
         onEndReachedThreshold={0.5}
         refreshing={v.status === 'loading' && v.words.length === 0}
@@ -113,12 +108,12 @@ export default function VocabularyScreen() {
           )
         }
         renderItem={({ item }) => {
-          const partOfSpeech = strings.partOfSpeech(item.part_of_speech);
+          const partsOfSpeech = partsOfSpeechLabel(item.parts_of_speech);
           return (
             <Pressable
               accessibilityRole="button"
               testID="vocabulary-word"
-              onPress={() => router.push(`/vocabulary/${item.lexeme_id}`)}
+              onPress={() => router.push({ pathname: '/vocabulary/word', params: { lemma: item.lemma } })}
               style={styles.row}
             >
               <View style={styles.rowTop}>
@@ -130,7 +125,7 @@ export default function VocabularyScreen() {
                 ) : null}
               </View>
               <LevelBadge level={item.level} testID="vocabulary-word-level" />
-              {partOfSpeech ? <Text style={styles.meta}>{partOfSpeech}</Text> : null}
+              {partsOfSpeech ? <Text style={styles.meta}>{partsOfSpeech}</Text> : null}
               <Text style={styles.translation}>{item.headline.translation}</Text>
             </Pressable>
           );

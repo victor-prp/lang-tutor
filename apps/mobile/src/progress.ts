@@ -27,8 +27,3 @@ export function dimensionRows(progress: SenseProgress, live: readonly Dimension[
     level: live.includes(dimension) ? progress.dimensions[dimension] : null,
   }));
 }
-
-/** Tapping the selected level clears the filter; tapping another selects it. */
-export function nextLevelFilter(current: number | null, tapped: number): number | null {
-  return current === tapped ? null : tapped;
-}

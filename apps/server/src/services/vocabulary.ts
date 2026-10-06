@@ -16,7 +16,7 @@ import {
   encodeCursor,
   firstPerSense,
 } from '../domain/vocabulary';
-import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, LexemeNotFound } from '../errors';
+import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { Repos, Transaction } from './transaction';
 
@@ -91,16 +91,13 @@ export function createVocabularyService({
     /**
      * Keyset pagination. One extra row is read to learn whether a next page
      * exists; the cursor is the last row KEPT — from the page rows, never from
-     * the assembled items, which may be one short (assemblePage's comment). A
-     * cursor issued under another sort is refused: it names a position in a
-     * different order.
+     * the assembled items, which may be one short (assemblePage's comment).
      */
     listWords: async (enrollmentId: string, query: VocabularyPageQuery): Promise<VocabularyPage> => {
       const limit = query.limit ?? DEFAULT_PAGE_SIZE;
-      const sort = query.sort ?? 'newest';
       const level = query.level ?? null;
       const after = query.cursor === undefined ? null : decodeCursor(query.cursor);
-      if (query.cursor !== undefined && (!after || after.sort !== sort)) throw new InvalidCursor();
+      if (query.cursor !== undefined && !after) throw new InvalidCursor();
 
       return transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
@@ -108,41 +105,45 @@ export function createVocabularyService({
           enrollmentId,
           limit: limit + 1,
           after,
-          sort,
           level,
           live: LIVE_DIMENSIONS,
         });
         const rows = read.slice(0, limit);
         const summaries = await repos.vocabulary.findWordSummaries({
           enrollmentId,
-          lexemeIds: rows.map((row) => row.lexemeId),
+          lemmas: rows.map((row) => row.lemma),
+          targetLanguage: enrolled.target_language,
           sourceLanguage: enrolled.source_language,
         });
         return {
           items: assemblePage(rows, summaries),
-          next_cursor: read.length > limit ? encodeCursor(cursorAfter(sort, rows[rows.length - 1])) : null,
+          next_cursor: read.length > limit ? encodeCursor(cursorAfter(rows[rows.length - 1])) : null,
         };
       });
     },
 
-    wordDetail: (enrollmentId: string, lexemeId: string): Promise<VocabularyWordDetail> =>
+    /** Every lexeme with this lemma in the target language is one word. None is a
+     *  404; a word with nothing saved is a 200 with no level. */
+    wordDetail: (enrollmentId: string, lemma: string): Promise<VocabularyWordDetail> =>
       transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
-        const lexeme = await repos.vocabulary.findLexeme(lexemeId);
-        if (!lexeme || lexeme.languageCode !== enrolled.target_language) {
-          throw new LexemeNotFound(lexemeId);
-        }
-        const renderings = await repos.vocabulary.findLexemeRenderings({
-          lexemeId,
+        const lexemes = await repos.vocabulary.findLemmaLexemes({
+          languageCode: enrolled.target_language,
+          lemma,
+        });
+        if (lexemes.length === 0) throw new WordNotFound(lemma);
+        const renderings = await repos.vocabulary.findLemmaRenderings({
+          languageCode: enrolled.target_language,
+          lemma,
           userLanguageCode: enrolled.source_language,
         });
-        const saved = await repos.vocabulary.findSavedInLexeme({ enrollmentId, lexemeId });
+        const saved = await repos.vocabulary.findSavedInLemma({ enrollmentId, lemma });
         const progress = await repos.progress.findRows({
           enrollmentId,
           senseIds: saved.map((entry) => entry.senseId),
           savedBy: null,
         });
-        return buildWordDetail(lexeme, renderings, saved, progress);
+        return buildWordDetail(lemma, lexemes, renderings, saved, progress);
       }),
   };
 }

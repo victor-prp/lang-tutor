@@ -267,18 +267,22 @@ describe('api/client', () => {
     expect(mockFetch).toHaveBeenNthCalledWith(2, 'http://test.local/api/enrollments/e1/vocabulary', { method: 'GET' });
   });
 
-  it('listVocabulary passes sort and level when given', async () => {
+  it('listVocabulary passes a level when given, and never a sort', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: [], next_cursor: null }) }));
     const client = buildClient(mockFetch);
-    await client.listVocabulary('e1', { sort: 'level_desc', level: 2 });
-    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary?sort=level_desc&level=2', { method: 'GET' });
+    await client.listVocabulary('e1', { level: 2 });
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary?level=2', { method: 'GET' });
   });
 
-  it('vocabularyWord gets one word', async () => {
+  // Review Focus 1: a lemma travels as an encoded query parameter.
+  it.each(['ice cream', 'знать', 'и/или'])('vocabularyWord gets one word by its lemma: %s', async (lemma) => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
     const client = buildClient(mockFetch);
-    await client.vocabularyWord('e1', 'lx1');
-    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary/words/lx1', { method: 'GET' });
+    await client.vocabularyWord('e1', lemma);
+    expect(mockFetch).toHaveBeenCalledWith(
+      `http://test.local/api/enrollments/e1/vocabulary/word?lemma=${encodeURIComponent(lemma)}`,
+      { method: 'GET' },
+    );
   });
 
   it('unsaveVocabulary throws ApiError on failure', async () => {

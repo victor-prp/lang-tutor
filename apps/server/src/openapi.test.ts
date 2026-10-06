@@ -103,7 +103,7 @@ describe('the document as a whole', () => {
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
-      '/api/enrollments/{id}/vocabulary/words/{lexeme_id}',
+      '/api/enrollments/{id}/vocabulary/word',
       '/api/login',
       '/api/sessions',
       '/api/sessions/{id}',
@@ -252,7 +252,7 @@ describe('the vocabulary endpoints in the published document', () => {
     [BASE, 'post', ['200', '400', '404']],
     [BASE, 'get', ['200', '400', '404']],
     [`${BASE}/senses/{sense_id}`, 'delete', ['204', '404']],
-    [`${BASE}/words/{lexeme_id}`, 'get', ['200', '404']],
+    [`${BASE}/word`, 'get', ['200', '400', '404']],
   ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths[path][method].responses).sort()).toEqual(statuses);

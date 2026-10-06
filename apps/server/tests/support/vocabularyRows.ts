@@ -45,7 +45,7 @@ export async function seedSavedSenses(
   await withTx(db, (tx) =>
     createVocabularyRepo(tx).insertEntries({
       enrollmentId: input.enrollmentId,
-      entries: word.senseIds.map((senseId) => ({ senseId, variantId, lexemeId: word.lexemeId })),
+      entries: word.senseIds.map((senseId) => ({ senseId, variantId, lexemeId: word.lexemeId, lemma: input.lemma })),
     }),
   );
   return { lexemeId: word.lexemeId, variantId, senseIds: word.senseIds };

@@ -2,18 +2,15 @@ import type {
   SenseProgress,
   TranslationSense,
   VocabularyEntryInput,
-  VocabularySort,
   VocabularyWord,
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
-import { DIMENSIONS, LIVE_DIMENSIONS, MAX_LEVEL, MIN_LEVEL, badge, type Dimension } from '@lang-tutor/core/domain';
+import { DIMENSIONS, LIVE_DIMENSIONS, MIN_LEVEL, badge, type Dimension } from '@lang-tutor/core/domain';
 
 import type { ProgressRow } from './progress';
 
 /**
- * Where the next list page starts: the last row's newest save and its lexeme
- * id, and under a level sort its level too. The sort is in the cursor so one
- * replayed under another sort is refused rather than read as a wrong position.
+ * Where the next list page starts: the last row's newest save and its lemma.
  *
  * `savedAt` is Postgres's own text for a timestamptz, never a JS Date. A Date
  * keeps milliseconds and created_at keeps microseconds, so a cursor rounded down
@@ -21,9 +18,12 @@ import type { ProgressRow } from './progress';
  * repository prints it with `::text` and casts it back with `::timestamptz`, and
  * the round trip is exact.
  */
-export type VocabularyCursor =
-  | { sort: 'newest'; savedAt: string; lexemeId: string }
-  | { sort: 'level_asc' | 'level_desc'; savedAt: string; lexemeId: string; level: number };
+export type VocabularyCursor = { savedAt: string; lemma: string };
+
+// Phase 21. The leading tag is what makes a phase 18 or phase 20 cursor — two or
+// four elements, keyed by lexeme id — decode to null and answer 400, rather than
+// be read as a position among lemmas.
+const CURSOR_TAG = 'lemma';
 
 // What `timestamptz::text` prints under DateStyle ISO: `2026-10-04 12:00:00.123456+00`.
 // Anything else is refused here, because the repository casts it with
@@ -49,14 +49,8 @@ function isRealTimestamptz(text: string): boolean {
   return day <= lastOfMonth.getUTCDate();
 }
 
-/** A newest-sort cursor keeps phase 18's two-element form, so a cursor an app
- *  already holds stays valid. A level-sort cursor carries four elements. */
 export function encodeCursor(cursor: VocabularyCursor): string {
-  const fields =
-    cursor.sort === 'newest'
-      ? [cursor.savedAt, cursor.lexemeId]
-      : [cursor.savedAt, cursor.lexemeId, cursor.sort, cursor.level];
-  return Buffer.from(JSON.stringify(fields), 'utf8').toString('base64url');
+  return Buffer.from(JSON.stringify([CURSOR_TAG, cursor.savedAt, cursor.lemma]), 'utf8').toString('base64url');
 }
 
 /** `null` for anything this server did not issue. The caller turns that into a 400. */
@@ -67,38 +61,30 @@ export function decodeCursor(raw: string): VocabularyCursor | null {
   } catch {
     return null;
   }
-  if (!Array.isArray(parsed) || (parsed.length !== 2 && parsed.length !== 4)) return null;
-  const [savedAt, lexemeId, sort, level] = parsed as unknown[];
+  if (!Array.isArray(parsed) || parsed.length !== 3) return null;
+  const [tag, savedAt, lemma] = parsed as unknown[];
+  if (tag !== CURSOR_TAG) return null;
   if (typeof savedAt !== 'string' || !isRealTimestamptz(savedAt)) return null;
   // A NUL cannot be a Postgres text parameter: it would raise there, a 500.
-  if (typeof lexemeId !== 'string' || lexemeId.length === 0 || lexemeId.includes('\u0000')) {
-    return null;
-  }
-  if (parsed.length === 2) return { sort: 'newest', savedAt, lexemeId };
-  if (sort !== 'level_asc' && sort !== 'level_desc') return null;
-  if (typeof level !== 'number' || !Number.isInteger(level) || level < MIN_LEVEL || level > MAX_LEVEL) {
-    return null;
-  }
-  return { sort, savedAt, lexemeId, level };
+  if (typeof lemma !== 'string' || lemma.length === 0 || lemma.includes('\u0000')) return null;
+  return { savedAt, lemma };
 }
 
 /** One row of the grouped keyset read, in page order. `level` is the word's
- *  badge: the rounded mean over its saved senses and the live dimensions. */
-export type WordPageRow = { lexemeId: string; lastSavedAt: string; level: number };
+ *  badge: the rounded mean over every saved sense of the lemma and the live
+ *  dimensions. */
+export type WordPageRow = { lemma: string; lastSavedAt: string; level: number };
 
-/** The cursor that continues after `row` under `sort`. */
-export function cursorAfter(sort: VocabularySort, row: WordPageRow): VocabularyCursor {
-  return sort === 'newest'
-    ? { sort, savedAt: row.lastSavedAt, lexemeId: row.lexemeId }
-    : { sort, savedAt: row.lastSavedAt, lexemeId: row.lexemeId, level: row.level };
+/** The cursor that continues after `row`. */
+export function cursorAfter(row: WordPageRow): VocabularyCursor {
+  return { savedAt: row.lastSavedAt, lemma: row.lemma };
 }
 
-/** What the page's enrichment read returns per lexeme. Declared here rather than
+/** What the page's enrichment read returns per lemma. Declared here rather than
  *  imported from the repository: R3 keeps this layer ignorant of Drizzle. */
 export type WordSummary = {
-  lexemeId: string;
   lemma: string;
-  partOfSpeech: string;
+  partsOfSpeech: string[];
   headlineSenseId: string;
   headlineTranslation: string;
   headlineForm: string;
@@ -107,8 +93,8 @@ export type WordSummary = {
 };
 
 /**
- * Page rows to the wire, in PAGE order. The enrichment read is keyed by lexeme
- * id and comes back in whatever order Postgres chose.
+ * Page rows to the wire, in PAGE order. The enrichment read is keyed by lemma
+ * and comes back in whatever order Postgres chose.
  *
  * A row with no summary is dropped. The enrichment read inner-joins each saved
  * entry to its saved form's rendering, so a word whose saved senses lost every
@@ -117,15 +103,14 @@ export type WordSummary = {
  * taken from the page rows, not from this output — still advances.
  */
 export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): VocabularyWord[] {
-  const byLexeme = new Map(summaries.map((s) => [s.lexemeId, s]));
+  const byLemma = new Map(summaries.map((s) => [s.lemma, s]));
   return rows.flatMap((row) => {
-    const s = byLexeme.get(row.lexemeId);
+    const s = byLemma.get(row.lemma);
     if (!s) return [];
     return [
       {
-        lexeme_id: s.lexemeId,
         lemma: s.lemma,
-        part_of_speech: s.partOfSpeech,
+        parts_of_speech: s.partsOfSpeech,
         headline: {
           sense_id: s.headlineSenseId,
           translation: s.headlineTranslation,
@@ -139,16 +124,13 @@ export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): Voc
   });
 }
 
-export type LexemeRow = {
-  lexemeId: string;
-  lemma: string;
-  partOfSpeech: string;
-  languageCode: string;
-};
+/** One lexeme of the word: the detail spans every lexeme with the lemma. */
+export type WordLexeme = { lexemeId: string; partOfSpeech: string };
 
-/** One rendering of one of the lexeme's senses, by one of its forms, in the
- *  enrollment's source language. */
+/** One rendering of one of the word's senses, by one form of that sense's own
+ *  lexeme, in the enrollment's source language. */
 export type LexemeRendering = {
+  lexemeId: string;
   senseId: string;
   variantId: string;
   form: string;
@@ -172,14 +154,16 @@ function senseProgressOf(rows: ProgressRow[]): SenseProgress {
 }
 
 /**
- * The drill-down: every sense the lexeme can show in this language, each in one
- * rendering, saved senses first.
+ * The drill-down: every sense of every lexeme with this lemma that the enrollment's
+ * source language can show, each in one rendering and labelled with its part of
+ * speech. Saved senses first, then by part of speech, then by rank, then by sense id.
  *
  * Which rendering:
  * - a saved sense is shown in its saved form;
  * - an unsaved one in a representative form — the lemma's own spelling if anyone
- *   looked it up, otherwise the form that renders the most of this lexeme, ties
- *   broken by variant id.
+ *   looked it up, otherwise the form that renders the most senses, ties broken by
+ *   variant id. A form belongs to one lexeme and a sense's renderings are all forms
+ *   of its own lexeme, so the choice is always made within that lexeme.
  *
  * A saved sense whose saved form no longer renders it falls back to the
  * representative and stays saved. Ranks compared across forms are approximate —
@@ -192,17 +176,19 @@ function senseProgressOf(rows: ProgressRow[]): SenseProgress {
  * saved sense, including one with no rendering to show.
  */
 export function buildWordDetail(
-  lexeme: LexemeRow,
+  lemma: string,
+  lexemes: WordLexeme[],
   renderings: LexemeRendering[],
   saved: SavedEntry[],
   progress: ProgressRow[],
 ): VocabularyWordDetail {
+  const partOfSpeech = new Map(lexemes.map((lexeme) => [lexeme.lexemeId, lexeme.partOfSpeech]));
   const savedVariant = new Map(saved.map((entry) => [entry.senseId, entry.variantId]));
   const perVariant = new Map<string, number>();
   for (const r of renderings) perVariant.set(r.variantId, (perVariant.get(r.variantId) ?? 0) + 1);
 
-  const lemma = lexeme.lemma.toLowerCase();
-  const isLemma = (r: LexemeRendering) => Number(r.form.toLowerCase() === lemma);
+  const lowered = lemma.toLowerCase();
+  const isLemma = (r: LexemeRendering) => Number(r.form.toLowerCase() === lowered);
   const better = (a: LexemeRendering, b: LexemeRendering) =>
     isLemma(b) - isLemma(a) ||
     perVariant.get(b.variantId)! - perVariant.get(a.variantId)! ||
@@ -217,8 +203,10 @@ export function buildWordDetail(
 
   const shown = [...bySense.entries()].map(([senseId, options]) => {
     const own = savedVariant.get(senseId);
+    const rendering = options.find((o) => o.variantId === own) ?? [...options].sort(better)[0];
     return {
-      rendering: options.find((o) => o.variantId === own) ?? [...options].sort(better)[0],
+      rendering,
+      partOfSpeech: partOfSpeech.get(rendering.lexemeId) ?? '',
       saved: savedVariant.has(senseId),
     };
   });
@@ -226,6 +214,7 @@ export function buildWordDetail(
   shown.sort(
     (a, b) =>
       Number(b.saved) - Number(a.saved) ||
+      (a.partOfSpeech < b.partOfSpeech ? -1 : a.partOfSpeech > b.partOfSpeech ? 1 : 0) ||
       a.rendering.rank - b.rendering.rank ||
       a.rendering.senseId.localeCompare(b.rendering.senseId),
   );
@@ -237,15 +226,14 @@ export function buildWordDetail(
   const live = progress.filter((row) => LIVE_DIMENSIONS.includes(row.dimension));
 
   return {
-    lexeme_id: lexeme.lexemeId,
-    lemma: lexeme.lemma,
-    part_of_speech: lexeme.partOfSpeech,
+    lemma,
     level: live.length === 0 ? null : badge(live.map((row) => row.level)),
-    senses: shown.map(({ rendering: r, saved: isSaved }) => ({
+    senses: shown.map(({ rendering: r, partOfSpeech: pos, saved: isSaved }) => ({
       sense_id: r.senseId,
       variant_id: r.variantId,
       form: r.form,
       translation: r.translation,
+      part_of_speech: pos,
       ...(r.exampleSource && r.exampleTarget
         ? { example: { source: r.exampleSource, target: r.exampleTarget } }
         : {}),

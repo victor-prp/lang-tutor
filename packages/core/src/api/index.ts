@@ -46,7 +46,7 @@ export type {
   VocabularyPage,
   VocabularyPageQuery,
   VocabularySense,
-  VocabularySort,
   VocabularyWord,
   VocabularyWordDetail,
+  VocabularyWordQuery,
 } from './types';

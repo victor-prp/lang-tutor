@@ -110,6 +110,10 @@ export const dictLexemes = pgTable(
   },
   (t) => [
     unique('dict_lexemes_language_lemma_pos_key').on(t.languageCode, t.lemma, t.partOfSpeech),
+    // Phase 21. What vocabulary_entries_lexeme_lemma_fk references: an entry's
+    // copied lemma must be its lexeme's. Redundant as a uniqueness rule (id is the
+    // primary key), required by Postgres as a foreign-key target.
+    unique('dict_lexemes_id_lemma_key').on(t.id, t.lemma),
   ],
 );
 
@@ -350,6 +354,11 @@ export const vocabularyEntries = pgTable(
     enrollmentId: text('enrollment_id').notNull(),
     senseId: text('sense_id').notNull(),
     lexemeId: text('lexeme_id').notNull(),
+    // Phase 21. The lexeme's lemma, copied at save time. The saved list groups by
+    // it, and the copy is what keeps that list as cheap as phase 20's: joining
+    // dict_lexemes at read time measured 98.6 ms against a 50 ms budget (spec §1).
+    // vocabulary_entries_lexeme_lemma_fk keeps it equal to the lexeme's.
+    lemma: text('lemma').notNull(),
     variantId: text('variant_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -366,21 +375,21 @@ export const vocabularyEntries = pgTable(
       foreignColumns: [dictSenses.id],
     }).onDelete('cascade'),
     foreignKey({
-      name: 'vocabulary_entries_lexeme_fk',
-      columns: [t.lexemeId],
-      foreignColumns: [dictLexemes.id],
-    }).onDelete('cascade'),
+      name: 'vocabulary_entries_lexeme_lemma_fk',
+      columns: [t.lexemeId, t.lemma],
+      foreignColumns: [dictLexemes.id, dictLexemes.lemma],
+    })
+      .onDelete('cascade')
+      .onUpdate('cascade'),
     foreignKey({
       name: 'vocabulary_entries_variant_fk',
       columns: [t.variantId],
       foreignColumns: [dictVariants.id],
     }).onDelete('cascade'),
     // Every read is scoped to one enrollment, which is what keeps the table's
-    // total size irrelevant. created_at is a trailing KEY column rather than
-    // INCLUDE (drizzle-kit cannot express INCLUDE); either way the list page's
-    // GROUP BY lexeme_id / max(created_at) is an index-only scan of one
-    // enrollment's slice.
-    index('vocabulary_entries_enrollment_lexeme_idx').on(t.enrollmentId, t.lexemeId, t.createdAt),
+    // total size irrelevant. Phase 21 reads by lemma: the list's GROUP BY lemma /
+    // max(created_at), the summaries' counts, and the detail's saved entries.
+    index('vocabulary_entries_enrollment_lemma_idx').on(t.enrollmentId, t.lemma, t.createdAt),
   ],
 );
 
@@ -404,7 +413,7 @@ export const vocabularyEntries = pgTable(
  * packages/core. A literal, because drizzle-kit reads this file on its own; the
  * schema tests insert every DIMENSIONS value, which keeps the two equal.
  *
- * sense_progress_enrollment_dimension_idx serves the list's level sort and
+ * sense_progress_enrollment_dimension_idx serves the list's level and
  * filter as an index-only scan of one enrollment's live-dimension rows.
  * Measured while planning at the plan test's volume: 35 ms without it, 12 ms
  * with it, for a 20k-word enrollment's first page. `level` is a key column
