@@ -28,3 +28,21 @@ export const LUK = {
     },
   ],
 };
+
+// One form, two lexemes: знать the verb (to know) and знать the noun (nobility).
+// Used only by the merged-word test, so no other spec has it in the e2e database.
+export const ZNAT = {
+  kind: 'word' as const,
+  entries: [
+    {
+      lemma: 'знать',
+      part_of_speech: 'verb',
+      senses: [{ translation: 'לדעת', sense_code: 'know' }],
+    },
+    {
+      lemma: 'знать',
+      part_of_speech: 'noun',
+      senses: [{ translation: 'אצולה', sense_code: 'nobility' }],
+    },
+  ],
+};

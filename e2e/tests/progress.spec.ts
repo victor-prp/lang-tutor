@@ -16,7 +16,7 @@ const DISTRACTORS = {
   items: Array.from({ length: 10 }, (_, i) => ({ key: `q${i + 1}`, distractors: WRONG })),
 };
 
-test('a session moves the words it practised up the ladder, and the list sorts and filters by level', async ({
+test('a session moves the words it practised up the ladder, and the list filters by level', async ({
   page,
   request,
 }) => {
@@ -73,22 +73,19 @@ test('a session moves the words it practised up the ladder, and the list sorts a
   await expect(words.filter({ hasText: 'лук' }).getByTestId('vocabulary-word-level-name')).toHaveText('נחשפה');
   await expect(words.filter({ hasText: 'прочитать' }).getByTestId('vocabulary-word-level-name')).toHaveText('חדשה');
 
-  // 5. Sort both ways. The default order puts лук (saved second) first, so ascending
-  // is the first tap that has to change the order and descending the second.
-  await page.getByTestId('vocabulary-sort-level_asc').click();
-  await expect(words.first()).toContainText('прочитать');
-  await page.getByTestId('vocabulary-sort-level_desc').click();
-  await expect(words.first()).toContainText('лук');
+  // 5. No sorts any more, and the filter opens on "all".
+  await expect(page.locator('[data-testid^="vocabulary-sort-"]')).toHaveCount(0);
+  await expect(page.getByTestId('vocabulary-level-all')).toBeVisible();
 
-  // 6. Filter, an empty level, and clearing it.
+  // 6. Filter to a level, an empty level, and "all" to clear it.
   await page.getByTestId('vocabulary-level-2').click();
   await expect(words).toHaveCount(1);
   await expect(words.first()).toContainText('лук');
-  await page.getByTestId('vocabulary-level-2').click();
+  await page.getByTestId('vocabulary-level-all').click();
   await expect(words).toHaveCount(2);
   await page.getByTestId('vocabulary-level-4').click();
   await expect(page.getByTestId('vocabulary-empty-level')).toBeVisible();
-  await page.getByTestId('vocabulary-level-4').click();
+  await page.getByTestId('vocabulary-level-all').click();
   await expect(words).toHaveCount(2);
 
   // 7. A word's detail: five dimensions, one live.
