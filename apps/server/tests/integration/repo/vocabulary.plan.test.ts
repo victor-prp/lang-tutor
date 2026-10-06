@@ -74,6 +74,21 @@ async function explain(query: SQL): Promise<Explained> {
   return result.rows[0]['QUERY PLAN'][0];
 }
 
+// Execution Time on a CI runner is the query's cost plus whatever the other Jest
+// workers are doing to the same CPU and Postgres. Since ci.yml keeps Jest's
+// timings, this file starts first, while every other worker is cloning
+// databases: single samples landed at 50.4 and 52.3 ms there, against ~14 ms
+// for the same query alone. A query's cost is the least time it takes, so the
+// budget is held against the best of five warm runs. BUDGET_MS is unchanged, and
+// a worse plan (a Seq Scan, a sort of all 20k entries) is slow in every run.
+async function bestExecutionTime(query: SQL): Promise<number> {
+  // Warm once, so the budget measures the plan rather than a cold cache.
+  await explain(query);
+  let best = Number.POSITIVE_INFINITY;
+  for (let run = 0; run < 5; run++) best = Math.min(best, (await explain(query))['Execution Time']);
+  return best;
+}
+
 // EXPLAIN ANALYZE of a write executes it, so a write is explained inside a
 // transaction that is always rolled back: the heavy fixture stays as loaded.
 class Rollback extends Error {}
@@ -173,15 +188,12 @@ describe('every vocabulary read at volume', () => {
   });
 
   it(`serves the heavy enrollment's first list page in under ${BUDGET_MS} ms`, async () => {
-    // Warm once, so the budget measures the plan rather than a cold cache.
-    await explain(vocabularyQueries.wordsPage({ ...PAGE, after: null }));
-    const plan = await explain(vocabularyQueries.wordsPage({ ...PAGE, after: null }));
-    expect(plan['Execution Time']).toBeLessThan(BUDGET_MS);
+    expect(await bestExecutionTime(vocabularyQueries.wordsPage({ ...PAGE, after: null }))).toBeLessThan(BUDGET_MS);
   });
 
   it(`serves the heavy enrollment's first one-level page in under ${BUDGET_MS} ms`, async () => {
-    await explain(vocabularyQueries.wordsPage({ ...PAGE, level: 2, after: null }));
-    const plan = await explain(vocabularyQueries.wordsPage({ ...PAGE, level: 2, after: null }));
-    expect(plan['Execution Time']).toBeLessThan(BUDGET_MS);
+    expect(await bestExecutionTime(vocabularyQueries.wordsPage({ ...PAGE, level: 2, after: null }))).toBeLessThan(
+      BUDGET_MS,
+    );
   });
 });
