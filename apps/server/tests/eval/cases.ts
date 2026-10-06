@@ -1,5 +1,6 @@
 import type { LanguageCode, PartOfSpeech, TranslationKind } from '@lang-tutor/core/api';
 
+import type { Task } from '../../src/domain/distractors';
 import type { StoredSense } from '../../src/domain/translation';
 
 /**
@@ -712,17 +713,25 @@ export const RENDERING_CASES: RenderingCase[] = [
  * answer, all in the answer's script. Tier 2 is the failure that matters most
  * to a learner, a "wrong" option that is right: `synonyms` lists known right
  * answers that must never appear.
+ *
+ * Phase 23. Each item has a task (default `meaning`, today's card). For `word`
+ * (the reversed card) the options and `synonyms` are in the learned language.
+ * For `typed` there are no wrong options; tier 1 asks that the alternatives are
+ * in the learned language, and tier 2 that at least one of `alternatives`, the
+ * well-known other right answers, is listed.
  */
 export type DistractorCase = {
   label: string;
   from: LanguageCode;
   to: LanguageCode;
   items: {
+    task?: Task;
     form: string;
     lemma: string;
     partOfSpeech: PartOfSpeech;
     translation: string;
     synonyms: string[];
+    alternatives?: string[];
   }[];
 };
 
@@ -770,6 +779,48 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
       { form: 'ключ', lemma: 'ключ', partOfSpeech: 'noun', translation: 'מפתח', synonyms: ['מעיין'] },
       { form: 'ключ', lemma: 'ключ', partOfSpeech: 'noun', translation: 'מעיין', synonyms: ['מפתח'] },
       { form: 'окно', lemma: 'окно', partOfSpeech: 'noun', translation: 'חלון', synonyms: ['אשנב', 'צוהר'] },
+    ],
+  },
+  {
+    label: 'Italian words to pick, the Hebrew shown',
+    from: 'it',
+    to: 'he',
+    items: [
+      { task: 'word', form: 'parlo', lemma: 'parlare', partOfSpeech: 'verb', translation: 'מדבר', synonyms: ['parla', 'parli', 'discorro'] },
+      { task: 'word', form: 'casa', lemma: 'casa', partOfSpeech: 'noun', translation: 'בית', synonyms: ['abitazione', 'dimora'] },
+      { task: 'word', form: 'sempre', lemma: 'sempre', partOfSpeech: 'adverb', translation: 'תמיד', synonyms: ['ognora'] },
+      { task: 'word', form: 'bella', lemma: 'bello', partOfSpeech: 'adjective', translation: 'יפה', synonyms: ['bello', 'carina', 'graziosa'] },
+    ],
+  },
+  {
+    label: 'Russian words to pick, the Hebrew shown',
+    from: 'ru',
+    to: 'he',
+    items: [
+      { task: 'word', form: 'окно', lemma: 'окно', partOfSpeech: 'noun', translation: 'חלון', synonyms: ['оконце'] },
+      { task: 'word', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', synonyms: ['живо', 'стремительно', 'шустро'] },
+      { task: 'word', form: 'красивая', lemma: 'красивый', partOfSpeech: 'adjective', translation: 'יפה', synonyms: ['прекрасная', 'красивый', 'симпатичная'] },
+    ],
+  },
+  {
+    label: 'Typed answers with well-known synonyms',
+    from: 'en',
+    to: 'he',
+    items: [
+      { task: 'typed', form: 'big', lemma: 'big', partOfSpeech: 'adjective', translation: 'גדול', synonyms: [], alternatives: ['large'] },
+      { task: 'typed', form: 'begin', lemma: 'begin', partOfSpeech: 'verb', translation: 'להתחיל', synonyms: [], alternatives: ['start', 'commence'] },
+      { task: 'typed', form: 'quickly', lemma: 'quickly', partOfSpeech: 'adverb', translation: 'מהר', synonyms: [], alternatives: ['fast', 'rapidly'] },
+    ],
+  },
+  {
+    label: 'A mixed session, as prepare-session sends it',
+    from: 'it',
+    to: 'he',
+    items: [
+      { task: 'meaning', form: 'libro', lemma: 'libro', partOfSpeech: 'noun', translation: 'ספר', synonyms: ['כרך'] },
+      { task: 'word', form: 'finestra', lemma: 'finestra', partOfSpeech: 'noun', translation: 'חלון', synonyms: ['finestrella'] },
+      { task: 'typed', form: 'macchina', lemma: 'macchina', partOfSpeech: 'noun', translation: 'מכונית', synonyms: [], alternatives: ['auto', 'automobile'] },
+      { task: 'meaning', form: 'acqua', lemma: 'acqua', partOfSpeech: 'noun', translation: 'מים', synonyms: [] },
     ],
   },
 ];

@@ -23,7 +23,7 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
-import { distractorItems, validateDistractors } from '../../src/domain/distractors';
+import { distractorItems, validateDistractors, type Task } from '../../src/domain/distractors';
 import { isInScript } from '../../src/domain/languages';
 import { createGeminiClient } from '../../src/providers/gemini';
 import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
@@ -474,7 +474,11 @@ function renderingTier2(kase: RenderingCase, answer: LlmReconciliation): Check[]
   return checks;
 }
 
-/** Phase 19. The items as prepareSession builds them, keyed q1, q2, …. */
+const TYPE_OF_TASK = { meaning: 'multiple_choice', word: 'reverse_choice', typed: 'typed_translation' } as const;
+const taskOf = (item: DistractorCase['items'][number]): Task => item.task ?? 'meaning';
+
+/** Phase 19. The items as prepareSession builds them, keyed q1, q2, …. Phase
+ *  23: with each item's task. */
 function itemsOf(kase: DistractorCase) {
   return distractorItems(
     kase.items.map((item, index) => ({
@@ -486,33 +490,59 @@ function itemsOf(kase: DistractorCase) {
       partOfSpeech: item.partOfSpeech,
       translation: item.translation,
     })),
+    kase.items.map((item) => TYPE_OF_TASK[taskOf(item)]),
   );
 }
 
+const answeredItem = (kase: DistractorCase, answer: LlmDistractors, index: number) =>
+  answer.items.find((answered) => answered.key === itemsOf(kase)[index].key);
+
 function distractorTier1(kase: DistractorCase, answer: LlmDistractors): Check[] {
   const verdict = validateDistractors(itemsOf(kase), answer);
-  const all = answer.items.flatMap((item) => item.distractors);
-  return [
-    { name: 'every item answered with three distinct wrong options', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
-    {
-      name: `every wrong option is in ${kase.to} script`,
-      ok: all.every((text) => isInScript(text, kase.to)),
-      detail: all.join(' | '),
-    },
+  const checks: Check[] = [
+    { name: 'every item answered as its task asks', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
   ];
+  // The options' language: Hebrew meanings on today's card, learned-language
+  // words on the reversed card and in a typed card's alternatives.
+  kase.items.forEach((item, index) => {
+    const task = taskOf(item);
+    const got = answeredItem(kase, answer, index);
+    const texts = task === 'typed' ? (got?.alternatives ?? []) : (got?.distractors ?? []);
+    const script = task === 'meaning' ? kase.to : kase.from;
+    checks.push({
+      name: `${item.form}: every ${task === 'typed' ? 'alternative' : 'wrong option'} is in ${script} script`,
+      ok: texts.every((text) => isInScript(text, script)),
+      detail: texts.join(' | '),
+    });
+  });
+  return checks;
 }
 
 function distractorTier2(kase: DistractorCase, answer: LlmDistractors): Check[] {
-  const items = itemsOf(kase);
   const same = (a: string, b: string) => normalizeForm(a).toLowerCase() === normalizeForm(b).toLowerCase();
-  return kase.items.map((item, index) => {
-    const offered = answer.items.find((answered) => answered.key === items[index].key)?.distractors ?? [];
+  return kase.items.flatMap((item, index): Check[] => {
+    const got = answeredItem(kase, answer, index);
+    if (taskOf(item) === 'typed') {
+      const known = item.alternatives ?? [];
+      if (known.length === 0) return [];
+      const listed = got?.alternatives ?? [];
+      return [
+        {
+          name: `${item.form}: a known other right answer is accepted`,
+          ok: listed.some((text) => known.some((alternative) => same(text, alternative))),
+          detail: listed.join(' | ') || '(none)',
+        },
+      ];
+    }
+    const offered = got?.distractors ?? [];
     const offenders = offered.filter((text) => item.synonyms.some((synonym) => same(text, synonym)));
-    return {
-      name: `${item.form}: no wrong option is a known right answer`,
-      ok: offenders.length === 0,
-      detail: offenders.length ? offenders.join(', ') : offered.join(' | '),
-    };
+    return [
+      {
+        name: `${item.form}: no wrong option is a known right answer`,
+        ok: offenders.length === 0,
+        detail: offenders.length ? offenders.join(', ') : offered.join(' | '),
+      },
+    ];
   });
 }
 
@@ -690,7 +720,9 @@ async function main(): Promise<void> {
     }
     if (row.distractors) {
       console.log(
-        `       ${row.distractors.items.map((item) => `${item.key}=${item.distractors.join('/')}`).join(' | ')}`,
+        `       ${row.distractors.items
+          .map((item) => `${item.key}=${item.distractors.join('/')}${item.alternatives?.length ? ` +${item.alternatives.join('/')}` : ''}`)
+          .join(' | ')}`,
       );
     }
     for (const check of [...t1Bad, ...t2Bad]) {
