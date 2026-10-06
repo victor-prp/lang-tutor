@@ -1,8 +1,9 @@
 # Phase 21 — Saved list by lemma
 
-- **Status:** Design approved, 2026-10-06. Victor approved the brief, the grouping key and the
-  kept save toggle in the dialogue, then delegated the remaining decisions; those are recorded
-  in §1 with their reasons.
+- **Status:** Implemented on branch `phase-21-saved-list-by-lemma`, with the deviations from the
+  approved design folded in. The design was approved on 2026-10-06: Victor approved the brief,
+  the grouping key and the kept save toggle in the dialogue, then delegated the remaining
+  decisions; those are recorded in §1 with their reasons.
 - **Date:** 2026-10-06
 - **Source:** the one-pager `drafts/2026-10-06-saved-list-by-lemma-one-pager.md` and the design
   dialogue recorded here. `drafts/` is gitignored, so everything this spec depends on is
@@ -135,10 +136,12 @@ It is replaced by `vocabulary_entries_enrollment_lemma_idx (enrollment_id, lemma
 Generated with `npm run db:generate --workspace apps/server`, then edited by hand, because
 drizzle-kit adds a NOT NULL column in one statement, which fails on existing rows:
 
-1. add `lemma` as nullable;
-2. backfill it from `dict_lexemes` through `lexeme_id`;
-3. set it NOT NULL;
-4. add `dict_lexemes_id_lemma_key`, swap the lexeme FK for the composite one, swap the index.
+1. drop `vocabulary_entries_lexeme_fk` and `vocabulary_entries_enrollment_lexeme_idx`;
+2. add `lemma` as nullable;
+3. backfill it from `dict_lexemes` through `lexeme_id`;
+4. set it NOT NULL;
+5. add `dict_lexemes_id_lemma_key`, the composite FK `vocabulary_entries_lexeme_lemma_fk` and
+   `vocabulary_entries_enrollment_lemma_idx`.
 
 A header comment says what it does. `npm run db:check --workspace apps/server` must pass after
 the edit, so the snapshot still matches the schema.
@@ -214,7 +217,8 @@ across a deploy, and the list reloads on focus.
 
 ### Detail — `GET /enrollments/{id}/vocabulary/word?lemma=` (replaces `/words/{lexeme_id}`)
 
-**Query:** `lemma`, a non-empty string. Missing or empty is a 400 `invalid request`.
+**Query:** `lemma`, a non-empty string, declared as `VocabularyWordQuerySchema` in
+`packages/core`. Missing or empty is a 400 `invalid request`.
 
 **Body, `VocabularyWordDetail`:**
 
@@ -241,12 +245,12 @@ across a deploy, and the list reloads on focus.
 4. the enrollment's saved entries with that lemma, through the new index;
 5. their progress rows, as today.
 
-`buildWordDetail` takes the lexemes instead of one. It chooses each unsaved sense's
-representative form within that sense's own lexeme, by phase 18's rule: the lemma's own
-spelling, otherwise the form rendering the most senses of that lexeme, ties by variant id. A
-saved sense is shown in its saved form. Cards are ordered saved first, then `part_of_speech`
-ascending, then rank, then sense id. The level is `badge` over the live rows of every saved
-sense, as today.
+`buildWordDetail` takes the lemma and the word's lexemes (id and part of speech) instead of one
+lexeme. It chooses each unsaved sense's representative form within that sense's own lexeme, by
+phase 18's rule: the lemma's own spelling, otherwise the form rendering the most senses of that
+lexeme, ties by variant id. A saved sense is shown in its saved form. Cards are ordered saved
+first, then `part_of_speech` ascending, then rank, then sense id. The level is `badge` over the
+live rows of every saved sense, as today.
 
 A lemma that is in the dictionary with nothing saved still answers 200 with `level: null`,
 which is what the detail shows after its last sense is unsaved.
@@ -288,7 +292,8 @@ Renamed from `[lexemeId].tsx`, a static route reading `lemma` from its search pa
 - `VocabularyQuery` becomes `{ level: number | null }`, defaulting to `{ level: null }`.
 - `loadWord(lemma)`.
 - `api.listVocabulary` loses `sort`. `api.vocabularyWord(enrollmentId, lemma)` gets
-  `/api/enrollments/{id}/vocabulary/word?lemma=<encoded>` through `URLSearchParams`.
+  `/api/enrollments/{id}/vocabulary/word?lemma=<encoded>`, encoding the lemma with
+  `encodeURIComponent`.
 
 ## 5. Errors
 
@@ -304,54 +309,68 @@ Renamed from `[lexemeId].tsx`, a static route reading `lemma` from its search pa
 
 ### Unit, server
 
-- `encodeCursor`/`decodeCursor`: the round trip; a two- or four-element array, a wrong tag, an
-  empty lemma and a lemma with a NUL each decode to `null`; the timestamp checks still apply.
+- `encodeCursor`/`decodeCursor`: the round trip, including a lemma with a space or a slash; a
+  two- or four-element array (a phase 18 or phase 20 cursor), a wrong tag, an empty lemma and a
+  lemma with a NUL each decode to `null`; the timestamp checks still apply.
 - `cursorAfter` takes the last page row.
 - `assemblePage` keeps page order, keys by lemma, carries `parts_of_speech`, and drops a lemma
   with no summary.
 - `buildWordDetail` with two lexemes of one lemma: every sense of both appears; each carries its
-  part of speech; saved first, then part of speech, then rank, then sense id; an unsaved
-  sense's representative form is chosen within its own lexeme; the level spans both lexemes'
-  saved senses; null when nothing is saved.
+  part of speech; saved first, then part of speech, then rank, then sense id; a saved sense
+  keeps its own lexeme's part of speech; the level spans both lexemes' saved senses. The
+  single-lexeme cases still cover the representative form, the fallback when a saved form no
+  longer renders its sense, and the null level when nothing is saved.
 
 ### Unit, mobile
 
 - `partsOfSpeechLabel`: one code, two codes joined, an unknown code dropped, an empty list.
 - `appendPage` de-duplicates by lemma.
-- the client: `listVocabulary` sends no `sort`; `vocabularyWord` puts the lemma in `?lemma=`,
-  encoded, with a space and a Cyrillic lemma as cases.
+- the client: `listVocabulary` sends a level and no `sort`; `vocabularyWord` puts the lemma in
+  `?lemma=`, encoded, with a space, a Cyrillic lemma and a slash as cases.
+- `strings.levelAll` is "הכל".
 
 ### Integration, real Postgres
 
 - **Schema:** the column is NOT NULL; the indexes on `vocabulary_entries` are exactly the
   primary key and `vocabulary_entries_enrollment_lemma_idx`; an entry whose lemma differs from
-  its lexeme's is rejected by the foreign key.
+  its lexeme's is rejected by the foreign key, even when another lexeme has that lemma.
 - **Migration:** entries saved before it get their lexeme's lemma.
-- **Repo:** save writes the lemma; the page groups two lexemes of one lemma into one row with
-  one level; the level filter sees the merged level; a walk of 120 lemmas pages without
-  repeating or skipping; summaries count saved and total senses across lexemes and list the
-  parts of speech; the detail's reads find both lexemes and their saved entries.
-- **Routes:** the list has no `sort`, and a phase 20 cursor answers 400; the detail by lemma
-  merges two lexemes, answers 404 for a lemma not in the target language, 400 for a missing
-  lemma, and accepts a lemma with a space.
+- **Repo:** save writes the lemma; the page groups two lexemes of one lemma into one row, at
+  its newer save, with one level; the level filter sees the merged level; the page orders by
+  newest save, breaks a tie by lemma descending, keeps microseconds and continues strictly
+  after a cursor, also under a level filter; lemmas that differ only in case stay two rows;
+  summaries count saved and total senses across lexemes and list the parts of speech, naming
+  only those with a saved sense; the detail's reads find both lexemes and their saved entries.
+- **Routes:** a walk of 120 lemmas in pages of 50 serves each once, newest first, also when an
+  old lemma moves to the top, or gains a save in another of its lexemes, mid-walk; a lemma with
+  two lexemes is one row with both parts of speech, counts across both and has one level, and
+  keeps its row when one lexeme's last saved sense is unsaved; the list ignores a `sort` an
+  older app still sends, and a phase 18 or phase 20 cursor answers 400; the detail by lemma
+  merges two lexemes, matches the lemma exactly, answers 404 for a lemma not in the target
+  language, 400 for a missing or empty lemma, and finds a lemma with a space or a slash.
 - **Plan test:** the fixture writes `lemma`. The list's shapes are now three: first page, after
   a cursor, one level. Each still reads progress through
-  `sense_progress_enrollment_dimension_idx`, scans no watched table sequentially, and the heavy
-  enrollment's first page stays under 50 ms. The detail's lemma reads (lexemes by lemma,
-  renderings of those lexemes, saved entries by lemma) are added, and `dict_lexemes` joins the
-  watched tables.
+  `sense_progress_enrollment_dimension_idx` and scans no watched table sequentially. The heavy
+  enrollment's first page and its first one-level page each stay under 50 ms. The detail's
+  lemma reads (lexemes by lemma, renderings of those lexemes, saved entries by lemma) are added,
+  and `dict_lexemes` joins the watched tables. The saved-entries read must go through
+  `vocabulary_entries_enrollment_lemma_idx`, which the sequential-scan check alone cannot tell
+  from a bitmap scan of the primary key.
 - Every fixture that inserts into `vocabulary_entries` directly supplies `lemma`.
 
 ### E2E
 
 1. **`vocabulary.spec.ts`, new test:** a Russian learner looks up знать, whose lookup returns
-   two lexemes, the verb (to know) and the noun (nobility), saves a sense of each, and sees one
-   row for знать with the mark 2/2 and both parts of speech. The detail shows both cards, each
-   labelled with its part of speech; unsaving one keeps the row, with the mark 1/2.
+   two lexemes, the verb (to know) and the noun (nobility), saves both senses with save-all, and
+   sees one row for знать with the mark 2/2 and both parts of speech. The detail shows both
+   cards, the noun first, each labelled with its part of speech; unsaving the noun sense keeps
+   the row, with the mark 1/2 and only the verb named. The lookup comes from a `ZNAT` fixture in
+   `e2e/tests/support/lexemes.ts`.
 2. **`vocabulary.spec.ts`, existing test:** unchanged in behaviour; it navigates through the
    lemma route.
-3. **`progress.spec.ts`:** the sort steps are removed. The filter step selects a level, then
-   "הכל" to clear it, and "הכל" is selected when the list opens.
+3. **`progress.spec.ts`:** the sort steps are replaced by a check that no sort chip exists and
+   that "הכל" is visible when the list opens. The filter step selects a level, then taps "הכל"
+   to clear it; the empty-level step clears the same way.
 
 ### Eval
 
