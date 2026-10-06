@@ -2,7 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 
 import { createFakeLlmClient, createFakeLogger } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
-import { SessionNotFound } from '../errors';
+import type { SessionRecord } from '../domain/session';
+import { AnswerKindMismatch, SessionNotFound } from '../errors';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
@@ -167,7 +168,62 @@ describe('repos', () => {
     });
 
     await expect(
-      service.submitAnswer('00000000-0000-0000-0000-000000000000', 'q-window', 0),
+      service.submitAnswer('00000000-0000-0000-0000-000000000000', 'q-window', { option_index: 0 }),
     ).rejects.toBeInstanceOf(SessionNotFound);
+  });
+
+  // Phase 23. A typed card, the first of two, mid-session.
+  const TYPED_SESSION: SessionRecord = {
+    user_id: 'u1',
+    questions: [
+      {
+        id: 't1',
+        type: 'typed_translation',
+        vocab_term_id: 'l1',
+        question: 'חלון',
+        part_of_speech: 'noun',
+        answer: 'finestra',
+        lemma: 'finestra',
+        alternatives: [],
+      },
+      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+    ],
+    answers: [],
+    complete: false,
+    completed_at: null,
+    status: 'ready',
+    source: 'list',
+  };
+
+  it('stores a typed answer with the verdict the learner was shown', async () => {
+    const inserted: unknown[] = [];
+    const service = createSessionService({
+      transaction: fakeTransaction(
+        sessionRepoWith({
+          loadSession: async () => TYPED_SESSION,
+          insertAnswer: async (...args) => {
+            inserted.push(args);
+          },
+        }),
+      ),
+      rng: testRng(7),
+      logger: createFakeLogger(),
+      llm: createFakeLlmClient(''),
+    });
+
+    const result = await service.submitAnswer('s1', 't1', { text: 'finestar' });
+    expect(inserted).toEqual([['s1', 0, 't1', { text: 'finestar', verdict: 'near_miss' }]]);
+    expect(result.answers[0]).toMatchObject({ is_correct: true, verdict: 'near_miss' });
+  });
+
+  it('refuses an option index on a typed card, writing nothing', async () => {
+    const service = createSessionService({
+      transaction: fakeTransaction(sessionRepoWith({ loadSession: async () => TYPED_SESSION })),
+      rng: testRng(7),
+      logger: createFakeLogger(),
+      llm: createFakeLlmClient(''),
+    });
+
+    await expect(service.submitAnswer('s1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
   });
 });

@@ -1,10 +1,10 @@
 import type { SessionSource, SessionStatus } from '@lang-tutor/core/api';
-import { LIVE_DIMENSIONS, pickQuestions } from '@lang-tutor/core/domain';
+import { LIVE_DIMENSIONS, shuffleOptions, type AnswerInput } from '@lang-tutor/core/domain';
 
 import {
   buildDistractorPrompt,
   distractorItems,
-  optionsFor,
+  generatedContent,
   parseLlmDistractors,
   validateDistractors,
 } from '../domain/distractors';
@@ -20,8 +20,10 @@ import {
   pickSenses,
   sessionScore,
   step,
+  typeFor,
 } from '../domain/session';
 import {
+  AnswerKindMismatch,
   EnrollmentNotFound,
   InsufficientQuestions,
   InvalidDistractors,
@@ -195,10 +197,13 @@ export function createSessionService({
       if (skipped) logger.info({ event: 'session_skipped', session_id: sessionId });
     },
 
+    /** `answer` is an option index for a choice and the typed text for a
+     *  typed card (phase 23). A typed answer is judged here, by the same
+     *  judgeTyped the app ran for its feedback, and stored with its verdict. */
     submitAnswer: async (
       sessionId: string,
       questionId: string,
-      optionIndex: number,
+      answer: AnswerInput,
     ): Promise<SessionResult> => {
       // The transaction returns its outcome and the log fires after it resolves:
       // a commit that fails after completeSession must not leave a log claiming a
@@ -213,11 +218,14 @@ export function createSessionService({
           throw new SessionNotReady(sessionId, loaded.status);
         }
 
-        // Three failure modes, three domain outcomes, three errors — the domain
+        // Four failure modes, four domain outcomes, four errors — the domain
         // decides what is wrong, this layer only names it.
-        const outcome = step(loaded, questionId, optionIndex);
+        const outcome = step(loaded, questionId, answer);
         if (outcome.status === 'invalid_question') throw new QuestionDesynced(questionId);
-        if (outcome.status === 'out_of_range') throw new OptionOutOfRange(optionIndex);
+        if (outcome.status === 'wrong_answer_kind') throw new AnswerKindMismatch(questionId);
+        if (outcome.status === 'out_of_range') {
+          throw new OptionOutOfRange('option_index' in answer ? answer.option_index : -1);
+        }
         // A replay reports justCompleted: false, so retrying a completed session
         // logs nothing and writes no progress.
         if (outcome.status === 'replayed') {
@@ -225,7 +233,15 @@ export function createSessionService({
           return { result: { ...outcome.record, progress }, justCompleted: false };
         }
 
-        await repos.session.insertAnswer(sessionId, loaded.answers.length, questionId, optionIndex);
+        const recorded = outcome.record.answers[loaded.answers.length];
+        await repos.session.insertAnswer(
+          sessionId,
+          loaded.answers.length,
+          questionId,
+          'text' in answer
+            ? { text: answer.text, verdict: recorded.verdict! }
+            : { displayIndex: answer.option_index },
+        );
 
         if (outcome.justCompleted) {
           await repos.session.completeSession(sessionId);
@@ -277,7 +293,10 @@ export function createSessionService({
         throw new InvalidDistractors(sessionId, 'none of the picked senses is in the dictionary any more');
       }
 
-      const items = distractorItems(read.context);
+      // Phase 23 (spec D2). The picks are in random order already; position
+      // decides the type, and the order is kept from here on.
+      const types = read.context.map((_, index) => typeFor(index));
+      const items = distractorItems(read.context, types);
       const raw = await llm(
         buildDistractorPrompt({
           items,
@@ -305,12 +324,19 @@ export function createSessionService({
             senseId: row.senseId,
             variantId: row.variantId,
             form: row.form,
+            lemma: row.lemma,
+            partOfSpeech: row.partOfSpeech,
             lexemeId: row.lexemeId,
-            options: optionsFor(row.translation, verdict.byKey.get(items[index].key)!),
+            type: types[index],
+            ...generatedContent(row, types[index], verdict.byKey.get(items[index].key)!),
           })),
         });
-        // The same shuffle seed sessions get: question order and option order.
-        await session.insertSessionQuestions(sessionId, pickQuestions(generated, generated.length, rng));
+        // Options are shuffled as a seed session's are; the question order is
+        // not, because the type cycle is by position.
+        await session.insertSessionQuestions(
+          sessionId,
+          generated.map((question) => shuffleOptions(question, rng)),
+        );
         return true;
       });
 
