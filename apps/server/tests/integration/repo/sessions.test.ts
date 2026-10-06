@@ -4,11 +4,13 @@ import { eq } from 'drizzle-orm';
 
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
+import { asChoice } from '../../support/questions';
 import { testRng } from '../../support/testRng';
+import { seedSavedSenses } from '../../support/vocabularyRows';
 import { withTx } from '../../support/withTx';
 import type { Tx } from '../../../src/db/client';
 import { newSessionRecord } from '../../../src/domain/session';
-import { sessions } from '../../../src/db/schema';
+import { answers, sessionQuestions, sessions } from '../../../src/db/schema';
 import { SessionOpen } from '../../../src/errors';
 import { createQuestionRepo } from '../../../src/repo/questions';
 import { createSessionRepo } from '../../../src/repo/sessions';
@@ -88,10 +90,10 @@ describe('insertAnswer', () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const before = await sessionRepo.loadSession(sessionId);
-      const question = before!.questions[0];
+      const question = asChoice(before!.questions[0]);
       const displayIndex = question.correct_option;
 
-      await sessionRepo.insertAnswer(sessionId, 0, question.id, displayIndex);
+      await sessionRepo.insertAnswer(sessionId, 0, question.id, { displayIndex });
 
       const after = await sessionRepo.loadSession(sessionId);
       expect(after!.answers).toEqual([
@@ -108,10 +110,10 @@ describe('insertAnswer', () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const before = await sessionRepo.loadSession(sessionId);
-      const question = before!.questions[0];
+      const question = asChoice(before!.questions[0]);
       const wrongDisplay = (question.correct_option + 1) % question.options.length;
 
-      await sessionRepo.insertAnswer(sessionId, 0, question.id, wrongDisplay);
+      await sessionRepo.insertAnswer(sessionId, 0, question.id, { displayIndex: wrongDisplay });
 
       const after = await sessionRepo.loadSession(sessionId);
       expect(after!.answers[0].is_correct).toBe(false);
@@ -127,8 +129,8 @@ describe('insertAnswer', () => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const loaded = await sessionRepo.loadSession(sessionId);
       const question = loaded!.questions[0];
-      await sessionRepo.insertAnswer(sessionId, 0, question.id, 0);
-      await expect(sessionRepo.insertAnswer(sessionId, 0, question.id, 1)).rejects.toThrow();
+      await sessionRepo.insertAnswer(sessionId, 0, question.id, { displayIndex: 0 });
+      await expect(sessionRepo.insertAnswer(sessionId, 0, question.id, { displayIndex: 1 })).rejects.toThrow();
     });
   });
 
@@ -137,7 +139,90 @@ describe('insertAnswer', () => {
       const { sessionRepo, sessionId } = await startSession(tx);
       const loaded = await sessionRepo.loadSession(sessionId);
       const notFirst = loaded!.questions[1];
-      await expect(sessionRepo.insertAnswer(sessionId, 0, notFirst.id, 0)).rejects.toThrow();
+      await expect(sessionRepo.insertAnswer(sessionId, 0, notFirst.id, { displayIndex: 0 })).rejects.toThrow();
+    });
+  });
+});
+
+describe('phase 23: typed answers', () => {
+  /** A list session holding one typed question, the way prepare-session writes it. */
+  async function typedSession(tx: Tx) {
+    const word = await seedSavedSenses(tx, { enrollmentId: enrollmentOf('u_1'), lemma: 'tome', translations: ['ספר'] });
+    const sessionRepo = createSessionRepo(tx);
+    const [typed] = await createQuestionRepo(tx).insertGeneratedQuestions({
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      targetLanguage: 'en',
+      userLanguageCode: 'he',
+      questions: [
+        {
+          senseId: word.senseIds[0],
+          variantId: word.variantId,
+          form: 'tome',
+          lemma: 'tome',
+          partOfSpeech: 'noun',
+          lexemeId: word.lexemeId,
+          type: 'typed_translation',
+          prompt: 'ספר',
+          options: null,
+          alternatives: ['book'],
+        },
+      ],
+    });
+    const sessionId = await sessionRepo.insertPreparingSession('u_1', enrollmentOf('u_1'));
+    await sessionRepo.insertSessionQuestions(sessionId, [typed]);
+    return { sessionRepo, sessionId, typed };
+  }
+
+  it('writes an empty option order and round-trips the text and its verdict', async () => {
+    await withTx(t.db, async (tx) => {
+      const { sessionRepo, sessionId, typed } = await typedSession(tx);
+      const [{ order }] = await tx
+        .select({ order: sessionQuestions.optionOrder })
+        .from(sessionQuestions)
+        .where(eq(sessionQuestions.sessionId, sessionId));
+      expect(order).toEqual([]);
+
+      await sessionRepo.insertAnswer(sessionId, 0, typed.id, { text: 'tomb', verdict: 'near_miss' });
+      const loaded = await sessionRepo.loadSession(sessionId);
+      expect(loaded!.questions).toEqual([typed]);
+      expect(loaded!.answers).toEqual([
+        { question_id: typed.id, is_correct: true, answer_string: 'tomb', verdict: 'near_miss' },
+      ]);
+    });
+  });
+
+  it('reads a wrong typed answer as incorrect', async () => {
+    await withTx(t.db, async (tx) => {
+      const { sessionRepo, sessionId, typed } = await typedSession(tx);
+      await sessionRepo.insertAnswer(sessionId, 0, typed.id, { text: '', verdict: 'wrong' });
+      expect((await sessionRepo.loadSession(sessionId))!.answers[0]).toMatchObject({ is_correct: false, verdict: 'wrong' });
+    });
+  });
+
+  // answers_kind_valid and answers_verdict_known (spec D12).
+  it('refuses an answer with both an option and a text', async () => {
+    await withTx(t.db, async (tx) => {
+      const { sessionId, typed } = await typedSession(tx);
+      await expect(
+        tx.insert(answers).values({ sessionId, position: 0, questionId: typed.id, selectedOptionPosition: 0, typedText: 'tome', verdict: 'exact' }),
+      ).rejects.toThrow();
+    });
+  });
+
+  it('refuses a text without a verdict', async () => {
+    await withTx(t.db, async (tx) => {
+      const { sessionId, typed } = await typedSession(tx);
+      await expect(tx.insert(answers).values({ sessionId, position: 0, questionId: typed.id, typedText: 'tome' })).rejects.toThrow();
+    });
+  });
+
+  it('refuses an unknown verdict', async () => {
+    await withTx(t.db, async (tx) => {
+      const { sessionId, typed } = await typedSession(tx);
+      await expect(
+        tx.insert(answers).values({ sessionId, position: 0, questionId: typed.id, typedText: 'tome', verdict: 'maybe' }),
+      ).rejects.toThrow();
     });
   });
 });
@@ -201,7 +286,7 @@ describe('session state (phase 19)', () => {
   it('summarises the newest session: answered and total', async () => {
     expect(await repo((r) => r.findLatest(E))).toBeUndefined();
     const { sessionId, record } = await withTx(t.db, (tx) => startSession(tx));
-    await repo((r) => r.insertAnswer(sessionId, 0, record.questions[0].id, 0));
+    await repo((r) => r.insertAnswer(sessionId, 0, record.questions[0].id, { displayIndex: 0 }));
     expect(await repo((r) => r.findLatest(E))).toEqual({
       id: sessionId,
       status: 'ready',

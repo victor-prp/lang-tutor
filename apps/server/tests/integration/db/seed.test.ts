@@ -196,8 +196,9 @@ describe('seedContent', () => {
         .select()
         .from(questions)
         .where(eq(questions.id, entry.question_id));
+      // A seed question is always today's card, so it has options.
       expect(question.options).toEqual(optionsFor(entry));
-      expect(question.options.find((option) => option.is_correct)!.text).toBe(
+      expect(question.options!.find((option) => option.is_correct)!.text).toBe(
         correctAnswerFor(entry),
       );
     }

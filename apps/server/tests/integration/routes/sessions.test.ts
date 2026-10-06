@@ -9,6 +9,8 @@ import {
   seedUser,
 } from '../../support/seedUser';
 import { saveSessionSenses } from '../../support/progressRows';
+import { insertListSession } from '../../support/questions';
+import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
@@ -177,6 +179,86 @@ describe('POST /api/sessions', () => {
 
     await walk('e_u_1_it', true);
     await walk(enrollmentOf('u_1'), false);
+  });
+});
+
+// Phase 23. A ready list session of three saved words, so of all three types.
+async function startMixed() {
+  const asked = [];
+  for (const [lemma, translation] of [
+    ['tome', 'ספר'],
+    ['quill', 'נוצה'],
+    ['lantern', 'פנס'],
+  ]) {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
+    asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+  }
+  return insertListSession(t.db, { userId: 'u_1', enrollmentId: enrollmentOf('u_1'), asked, alternatives: ['lamp'] });
+}
+
+describe('POST /api/sessions/:id/next-step, phase 23', () => {
+  it('serves the three types and answers a typed card by its text', async () => {
+    const app = buildTestApp();
+    const { sessionId, questions } = await startMixed();
+    const step = (question_id: string, answer: object) =>
+      postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id, ...answer });
+
+    const first = await (await step(questions[0].id, { option_index: 0 })).json();
+    expect(first.question).toMatchObject({ type: 'reverse_choice', question: 'נוצה', part_of_speech: 'noun' });
+    const second = await (await step(questions[1].id, { option_index: 0 })).json();
+    expect(second.question).toEqual({
+      id: questions[2].id,
+      type: 'typed_translation',
+      vocab_term_id: questions[2].vocab_term_id,
+      question: 'פנס',
+      part_of_speech: 'noun',
+      answer: 'lantern',
+      lemma: 'lantern',
+      alternatives: ['lamp'],
+    });
+
+    const done = await step(questions[2].id, { text: 'lamp' });
+    expect(done.status).toBe(200);
+    const body = await done.json();
+    expect(body).toMatchObject({ complete: true, score: { correct: 3, total: 3 }, missed_questions: [] });
+    // An alternative is right but says nothing about this sense: nothing rose.
+    const lantern = body.progress.find((item: { form: string }) => item.form === 'lantern');
+    expect(lantern).toMatchObject({ translation: 'פנס', raised: [] });
+    const quill = body.progress.find((item: { form: string }) => item.form === 'quill');
+    expect(quill).toMatchObject({ translation: 'נוצה', raised: ['written_receptive', 'written_productive'] });
+  });
+
+  it('400s an answer of the wrong kind, either way round', async () => {
+    const app = buildTestApp();
+    const { sessionId, questions } = await startMixed();
+    const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, {
+      user_id: 'u_1',
+      question_id: questions[0].id,
+      text: 'tome',
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'the answer is not the kind this question takes' });
+
+    await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[0].id, option_index: 0 });
+    await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[1].id, option_index: 0 });
+    const typed = await postJson(app, `/api/sessions/${sessionId}/next-step`, {
+      user_id: 'u_1',
+      question_id: questions[2].id,
+      option_index: 0,
+    });
+    expect(typed.status).toBe(400);
+  });
+
+  it('400s typed text over 100 characters', async () => {
+    const app = buildTestApp();
+    const { sessionId, questions } = await startMixed();
+    const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, {
+      user_id: 'u_1',
+      question_id: questions[0].id,
+      text: 'x'.repeat(101),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
   });
 });
 
