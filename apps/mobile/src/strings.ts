@@ -104,6 +104,8 @@ export const strings = {
   profileAgeLabel: 'גיל',
   switchUser: 'החלפת משתמש',
   back: 'חזרה',
+  // Phase 23. The speaker button's accessibility label.
+  speak: 'השמעה',
   translateEntry: 'תרגום מלה או ביטוי',
   translateTitle: 'תרגום',
   translatePlaceholder: 'מלה או ביטוי…',
