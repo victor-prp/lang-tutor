@@ -4,6 +4,8 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/LevelBadge';
+import { SpeakButton } from '@/components/SpeakButton';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
 import { practisedRows } from '@/progress';
@@ -20,6 +22,10 @@ function headlineFor(correct: number, total: number): string {
 export default function ResultsScreen() {
   const session = useSession();
   const next = useNextSession();
+  // Phase 23. The practised forms and missed prompts are in the active
+  // enrollment's target language.
+  const { active } = useCurrentUser();
+  const language = active?.target_language ?? null;
   // A ref guards re-entry (state is stale between two taps in one frame); the
   // state only drives the disabled look.
   const inFlight = useRef(false);
@@ -58,8 +64,9 @@ export default function ResultsScreen() {
             <Text style={styles.missedTitle}>{strings.resultsPractisedTitle}</Text>
             {practisedRows(progress).map((row) => (
               <View key={row.sense_id} style={[styles.missedRow, row.raised && styles.raisedRow]} testID="practised-row">
-                <View style={styles.missedCellStart}>
-                  <Text style={styles.missedPrompt}>{row.form}</Text>
+                <View style={[styles.missedCellStart, styles.spoken]}>
+                  <Text style={[styles.missedPrompt, styles.shrink]}>{row.form}</Text>
+                  {language ? <SpeakButton text={row.form} language={language} testID="speak-practised" /> : null}
                 </View>
                 <View style={styles.missedCellEnd}>
                   <Text style={styles.missedAnswer}>{row.translation}</Text>
@@ -80,8 +87,11 @@ export default function ResultsScreen() {
             <Text style={styles.missedTitle}>{strings.resultsMissedTitle}</Text>
             {missedQuestions.map(({ question, correct_answer }) => (
               <View key={question.id} style={styles.missedRow} testID="missed-row">
-                <View style={styles.missedCellStart}>
-                  <Text style={styles.missedPrompt}>{question.question}</Text>
+                <View style={[styles.missedCellStart, styles.spoken]}>
+                  <Text style={[styles.missedPrompt, styles.shrink]}>{question.question}</Text>
+                  {language ? (
+                    <SpeakButton text={question.question} language={language} testID="speak-missed" />
+                  ) : null}
                 </View>
                 <View style={styles.missedCellEnd}>
                   <Text style={styles.missedAnswer}>{correct_answer}</Text>
@@ -162,6 +172,8 @@ const styles = StyleSheet.create({
   // than a physical textAlign, which native RTL would swap.
   missedCellStart: { flex: 1, alignItems: 'flex-start' },
   missedCellEnd: { flex: 1, alignItems: 'flex-end' },
+  spoken: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  shrink: { flexShrink: 1 },
   missedPrompt: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,

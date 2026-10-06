@@ -8,6 +8,7 @@ import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { ProgressBar } from '@/components/ProgressBar';
 import { confirm } from '@/confirm';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
 import { strings } from '@/strings';
@@ -18,6 +19,7 @@ import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 // feedback banner and scoring are untouched.
 function renderQuestion(
   question: Question,
+  language: string | null,
   selectedOption: number | null,
   onSelect: (optionIndex: number) => void,
 ) {
@@ -26,6 +28,7 @@ function renderQuestion(
       return (
         <MultipleChoiceView
           question={question}
+          language={language}
           selectedOption={selectedOption}
           onSelect={onSelect}
         />
@@ -42,6 +45,9 @@ function renderQuestion(
 export default function SessionScreen() {
   const session = useSession();
   const next = useNextSession();
+  // Phase 23. A session belongs to the active enrollment, so its prompts are in
+  // that enrollment's target language.
+  const { active } = useCurrentUser();
   // Re-entry guard: a fast double tap on skip must not stack two confirms.
   const skipping = useRef(false);
 
@@ -103,7 +109,7 @@ export default function SessionScreen() {
       <ProgressBar position={session.position} total={session.total} />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        {renderQuestion(question, session.selectedOption, session.select)}
+        {renderQuestion(question, active?.target_language ?? null, session.selectedOption, session.select)}
       </ScrollView>
 
       {session.answered ? (

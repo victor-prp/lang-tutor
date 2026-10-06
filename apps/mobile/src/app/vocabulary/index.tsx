@@ -4,6 +4,7 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/LevelBadge';
+import { SpeakButton } from '@/components/SpeakButton';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useVocabulary } from '@/hooks/useVocabulary';
 import { strings } from '@/strings';
@@ -47,6 +48,7 @@ export default function VocabularyScreen() {
   // a change made there appear here.
   useFocusEffect(useCallback(() => reload(), [reload]));
   if (!active) return <Redirect href="/" />;
+  const language = active.target_language;
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -110,24 +112,29 @@ export default function VocabularyScreen() {
         renderItem={({ item }) => {
           const partsOfSpeech = partsOfSpeechLabel(item.parts_of_speech);
           return (
-            <Pressable
-              accessibilityRole="button"
-              testID="vocabulary-word"
-              onPress={() => router.push({ pathname: '/vocabulary/word', params: { lemma: item.lemma } })}
-              style={styles.row}
-            >
-              <View style={styles.rowTop}>
-                <Text style={styles.lemma}>{item.lemma}</Text>
-                {showsMark(item) ? (
-                  <Text testID="vocabulary-mark" style={styles.mark}>
-                    {strings.vocabularyMark(item.saved_count, item.sense_count)}
-                  </Text>
-                ) : null}
-              </View>
-              <LevelBadge level={item.level} testID="vocabulary-word-level" />
-              {partsOfSpeech ? <Text style={styles.meta}>{partsOfSpeech}</Text> : null}
-              <Text style={styles.translation}>{item.headline.translation}</Text>
-            </Pressable>
+            <View style={styles.row}>
+              <Pressable
+                accessibilityRole="button"
+                testID="vocabulary-word"
+                onPress={() => router.push({ pathname: '/vocabulary/word', params: { lemma: item.lemma } })}
+                style={styles.rowMain}
+              >
+                <View style={styles.rowTop}>
+                  <Text style={styles.lemma}>{item.lemma}</Text>
+                  {showsMark(item) ? (
+                    <Text testID="vocabulary-mark" style={styles.mark}>
+                      {strings.vocabularyMark(item.saved_count, item.sense_count)}
+                    </Text>
+                  ) : null}
+                </View>
+                <LevelBadge level={item.level} testID="vocabulary-word-level" />
+                {partsOfSpeech ? <Text style={styles.meta}>{partsOfSpeech}</Text> : null}
+                <Text style={styles.translation}>{item.headline.translation}</Text>
+              </Pressable>
+              {/* A sibling, not a child: a button inside the row's button is
+                  announced badly by screen readers (spec §1 D10). */}
+              <SpeakButton text={item.lemma} language={language} testID="speak-word" />
+            </View>
           );
         }}
       />
@@ -141,14 +148,19 @@ const styles = StyleSheet.create({
   title: { fontSize: fontSizes.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   list: { gap: spacing.sm, paddingBottom: spacing.xl },
+  // Phase 23 (spec §1 D10). The card holds two sibling buttons: the word, which
+  // opens it, and its speaker.
   row: {
     backgroundColor: colors.surface,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.md,
-    gap: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingEnd: spacing.md,
+    gap: spacing.sm,
   },
+  rowMain: { flex: 1, padding: spacing.md, gap: spacing.xs },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   lemma: { fontSize: fontSizes.lg, fontWeight: '700', color: colors.text },
   mark: { fontSize: fontSizes.sm, color: colors.muted },

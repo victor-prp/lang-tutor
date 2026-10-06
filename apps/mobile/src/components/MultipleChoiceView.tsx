@@ -3,16 +3,19 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { OptionButton, type OptionVisualState } from '@/components/OptionButton';
+import { SpeakButton } from '@/components/SpeakButton';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 type Props = {
   question: MultipleChoiceQuestion;
+  /** The prompt's language: the enrollment's target. Null speaks nothing. */
+  language: string | null;
   selectedOption: number | null;
   onSelect: (optionIndex: number) => void;
 };
 
-export function MultipleChoiceView({ question, selectedOption, onSelect }: Props) {
+export function MultipleChoiceView({ question, language, selectedOption, onSelect }: Props) {
   // All four buttons match the tallest, so a wrapped phrase does not leave the
   // set visually ragged. Reset on every new question.
   const [maxHeight, setMaxHeight] = useState(0);
@@ -33,7 +36,10 @@ export function MultipleChoiceView({ question, selectedOption, onSelect }: Props
   return (
     <View style={styles.container}>
       <Text style={styles.instruction}>{strings.questionInstruction}</Text>
-      <Text style={styles.prompt} testID="question-prompt">{question.question}</Text>
+      <View style={styles.promptRow}>
+        <Text style={styles.prompt} testID="question-prompt">{question.question}</Text>
+        {language ? <SpeakButton text={question.question} language={language} testID="speak-prompt" /> : null}
+      </View>
       <View style={styles.options}>
         {question.options.map((option, index) => (
           <OptionButton
@@ -64,7 +70,9 @@ const styles = StyleSheet.create({
   },
   // The English prompt is centred and explicitly LTR so it reads correctly
   // inside the mirrored screen, punctuation included.
+  promptRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   prompt: {
+    flexShrink: 1,
     fontSize: fontSizes.xl,
     lineHeight: lineHeights.xl,
     color: colors.text,
