@@ -155,9 +155,11 @@ ring switch is on silent. A learner who presses play has asked for sound, as in 
 at start-up the speaker sets the audio mode through `expo-audio`:
 `playsInSilentMode: true, interruptionMode: 'mixWithOthers'`. That sets the shared audio session
 to the playback category, which the synthesizer uses, since its `usesApplicationAudioSession`
-defaults to true. `mixWithOthers` keeps the learner's music or podcast playing underneath. On the
-web the call does nothing, and Android plays TTS on the media stream regardless. A failure to set
-the mode is ignored: speech still works whenever the switch is off.
+defaults to true. `mixWithOthers` keeps the learner's music or podcast playing underneath. The
+speaker sets the mode on iOS only. On Android, expo-audio's audio mode is device-wide: it sets
+`MODE_NORMAL` and turns the speakerphone on, which could reroute a call the learner is on, and TTS
+plays on the media stream there regardless. The web ignores the call. A failure to set the mode is
+ignored: speech still works whenever the switch is off.
 
 **D9. Hearing a word earns no progress.** `spoken_receptive` measures understanding speech, and
 pressing play proves nothing about that. It stays out of `LIVE_DIMENSIONS` until the listening

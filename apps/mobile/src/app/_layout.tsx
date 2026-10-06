@@ -32,7 +32,7 @@ const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage 
 
 // Phase 23. The device's own speech engine (spec §1 D1). The audio mode is what
 // lets a tap sound with an iPhone's ring switch on silent, with the learner's
-// music kept playing underneath (D8); the web ignores it.
+// music kept playing underneath (D8). The speaker applies it on iOS only.
 const speaker = createSpeaker({
   engine: Speech,
   platform: Platform.OS,

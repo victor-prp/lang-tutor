@@ -81,9 +81,12 @@ export type SpeechSnapshot = {
 
 export type SpeakerDeps = {
   engine: SpeechEngine;
-  /** Platform.OS. Only 'android' changes anything (see voiceTags). */
+  /** Platform.OS: it picks the tag (see voiceTags) and whether to prepare audio. */
   platform: string;
-  /** Lets a tap sound with an iPhone's ring switch on silent (D8). */
+  /** Lets a tap sound with an iPhone's ring switch on silent (D8). Run on iOS
+   *  only: on Android, expo-audio's audio mode is device-wide (MODE_NORMAL and
+   *  the speakerphone on), which can reroute a call the learner is on, and TTS
+   *  there plays on the media stream anyway. The web ignores it. */
   prepareAudio: () => Promise<void>;
 };
 
@@ -108,7 +111,7 @@ export function createSpeaker({ engine, platform, prepareAudio }: SpeakerDeps) {
     /** Once per launch. A failed audio mode costs only the silent-switch case;
      *  failed voices leave nothing speakable, which beats a wrong voice. */
     start: async (): Promise<void> => {
-      await prepareAudio().catch(() => undefined);
+      if (platform === 'ios') await prepareAudio().catch(() => undefined);
       try {
         update({ tags: voiceTags(await engine.getAvailableVoicesAsync(), platform) });
       } catch {

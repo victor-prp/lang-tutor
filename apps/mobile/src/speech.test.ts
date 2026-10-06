@@ -116,6 +116,24 @@ describe('createSpeaker', () => {
     expect(speaker.snapshot().tags.get('it')).toBe('it-IT');
   });
 
+  it('leaves the audio mode alone off iOS', async () => {
+    // expo-audio on Android sets the device-wide audio mode and turns the
+    // speakerphone on, which can reroute a call the learner is on.
+    let prepared = 0;
+    for (const platform of ['android', 'web']) {
+      const speaker = createSpeaker({
+        engine: fakeEngine().engine,
+        platform,
+        prepareAudio: async () => {
+          prepared += 1;
+        },
+      });
+      await speaker.start();
+      expect(speaker.snapshot().tags.has('it')).toBe(true);
+    }
+    expect(prepared).toBe(0);
+  });
+
   it('a failed audio mode still reads the voices', async () => {
     const speaker = createSpeaker({
       engine: fakeEngine().engine,
