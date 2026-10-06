@@ -803,6 +803,18 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
     ],
   },
   {
+    // Review: two saved words with one meaning. On each reversed card the other
+    // word is right too, so offering it fails tier 1 (validateDistractors).
+    label: 'Two saved Italian words with one meaning, both to pick',
+    from: 'it',
+    to: 'he',
+    items: [
+      { task: 'word', form: 'bella', lemma: 'bello', partOfSpeech: 'adjective', translation: 'יפה', synonyms: ['carina', 'bello'] },
+      { task: 'word', form: 'carina', lemma: 'carino', partOfSpeech: 'adjective', translation: 'יפה', synonyms: ['bella', 'carino'] },
+      { task: 'word', form: 'casa', lemma: 'casa', partOfSpeech: 'noun', translation: 'בית', synonyms: ['abitazione'] },
+    ],
+  },
+  {
     label: 'Typed answers with well-known synonyms',
     from: 'en',
     to: 'he',

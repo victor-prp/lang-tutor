@@ -308,7 +308,7 @@ export function createSessionService({
       // unlike a lookup, there is nothing useful to serve without it.
       const answer = raw === '' ? null : parseLlmDistractors(raw);
       if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
-      const verdict = validateDistractors(items, answer);
+      const verdict = validateDistractors(items, answer, read.enrolled.source_language);
       if (!verdict.ok) throw new InvalidDistractors(sessionId, verdict.reason);
 
       const written = await transaction(async ({ session, question }) => {

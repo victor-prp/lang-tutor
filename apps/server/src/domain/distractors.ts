@@ -3,7 +3,7 @@ import { LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
 import { LANGUAGES, stripStress, type Language, type LanguageCode } from './languages';
-import { unfence } from './translation';
+import { dropNulls, unfence } from './translation';
 
 /**
  * Phase 19. The pure core of a list session's generation: what to ask the
@@ -112,6 +112,7 @@ export function buildDistractorPrompt(input: {
     'not another valid translation of the word.',
     'The three wrong answers of an item must differ from each other.',
     "When several items share a word, none of an item's wrong answers may be another item's correct answer.",
+    "When several items share a meaning, none of a \"word\" item's wrong answers may be another of those items' words.",
     'Answer every item, using its key exactly as given.',
     ...answers.writing,
     ...learned.writing,
@@ -131,6 +132,24 @@ export function buildDistractorPrompt(input: {
   return { system, user, schema: LlmDistractorsSchema };
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** A null list is "none" (structured output's spelling, dropNulls), and a
+ *  missing `distractors` is an empty one: a typed item has no wrong options to
+ *  give (phase 23, D8). What an empty list costs is the per-task validation's
+ *  call, not the parser's. */
+function withEmptyLists(json: unknown): unknown {
+  const cleaned = dropNulls(json);
+  if (!isRecord(cleaned) || !Array.isArray(cleaned.items)) return cleaned;
+  return {
+    ...cleaned,
+    items: cleaned.items.map((item) =>
+      isRecord(item) && !('distractors' in item) ? { ...item, distractors: [] } : item,
+    ),
+  };
+}
+
 /** `null` means unreadable; the caller decides what that costs. */
 export function parseLlmDistractors(raw: string): LlmDistractors | null {
   let json: unknown;
@@ -139,7 +158,7 @@ export function parseLlmDistractors(raw: string): LlmDistractors | null {
   } catch {
     return null;
   }
-  const result = LlmDistractorsSchema.safeParse(json);
+  const result = LlmDistractorsSchema.safeParse(withEmptyLists(json));
   return result.success ? result.data : null;
 }
 
@@ -154,9 +173,12 @@ const comparable = (text: string): string =>
     .trim()
     .toLowerCase();
 
-const HEBREW = /\p{Script=Hebrew}/u;
-
-function badChoice(item: DistractorItem, items: DistractorItem[], found: string[]): string | null {
+function badChoice(
+  item: DistractorItem,
+  items: DistractorItem[],
+  found: string[],
+  explanationLetters: RegExp,
+): string | null {
   const texts = found.map((text) => text.trim());
   if (texts.length !== 3 || texts.some((text) => text === '')) {
     return `${item.key} needs three non-empty wrong answers`;
@@ -167,8 +189,8 @@ function badChoice(item: DistractorItem, items: DistractorItem[], found: string[
   if (new Set(all).size !== all.length || all.some((text) => rights.map(comparable).includes(text))) {
     return `${item.key} repeats the answer or another wrong answer`;
   }
-  if (item.task === 'word' && texts.some((text) => HEBREW.test(text))) {
-    return `${item.key} offers a Hebrew wrong answer where the options are ${item.form}'s language`;
+  if (item.task === 'word' && texts.some((text) => explanationLetters.test(text))) {
+    return `${item.key} offers a wrong answer in the explanation language where the options are ${item.form}'s`;
   }
   // Save-all stores every sense of a word, so the batch can hold the same
   // form twice; the other sense's translation is a right answer on a meaning
@@ -193,15 +215,15 @@ function badChoice(item: DistractorItem, items: DistractorItem[], found: string[
 }
 
 /** Never a refusal: alternatives only widen what a typed card accepts, so a
- *  bad one is dropped (empty, Hebrew, the answer itself, a repeat) and the
- *  rest kept, up to MAX_ALTERNATIVES. */
-function cleanAlternatives(item: DistractorItem, found: string[] | undefined): string[] {
+ *  bad one is dropped (empty, in the explanation language, the answer itself,
+ *  a repeat) and the rest kept, up to MAX_ALTERNATIVES. */
+function cleanAlternatives(item: DistractorItem, found: string[] | undefined, explanationLetters: RegExp): string[] {
   const seen = new Set([item.form, item.lemma].map(comparable));
   const kept: string[] = [];
   for (const raw of found ?? []) {
     const text = raw.trim();
     const key = comparable(text);
-    if (text === '' || HEBREW.test(text) || seen.has(key)) continue;
+    if (text === '' || explanationLetters.test(text) || seen.has(key)) continue;
     seen.add(key);
     kept.push(text);
     if (kept.length === MAX_ALTERNATIVES) break;
@@ -212,19 +234,29 @@ function cleanAlternatives(item: DistractorItem, found: string[] | undefined): s
 /**
  * All or nothing for the choice tasks: a session is either fully generated or
  * the attempt fails and pg-boss retries it. A typed item cannot fail. Keys the
- * model added beyond the items asked are ignored.
+ * model added beyond the items asked are ignored. `explanation` is the
+ * language the meanings are in (the enrollment's source): a reversed card's
+ * wrong words and a typed card's alternatives must not be in its script.
  */
-export function validateDistractors(items: DistractorItem[], answer: LlmDistractors): DistractorVerdict {
+export function validateDistractors(
+  items: DistractorItem[],
+  answer: LlmDistractors,
+  explanation: string,
+): DistractorVerdict {
+  const explanationLetters = language(explanation).letters;
   const answered = new Map(answer.items.map((item) => [item.key, item]));
   const byKey = new Map<string, Generated>();
   for (const item of items) {
     const found = answered.get(item.key);
     if (!found) return { ok: false, reason: `no answer for ${item.key}` };
     if (item.task === 'typed') {
-      byKey.set(item.key, { distractors: [], alternatives: cleanAlternatives(item, found.alternatives) });
+      byKey.set(item.key, {
+        distractors: [],
+        alternatives: cleanAlternatives(item, found.alternatives, explanationLetters),
+      });
       continue;
     }
-    const reason = badChoice(item, items, found.distractors);
+    const reason = badChoice(item, items, found.distractors, explanationLetters);
     if (reason) return { ok: false, reason };
     byKey.set(item.key, { distractors: found.distractors.map((text) => text.trim()), alternatives: [] });
   }

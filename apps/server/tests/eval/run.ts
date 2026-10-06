@@ -498,7 +498,7 @@ const answeredItem = (kase: DistractorCase, answer: LlmDistractors, index: numbe
   answer.items.find((answered) => answered.key === itemsOf(kase)[index].key);
 
 function distractorTier1(kase: DistractorCase, answer: LlmDistractors): Check[] {
-  const verdict = validateDistractors(itemsOf(kase), answer);
+  const verdict = validateDistractors(itemsOf(kase), answer, kase.to);
   const checks: Check[] = [
     { name: 'every item answered as its task asks', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
   ];

@@ -52,6 +52,12 @@ describe('buildDistractorPrompt', () => {
     expect(prompt.system).toContain('share a word');
   });
 
+  // Review: the validator refuses, on a reversed card, another saved word with
+  // the same meaning. Unstated, a refusal would repeat on every retry.
+  it('tells the model that items sharing a meaning must not offer each other’s words', () => {
+    expect(prompt.system).toContain('share a meaning');
+  });
+
   it('carries the target writing rules: no nikud in Hebrew', () => {
     expect(prompt.system).toContain('no nikud');
   });
@@ -80,7 +86,22 @@ describe('parseLlmDistractors', () => {
   it('answers null for junk and for the wrong shape', () => {
     expect(parseLlmDistractors('not json')).toBeNull();
     expect(parseLlmDistractors(JSON.stringify({ items: [{ key: 'q1', distractors: ['a', 'b', 'c', 'd'] }] }))).toBeNull();
-    expect(parseLlmDistractors(JSON.stringify({ items: [{ key: 'q1' }] }))).toBeNull();
+    expect(parseLlmDistractors(JSON.stringify({ items: [{ distractors: [] }] }))).toBeNull();
+  });
+
+  // Phase 23, Review Focus 4: null is how structured output spells "none", and
+  // a typed item has no wrong options to give. Neither may fail the parse; the
+  // per-task validation decides what an empty list costs.
+  it('reads a null or missing list as an empty one', () => {
+    expect(parseLlmDistractors(JSON.stringify({ items: [{ key: 'q3', distractors: [], alternatives: null }] }))).toEqual({
+      items: [{ key: 'q3', distractors: [] }],
+    });
+    expect(parseLlmDistractors(JSON.stringify({ items: [{ key: 'q3', alternatives: ['big'] }] }))).toEqual({
+      items: [{ key: 'q3', distractors: [], alternatives: ['big'] }],
+    });
+    expect(parseLlmDistractors(JSON.stringify({ items: [{ key: 'q3', distractors: null, alternatives: ['big'] }] }))).toEqual({
+      items: [{ key: 'q3', distractors: [], alternatives: ['big'] }],
+    });
   });
 });
 
@@ -93,7 +114,7 @@ describe('validateDistractors', () => {
   });
 
   it('accepts three distinct wrong answers per item, trimmed', () => {
-    const verdict = validateDistractors(ITEMS, answer([' כתבה', 'שמעה', 'ראתה ']));
+    const verdict = validateDistractors(ITEMS, answer([' כתבה', 'שמעה', 'ראתה ']), 'he');
     expect(verdict).toEqual({
       ok: true,
       byKey: new Map([
@@ -106,30 +127,30 @@ describe('validateDistractors', () => {
   it('ignores keys nobody asked for', () => {
     const verdict = validateDistractors(ITEMS, {
       items: [...answer(['כתבה', 'שמעה', 'ראתה']).items, { key: 'q9', distractors: ['x', 'y', 'z'] }],
-    });
+    }, 'he');
     expect(verdict.ok).toBe(true);
   });
 
   it('refuses an item with no answer', () => {
-    const verdict = validateDistractors(ITEMS, { items: [{ key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] }] });
+    const verdict = validateDistractors(ITEMS, { items: [{ key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] }] }, 'he');
     expect(verdict).toEqual({ ok: false, reason: 'no answer for q2' });
   });
 
   it('refuses fewer than three wrong answers on a choice item', () => {
-    expect(validateDistractors(ITEMS, answer(['כתבה', 'שמעה'])).ok).toBe(false);
+    expect(validateDistractors(ITEMS, answer(['כתבה', 'שמעה']), 'he').ok).toBe(false);
   });
 
   it('refuses an empty distractor', () => {
-    expect(validateDistractors(ITEMS, answer(['כתבה', '  ', 'ראתה'])).ok).toBe(false);
+    expect(validateDistractors(ITEMS, answer(['כתבה', '  ', 'ראתה']), 'he').ok).toBe(false);
   });
 
   // Review Focus 4: the right answer in disguise.
   it.each([['קראה'], ['קראה '], ['קראה.']])('refuses the correct answer as a distractor: %j', (disguised) => {
-    expect(validateDistractors(ITEMS, answer(['כתבה', disguised, 'ראתה'])).ok).toBe(false);
+    expect(validateDistractors(ITEMS, answer(['כתבה', disguised, 'ראתה']), 'he').ok).toBe(false);
   });
 
   it('refuses two equal distractors', () => {
-    expect(validateDistractors(ITEMS, answer(['כתבה', 'כתבה', 'ראתה'])).ok).toBe(false);
+    expect(validateDistractors(ITEMS, answer(['כתבה', 'כתבה', 'ראתה']), 'he').ok).toBe(false);
   });
 
   // The comparison is the validator's own: a multi-word answer keeps its mark
@@ -143,21 +164,21 @@ describe('validateDistractors', () => {
     it.each([['תודה רבה.'], ['תודה רבה!'], ['תודה  רבה'], ['תודה רבה…'], ['תודה רבה?!']])(
       'refuses the multi-word answer in disguise: %j',
       (disguised) => {
-        expect(validateDistractors(phrase, one(['כתבה', disguised, 'ראתה'])).ok).toBe(false);
+        expect(validateDistractors(phrase, one(['כתבה', disguised, 'ראתה']), 'he').ok).toBe(false);
       },
     );
 
     it('accepts a different multi-word option', () => {
-      expect(validateDistractors(phrase, one(['בבקשה רבה', 'להתראות', 'ערב טוב'])).ok).toBe(true);
+      expect(validateDistractors(phrase, one(['בבקשה רבה', 'להתראות', 'ערב טוב']), 'he').ok).toBe(true);
     });
 
     it('refuses a pointed copy of the answer', () => {
-      expect(validateDistractors(ITEMS, answer(['כתבה', 'קָרָאָה', 'ראתה'])).ok).toBe(false);
+      expect(validateDistractors(ITEMS, answer(['כתבה', 'קָרָאָה', 'ראתה']), 'he').ok).toBe(false);
     });
 
     it('counts two distractors that differ only in points, marks or spacing as equal', () => {
-      expect(validateDistractors(phrase, one(['כתבה', 'כָּתְבָה', 'כתבה.'])).ok).toBe(false);
-      expect(validateDistractors(phrase, one(['שמעה רבה', 'שמעה  רבה!', 'ראתה'])).ok).toBe(false);
+      expect(validateDistractors(phrase, one(['כתבה', 'כָּתְבָה', 'כתבה.']), 'he').ok).toBe(false);
+      expect(validateDistractors(phrase, one(['שמעה רבה', 'שמעה  רבה!', 'ראתה']), 'he').ok).toBe(false);
     });
   });
 
@@ -179,15 +200,41 @@ describe('validateDistractors', () => {
 
     it('refuses a distractor that is the other sense’s translation, even in disguise', () => {
       for (const offered of ['קשת', 'קשת.', 'קֶשֶׁת']) {
-        const verdict = validateDistractors(polysemy, batch(['חציל', offered, 'מלפפון']));
+        const verdict = validateDistractors(polysemy, batch(['חציל', offered, 'מלפפון']), 'he');
         expect(verdict.ok).toBe(false);
         if (!verdict.ok) expect(verdict.reason).toContain('q1');
       }
     });
 
     it('accepts the same text on an item of a different word', () => {
-      expect(validateDistractors(polysemy, batch(['חציל', 'מלפפון', 'עגבניה'], ['קשת', 'חלב', 'ביצה'])).ok).toBe(true);
+      expect(validateDistractors(polysemy, batch(['חציל', 'מלפפון', 'עגבניה'], ['קשת', 'חלב', 'ביצה']), 'he').ok).toBe(true);
     });
+  });
+});
+
+// Review: the script a reversed card's wrong options must avoid is the
+// explanation language's, not Hebrew's. A legacy learner of Hebrew explained
+// in English gets Hebrew options and English prompts.
+describe('a learner of Hebrew explained in English', () => {
+  const HEBREW_WORDS: GenerationContext[] = [
+    { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'ספר', lemma: 'ספר', partOfSpeech: 'noun', translation: 'book' },
+    { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'חלון', lemma: 'חלון', partOfSpeech: 'noun', translation: 'window' },
+  ];
+  const items = distractorItems(HEBREW_WORDS, ['reverse_choice', 'typed_translation']);
+
+  it('accepts Hebrew wrong words and refuses English ones', () => {
+    const reply = (q1: string[]) => ({ items: [{ key: 'q1', distractors: q1 }, { key: 'q2', distractors: [] }] });
+    expect(validateDistractors(items, reply(['עט', 'דף', 'שולחן']), 'en').ok).toBe(true);
+    expect(validateDistractors(items, reply(['עט', 'pen', 'שולחן']), 'en').ok).toBe(false);
+  });
+
+  it('keeps Hebrew alternatives and drops English ones', () => {
+    const verdict = validateDistractors(
+      items,
+      { items: [{ key: 'q1', distractors: ['עט', 'דף', 'שולחן'] }, { key: 'q2', distractors: [], alternatives: ['אשנב', 'pane'] }] },
+      'en',
+    );
+    expect(verdict.ok && verdict.byKey.get('q2')!.alternatives).toEqual(['אשנב']);
   });
 });
 
@@ -233,15 +280,15 @@ describe('three tasks', () => {
   });
 
   it('accepts three target-language wrong words on a word item', () => {
-    const verdict = validateDistractors(MIXED, reply(['чеснок', 'морковь', 'капуста']));
+    const verdict = validateDistractors(MIXED, reply(['чеснок', 'морковь', 'капуста']), 'he');
     expect(verdict.ok).toBe(true);
     if (verdict.ok) expect(verdict.byKey.get('q2')).toEqual({ distractors: ['чеснок', 'морковь', 'капуста'], alternatives: [] });
   });
 
   it('refuses Hebrew, or the word itself, among a word item’s wrong options', () => {
-    expect(validateDistractors(MIXED, reply(['чеснок', 'בצל', 'капуста'])).ok).toBe(false);
-    expect(validateDistractors(MIXED, reply(['чеснок', 'лук', 'капуста'])).ok).toBe(false);
-    expect(validateDistractors(MIXED, reply(['чеснок', 'Лук.', 'капуста'])).ok).toBe(false);
+    expect(validateDistractors(MIXED, reply(['чеснок', 'בצל', 'капуста']), 'he').ok).toBe(false);
+    expect(validateDistractors(MIXED, reply(['чеснок', 'лук', 'капуста']), 'he').ok).toBe(false);
+    expect(validateDistractors(MIXED, reply(['чеснок', 'Лук.', 'капуста']), 'he').ok).toBe(false);
   });
 
   it('refuses, on a word item, another item’s word that has the same meaning', () => {
@@ -257,13 +304,13 @@ describe('three tasks', () => {
         { key: 'q1', distractors: ['brutta', 'carina', 'alta'] },
         { key: 'q2', distractors: ['brutta', 'bassa', 'alta'] },
       ],
-    });
+    }, 'he');
     expect(verdict.ok).toBe(false);
   });
 
   // Review Focus 4: alternatives may be missing or messy; never fail a session.
   it('accepts a typed item with no alternatives key, and ignores its distractors', () => {
-    const verdict = validateDistractors(MIXED, reply(['чеснок', 'морковь', 'капуста'], { distractors: ['a', 'b', 'c'] }));
+    const verdict = validateDistractors(MIXED, reply(['чеснок', 'морковь', 'капуста'], { distractors: ['a', 'b', 'c'] }), 'he');
     expect(verdict.ok).toBe(true);
     if (verdict.ok) expect(verdict.byKey.get('q3')).toEqual({ distractors: [], alternatives: [] });
   });
@@ -274,6 +321,7 @@ describe('three tasks', () => {
       reply(['чеснок', 'морковь', 'капуста'], {
         alternatives: [' скоро ', '', 'מהר', 'быстро', 'Скоро', 'живо', 'шибко', 'резво', 'стремительно', 'проворно'],
       }),
+      'he',
     );
     expect(verdict.ok).toBe(true);
     if (verdict.ok) {
