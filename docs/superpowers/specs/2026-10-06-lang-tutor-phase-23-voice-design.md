@@ -116,6 +116,9 @@ form, because the senses describe that form, not the misspelling. For a phrase o
 headword is the whole phrase or sentence, which is how the learner hears a sentence they looked
 up. A Hebrew → target lookup gets no headword row: the typed text is Hebrew and not voiced, and
 the target-language text there is each card's translation, which carries its own speaker.
+The row depends on the language, not on the device (`isVoiced(from)`). A device with no voice
+for it still shows the headword, which is also where a corrected form is read, just without a
+speaker.
 
 **D5. The speaker appears only when the device has a voice for that language.** At start-up the
 speaker asks the engine for its voices and marks a language as speakable when some voice's
@@ -180,10 +183,11 @@ accessibility label is **השמעה** ("play"), its state reports `selected` whi
 - `package.json`: `expo-speech` and `expo-audio`, at the versions SDK 57 pins
   (`expo/bundledNativeModules.json`). `npx expo install` refuses to run under this npm
   (`--allow-scripts`), so they are installed with npm at those exact ranges.
-- `src/speech.ts`, new. `VOICE_TAGS` (`en-US`, `ru-RU`, `it-IT`); `voiceTags(voices,
-  platform)`, which maps each speakable language to the tag the engine gets (D5, D6); and
-  `createSpeaker({ engine, platform, prepareAudio })`, a store with `start`, `snapshot`,
-  `subscribe`, `toggle` and `stop`.
+- `src/speech.ts`, new. `VOICE_TAGS` (`en-US`, `ru-RU`, `it-IT`); `isVoiced(language)`;
+  `voiceTags(voices, platform)`, a `Map` from each speakable language to the tag the engine gets
+  (D5, D6); and `createSpeaker({ engine, platform, prepareAudio })`, a store with `start`,
+  `snapshot`, `subscribe` and `toggle`. A `Map`, not an object, so a wire string such as
+  `constructor` cannot find a prototype key.
 - `src/hooks/useSpeech.tsx`, new. `SpeechProvider` starts the speaker once and exposes
   `canSpeak(language)`, `isPlaying(text, language)` and `toggle(text, language)`.
 - `src/components/SpeakButton.tsx`, new (D11).
