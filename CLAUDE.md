@@ -14,6 +14,18 @@ check that passes, so "it printed nothing" is not evidence on its own.
 
 Use the `create-adr` skill when a new structural decision needs recording.
 
+# Finishing a branch
+
+Finished work ends as an open PR with green CI, not as a question. When
+`superpowers:finishing-a-development-branch` runs — at the end of `executing-plans` or
+`subagent-driven-development`, or on its own — and the checkout is a named branch other
+than `master`, do not present its options menu and do not wait: take "Push and create a
+Pull Request" via the `git-create-pr` skill, then `ci-green`. Never merge locally. Keep
+the worktree, as that option already says. Put any rulings and residual review findings
+in the final message alongside the PR URL and the CI result.
+
+On `master` or a detached HEAD there is no branch to open a PR from, so stop and ask.
+
 # Prompt evals
 
 `apps/server/tests/eval/` is a fourth test bucket, run by `npm run eval`, and the only
