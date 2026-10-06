@@ -10,6 +10,7 @@ import {
   resolveKind,
   tidyAlternatives,
 } from './translation';
+import type { LanguageCode } from './languages';
 
 describe('resolveKind', () => {
   it('forces word for a single token, whatever the model said', () => {
@@ -725,9 +726,9 @@ describe('resolveCorrection', () => {
 });
 
 describe('prompts assembled from the language table', () => {
-  const system = (from: 'he' | 'en' | 'ru', to: 'he' | 'en' | 'ru') =>
+  const system = (from: LanguageCode, to: LanguageCode) =>
     buildPrompt({ text: 'x', from, to }).system;
-  const rendering = (from: 'he' | 'en' | 'ru', to: 'he' | 'en' | 'ru') =>
+  const rendering = (from: LanguageCode, to: LanguageCode) =>
     buildRenderingPrompt({
       form: 'x',
       from,
@@ -791,8 +792,46 @@ describe('prompts assembled from the language table', () => {
     expect(rendering('en', 'he')).not.toContain('Russian');
   });
 
+  it('names Italian as the learned language in both directions', () => {
+    expect(system('it', 'he')).toContain(
+      'You translate from Italian to Hebrew for a Hebrew-speaking learner of Italian.',
+    );
+    expect(system('he', 'it')).toContain(
+      'You translate from Hebrew to Italian for a Hebrew-speaking learner of Italian.',
+    );
+  });
+
+  it("carries Italian's rules exactly where they apply", () => {
+    // Reading rules: only when Italian is the source.
+    expect(system('it', 'he')).toContain('"scrivevo" belongs to "scrivere"');
+    expect(system('it', 'he')).toContain('typed without its written accent is a misspelling');
+    expect(system('he', 'it')).not.toContain('"scrivevo"');
+    // The past-tense rule: only when Italian is the target.
+    expect(system('he', 'it')).toContain('passato prossimo');
+    expect(system('it', 'he')).not.toContain('passato prossimo');
+    // Writing rules: both directions, because examples hold both.
+    expect(system('it', 'he')).toContain('grave or acute');
+    expect(system('he', 'it')).toContain('grave or acute');
+    expect(rendering('it', 'he')).toContain('"scrivevo" belongs to "scrivere"');
+    expect(rendering('it', 'he')).toContain('grave or acute');
+  });
+
+  it('keeps Italian out of every other pair', () => {
+    for (const prompt of [system('en', 'he'), system('he', 'en'), system('ru', 'he'), system('he', 'ru')]) {
+      expect(prompt).not.toContain('Italian');
+    }
+    expect(system('it', 'he')).not.toContain('Russian');
+  });
+
   it('never contains an unquoted registered matchText', () => {
-    for (const prompt of [system('en', 'he'), system('ru', 'he'), rendering('ru', 'he')]) {
+    for (const prompt of [
+      system('en', 'he'),
+      system('ru', 'he'),
+      rendering('ru', 'he'),
+      system('it', 'he'),
+      system('he', 'it'),
+      rendering('it', 'he'),
+    ]) {
       expect(prompt).not.toMatch(/see|saw/);
     }
   });

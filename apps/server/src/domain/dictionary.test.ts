@@ -409,6 +409,18 @@ describe('normalizeForm and Russian stress', () => {
   });
 });
 
+describe('normalizeForm and Italian accents', () => {
+  it('keeps an accent: it is spelling, and e and è are two words', () => {
+    expect(normalizeForm('perché')).toBe('perché');
+    expect(normalizeForm('città')).toBe('città');
+    expect(normalizeForm('è')).toBe('è');
+  });
+
+  it('strips trailing punctuation without touching the accent', () => {
+    expect(normalizeForm('perché?')).toBe('perché');
+  });
+});
+
 describe('mergeEntries and Russian stress', () => {
   it('strips stress from a lemma, so a stray mark cannot make a second lexeme', () => {
     const merged = mergeEntries([

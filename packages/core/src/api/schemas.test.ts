@@ -264,6 +264,10 @@ describe('TranslationRequestSchema', () => {
     expect(ok('ru', 'he')).toBe(true);
     expect(ok('he', 'ru')).toBe(true);
     expect(ok('en', 'ru')).toBe(false);
+    expect(ok('it', 'he')).toBe(true);
+    expect(ok('he', 'it')).toBe(true);
+    expect(ok('en', 'it')).toBe(false);
+    expect(ok('ru', 'it')).toBe(false);
     expect(ok('he', 'he')).toBe(false);
     expect(TranslationRequestSchema.safeParse({ text: 'x' }).success).toBe(false);
   });
@@ -550,8 +554,9 @@ describe('the correction block', () => {
 });
 
 describe('CreateEnrollmentRequestSchema', () => {
-  it('accepts a Hebrew-explained enrollment in English or Russian', () => {
+  it('accepts a Hebrew-explained enrollment in English, Russian or Italian', () => {
     expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'ru' }).success).toBe(true);
+    expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'it' }).success).toBe(true);
     expect(CreateEnrollmentRequestSchema.safeParse({ source_language: 'he', target_language: 'en' }).success).toBe(true);
   });
 

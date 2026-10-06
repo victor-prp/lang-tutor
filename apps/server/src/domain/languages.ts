@@ -6,7 +6,7 @@
  *
  * Pure data under ADR 0001 R3. `LanguageCode` is declared here rather than
  * imported from packages/core so this module has no dependency at all; the
- * wire's `LanguageCodeSchema` names the same three codes, and
+ * wire's `LanguageCodeSchema` names the same codes, and
  * services/translations.ts is where the two meet and the compiler checks them.
  *
  * Every rule string here goes into the prompt's system instruction, which is
@@ -14,7 +14,7 @@
  * unquoted substrings `see` or `saw` — see the comment in `buildPrompt`, and
  * the test that enforces it.
  */
-export type LanguageCode = 'he' | 'en' | 'ru';
+export type LanguageCode = 'he' | 'en' | 'ru' | 'it';
 
 export type Language = {
   code: LanguageCode;
@@ -82,6 +82,35 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
       'Write Russian without stress marks: молоко, never молоко́.',
       'Write ё wherever the word has it: ёлка, never елка.',
     ],
+  },
+  it: {
+    code: 'it',
+    name: 'Italian',
+    // The same script as English. The guard cannot tell the two apart and does
+    // not try: the client states the pair, and English typed under it → he
+    // reaches the model's third-language rule (phase 22 spec, D2).
+    letters: /\p{Script=Latin}/u,
+    // The examples are deliberately not the eval cases (parlo, libri, bella,
+    // perche, citta), so the evals measure the rule rather than recall of the
+    // example.
+    asSource: () => [
+      'An Italian noun belongs to its singular, an adjective to its masculine singular, and a',
+      'verb to its infinitive: "scrivevo" belongs to "scrivere", "case" to "casa", "rosse" to',
+      '"rosso". A pronominal verb takes its -si infinitive: "mi chiamo" belongs to "chiamarsi".',
+      // The counterpart of Russian's ё rule. Phone keyboards drop accents, and
+      // phase 13's correction path is what turns `piu` into `più` for good. The
+      // exception keeps `e` (and) from being "corrected" to `è` (is).
+      'An Italian word typed without its written accent is a misspelling: correct "piu" to',
+      '"più" and "gia" to "già". This does not apply when the unaccented spelling is itself a',
+      'different word, as e is beside è and la beside là.',
+    ],
+    // Italian has several past tenses. The passato prossimo is the one of
+    // everyday speech, which is what a beginner meets (spec D5).
+    asTarget: [
+      'For Italian past tense that citation form is the passato prossimo, third-person masculine',
+      'singular: "ha scritto", "è partito".',
+    ],
+    writing: ['Write Italian with every accent its spelling has, grave or acute: però, così, più.'],
   },
 };
 

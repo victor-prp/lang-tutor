@@ -186,10 +186,10 @@ export const UsernameSchema = z.string().regex(/^[a-z0-9_]{3,30}$/);
 
 // Every language the server knows. Request fields narrow to it; response fields
 // stay plain strings (see UserSchema below).
-export const LanguageCodeSchema = z.enum(['he', 'en', 'ru']);
+export const LanguageCodeSchema = z.enum(['he', 'en', 'ru', 'it']);
 
-// What a learner may name as their native language at sign-up. Russian is a
-// target only in phase 16.
+// What a learner may name as their native language at sign-up. Russian (phase
+// 16) and Italian (phase 22) are targets only.
 export const NativeLanguageSchema = z.enum(['he', 'en']);
 
 // Phase 16's restriction, published rather than hidden: the app's UI is Hebrew
@@ -285,8 +285,9 @@ export const TranslationRequestSchema = z
     // endpoint never learns who asked" — deliberately, and only for `saved`.
     enrollment_id: z.string().min(1).optional(),
   })
-  // Every supported pair includes Hebrew: {he,en} and {he,ru}. en↔ru is refused
-  // here, before the model is ever called.
+  // Every supported pair includes Hebrew: {he,en}, {he,ru} and {he,it}. A pair
+  // without Hebrew, en↔ru for one, is refused here, before the model is ever
+  // called.
   .refine(({ from, to }) => from !== to && (from === 'he' || to === 'he'), {
     message: 'unsupported language pair',
   });

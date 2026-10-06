@@ -29,6 +29,20 @@ describe('guardScript', () => {
     expect(guardScript('window', 'he', 'en')).toBe('wrong_direction');
   });
 
+  it('reads Italian as Latin script, accents included', () => {
+    expect(guardScript('perché', 'it', 'he')).toBe('pass');
+    expect(guardScript('città', 'it', 'he')).toBe('pass');
+    // One accented letter alone is still one Latin letter.
+    expect(guardScript('è', 'it', 'he')).toBe('pass');
+    expect(guardScript('חלון', 'it', 'he')).toBe('wrong_direction');
+    expect(guardScript('finestra', 'he', 'it')).toBe('wrong_direction');
+    expect(guardScript('окно', 'it', 'he')).toBe('out_of_pair');
+  });
+
+  it('cannot tell English from Italian, and leaves that to the model (spec D2)', () => {
+    expect(guardScript('window', 'it', 'he')).toBe('pass');
+  });
+
   it('calls any other script out of pair', () => {
     expect(guardScript('window', 'ru', 'he')).toBe('out_of_pair');
     expect(guardScript('окно', 'en', 'he')).toBe('out_of_pair');
@@ -74,7 +88,7 @@ describe('stripStress', () => {
 
 describe('LANGUAGES', () => {
   it('names every language the wire knows', () => {
-    expect(Object.keys(LANGUAGES).sort()).toEqual(['en', 'he', 'ru']);
+    expect(Object.keys(LANGUAGES).sort()).toEqual(['en', 'he', 'it', 'ru']);
   });
 
   // The MockServer constraint in Global Constraints, as a test: an unquoted
