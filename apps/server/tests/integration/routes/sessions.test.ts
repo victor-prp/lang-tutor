@@ -13,7 +13,6 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
 import { createTestServerDeps } from '../../support/serverDeps';
-import { content } from '../../../src/db/content';
 import { createSessionsRouter } from '../../../src/routes/sessions';
 
 let t: TestDb;
@@ -142,18 +141,29 @@ describe('POST /api/sessions', () => {
   });
 
   // Phase 22. English and Italian share a script, so the regexes above cannot
-  // tell their pools apart; this compares every prompt against the exact
-  // seeded queries of its pair instead.
+  // tell their pools apart. The ten Italian seed queries are named here, as the
+  // seed's own test names its counts: every Italian prompt is one of them, and
+  // no English prompt is.
   it('draws Italian, never English, for a learner holding both', async () => {
+    const ITALIAN = new Set([
+      'finestra',
+      'libro',
+      'acqua',
+      'amico',
+      'difficile',
+      'ricordare',
+      'per favore',
+      'buongiorno',
+      'grazie mille',
+      'arrivederci',
+    ]);
     await seedEnrollment(t.db, { id: 'e_u_1_it', userId: 'u_1', targetLanguage: 'it' });
     const app = buildTestApp();
-    const queriesOf = (from: string) =>
-      new Set(content.filter((entry) => entry.from === from).map((entry) => entry.query));
-    const walk = async (enrollmentId: string, expected: Set<string>) => {
+    const walk = async (enrollmentId: string, isItalian: boolean) => {
       let current = await startSeed(app, enrollmentId);
       expect(await enrollmentOfSession(t.db, current.session_id)).toBe(enrollmentId);
       for (let i = 0; i < 10; i++) {
-        expect(expected.has(current.question.question)).toBe(true);
+        expect(ITALIAN.has(current.question.question)).toBe(isItalian);
         current = await (
           await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
             user_id: 'u_1',
@@ -165,8 +175,8 @@ describe('POST /api/sessions', () => {
       expect(current.complete).toBe(true);
     };
 
-    await walk('e_u_1_it', queriesOf('it'));
-    await walk(enrollmentOf('u_1'), queriesOf('en'));
+    await walk('e_u_1_it', true);
+    await walk(enrollmentOf('u_1'), false);
   });
 });
 
