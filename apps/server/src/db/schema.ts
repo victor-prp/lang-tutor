@@ -81,7 +81,7 @@ export const enrollments = pgTable(
     unique('enrollments_user_id_id_key').on(t.userId, t.id),
     check('enrollments_languages_differ', sql`${t.sourceLanguage} <> ${t.targetLanguage}`),
     check('enrollments_source_known', sql`${t.sourceLanguage} in ('he', 'en')`),
-    check('enrollments_target_known', sql`${t.targetLanguage} in ('he', 'en', 'ru')`),
+    check('enrollments_target_known', sql`${t.targetLanguage} in ('he', 'en', 'ru', 'it')`),
   ],
 );
 

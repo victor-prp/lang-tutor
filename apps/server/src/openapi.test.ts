@@ -157,6 +157,12 @@ describe('the translation endpoint in the published document', () => {
     }
   });
 
+  it('names every supported pair, Italian included', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths['/api/translations'].post.description).toMatch(/Hebrew with Italian/);
+    expect(doc.info.description).toMatch(/Italian/);
+  });
+
   // The endpoint costs money on every call and nothing rate-limits it. A reader
   // of the document is the person most likely to point a script at it.
   it('warns in the published description that the endpoint costs money', async () => {

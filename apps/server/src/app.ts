@@ -63,7 +63,7 @@ export function createApp(deps: AppDeps) {
       title: 'lang-tutor API',
       version: '0.1.0',
       description:
-        'Practice sessions for Hebrew speakers learning English or Russian: a seeded first session, then sessions built from the words each learner saves.',
+        'Practice sessions for Hebrew speakers learning English, Russian or Italian: a seeded first session, then sessions built from the words each learner saves.',
     },
   });
   app.get('/docs', Scalar({ url: '/openapi.json', pageTitle: 'lang-tutor API' }));
