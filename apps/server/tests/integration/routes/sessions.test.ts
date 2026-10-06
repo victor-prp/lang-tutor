@@ -530,10 +530,17 @@ describe('the progress block (phase 20)', () => {
 
     const { last, asked } = await answerAll(app, first);
     expect(last.complete).toBe(true);
-    expect(last.progress).toEqual([
-      { sense_id: s0, form: asked[0].question, translation: asked[0].options[asked[0].correct_option], level_before: 1, level_after: 2 },
-      { sense_id: s1, form: asked[1].question, translation: asked[1].options[asked[1].correct_option], level_before: 1, level_after: 2 },
-    ]);
+    // Phase 23: the badge averages three live dimensions, so recognition alone,
+    // (2, 1, 1), reads 1; `raised` names what moved.
+    const item = (senseId: string, q: SeedView['question']) => ({
+      sense_id: senseId,
+      form: q.question,
+      translation: q.options[q.correct_option],
+      level_before: 1,
+      level_after: 1,
+      raised: ['written_receptive'],
+    });
+    expect(last.progress).toEqual([item(s0, asked[0]), item(s1, asked[1])]);
 
     const read = await (await getJson(app, `/api/sessions/${first.session_id}`)).json();
     expect(read.progress).toEqual(last.progress);

@@ -318,10 +318,12 @@ describe('progress (phase 20)', () => {
     expect(receptive(rows, saved[2])).toMatchObject({ level: 2, lastStepOn: day });
     expect(rows.filter((row) => row.dimension !== 'written_receptive').every((row) => row.level === 1)).toBe(true);
     expect(await readSnapshot(t.db, sessionId)).toHaveLength(15);
-    expect(result.progress.map((p) => [p.senseId, p.levelBefore, p.levelAfter])).toEqual([
-      [saved[0], 1, 2],
-      [saved[1], 1, 1],
-      [saved[2], 1, 2],
+    // Phase 23: recognition alone moves one of three live dimensions, so the
+    // badge, (2, 1, 1), still reads 1; `raised` says what did move.
+    expect(result.progress.map((p) => [p.senseId, p.levelBefore, p.levelAfter, p.raised])).toEqual([
+      [saved[0], 1, 1, ['written_receptive']],
+      [saved[1], 1, 1, []],
+      [saved[2], 1, 1, ['written_receptive']],
     ]);
   });
 
