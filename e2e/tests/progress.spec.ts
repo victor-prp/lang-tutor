@@ -4,17 +4,20 @@ import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
+import { answerChoice, answerTyped, generationStub, readCard, rightOption, type CardKind } from './support/cards';
 import { clearGemini, expectGeminiPayload } from './support/mockServer';
-import { stripIsolates } from './support/text';
 import { createLearner, logIn } from './support/users';
 
 test.setTimeout(180_000);
 
 const DIMENSIONS = ['written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling'];
-const WRONG = ['דלת', 'קיר', 'תקרה'];
-const DISTRACTORS = {
-  items: Array.from({ length: 10 }, (_, i) => ({ key: `q${i + 1}`, distractors: WRONG })),
-};
+// The saved form of each meaning, for reversed and typed cards (phase 23).
+const FORM_OF: Record<string, string> = { קראה: 'прочитала', הקריאה: 'прочитала', בצל: 'лук', קשת: 'лук' };
+
+// Phase 23. What one right answer does to a new sense's three written levels
+// (spec D6), and the badge over them: the mean, ties up.
+const LEVELS_AFTER_RIGHT: Record<CardKind, number[]> = { choice: [2, 1, 1], reverse: [2, 2, 1], typed: [2, 2, 2] };
+const badgeOf = (levels: number[]) => Math.floor(levels.reduce((a, b) => a + b, 0) / levels.length + 0.5);
 
 test('a session moves the words it practised up the ladder, and the list filters by level', async ({
   page,
@@ -39,38 +42,52 @@ test('a session moves the words it practised up the ladder, and the list filters
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
   await page.getByTestId('translate-back').click();
 
-  // 2. A list session: лук answered right, прочитала wrong.
+  // 2. A list session: лук answered right, прочитала wrong, whatever each card's
+  // type. Which word lands on which position is random, so the test records
+  // the type each лук card had and works out the levels from it.
   await clearGemini(request);
-  await expectGeminiPayload(request, DISTRACTORS);
+  await expectGeminiPayload(request, generationStub());
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
+  const lukKinds: CardKind[] = [];
   for (let position = 1; position <= 4; position++) {
-    await expect(page.getByTestId('progress-label')).toHaveText(new RegExp(`${position}\\s*/\\s*4`));
-    const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
-    const options = await Promise.all(
-      [0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`option-${i}`).textContent())),
-    );
-    const pick = prompt === 'лук' ? options.findIndex((text) => !WRONG.includes(text)) : options.indexOf(WRONG[0]);
-    await page.getByTestId(`option-${pick}`).click();
+    const card = await readCard(page, position, 4);
+    const word = card.kind === 'choice' ? card.prompt : card.kind === 'reverse' ? rightOption(card) : FORM_OF[card.prompt];
+    const right = word === 'лук';
+    if (right) lukKinds.push(card.kind);
+    if (card.kind === 'typed') {
+      if (right) await answerTyped(page, 'лук');
+      else await page.getByTestId('typed-show-answer').click();
+    } else {
+      await answerChoice(page, card, right);
+    }
     await page.getByTestId('continue-button').click();
   }
+  expect(lukKinds).toHaveLength(2);
 
-  // 3. Results: four practised words, the two лук senses moved up to נחשפה.
+  // 3. Results: four practised words. A лук card that was reversed or typed
+  // raises its badge to נחשפה; one that was today's card moves recognition
+  // only, and says so. прочитала moves nothing.
+  const lukBadges = lukKinds.map((kind) => badgeOf(LEVELS_AFTER_RIGHT[kind]));
   await expect(page.getByTestId('practised-row')).toHaveCount(4);
-  await expect(page.getByTestId('practised-raised')).toHaveCount(2);
+  await expect(page.getByTestId('practised-raised')).toHaveCount(lukBadges.filter((level) => level === 2).length);
+  await expect(page.getByTestId('practised-progressed')).toHaveCount(lukBadges.filter((level) => level === 1).length);
   const raised = page.getByTestId('practised-row').filter({ has: page.getByTestId('practised-raised') });
   for (const row of await raised.all()) {
     await expect(row).toContainText('лук');
     await expect(row.getByTestId('practised-level-name')).toHaveText('נחשפה');
   }
 
-  // 4. The list: лук at נחשפה, прочитать at חדשה.
+  // 4. The list: лук at the mean of its two senses' levels, прочитать at חדשה.
+  const lukLevel = badgeOf(lukKinds.flatMap((kind) => LEVELS_AFTER_RIGHT[kind]));
   await page.getByTestId('results-done').click();
   await tapUntil(page, 'vocabulary-entry', 'vocabulary-word');
   const words = page.getByTestId('vocabulary-word');
   await expect(words).toHaveCount(2);
-  await expect(words.filter({ hasText: 'лук' }).getByTestId('vocabulary-word-level-name')).toHaveText('נחשפה');
+  await expect(words.filter({ hasText: 'лук' }).getByTestId('vocabulary-word-level-name')).toHaveText(
+    lukLevel === 2 ? 'נחשפה' : 'חדשה',
+  );
   await expect(words.filter({ hasText: 'прочитать' }).getByTestId('vocabulary-word-level-name')).toHaveText('חדשה');
 
   // 5. No sorts any more, and the filter opens on "all".
@@ -80,10 +97,11 @@ test('a session moves the words it practised up the ladder, and the list filters
   await expect(levelAll).toHaveText('הכל');
   await expect(levelAll).toHaveAttribute('aria-selected', 'true');
 
-  // 6. Filter to a level, an empty level, and "all" to clear it.
+  // 6. Filter to a level, an empty level, and "all" to clear it. лук reads
+  // חדשה only when both its cards were today's card, beside прочитать.
   await level2.click();
-  await expect(words).toHaveCount(1);
-  await expect(words.first()).toContainText('лук');
+  await expect(words).toHaveCount(lukLevel === 2 ? 1 : 0);
+  if (lukLevel === 2) await expect(words.first()).toContainText('лук');
   await expect(levelAll).toHaveAttribute('aria-selected', 'false');
   await expect(level2).toHaveAttribute('aria-selected', 'true');
   await levelAll.click();
@@ -94,19 +112,20 @@ test('a session moves the words it practised up the ladder, and the list filters
   await levelAll.click();
   await expect(words).toHaveCount(2);
 
-  // 7. A word's detail: five dimensions, one live.
+  // 7. A word's detail: five dimensions, three live since phase 23.
   await words.filter({ hasText: 'лук' }).click();
   await expect(page.getByTestId('vocabulary-sense-level')).toHaveCount(2);
-  // Each of the two saved senses shows all five dimensions, and one is live: the
-  // other four read "not practised yet" (8 of 10).
+  // Each of the two saved senses shows all five dimensions; the two spoken ones
+  // read "not practised yet" (4 of 10). Every right answer, of any type, raised
+  // recognition.
   for (const dimension of DIMENSIONS) {
     await expect(page.getByTestId(`vocabulary-dimension-${dimension}`)).toHaveCount(2);
   }
   const dimensionRows = page.locator('[data-testid^="vocabulary-dimension-"]');
   await expect(dimensionRows).toHaveCount(10);
-  await expect(page.getByTestId('vocabulary-dimension-written_receptive').first()).toContainText('נחשפה');
-  await expect(page.getByTestId('vocabulary-dimension-spelling').first()).toContainText('טרם תורגל');
-  await expect(dimensionRows.filter({ hasText: 'טרם תורגל' })).toHaveCount(8);
+  await expect(page.getByTestId('vocabulary-dimension-written_receptive')).toHaveText([/נחשפה/, /נחשפה/]);
+  await expect(page.getByTestId('vocabulary-dimension-spoken_receptive').first()).toContainText('טרם תורגל');
+  await expect(dimensionRows.filter({ hasText: 'טרם תורגל' })).toHaveCount(4);
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
