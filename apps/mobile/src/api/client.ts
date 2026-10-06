@@ -110,8 +110,8 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       const search = params.toString();
       return getJson<VocabularyPage>(`${vocabularyPath(enrollmentId)}${search ? `?${search}` : ''}`);
     },
-    vocabularyWord: (enrollmentId: string, lexemeId: string) =>
-      getJson<VocabularyWordDetail>(`${vocabularyPath(enrollmentId)}/words/${encodeURIComponent(lexemeId)}`),
+    vocabularyWord: (enrollmentId: string, lemma: string) =>
+      getJson<VocabularyWordDetail>(`${vocabularyPath(enrollmentId)}/word?lemma=${encodeURIComponent(lemma)}`),
   };
 }
 

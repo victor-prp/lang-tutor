@@ -118,7 +118,7 @@ export default function VocabularyScreen() {
             <Pressable
               accessibilityRole="button"
               testID="vocabulary-word"
-              onPress={() => router.push(`/vocabulary/${item.lexeme_id}`)}
+              onPress={() => router.push({ pathname: '/vocabulary/word', params: { lemma: item.lemma } })}
               style={styles.row}
             >
               <View style={styles.rowTop}>

@@ -3,12 +3,12 @@ import { DIMENSIONS, type Dimension } from '@lang-tutor/core/domain';
 import { asc, eq, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import { dictLexemes, vocabularyEntries } from '../db/schema';
+import { vocabularyEntries } from '../db/schema';
 import type {
   LexemeRendering,
-  LexemeRow,
   SavedEntry,
   VocabularyCursor,
+  WordLexeme,
   WordPageRow,
   WordSummary,
 } from '../domain/vocabulary';
@@ -204,21 +204,33 @@ export const vocabularyQueries = {
     ) h ON true
     WHERE l.id IN (${inList(input.lexemeIds)})`,
 
-  /** Every rendering of one lexeme's senses in one language, by any form. */
-  lexemeRenderings: (input: { lexemeId: string; userLanguageCode: string }): SQL => sql`
-    SELECT tr.sense_id, tr.variant_id, v.form, tr.rank, tr.translation,
+  /** Every lexeme with this lemma in one language, through
+   *  dict_lexemes_language_lemma_pos_key. Exact match, case included. */
+  lemmaLexemes: (input: { languageCode: string; lemma: string }): SQL => sql`
+    SELECT id AS lexeme_id, part_of_speech FROM dict_lexemes
+    WHERE language_code = ${input.languageCode}
+      AND lemma = ${input.lemma}
+    ORDER BY part_of_speech`,
+
+  /** Every rendering of the senses of every lexeme with this lemma, in one user
+   *  language, by any form, each with its lexeme. */
+  lemmaRenderings: (input: { languageCode: string; lemma: string; userLanguageCode: string }): SQL => sql`
+    SELECT s.lexeme_id, tr.sense_id, tr.variant_id, v.form, tr.rank, tr.translation,
            tr.example_source, tr.example_target
-    FROM dict_senses s
+    FROM dict_lexemes l
+    JOIN dict_senses s            ON s.lexeme_id = l.id
     JOIN dict_var_translations tr ON tr.sense_id = s.id
                                  AND tr.user_language_code = ${input.userLanguageCode}
     JOIN dict_variants v          ON v.id = tr.variant_id
-    WHERE s.lexeme_id = ${input.lexemeId}`,
+    WHERE l.language_code = ${input.languageCode}
+      AND l.lemma = ${input.lemma}`,
 
-  /** One lexeme's saved senses in one enrollment. */
-  savedInLexeme: (input: { enrollmentId: string; lexemeId: string }): SQL => sql`
+  /** One lemma's saved senses in one enrollment, through
+   *  vocabulary_entries_enrollment_lemma_idx. */
+  savedInLemma: (input: { enrollmentId: string; lemma: string }): SQL => sql`
     SELECT sense_id, variant_id FROM vocabulary_entries
     WHERE enrollment_id = ${input.enrollmentId}
-      AND lexeme_id = ${input.lexemeId}`,
+      AND lemma = ${input.lemma}`,
 };
 
 export function createVocabularyRepo(tx: Tx) {
@@ -321,24 +333,20 @@ export function createVocabularyRepo(tx: Tx) {
       }));
     },
 
-    findLexeme: async (lexemeId: string): Promise<LexemeRow | undefined> => {
-      const [row] = await tx
-        .select({
-          lexemeId: dictLexemes.id,
-          lemma: dictLexemes.lemma,
-          partOfSpeech: dictLexemes.partOfSpeech,
-          languageCode: dictLexemes.languageCode,
-        })
-        .from(dictLexemes)
-        .where(eq(dictLexemes.id, lexemeId));
-      return row;
+    findLemmaLexemes: async (input: { languageCode: string; lemma: string }): Promise<WordLexeme[]> => {
+      const rows = await tx.execute<{ lexeme_id: string; part_of_speech: string }>(
+        vocabularyQueries.lemmaLexemes(input),
+      );
+      return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, partOfSpeech: row.part_of_speech }));
     },
 
-    findLexemeRenderings: async (input: {
-      lexemeId: string;
+    findLemmaRenderings: async (input: {
+      languageCode: string;
+      lemma: string;
       userLanguageCode: string;
     }): Promise<LexemeRendering[]> => {
       const rows = await tx.execute<{
+        lexeme_id: string;
         sense_id: string;
         variant_id: string;
         form: string;
@@ -346,8 +354,9 @@ export function createVocabularyRepo(tx: Tx) {
         translation: string;
         example_source: string | null;
         example_target: string | null;
-      }>(vocabularyQueries.lexemeRenderings(input));
+      }>(vocabularyQueries.lemmaRenderings(input));
       return rows.rows.map((row) => ({
+        lexemeId: row.lexeme_id,
         senseId: row.sense_id,
         variantId: row.variant_id,
         form: row.form,
@@ -358,9 +367,9 @@ export function createVocabularyRepo(tx: Tx) {
       }));
     },
 
-    findSavedInLexeme: async (input: { enrollmentId: string; lexemeId: string }): Promise<SavedEntry[]> => {
+    findSavedInLemma: async (input: { enrollmentId: string; lemma: string }): Promise<SavedEntry[]> => {
       const rows = await tx.execute<{ sense_id: string; variant_id: string }>(
-        vocabularyQueries.savedInLexeme(input),
+        vocabularyQueries.savedInLemma(input),
       );
       return rows.rows.map((row) => ({ senseId: row.sense_id, variantId: row.variant_id }));
     },

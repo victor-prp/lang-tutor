@@ -39,7 +39,7 @@ export type VocabularyValue = {
   reload: () => void;
   /** The next page, if there is one and none is loading. */
   loadMore: () => void;
-  loadWord: (lexemeId: string) => Promise<VocabularyWordDetail>;
+  loadWord: (lemma: string) => Promise<VocabularyWordDetail>;
   save: (entries: VocabularyEntryInput[]) => Promise<void>;
   unsave: (senseId: string) => Promise<void>;
 };
@@ -108,9 +108,9 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
     [fetchPage],
   );
   const loadWord = useCallback(
-    (lexemeId: string) => {
+    (lemma: string) => {
       if (!active) return Promise.reject(new Error('no active enrollment'));
-      return api.vocabularyWord(active.id, lexemeId);
+      return api.vocabularyWord(active.id, lemma);
     },
     [api, active],
   );

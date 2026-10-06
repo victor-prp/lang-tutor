@@ -383,19 +383,27 @@ export const VocabularySenseSchema = z.object({
   variant_id: z.string(),
   form: z.string(),
   translation: z.string(),
+  // Phase 21. The detail spans every lexeme of a lemma, so each sense names its own.
+  part_of_speech: z.string(),
   example: z.object({ source: z.string(), target: z.string() }).optional(),
   saved: z.boolean(),
   // Phase 20. Present on a saved sense only: its badge and five levels.
   progress: SenseProgressSchema.optional(),
 });
 
+// Phase 21. One word is every lexeme with this lemma in the enrollment's target
+// language.
 export const VocabularyWordDetailSchema = z.object({
-  lexeme_id: z.string(),
   lemma: z.string(),
-  part_of_speech: z.string(),
   // Phase 20. The word's badge, as on the list; null when nothing is saved.
   level: LevelSchema.nullable(),
   senses: z.array(VocabularySenseSchema),
+});
+
+// Phase 21. A query parameter rather than a path segment: a lemma may hold a
+// space or a slash. Matched exactly.
+export const VocabularyWordQuerySchema = z.object({
+  lemma: z.string().min(1),
 });
 
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from

@@ -129,9 +129,7 @@ describe('insertEntries and deleteEntry', () => {
   it('keeps the first form when the same sense is saved again', async () => {
     await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITES)] }));
     await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
-    expect(await repo((r) => r.findSavedInLexeme({ enrollmentId: E, lexemeId: kite.lexemeId }))).toEqual([
-      pair(TOY, KITES),
-    ]);
+    expect(await repo((r) => r.findSavedInLemma({ enrollmentId: E, lemma: 'kite' }))).toEqual([pair(TOY, KITES)]);
   });
 
   it('gives a new entry its five level 1 progress rows, and a repeat adds none', async () => {
@@ -384,28 +382,68 @@ describe('findWordSummaries', () => {
 });
 
 describe('the drill-down reads', () => {
-  it('finds a lexeme with its language', async () => {
-    expect(await repo((r) => r.findLexeme(kite.lexemeId))).toEqual({
-      lexemeId: kite.lexemeId,
+  // A second `kite` lexeme, a verb, so a lemma spans two lexemes. Its form is also
+  // `kite`, so it takes entry rank 1 (dict_variants_form_entry_rank_key).
+  let kiteVerb: { lexemeId: string; variantIds: string[]; senseIds: string[] };
+  beforeEach(async () => {
+    kiteVerb = await insertLexeme(t.db, {
       lemma: 'kite',
-      partOfSpeech: 'noun',
       languageCode: 'en',
+      partOfSpeech: 'verb',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'fly' }],
+      variants: [
+        {
+          form: 'kite',
+          kind: 'word',
+          entryRank: 1,
+          translations: [
+            { senseCode: 'fly', rank: 0, translation: 'להטיס עפיפון', exampleSource: null, exampleTarget: null },
+          ],
+        },
+      ],
     });
-    expect(await repo((r) => r.findLexeme('nope'))).toBeUndefined();
   });
 
-  it("returns every rendering of the lexeme's senses in one language", async () => {
+  it('finds every lexeme of a lemma in one language, by part of speech', async () => {
+    expect(await repo((r) => r.findLemmaLexemes({ languageCode: 'en', lemma: 'kite' }))).toEqual([
+      { lexemeId: kite.lexemeId, partOfSpeech: 'noun' },
+      { lexemeId: kiteVerb.lexemeId, partOfSpeech: 'verb' },
+    ]);
+    expect(await repo((r) => r.findLemmaLexemes({ languageCode: 'he', lemma: 'kite' }))).toEqual([]);
+  });
+
+  // Review Focus 2: lemmas match exactly.
+  it('matches the lemma exactly, case included', async () => {
+    expect(await repo((r) => r.findLemmaLexemes({ languageCode: 'en', lemma: 'Kite' }))).toEqual([]);
+  });
+
+  it("returns every rendering of every lexeme's senses in one language, with its lexeme", async () => {
     const rows = await repo((r) =>
-      r.findLexemeRenderings({ lexemeId: kite.lexemeId, userLanguageCode: 'he' }),
+      r.findLemmaRenderings({ languageCode: 'en', lemma: 'kite', userLanguageCode: 'he' }),
     );
-    expect(rows.map((row) => `${row.form}:${row.translation}`).sort()).toEqual([
-      'kite:דיה',
-      'kite:עפיפון',
-      'kites:עפיפונים',
+    expect(rows.map((row) => `${row.lexemeId === kite.lexemeId ? 'noun' : 'verb'}:${row.form}:${row.translation}`).sort()).toEqual([
+      'noun:kite:דיה',
+      'noun:kite:עפיפון',
+      'noun:kites:עפיפונים',
+      'verb:kite:להטיס עפיפון',
     ]);
     expect(
-      await repo((r) => r.findLexemeRenderings({ lexemeId: kite.lexemeId, userLanguageCode: 'ru' })),
+      await repo((r) => r.findLemmaRenderings({ languageCode: 'en', lemma: 'kite', userLanguageCode: 'ru' })),
     ).toEqual([]);
+  });
+
+  it("finds the enrollment's saved entries across the lemma's lexemes", async () => {
+    await saveAt(kite.lexemeId, kite.senseIds[TOY], kite.variantIds[KITES], '2026-10-04 12:00:00+00');
+    await saveAt(kiteVerb.lexemeId, kiteVerb.senseIds[0], kiteVerb.variantIds[0], '2026-10-04 12:00:01+00');
+    const saved = await repo((r) => r.findSavedInLemma({ enrollmentId: E, lemma: 'kite' }));
+    expect(saved.sort((a, b) => a.senseId.localeCompare(b.senseId))).toEqual(
+      [
+        pair(TOY, KITES),
+        { senseId: kiteVerb.senseIds[0], variantId: kiteVerb.variantIds[0] },
+      ].sort((a, b) => a.senseId.localeCompare(b.senseId)),
+    );
+    expect(await repo((r) => r.findSavedInLemma({ enrollmentId: E, lemma: 'fly' }))).toEqual([]);
   });
 });
 
@@ -435,9 +473,7 @@ describe('a repaired variant', () => {
       });
     });
 
-    expect(await repo((r) => r.findSavedInLexeme({ enrollmentId: E, lexemeId: kite.lexemeId }))).toEqual([
-      pair(TOY, KITES),
-    ]);
+    expect(await repo((r) => r.findSavedInLemma({ enrollmentId: E, lemma: 'kite' }))).toEqual([pair(TOY, KITES)]);
     const page = await repo((r) => r.findWordsPage({ ...NEWEST, enrollmentId: E, limit: 50, after: null }));
     expect(page.map((row) => row.lexemeId)).toEqual([kite.lexemeId]);
     expect(

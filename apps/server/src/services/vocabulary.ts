@@ -16,7 +16,7 @@ import {
   encodeCursor,
   firstPerSense,
 } from '../domain/vocabulary';
-import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, LexemeNotFound } from '../errors';
+import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { Repos, Transaction } from './transaction';
 
@@ -125,24 +125,28 @@ export function createVocabularyService({
       });
     },
 
-    wordDetail: (enrollmentId: string, lexemeId: string): Promise<VocabularyWordDetail> =>
+    /** Every lexeme with this lemma in the target language is one word. None is a
+     *  404; a word with nothing saved is a 200 with no level. */
+    wordDetail: (enrollmentId: string, lemma: string): Promise<VocabularyWordDetail> =>
       transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
-        const lexeme = await repos.vocabulary.findLexeme(lexemeId);
-        if (!lexeme || lexeme.languageCode !== enrolled.target_language) {
-          throw new LexemeNotFound(lexemeId);
-        }
-        const renderings = await repos.vocabulary.findLexemeRenderings({
-          lexemeId,
+        const lexemes = await repos.vocabulary.findLemmaLexemes({
+          languageCode: enrolled.target_language,
+          lemma,
+        });
+        if (lexemes.length === 0) throw new WordNotFound(lemma);
+        const renderings = await repos.vocabulary.findLemmaRenderings({
+          languageCode: enrolled.target_language,
+          lemma,
           userLanguageCode: enrolled.source_language,
         });
-        const saved = await repos.vocabulary.findSavedInLexeme({ enrollmentId, lexemeId });
+        const saved = await repos.vocabulary.findSavedInLemma({ enrollmentId, lemma });
         const progress = await repos.progress.findRows({
           enrollmentId,
           senseIds: saved.map((entry) => entry.senseId),
           savedBy: null,
         });
-        return buildWordDetail(lexeme, renderings, saved, progress);
+        return buildWordDetail(lemma, lexemes, renderings, saved, progress);
       }),
   };
 }

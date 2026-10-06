@@ -6,10 +6,11 @@ import {
   VocabularyPageQuerySchema,
   VocabularyPageSchema,
   VocabularyWordDetailSchema,
+  VocabularyWordQuerySchema,
 } from '@lang-tutor/core/api/schemas';
 import { z } from 'zod';
 
-import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, LexemeNotFound } from '../errors';
+import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { VocabularyService } from '../services/vocabulary';
 
 const BASE = '/enrollments/{id}/vocabulary';
@@ -81,19 +82,22 @@ const unsaveRoute = createRoute({
 
 const detailRoute = createRoute({
   method: 'get',
-  path: `${BASE}/words/{lexeme_id}`,
+  path: `${BASE}/word`,
   tags: ['vocabulary'],
   summary: 'One word, with every sense it can show',
   description:
-    "Every sense of the lexeme that has a rendering in the enrollment's source language, saved " +
-    'senses first. A saved sense is shown in the form it was saved from.' +
-    ' A saved sense carries its level in each knowledge dimension; the word carries its overall level, null when nothing is saved.',
-  request: { params: z.object({ id: z.string(), lexeme_id: z.string() }) },
+    "A word is every lexeme with this lemma in the enrollment's target language; the lemma is " +
+    'matched exactly. Every sense of those lexemes that has a rendering in the source language is ' +
+    'listed with its part of speech, saved senses first, then by part of speech. A saved sense is ' +
+    'shown in the form it was saved from and carries its level in each knowledge dimension; the ' +
+    'word carries its overall level, null when nothing is saved.',
+  request: { params: enrollmentParams, query: VocabularyWordQuerySchema },
   responses: {
     200: json(VocabularyWordDetailSchema, 'The word, possibly with nothing saved.'),
+    400: json(ErrorSchema, '`lemma` is missing or empty.'),
     404: json(
       ErrorSchema,
-      "No enrollment has this id, or no word with this id is in the enrollment's target language.",
+      "No enrollment has this id, or no word with this lemma is in the enrollment's target language.",
     ),
   },
 });
@@ -143,12 +147,13 @@ export function createVocabularyRouter(vocabulary: VocabularyService) {
   });
 
   router.openapi(detailRoute, async (c) => {
-    const { id, lexeme_id } = c.req.valid('param');
+    const { id } = c.req.valid('param');
+    const { lemma } = c.req.valid('query');
     try {
-      return c.json(await vocabulary.wordDetail(id, lexeme_id), 200);
+      return c.json(await vocabulary.wordDetail(id, lemma), 200);
     } catch (error) {
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
-      if (error instanceof LexemeNotFound) return c.json({ error: 'word not found' }, 404);
+      if (error instanceof WordNotFound) return c.json({ error: 'word not found' }, 404);
       throw error;
     }
   });

@@ -36,6 +36,26 @@ async function russianWord(lemma: string, form = lemma) {
   });
 }
 
+// A Russian verb with one sense. Its form is the lemma at entry rank 1, so it can
+// share a lemma, and a form, with a noun from russianWord.
+async function russianVerb(lemma: string, translation: string) {
+  return insertLexeme(t.db, {
+    lemma,
+    languageCode: 'ru',
+    partOfSpeech: 'verb',
+    userLanguageCode: 'he',
+    senses: [{ senseCode: 'verb' }],
+    variants: [
+      {
+        form: lemma,
+        kind: 'word',
+        entryRank: 1,
+        translations: [{ senseCode: 'verb', rank: 0, translation, exampleSource: null, exampleTarget: null }],
+      },
+    ],
+  });
+}
+
 beforeEach(async () => {
   t = await createTestDb();
   logger = createFakeLogger();
@@ -63,8 +83,8 @@ const unsave = (enrollmentId: string, senseId: string) =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary/senses/${senseId}`, { method: 'DELETE' });
 const list = (enrollmentId: string, query = '') =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary${query}`);
-const detail = (enrollmentId: string, lexemeId: string) =>
-  app().request(`/api/enrollments/${enrollmentId}/vocabulary/words/${lexemeId}`);
+const detail = (enrollmentId: string, lemma: string) =>
+  app().request(`/api/enrollments/${enrollmentId}/vocabulary/word?lemma=${encodeURIComponent(lemma)}`);
 
 type Page = { items: { lexeme_id: string; saved_count: number; sense_count: number }[]; next_cursor: string | null };
 
@@ -260,34 +280,84 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
   });
 });
 
-describe('GET /api/enrollments/{id}/vocabulary/words/{lexeme_id}', () => {
+describe('GET /api/enrollments/{id}/vocabulary/word', () => {
+  type Detail = {
+    lemma: string;
+    level: number | null;
+    senses: { sense_id: string; saved: boolean; part_of_speech: string; progress?: unknown }[];
+  };
+
   it('lists every sense, saved first, and answers 200 once nothing is saved', async () => {
     const rama = await russianWord('рама');
     await save(RU, [{ sense_id: rama.senseIds[1], variant_id: rama.variantIds[0] }]);
 
-    const res = await detail(RU, rama.lexemeId);
+    const res = await detail(RU, 'рама');
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { senses: { sense_id: string; saved: boolean }[] };
-    expect(body.senses.map((s) => [s.sense_id, s.saved])).toEqual([
-      [rama.senseIds[1], true],
-      [rama.senseIds[0], false],
+    const body = (await res.json()) as Detail;
+    expect(body.lemma).toBe('рама');
+    expect(body).not.toHaveProperty('lexeme_id');
+    expect(body).not.toHaveProperty('part_of_speech');
+    expect(body.senses.map((s) => [s.sense_id, s.saved, s.part_of_speech])).toEqual([
+      [rama.senseIds[1], true, 'noun'],
+      [rama.senseIds[0], false, 'noun'],
     ]);
 
     await unsave(RU, rama.senseIds[1]);
-    expect((await detail(RU, rama.lexemeId)).status).toBe(200);
+    expect((await detail(RU, 'рама')).status).toBe(200);
   });
 
-  it("answers 404 for an unknown lexeme and for one outside the enrollment's target", async () => {
-    const rama = await russianWord('рама');
-    expect((await detail(RU, 'nope')).status).toBe(404);
-    const wrongLanguage = await detail('e_u_1', rama.lexemeId);
+  it('merges every lexeme of the lemma: saved first, then by part of speech', async () => {
+    const noun = await russianWord('знать');
+    const verb = await russianVerb('знать', 'לדעת');
+    await save(RU, [
+      { sense_id: verb.senseIds[0], variant_id: verb.variantIds[0] },
+      { sense_id: noun.senseIds[1], variant_id: noun.variantIds[0] },
+    ]);
+    await setLevel(t.db, { enrollmentId: RU, senseId: verb.senseIds[0], level: 5 });
+    await setLevel(t.db, { enrollmentId: RU, senseId: noun.senseIds[1], level: 2 });
+
+    const body = (await (await detail(RU, 'знать')).json()) as Detail;
+    expect(body.senses.map((s) => [s.sense_id, s.saved, s.part_of_speech])).toEqual([
+      [noun.senseIds[1], true, 'noun'],
+      [verb.senseIds[0], true, 'verb'],
+      [noun.senseIds[0], false, 'noun'],
+    ]);
+    expect(body.level).toBe(4);
+  });
+
+  // Review Focus 1.
+  it.each(['всё равно', 'и/или'])('finds a lemma that holds a space or a slash: %s', async (lemma) => {
+    await russianWord(lemma);
+    const res = await detail(RU, lemma);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Detail).lemma).toBe(lemma);
+  });
+
+  // Review Focus 2.
+  it('matches the lemma exactly, case included', async () => {
+    await russianWord('Рама');
+    await russianVerb('рама', 'למסגר');
+    const body = (await (await detail(RU, 'рама')).json()) as Detail;
+    expect(body.senses.map((s) => s.part_of_speech)).toEqual(['verb']);
+  });
+
+  it("answers 404 for an unknown lemma and for one outside the enrollment's target", async () => {
+    await russianWord('рама');
+    expect((await detail(RU, 'нет')).status).toBe(404);
+    const wrongLanguage = await detail('e_u_1', 'рама');
     expect(wrongLanguage.status).toBe(404);
     expect(await wrongLanguage.json()).toEqual({ error: 'word not found' });
   });
 
+  it.each(['', '?lemma='])('answers 400 for a missing or empty lemma: "%s"', async (query) => {
+    const res = await app().request(`/api/enrollments/${RU}/vocabulary/word${query}`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+
   it('answers 404 for an unknown enrollment', async () => {
-    const rama = await russianWord('рама');
-    const res = await detail('e_nobody', rama.lexemeId);
+    await russianWord('рама');
+    const res = await detail('e_nobody', 'рама');
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'enrollment not found' });
   });
@@ -297,10 +367,7 @@ describe('GET /api/enrollments/{id}/vocabulary/words/{lexeme_id}', () => {
     await save(RU, [{ sense_id: rama.senseIds[0], variant_id: rama.variantIds[0] }]);
     await setLevel(t.db, { enrollmentId: RU, senseId: rama.senseIds[0], level: 3 });
 
-    const body = (await (await detail(RU, rama.lexemeId)).json()) as {
-      level: number | null;
-      senses: { sense_id: string; progress?: unknown }[];
-    };
+    const body = (await (await detail(RU, 'рама')).json()) as Detail;
     expect(body.level).toBe(3);
     expect(body.senses.find((s) => s.sense_id === rama.senseIds[0])?.progress).toEqual({
       level: 3,
@@ -310,8 +377,8 @@ describe('GET /api/enrollments/{id}/vocabulary/words/{lexeme_id}', () => {
   });
 
   it('gives a word with nothing saved no level', async () => {
-    const rama = await russianWord('рама');
-    expect(((await (await detail(RU, rama.lexemeId)).json()) as { level: unknown }).level).toBeNull();
+    await russianWord('рама');
+    expect(((await (await detail(RU, 'рама')).json()) as Detail).level).toBeNull();
   });
 });
 

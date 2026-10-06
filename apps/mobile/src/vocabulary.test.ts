@@ -133,6 +133,7 @@ describe('keepSenseOrder', () => {
     variant_id: 'v1',
     form: 'прочитала',
     translation: `tr-${sense_id}`,
+    part_of_speech: 'verb',
     saved,
     ...(level === undefined
       ? {}
@@ -150,9 +151,7 @@ describe('keepSenseOrder', () => {
         }),
   });
   const detail = (level: number | null, senses: VocabularySense[]): VocabularyWordDetail => ({
-    lexeme_id: 'lx',
     lemma: 'прочитать',
-    part_of_speech: 'verb',
     level,
     senses,
   });

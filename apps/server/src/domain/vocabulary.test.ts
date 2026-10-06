@@ -12,6 +12,7 @@ import {
   firstPerSense,
   markSaved,
   type LexemeRendering,
+  type WordLexeme,
   type WordSummary,
 } from './vocabulary';
 
@@ -146,6 +147,7 @@ describe('assemblePage', () => {
 });
 
 const rendering = (over: Partial<LexemeRendering>): LexemeRendering => ({
+  lexemeId: 'lx',
   senseId: 's1',
   variantId: 'v1',
   form: 'прочитать',
@@ -156,12 +158,14 @@ const rendering = (over: Partial<LexemeRendering>): LexemeRendering => ({
   ...over,
 });
 
-const LEXEME = { lexemeId: 'lx', lemma: 'прочитать', partOfSpeech: 'verb', languageCode: 'ru' };
+const LEMMA = 'прочитать';
+const VERB: WordLexeme[] = [{ lexemeId: 'lx', partOfSpeech: 'verb' }];
 
 describe('buildWordDetail', () => {
   it("shows a saved sense in the form it was saved from, even when the lemma's form renders it", () => {
     const detail = buildWordDetail(
-      LEXEME,
+      LEMMA,
+      VERB,
       [
         rendering({ variantId: 'v-lemma', form: 'прочитать', translation: 'לקרוא' }),
         rendering({ variantId: 'v-past', form: 'прочитала', translation: 'קראה' }),
@@ -170,13 +174,14 @@ describe('buildWordDetail', () => {
       [],
     );
     expect(detail.senses).toEqual([
-      { sense_id: 's1', variant_id: 'v-past', form: 'прочитала', translation: 'קראה', saved: true },
+      { sense_id: 's1', variant_id: 'v-past', form: 'прочитала', translation: 'קראה', part_of_speech: 'verb', saved: true },
     ]);
   });
 
   it("shows an unsaved sense in the lemma's own form when one exists", () => {
     const detail = buildWordDetail(
-      LEXEME,
+      LEMMA,
+      VERB,
       [
         rendering({ variantId: 'v-past', form: 'прочитала', translation: 'קראה' }),
         rendering({ variantId: 'v-lemma', form: 'Прочитать', translation: 'לקרוא' }),
@@ -189,7 +194,8 @@ describe('buildWordDetail', () => {
 
   it('otherwise uses the form that renders the most of this lexeme, ties by variant id', () => {
     const detail = buildWordDetail(
-      LEXEME,
+      LEMMA,
+      VERB,
       [
         rendering({ senseId: 's1', variantId: 'v-b', form: 'прочитаю' }),
         rendering({ senseId: 's2', variantId: 'v-b', form: 'прочитаю', rank: 1 }),
@@ -204,11 +210,11 @@ describe('buildWordDetail', () => {
     expect(shown).toEqual({ s1: 'v-b', s2: 'v-b', s3: 'v-c' });
   });
 
-  // Review Focus 3: the saved form no longer renders the sense. A repair may not
-  // drop a rendering, so this is a backstop — but it must not lose the entry.
+  // Review Focus 3 of phase 18: the saved form no longer renders the sense.
   it('falls back to the representative rendering when the saved form no longer renders the sense', () => {
     const detail = buildWordDetail(
-      LEXEME,
+      LEMMA,
+      VERB,
       [rendering({ variantId: 'v-lemma', form: 'прочитать' })],
       [{ senseId: 's1', variantId: 'v-gone' }],
       [],
@@ -220,7 +226,8 @@ describe('buildWordDetail', () => {
 
   it('orders saved senses first, each group by rank, then by sense id', () => {
     const detail = buildWordDetail(
-      LEXEME,
+      LEMMA,
+      VERB,
       [
         rendering({ senseId: 's-a', rank: 0 }),
         rendering({ senseId: 's-b', rank: 2 }),
@@ -235,7 +242,8 @@ describe('buildWordDetail', () => {
 
   it('carries an example only when both halves are present', () => {
     const detail = buildWordDetail(
-      LEXEME,
+      LEMMA,
+      VERB,
       [
         rendering({ senseId: 's1', exampleSource: 'Я прочитала книгу.', exampleTarget: 'קראתי את הספר.' }),
         rendering({ senseId: 's2', rank: 1, exampleSource: 'half', exampleTarget: null }),
@@ -250,14 +258,8 @@ describe('buildWordDetail', () => {
     expect(detail.senses[1]).not.toHaveProperty('example');
   });
 
-  it('carries the lexeme fields', () => {
-    expect(buildWordDetail(LEXEME, [], [], [])).toEqual({
-      lexeme_id: 'lx',
-      lemma: 'прочитать',
-      part_of_speech: 'verb',
-      level: null,
-      senses: [],
-    });
+  it('carries the lemma, and no lexeme fields', () => {
+    expect(buildWordDetail(LEMMA, VERB, [], [], [])).toEqual({ lemma: LEMMA, level: null, senses: [] });
   });
 
   const levels = (senseId: string, written: number): ProgressRow[] =>
@@ -271,7 +273,8 @@ describe('buildWordDetail', () => {
 
   it('gives a saved sense its badge and five levels, and an unsaved one neither', () => {
     const detail = buildWordDetail(
-      LEXEME,
+      LEMMA,
+      VERB,
       [rendering({ senseId: 's1' }), rendering({ senseId: 's2', rank: 1, translation: 'להקריא' })],
       [{ senseId: 's1', variantId: 'v1' }],
       levels('s1', 3),
@@ -288,7 +291,8 @@ describe('buildWordDetail', () => {
 
   it("gives the word one flat mean over every saved sense's live-dimension levels, rounded once, ties up", () => {
     const detail = buildWordDetail(
-      LEXEME,
+      LEMMA,
+      VERB,
       [rendering({ senseId: 's1' }), rendering({ senseId: 's2' })],
       [{ senseId: 's1', variantId: 'v1' }, { senseId: 's2', variantId: 'v1' }],
       [...levels('s1', 2), ...levels('s2', 3)],
@@ -297,7 +301,71 @@ describe('buildWordDetail', () => {
   });
 
   it('gives a word with nothing saved no level', () => {
-    expect(buildWordDetail(LEXEME, [rendering({})], [], []).level).toBeNull();
+    expect(buildWordDetail(LEMMA, VERB, [rendering({})], [], []).level).toBeNull();
+  });
+
+  describe('a lemma with two lexemes', () => {
+    // знать: the verb (to know) and the noun (nobility). Ids chosen so that sense
+    // id order and part-of-speech order disagree, which the ordering must survive.
+    const ZNAT: WordLexeme[] = [
+      { lexemeId: 'lx-noun', partOfSpeech: 'noun' },
+      { lexemeId: 'lx-verb', partOfSpeech: 'verb' },
+    ];
+    const verb = (over: Partial<LexemeRendering>) =>
+      rendering({ lexemeId: 'lx-verb', variantId: 'v-verb', form: 'знать', translation: 'לדעת', ...over });
+    const noun = (over: Partial<LexemeRendering>) =>
+      rendering({ lexemeId: 'lx-noun', variantId: 'v-noun', form: 'знать', translation: 'אצולה', ...over });
+
+    it('shows every sense of both, each with its own part of speech', () => {
+      const detail = buildWordDetail('знать', ZNAT, [verb({ senseId: 'a-know' }), noun({ senseId: 'z-nobility' })], [], []);
+      expect(detail.senses.map((s) => [s.sense_id, s.part_of_speech])).toEqual([
+        ['z-nobility', 'noun'],
+        ['a-know', 'verb'],
+      ]);
+    });
+
+    it('orders saved first, then by part of speech, then by rank, then by sense id', () => {
+      const detail = buildWordDetail(
+        'знать',
+        ZNAT,
+        [
+          verb({ senseId: 'v1', rank: 0 }),
+          verb({ senseId: 'v2', rank: 1, translation: 'להכיר' }),
+          noun({ senseId: 'n1', rank: 0 }),
+          noun({ senseId: 'n2', rank: 1, translation: 'עילית' }),
+        ],
+        [{ senseId: 'v2', variantId: 'v-verb' }, { senseId: 'n2', variantId: 'v-noun' }],
+        [],
+      );
+      expect(detail.senses.map((s) => s.sense_id)).toEqual(['n2', 'v2', 'n1', 'v1']);
+    });
+
+    it("labels a saved sense with its lexeme's part of speech, not the saved form's neighbours'", () => {
+      // Both lexemes have a form spelled знать; the saved noun sense must still read
+      // as a noun even though the verb's sense sorts beside it.
+      const detail = buildWordDetail(
+        'знать',
+        ZNAT,
+        [verb({ senseId: 'v1' }), noun({ senseId: 'n1' })],
+        [{ senseId: 'n1', variantId: 'v-noun' }],
+        [],
+      );
+      expect(detail.senses.map((s) => [s.sense_id, s.part_of_speech, s.saved])).toEqual([
+        ['n1', 'noun', true],
+        ['v1', 'verb', false],
+      ]);
+    });
+
+    it("averages the word's level over the saved senses of both lexemes", () => {
+      const detail = buildWordDetail(
+        'знать',
+        ZNAT,
+        [verb({ senseId: 'v1' }), noun({ senseId: 'n1' })],
+        [{ senseId: 'v1', variantId: 'v-verb' }, { senseId: 'n1', variantId: 'v-noun' }],
+        [...levels('v1', 5), ...levels('n1', 2)],
+      );
+      expect(detail.level).toBe(4);
+    });
   });
 });
 

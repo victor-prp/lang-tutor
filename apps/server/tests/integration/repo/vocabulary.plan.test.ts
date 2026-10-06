@@ -14,7 +14,7 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 // If one of these fails, read the plan in the failure before touching the
 // assertion. The fix is an index or a query shape, never a looser test.
 
-const WATCHED = ['vocabulary_entries', 'dict_var_translations', 'sense_progress'];
+const WATCHED = ['vocabulary_entries', 'dict_var_translations', 'sense_progress', 'dict_lexemes'];
 const HEAVY = 'pe1';
 const BUDGET_MS = 50;
 
@@ -139,8 +139,13 @@ describe('every vocabulary read at volume', () => {
       lexemeIds: FIRST_50,
       sourceLanguage: 'he',
     })],
-    ['lexemeRenderings', () => vocabularyQueries.lexemeRenderings({ lexemeId: 'pl7', userLanguageCode: 'he' })],
-    ['savedInLexeme', () => vocabularyQueries.savedInLexeme({ enrollmentId: HEAVY, lexemeId: 'pl7' })],
+    ['lemmaLexemes', () => vocabularyQueries.lemmaLexemes({ languageCode: 'ru', lemma: 'слово7' })],
+    ['lemmaRenderings', () => vocabularyQueries.lemmaRenderings({
+      languageCode: 'ru',
+      lemma: 'слово7',
+      userLanguageCode: 'he',
+    })],
+    ['savedInLemma', () => vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7' })],
   ])('%s scans no watched table sequentially', async (_name, build) => {
     const plan = await explain(build());
     expect(seqScans(plan)).toEqual([]);
@@ -151,6 +156,13 @@ describe('every vocabulary read at volume', () => {
   it.each(WORDS_PAGES)('%s reads progress through sense_progress_enrollment_dimension_idx', async (_name, build) => {
     const plan = await explain(build());
     expect(indexesUsed(plan)).toContain('sense_progress_enrollment_dimension_idx');
+  });
+
+  // The scan check alone cannot tell the lemma index from a bitmap scan of the
+  // primary key's enrollment prefix, which reads the whole heavy enrollment.
+  it('reads one lemma of the heavy enrollment through vocabulary_entries_enrollment_lemma_idx', async () => {
+    const plan = await explain(vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7' }));
+    expect(indexesUsed(plan)).toContain('vocabulary_entries_enrollment_lemma_idx');
   });
 
   // Save and unsave, spec §3: a primary-key insert and a primary-key delete,

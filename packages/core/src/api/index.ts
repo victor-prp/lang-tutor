@@ -49,4 +49,5 @@ export type {
   VocabularySort,
   VocabularyWord,
   VocabularyWordDetail,
+  VocabularyWordQuery,
 } from './types';

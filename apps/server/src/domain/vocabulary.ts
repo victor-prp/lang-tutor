@@ -139,16 +139,13 @@ export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): Voc
   });
 }
 
-export type LexemeRow = {
-  lexemeId: string;
-  lemma: string;
-  partOfSpeech: string;
-  languageCode: string;
-};
+/** One lexeme of the word: the detail spans every lexeme with the lemma. */
+export type WordLexeme = { lexemeId: string; partOfSpeech: string };
 
-/** One rendering of one of the lexeme's senses, by one of its forms, in the
- *  enrollment's source language. */
+/** One rendering of one of the word's senses, by one form of that sense's own
+ *  lexeme, in the enrollment's source language. */
 export type LexemeRendering = {
+  lexemeId: string;
   senseId: string;
   variantId: string;
   form: string;
@@ -172,14 +169,16 @@ function senseProgressOf(rows: ProgressRow[]): SenseProgress {
 }
 
 /**
- * The drill-down: every sense the lexeme can show in this language, each in one
- * rendering, saved senses first.
+ * The drill-down: every sense of every lexeme with this lemma that the enrollment's
+ * source language can show, each in one rendering and labelled with its part of
+ * speech. Saved senses first, then by part of speech, then by rank, then by sense id.
  *
  * Which rendering:
  * - a saved sense is shown in its saved form;
  * - an unsaved one in a representative form — the lemma's own spelling if anyone
- *   looked it up, otherwise the form that renders the most of this lexeme, ties
- *   broken by variant id.
+ *   looked it up, otherwise the form that renders the most senses, ties broken by
+ *   variant id. A form belongs to one lexeme and a sense's renderings are all forms
+ *   of its own lexeme, so the choice is always made within that lexeme.
  *
  * A saved sense whose saved form no longer renders it falls back to the
  * representative and stays saved. Ranks compared across forms are approximate —
@@ -192,17 +191,19 @@ function senseProgressOf(rows: ProgressRow[]): SenseProgress {
  * saved sense, including one with no rendering to show.
  */
 export function buildWordDetail(
-  lexeme: LexemeRow,
+  lemma: string,
+  lexemes: WordLexeme[],
   renderings: LexemeRendering[],
   saved: SavedEntry[],
   progress: ProgressRow[],
 ): VocabularyWordDetail {
+  const partOfSpeech = new Map(lexemes.map((lexeme) => [lexeme.lexemeId, lexeme.partOfSpeech]));
   const savedVariant = new Map(saved.map((entry) => [entry.senseId, entry.variantId]));
   const perVariant = new Map<string, number>();
   for (const r of renderings) perVariant.set(r.variantId, (perVariant.get(r.variantId) ?? 0) + 1);
 
-  const lemma = lexeme.lemma.toLowerCase();
-  const isLemma = (r: LexemeRendering) => Number(r.form.toLowerCase() === lemma);
+  const lowered = lemma.toLowerCase();
+  const isLemma = (r: LexemeRendering) => Number(r.form.toLowerCase() === lowered);
   const better = (a: LexemeRendering, b: LexemeRendering) =>
     isLemma(b) - isLemma(a) ||
     perVariant.get(b.variantId)! - perVariant.get(a.variantId)! ||
@@ -217,8 +218,10 @@ export function buildWordDetail(
 
   const shown = [...bySense.entries()].map(([senseId, options]) => {
     const own = savedVariant.get(senseId);
+    const rendering = options.find((o) => o.variantId === own) ?? [...options].sort(better)[0];
     return {
-      rendering: options.find((o) => o.variantId === own) ?? [...options].sort(better)[0],
+      rendering,
+      partOfSpeech: partOfSpeech.get(rendering.lexemeId) ?? '',
       saved: savedVariant.has(senseId),
     };
   });
@@ -226,6 +229,7 @@ export function buildWordDetail(
   shown.sort(
     (a, b) =>
       Number(b.saved) - Number(a.saved) ||
+      (a.partOfSpeech < b.partOfSpeech ? -1 : a.partOfSpeech > b.partOfSpeech ? 1 : 0) ||
       a.rendering.rank - b.rendering.rank ||
       a.rendering.senseId.localeCompare(b.rendering.senseId),
   );
@@ -237,15 +241,14 @@ export function buildWordDetail(
   const live = progress.filter((row) => LIVE_DIMENSIONS.includes(row.dimension));
 
   return {
-    lexeme_id: lexeme.lexemeId,
-    lemma: lexeme.lemma,
-    part_of_speech: lexeme.partOfSpeech,
+    lemma,
     level: live.length === 0 ? null : badge(live.map((row) => row.level)),
-    senses: shown.map(({ rendering: r, saved: isSaved }) => ({
+    senses: shown.map(({ rendering: r, partOfSpeech: pos, saved: isSaved }) => ({
       sense_id: r.senseId,
       variant_id: r.variantId,
       form: r.form,
       translation: r.translation,
+      part_of_speech: pos,
       ...(r.exampleSource && r.exampleTarget
         ? { example: { source: r.exampleSource, target: r.exampleTarget } }
         : {}),
