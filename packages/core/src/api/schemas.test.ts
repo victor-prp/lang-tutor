@@ -5,6 +5,7 @@ import {
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
   LlmCorrectionSchema,
+  LlmDistractorsSchema,
   LlmEntrySchema,
   LlmSenseSchema,
   LlmTranslationSchema,
@@ -12,6 +13,7 @@ import {
   LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
+  QuestionSchema,
   SaveVocabularyRequestSchema,
   TranslationCorrectionSchema,
   TranslationRequestSchema,
@@ -75,6 +77,63 @@ describe('NextStepRequestSchema', () => {
   it('rejects a fractional option_index', () => {
     expect(NextStepRequestSchema.safeParse({ ...valid, option_index: 1.5 }).success).toBe(false);
   });
+
+  // Phase 23. A typed card is answered by its text.
+  it('accepts a typed answer, empty included ("show me the answer")', () => {
+    expect(NextStepRequestSchema.safeParse({ user_id: 'u1', question_id: 'q1', text: 'casa' }).success).toBe(true);
+    expect(NextStepRequestSchema.safeParse({ user_id: 'u1', question_id: 'q1', text: '' }).success).toBe(true);
+  });
+
+  it('rejects typed text over 100 characters, and a body with neither answer', () => {
+    expect(
+      NextStepRequestSchema.safeParse({ user_id: 'u1', question_id: 'q1', text: 'x'.repeat(101) }).success,
+    ).toBe(false);
+    expect(NextStepRequestSchema.safeParse({ user_id: 'u1', question_id: 'q1' }).success).toBe(false);
+  });
+});
+
+describe('QuestionSchema', () => {
+  it('parses each of the three types', () => {
+    expect(QuestionSchema.parse(QUESTION).type).toBe('multiple_choice');
+    expect(
+      QuestionSchema.parse({
+        id: 'q2', type: 'reverse_choice', vocab_term_id: 'l1', question: 'כלב', part_of_speech: 'noun',
+        options: ['dog', 'cat'], correct_option: 0,
+      }).type,
+    ).toBe('reverse_choice');
+    expect(
+      QuestionSchema.parse({
+        id: 'q3', type: 'typed_translation', vocab_term_id: 'l1', question: 'כלב', part_of_speech: 'noun',
+        answer: 'dog', lemma: 'dog', alternatives: ['hound'],
+      }).type,
+    ).toBe('typed_translation');
+  });
+
+  it('rejects a typed card without its answer', () => {
+    expect(
+      QuestionSchema.safeParse({
+        id: 'q3', type: 'typed_translation', vocab_term_id: 'l1', question: 'כלב', part_of_speech: 'noun',
+        lemma: 'dog', alternatives: [],
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('LlmDistractorsSchema', () => {
+  // Phase 23 (spec D8): a typed item has no wrong options, and its alternatives
+  // may be missing without failing the answer.
+  it('accepts a typed item with no distractors and no alternatives key', () => {
+    expect(LlmDistractorsSchema.safeParse({ items: [{ key: 'q3', distractors: [] }] }).success).toBe(true);
+    expect(
+      LlmDistractorsSchema.safeParse({ items: [{ key: 'q3', distractors: [], alternatives: ['hound'] }] }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a fourth wrong option', () => {
+    expect(
+      LlmDistractorsSchema.safeParse({ items: [{ key: 'q1', distractors: ['a', 'b', 'c', 'd'] }] }).success,
+    ).toBe(false);
+  });
 });
 
 // The response schema the spec flags as most likely to bite: a discriminated
@@ -100,7 +159,9 @@ describe('NextStepResponseSchema', () => {
       complete: true,
       score: { correct: 9, total: 10 },
       missed_questions: [{ question: QUESTION, correct_answer: 'כלב' }],
-      progress: [{ sense_id: 'se1', form: 'dog', translation: 'כלב', level_before: 1, level_after: 2 }],
+      progress: [
+        { sense_id: 'se1', form: 'dog', translation: 'כלב', level_before: 1, level_after: 2, raised: ['written_receptive'] },
+      ],
     });
 
     // Both the runtime assertion and the narrowing below are the test: if the
