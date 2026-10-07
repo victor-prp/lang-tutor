@@ -14,8 +14,7 @@
   everything this spec depends on is restated below.
 - **Builds on:** Part A (#93); Part B is not required, and inserts its cloze types into these tiers
   when it lands. Phase 24 as designed, both PRs
-  (`docs/superpowers/specs/2026-10-07-lang-tutor-phase-24-more-question-types-design.md`, on branch
-  `phase-24-more-question-types` until it merges): the tiered planner (D3), eligibility (D4), the
+  (`docs/superpowers/specs/2026-10-07-lang-tutor-phase-24-more-question-types-design.md`, merged as #93): the tiered planner (D3), eligibility (D4), the
   listening flag (D5), dictation's shape and `spoken_receptive` live (D13). Phase 23 (#89:
   `judgeTyped`, the typed card and "show the answer"; #90: `SpeakButton`, `expo-audio` in the
   composition root, the iOS audio mode). Phase 20 (five dimensions per saved sense, the evidence
@@ -148,8 +147,10 @@ before the rotation, so a session without speaking is planned exactly as phase 2
   the learner and nothing has to be recalled.
 - **Say the translation is recall,** so it closes a run, beside the typed card.
 - **Each is appended to the end of its tier,** so the rotation, `tier[(k + r) mod size]`, keeps
-  phase 24's order and only grows. The tiers now cycle three, three and four types, so four
-  sessions in a row show every type of every tier, where phase 24 needed three.
+  phase 24's order and only grows. As built on Part A the tiers cycle three, two and three types,
+  so every type of every tier takes six sessions in a row (the least common multiple), and the
+  planner's test pins that four sessions in a row show both speaking cards (Done means 1). When
+  Part B's cloze types land, the tiers cycle three, three and four.
 - **Eligibility** (phase 24 D4), for both: the session was created with speaking on (D4), and the
   form, with stress marks removed, has at most four words. An elision such as `l'acqua` is one
   word. An ineligible pick falls through its tier as phase 24 says, ending at the always-eligible

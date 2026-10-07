@@ -143,6 +143,9 @@ test("speaking: read aloud, say the translation, and can't speak now", async ({ 
   await readCard(page, 1, 10, 'read');
   await page.getByTestId('speak-cant-speak').click();
   const tiles2 = await readCard(page, 2, 10, 'tiles');
+  // Passed unseen (spec D8): card 2 is up, and no banner or Continue came between.
+  await expect(page.getByTestId('feedback-title')).toHaveCount(0);
+  await expect(page.getByTestId('continue-button')).toHaveCount(0);
   await buildWord(page, FORM_OF[tiles2.prompt]);
   await page.getByTestId('continue-button').click();
 
