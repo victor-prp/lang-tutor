@@ -264,3 +264,67 @@ describe('phase 25: speaking questions', () => {
     });
   });
 });
+
+describe('phase 27: meaning recall', () => {
+  async function meaningSession(example?: { source: string; target: string }) {
+    const saved = await seedSavedSenses(t.db, {
+      enrollmentId: enrollmentOf('u_1'),
+      lemma: 'reserve',
+      form: 'to book',
+      translations: ['להזמין'],
+      example,
+    });
+    const asked = [
+      { senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'to book', lemma: 'reserve', translation: 'להזמין' },
+    ];
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked,
+      types: ['typed_meaning'],
+    });
+    return { questions, saved };
+  }
+
+  it('loads a typed_meaning question with its form, part of speech and meaning (phase 27)', async () => {
+    const { questions, saved } = await meaningSession();
+    expect(questions[0]).toEqual({
+      id: questions[0].id,
+      type: 'typed_meaning',
+      vocab_term_id: saved.lexemeId,
+      question: 'to book',
+      part_of_speech: 'noun',
+      meaning: 'להזמין',
+    });
+  });
+
+  it('findJudgeContext reads the lemma, part of speech, meaning and the saved example (phase 27)', async () => {
+    const { questions } = await meaningSession({
+      source: 'Vorrei prenotare un tavolo.',
+      target: 'הייתי רוצה להזמין שולחן.',
+    });
+    await withTx(t.db, async (tx) => {
+      const repo = createQuestionRepo(tx);
+      expect(await repo.findJudgeContext(questions[0].id)).toEqual({
+        form: 'to book',
+        lemma: 'reserve',
+        partOfSpeech: 'noun',
+        meaning: 'להזמין',
+        example: 'Vorrei prenotare un tavolo.',
+        exampleTranslation: 'הייתי רוצה להזמין שולחן.',
+      });
+      expect(await repo.findJudgeContext('00000000-0000-0000-0000-000000000000')).toBeUndefined();
+      expect(await repo.findJudgeContext('not-a-uuid')).toBeUndefined();
+    });
+  });
+
+  it('findJudgeContext gives null examples when none is saved (phase 27)', async () => {
+    const { questions } = await meaningSession();
+    await withTx(t.db, async (tx) => {
+      expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
+        example: null,
+        exampleTranslation: null,
+      });
+    });
+  });
+});

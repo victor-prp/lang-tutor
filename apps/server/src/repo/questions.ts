@@ -81,6 +81,16 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         lemma: row.lemma,
         alternatives: row.alternatives ?? [],
       };
+    case 'typed_meaning':
+      // Phase 27 (spec D15): the form is asked, the stored Hebrew is the meaning
+      // the judge compares the answer with.
+      return {
+        ...base,
+        type: 'typed_meaning',
+        question: row.form,
+        part_of_speech: row.partOfSpeech,
+        meaning: row.prompt!,
+      };
     case 'letter_tiles':
       return {
         ...base,
@@ -219,6 +229,54 @@ export function createQuestionRepo(tx: Tx) {
             ]
           : [];
       });
+    },
+
+    /**
+     * Phase 27 (spec D15). What the meaning judge is shown: the asked form, its
+     * lexeme, the stored meaning, and the learner's saved example for that
+     * form and sense. questions.id is text, so an id that matches nothing is
+     * simply no row.
+     */
+    findJudgeContext: async (
+      questionId: string,
+    ): Promise<
+      | {
+          form: string;
+          lemma: string;
+          partOfSpeech: string;
+          meaning: string;
+          example: string | null;
+          exampleTranslation: string | null;
+        }
+      | undefined
+    > => {
+      const rows = await tx.execute<{
+        form: string;
+        lemma: string;
+        part_of_speech: string;
+        prompt: string;
+        example_source: string | null;
+        example_target: string | null;
+      }>(sql`
+        SELECT v.form, l.lemma, l.part_of_speech, q.prompt, tr.example_source, tr.example_target
+        FROM questions q
+        JOIN dict_variants v  ON v.id = q.prompt_variant_id
+        JOIN dict_lexemes l   ON l.id = v.lexeme_id
+        LEFT JOIN dict_var_translations tr ON tr.variant_id = q.prompt_variant_id
+                                          AND tr.sense_id = q.sense_id
+                                          AND tr.user_language_code = q.user_language_code
+        WHERE q.id = ${questionId}`);
+      const row = rows.rows[0];
+      return row
+        ? {
+            form: row.form,
+            lemma: row.lemma,
+            partOfSpeech: row.part_of_speech,
+            meaning: row.prompt,
+            example: row.example_source,
+            exampleTranslation: row.example_target,
+          }
+        : undefined;
     },
 
     /** One list session's questions, owned by its enrollment, each of the type
