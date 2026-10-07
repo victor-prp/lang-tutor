@@ -58,10 +58,15 @@ test('a tutor invites a student, adds a word to their list, and the student ends
   // 5. The student ends the link; the tutor no longer has them.
   await logIn(page, STUDENT);
   await page.getByTestId('profile-button').click();
+  await expect(page.getByTestId(`tutor-${TUTOR}`)).toBeVisible();
   page.once('dialog', (dialog) => void dialog.accept());
   await tapAndWaitForGrant(page, `tutor-end-${TUTOR}`, 'DELETE');
   await expect(page.getByTestId(`tutor-${TUTOR}`)).toHaveCount(0);
 
+  // The landing is the proof: login loads grants before home decides the
+  // redirect (needsEnrollScreen), so a tutor who still held the grant would
+  // land on home and logIn would time out waiting for enroll-teach.
   await logIn(page, TUTOR, 'enroll-teach');
+  await expect(page.getByTestId('students-section')).toHaveCount(0);
   await expect(page.getByTestId(`student-${STUDENT}`)).toHaveCount(0);
 });
