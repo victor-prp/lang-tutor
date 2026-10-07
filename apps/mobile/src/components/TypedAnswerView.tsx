@@ -127,7 +127,7 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
         }}
         placeholder={strings.typedPlaceholder}
         placeholderTextColor={colors.muted}
-        style={[styles.input, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }, border]}
+        style={[styles.input, question.type === 'sentence_translation' && styles.inputMultiline, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }, border]}
       />
       {answered ? null : (
         <View style={answerStyles.actions}>
@@ -221,6 +221,8 @@ const styles = StyleSheet.create({
   },
   // The meaning card asks with a target-language form, which reads left to right.
   promptLtr: { writingDirection: 'ltr' },
+  // A sentence needs room, and Android centres a multiline box's text by default.
+  inputMultiline: { minHeight: 96, textAlignVertical: 'top' },
   inputIdle: { borderColor: colors.border },
   inputCorrect: { borderColor: colors.correct, backgroundColor: colors.correctSurface },
   inputWrong: { borderColor: colors.wrong, backgroundColor: colors.wrongSurface },

@@ -18,20 +18,22 @@ import { feedbackFor } from '@/feedback';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession, type SessionValue } from '@/hooks/useSession';
-import { splitAtGap } from '@/sentence';
+import { showsSentenceTranslation, splitAtGap } from '@/sentence';
 import { isSkip } from '@/speaking';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 // Phase 27 (spec D5). The gap card's prompt: the sentence with its blank, the
 // Hebrew line under it, and once answered the sentence spoken.
-function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID: string) {
+function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID?: string) {
   return (
     <View style={styles.gapCard} testID={testID}>
       <SentenceGap sentence={question.sentence} gap={question.gap} filled={answered} />
-      <Text style={styles.hebrewLine} testID="sentence-translation">
-        {question.translation}
-      </Text>
+      {showsSentenceTranslation(question.type, answered) ? (
+        <Text style={styles.hebrewLine} testID="sentence-translation">
+          {question.translation}
+        </Text>
+      ) : null}
       {answered ? <SpeakButton text={question.sentence} language={language} testID="speak-sentence" /> : null}
     </View>
   );
@@ -127,7 +129,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           direction="ltr"
           checking={false}
           failed={false}
-          prompt={gapPrompt(question, session.answered, language, 'cloze-prompt')}
+          prompt={gapPrompt(question, session.answered, language)}
         />
       );
     case 'sentence_translation':
