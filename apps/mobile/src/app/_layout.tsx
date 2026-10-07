@@ -56,12 +56,23 @@ const photoPicker = createPhotoPicker({
     launchCamera: async () => firstAsset(await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 })),
     launchLibrary: async () =>
       firstAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 })),
+    // The context and the rendered image hold native memory (a decoded camera
+    // photo is tens of megabytes) until released, so both are released as soon
+    // as the JPEG is saved, or the shrink fails. A no-op on web.
     shrink: async (uri, resize) => {
       const context = ImageManipulator.manipulate(uri);
-      if (resize) context.resize(resize);
-      const image = await context.renderAsync();
-      const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.8, base64: true });
-      return saved.base64 ?? '';
+      try {
+        if (resize) context.resize(resize);
+        const image = await context.renderAsync();
+        try {
+          const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.8, base64: true });
+          return saved.base64 ?? '';
+        } finally {
+          image.release();
+        }
+      } finally {
+        context.release();
+      }
     },
   },
 });
