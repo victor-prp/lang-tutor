@@ -46,8 +46,14 @@ describe('repos', () => {
     findGenerationContext: () => {
       throw new Error('submitAnswer must not read the generation context');
     },
+    findRecentSentences: () => {
+      throw new Error('submitAnswer must not read recent sentences');
+    },
     insertGeneratedQuestions: () => {
       throw new Error('submitAnswer must not write generated questions');
+    },
+    findJudgeContext: () => {
+      throw new Error('submitAnswer must not read the judge context');
     },
   };
 
@@ -186,6 +192,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
     });
 
     await expect(
@@ -232,6 +239,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
     });
 
     const result = await service.submitAnswer('s1', 't1', { text: 'finestar' });
@@ -247,6 +255,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
     });
 
     await expect(service.submitAnswer('s1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
@@ -277,6 +286,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
     });
 
     await service.createNextSession(E, { listening: true, speaking });

@@ -12,9 +12,12 @@ import type {
 } from '../api/types';
 import { seededRng } from '../utils/rng';
 import {
+  MAX_JUDGED_TEXT,
   SESSION_LENGTH,
   answerFits,
   evaluate,
+  isChoice,
+  isJudged,
   missed,
   pickQuestions,
   rightAnswer,
@@ -316,5 +319,121 @@ describe('phase 25 speaking cards', () => {
   it('knows which stored verdicts are right', () => {
     expect(['exact', 'near_miss', 'alternative', 'understood'].every((v) => verdictCorrect(v as never))).toBe(true);
     expect(['wrong', 'gave_up', 'skipped'].some((v) => verdictCorrect(v as never))).toBe(false);
+  });
+});
+
+const MEANING: Question = {
+  id: 'm1',
+  type: 'typed_meaning',
+  vocab_term_id: 'l1',
+  question: 'parlare',
+  part_of_speech: 'verb',
+  meaning: 'לדבר',
+};
+
+describe('typed_meaning (phase 27 D3)', () => {
+  it('is judged, not a choice and not speaking', () => {
+    expect(isJudged(MEANING)).toBe(true);
+    expect(isChoice(MEANING)).toBe(false);
+    expect(isJudged({ ...MEANING, type: 'typed_translation', answer: 'x', lemma: 'x', alternatives: [] } as Question)).toBe(false);
+  });
+  it('takes only a judged text', () => {
+    expect(answerFits(MEANING, { text: 'לדבר', judged: 'exact' })).toBe(true);
+    expect(answerFits(MEANING, { text: 'לדבר' })).toBe(false);
+    expect(answerFits(MEANING, { option_index: 0 })).toBe(false);
+  });
+  it('records the verdict it was given, never judging itself', () => {
+    expect(evaluate(MEANING, { text: 'לשוחח', judged: 'exact' })).toEqual({
+      question_id: 'm1',
+      is_correct: true,
+      answer_string: 'לשוחח',
+      verdict: 'exact',
+    });
+    expect(evaluate(MEANING, { text: 'ספר', judged: 'alternative' })).toMatchObject({ is_correct: true, verdict: 'alternative' });
+    expect(evaluate(MEANING, { text: 'לאכול', judged: 'wrong' })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+  });
+  it('stores at most MAX_JUDGED_TEXT characters', () => {
+    const long = 'א'.repeat(MAX_JUDGED_TEXT + 20);
+    expect(evaluate(MEANING, { text: long, judged: 'wrong' }).answer_string).toHaveLength(MAX_JUDGED_TEXT);
+  });
+  it('a typed card still refuses a judged answer', () => {
+    const typed: Question = { id: 't1', type: 'typed_translation', vocab_term_id: 'l1', question: 'לדבר', part_of_speech: 'verb', answer: 'parlare', lemma: 'parlare', alternatives: [] };
+    expect(answerFits(typed, { text: 'parlare', judged: 'exact' })).toBe(false);
+  });
+  it('its right answer is the meaning, and it is missed like any card', () => {
+    expect(rightAnswer(MEANING)).toBe('לדבר');
+    const record = evaluate(MEANING, { text: '', judged: 'wrong' });
+    expect(missed([MEANING], [record])).toEqual([{ question: MEANING, correct_answer: 'לדבר' }]);
+  });
+});
+
+const CLOZE_CHOICE: Question = {
+  id: 'cc',
+  type: 'cloze_choice',
+  vocab_term_id: 'l1',
+  sentence: 'Vorrei prenotare un tavolo.',
+  gap: { start: 7, end: 16 },
+  translation: 'הייתי רוצה להזמין שולחן.',
+  meaning: 'להזמין',
+  options: ['prenotare', 'mangiare', 'dormire', 'correre'],
+  correct_option: 0,
+};
+const CLOZE_TYPED: Question = {
+  id: 'ct',
+  type: 'cloze_typed',
+  vocab_term_id: 'l2',
+  sentence: 'Ieri parlavamo per ore.',
+  gap: { start: 5, end: 14 },
+  translation: 'אתמול דיברנו שעות.',
+  meaning: 'לדבר',
+  answer: 'parlavamo',
+  alternatives: ['chiacchieravamo'],
+};
+const TRANSLATION: Question = {
+  id: 'st',
+  type: 'sentence_translation',
+  vocab_term_id: 'l3',
+  question: 'אני רוצה להזמין שולחן',
+  meaning: 'להזמין',
+  sentence: 'Voglio prenotare un tavolo.',
+  gap: { start: 7, end: 16 },
+  answer: 'prenotare',
+};
+
+describe('phase 27 Part B cards', () => {
+  it('a gap choice is a choice, judged by its option', () => {
+    expect(isChoice(CLOZE_CHOICE)).toBe(true);
+    expect(evaluate(CLOZE_CHOICE, { option_index: 0 })).toMatchObject({ is_correct: true, answer_string: 'prenotare' });
+    expect(rightAnswer(CLOZE_CHOICE)).toBe('prenotare');
+  });
+  it('a typed gap wants the form the sentence needs', () => {
+    expect(evaluate(CLOZE_TYPED, { text: 'parlavamo' })).toMatchObject({ verdict: 'exact', is_correct: true });
+    expect(evaluate(CLOZE_TYPED, { text: 'parlare' })).toMatchObject({ verdict: 'wrong', is_correct: false });
+    expect(evaluate(CLOZE_TYPED, { text: 'parlavano' })).toMatchObject({ verdict: 'near_miss' });
+    expect(evaluate(CLOZE_TYPED, { text: 'chiacchieravamo' })).toMatchObject({ verdict: 'alternative' });
+    expect(rightAnswer(CLOZE_TYPED)).toBe('parlavamo');
+    expect(answerFits(CLOZE_TYPED, { text: 'x', judged: 'exact' })).toBe(false);
+  });
+  it('a translation is judged by the server', () => {
+    expect(isJudged(TRANSLATION)).toBe(true);
+    expect(answerFits(TRANSLATION, { text: 'x' })).toBe(false);
+    expect(evaluate(TRANSLATION, { text: 'Vorrei prenotare un tavolo', judged: 'exact' })).toMatchObject({
+      is_correct: true,
+      verdict: 'exact',
+    });
+    expect(rightAnswer(TRANSLATION)).toBe('Voglio prenotare un tavolo.');
+  });
+  it('no card that is not judged takes a judged answer', () => {
+    const say: Question = {
+      id: 's',
+      type: 'say_translation',
+      vocab_term_id: 'l',
+      question: 'לדבר',
+      part_of_speech: 'verb',
+      answer: 'parlare',
+      lemma: 'parlare',
+      alternatives: [],
+    };
+    expect(answerFits(say, { text: 'parlare', judged: 'exact' })).toBe(false);
   });
 });

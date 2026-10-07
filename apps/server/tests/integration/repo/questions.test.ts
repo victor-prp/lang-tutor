@@ -10,6 +10,7 @@ import { optionsFor as generatedOptions, type QuestionOption } from '../../../sr
 import { asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createQuestionRepo } from '../../../src/repo/questions';
+import { createSessionRepo } from '../../../src/repo/sessions';
 
 let t: TestDb;
 
@@ -45,7 +46,7 @@ describe('loadQuestionPool', () => {
   it("uses the term variant's form as the prompt, not the lemma", async () => {
     await withTx(t.db, async (tx) => {
       const pool = await createQuestionRepo(tx).loadQuestionPool('en', 'he');
-      expect(pool.find((q) => q.id === 'q-remember')!.question).toBe('to remember');
+      expect(pool.find((q) => q.id === 'q-remember')).toMatchObject({ question: 'to remember' });
     });
   });
 
@@ -112,8 +113,8 @@ describe('phase 19', () => {
       }),
     );
     expect(context).toEqual([
-      { senseId: run.senseIds[0], variantId: run.variantId, lexemeId: run.lexemeId, form: 'sprint', lemma: 'sprint', partOfSpeech: 'noun', translation: 'ריצה' },
-      { senseId: book.senseIds[0], variantId: book.variantId, lexemeId: book.lexemeId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', translation: 'ספר' },
+      { senseId: run.senseIds[0], variantId: run.variantId, lexemeId: run.lexemeId, form: 'sprint', lemma: 'sprint', partOfSpeech: 'noun', translation: 'ריצה', example: null, exampleTranslation: null },
+      { senseId: book.senseIds[0], variantId: book.variantId, lexemeId: book.lexemeId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', translation: 'ספר', example: null, exampleTranslation: null },
     ]);
   });
 
@@ -261,6 +262,252 @@ describe('phase 25: speaking questions', () => {
       answer: 'lantern',
       lemma: 'lantern',
       alternatives: ['lamp'],
+    });
+  });
+});
+
+describe('phase 27: meaning recall', () => {
+  async function meaningSession(example?: { source: string; target: string }) {
+    const saved = await seedSavedSenses(t.db, {
+      enrollmentId: enrollmentOf('u_1'),
+      lemma: 'reserve',
+      form: 'to book',
+      translations: ['להזמין'],
+      example,
+    });
+    const asked = [
+      { senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'to book', lemma: 'reserve', translation: 'להזמין' },
+    ];
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked,
+      types: ['typed_meaning'],
+    });
+    return { questions, saved };
+  }
+
+  it('loads a typed_meaning question with its form, part of speech and meaning (phase 27)', async () => {
+    const { questions, saved } = await meaningSession();
+    expect(questions[0]).toEqual({
+      id: questions[0].id,
+      type: 'typed_meaning',
+      vocab_term_id: saved.lexemeId,
+      question: 'to book',
+      part_of_speech: 'noun',
+      meaning: 'להזמין',
+    });
+  });
+
+  it('findJudgeContext reads the lemma, part of speech, meaning and the saved example (phase 27)', async () => {
+    const { questions } = await meaningSession({
+      source: 'Vorrei prenotare un tavolo.',
+      target: 'הייתי רוצה להזמין שולחן.',
+    });
+    await withTx(t.db, async (tx) => {
+      const repo = createQuestionRepo(tx);
+      expect(await repo.findJudgeContext(questions[0].id)).toEqual({
+        form: 'to book',
+        lemma: 'reserve',
+        partOfSpeech: 'noun',
+        meaning: 'להזמין',
+        example: 'Vorrei prenotare un tavolo.',
+        exampleTranslation: 'הייתי רוצה להזמין שולחן.',
+      });
+      expect(await repo.findJudgeContext('00000000-0000-0000-0000-000000000000')).toBeUndefined();
+      expect(await repo.findJudgeContext('not-a-uuid')).toBeUndefined();
+    });
+  });
+
+  it('findJudgeContext gives null examples when none is saved (phase 27)', async () => {
+    const { questions } = await meaningSession();
+    await withTx(t.db, async (tx) => {
+      expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
+        example: null,
+        exampleTranslation: null,
+      });
+    });
+  });
+});
+
+describe('phase 27 Part B: sentence cards', () => {
+  const SENTENCE = 'Ieri parlavamo per ore.';
+  const HEBREW = 'אתמול דיברנו שעות.';
+
+  async function savedWord(example?: { source: string; target: string }) {
+    return seedSavedSenses(t.db, {
+      enrollmentId: enrollmentOf('u_1'),
+      lemma: 'parlare',
+      form: 'parlavamo',
+      translations: ['לדבר'],
+      example,
+    });
+  }
+
+  type SentenceExtra = {
+    type: QuestionType;
+    options?: QuestionOption[] | null;
+    alternatives?: string[] | null;
+    sentence?: string;
+    sentenceTranslation?: string;
+    gapStart?: number;
+    gapEnd?: number;
+  };
+  const sentenceRow = (word: Awaited<ReturnType<typeof savedWord>>, extra: SentenceExtra) => ({
+    senseId: word.senseIds[0],
+    variantId: word.variantId,
+    form: 'parlavamo',
+    lemma: 'parlare',
+    partOfSpeech: 'noun',
+    lexemeId: word.lexemeId,
+    prompt: 'לדבר',
+    options: null,
+    alternatives: null,
+    tiles: null,
+    sentence: SENTENCE,
+    sentenceTranslation: HEBREW,
+    gapStart: 5,
+    gapEnd: 14,
+    ...extra,
+  });
+
+  it('writes the three sentence types and loads each back in its shape (questionFrom)', async () => {
+    const word = await savedWord();
+    const [choice, typed, translation] = await withTx(t.db, (tx) =>
+      createQuestionRepo(tx).insertGeneratedQuestions({
+        userId: 'u_1',
+        enrollmentId: enrollmentOf('u_1'),
+        targetLanguage: 'it',
+        userLanguageCode: 'he',
+        questions: [
+          sentenceRow(word, { type: 'cloze_choice', options: generatedOptions('parlavamo', ['parlammo', 'parlate', 'parlano']) }),
+          sentenceRow(word, { type: 'cloze_typed', alternatives: ['parlammo'] }),
+          sentenceRow(word, { type: 'sentence_translation', sentence: 'Yesterday we talked for hours.', sentenceTranslation: HEBREW, gapStart: 13, gapEnd: 19 }),
+        ],
+      }),
+    );
+    const gap = { start: 5, end: 14 };
+    expect(choice).toEqual({
+      id: choice.id,
+      type: 'cloze_choice',
+      vocab_term_id: word.lexemeId,
+      sentence: SENTENCE,
+      gap,
+      translation: HEBREW,
+      meaning: 'לדבר',
+      options: ['parlavamo', 'parlammo', 'parlate', 'parlano'],
+      correct_option: 0,
+    });
+    expect(typed).toEqual({
+      id: typed.id,
+      type: 'cloze_typed',
+      vocab_term_id: word.lexemeId,
+      sentence: SENTENCE,
+      gap,
+      translation: HEBREW,
+      meaning: 'לדבר',
+      answer: 'parlavamo',
+      alternatives: ['parlammo'],
+    });
+    expect(translation).toEqual({
+      id: translation.id,
+      type: 'sentence_translation',
+      vocab_term_id: word.lexemeId,
+      question: HEBREW,
+      meaning: 'לדבר',
+      sentence: 'Yesterday we talked for hours.',
+      gap: { start: 13, end: 19 },
+      answer: 'talked',
+    });
+
+    // loadSession reads the same shapes from the stored rows.
+    const sessionId = await withTx(t.db, async (tx) => {
+      const sessions = createSessionRepo(tx);
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'));
+      await sessions.insertSessionQuestions(id, [choice, typed, translation]);
+      await sessions.transition(id, ['preparing'], 'ready');
+      return id;
+    });
+    const loaded = await withTx(t.db, (tx) => createSessionRepo(tx).loadSession(sessionId));
+    expect(loaded!.questions).toEqual([choice, typed, translation]);
+  });
+
+  it('refuses a sentence card whose gap lies outside its sentence', async () => {
+    const word = await savedWord();
+    await expect(
+      withTx(t.db, (tx) =>
+        createQuestionRepo(tx).insertGeneratedQuestions({
+          userId: 'u_1',
+          enrollmentId: enrollmentOf('u_1'),
+          targetLanguage: 'it',
+          userLanguageCode: 'he',
+          questions: [sentenceRow(word, { type: 'cloze_typed', alternatives: [], gapEnd: 99 })],
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('findGenerationContext returns the saved example and its translation', async () => {
+    const word = await savedWord({ source: SENTENCE, target: HEBREW });
+    const bare = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'tome', translations: ['ספר'] });
+    const context = await withTx(t.db, (tx) =>
+      createQuestionRepo(tx).findGenerationContext({
+        picks: [
+          { senseId: word.senseIds[0], variantId: word.variantId },
+          { senseId: bare.senseIds[0], variantId: bare.variantId },
+        ],
+        sourceLanguage: 'he',
+      }),
+    );
+    expect(context.map((row) => [row.example, row.exampleTranslation])).toEqual([
+      [SENTENCE, HEBREW],
+      [null, null],
+    ]);
+  });
+
+  describe('findRecentSentences', () => {
+    async function ask(word: Awaited<ReturnType<typeof savedWord>>, enrollmentId: string, userId: string, rows: SentenceExtra[]) {
+      // One transaction each, so created_at orders them.
+      await withTx(t.db, (tx) =>
+        createQuestionRepo(tx).insertGeneratedQuestions({
+          userId,
+          enrollmentId,
+          targetLanguage: 'it',
+          userLanguageCode: 'he',
+          questions: rows.map((row) => sentenceRow(word, row)),
+        }),
+      );
+    }
+    const typedWith = (n: number): SentenceExtra => ({ type: 'cloze_typed', alternatives: [], sentence: `Ieri parlavamo ${n}.`, gapStart: 5, gapEnd: 14 });
+    const translateWith = (n: number): SentenceExtra => ({ type: 'sentence_translation', sentence: `We parlavamo ${n}.`, sentenceTranslation: `דיברנו ${n}.`, gapStart: 3, gapEnd: 12 });
+
+    it('returns, per sense, newest first, only this enrollment, only the two types, at most limit', async () => {
+      await seedUser(t.db, 'u_2');
+      const word = await savedWord();
+      const enrollmentId = enrollmentOf('u_1');
+      await ask(word, enrollmentId, 'u_1', [typedWith(1)]);
+      await ask(word, enrollmentId, 'u_1', [translateWith(1)]);
+      await ask(word, enrollmentId, 'u_1', [typedWith(2)]);
+      // A cloze_choice shows the saved example, which is not a written sentence.
+      await ask(word, enrollmentId, 'u_1', [{ type: 'cloze_choice', options: generatedOptions('parlavamo', ['a', 'b', 'c']), sentence: 'Ieri parlavamo 9.' }]);
+      await ask(word, enrollmentId, 'u_1', [typedWith(3)]);
+      // Another learner's question for the same sense.
+      await ask(word, enrollmentOf('u_2'), 'u_2', [typedWith(7)]);
+      await ask(word, enrollmentId, 'u_1', [translateWith(2)]);
+
+      const read = (limit: number, senseIds = [word.senseIds[0], 'other']) =>
+        withTx(t.db, (tx) => createQuestionRepo(tx).findRecentSentences({ enrollmentId, senseIds, limit }));
+
+      const recent = await read(2);
+      expect(recent.get(word.senseIds[0])).toEqual({
+        cloze: ['Ieri parlavamo 3.', 'Ieri parlavamo 2.'],
+        // The Hebrew sentence asked, not the reference that follows the answer.
+        translate: ['דיברנו 2.', 'דיברנו 1.'],
+      });
+      expect((await read(10)).get(word.senseIds[0])!.cloze).toEqual(['Ieri parlavamo 3.', 'Ieri parlavamo 2.', 'Ieri parlavamo 1.']);
+      // A sense with none has no entry; no senses is an empty map.
+      expect(recent.has('other')).toBe(false);
+      expect((await read(2, [])).size).toBe(0);
     });
   });
 });

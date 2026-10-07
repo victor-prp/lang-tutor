@@ -51,6 +51,7 @@ export async function main(): Promise<void> {
     translationTimeoutMs: config.translationTimeoutMs,
     sessionGenerationTimeoutMs: config.sessionGenerationTimeoutMs,
     speechTimeoutMs: config.speechTimeoutMs,
+    judgeTimeoutMs: config.judgeTimeoutMs,
     photoReadTimeoutMs: config.photoReadTimeoutMs,
     // Resolved here, in the one place that reads the environment: app.ts must
     // not learn that a lane exists.

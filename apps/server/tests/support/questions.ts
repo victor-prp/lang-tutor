@@ -2,7 +2,8 @@ import type { Question } from '@lang-tutor/core/api';
 import { isChoice, type ChoiceQuestion, type QuestionType } from '@lang-tutor/core/domain';
 
 import type { Db } from '../../src/db/client';
-import { generatedContent } from '../../src/domain/distractors';
+import { findGap } from '../../src/domain/cloze';
+import { NOTHING_GENERATED, generatedContent, type Generated, type QuestionContent } from '../../src/domain/distractors';
 import { LANGUAGES } from '../../src/domain/languages';
 import { tilesFor } from '../../src/domain/tiles';
 import { createQuestionRepo } from '../../src/repo/questions';
@@ -32,6 +33,37 @@ export type AskedSense = {
   lemma: string;
   translation: string;
 };
+
+const HEBREW_SENTENCE = 'משפט לדוגמה';
+
+/**
+ * Phase 27. The content of one position, with a sentence card's sentence made
+ * from its word: 'We use <form> here today.' (cloze_choice reads it as the
+ * saved example). `build` receives the saved example, what the model made, and
+ * the gap, as generatedContent wants them.
+ */
+function sentenceCard(
+  sense: AskedSense,
+  type: QuestionType,
+  alternatives: string[],
+  build: (example: string | null, generated: Generated, gap: { start: number; end: number } | null) => QuestionContent,
+): QuestionContent {
+  const sentence = `We use ${sense.form} here today.`;
+  const gap = findGap(sentence, [sense.form])!;
+  switch (type) {
+    case 'cloze_choice':
+      return build(sentence, { ...NOTHING_GENERATED, distractors: ['wrong1', 'wrong2', 'wrong3'] }, gap);
+    case 'cloze_typed':
+      return build(null, { ...NOTHING_GENERATED, sentence: { sentence, translation: HEBREW_SENTENCE, gap, alternatives } }, null);
+    case 'sentence_translation':
+      return build(null, { ...NOTHING_GENERATED, translate: { hebrew: HEBREW_SENTENCE, reference: sentence, gap } }, null);
+    case 'multiple_choice':
+    case 'listen_choice':
+      return build(null, { ...NOTHING_GENERATED, distractors: ['שגוי1', 'שגוי2', 'שגוי3'] }, null);
+    default:
+      return build(null, { ...NOTHING_GENERATED, distractors: ['wrong1', 'wrong2', 'wrong3'], alternatives }, null);
+  }
+}
 
 /** Phase 23's cycle: the default types of a test's list session. */
 const CYCLE: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
@@ -67,16 +99,17 @@ export async function insertListSession(
         partOfSpeech: 'noun',
         lexemeId: sense.lexemeId,
         type: types[index],
-        ...generatedContent(
-          { ...sense, partOfSpeech: 'noun' },
-          types[index],
-          types[index] === 'multiple_choice' || types[index] === 'listen_choice'
-            ? { distractors: ['שגוי1', 'שגוי2', 'שגוי3'], alternatives: [] }
-            : { distractors: ['wrong1', 'wrong2', 'wrong3'], alternatives: input.alternatives ?? [] },
-          {
-            tiles: types[index] === 'letter_tiles' ? tilesFor(sense.form, LANGUAGES.en.alphabet, testRng(1)) : null,
-            board: types[index] === 'matching' ? { meanings, own: index - boardStart } : null,
-          },
+        ...sentenceCard(sense, types[index], input.alternatives ?? [], (example, generated, gap) =>
+          generatedContent(
+            { ...sense, partOfSpeech: 'noun', example, exampleTranslation: example ? HEBREW_SENTENCE : null },
+            types[index],
+            generated,
+            {
+              tiles: types[index] === 'letter_tiles' ? tilesFor(sense.form, LANGUAGES.en.alphabet, testRng(1)) : null,
+              board: types[index] === 'matching' ? { meanings, own: index - boardStart } : null,
+              gap,
+            },
+          ),
         ),
       })),
     });

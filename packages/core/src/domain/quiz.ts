@@ -1,6 +1,7 @@
 import type {
   AnswerRecord,
   AnswerVerdict,
+  ClozeChoiceQuestion,
   ListenChoiceQuestion,
   MatchingQuestion,
   MissedQuestion,
@@ -10,7 +11,9 @@ import type {
   ReverseChoiceQuestion,
   SayTranslationQuestion,
   Score,
+  SentenceTranslationQuestion,
   SpeechVerdict,
+  TypedMeaningQuestion,
   TypedVerdict,
 } from '../api/types';
 import { shuffle } from '../utils/shuffle';
@@ -29,13 +32,18 @@ export type AnswerInput =
   | { option_index: number }
   | { text: string }
   | { heard: string }
-  | { pass: 'skip' | 'show_answer' };
+  | { pass: 'skip' | 'show_answer' }
+  // Phase 27 (spec D3). A text the server judged, by rule or by a model call.
+  // Only the server builds it: the next-step schema has no `judged` field.
+  | { text: string; judged: TypedVerdict };
 
-export type ChoiceQuestion = MultipleChoiceQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion;
+export type ChoiceQuestion = MultipleChoiceQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion | ClozeChoiceQuestion;
 /** Phase 25. The cards answered by voice. */
 export type SpeakingQuestion = ReadAloudQuestion | SayTranslationQuestion;
 /** Phase 24. A question answered by text: typed, heard, or built from tiles. */
-type TextQuestion = Exclude<Question, ChoiceQuestion | SpeakingQuestion>;
+/** Phase 27 (spec D3). The cards whose text answer the server judges. */
+export type JudgedQuestion = TypedMeaningQuestion | SentenceTranslationQuestion;
+type TextQuestion = Exclude<Question, ChoiceQuestion | SpeakingQuestion | JudgedQuestion>;
 
 export function isChoice(question: Question): question is ChoiceQuestion {
   switch (question.type) {
@@ -43,12 +51,16 @@ export function isChoice(question: Question): question is ChoiceQuestion {
     case 'reverse_choice':
     case 'listen_choice':
     case 'matching':
+    case 'cloze_choice':
       return true;
     case 'typed_translation':
     case 'dictation':
     case 'letter_tiles':
     case 'read_aloud':
     case 'say_translation':
+    case 'typed_meaning':
+    case 'cloze_typed':
+    case 'sentence_translation':
       return false;
   }
 }
@@ -57,18 +69,26 @@ export function isSpeaking(question: Question): question is SpeakingQuestion {
   return question.type === 'read_aloud' || question.type === 'say_translation';
 }
 
+/** Phase 27 (spec D3). The cards whose text answer the server judges. */
+export function isJudged(question: Question): question is JudgedQuestion {
+  return question.type === 'typed_meaning' || question.type === 'sentence_translation';
+}
+
 /** Whether `answer` is the kind `question` takes. A read-aloud card has no
  *  "show the answer": its word is on the screen. */
 export function answerFits(question: Question, answer: AnswerInput): boolean {
   if (isChoice(question)) return 'option_index' in answer;
   if (question.type === 'read_aloud') return 'heard' in answer || ('pass' in answer && answer.pass === 'skip');
-  if (question.type === 'say_translation') return 'heard' in answer || 'pass' in answer || 'text' in answer;
-  return 'text' in answer;
+  if (question.type === 'say_translation') return 'heard' in answer || 'pass' in answer || ('text' in answer && !('judged' in answer));
+  if (isJudged(question)) return 'text' in answer && 'judged' in answer;
+  return 'text' in answer && !('judged' in answer);
 }
 
 /** What the learner should have answered, as the feedback and the missed list show it. */
 export function rightAnswer(question: Question): string {
   if (isChoice(question)) return question.options[question.correct_option];
+  if (question.type === 'typed_meaning') return question.meaning;
+  if (question.type === 'sentence_translation') return question.sentence;
   return question.type === 'dictation' || question.type === 'read_aloud' ? question.question : question.answer;
 }
 
@@ -145,6 +165,9 @@ function verdictFor(question: TextQuestion | SayTranslationQuestion, text: strin
     case 'dictation':
       // Spec D7: what was said, and nothing else — not its lemma, not a synonym.
       return judgeTyped({ answer: question.question, lemma: question.question, alternatives: [] }, text);
+    case 'cloze_typed':
+      // Phase 27 (spec D5): the form the sentence needs; its lemma is wrong unless the sentence needs it.
+      return judgeTyped({ answer: question.answer, lemma: question.answer, alternatives: question.alternatives }, text);
     case 'letter_tiles':
       return judgeTiles(question.answer, text);
   }
@@ -152,6 +175,9 @@ function verdictFor(question: TextQuestion | SayTranslationQuestion, text: strin
 
 // answers_typed_text_length: a transcript is stored as the text of its answer.
 const MAX_ANSWER_TEXT = 100;
+
+// answers_typed_text_length (phase 27 D11)
+export const MAX_JUDGED_TEXT = 300;
 
 // Callers check answerFits, and an option's range, first: the session's step
 // owns those outcomes, so here a mismatch is a programming error. So is an
@@ -173,7 +199,15 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
     const verdict = answer.pass === 'skip' ? 'skipped' : 'gave_up';
     return { question_id: question.id, is_correct: false, answer_string: '', verdict };
   }
-  if (!isChoice(question) && question.type !== 'read_aloud' && 'text' in answer) {
+  if (isJudged(question) && 'judged' in answer) {
+    return {
+      question_id: question.id,
+      is_correct: verdictCorrect(answer.judged),
+      answer_string: answer.text.slice(0, MAX_JUDGED_TEXT),
+      verdict: answer.judged,
+    };
+  }
+  if (!isChoice(question) && !isJudged(question) && question.type !== 'read_aloud' && 'text' in answer && !('judged' in answer)) {
     const verdict = verdictFor(question, answer.text);
     return { question_id: question.id, is_correct: verdictCorrect(verdict), answer_string: answer.text, verdict };
   }

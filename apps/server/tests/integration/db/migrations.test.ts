@@ -468,3 +468,199 @@ describe('0017_speaking_cards', () => {
     });
   });
 });
+
+// Phase 27 Part A: stored questions and answers survive 0019, a meaning-recall
+// row takes a prompt only, and a judged answer may be 300 characters.
+describe('0019_typed_meaning', () => {
+  it('keeps every existing question and answer, and admits a typed_meaning question with a prompt only', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0018_photo_imports'));
+
+    const options = JSON.stringify([
+      { position: 0, text: 'עפיפון', is_correct: true },
+      { position: 1, text: 'א', is_correct: false },
+      { position: 2, text: 'ב', is_correct: false },
+      { position: 3, text: 'ג', is_correct: false },
+    ]);
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech)
+        values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code)
+        values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 0);
+    `);
+    const insertQuestion = (id: string, type: string, columns: { options?: string; prompt?: string; alternatives?: string; tiles?: string }) =>
+      db.execute(sql`
+        insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles)
+          values (${id}, 'u_1', 'e_1', 's1', 'v1', 'en', 'he', ${type},
+            ${columns.options ?? null}::jsonb, ${columns.prompt ?? null}, ${columns.alternatives ?? null}::text[], ${columns.tiles ?? null}::text[])`);
+    // One question of each existing type.
+    await insertQuestion('q1', 'multiple_choice', { options });
+    await insertQuestion('q2', 'reverse_choice', { options, prompt: 'עפיפון' });
+    await insertQuestion('q3', 'typed_translation', { prompt: 'עפיפון', alternatives: '{}' });
+    await insertQuestion('q4', 'listen_choice', { options });
+    await insertQuestion('q5', 'dictation', { prompt: 'עפיפון' });
+    await insertQuestion('q6', 'matching', { options });
+    await insertQuestion('q7', 'letter_tiles', { prompt: 'עפיפון', tiles: '{k,i,t,e,s}' });
+    await insertQuestion('q8', 'read_aloud', { prompt: 'עפיפון' });
+    await insertQuestion('q9', 'say_translation', { prompt: 'עפיפון', alternatives: '{}' });
+    const [session] = (
+      await db.execute<{ id: string }>(sql`
+        insert into sessions (user_id, enrollment_id, status, source)
+          values ('u_1', 'e_1', 'ready', 'list') returning id`)
+    ).rows;
+    await db.execute(sql`
+      insert into session_questions (session_id, position, question_id, option_order)
+        values (${session.id}, 0, 'q3', '{}')`);
+    const hundred = 'a'.repeat(100);
+    await db.execute(sql`
+      insert into answers (session_id, position, question_id, typed_text, verdict)
+        values (${session.id}, 0, 'q3', ${hundred}, 'exact')`);
+
+    await runMigrations(db);
+
+    const kept = await db.execute<{ type: string }>(sql`select type from questions order by id`);
+    expect(kept.rows.map((r) => r.type)).toEqual([
+      'multiple_choice',
+      'reverse_choice',
+      'typed_translation',
+      'listen_choice',
+      'dictation',
+      'matching',
+      'letter_tiles',
+      'read_aloud',
+      'say_translation',
+    ]);
+    const stored = await db.execute<{ typed_text: string; verdict: string }>(
+      sql`select typed_text, verdict from answers`,
+    );
+    expect(stored.rows).toEqual([{ typed_text: hundred, verdict: 'exact' }]);
+
+    // The new shape: a prompt and nothing else.
+    await insertQuestion('r1', 'typed_meaning', { prompt: 'עפיפון' });
+    await expect(insertQuestion('r2', 'typed_meaning', { prompt: 'עפיפון', options })).rejects.toMatchObject({ cause: { constraint: 'questions_shape_valid' } });
+    await expect(insertQuestion('r3', 'typed_meaning', { prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject({ cause: { constraint: 'questions_shape_valid' } });
+    await expect(insertQuestion('r4', 'typed_meaning', {})).rejects.toMatchObject({ cause: { constraint: 'questions_shape_valid' } });
+
+    // A judged answer is at most 300 characters.
+    const answer = (position: number, length: number) =>
+      db.execute(sql`
+        insert into answers (session_id, position, question_id, typed_text, verdict)
+          values (${session.id}, ${position}, 'r1', ${'ב'.repeat(length)}, 'exact')`);
+    await db.execute(sql`
+      insert into session_questions (session_id, position, question_id, option_order)
+        values (${session.id}, 4, 'r1', '{}'), (${session.id}, 5, 'r1', '{}')`);
+    await answer(4, 300);
+    await expect(answer(5, 301)).rejects.toMatchObject({ cause: { constraint: 'answers_typed_text_length' } });
+  });
+});
+
+// Phase 27 Part B (Review Focus 5): rows stored before 0020 keep loading, each
+// sentence type takes its four columns, and a sentence column anywhere else, or
+// a gap outside its sentence, is refused.
+describe('0020_sentence_cards', () => {
+  it('keeps every existing question, admits the three sentence types, and refuses a stray or out-of-range sentence', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0019_typed_meaning'));
+
+    const options = JSON.stringify([
+      { position: 0, text: 'kite', is_correct: true },
+      { position: 1, text: 'a', is_correct: false },
+      { position: 2, text: 'b', is_correct: false },
+      { position: 3, text: 'c', is_correct: false },
+    ]);
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech)
+        values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code)
+        values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 0);
+    `);
+    type Columns = {
+      options?: string;
+      prompt?: string;
+      alternatives?: string;
+      tiles?: string;
+      sentence?: string;
+      translation?: string;
+      gapStart?: number;
+      gapEnd?: number;
+    };
+    const insertQuestion = (id: string, type: string, c: Columns) =>
+      db.execute(sql`
+        insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles,
+                               sentence, sentence_translation, gap_start, gap_end)
+          values (${id}, 'u_1', 'e_1', 's1', 'v1', 'en', 'he', ${type},
+            ${c.options ?? null}::jsonb, ${c.prompt ?? null}, ${c.alternatives ?? null}::text[], ${c.tiles ?? null}::text[],
+            ${c.sentence ?? null}, ${c.translation ?? null}, ${c.gapStart ?? null}::int, ${c.gapEnd ?? null}::int)`);
+    // Before 0019 the table has no sentence columns.
+    await db.execute(sql`
+      insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives)
+        values ('q1', 'u_1', 'e_1', 's1', 'v1', 'en', 'he', 'multiple_choice', ${options}::jsonb, null, null),
+               ('q2', 'u_1', 'e_1', 's1', 'v1', 'en', 'he', 'typed_meaning', null, 'עפיפון', null),
+               ('q3', 'u_1', 'e_1', 's1', 'v1', 'en', 'he', 'say_translation', null, 'עפיפון', '{}')`);
+
+    await runMigrations(db);
+
+    const kept = await db.execute<{ type: string; sentence: string | null; gap_start: number | null }>(
+      sql`select type, sentence, gap_start from questions order by id`,
+    );
+    expect(kept.rows).toEqual([
+      { type: 'multiple_choice', sentence: null, gap_start: null },
+      { type: 'typed_meaning', sentence: null, gap_start: null },
+      { type: 'say_translation', sentence: null, gap_start: null },
+    ]);
+
+    // Each sentence type with its columns: 'I fly a kite.', the gap is 'kite'.
+    const sentence = { sentence: 'I fly a kite.', translation: 'אני מעיף עפיפון.', gapStart: 8, gapEnd: 12 };
+    await insertQuestion('c1', 'cloze_choice', { ...sentence, options, prompt: 'עפיפון' });
+    await insertQuestion('c2', 'cloze_typed', { ...sentence, prompt: 'עפיפון', alternatives: '{}' });
+    await insertQuestion('c3', 'sentence_translation', { ...sentence, prompt: 'עפיפון' });
+    const stored = await db.execute<{ id: string; sentence: string; gap_start: number; gap_end: number }>(
+      sql`select id, sentence, gap_start, gap_end from questions where id like 'c%' order by id`,
+    );
+    expect(stored.rows.map((r) => [r.id, r.sentence.slice(r.gap_start, r.gap_end)])).toEqual([
+      ['c1', 'kite'],
+      ['c2', 'kite'],
+      ['c3', 'kite'],
+    ]);
+
+    // The shapes of the three.
+    const shape = { cause: { constraint: 'questions_shape_valid' } };
+    await expect(insertQuestion('s1', 'cloze_choice', { ...sentence, prompt: 'עפיפון' })).rejects.toMatchObject(shape);
+    await expect(insertQuestion('s2', 'cloze_choice', { ...sentence, options, prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject(shape);
+    await expect(insertQuestion('s3', 'cloze_typed', { ...sentence, prompt: 'עפיפון', options, alternatives: '{}' })).rejects.toMatchObject(shape);
+    await expect(insertQuestion('s4', 'cloze_typed', { ...sentence, prompt: 'עפיפון', alternatives: '{a,b,c,d,e,f}' })).rejects.toMatchObject(shape);
+    await expect(insertQuestion('s5', 'sentence_translation', { ...sentence, prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject(shape);
+    await expect(insertQuestion('s6', 'sentence_translation', { ...sentence, prompt: 'עפיפון', tiles: '{a,b,c,d,e}' })).rejects.toMatchObject(shape);
+
+    // A sentence column on any other type, or a sentence type missing one.
+    const valid = { cause: { constraint: 'questions_sentence_valid' } };
+    await expect(insertQuestion('x1', 'multiple_choice', { options, sentence: 'I fly a kite.' })).rejects.toMatchObject(valid);
+    await expect(insertQuestion('x2', 'typed_meaning', { prompt: 'עפיפון', ...sentence })).rejects.toMatchObject(valid);
+    await expect(insertQuestion('x3', 'sentence_translation', { prompt: 'עפיפון' })).rejects.toMatchObject(valid);
+    await expect(insertQuestion('x4', 'cloze_typed', { ...sentence, gapStart: undefined, prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject(valid);
+
+    // The gap lies inside the sentence.
+    const outside = (id: string, gapStart: number, gapEnd: number) =>
+      insertQuestion(id, 'sentence_translation', { ...sentence, prompt: 'עפיפון', gapStart, gapEnd });
+    await expect(outside('g1', 8, 14)).rejects.toMatchObject(valid);
+    await expect(outside('g2', -1, 4)).rejects.toMatchObject(valid);
+    await expect(outside('g3', 5, 5)).rejects.toMatchObject(valid);
+    await outside('g4', 8, 13);
+  });
+});

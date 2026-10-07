@@ -132,3 +132,28 @@ describe('missedPair, phase 24', () => {
       .toEqual({ word: 'casa', meaning: 'בית' });
   });
 });
+
+describe('missedPair, phase 27 sentence cards', () => {
+  it('reads the practised word → its meaning', () => {
+    const base = { vocab_term_id: 'l', meaning: 'לדבר', gap: { start: 5, end: 14 } };
+    const sentence = 'Ieri parlavamo per ore.';
+    expect(
+      missedPair({
+        question: { id: 'a', type: 'cloze_choice', ...base, sentence, translation: 'x', options: ['parlavamo', 'parlano'], correct_option: 0 },
+        correct_answer: 'parlavamo',
+      }),
+    ).toEqual({ word: 'parlavamo', meaning: 'לדבר' });
+    expect(
+      missedPair({
+        question: { id: 'b', type: 'cloze_typed', ...base, sentence, translation: 'x', answer: 'parlavamo', alternatives: [] },
+        correct_answer: 'parlavamo',
+      }),
+    ).toEqual({ word: 'parlavamo', meaning: 'לדבר' });
+    expect(
+      missedPair({
+        question: { id: 'c', type: 'sentence_translation', ...base, question: 'אתמול', sentence, answer: 'parlavamo' },
+        correct_answer: sentence,
+      }),
+    ).toEqual({ word: 'parlavamo', meaning: 'לדבר' });
+  });
+});

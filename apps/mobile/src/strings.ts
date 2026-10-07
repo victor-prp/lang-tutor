@@ -76,6 +76,15 @@ export const strings = {
   listenAgain: 'השמעה חוזרת',
   listenNoVoice: 'אין במכשיר קול לשפה הזו, אז הנה המילה בכתב',
   boardResult: (right: number, total: number) => `בניסיון הראשון: ${right} מתוך ${total}`,
+  // Phase 27 (spec D12).
+  questionInstructionMeaning: 'כתבו את הפירוש בעברית',
+  feedbackSavedMeaning: 'נכון! הפירוש השמור:',
+  feedbackOtherSense: 'נכון, אבל כאן תרגלנו:',
+  // Phase 27 (spec D5, D6): the gap and translation cards.
+  questionInstructionCloze: 'איזו מילה חסרה?',
+  questionInstructionClozeTyped: (language: string) => `השלימו את המילה החסרה ב${languageName(language)}`,
+  questionInstructionTranslate: (language: string) => `תרגמו ל${languageName(language)}`,
+  translationReference: 'תרגום לדוגמה:',
   // Phase 25 (spec D7).
   questionInstructionReadAloud: 'קראו בקול',
   questionInstructionSay: (language: string) => `אמרו ב${languageName(language)}`,

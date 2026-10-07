@@ -343,3 +343,36 @@ describe('phase 25 evidence (spec D10)', () => {
     expect(advance(row({ level: 2, lastStepOn: '2026-09-01' }), [{ ...right, cap: 3 }, { ...right, cap: 2 }], D).level).toBe(3);
   });
 });
+
+describe('typed_meaning evidence (phase 27 D10)', () => {
+  const answer = (verdict: 'exact' | 'alternative' | 'wrong') => ({ senseId: 's1', type: 'typed_meaning' as const, verdict });
+  it('credits written_receptive, uncapped, for a right meaning', () => {
+    expect(evidenceFor(answer('exact'))).toEqual([{ dimension: 'written_receptive', correct: true, cap: null }]);
+  });
+  it('is a written_receptive failure when wrong', () => {
+    expect(evidenceFor(answer('wrong'))).toEqual([{ dimension: 'written_receptive', correct: false, cap: null }]);
+  });
+  it('says nothing for another sense', () => {
+    expect(evidenceFor(answer('alternative'))).toEqual([]);
+  });
+});
+
+describe('the sentence cards evidence (phase 27 D10)', () => {
+  it('scores a cloze choice as a reversed card: right is receptive and capped productive, wrong is capped productive', () => {
+    expect(evidenceFor({ senseId: 's', type: 'cloze_choice', correct: true })).toEqual([
+      { dimension: 'written_receptive', correct: true, cap: null },
+      { dimension: 'written_productive', correct: true, cap: 3 },
+    ]);
+    expect(evidenceFor({ senseId: 's', type: 'cloze_choice', correct: false })).toEqual([
+      { dimension: 'written_productive', correct: false, cap: 3 },
+    ]);
+  });
+  it.each(['cloze_typed', 'sentence_translation'] as const)('scores %s as a typed translation', (type) => {
+    for (const verdict of ['exact', 'near_miss', 'alternative', 'wrong'] as const) {
+      expect(evidenceFor({ senseId: 's', type, verdict })).toEqual(
+        evidenceFor({ senseId: 's', type: 'typed_translation', verdict }),
+      );
+    }
+    expect(evidenceFor({ senseId: 's', type, verdict: 'exact' }).length).toBeGreaterThan(0);
+  });
+});

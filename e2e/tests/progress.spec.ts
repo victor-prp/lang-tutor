@@ -4,8 +4,8 @@ import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
-import { answerChoice, answerTyped, generationStub, readCard, rightOption, type CardKind } from './support/cards';
-import { clearGemini, expectGeminiPayload } from './support/mockServer';
+import { answerChoice, answerMeaning, answerTyped, generationStub, readCard, rightOption, type CardKind } from './support/cards';
+import { clearGemini, expectGeminiPayload, expectJudge } from './support/mockServer';
 import { createLearner, logIn } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -22,6 +22,8 @@ const LEVELS_AFTER_RIGHT: Record<string, number[]> = {
   choice: [2, 1, 1, 1, 1],
   reverse: [2, 2, 1, 1, 1],
   typed: [2, 2, 2, 1, 1],
+  // Phase 27 (spec D10): a right meaning is written_receptive evidence only, like today's card.
+  meaning: [2, 1, 1, 1, 1],
 };
 const badgeOf = (levels: number[]) => Math.floor(levels.reduce((a, b) => a + b, 0) / levels.length + 0.5);
 
@@ -51,7 +53,10 @@ test('a session moves the words it practised up the ladder, and the list filters
 
   // 2. A list session: лук answered right, прочитала wrong, whatever each card's
   // type. Which word lands on which position is random, so the test records
-  // the type each лук card had and works out the levels from it.
+  // the type each лук card had and works out the levels from it. Ordinal 0,
+  // no voices, speaking off: 1 choice, 2 reverse, 3 typed, and 4 a meaning card
+  // (run 1 prefers listen_choice, which falls through past read_aloud, removed
+  // with speaking off, to typed_meaning).
   await clearGemini(request);
   await expectGeminiPayload(request, generationStub());
   await page.getByTestId('create-button').click();
@@ -59,13 +64,24 @@ test('a session moves the words it practised up the ladder, and the list filters
   await tapUntil(page, 'start-button', 'progress-label');
   const lukKinds: CardKind[] = [];
   for (let position = 1; position <= 4; position++) {
-    const card = await readCard(page, position, 4);
-    const word = card.kind === 'choice' ? card.prompt : card.kind === 'reverse' ? rightOption(card) : FORM_OF[card.prompt];
+    const card = await readCard(page, position, 4, position === 4 ? 'meaning' : undefined);
+    // A meaning card shows the form itself.
+    const word =
+      card.kind === 'choice' || card.kind === 'meaning' ? card.prompt : card.kind === 'reverse' ? rightOption(card) : FORM_OF[card.prompt];
     const right = word === 'лук';
     if (right) lukKinds.push(card.kind);
     if (card.kind === 'typed') {
       if (right) await answerTyped(page, 'лук');
       else await page.getByTestId('typed-show-answer').click();
+    } else if (card.kind === 'meaning') {
+      // Which of the word's two meanings this card asks is not known here, so a
+      // right answer is a synonym the judge accepts; a wrong one gives up.
+      if (right) {
+        await expectJudge(request, 'right');
+        await answerMeaning(page, 'מילה');
+      } else {
+        await page.getByTestId('typed-show-answer').click();
+      }
     } else {
       await answerChoice(page, card, right);
     }

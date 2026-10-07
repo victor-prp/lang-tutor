@@ -10,8 +10,10 @@ import { comparable } from './distractors';
  */
 
 /** One pick as the plan reads it. `tiles`: the form can be built from tiles.
- *  `speakable`: it is one to four words, so it can be said (phase 25 D3). */
-export type PlanPick = { form: string; translation: string; tiles: boolean; speakable: boolean };
+ *  `speakable`: it is one to four words, so it can be said (phase 25 D3).
+ *  `clozeGap`: its saved example holds the form exactly once, so it can be
+ *  blanked (phase 27 D7). */
+export type PlanPick = { form: string; translation: string; tiles: boolean; speakable: boolean; clozeGap: boolean };
 
 /** `listening`: the app said its device has a voice for the target (spec D5).
  *  `speaking`: the app said it can record (phase 25 D4).
@@ -23,13 +25,16 @@ export type PlanInput = { listening: boolean; speaking: boolean; ordinal: number
 export type SessionPlan = { order: number[]; types: QuestionType[]; board: { start: number } | null };
 
 /** Each run of three climbs these tiers: recognise, pick the form, produce.
- *  A tier's first type is always eligible. Part B inserts the cloze types at
- *  index 1 of the second and third. Phase 25 appends read aloud, a warm-up, to
- *  the first, and say the translation, recall, to the third. */
+ *  A tier's first type is always eligible. Phase 25 appends read aloud, a
+ *  warm-up, to the first, and say the translation, recall, to the third.
+ *  Phase 27 appends meaning recall, receptive recall, to the first: the
+ *  hardest recognise card, so last. Part B puts the cloze choice at index 1 of
+ *  the second tier, the typed cloze at index 1 of the third, and appends the
+ *  sentence translation, the hardest produce card, to the third. */
 export const TIERS: readonly (readonly QuestionType[])[] = [
-  ['multiple_choice', 'listen_choice', 'read_aloud'],
-  ['reverse_choice', 'letter_tiles'],
-  ['typed_translation', 'dictation', 'say_translation'],
+  ['multiple_choice', 'listen_choice', 'read_aloud', 'typed_meaning'],
+  ['reverse_choice', 'cloze_choice', 'letter_tiles'],
+  ['typed_translation', 'cloze_typed', 'dictation', 'say_translation', 'sentence_translation'],
 ];
 
 const SPEAKING: ReadonlySet<QuestionType> = new Set(['read_aloud', 'say_translation']);
@@ -43,6 +48,7 @@ function eligible(type: QuestionType, pick: PlanPick, input: PlanInput): boolean
     case 'multiple_choice':
     case 'reverse_choice':
     case 'typed_translation':
+    case 'typed_meaning':
       return true;
     case 'listen_choice':
     case 'dictation':
@@ -52,7 +58,13 @@ function eligible(type: QuestionType, pick: PlanPick, input: PlanInput): boolean
     case 'read_aloud':
     case 'say_translation':
       // Only reached when speaking is on: planSession removes them otherwise.
+    case 'cloze_typed':
+    case 'sentence_translation':
+      // Phase 27 (spec D9): the sentence cards practise the form in any
+      // inflection, so only a form short enough to say is one a sentence fits.
       return pick.speakable;
+    case 'cloze_choice':
+      return pick.clozeGap;
     case 'matching':
       return false;
   }

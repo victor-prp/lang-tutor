@@ -9,7 +9,7 @@ export const WRONG_RUSSIAN = ['писать', 'дверь', 'стена'];
 
 /** The type cycle by position (server domain/session.ts, spec D2). */
 export const CYCLE = ['choice', 'reverse', 'typed'] as const;
-export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say';
+export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning' | 'cloze-choice' | 'cloze-typed' | 'translate';
 
 /**
  * Phase 23. The generation stub for q1 to q10, each key answering the task of
@@ -46,6 +46,9 @@ async function kindOnScreen(page: Page): Promise<CardKind> {
     const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
     return HEBREW.test(prompt) ? 'say' : 'read';
   }
+  if (await has('meaning-card')) return 'meaning';
+  if (await has('cloze-card')) return (await has('typed-input')) ? 'cloze-typed' : 'cloze-choice';
+  if (await has('translate-card')) return 'translate';
   if (await has('typed-input')) return 'typed';
   const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
   return HEBREW.test(prompt) ? 'reverse' : 'choice';
@@ -70,27 +73,49 @@ export async function readCard(
       ? stripIsolates(await page.getByTestId('question-prompt').textContent())
       : '';
   const options =
-    kind === 'choice' || kind === 'reverse' || kind === 'listen'
+    kind === 'choice' || kind === 'reverse' || kind === 'listen' || kind === 'cloze-choice'
       ? await Promise.all([0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`option-${i}`).textContent())))
       : [];
   return { kind, prompt, options };
 }
 
+/** Phase 27 Part B. The one sentence every stubbed `sentence` and `translate`
+ *  answer uses, in Russian with its Hebrew: it holds `STUB_GAP` once, and
+ *  whichever saved word a position asks, a gap is any word of the sentence
+ *  with as many words as the saved form (one). The gap is inflected, so its
+ *  lemma is a word that is not in the sentence. */
+export const STUB_SENTENCE = 'Вчера она прочитала эту книгу';
+export const STUB_SENTENCE_HEBREW = 'אתמול היא קראה את הספר הזה';
+export const STUB_GAP = 'прочитала';
+export const STUB_GAP_LEMMA = 'прочитать';
+
+type Task = 'meaning' | 'word' | 'typed' | 'gap' | 'sentence' | 'translate';
+
 /** Phase 24. A stub answering exactly the keys a plan asks, each by its task. */
-export function generationStubFor(tasks: Record<number, 'meaning' | 'word' | 'typed'>, alternatives: string[] = []) {
+export function generationStubFor(tasks: Record<number, Task>, alternatives: string[] = []) {
   return {
     items: Object.entries(tasks).map(([position, task]) => {
       const key = `q${position}`;
-      if (task === 'meaning') return { key, distractors: WRONG_HEBREW };
-      if (task === 'word') return { key, distractors: WRONG_RUSSIAN };
-      return { key, distractors: [], alternatives };
+      switch (task) {
+        case 'meaning':
+          return { key, distractors: WRONG_HEBREW };
+        case 'word':
+        case 'gap':
+          return { key, distractors: WRONG_RUSSIAN };
+        case 'typed':
+          return { key, distractors: [], alternatives };
+        case 'sentence':
+          return { key, distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] };
+        case 'translate':
+          return { key, distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE };
+      }
     }),
   };
 }
 
 /** Picks the right option (the one not in the stub's wrong list) or a wrong one. */
 export async function answerChoice(page: Page, card: Card, right: boolean) {
-  const wrong = card.kind === 'reverse' ? WRONG_RUSSIAN : WRONG_HEBREW;
+  const wrong = card.kind === 'reverse' || card.kind === 'cloze-choice' ? WRONG_RUSSIAN : WRONG_HEBREW;
   const index = card.options.findIndex((text) => wrong.includes(text) !== right);
   expect(index, card.options.join(' | ')).toBeGreaterThanOrEqual(0);
   await page.getByTestId(`option-${index}`).click();
@@ -105,7 +130,7 @@ export async function answerTyped(page: Page, text: string) {
 
 /** The right option's text: the word on a reversed card, the meaning on today's. */
 export function rightOption(card: Card): string {
-  const wrong = card.kind === 'reverse' ? WRONG_RUSSIAN : WRONG_HEBREW;
+  const wrong = card.kind === 'reverse' || card.kind === 'cloze-choice' ? WRONG_RUSSIAN : WRONG_HEBREW;
   return card.options.find((text) => !wrong.includes(text))!;
 }
 
@@ -119,8 +144,21 @@ export function nearMiss(word: string): string {
 /** Phase 25. Records one attempt on the speaking card: tap, about a second of
  *  Chromium's fake microphone, tap. */
 export async function speak(page: Page) {
-  await page.getByTestId('speak-record').click();
-  await expect(page.getByTestId('speak-status')).toBeVisible();
+  // Retried: a click before the static export hydrates is a silent no-op, and
+  // the first card of a session can be this one (the rotation, phase 27).
+  await expect(async () => {
+    // Only while nothing is recording: a second tap would stop the recording
+    // a slow recorder.start() has just begun.
+    if ((await page.getByTestId('speak-status').count()) === 0) await page.getByTestId('speak-record').click();
+    await expect(page.getByTestId('speak-status')).toBeVisible({ timeout: 4_000 });
+  }).toPass({ timeout: 20_000 });
   await page.waitForTimeout(1_000);
   await page.getByTestId('speak-record').click();
+}
+
+/** Phase 27. Answers a meaning card. The stored meaning is judged by rule,
+ *  with no model call; anything else needs an expectJudge stub first. */
+export async function answerMeaning(page: Page, text: string) {
+  await page.getByTestId('typed-input').fill(text);
+  await page.getByTestId('typed-submit').click();
 }

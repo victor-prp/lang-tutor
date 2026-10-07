@@ -44,6 +44,8 @@ type GeminiDeps = {
   apiKey: string;
   model: string;
   timeoutMs: number;
+  // A setting, not a collaborator (ADR 0002 R5). Phase 27: 0 turns thinking off.
+  thinkingBudget?: number;
 };
 
 /** One generateContent call and its envelope: the budget, the key header, the
@@ -102,6 +104,7 @@ export function createGeminiClient(deps: GeminiDeps) {
         temperature: 0,
         responseMimeType: 'application/json',
         responseSchema: toGeminiSchema(request.schema),
+        ...(deps.thinkingBudget === undefined ? {} : { thinkingConfig: { thinkingBudget: deps.thinkingBudget } }),
       },
     });
 }

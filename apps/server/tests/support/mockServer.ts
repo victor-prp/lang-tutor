@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
 
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
+import { JUDGE_MARKER } from '../../src/domain/judge';
 import { PHOTO_READING_MARKER } from '../../src/domain/photoReading';
 import { SENSE_MATCH_MARKER } from '../../src/domain/senseMatching';
 import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
@@ -302,6 +303,10 @@ export const STUB_ALTERNATIVE = 'volume';
  *  ordinal 0 with listening off, at every position that asks anything. */
 const CYCLE_TASKS: Task[] = Array.from({ length: 10 }, (_, i) => (['meaning', 'word', 'typed'] as const)[i % 3]);
 
+export const STUB_SENTENCE = 'Tome sprint lantern kettle pillow ladder bucket violin turtle lizard';
+export const STUB_SENTENCE_HEBREW = 'אני רואה ספר ופנס בבית';
+export const STUB_GAP = 'lantern';
+
 export async function expectDistractors(ns: string, opts: { delayMs?: number; tasks?: Task[] } = {}): Promise<void> {
   const items = (opts.tasks ?? CYCLE_TASKS).map((task, i) => {
     const key = `q${i + 1}`;
@@ -312,6 +317,15 @@ export async function expectDistractors(ns: string, opts: { delayMs?: number; ta
         return { key, distractors: STUB_WRONG_ENGLISH };
       case 'typed':
         return { key, distractors: [], alternatives: [STUB_ALTERNATIVE] };
+      case 'gap':
+        return { key, distractors: STUB_WRONG_ENGLISH };
+      // Phase 27 Part B. One sentence holds every word the tests save, once, so
+      // whichever word a position asks, `gap` is a word of it. The sentence
+      // is English (the enrollment's target), its translation Hebrew.
+      case 'sentence':
+        return { key, distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] };
+      case 'translate':
+        return { key, distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE };
     }
   });
   await expectation(ns, {
@@ -342,6 +356,26 @@ export async function expectTranscription(ns: string, heard: string, opts: { onc
         body: JSON.stringify(geminiResponse({ heard })),
       },
       ...(opts.once ? { times: { remainingTimes: 1, unlimited: false } } : {}),
+    },
+  });
+}
+
+/**
+ * Phase 27. The judge call's answer, matched on JUDGE_MARKER so a generation or
+ * transcription stub in the same namespace cannot answer it. Consumed once, and
+ * prioritised so it wins over a broader stub registered earlier.
+ */
+export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' | 'wrong'): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${JUDGE_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ verdict })),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+      priority: 10,
     },
   });
 }

@@ -49,7 +49,14 @@ export function missedPair({ question, correct_answer }: MissedQuestion): { word
       return { word: question.question, meaning: correct_answer };
     case 'dictation':
     case 'read_aloud':
+    case 'typed_meaning':
       return { word: question.question, meaning: question.meaning };
+    // Phase 27: the practised word, not the sentence round it.
+    case 'cloze_choice':
+      return { word: correct_answer, meaning: question.meaning };
+    case 'cloze_typed':
+    case 'sentence_translation':
+      return { word: question.answer, meaning: question.meaning };
     case 'reverse_choice':
     case 'say_translation':
     case 'typed_translation':

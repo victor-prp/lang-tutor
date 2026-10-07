@@ -1,15 +1,19 @@
-import type { SessionSource, SessionStatus, SpeechVerdict } from '@lang-tutor/core/api';
-import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
+import type { SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
+import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
   LIVE_DIMENSIONS,
+  MAX_JUDGED_TEXT,
+  isJudged,
   isSpeaking,
   shuffleSession,
   speakable,
   spokenVerdict,
   type AnswerInput,
+  type JudgedQuestion,
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
 
+import { findGap } from '../domain/cloze';
 import {
   NOTHING_GENERATED,
   boardMeanings,
@@ -22,6 +26,7 @@ import {
   validateDistractors,
   type DistractorVerdict,
 } from '../domain/distractors';
+import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planSession } from '../domain/plan';
@@ -38,6 +43,7 @@ import {
   sessionScore,
   step,
 } from '../domain/session';
+import { MAX_AVOID } from '../domain/sentences';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
@@ -81,6 +87,9 @@ export type SessionResult = SessionRecord & { progress: ProgressChange[] };
 /** Phase 25. What one spoken attempt came to: the transcript, how it was
  *  judged, and the session when the answer was recorded (null when not). */
 export type SpeechResult = { heard: string; verdict: SpeechVerdict; session: SessionResult | null };
+
+/** Phase 27. A judged answer: its verdict, and the session it was recorded in. */
+export type JudgedResult = { verdict: TypedVerdict; session: SessionResult };
 
 /**
  * Phase 20. Runs the progress rule over an ended session's answers, inside the
@@ -126,6 +135,7 @@ export function createSessionService({
   logger,
   llm,
   transcriber,
+  judge,
 }: {
   transaction: Transaction;
   rng: () => number;
@@ -133,6 +143,7 @@ export function createSessionService({
   logger: Logger;
   llm: LlmClient;
   transcriber: SpeechTranscriber;
+  judge: LlmClient;
 }) {
   const service = {
     /**
@@ -391,6 +402,83 @@ export function createSessionService({
     },
 
     /**
+     * Phase 27 (spec D3). A text answer the server judges. The card is checked
+     * first, so no model call is spent on a stale or wrong request; a rule
+     * decides an empty answer and the stored meaning; otherwise the judge is
+     * called outside any transaction (ADR 0001 R8); and the verdict is recorded
+     * through submitAnswer, exactly as a next-step is.
+     */
+    answerJudged: async (
+      sessionId: string,
+      input: { userId: string; questionId: string; text: string },
+    ): Promise<JudgedResult> => {
+      type Checked =
+        | { replay: JudgedResult }
+        | { current: JudgedQuestion; context: JudgeContext };
+      const checked = await transaction(async (repos): Promise<Checked> => {
+        const loaded = await repos.session.loadSession(sessionId);
+        if (!loaded || loaded.user_id !== input.userId) throw new SessionNotFound(sessionId);
+        if (loaded.status !== 'ready' && loaded.status !== 'completed') {
+          throw new SessionNotReady(sessionId, loaded.status);
+        }
+        // A retry of an answer already recorded: the stored verdict, no call.
+        // Only this endpoint answers a judged card, so any typed verdict is one.
+        const last = loaded.answers[loaded.answers.length - 1];
+        if (last && last.question_id === input.questionId) {
+          const verdict = TypedVerdictSchema.safeParse(last.verdict);
+          if (!verdict.success) throw new QuestionDesynced(input.questionId);
+          return { replay: { verdict: verdict.data, session: { ...loaded, progress: await progressOf(repos, sessionId, loaded) } } };
+        }
+        const current = currentQuestion(loaded);
+        if (!current || current.id !== input.questionId) throw new QuestionDesynced(input.questionId);
+        if (!isJudged(current)) throw new AnswerKindMismatch(input.questionId);
+        const state = await repos.session.findState(sessionId);
+        const enrolled = state ? await repos.enrollment.findById(state.enrollmentId) : undefined;
+        const found = await repos.question.findJudgeContext(current.id);
+        if (!enrolled || !found) throw new SessionNotFound(sessionId);
+        return { current, context: { language: enrolled.target_language as LanguageCode, explanation: enrolled.source_language as LanguageCode, ...found } };
+      });
+      if ('replay' in checked) return checked.replay;
+
+      const text = input.text.slice(0, MAX_JUDGED_TEXT);
+      let verdict = ruleVerdict(checked.current, text);
+      const judgedBy = verdict === null ? 'model' : 'rule';
+      const started = now();
+      if (verdict === null) {
+        try {
+          const raw = await judge(judgePrompt(checked.current, checked.context, text));
+          verdict = parseJudge(checked.current.type, raw);
+          if (verdict === null) throw new LlmUnavailable('the verdict was unreadable');
+        } catch (error) {
+          logger.info({
+            event: 'answer_judge_failed',
+            session_id: sessionId,
+            question_type: checked.current.type,
+            judge_ms: now() - started,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
+      }
+      // Logged before the answer is recorded: a paid call is always logged,
+      // even when submitAnswer then throws on a desync race.
+      logger.info({
+        event: 'answer_judged',
+        session_id: sessionId,
+        question_type: checked.current.type,
+        verdict,
+        judged_by: judgedBy,
+        ...(judgedBy === 'model' ? { judge_ms: now() - started } : {}),
+        chars: text.length,
+      });
+      const session = await service.submitAnswer(sessionId, input.questionId, { text, judged: verdict });
+      // Two overlapping requests may both have paid for a call; step replayed
+      // the first, so report the verdict stored for this card, not our own.
+      const stored = TypedVerdictSchema.safeParse(session.answers.find((a) => a.question_id === input.questionId)?.verdict);
+      return { verdict: stored.success ? stored.data : verdict, session };
+    },
+
+    /**
      * The prepare-session job: read, call the model, write. Three steps, so no
      * transaction is held across the model call (ADR 0001 R8). The status flip
      * and the question inserts are dependent writes and share the last
@@ -414,7 +502,13 @@ export function createSessionService({
           picks: payload.picks.map((pick) => ({ senseId: pick.sense_id, variantId: pick.variant_id })),
           sourceLanguage: enrolled.source_language,
         });
-        return { state, enrolled, context };
+        // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
+        const recent = await question.findRecentSentences({
+          enrollmentId: state.enrollmentId,
+          senseIds: context.map((row) => row.senseId),
+          limit: MAX_AVOID,
+        });
+        return { state, enrolled, context, recent };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -433,15 +527,20 @@ export function createSessionService({
           translation: row.translation,
           tiles: tileEligible(row.form),
           speakable: speakable(row.form),
+          // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
+          clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
         })),
         { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
       );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor(plan);
-      const items = distractorItems(ordered, tasks);
+      const items = distractorItems(ordered, tasks, read.recent);
       // The rows that ask the model nothing are still in the session: the
       // validation and the prompt must know their words and meanings.
       const others = ordered.filter((_, index) => !tasks[index]);
+      // Where each pick's form sits in its saved example: the same search that
+      // made the gap item's blank and the plan's eligibility.
+      const gaps = ordered.map((row) => findGap(row.example ?? '', [row.form, row.lemma]));
 
       const started = now();
       let modelMs = 0;
@@ -457,7 +556,7 @@ export function createSessionService({
         // unlike a lookup, there is nothing useful to serve without it.
         const answer = raw === '' ? null : parseLlmDistractors(raw);
         if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
-        const checked = validateDistractors(items, answer, read.enrolled.source_language, others);
+        const checked = validateDistractors(items, answer, read.enrolled.source_language, others, target);
         if (!checked.ok) throw new InvalidDistractors(sessionId, checked.reason);
         verdict = checked;
 
@@ -487,7 +586,10 @@ export function createSessionService({
         throw error;
       }
 
+      // Logged once the session is written, not on an attempt a failed insert or a retry repeats.
+      let degradedEvents: Record<string, unknown>[] = [];
       const written = await transaction(async ({ session, question }) => {
+        degradedEvents = [];
         // Conditional: a skip that landed during the model call wins, and this
         // transaction then writes nothing at all.
         if (!(await session.transition(sessionId, ['preparing'], 'ready'))) return false;
@@ -497,7 +599,23 @@ export function createSessionService({
           targetLanguage: target,
           userLanguageCode: read.enrolled.source_language,
           questions: ordered.map((row, index) => {
-            const type = plan.types[index];
+            const made = verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED;
+            // Spec D5, D6: a sentence card the model did not make usable is a
+            // typed translation, with nothing generated for it.
+            const planned = plan.types[index];
+            const degraded =
+              (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate);
+            if (degraded) {
+              degradedEvents.push({
+                event: 'sentence_degraded',
+                session_id: sessionId,
+                position: index,
+                type: planned,
+                reason: made.degraded,
+              });
+            }
+            const type = degraded ? 'typed_translation' : planned;
+            const content = degraded ? NOTHING_GENERATED : made;
             return {
               senseId: row.senseId,
               variantId: row.variantId,
@@ -506,9 +624,10 @@ export function createSessionService({
               partOfSpeech: row.partOfSpeech,
               lexemeId: row.lexemeId,
               type,
-              ...generatedContent(row, type, verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED, {
+              ...generatedContent(row, type, content, {
                 tiles: type === 'letter_tiles' ? tilesFor(row.form, LANGUAGES[target].alphabet, rng) : null,
                 board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
+                gap: gaps[index],
               }),
             };
           }),
@@ -519,6 +638,7 @@ export function createSessionService({
         return true;
       });
 
+      if (written) for (const event of degradedEvents) logger.info(event);
       logger.info({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
         session_id: sessionId,

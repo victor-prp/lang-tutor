@@ -1,6 +1,12 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { ApiError, PHOTO_UPLOAD_TIMEOUT_MS, SPEECH_UPLOAD_TIMEOUT_MS, createApiClient } from './client';
+import {
+  ApiError,
+  JUDGE_REQUEST_TIMEOUT_MS,
+  PHOTO_UPLOAD_TIMEOUT_MS,
+  SPEECH_UPLOAD_TIMEOUT_MS,
+  createApiClient,
+} from './client';
 
 function buildClient(mockFetch: jest.Mock) {
   return createApiClient({
@@ -327,6 +333,37 @@ describe('api/client', () => {
       const pending = api.answerBySpeech('s1', { user_id: 'u', question_id: 'q', mime_type: 'audio/aac', audio: 'QUJD' });
       const outcome = expect(pending).rejects.toThrow('aborted');
       jest.advanceTimersByTime(SPEECH_UPLOAD_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('posts a judged answer and returns the verdict with the next step (phase 27)', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const body = { verdict: 'exact', next: { complete: true } };
+    const fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const api = createApiClient({ baseUrl: 'http://api', fetch });
+    const request = { user_id: 'u', question_id: 'q', text: 'להזמין' };
+    expect(await api.judgeAnswer('s 1', request)).toEqual(body);
+    expect(calls[0].url).toBe('http://api/api/sessions/s%201/judged-answer');
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(request);
+  });
+
+  it('abandons a judged answer that stalls, so the card can offer a retry (phase 27)', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetch = ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })) as unknown as typeof globalThis.fetch;
+      const api = createApiClient({ baseUrl: 'http://api', fetch });
+      const pending = api.judgeAnswer('s1', { user_id: 'u', question_id: 'q', text: 'x' });
+      const outcome = expect(pending).rejects.toThrow('aborted');
+      jest.advanceTimersByTime(JUDGE_REQUEST_TIMEOUT_MS);
       await outcome;
     } finally {
       jest.useRealTimers();

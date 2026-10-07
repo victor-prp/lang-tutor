@@ -1,5 +1,5 @@
 import type { AnswerVerdict, Question } from '@lang-tutor/core/api';
-import { evaluate, rightAnswer, type AnswerInput } from '@lang-tutor/core/domain';
+import { evaluate, normaliseHebrew, rightAnswer, type AnswerInput } from '@lang-tutor/core/domain';
 
 import { strings } from '@/strings';
 
@@ -43,6 +43,26 @@ export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
       return { tone: 'correct', title: strings.feedbackAlternative, line: rightAnswer(question), verdict: 'alternative' };
     }
     return { tone: 'correct', title: strings.feedbackHeard, line: answer.heard, verdict: 'understood' };
+  }
+  // Phase 27 (spec D12). A judged card's verdict is the server's: the app
+  // never judges it, so it only words the banner.
+  if ('judged' in answer) {
+    // A translation's banner names the practised word, not the whole sentence;
+    // the card itself shows the reference after every verdict (spec D6).
+    if (question.type === 'sentence_translation') {
+      const word = question.answer;
+      if (answer.judged === 'wrong') return { tone: 'wrong', title: strings.feedbackWrong, line: word, verdict: 'wrong' };
+      if (answer.judged === 'near_miss') return { tone: 'correct', title: strings.feedbackNearMiss, line: word, verdict: 'near_miss' };
+      if (answer.judged === 'alternative') return { tone: 'correct', title: strings.feedbackAlternative, line: word, verdict: 'alternative' };
+      return { tone: 'correct', title: strings.feedbackCorrect, line: null, verdict: answer.judged };
+    }
+    if (question.type !== 'typed_meaning') throw new Error(`a judged answer for a ${question.type} card`);
+    const meaning = question.meaning;
+    if (answer.judged === 'wrong') return { tone: 'wrong', title: strings.feedbackWrong, line: meaning, verdict: 'wrong' };
+    if (answer.judged === 'alternative') return { tone: 'correct', title: strings.feedbackOtherSense, line: meaning, verdict: 'alternative' };
+    return normaliseHebrew(answer.text) === normaliseHebrew(meaning)
+      ? { tone: 'correct', title: strings.feedbackCorrect, line: null, verdict: answer.judged }
+      : { tone: 'correct', title: strings.feedbackSavedMeaning, line: meaning, verdict: answer.judged };
   }
   const record = evaluate(question, answer);
   const verdict = record.verdict ?? null;

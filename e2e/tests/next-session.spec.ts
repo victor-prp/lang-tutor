@@ -50,10 +50,14 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   await tapUntil(page, 'start-button', 'progress-label');
   const words: string[] = [];
   for (let position = 1; position <= 4; position++) {
-    const card = await readCard(page, position, 4);
-    if (card.kind === 'choice') {
+    // Ordinal 0, no voices, speaking off: 1 choice, 2 reverse, 3 typed, and 4 a
+    // meaning card (run 1 prefers listen_choice, which falls through past
+    // read_aloud to typed_meaning).
+    const card = await readCard(page, position, 4, position === 4 ? 'meaning' : undefined);
+    if (card.kind === 'choice' || card.kind === 'meaning') {
       words.push(card.prompt);
-      await answerChoice(page, card, true);
+      if (card.kind === 'choice') await answerChoice(page, card, true);
+      else await page.getByTestId('typed-show-answer').click();
     } else if (card.kind === 'reverse') {
       words.push(rightOption(card));
       await answerChoice(page, card, true);

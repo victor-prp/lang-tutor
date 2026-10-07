@@ -66,6 +66,15 @@ import type {
   SpeechAnswerRequestSchema,
   SpeechAnswerResponseSchema,
   LlmTranscriptSchema,
+  TypedMeaningQuestionSchema,
+  JudgedAnswerRequestSchema,
+  JudgedAnswerResponseSchema,
+  LlmMeaningJudgeSchema,
+  LlmTranslationJudgeSchema,
+  GapSchema,
+  ClozeChoiceQuestionSchema,
+  ClozeTypedQuestionSchema,
+  SentenceTranslationQuestionSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
   TranslationKindSchema,
@@ -158,6 +167,15 @@ export type SpeechVerdict = z.infer<typeof SpeechVerdictSchema>;
 export type SpeechAnswerRequest = z.infer<typeof SpeechAnswerRequestSchema>;
 export type SpeechAnswerResponse = z.infer<typeof SpeechAnswerResponseSchema>;
 export type LlmTranscript = z.infer<typeof LlmTranscriptSchema>;
+export type TypedMeaningQuestion = z.infer<typeof TypedMeaningQuestionSchema>;
+export type JudgedAnswerRequest = z.infer<typeof JudgedAnswerRequestSchema>;
+export type JudgedAnswerResponse = z.infer<typeof JudgedAnswerResponseSchema>;
+export type LlmMeaningJudge = z.infer<typeof LlmMeaningJudgeSchema>;
+export type LlmTranslationJudge = z.infer<typeof LlmTranslationJudgeSchema>;
+export type Gap = z.infer<typeof GapSchema>;
+export type ClozeChoiceQuestion = z.infer<typeof ClozeChoiceQuestionSchema>;
+export type ClozeTypedQuestion = z.infer<typeof ClozeTypedQuestionSchema>;
+export type SentenceTranslationQuestion = z.infer<typeof SentenceTranslationQuestionSchema>;
 export type PhotoImportCreateRequest = z.infer<typeof PhotoImportCreateRequestSchema>;
 export type PhotoImportStatus = z.infer<typeof PhotoImportStatusSchema>;
 export type PhotoImportItemStatus = z.infer<typeof PhotoImportItemStatusSchema>;

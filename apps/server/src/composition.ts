@@ -73,6 +73,8 @@ export function createServerDeps(io: {
   // Phase 26 (spec D5). One photo read's budget: a long call over an image,
   // longer than a lookup's.
   photoReadTimeoutMs: number;
+  // Phase 27 (spec D4). One judged answer's budget: a learner is waiting on it.
+  judgeTimeoutMs: number;
   identity: ServerIdentity;
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
@@ -135,6 +137,17 @@ export function createServerDeps(io: {
     timeoutMs: io.photoReadTimeoutMs,
   });
 
+  // Phase 27 (spec D3). The judge waits on the learner, as the transcriber
+  // does: its own budget, and thinking off for the wait (D4).
+  const judge: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.judgeTimeoutMs,
+    thinkingBudget: 0,
+  });
+
   const translations = createTranslationService({ llm, transaction, logger: io.logger });
 
   return {
@@ -145,6 +158,7 @@ export function createServerDeps(io: {
       logger: io.logger,
       llm: sessionLlm,
       transcriber,
+      judge,
     }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
