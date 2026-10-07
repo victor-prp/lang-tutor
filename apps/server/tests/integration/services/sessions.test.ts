@@ -110,13 +110,15 @@ describe('createNextSession', () => {
       translations: ['ספר', 'כרך', 'חיבור', 'מחברת', 'דף', 'עמוד', 'פרק', 'שער', 'כותר', 'ספרון', 'קובץ', 'גליון'],
     });
 
-    const created = await service.createNextSession(E, { listening: false });
+    const created = await service.createNextSession(E, { listening: true });
     expect(created).toMatchObject({ status: 'preparing', source: 'list' });
 
     const jobs = await boss.findJobs<PrepareSessionPayload>(PREPARE_SESSION);
     expect(jobs).toHaveLength(1);
     expect(jobs[0].data.session_id).toBe(created.sessionId);
     expect(jobs[0].data.picks).toHaveLength(SESSION_LENGTH);
+    // Phase 24: listening on, and the ordinal is the list sessions before this one (none).
+    expect(jobs[0].data).toMatchObject({ listening: true, ordinal: 0 });
     expect(jobs[0].data.picks.every((p) => saved.senseIds.includes(p.sense_id))).toBe(true);
   });
 });

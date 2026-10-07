@@ -200,4 +200,47 @@ describe('recomputeProgress', () => {
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });
     expect(await written()).toEqual(before);
   });
+
+  it('writes back exactly what the live path wrote for a session of every phase 24 type', async () => {
+    const { sessions: live } = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+    const words = [];
+    for (const [lemma, translation] of [
+      ['tome', 'ספר'], ['quill', 'נוצה'], ['lantern', 'פנס'],
+      ['kettle', 'קומקום'], ['pillow', 'כרית'], ['ladder', 'סולם'], ['bucket', 'דלי'],
+    ]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: words,
+      types: ['listen_choice', 'letter_tiles', 'dictation', 'matching', 'matching', 'matching', 'matching'],
+    });
+
+    await live.submitAnswer(sessionId, questions[0].id, { option_index: 0 });
+    await live.submitAnswer(sessionId, questions[1].id, { text: 'quill' });
+    await live.submitAnswer(sessionId, questions[2].id, { text: 'lantern' });
+    // Board words: right except the second, which first tried the fifth meaning.
+    await live.submitAnswer(sessionId, questions[3].id, { option_index: 0 });
+    await live.submitAnswer(sessionId, questions[4].id, { option_index: 4 });
+    await live.submitAnswer(sessionId, questions[5].id, { option_index: 2 });
+    const done = await live.submitAnswer(sessionId, questions[6].id, { option_index: 3 });
+    expect(done.status).toBe('completed');
+
+    const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });
+    const before = await written();
+    const level = (senseId: string, dimension: string) =>
+      before.progress.find((row) => row.senseId === senseId && row.dimension === dimension)!.level;
+    expect(level(words[0].senseId, 'spoken_receptive')).toBe(2);
+    expect(level(words[1].senseId, 'written_productive')).toBe(2);
+    expect(level(words[1].senseId, 'spelling')).toBe(1);
+    expect(level(words[2].senseId, 'spoken_receptive')).toBe(2);
+    expect(level(words[2].senseId, 'spelling')).toBe(2);
+    expect(level(words[3].senseId, 'written_receptive')).toBe(2);
+    expect(level(words[4].senseId, 'written_receptive')).toBe(1);
+
+    expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });
+    expect(await written()).toEqual(before);
+  });
 });

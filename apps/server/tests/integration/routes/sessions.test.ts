@@ -79,6 +79,19 @@ describe('POST /api/sessions', () => {
     expect(body).toMatchObject({ status: 'ready', source: 'seed' });
   });
 
+  it('accepts listening: true', async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1'), listening: true });
+    expect(res.status).toBe(201);
+  });
+
+  it('rejects a listening that is not a boolean', async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_1'), listening: 'yes' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+
   it('rejects a missing enrollment_id', async () => {
     const app = buildTestApp();
     const res = await postJson(app, '/api/sessions', {});

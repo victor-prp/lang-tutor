@@ -188,12 +188,18 @@ describe('phase 23: reversed and typed questions', () => {
     prompt: string | null;
     options: QuestionOption[] | null;
     alternatives: string[] | null;
+    tiles: string[] | null;
   }[] = [
-    { label: 'a typed question with options', type: 'typed_translation', prompt: 'ספר', options: generatedOptions('tome', ['a', 'b', 'c']), alternatives: [] },
-    { label: 'a typed question without a prompt', type: 'typed_translation', prompt: null, options: null, alternatives: [] },
-    { label: 'a typed question with six alternatives', type: 'typed_translation', prompt: 'ספר', options: null, alternatives: ['a', 'b', 'c', 'd', 'e', 'f'] },
-    { label: 'a reversed question without a prompt', type: 'reverse_choice', prompt: null, options: generatedOptions('tome', ['a', 'b', 'c']), alternatives: null },
-    { label: 'a choice with a prompt', type: 'multiple_choice', prompt: 'ספר', options: generatedOptions('ספר', ['a', 'b', 'c']), alternatives: null },
+    { label: 'a typed question with options', type: 'typed_translation', prompt: 'ספר', options: generatedOptions('tome', ['a', 'b', 'c']), alternatives: [], tiles: null },
+    { label: 'a typed question without a prompt', type: 'typed_translation', prompt: null, options: null, alternatives: [], tiles: null },
+    { label: 'a typed question with six alternatives', type: 'typed_translation', prompt: 'ספר', options: null, alternatives: ['a', 'b', 'c', 'd', 'e', 'f'], tiles: null },
+    { label: 'a reversed question without a prompt', type: 'reverse_choice', prompt: null, options: generatedOptions('tome', ['a', 'b', 'c']), alternatives: null, tiles: null },
+    { label: 'a choice with a prompt', type: 'multiple_choice', prompt: 'ספר', options: generatedOptions('ספר', ['a', 'b', 'c']), alternatives: null, tiles: null },
+    { label: 'a dictation with options', type: 'dictation', prompt: 'ספר', options: generatedOptions('tome', ['a', 'b', 'c']), alternatives: null, tiles: null },
+    { label: 'a dictation without its meaning', type: 'dictation', prompt: null, options: null, alternatives: null, tiles: null },
+    { label: 'a tiles card with four tiles', type: 'letter_tiles', prompt: 'ספר', options: null, alternatives: null, tiles: ['t', 'o', 'm', 'e'] },
+    { label: 'a listening card with a prompt', type: 'listen_choice', prompt: 'ספר', options: generatedOptions('ספר', ['a', 'b', 'c']), alternatives: null, tiles: null },
+    { label: 'a board word with tiles', type: 'matching', prompt: null, options: generatedOptions('ספר', ['a', 'b', 'c']), alternatives: null, tiles: ['t', 'o', 'm', 'e', 'x'] },
   ];
 
   for (const bad of BAD) {
@@ -218,7 +224,7 @@ describe('phase 23: reversed and typed questions', () => {
                 prompt: bad.prompt,
                 options: bad.options,
                 alternatives: bad.alternatives,
-                tiles: null,
+                tiles: bad.tiles,
               },
             ],
           }),
