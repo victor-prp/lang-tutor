@@ -344,15 +344,29 @@ export function createSessionService({
       const started = now();
       let heard = '';
       if (input.audio.length >= MIN_AUDIO_CHARS) {
-        const raw = await transcriber({
-          system: transcriptionSystem(checked.language),
-          audio: input.audio,
-          mimeType: input.mimeType,
-          schema: LlmTranscriptSchema,
-        });
-        const parsed = parseTranscript(raw);
-        if (parsed === null) throw new LlmUnavailable('the transcript was unreadable');
-        heard = parsed;
+        try {
+          const raw = await transcriber({
+            system: transcriptionSystem(checked.language),
+            audio: input.audio,
+            mimeType: input.mimeType,
+            schema: LlmTranscriptSchema,
+          });
+          const parsed = parseTranscript(raw);
+          if (parsed === null) throw new LlmUnavailable('the transcript was unreadable');
+          heard = parsed;
+        } catch (error) {
+          // The route maps this to a 502 and drops the cause; this is its trace.
+          logger.info({
+            event: 'speech_failed',
+            session_id: sessionId,
+            question_type: checked.current.type,
+            transcribe_ms: now() - started,
+            bytes: Math.floor((input.audio.length * 3) / 4),
+            mime_type: input.mimeType,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
       }
       const transcribeMs = now() - started;
 

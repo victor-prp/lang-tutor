@@ -121,6 +121,25 @@ describe('answerBySpeech (spec D5)', () => {
     ).rejects.toBeInstanceOf(LlmUnavailable);
   });
 
+  it('logs speech_failed when the transcription fails or is unreadable', async () => {
+    const failing = setup(createFakeTranscriber(new LlmUnavailable('responded 503')));
+    await expect(failing.service.answerBySpeech(SESSION, attempt)).rejects.toBeInstanceOf(LlmUnavailable);
+    expect(failing.logger.events.filter((e) => e.event === 'speech_failed')).toEqual([
+      {
+        event: 'speech_failed',
+        session_id: SESSION,
+        question_type: 'read_aloud',
+        transcribe_ms: 1_500,
+        bytes: 1_500,
+        mime_type: 'audio/aac',
+        reason: 'language model unavailable: responded 503',
+      },
+    ]);
+    const unreadable = setup(createFakeTranscriber('nonsense'));
+    await expect(unreadable.service.answerBySpeech(SESSION, attempt)).rejects.toBeInstanceOf(LlmUnavailable);
+    expect(unreadable.logger.events.filter((e) => e.event === 'speech_failed')).toHaveLength(1);
+  });
+
   it('logs speech_judged with the wait, and never the audio', async () => {
     const { service, logger } = setup(createFakeTranscriber('{"heard":"gatto"}'));
     await service.answerBySpeech(SESSION, attempt);

@@ -9,7 +9,7 @@ import {
   geminiBaseUrlFor,
   mockNamespace,
 } from '../../support/mockServer';
-import { insertListSession, type AskedSense } from '../../support/questions';
+import { insertListSession, readStoredAnswers, type AskedSense } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -109,7 +109,12 @@ describe('POST /api/sessions/:id/speech', () => {
     const { sessionId, questions } = await startSpeaking();
     const res = await postJson(app, `/api/sessions/${sessionId}/speech`, { user_id: 'u_1', question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO });
     expect(res.status).toBe(200);
-    expect((await res.json()).heard).toHaveLength(100);
+    const body = await res.json();
+    expect(body.heard).toHaveLength(100);
+    expect(body).toMatchObject({ verdict: 'understood', next: { complete: false } });
+    const stored = await readStoredAnswers(t.db, sessionId);
+    expect(stored[0].answer_string).toHaveLength(100);
+    expect(stored[0].verdict).toBe('understood');
   });
 
   it('400s a choice card, 404s another learner, 409s a card that is not current, and 502s a failing model', async () => {
