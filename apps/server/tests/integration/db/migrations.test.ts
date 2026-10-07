@@ -342,3 +342,110 @@ describe('0016_listening_variety', () => {
     });
   });
 });
+
+// Phase 25, Review Focus 5: questions, sessions and answers stored before 0017
+// load and take answers unchanged, and a speaking row of the wrong shape is
+// refused.
+describe('0017_speaking_cards', () => {
+  it('keeps every stored question and answer, takes the speaking rows, and refuses the wrong shapes', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0016_listening_variety'));
+
+    const options = JSON.stringify([
+      { position: 0, text: 'עפיפון', is_correct: true },
+      { position: 1, text: 'א', is_correct: false },
+      { position: 2, text: 'ב', is_correct: false },
+      { position: 3, text: 'ג', is_correct: false },
+    ]);
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech)
+        values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code)
+        values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 0);
+    `);
+    // One question of each phase 24 type.
+    const insertQuestion = (id: string, type: string, columns: { options?: string; prompt?: string; alternatives?: string; tiles?: string }) =>
+      db.execute(sql`
+        insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles)
+          values (${id}, 'u_1', 'e_1', 's1', 'v1', 'en', 'he', ${type},
+            ${columns.options ?? null}::jsonb, ${columns.prompt ?? null}, ${columns.alternatives ?? null}::text[], ${columns.tiles ?? null}::text[])`);
+    await insertQuestion('q1', 'multiple_choice', { options });
+    await insertQuestion('q2', 'reverse_choice', { options, prompt: 'עפיפון' });
+    await insertQuestion('q3', 'typed_translation', { prompt: 'עפיפון', alternatives: '{}' });
+    await insertQuestion('q4', 'listen_choice', { options });
+    await insertQuestion('q5', 'dictation', { prompt: 'עפיפון' });
+    await insertQuestion('q6', 'matching', { options });
+    await insertQuestion('q7', 'letter_tiles', { prompt: 'עפיפון', tiles: '{k,i,t,e,s}' });
+    const [session] = (
+      await db.execute<{ id: string }>(sql`
+        insert into sessions (user_id, enrollment_id, status, source)
+          values ('u_1', 'e_1', 'ready', 'list') returning id`)
+    ).rows;
+    await db.execute(sql`
+      insert into session_questions (session_id, position, question_id, option_order)
+        values (${session.id}, 0, 'q1', '{0,1,2,3}'), (${session.id}, 1, 'q3', '{}')`);
+    await db.execute(sql`
+      insert into answers (session_id, position, question_id, selected_option_position)
+        values (${session.id}, 0, 'q1', 0)`);
+    await db.execute(sql`
+      insert into answers (session_id, position, question_id, typed_text, verdict)
+        values (${session.id}, 1, 'q3', 'kite', 'near_miss')`);
+
+    await runMigrations(db);
+
+    const kept = await db.execute<{ id: string; type: string }>(sql`select id, type from questions order by id`);
+    expect(kept.rows.map((r) => r.type)).toEqual([
+      'multiple_choice',
+      'reverse_choice',
+      'typed_translation',
+      'listen_choice',
+      'dictation',
+      'matching',
+      'letter_tiles',
+    ]);
+    const stored = await db.execute<{ position: number; verdict: string | null }>(
+      sql`select position, verdict from answers order by position`,
+    );
+    expect(stored.rows).toEqual([
+      { position: 0, verdict: null },
+      { position: 1, verdict: 'near_miss' },
+    ]);
+
+    // The new shapes.
+    await insertQuestion('r1', 'read_aloud', { prompt: 'עפיפון' });
+    await insertQuestion('r2', 'say_translation', { prompt: 'עפיפון', alternatives: '{}' });
+    await expect(insertQuestion('r3', 'read_aloud', { prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject({ cause: { constraint: 'questions_shape_valid' } });
+    await expect(insertQuestion('r4', 'say_translation', { prompt: 'עפיפון' })).rejects.toMatchObject({ cause: { constraint: 'questions_shape_valid' } });
+
+    // The new verdicts.
+    await db.execute(sql`
+      insert into session_questions (session_id, position, question_id, option_order)
+        values (${session.id}, 2, 'r1', '{}'), (${session.id}, 3, 'r2', '{}'), (${session.id}, 4, 'r1', '{}'),
+               (${session.id}, 5, 'r2', '{}')`);
+    const answer = (position: number, questionId: string, verdict: string) =>
+      db.execute(sql`
+        insert into answers (session_id, position, question_id, typed_text, verdict)
+          values (${session.id}, ${position}, ${questionId}, '', ${verdict})`);
+    await answer(2, 'r1', 'understood');
+    await answer(3, 'r2', 'gave_up');
+    await answer(4, 'r1', 'skipped');
+    await expect(answer(5, 'r2', 'unheard')).rejects.toMatchObject({ cause: { constraint: 'answers_verdict_known' } });
+
+    // A stored session still loads and takes an answer.
+    await db.transaction(async (tx) => {
+      const loaded = await createSessionRepo(tx).loadSession(session.id);
+      expect(loaded!.answers.slice(0, 2)).toEqual([
+        { question_id: 'q1', is_correct: true, answer_string: 'עפיפון' },
+        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'near_miss' },
+      ]);
+    });
+  });
+});

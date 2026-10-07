@@ -1,4 +1,4 @@
-import type { TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerVerdict } from '@lang-tutor/core/api';
 import type { Dimension } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
@@ -14,7 +14,13 @@ import type {
 } from '../domain/progress';
 import { canonicalOptions } from './questions';
 
-const TEXT_TYPES: ReadonlySet<string> = new Set(['typed_translation', 'dictation', 'letter_tiles']);
+const TEXT_TYPES: ReadonlySet<string> = new Set([
+  'typed_translation',
+  'dictation',
+  'letter_tiles',
+  'read_aloud',
+  'say_translation',
+]);
 
 /** A session's answers as the rule reads them. */
 export type SessionEvidence = {
@@ -71,7 +77,7 @@ export function createProgressRepo(tx: Tx) {
         answers: rows.rows.map((row): AnsweredQuestion => {
           // Phase 23 and 24. A text answer carries the verdict it was shown.
           if (TEXT_TYPES.has(row.type)) {
-            return { senseId: row.sense_id, type: row.type as TextAnswerType, verdict: row.verdict as TypedVerdict };
+            return { senseId: row.sense_id, type: row.type as TextAnswerType, verdict: row.verdict as AnswerVerdict };
           }
           return {
             senseId: row.sense_id,

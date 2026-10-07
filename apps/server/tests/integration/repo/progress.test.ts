@@ -341,3 +341,33 @@ describe('phase 23: reversed and typed questions', () => {
     ]);
   });
 });
+
+describe('phase 25: spoken answers as evidence', () => {
+  it('reads a read-aloud and a say-the-translation answer by their verdicts', async () => {
+    const asked = [];
+    for (const [lemma, translation] of [
+      ['tome', 'ספר'],
+      ['lantern', 'פנס'],
+    ]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked,
+      alternatives: ['lamp'],
+      types: ['read_aloud', 'say_translation'],
+    });
+    await withTx(t.db, async (tx) => {
+      const sessions = createSessionRepo(tx);
+      await sessions.insertAnswer(sessionId, 0, questions[0].id, { text: 'tome', verdict: 'understood' });
+      await sessions.insertAnswer(sessionId, 1, questions[1].id, { text: '', verdict: 'skipped' });
+    });
+    const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
+    expect(evidence!.answers).toEqual([
+      { senseId: asked[0].senseId, type: 'read_aloud', verdict: 'understood' },
+      { senseId: asked[1].senseId, type: 'say_translation', verdict: 'skipped' },
+    ]);
+  });
+});
