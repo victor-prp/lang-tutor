@@ -127,7 +127,7 @@ export async function askDistractors(
   llm: LlmClient,
   input: { from: LanguageCode; to: LanguageCode; items: DistractorItem[] },
 ): Promise<LlmDistractors> {
-  const raw = await llm(buildDistractorPrompt(input));
+  const raw = await llm(buildDistractorPrompt({ ...input, others: [] }));
   const answer = raw === '' ? null : parseLlmDistractors(raw);
   if (!answer) throw new Error(`unreadable distractor answer: ${raw.slice(0, 200)}`);
   return answer;

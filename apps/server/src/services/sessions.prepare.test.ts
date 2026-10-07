@@ -200,6 +200,29 @@ describe('prepareSession', () => {
     expect(calls.transitions).toEqual([]);
   });
 
+  // Phase 24 (spec D16): a failed attempt is logged where it happens, not only
+  // when the retries are spent.
+  it('logs a failed attempt with how long the model took, then rethrows', async () => {
+    const { service, logger } = world({ reply: new Error('provider down') });
+    await expect(service.prepareSession(PAYLOAD)).rejects.toThrow('provider down');
+    expect(logger.events).toContainEqual({
+      event: 'session_preparation_attempt_failed',
+      session_id: SESSION,
+      item_count: 2,
+      model_ms: 250,
+      reason: 'provider down',
+    });
+    expect(logger.events.map((e) => (e as { event: string }).event)).not.toContain('session_prepared');
+  });
+
+  it('logs a refusal of the answer the same way', async () => {
+    const { service, logger } = world({ reply: 'nope' });
+    await expect(service.prepareSession(PAYLOAD)).rejects.toBeInstanceOf(InvalidDistractors);
+    expect(logger.events).toContainEqual(
+      expect.objectContaining({ event: 'session_preparation_attempt_failed', reason: expect.stringContaining('unreadable') }),
+    );
+  });
+
   it('rejects a payload that is not one (an older deploy, a hand-made job)', async () => {
     await expect(world({}).service.prepareSession({ session_id: SESSION })).rejects.toThrow();
   });
@@ -259,6 +282,22 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
     const reply = TEN_REPLY.replace('["דלי","שולחן","כיסא"]', '["דלי","כינור","את חפירה"]');
     const { service } = world({ context: TEN, reply });
     await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toThrow(/board/);
+  });
+
+  // Final review: a dictation asks the model nothing, yet its meaning is as
+  // off limits as an item's own.
+  it("refuses a wrong meaning that is another meaning of a listening card's word held by a dictation", async () => {
+    const context = TEN.map((row, i) => (i === 9 ? { ...row, form: TEN[7].form, lemma: TEN[7].form, translation: 'מחבת' } : row));
+    const reply = TEN_REPLY.replace('["ענן","גשם","רוח"]', '["מחבת","גשם","רוח"]');
+    const { service, calls, llm } = world({ context, reply });
+    await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toBeInstanceOf(InvalidDistractors);
+    expect(calls.generated).toEqual([]);
+    // The model was told about the dictation's row.
+    expect(JSON.parse(llm.calls[0].user).also_in_session).toEqual([{ word: TEN[7].form, correct: 'מחבת' }]);
+    // Without it offered, the same session is fine.
+    const fine = world({ context, reply: TEN_REPLY });
+    await fine.service.prepareSession(TEN_PAYLOAD);
+    expect(fine.calls.generated).toHaveLength(1);
   });
 
   it('gives a listening-off session no listening card', async () => {

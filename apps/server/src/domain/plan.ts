@@ -1,5 +1,7 @@
 import type { QuestionType } from '@lang-tutor/core/domain';
 
+import { comparable } from './distractors';
+
 /**
  * Phase 24 (spec D3, D4, D10). Which type each position of a list session
  * gets, and in which order its picks are asked. Pure and deterministic: the
@@ -47,7 +49,9 @@ function eligible(type: QuestionType, pick: PlanPick, input: PlanInput): boolean
   }
 }
 
-const key = (text: string) => text.trim().toLowerCase();
+// The same comparison the distractors use: points, stress, a full stop and case
+// do not make two words different.
+const key = comparable;
 
 /** The first four picks from `from` on whose forms and meanings all differ:
  *  two senses of one word, or two words with one meaning, would each make two

@@ -53,6 +53,11 @@ describe('loadConfig', () => {
     expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '5000' }).sessionGenerationTimeoutMs).toBe(5_000);
   });
 
+  // Victor's cap: the job's expiry is twice the budget and depends on it.
+  it('never lets SESSION_GENERATION_TIMEOUT_MS raise the budget above five minutes', () => {
+    expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '600000' }).sessionGenerationTimeoutMs).toBe(300_000);
+  });
+
   // Phase 24 (spec D16): expiry detects a crashed worker and must never cut a
   // healthy call off. The two numbers used to agree only through a comment.
   it('expires a prepare-session job no sooner than twice the default budget', () => {

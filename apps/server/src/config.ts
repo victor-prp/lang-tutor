@@ -31,8 +31,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     port: Number(env.PORT) || 3001,
     poolMax: Number(env.PG_POOL_MAX) || 5,
     translationTimeoutMs: Number(env.TRANSLATION_TIMEOUT_MS) || DEFAULT_TRANSLATION_TIMEOUT_MS,
-    sessionGenerationTimeoutMs:
+    // Victor's cap: five minutes at most. The prepare-session job expires at
+    // twice SESSION_GENERATION_BUDGET_MS, so a longer call would be cut off by
+    // the expiry rather than by its own timeout.
+    sessionGenerationTimeoutMs: Math.min(
       Number(env.SESSION_GENERATION_TIMEOUT_MS) || SESSION_GENERATION_BUDGET_MS,
+      SESSION_GENERATION_BUDGET_MS,
+    ),
   };
 }
 

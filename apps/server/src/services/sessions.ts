@@ -11,6 +11,7 @@ import {
   parseLlmDistractors,
   tasksFor,
   validateDistractors,
+  type DistractorVerdict,
 } from '../domain/distractors';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
@@ -315,29 +316,54 @@ export function createSessionService({
         { listening: payload.listening, ordinal: payload.ordinal },
       );
       const ordered = plan.order.map((index) => read.context[index]);
-      const items = distractorItems(ordered, tasksFor(plan));
+      const tasks = tasksFor(plan);
+      const items = distractorItems(ordered, tasks);
+      // The rows that ask the model nothing are still in the session: the
+      // validation and the prompt must know their words and meanings.
+      const others = ordered.filter((_, index) => !tasks[index]);
 
       const started = now();
-      const raw = await llm(buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language }));
-      const modelMs = now() - started;
-      // An empty string is the provider's "no content" (a safety block). Here,
-      // unlike a lookup, there is nothing useful to serve without it.
-      const answer = raw === '' ? null : parseLlmDistractors(raw);
-      if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
-      const verdict = validateDistractors(items, answer, read.enrolled.source_language);
-      if (!verdict.ok) throw new InvalidDistractors(sessionId, verdict.reason);
-
-      // Spec D10: the board's fifth meaning is its first word's first wrong
-      // meaning that is none of the four.
+      let modelMs = 0;
+      let verdict: Extract<DistractorVerdict, { ok: true }>;
+      let meanings: string[] | null;
       const board = plan.board;
-      const meanings = board
-        ? boardMeanings(
-            ordered.slice(board.start, board.start + BOARD_SIZE).map((row) => row.translation),
-            verdict.byKey.get(keyOf(board.start))!.distractors,
-          )
-        : null;
-      if (board && !meanings) {
-        throw new InvalidDistractors(sessionId, "every wrong meaning of the board is one of its words' own");
+      try {
+        const raw = await llm(
+          buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others }),
+        );
+        modelMs = now() - started;
+        // An empty string is the provider's "no content" (a safety block). Here,
+        // unlike a lookup, there is nothing useful to serve without it.
+        const answer = raw === '' ? null : parseLlmDistractors(raw);
+        if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
+        const checked = validateDistractors(items, answer, read.enrolled.source_language, others);
+        if (!checked.ok) throw new InvalidDistractors(sessionId, checked.reason);
+        verdict = checked;
+
+        // Spec D10: the board's fifth meaning is its first word's first wrong
+        // meaning that is none of the four, nor another saved meaning of one
+        // of its words.
+        meanings = board
+          ? boardMeanings(
+              ordered.slice(board.start, board.start + BOARD_SIZE),
+              ordered,
+              verdict.byKey.get(keyOf(board.start))!.distractors,
+            )
+          : null;
+        if (board && !meanings) {
+          throw new InvalidDistractors(sessionId, "every wrong meaning of the board is one of its words' own");
+        }
+      } catch (error) {
+        // Spec D16: a failed attempt is a measurement too, not only the
+        // dead-letter fifteen minutes on.
+        logger.info({
+          event: 'session_preparation_attempt_failed',
+          session_id: sessionId,
+          item_count: items.length,
+          model_ms: now() - started,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
       }
 
       const written = await transaction(async ({ session, question }) => {

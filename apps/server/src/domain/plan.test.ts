@@ -69,6 +69,21 @@ describe('planSession (spec D3, D4, D10)', () => {
     expect(plan.order).toEqual([0, 1, 2, 3, 5, 7, 8, 4, 6, 9]);
   });
 
+  // Final review: "the same" is distractors' comparable, not just case.
+  it('treats a meaning that differs only by points or a full stop as the same on a board', () => {
+    const list: PlanPick[] = [
+      pick(0), pick(1), pick(2),
+      { form: 'lock', translation: 'מנעול', tiles: true },
+      { form: 'castle', translation: 'טירה', tiles: true },
+      { form: 'big', translation: 'גדול', tiles: true },
+      { form: 'large', translation: 'גָּדוֹל.', tiles: true },
+      pick(7), pick(8), pick(9),
+    ];
+    const plan = planSession(list, OFF);
+    expect(plan.board).toEqual({ start: 3 });
+    expect(plan.order).toEqual([0, 1, 2, 3, 4, 5, 7, 6, 8, 9]);
+  });
+
   it('has no board when four distinct words cannot be found', () => {
     const same = Array.from({ length: 8 }, (_, i) => ({ form: i < 3 ? `w${i}` : 'lock', translation: `מ${i}`, tiles: true }));
     const plan = planSession(same, OFF);
