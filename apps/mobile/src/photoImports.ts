@@ -1,11 +1,14 @@
 import type {
   PhotoImport,
   PhotoImportItem,
+  PhotoImportItemReason,
   PhotoImportItemUpdate,
   PhotoImportOption,
   PhotoImportStatus,
   PhotoImportSummary,
 } from '@lang-tutor/core/api';
+
+import { strings } from '@/strings';
 
 /** Phase 26 (spec D13). The review's rules, kept out of the screen so they are
  *  tested without rendering. */
@@ -23,6 +26,42 @@ export const canSave = (imp: PhotoImport): boolean => imp.status === 'ready' && 
 
 export const chosenOption = (item: PhotoImportItem): PhotoImportOption | null =>
   item.options.find((option) => option.sense_id === item.chosen_sense_id) ?? null;
+
+/** The status line of an import, on the review and in the list of open ones.
+ *  A saved or discarded import has none: there is nothing left to wait for. */
+export function statusLabel(summary: PhotoImportSummary): string | null {
+  switch (summary.status) {
+    case 'reading':
+      return strings.photoImportReading;
+    case 'looking_up':
+      return strings.photoImportLookingUp(summary.settled_count, summary.item_count);
+    case 'ready':
+      return strings.photoImportReady;
+    case 'failed':
+      return strings.photoImportFailed;
+    case 'saved':
+    case 'discarded':
+      return null;
+  }
+}
+
+const REASONS: Record<PhotoImportItemReason, string> = {
+  sentence: strings.photoImportReasonSentence,
+  no_meaning: strings.photoImportReasonNoMeaning,
+  not_in_language: strings.photoImportReasonNotInLanguage,
+};
+
+/** What a row says under its word: what the photo had when the lookup corrected
+ *  it, the printed Hebrew when it named none of the senses, and why a row has
+ *  nothing to save. */
+export function rowNotes(item: PhotoImportItem): string[] {
+  const notes: string[] = [];
+  if (item.corrected_form !== null) notes.push(strings.photoImportReadAs(item.text));
+  if (item.hebrew_mismatch && item.hebrew !== null) notes.push(strings.photoImportListSays(item.hebrew));
+  if (item.reason !== null) notes.push(REASONS[item.reason]);
+  if (item.status === 'failed') notes.push(strings.photoImportRowFailed);
+  return notes;
+}
 
 /** The optimistic copy of a change, before the server answers. */
 export function withChange(imp: PhotoImport, position: number, change: PhotoImportItemUpdate): PhotoImport {

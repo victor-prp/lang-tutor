@@ -7,10 +7,13 @@ import {
   homePhotoCard,
   importsFor,
   mergePolled,
+  rowNotes,
   shouldPollImport,
+  statusLabel,
   tickedCount,
   withChange,
 } from './photoImports';
+import { strings } from './strings';
 
 const option = (n: number) => ({ sense_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
 const item = (position: number, over: Partial<PhotoImportItem> = {}): PhotoImportItem => ({
@@ -69,6 +72,41 @@ describe('homePhotoCard', () => {
     expect(homePhotoCard([summary('a', 'ready', 32)])).toEqual({ kind: 'ready', id: 'a', count: 32 });
     expect(homePhotoCard([summary('a', 'failed')])).toEqual({ kind: 'failed', id: 'a' });
     expect(homePhotoCard([summary('a', 'ready'), summary('b', 'reading')])).toEqual({ kind: 'several', count: 2 });
+  });
+});
+
+describe('statusLabel', () => {
+  it('says what an open import is doing, with the rows looked up so far', () => {
+    expect(statusLabel(summary('a', 'reading'))).toBe(strings.photoImportReading);
+    expect(statusLabel({ ...summary('a', 'looking_up', 32), settled_count: 12 })).toBe(
+      strings.photoImportLookingUp(12, 32),
+    );
+    expect(statusLabel(summary('a', 'ready'))).toBe(strings.photoImportReady);
+    expect(statusLabel(summary('a', 'failed'))).toBe(strings.photoImportFailed);
+  });
+
+  it('says nothing for an import that is no longer open', () => {
+    expect(statusLabel(summary('a', 'saved'))).toBeNull();
+    expect(statusLabel(summary('a', 'discarded'))).toBeNull();
+  });
+});
+
+describe('rowNotes', () => {
+  it('has none for a row read and matched as printed', () => {
+    expect(rowNotes(item(0))).toEqual([]);
+  });
+
+  it('names what was read when the lookup corrected it, and the Hebrew that named no sense', () => {
+    const row = item(0, { text: 'gatlo', corrected_form: 'gatto', hebrew: 'גדה', hebrew_mismatch: true });
+    expect(rowNotes(row)).toEqual([strings.photoImportReadAs('gatlo'), strings.photoImportListSays('גדה')]);
+  });
+
+  it('says why a row has nothing to save', () => {
+    const none = { options: [], chosen_sense_id: null, ticked: false };
+    expect(rowNotes(item(0, { ...none, reason: 'sentence' }))).toEqual([strings.photoImportReasonSentence]);
+    expect(rowNotes(item(0, { ...none, reason: 'no_meaning' }))).toEqual([strings.photoImportReasonNoMeaning]);
+    expect(rowNotes(item(0, { ...none, reason: 'not_in_language' }))).toEqual([strings.photoImportReasonNotInLanguage]);
+    expect(rowNotes(item(0, { ...none, status: 'failed' }))).toEqual([strings.photoImportRowFailed]);
   });
 });
 
