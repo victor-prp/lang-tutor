@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
 
 import { DISTRACTOR_MARKER } from '../../src/domain/distractors';
+import { typeFor } from '../../src/domain/session';
 import { geminiResponse } from './geminiResponse';
 
 // tests/support/ is the test composition root, so naming a concrete URL and
@@ -242,16 +243,30 @@ export async function countGeminiRequests(ns: string, matchText?: string): Promi
 }
 
 /**
- * Phase 19. The distractor call's answer: the same three wrong options for
- * q1 to q10, so one stub fits any session of up to ten questions. Matched on
- * DISTRACTOR_MARKER, which only that prompt carries, so a translation stub in
- * the same namespace cannot answer it.
+ * Phase 19. The distractor call's answer for q1 to q10, so one stub fits any
+ * session of up to ten questions. Matched on DISTRACTOR_MARKER, which only that
+ * prompt carries, so a translation stub in the same namespace cannot answer it.
+ *
+ * Phase 23. Each key answers the task its position's type asks (spec D2):
+ * Hebrew wrong options for today's card, English ones for a reversed card, and
+ * no options but one alternative for a typed card.
  */
+export const STUB_WRONG_HEBREW = ['דלת', 'קיר', 'תקרה'];
+export const STUB_WRONG_ENGLISH = ['door', 'wall', 'ceiling'];
+export const STUB_ALTERNATIVE = 'volume';
+
 export async function expectDistractors(ns: string, opts: { delayMs?: number } = {}): Promise<void> {
-  const items = Array.from({ length: 10 }, (_, i) => ({
-    key: `q${i + 1}`,
-    distractors: ['דלת', 'קיר', 'תקרה'],
-  }));
+  const items = Array.from({ length: 10 }, (_, i) => {
+    const key = `q${i + 1}`;
+    switch (typeFor(i)) {
+      case 'multiple_choice':
+        return { key, distractors: STUB_WRONG_HEBREW };
+      case 'reverse_choice':
+        return { key, distractors: STUB_WRONG_ENGLISH };
+      case 'typed_translation':
+        return { key, distractors: [], alternatives: [STUB_ALTERNATIVE] };
+    }
+  });
   await expectation(ns, {
     match: { body: { type: 'REGEX', regex: `[\\s\\S]*${DISTRACTOR_MARKER}[\\s\\S]*` } },
     action: {

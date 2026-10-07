@@ -46,3 +46,20 @@ export const ZNAT = {
     },
   ],
 };
+
+// Phase 23. Two senses of one five-letter form, so every card about it can be
+// a typed card answered with a near miss (one swap needs five letters). Used
+// only by question-types.spec.ts.
+export const ZAMOK = {
+  kind: 'word' as const,
+  entries: [
+    {
+      lemma: 'замок',
+      part_of_speech: 'noun',
+      senses: [
+        { translation: 'טירה', sense_code: 'castle' },
+        { translation: 'מנעול', sense_code: 'lock' },
+      ],
+    },
+  ],
+};

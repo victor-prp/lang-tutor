@@ -23,6 +23,15 @@ export class OptionOutOfRange extends Error {
   }
 }
 
+// Phase 23. An option index sent for a typed card, or text for a choice: a
+// malformed request, not a desync.
+export class AnswerKindMismatch extends Error {
+  constructor(readonly questionId: string) {
+    super(`the answer to ${questionId} is not the kind its question takes`);
+    this.name = 'AnswerKindMismatch';
+  }
+}
+
 export class UsernameTaken extends Error {
   constructor(readonly username: string) {
     super(`username ${username} is already taken`);

@@ -1,13 +1,16 @@
-import type { Question } from '@lang-tutor/core/api';
-import { MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/domain';
+import type { TypedVerdict } from '@lang-tutor/core/api';
+import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/domain';
 
 /**
  * Phase 20. The step rule (spec §3). Pure: the day is passed in, no clock is
  * read (ADR 0001 R3).
  */
 
-/** One answer as the rule reads it: which sense, which exercise, right or wrong. */
-export type AnsweredQuestion = { senseId: string; type: Question['type']; correct: boolean };
+/** One answer as the rule reads it: which sense, which exercise, and how it
+ *  was judged. A choice is right or wrong; a typed answer has its verdict. */
+export type AnsweredQuestion =
+  | { senseId: string; type: 'multiple_choice' | 'reverse_choice'; correct: boolean }
+  | { senseId: string; type: 'typed_translation'; verdict: TypedVerdict };
 
 /** One piece of evidence about one dimension. Capped evidence can carry a
  *  dimension to CAPPED_MAX_LEVEL and no further. */
@@ -28,13 +31,15 @@ export type SnapshotRow = { senseId: string; dimension: Dimension; levelBefore: 
 /** A snapshot row as the results read it back, with the question that asked it. */
 export type SnapshotRead = SnapshotRow & { form: string; translation: string; position: number };
 
-/** One practised saved sense, as badges. */
+/** One practised saved sense, as badges, and the live dimensions that rose:
+ *  with a badge over three dimensions, one can rise alone (phase 23, D11). */
 export type ProgressChange = {
   senseId: string;
   form: string;
   translation: string;
   levelBefore: number;
   levelAfter: number;
+  raised: Dimension[];
 };
 
 /** Whole days that must pass, since the later of the last step and the last
@@ -58,16 +63,40 @@ export function daysBetween(from: string, to: string): number {
 }
 
 /**
- * What one answer says about which dimensions. Today every question is
- * multiple choice, target word to Hebrew, which is recognition: uncapped
- * written_receptive evidence. Spec §3's table lists the cases later exercise
- * types add here, including the downward credit a correct productive answer
- * gives its receptive dimension.
+ * What one answer says about which dimensions: phase 20's §3 table, filled in
+ * for phase 23's types (spec D6). A productive success also credits the
+ * receptive dimension below it; only successes are credited downward; and
+ * recognition-format evidence caps a productive dimension at 3.
  */
 export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
+  const piece = (dimension: Dimension, correct: boolean, capped = false): Evidence => ({
+    dimension,
+    correct,
+    capped,
+  });
   switch (answer.type) {
     case 'multiple_choice':
-      return [{ dimension: 'written_receptive', correct: answer.correct, capped: false }];
+      return [piece('written_receptive', answer.correct)];
+    case 'reverse_choice':
+      // Picking the form out of four is recognition of it: productive evidence,
+      // capped. A failure says nothing about knowing the meaning.
+      return answer.correct
+        ? [piece('written_receptive', true), piece('written_productive', true, true)]
+        : [piece('written_productive', false, true)];
+    case 'typed_translation':
+      switch (answer.verdict) {
+        case 'exact':
+          return [piece('written_receptive', true), piece('written_productive', true), piece('spelling', true)];
+        case 'near_miss':
+          return [piece('written_receptive', true), piece('written_productive', true), piece('spelling', false)];
+        case 'alternative':
+          // Right, but not this word: nothing about this sense.
+          return [];
+        case 'wrong':
+          // A failure to recall is the productive failure; it says nothing
+          // about spelling a form the learner did not produce.
+          return [piece('written_productive', false)];
+      }
   }
 }
 
@@ -162,6 +191,9 @@ export function progressChanges(
           translation: first.translation,
           levelBefore: badge(shown.map((row) => row.levelBefore)),
           levelAfter: badge(shown.map((row) => row.levelAfter)),
+          raised: DIMENSIONS.filter((dimension) =>
+            shown.some((row) => row.dimension === dimension && row.levelAfter > row.levelBefore),
+          ),
         },
       };
     })

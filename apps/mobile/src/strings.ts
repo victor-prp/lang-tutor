@@ -62,11 +62,20 @@ export const strings = {
   preparationFailed: 'יצירת השאלות נכשלה. אפשר לנסות שוב.',
   homeSavedLabel: (count: number, language: string) => `${count} משמעויות שמורות ב${language}`,
   questionInstruction: 'מה הפירוש?',
+  // Phase 23. The reversed and typed cards name the language they ask for.
+  questionInstructionReverse: (language: string) => `איך אומרים ב${languageName(language)}?`,
+  questionInstructionTyped: (language: string) => `כתבו את המילה ב${languageName(language)}`,
+  typedPlaceholder: 'התשובה שלך…',
+  typedCheck: 'בדיקה',
+  typedShowAnswer: 'הצגת התשובה',
   progressLabel: (position: number, total: number) => isolateLtr(`${position} / ${total}`),
   scoreLabel: (correct: number, total: number) => isolateLtr(`${correct} / ${total}`),
   continueLabel: 'המשך',
   feedbackCorrect: 'נכון!',
   feedbackWrong: 'התשובה הנכונה:',
+  // Phase 23. Both count as correct (spec D9).
+  feedbackNearMiss: 'כמעט! כך כותבים:',
+  feedbackAlternative: 'נכון! המילה שתרגלנו:',
   resultsHeadlineGreat: 'מצוין!',
   resultsHeadlineGood: 'עבודה טובה!',
   resultsHeadlineKeepPractising: 'ממשיכים לתרגל',
@@ -158,6 +167,9 @@ export const strings = {
   levelName: (level: number): string => ['חדשה', 'נחשפה', 'מוכרת', 'ידועה', 'בשליטה'][level - 1] ?? '',
   levelAll: 'הכל',
   levelRaised: (level: number) => `עלתה לרמה ${level}`,
+  // Phase 23 (spec D11). A dimension rose and the badge did not.
+  dimensionsRaised: (dimensions: Dimension[]) =>
+    `התקדמות: ${dimensions.map((dimension) => DIMENSION_NAMES[dimension]).join(', ')}`,
   dimensionName: (dimension: Dimension): string => DIMENSION_NAMES[dimension],
   notPractised: 'טרם תורגל',
   vocabularyEmptyLevel: 'אין מילים ברמה הזו',

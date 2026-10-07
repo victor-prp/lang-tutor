@@ -9,6 +9,9 @@ import {
   assertMockServerReachable,
   clearNamespace,
   countGeminiRequests,
+  STUB_ALTERNATIVE,
+  STUB_WRONG_ENGLISH,
+  STUB_WRONG_HEBREW,
   expectDistractors,
   expectGeminiStatus,
   geminiBaseUrlFor,
@@ -44,12 +47,15 @@ afterEach(async () => {
   await t.close();
 });
 
-/** Past the seed (skipped), two saved words, and a list session requested. */
+const WORDS: Record<string, string> = { tome: 'ספר', sprint: 'ריצה', lantern: 'פנס' };
+
+/** Past the seed (skipped), three saved words, and a list session requested. */
 async function requestListSession(): Promise<string> {
   const seed = await deps.sessions.createNextSession(E);
   await deps.sessions.skipSession(seed.sessionId);
-  await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'tome', translations: ['ספר'] });
-  await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'sprint', translations: ['ריצה'] });
+  for (const [lemma, translation] of Object.entries(WORDS)) {
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+  }
   const { sessionId } = await deps.sessions.createNextSession(E);
   return sessionId;
 }
@@ -63,11 +69,24 @@ describe('prepare-session through the queue', () => {
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
     const record = await deps.sessions.getSession(sessionId);
-    expect(record.questions.map((q) => q.question).sort()).toEqual(['sprint', 'tome']);
-    for (const question of record.questions) {
-      expect(question.options).toHaveLength(4);
-      expect(['ספר', 'ריצה']).toContain(question.options[question.correct_option]);
+    // Phase 23 (spec D2): the type cycle, in order.
+    expect(record.questions.map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation']);
+    const [choice, reversed, typed] = record.questions;
+    if (choice.type !== 'multiple_choice' || reversed.type !== 'reverse_choice' || typed.type !== 'typed_translation') {
+      throw new Error('unreachable');
     }
+    // Today's card: the word, its meaning among Hebrew wrong options.
+    expect(Object.keys(WORDS)).toContain(choice.question);
+    expect(choice.options[choice.correct_option]).toBe(WORDS[choice.question]);
+    expect([...choice.options].sort()).toEqual([WORDS[choice.question], ...STUB_WRONG_HEBREW].sort());
+    // The reversed card: the meaning, the word among English wrong options.
+    const reversedWord = reversed.options[reversed.correct_option];
+    expect(reversed.question).toBe(WORDS[reversedWord]);
+    expect([...reversed.options].sort()).toEqual([reversedWord, ...STUB_WRONG_ENGLISH].sort());
+    // The typed card: the meaning, the word as its answer, the alternative kept.
+    expect(typed.question).toBe(WORDS[typed.answer]);
+    expect(typed.alternatives).toEqual([STUB_ALTERNATIVE]);
+    expect(new Set([choice.question, reversedWord, typed.answer]).size).toBe(3);
   });
 
   it('a provider that keeps failing ends the session failed, through the dead-letter queue', async () => {

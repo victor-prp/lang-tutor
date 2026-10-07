@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import type { AnswerRecord, Question, SessionStatus } from '@lang-tutor/core/api';
+import type { AnswerRecord, MultipleChoiceQuestion, Question, SessionStatus, TypedTranslationQuestion } from '@lang-tutor/core/api';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import {
@@ -13,10 +13,11 @@ import {
   positionOf,
   sessionScore,
   step,
+  typeFor,
   type SessionRecord,
 } from './session';
 
-function makeQuestion(n: number): Question {
+function makeQuestion(n: number): MultipleChoiceQuestion {
   return {
     id: `q${n}`,
     type: 'multiple_choice',
@@ -79,7 +80,7 @@ describe('positionOf', () => {
 describe('step', () => {
   it('records a fresh answer and advances to the next question', () => {
     const [q0, q1] = [makeQuestion(0), makeQuestion(1)];
-    const outcome = step(makeRecord([q0, q1]), q0.id, q0.correct_option);
+    const outcome = step(makeRecord([q0, q1]), q0.id, { option_index: q0.correct_option });
     expect(outcome.status).toBe('advanced');
     if (outcome.status !== 'advanced') throw new Error('unreachable');
     expect(outcome.record.answers).toHaveLength(1);
@@ -95,7 +96,7 @@ describe('step', () => {
 
   it('marks the record complete on the last question and reports justCompleted', () => {
     const q0 = makeQuestion(0);
-    const outcome = step(makeRecord([q0]), q0.id, q0.correct_option);
+    const outcome = step(makeRecord([q0]), q0.id, { option_index: q0.correct_option });
     expect(outcome.status).toBe('advanced');
     if (outcome.status !== 'advanced') throw new Error('unreachable');
     expect(outcome.record.complete).toBe(true);
@@ -109,7 +110,7 @@ describe('step', () => {
       [q0, q1],
       [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
     );
-    const outcome = step(answered, q0.id, q0.correct_option);
+    const outcome = step(answered, q0.id, { option_index: q0.correct_option });
     expect(outcome).toEqual({ status: 'replayed', record: answered, justCompleted: false });
   });
 
@@ -120,13 +121,13 @@ describe('step', () => {
       [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
     );
     expect(done.complete).toBe(true);
-    const outcome = step(done, q0.id, q0.correct_option);
+    const outcome = step(done, q0.id, { option_index: q0.correct_option });
     expect(outcome).toEqual({ status: 'replayed', record: done, justCompleted: false });
   });
 
   it('rejects a question_id that matches neither the current nor the just-answered question', () => {
     const [q0, q1] = [makeQuestion(0), makeQuestion(1)];
-    const outcome = step(makeRecord([q0, q1]), 'not-a-real-id', 0);
+    const outcome = step(makeRecord([q0, q1]), 'not-a-real-id', { option_index: 0 });
     expect(outcome).toEqual({ status: 'invalid_question' });
   });
 
@@ -136,18 +137,18 @@ describe('step', () => {
       [q0],
       [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
     );
-    const outcome = step(done, 'not-a-real-id', 0);
+    const outcome = step(done, 'not-a-real-id', { option_index: 0 });
     expect(outcome).toEqual({ status: 'invalid_question' });
   });
 
   it('rejects an option index past the last option, without evaluating it', () => {
     const q0 = makeQuestion(0);
-    expect(step(makeRecord([q0]), q0.id, q0.options.length)).toEqual({ status: 'out_of_range' });
+    expect(step(makeRecord([q0]), q0.id, { option_index: q0.options.length })).toEqual({ status: 'out_of_range' });
   });
 
   it('rejects a negative option index', () => {
     const q0 = makeQuestion(0);
-    expect(step(makeRecord([q0]), q0.id, -1)).toEqual({ status: 'out_of_range' });
+    expect(step(makeRecord([q0]), q0.id, { option_index: -1 })).toEqual({ status: 'out_of_range' });
   });
 
   // The range check must not fire on a replay: the record comes back unchanged,
@@ -158,11 +159,71 @@ describe('step', () => {
       [q0, q1],
       [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
     );
-    expect(step(answered, q0.id, 99)).toEqual({
+    expect(step(answered, q0.id, { option_index: 99 })).toEqual({
       status: 'replayed',
       record: answered,
       justCompleted: false,
     });
+  });
+});
+
+// Phase 23.
+function typedQuestion(id: string): TypedTranslationQuestion {
+  return {
+    id,
+    type: 'typed_translation',
+    vocab_term_id: 'l1',
+    question: 'חלון',
+    part_of_speech: 'noun',
+    answer: 'finestra',
+    lemma: 'finestra',
+    alternatives: [],
+  };
+}
+
+describe('typeFor', () => {
+  it('cycles choice, reverse choice, typed, from the first position', () => {
+    expect(Array.from({ length: 10 }, (_, i) => typeFor(i))).toEqual([
+      'multiple_choice',
+      'reverse_choice',
+      'typed_translation',
+      'multiple_choice',
+      'reverse_choice',
+      'typed_translation',
+      'multiple_choice',
+      'reverse_choice',
+      'typed_translation',
+      'multiple_choice',
+    ]);
+  });
+});
+
+describe('step, typed', () => {
+  const [t1, t2] = [typedQuestion('t1'), typedQuestion('t2')];
+
+  it('records a typed answer with its text and verdict', () => {
+    const outcome = step(makeRecord([t1, t2]), 't1', { text: 'finestar' });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.record.answers[0]).toEqual({
+      question_id: 't1',
+      is_correct: true,
+      answer_string: 'finestar',
+      verdict: 'near_miss',
+    });
+  });
+
+  it('refuses text for a choice and an index for a typed card', () => {
+    const q0 = makeQuestion(0);
+    expect(step(makeRecord([q0]), q0.id, { text: 'a0' })).toEqual({ status: 'wrong_answer_kind' });
+    expect(step(makeRecord([t1]), 't1', { option_index: 0 })).toEqual({ status: 'wrong_answer_kind' });
+  });
+
+  // Review Focus 3: the client resends after the server recorded the answer.
+  it('replays a retried typed answer without recording it twice', () => {
+    const first = step(makeRecord([t1, t2]), 't1', { text: 'finestra' });
+    if (first.status !== 'advanced') throw new Error(first.status);
+    const retried = step(first.record, 't1', { text: 'finestra' });
+    expect(retried).toEqual({ status: 'replayed', record: first.record, justCompleted: false });
   });
 });
 
@@ -224,7 +285,7 @@ describe('step and status', () => {
     expect(record.status).toBe('ready');
     expect(record.source).toBe('seed');
     for (const question of [...record.questions]) {
-      const outcome = step(record, question.id, 0);
+      const outcome = step(record, question.id, { option_index: 0 });
       if (outcome.status !== 'advanced') throw new Error(outcome.status);
       record = outcome.record;
     }

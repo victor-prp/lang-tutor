@@ -1,4 +1,4 @@
-import type { Question } from '@lang-tutor/core/api';
+import type { TypedVerdict } from '@lang-tutor/core/api';
 import type { Dimension } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
@@ -39,12 +39,13 @@ export function createProgressRepo(tx: Tx) {
         enrollment_id: string;
         sense_id: string;
         type: string;
-        options: QuestionOption[];
-        selected_option_position: number;
+        options: QuestionOption[] | null;
+        selected_option_position: number | null;
+        verdict: string | null;
         day: string;
         last_answered_at: string;
       }>(sql`
-        SELECT s.enrollment_id, q.sense_id, q.type, q.options, a.selected_option_position,
+        SELECT s.enrollment_id, q.sense_id, q.type, q.options, a.selected_option_position, a.verdict,
                ((max(a.answered_at) OVER ()) AT TIME ZONE 'UTC')::date::text AS day,
                (max(a.answered_at) OVER ())::text AS last_answered_at
         FROM answers a
@@ -58,13 +59,19 @@ export function createProgressRepo(tx: Tx) {
         enrollmentId: first.enrollment_id,
         day: first.day,
         lastAnsweredAt: first.last_answered_at,
-        answers: rows.rows.map((row) => ({
-          senseId: row.sense_id,
-          type: row.type as Question['type'],
-          // selected_option_position is canonical (sessions.insertAnswer), and
-          // question_options_valid makes positions 0..n-1.
-          correct: canonicalOptions(row.options)[row.selected_option_position].is_correct,
-        })),
+        answers: rows.rows.map((row): AnsweredQuestion => {
+          // Phase 23. A typed answer carries the verdict it was shown.
+          if (row.type === 'typed_translation') {
+            return { senseId: row.sense_id, type: 'typed_translation', verdict: row.verdict as TypedVerdict };
+          }
+          return {
+            senseId: row.sense_id,
+            type: row.type as 'multiple_choice' | 'reverse_choice',
+            // selected_option_position is canonical (sessions.insertAnswer), and
+            // question_options_valid makes positions 0..n-1.
+            correct: canonicalOptions(row.options!)[row.selected_option_position!].is_correct,
+          };
+        }),
       };
     },
 
@@ -134,8 +141,10 @@ export function createProgressRepo(tx: Tx) {
       );
     },
 
-    /** The snapshot with the form and right answer of the first question in
-     *  the session that asked each sense. */
+    /** The snapshot with the form and the meaning of the first question in the
+     *  session that asked each sense. Phase 23: a reversed or typed card asked
+     *  the meaning, which it stores as its prompt; today's card offers it as
+     *  its right option. Either way the results show form → meaning. */
     findSnapshot: async (sessionId: string): Promise<SnapshotRead[]> => {
       const rows = await tx.execute<{
         sense_id: string;
@@ -143,13 +152,14 @@ export function createProgressRepo(tx: Tx) {
         level_before: number;
         level_after: number;
         form: string;
-        options: QuestionOption[];
+        prompt: string | null;
+        options: QuestionOption[] | null;
         position: number;
       }>(sql`
-        SELECT sp.sense_id, sp.dimension, sp.level_before, sp.level_after, f.form, f.options, f.position
+        SELECT sp.sense_id, sp.dimension, sp.level_before, sp.level_after, f.form, f.prompt, f.options, f.position
         FROM session_progress sp
         JOIN LATERAL (
-          SELECT v.form, q.options, sq.position
+          SELECT v.form, q.prompt, q.options, sq.position
           FROM session_questions sq
           JOIN questions q     ON q.id = sq.question_id
           JOIN dict_variants v ON v.id = q.prompt_variant_id
@@ -165,7 +175,7 @@ export function createProgressRepo(tx: Tx) {
         levelBefore: row.level_before,
         levelAfter: row.level_after,
         form: row.form,
-        translation: canonicalOptions(row.options).find((option) => option.is_correct)!.text,
+        translation: row.prompt ?? canonicalOptions(row.options!).find((option) => option.is_correct)!.text,
         position: row.position,
       }));
     },

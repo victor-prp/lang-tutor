@@ -1,5 +1,5 @@
 import type { MissedQuestion, Question, Score, SessionProgressItem } from '@lang-tutor/core/api';
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+import { SESSION_LENGTH, type AnswerInput } from '@lang-tutor/core/domain';
 import { router } from 'expo-router';
 import {
   createContext,
@@ -22,6 +22,9 @@ export type SessionValue = {
   question: Question | undefined;
   position: number;
   total: number;
+  /** Phase 23. The answer to the card on screen: an option or a typed text. */
+  answer: AnswerInput | null;
+  /** The chosen option, for a choice card; null otherwise. */
   selectedOption: number | null;
   answered: boolean;
   complete: boolean;
@@ -35,6 +38,8 @@ export type SessionValue = {
    *  and resuming are the same call: the server knows how far it got. */
   enter: (sessionId: string) => void;
   select: (optionIndex: number) => void;
+  /** Phase 23. Answers a typed card. An empty text is "show me the answer". */
+  submitText: (text: string) => void;
   next: () => void;
 };
 
@@ -51,7 +56,7 @@ type QuizState = {
   question: Question | undefined;
   position: number;
   total: number;
-  selectedOption: number | null;
+  answer: AnswerInput | null;
   complete: boolean;
   correctCount: number;
   missedQuestions: MissedQuestion[];
@@ -86,7 +91,7 @@ function applyQueued(current: QuizState, queued: Queued): QuizState {
       correctCount: queued.score.correct,
       missedQuestions: queued.missedQuestions,
       progress: queued.progress,
-      selectedOption: null,
+      answer: null,
       queued: null,
       advanceRequested: false,
     };
@@ -95,7 +100,7 @@ function applyQueued(current: QuizState, queued: Queued): QuizState {
     ...current,
     question: queued.question,
     position: queued.position,
-    selectedOption: null,
+    answer: null,
     queued: null,
     advanceRequested: false,
   };
@@ -138,7 +143,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         question: undefined,
         position: 0,
         total: SESSION_LENGTH,
-        selectedOption: null,
+        answer: null,
         complete: false,
         correctCount: 0,
         missedQuestions: [],
@@ -179,23 +184,22 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // setState's updater-function form, because the updater form is invoked
   // twice by React Strict Mode to catch exactly the kind of impurity that a
   // real network call inside it would be — nextStep must fire exactly once
-  // per tap, so it stays outside any updater entirely.
-  const select = useCallback(
-    (optionIndex: number) => {
-      if (!state || state.selectedOption !== null || !state.question) return;
+  // per answer, so it stays outside any updater entirely.
+  //
+  // Phase 23: one path for a chosen option and a typed text. The guard on
+  // `state.answer` is what makes a second tap, or Return then Check, a no-op.
+  const answerWith = useCallback(
+    (input: AnswerInput) => {
+      if (!state || state.answer !== null || !state.question) return;
       const { sessionId, userId, question } = state;
 
-      setState((current) => (current ? { ...current, selectedOption: optionIndex } : current));
+      setState((current) => (current ? { ...current, answer: input } : current));
 
-      // Fired in the background: correctness is already visible to the
-      // learner from `question.correct_option` the moment this returns
-      // (see MultipleChoiceView), so this call only has to register the
-      // answer server-side and fetch what's next before Continue is tapped.
-      void api.nextStep(sessionId, {
-        user_id: userId,
-        question_id: question.id,
-        option_index: optionIndex,
-      })
+      // Fired in the background: the verdict is already visible to the learner
+      // the moment this returns (feedbackFor runs the server's own evaluate),
+      // so this call only has to register the answer server-side and fetch
+      // what's next before Continue is tapped.
+      void api.nextStep(sessionId, { user_id: userId, question_id: question.id, ...input })
         .then((response) => {
           const queued: Queued = response.complete
             ? {
@@ -220,8 +224,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
           if (stateRef.current?.sessionId === sessionId) handleApiFailure();
         });
     },
-    [state],
+    [state, api],
   );
+
+  const select = useCallback((optionIndex: number) => answerWith({ option_index: optionIndex }), [answerWith]);
+  const submitText = useCallback((text: string) => answerWith({ text }), [answerWith]);
 
   const next = useCallback(() => {
     setState((current) => {
@@ -239,6 +246,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         question: undefined,
         position: 0,
         total: SESSION_LENGTH,
+        answer: null,
         selectedOption: null,
         answered: false,
         complete: false,
@@ -248,6 +256,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         sessionId: null,
         enter,
         select,
+        submitText,
         next,
       };
     }
@@ -256,8 +265,9 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       question: state.question,
       position: state.position,
       total: state.total,
-      selectedOption: state.selectedOption,
-      answered: state.selectedOption !== null,
+      answer: state.answer,
+      selectedOption: state.answer && 'option_index' in state.answer ? state.answer.option_index : null,
+      answered: state.answer !== null,
       complete: state.complete,
       correctCount: state.correctCount,
       missedQuestions: state.missedQuestions,
@@ -265,9 +275,10 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       sessionId: state.sessionId,
       enter,
       select,
+      submitText,
       next,
     };
-  }, [state, enter, select, next]);
+  }, [state, enter, select, submitText, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

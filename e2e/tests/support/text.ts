@@ -1,5 +1,7 @@
-/** U+2066 LEFT-TO-RIGHT ISOLATE, U+2069 POP DIRECTIONAL ISOLATE. */
-const ISOLATE_CHARS = /[⁦⁩]/g;
+/** U+2066 LEFT-TO-RIGHT ISOLATE through U+2069 POP DIRECTIONAL ISOLATE, which
+ *  includes U+2068 FIRST STRONG ISOLATE: the feedback banner isolates a
+ *  target-language word inside its Hebrew text (phase 23). */
+const ISOLATE_CHARS = /[\u2066-\u2069]/g;
 
 /**
  * strings.ts wraps bidirectional-ambiguous labels ("1 / 10") in Unicode

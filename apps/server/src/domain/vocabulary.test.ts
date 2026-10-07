@@ -235,11 +235,13 @@ describe('buildWordDetail', () => {
     expect(buildWordDetail(LEMMA, VERB, [], [], [])).toEqual({ lemma: LEMMA, level: null, senses: [] });
   });
 
+  // Phase 23: the three written dimensions are live, so a sense practised
+  // evenly has all three at `written`; the spoken two stay not practised.
   const levels = (senseId: string, written: number): ProgressRow[] =>
     DIMENSIONS.map((dimension) => ({
       senseId,
       dimension,
-      level: dimension === 'written_receptive' ? written : 1,
+      level: dimension.startsWith('spoken') ? 1 : written,
       lastStepOn: null,
       lastWrongOn: null,
     }));
@@ -256,10 +258,25 @@ describe('buildWordDetail', () => {
       sense_id: 's1',
       progress: {
         level: 3,
-        dimensions: { written_receptive: 3, written_productive: 1, spoken_receptive: 1, spoken_productive: 1, spelling: 1 },
+        dimensions: { written_receptive: 3, written_productive: 3, spoken_receptive: 1, spoken_productive: 1, spelling: 3 },
       },
     });
     expect(detail.senses[1]).not.toHaveProperty('progress');
+  });
+
+  // Phase 23 (spec D7): a word known only by recognition reads lower once
+  // writing and spelling are live.
+  it('averages the badge over the three written dimensions', () => {
+    const recognisedOnly = DIMENSIONS.map((dimension) => ({
+      senseId: 's1',
+      dimension,
+      level: dimension === 'written_receptive' ? 3 : 1,
+      lastStepOn: null,
+      lastWrongOn: null,
+    }));
+    const detail = buildWordDetail(LEMMA, VERB, [rendering({ senseId: 's1' })], [{ senseId: 's1', variantId: 'v1' }], recognisedOnly);
+    expect(detail.senses[0].progress?.level).toBe(2);
+    expect(detail.level).toBe(2);
   });
 
   it("gives the word one flat mean over every saved sense's live-dimension levels, rounded once, ties up", () => {

@@ -1,52 +1,67 @@
 import type { Question } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { ProgressBar } from '@/components/ProgressBar';
+import { TypedAnswerView } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
+import { feedbackFor } from '@/feedback';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
-import { useSession } from '@/hooks/useSession';
+import { useSession, type SessionValue } from '@/hooks/useSession';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
-// The one place phase 1 dispatches on question type. Adding a question type
-// means a new case here plus a new view component; the header, progress bar,
-// feedback banner and scoring are untouched.
-function renderQuestion(
-  question: Question,
-  language: string | null,
-  selectedOption: number | null,
-  onSelect: (optionIndex: number) => void,
-) {
+// The one place the session screen dispatches on question type. Adding a type
+// means a new case here plus a view component; the header, progress bar,
+// feedback banner and scoring are untouched, and the `never` below fails the
+// build for a type with no case.
+function renderQuestion(question: Question, session: SessionValue, language: string) {
   switch (question.type) {
     case 'multiple_choice':
       return (
         <MultipleChoiceView
           question={question}
+          instruction={strings.questionInstruction}
           language={language}
-          selectedOption={selectedOption}
-          onSelect={onSelect}
+          selectedOption={session.selectedOption}
+          onSelect={session.select}
         />
       );
-    default:
-      // Unreachable while Question has a single member. Once a second question
-      // type joins the union, replace this line with
-      // `const unhandled: never = question;` and TypeScript will fail the build
-      // on any unhandled type.
-      throw new Error('unhandled question type');
+    case 'reverse_choice':
+      return (
+        <MultipleChoiceView
+          question={question}
+          instruction={strings.questionInstructionReverse(language)}
+          language={language}
+          selectedOption={session.selectedOption}
+          onSelect={session.select}
+        />
+      );
+    case 'typed_translation':
+      return (
+        <TypedAnswerView
+          question={question}
+          instruction={strings.questionInstructionTyped(language)}
+          answered={session.answered}
+          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          onSubmit={session.submitText}
+        />
+      );
+    default: {
+      const unhandled: never = question;
+      throw new Error(`unhandled question type: ${JSON.stringify(unhandled)}`);
+    }
   }
 }
 
 export default function SessionScreen() {
   const session = useSession();
   const next = useNextSession();
-  // Phase 23. A session belongs to the active enrollment, so its prompts are in
-  // that enrollment's target language.
   const { active } = useCurrentUser();
   // Re-entry guard: a fast double tap on skip must not stack two confirms.
   const skipping = useRef(false);
@@ -88,36 +103,43 @@ export default function SessionScreen() {
     return null;
   }
 
-  const isCorrect = session.selectedOption === question.correct_option;
+  // A session is always entered from home, which needs an active enrollment;
+  // an empty language only drops the name from the instruction.
+  const language = active?.target_language ?? '';
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" testID="session-back" hitSlop={12} onPress={() => router.back()}>
-          <Text style={styles.back}>{'→'}</Text>
-        </Pressable>
-        <View style={styles.headerEnd}>
-          <Text style={styles.counter} testID="progress-label">
-            {strings.progressLabel(session.position, session.total)}
-          </Text>
-          <Pressable accessibilityRole="button" testID="session-skip" hitSlop={12} onPress={() => void onSkip()}>
-            <Text style={styles.skip}>{strings.skip}</Text>
+      {/* The keyboard must not cover the typed card's input and its button. */}
+      <KeyboardAvoidingView style={styles.avoid} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.header}>
+          <Pressable accessibilityRole="button" testID="session-back" hitSlop={12} onPress={() => router.back()}>
+            <Text style={styles.back}>{'→'}</Text>
           </Pressable>
+          <View style={styles.headerEnd}>
+            <Text style={styles.counter} testID="progress-label">
+              {strings.progressLabel(session.position, session.total)}
+            </Text>
+            <Pressable accessibilityRole="button" testID="session-skip" hitSlop={12} onPress={() => void onSkip()}>
+              <Text style={styles.skip}>{strings.skip}</Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
 
-      <ProgressBar position={session.position} total={session.total} />
+        <ProgressBar position={session.position} total={session.total} />
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        {renderQuestion(question, active?.target_language ?? null, session.selectedOption, session.select)}
-      </ScrollView>
+        {/* "handled": with the keyboard up, the first tap on בדיקה must submit,
+            not merely dismiss the keyboard. */}
+        <ScrollView
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {renderQuestion(question, session, language)}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-      {session.answered ? (
-        <FeedbackBanner
-          isCorrect={isCorrect}
-          correctAnswer={question.options[question.correct_option]}
-          onContinue={session.next}
-        />
+      {session.answer ? (
+        <FeedbackBanner feedback={feedbackFor(question, session.answer)} onContinue={session.next} />
       ) : null}
     </SafeAreaView>
   );
@@ -125,6 +147,7 @@ export default function SessionScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  avoid: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

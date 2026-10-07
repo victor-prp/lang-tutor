@@ -99,10 +99,15 @@ script:
 |---|---|---|
 | Lookup, target → Hebrew | the headword (D4); each example's `source` | the response's `from` |
 | Lookup, Hebrew → target | each sense's `translation`; each example's `target` | the response's `to` |
-| Session | the question prompt | the active enrollment |
+| Session | the prompt of today's card (target → Hebrew) | the active enrollment |
 | Session results | each practised form; each missed prompt | the active enrollment |
 | Saved words list | each row's lemma | the active enrollment |
 | A word's page | the lemma; each sense's example `source` | the active enrollment |
+
+The two cards added by the question-types phase (#89), `reverse_choice` and `typed_translation`,
+ask a Hebrew meaning, so their prompt has no speaker. The results rows still voice every card:
+a practised row's `form` and a missed row's word (`missedPair`) are the target word whatever the
+type.
 
 `SpeakButton` takes the string and its language, and it renders nothing for a language with no
 voice. Hebrew never has one, because it is absent from the voice table, so no call site needs a

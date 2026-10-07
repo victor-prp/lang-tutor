@@ -46,6 +46,44 @@ describe('evidenceFor', () => {
   });
 });
 
+// Phase 23: spec D6, every row.
+describe('evidenceFor, every type and verdict', () => {
+  it.each([
+    [{ senseId: 's', type: 'multiple_choice', correct: true }, [['written_receptive', true, false]]],
+    [{ senseId: 's', type: 'multiple_choice', correct: false }, [['written_receptive', false, false]]],
+    [
+      { senseId: 's', type: 'reverse_choice', correct: true },
+      [
+        ['written_receptive', true, false],
+        ['written_productive', true, true],
+      ],
+    ],
+    [{ senseId: 's', type: 'reverse_choice', correct: false }, [['written_productive', false, true]]],
+    [
+      { senseId: 's', type: 'typed_translation', verdict: 'exact' },
+      [
+        ['written_receptive', true, false],
+        ['written_productive', true, false],
+        ['spelling', true, false],
+      ],
+    ],
+    [
+      { senseId: 's', type: 'typed_translation', verdict: 'near_miss' },
+      [
+        ['written_receptive', true, false],
+        ['written_productive', true, false],
+        ['spelling', false, false],
+      ],
+    ],
+    [{ senseId: 's', type: 'typed_translation', verdict: 'alternative' }, []],
+    [{ senseId: 's', type: 'typed_translation', verdict: 'wrong' }, [['written_productive', false, false]]],
+  ])('%o gives %j', (answer, expected) => {
+    expect(
+      evidenceFor(answer as AnsweredQuestion).map((piece) => [piece.dimension, piece.correct, piece.capped]),
+    ).toEqual(expected);
+  });
+});
+
 describe('advance', () => {
   it('rises from level 1 on the first all-correct day', () => {
     expect(advance(row(), [right], D)).toEqual(row({ level: 2, lastStepOn: D }));
@@ -142,6 +180,23 @@ describe('evaluateSession', () => {
   });
 });
 
+describe('evaluateSession, reverse choice only', () => {
+  // Phase 23 (spec D6): recognition of the form evidences productive knowledge
+  // only up to level 3, however many days it is right.
+  it('carries written_productive to 3 and no further', () => {
+    let rows = fiveRows('s1');
+    for (const day of ['2026-10-01', '2026-10-02', '2026-10-09', '2026-10-30', '2026-11-30']) {
+      const outcome = evaluateSession(rows, [{ senseId: 's1', type: 'reverse_choice', correct: true }], day);
+      const changed = new Map(outcome.changed.map((r) => [r.dimension, r]));
+      rows = rows.map((r) => changed.get(r.dimension) ?? r);
+    }
+    const level = (d: Dimension) => rows.find((r) => r.dimension === d)!.level;
+    expect(level('written_productive')).toBe(3);
+    expect(level('written_receptive')).toBe(5);
+    expect(level('spelling')).toBe(1);
+  });
+});
+
 describe('progressChanges', () => {
   const read = (senseId: string, position: number, dimension: Dimension, before: number, after: number): SnapshotRead => ({
     senseId,
@@ -159,8 +214,30 @@ describe('progressChanges', () => {
       ...DIMENSIONS.map((d) => read('s2', 0, d, 2, 2)),
     ];
     expect(progressChanges(rows, ['written_receptive'])).toEqual([
-      { senseId: 's2', form: 'form-s2', translation: 'tr-s2', levelBefore: 2, levelAfter: 2 },
-      { senseId: 's1', form: 'form-s1', translation: 'tr-s1', levelBefore: 1, levelAfter: 2 },
+      { senseId: 's2', form: 'form-s2', translation: 'tr-s2', levelBefore: 2, levelAfter: 2, raised: [] },
+      {
+        senseId: 's1',
+        form: 'form-s1',
+        translation: 'tr-s1',
+        levelBefore: 1,
+        levelAfter: 2,
+        raised: ['written_receptive'],
+      },
+    ]);
+  });
+
+  // Phase 23 (spec D11): a word can move a dimension without moving its badge.
+  it('names the live dimensions that rose, even when the badge did not', () => {
+    const rows = DIMENSIONS.map((d) => read('s1', 0, d, 1, d === 'written_receptive' || d === 'spoken_receptive' ? 2 : 1));
+    expect(progressChanges(rows, ['written_receptive', 'written_productive', 'spelling'])).toEqual([
+      {
+        senseId: 's1',
+        form: 'form-s1',
+        translation: 'tr-s1',
+        levelBefore: 1,
+        levelAfter: 1,
+        raised: ['written_receptive'],
+      },
     ]);
   });
 

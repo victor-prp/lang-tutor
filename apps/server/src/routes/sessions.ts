@@ -19,6 +19,7 @@ import {
   sessionScore,
 } from '../domain/session';
 import {
+  AnswerKindMismatch,
   EnrollmentNotFound,
   InsufficientQuestions,
   NoSavedWords,
@@ -42,6 +43,7 @@ const progressItem = (change: ProgressChange) => ({
   translation: change.translation,
   level_before: change.levelBefore,
   level_after: change.levelAfter,
+  raised: change.raised,
 });
 
 function buildNextStepResponse(
@@ -88,7 +90,7 @@ const createSessionRoute = createRoute({
   tags: ['sessions'],
   summary: 'Create the next session',
   description:
-    "An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Read it with GET /sessions/{id}.",
+    "An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types follow their positions: `multiple_choice`, `reverse_choice`, `typed_translation`, repeating. Read it with GET /sessions/{id}.",
   request: {
     body: { required: true, content: { 'application/json': { schema: CreateSessionRequestSchema } } },
   },
@@ -140,7 +142,7 @@ const nextStepRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current question',
   description:
-    'Records an answer and returns the next question, or the final score once all are answered. Re-sending the same answer replays the same response.',
+    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. Re-sending the same answer replays the same response.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
@@ -149,9 +151,11 @@ const nextStepRoute = createRoute({
     200: {
       content: { 'application/json': { schema: NextStepResponseSchema } },
       description:
-        'The answer was recorded. `complete: false` carries the next question; `complete: true` carries the score and the missed questions. The completing response also carries `progress`: each practised saved word with its level before and after.',
+        'The answer was recorded. `complete: false` carries the next question; `complete: true` carries the score and the missed questions. The completing response also carries `progress`: each practised saved word with its level before and after, and the dimensions that rose.',
     },
-    400: failure('The request body did not validate, or `option_index` is out of range.'),
+    400: failure(
+      'The request body did not validate, `option_index` is out of range, or the answer is not the kind its question takes (`text` for a choice, `option_index` for a typed question).',
+    ),
     404: failure('No session has this id.'),
     409: failure(
       "`question_id` is not the session's current question, or the session is not ready (`session_not_ready`).",
@@ -227,9 +231,10 @@ export function createSessionsRouter(sessions: SessionService) {
 
   router.openapi(nextStepRoute, async (c) => {
     const { id } = c.req.valid('param');
-    const { question_id, option_index } = c.req.valid('json');
+    const body = c.req.valid('json');
+    const answer = 'text' in body ? { text: body.text } : { option_index: body.option_index };
     try {
-      const record = await sessions.submitAnswer(id, question_id, option_index);
+      const record = await sessions.submitAnswer(id, body.question_id, answer);
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
@@ -239,6 +244,9 @@ export function createSessionsRouter(sessions: SessionService) {
       }
       if (error instanceof OptionOutOfRange) {
         return c.json({ error: 'option_index is out of range for this question' }, 400);
+      }
+      if (error instanceof AnswerKindMismatch) {
+        return c.json({ error: 'the answer is not the kind this question takes' }, 400);
       }
       throw error; // anything else is a real failure: app.ts's onError makes it a 500
     }

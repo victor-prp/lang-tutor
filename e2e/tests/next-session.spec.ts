@@ -4,16 +4,14 @@ import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
+import { answerChoice, generationStub, readCard, rightOption } from './support/cards';
 import { clearGemini, expectGeminiPayload } from './support/mockServer';
-import { stripIsolates } from './support/text';
 import { createLearner, logIn } from './support/users';
 
 test.setTimeout(180_000);
 
-// Three wrong options for any key up to ten, none equal to a right answer above.
-const DISTRACTORS = {
-  items: Array.from({ length: 10 }, (_, i) => ({ key: `q${i + 1}`, distractors: ['דלת', 'קיר', 'תקרה'] })),
-};
+// The saved form of each meaning, for reversed and typed cards (phase 23).
+const FORM_OF: Record<string, string> = { קראה: 'прочитала', הקריאה: 'прочитала', בצל: 'лук', קשת: 'лук' };
 
 test('past the seed, a session is built from the saved words', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
@@ -41,21 +39,29 @@ test('past the seed, a session is built from the saved words', async ({ page, re
 
   // 4. Create questions. The job turns the session ready, and home's poll sees it.
   await clearGemini(request);
-  await expectGeminiPayload(request, DISTRACTORS);
+  await expectGeminiPayload(request, generationStub());
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('start-button')).toHaveText('התחל');
 
-  // 5. Every question is one of the saved forms.
+  // 5. Every card asks one of the saved words, whichever way round it asks.
   await tapUntil(page, 'start-button', 'progress-label');
-  const prompts: string[] = [];
+  const words: string[] = [];
   for (let position = 1; position <= 4; position++) {
-    await expect(page.getByTestId('progress-label')).toHaveText(new RegExp(`${position}\\s*/\\s*4`));
-    prompts.push(stripIsolates(await page.getByTestId('question-prompt').textContent()));
-    await page.getByTestId('option-0').click();
+    const card = await readCard(page, position, 4);
+    if (card.kind === 'choice') {
+      words.push(card.prompt);
+      await answerChoice(page, card, true);
+    } else if (card.kind === 'reverse') {
+      words.push(rightOption(card));
+      await answerChoice(page, card, true);
+    } else {
+      words.push(FORM_OF[card.prompt]);
+      await page.getByTestId('typed-show-answer').click();
+    }
     await page.getByTestId('continue-button').click();
   }
-  expect(prompts.every((prompt) => ['прочитала', 'лук'].includes(prompt)), prompts.join(', ')).toBe(true);
+  expect(words.every((word) => ['прочитала', 'лук'].includes(word)), words.join(', ')).toBe(true);
 
   // 6. Results lead to the next session, back on home.
   await expect(page.getByTestId('results-score')).toBeVisible();
