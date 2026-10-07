@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm';
 
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
-import { asChoice } from '../../support/questions';
+import { asChoice, insertListSession } from '../../support/questions';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { withTx } from '../../support/withTx';
@@ -166,6 +166,7 @@ describe('phase 23: typed answers', () => {
           prompt: 'ספר',
           options: null,
           alternatives: ['book'],
+          tiles: null,
         },
       ],
     });
@@ -300,5 +301,56 @@ describe('session state (phase 19)', () => {
     const { sessionId } = await withTx(t.db, (tx) => startSession(tx));
     const loaded = await repo((r) => r.loadSession(sessionId));
     expect(loaded).toMatchObject({ status: 'ready', source: 'seed' });
+  });
+});
+
+describe('phase 24: boards', () => {
+  it('round-trips a board, and reads a wrong board answer as the meaning tried', async () => {
+    const words = [];
+    for (const [lemma, translation] of [['tome', 'ספר'], ['quill', 'נוצה'], ['lantern', 'פנס'], ['kettle', 'קומקום']]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
+      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked: words,
+      types: ['matching', 'matching', 'matching', 'matching'],
+    });
+    const ids = questions.map((q) => q.id);
+
+    await withTx(t.db, async (tx) => {
+      const repo = createSessionRepo(tx);
+      const loaded = await repo.loadSession(sessionId);
+      loaded!.questions.forEach((q, i) => {
+        if (q.type !== 'matching') throw new Error('unreachable');
+        expect(q.board.question_ids).toEqual(ids);
+        expect(q.board.correct_options[i]).toBe(i);
+      });
+
+      await repo.insertAnswer(sessionId, 0, ids[0], { displayIndex: 2 });
+      const first = loaded!.questions[0];
+      if (first.type !== 'matching') throw new Error('unreachable');
+      expect((await repo.loadSession(sessionId))!.answers[0]).toEqual({
+        question_id: ids[0],
+        is_correct: false,
+        answer_string: first.options[2],
+      });
+    });
+  });
+});
+
+describe('countListSessions', () => {
+  it('counts every list session the enrollment has had, whatever its status', async () => {
+    const E = enrollmentOf('u_1');
+    await withTx(t.db, async (tx) => {
+      const repo = createSessionRepo(tx);
+      expect(await repo.countListSessions(E)).toBe(0);
+      const failed = await repo.insertPreparingSession('u_1', E);
+      await repo.transition(failed, ['preparing'], 'failed');
+      const skipped = await repo.insertPreparingSession('u_1', E);
+      await repo.transition(skipped, ['preparing'], 'skipped');
+      expect(await repo.countListSessions(E)).toBe(2);
+    });
   });
 });

@@ -283,3 +283,62 @@ describe('0015_question_types', () => {
     });
   });
 });
+
+// Phase 24, Review Focus 4: a session stored before 0016 loads and takes
+// answers unchanged.
+describe('0016_listening_variety', () => {
+  it('keeps every stored question and answer, and a typed answer still lands', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0015_question_types'));
+
+    const options = JSON.stringify([
+      { position: 0, text: 'עפיפון', is_correct: true },
+      { position: 1, text: 'א', is_correct: false },
+      { position: 2, text: 'ב', is_correct: false },
+      { position: 3, text: 'ג', is_correct: false },
+    ]);
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech)
+        values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code)
+        values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 0);
+    `);
+    await db.execute(sql`
+      insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options)
+        values ('q1', 'u_1', 'e_1', 's1', 'v1', 'en', 'he', 'multiple_choice', ${options}::jsonb)`);
+    await db.execute(sql`
+      insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, prompt, alternatives)
+        values ('q2', 'u_1', 'e_1', 's1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}')`);
+    const [session] = (
+      await db.execute<{ id: string }>(sql`
+        insert into sessions (user_id, enrollment_id, status, source)
+          values ('u_1', 'e_1', 'ready', 'list') returning id`)
+    ).rows;
+    await db.execute(sql`
+      insert into session_questions (session_id, position, question_id, option_order)
+        values (${session.id}, 0, 'q1', '{0,1,2,3}'), (${session.id}, 1, 'q2', '{}')`);
+    await db.execute(sql`
+      insert into answers (session_id, position, question_id, selected_option_position)
+        values (${session.id}, 0, 'q1', 0)`);
+
+    await runMigrations(db);
+
+    await db.transaction(async (tx) => {
+      const repo = createSessionRepo(tx);
+      const before = await repo.loadSession(session.id);
+      expect(before!.questions.map((q) => q.type)).toEqual(['multiple_choice', 'typed_translation']);
+      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון' }]);
+
+      await repo.insertAnswer(session.id, 1, 'q2', { text: 'kite', verdict: 'exact' });
+      expect((await repo.loadSession(session.id))!.answers[1]).toMatchObject({ question_id: 'q2', is_correct: true });
+    });
+  });
+});

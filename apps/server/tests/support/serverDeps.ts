@@ -2,6 +2,7 @@ import type { PgBoss } from 'pg-boss';
 
 import { createServerDeps, type AppDeps } from '../../src/composition';
 import type { Db } from '../../src/db/client';
+import { SESSION_GENERATION_BUDGET_MS } from '../../src/domain/jobs';
 import type { Logger } from '../../src/logger';
 import { unstartedBoss } from './jobs';
 
@@ -36,6 +37,7 @@ export function createTestServerDeps(io: {
     db: io.db,
     logger: io.logger,
     rng: io.rng,
+    now: Date.now,
     fetch: globalThis.fetch,
     gemini: {
       apiKey: 'test-key',
@@ -43,7 +45,7 @@ export function createTestServerDeps(io: {
       model: 'test-model',
     },
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
-    sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? 120_000,
+    sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? SESSION_GENERATION_BUDGET_MS,
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0 },
     boss: io.boss ?? unstartedBoss(io.db),
   });

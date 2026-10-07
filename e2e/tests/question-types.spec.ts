@@ -8,6 +8,7 @@ import { PROCHITALA, ZAMOK } from './support/lexemes';
 import { clearGemini, expectGeminiPayload } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { createLearner, logIn } from './support/users';
+import { withVoices } from './support/voices';
 
 test.setTimeout(180_000);
 
@@ -24,6 +25,7 @@ const LEMMA_OF: Record<string, string> = { прочитала: 'прочитат
 
 /** Past the seed, four saved senses of two words, and a list session started. */
 async function startMixedSession(page: Page, request: APIRequestContext, username: string, report: () => string) {
+  await withVoices(page, []);
   await createLearner(request, username, 'ru');
   await logIn(page, username);
 

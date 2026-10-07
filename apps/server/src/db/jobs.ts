@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { PgBoss, fromDrizzle } from 'pg-boss';
 
-import { PREPARE_SESSION, PREPARE_SESSION_FAILED, type JobName } from '../domain/jobs';
+import { PREPARE_SESSION, PREPARE_SESSION_EXPIRY_SECONDS, PREPARE_SESSION_FAILED, type JobName } from '../domain/jobs';
 import type { Db } from './client';
 
 /**
@@ -36,9 +36,9 @@ export const JOB_QUEUES: QueueDefinition[] = [
     options: {
       retryLimit: 2,
       retryBackoff: true,
-      // Twice SESSION_GENERATION_TIMEOUT_MS: a worker that crashed mid-call
-      // expires, and the expiry counts as a failed attempt.
-      expireInSeconds: 240,
+      // Twice the generation budget (domain/jobs.ts, spec D16): a worker that
+      // crashed mid-call expires, and the expiry counts as a failed attempt.
+      expireInSeconds: PREPARE_SESSION_EXPIRY_SECONDS,
       deleteAfterSeconds: 86_400,
       deadLetter: PREPARE_SESSION_FAILED,
     },

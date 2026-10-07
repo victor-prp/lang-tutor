@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, type LayoutChangeEvent } from 'react-nativ
 
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
-export type OptionVisualState = 'idle' | 'correct' | 'wrong' | 'dimmed';
+export type OptionVisualState = 'idle' | 'correct' | 'wrong' | 'dimmed' | 'selected';
 
 type Props = {
   label: string;
@@ -66,4 +66,6 @@ const stateStyles = StyleSheet.create({
   correct: { borderColor: colors.correct, backgroundColor: colors.correctSurface },
   wrong: { borderColor: colors.wrong, backgroundColor: colors.wrongSurface },
   dimmed: { opacity: 0.45 },
+  // Phase 24. A board's word or meaning waiting for its pair.
+  selected: { borderColor: colors.primary, borderWidth: 2 },
 });

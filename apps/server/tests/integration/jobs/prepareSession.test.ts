@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import type { LetterTilesQuestion, MatchingQuestion } from '@lang-tutor/core/api';
 import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
@@ -51,16 +52,51 @@ const WORDS: Record<string, string> = { tome: 'ספר', sprint: 'ריצה', lant
 
 /** Past the seed (skipped), three saved words, and a list session requested. */
 async function requestListSession(): Promise<string> {
-  const seed = await deps.sessions.createNextSession(E);
+  const seed = await deps.sessions.createNextSession(E, { listening: false });
   await deps.sessions.skipSession(seed.sessionId);
   for (const [lemma, translation] of Object.entries(WORDS)) {
     await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
   }
-  const { sessionId } = await deps.sessions.createNextSession(E);
+  const { sessionId } = await deps.sessions.createNextSession(E, { listening: false });
   return sessionId;
 }
 
 const statusOf = async (sessionId: string) => (await deps.sessions.getSession(sessionId)).status;
+
+const TEN_WORDS: Record<string, string> = {
+  tome: 'ספר', sprint: 'ריצה', lantern: 'פנס', kettle: 'קומקום', pillow: 'כרית',
+  ladder: 'סולם', bucket: 'דלי', violin: 'כינור', turtle: 'צב', lizard: 'לטאה',
+};
+
+it('prepares a ten-word session with listening on: a run, the board, a run (spec D3, D10)', async () => {
+  await expectDistractors(ns, {
+    tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'typed'],
+  });
+  const seed = await deps.sessions.createNextSession(E, { listening: true });
+  await deps.sessions.skipSession(seed.sessionId);
+  for (const [lemma, translation] of Object.entries(TEN_WORDS)) {
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+  }
+  const { sessionId } = await deps.sessions.createNextSession(E, { listening: true });
+
+  await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+  const { questions } = await deps.sessions.getSession(sessionId);
+  expect(questions.map((q) => q.type)).toEqual([
+    'multiple_choice', 'reverse_choice', 'typed_translation',
+    'matching', 'matching', 'matching', 'matching',
+    'listen_choice', 'letter_tiles', 'dictation',
+  ]);
+  const board = questions.slice(3, 7) as MatchingQuestion[];
+  for (const word of board) {
+    expect(word.options).toEqual(board[0].options);
+    expect(word.board.question_ids).toEqual(board.map((q) => q.id));
+    expect(word.options[word.correct_option]).toBe(TEN_WORDS[word.question]);
+  }
+  expect(board[0].options).toHaveLength(5);
+  expect(board[0].options).toContain(STUB_WRONG_HEBREW[0]);
+  const tiles = questions[8] as LetterTilesQuestion;
+  expect(tiles.tiles).toHaveLength([...tiles.answer].length + 2);
+});
 
 describe('prepare-session through the queue', () => {
   it('turns a list session ready, with its saved words as the prompts', async () => {

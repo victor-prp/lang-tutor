@@ -3,11 +3,11 @@ import {
   SESSION_LENGTH,
   answerFits,
   evaluate,
+  isChoice,
   missed,
   pickQuestions,
   score,
   type AnswerInput,
-  type QuestionType,
 } from '@lang-tutor/core/domain';
 
 export { SESSION_LENGTH };
@@ -79,7 +79,7 @@ export function step(record: SessionRecord, questionId: string, answer: AnswerIn
   const expected = currentQuestion(record);
   if (expected && questionId === expected.id) {
     if (!answerFits(expected, answer)) return { status: 'wrong_answer_kind' };
-    if ('option_index' in answer && expected.type !== 'typed_translation') {
+    if ('option_index' in answer && isChoice(expected)) {
       if (answer.option_index < 0 || answer.option_index >= expected.options.length) {
         return { status: 'out_of_range' };
       }
@@ -125,16 +125,6 @@ export function isOpen(status: SessionStatus): boolean {
 
 export function isCurrent(status: SessionStatus): boolean {
   return CURRENT_STATUSES.includes(status);
-}
-
-/** Phase 23. A list session's types, by position (spec D2): every session opens
- *  on recognition, two cards in a row always differ, and each run of three
- *  climbs from recognition to recall. The picks are already in random order,
- *  so which word gets which type is random. */
-export const TYPE_CYCLE: readonly QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
-
-export function typeFor(position: number): QuestionType {
-  return TYPE_CYCLE[position % TYPE_CYCLE.length];
 }
 
 /** The first session of an enrollment is the seed; every later one, after a

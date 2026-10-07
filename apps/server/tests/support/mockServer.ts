@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
 
-import { DISTRACTOR_MARKER } from '../../src/domain/distractors';
-import { typeFor } from '../../src/domain/session';
+import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
 import { geminiResponse } from './geminiResponse';
 
 // tests/support/ is the test composition root, so naming a concrete URL and
@@ -255,15 +254,19 @@ export const STUB_WRONG_HEBREW = ['דלת', 'קיר', 'תקרה'];
 export const STUB_WRONG_ENGLISH = ['door', 'wall', 'ceiling'];
 export const STUB_ALTERNATIVE = 'volume';
 
-export async function expectDistractors(ns: string, opts: { delayMs?: number } = {}): Promise<void> {
-  const items = Array.from({ length: 10 }, (_, i) => {
+/** Phase 23's cycle of tasks: what a test's session of up to six words asks at
+ *  ordinal 0 with listening off, at every position that asks anything. */
+const CYCLE_TASKS: Task[] = Array.from({ length: 10 }, (_, i) => (['meaning', 'word', 'typed'] as const)[i % 3]);
+
+export async function expectDistractors(ns: string, opts: { delayMs?: number; tasks?: Task[] } = {}): Promise<void> {
+  const items = (opts.tasks ?? CYCLE_TASKS).map((task, i) => {
     const key = `q${i + 1}`;
-    switch (typeFor(i)) {
-      case 'multiple_choice':
+    switch (task) {
+      case 'meaning':
         return { key, distractors: STUB_WRONG_HEBREW };
-      case 'reverse_choice':
+      case 'word':
         return { key, distractors: STUB_WRONG_ENGLISH };
-      case 'typed_translation':
+      case 'typed':
         return { key, distractors: [], alternatives: [STUB_ALTERNATIVE] };
     }
   });

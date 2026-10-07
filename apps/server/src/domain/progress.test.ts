@@ -253,3 +253,30 @@ describe('progressChanges', () => {
     });
   });
 });
+
+describe('evidenceFor, phase 24 (spec D12)', () => {
+  const sense = 's1';
+  const piece = (dimension: string, correct: boolean, capped = false) => ({ dimension, correct, capped });
+  const cases: [AnsweredQuestion, Evidence[]][] = [
+    [{ senseId: sense, type: 'listen_choice', correct: true }, [piece('spoken_receptive', true)] as Evidence[]],
+    [{ senseId: sense, type: 'listen_choice', correct: false }, [piece('spoken_receptive', false)] as Evidence[]],
+    [{ senseId: sense, type: 'dictation', verdict: 'exact' }, [piece('spoken_receptive', true), piece('spelling', true)] as Evidence[]],
+    [{ senseId: sense, type: 'dictation', verdict: 'near_miss' }, [piece('spoken_receptive', true), piece('spelling', false)] as Evidence[]],
+    [{ senseId: sense, type: 'dictation', verdict: 'wrong' }, [piece('spoken_receptive', false)] as Evidence[]],
+    [{ senseId: sense, type: 'matching', correct: true }, [piece('written_receptive', true)] as Evidence[]],
+    [{ senseId: sense, type: 'matching', correct: false }, [piece('written_receptive', false)] as Evidence[]],
+    [
+      { senseId: sense, type: 'letter_tiles', verdict: 'exact' },
+      [piece('written_receptive', true), piece('written_productive', true, true)] as Evidence[],
+    ],
+    [{ senseId: sense, type: 'letter_tiles', verdict: 'wrong' }, [piece('written_productive', false, true)] as Evidence[]],
+  ];
+  it.each(cases)('%o', (answer, expected) => {
+    expect(evidenceFor(answer)).toEqual(expected);
+  });
+
+  it('never credits a written dimension for listening: nothing crosses modalities', () => {
+    const dimensions = evidenceFor({ senseId: sense, type: 'dictation', verdict: 'exact' }).map((p) => p.dimension);
+    expect(dimensions.filter((d) => d.startsWith('written'))).toEqual([]);
+  });
+});

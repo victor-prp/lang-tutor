@@ -42,7 +42,16 @@ export function dimensionRows(progress: SenseProgress, live: readonly Dimension[
  *  today's card prompts with the word, a reversed or typed one with the
  *  meaning. */
 export function missedPair({ question, correct_answer }: MissedQuestion): { word: string; meaning: string } {
-  return question.type === 'multiple_choice'
-    ? { word: question.question, meaning: correct_answer }
-    : { word: correct_answer, meaning: question.question };
+  switch (question.type) {
+    case 'multiple_choice':
+    case 'listen_choice':
+    case 'matching':
+      return { word: question.question, meaning: correct_answer };
+    case 'dictation':
+      return { word: question.question, meaning: question.meaning };
+    case 'reverse_choice':
+    case 'typed_translation':
+    case 'letter_tiles':
+      return { word: correct_answer, meaning: question.question };
+  }
 }

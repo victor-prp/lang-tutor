@@ -1,3 +1,5 @@
+import { SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
+
 // A pure function of its argument: it reads no global, so a test hands it a
 // literal object rather than mutating the process environment.
 export type Config = {
@@ -18,10 +20,6 @@ const DEFAULT_DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/lang_t
 // paying this in wall-clock time on every run.
 const DEFAULT_TRANSLATION_TIMEOUT_MS = 25_000;
 
-// Phase 19. One call writes three wrong options for up to ten words, a longer
-// answer than any lookup. Expiry of the job (240 s, db/jobs.ts) is twice this.
-const DEFAULT_SESSION_GENERATION_TIMEOUT_MS = 120_000;
-
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   return {
     databaseUrl: env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
@@ -33,8 +31,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     port: Number(env.PORT) || 3001,
     poolMax: Number(env.PG_POOL_MAX) || 5,
     translationTimeoutMs: Number(env.TRANSLATION_TIMEOUT_MS) || DEFAULT_TRANSLATION_TIMEOUT_MS,
-    sessionGenerationTimeoutMs:
-      Number(env.SESSION_GENERATION_TIMEOUT_MS) || DEFAULT_SESSION_GENERATION_TIMEOUT_MS,
+    // Victor's cap: five minutes at most. The prepare-session job expires at
+    // twice SESSION_GENERATION_BUDGET_MS, so a longer call would be cut off by
+    // the expiry rather than by its own timeout.
+    sessionGenerationTimeoutMs: Math.min(
+      Number(env.SESSION_GENERATION_TIMEOUT_MS) || SESSION_GENERATION_BUDGET_MS,
+      SESSION_GENERATION_BUDGET_MS,
+    ),
   };
 }
 

@@ -439,7 +439,7 @@ describe('GET /api/enrollments/{id}/vocabulary/word', () => {
     expect(body.level).toBe(3);
     expect(body.senses.find((s) => s.sense_id === rama.senseIds[0])?.progress).toEqual({
       level: 3,
-      dimensions: { written_receptive: 3, written_productive: 3, spoken_receptive: 1, spoken_productive: 1, spelling: 3 },
+      dimensions: { written_receptive: 3, written_productive: 3, spoken_receptive: 3, spoken_productive: 1, spelling: 3 },
     });
     expect(body.senses.find((s) => s.sense_id === rama.senseIds[1])).not.toHaveProperty('progress');
   });

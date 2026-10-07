@@ -90,7 +90,7 @@ const createSessionRoute = createRoute({
   tags: ['sessions'],
   summary: 'Create the next session',
   description:
-    "An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types follow their positions: `multiple_choice`, `reverse_choice`, `typed_translation`, repeating. Read it with GET /sessions/{id}.",
+    "An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, and listening cards only when the request says `listening: true`. Read it with GET /sessions/{id}.",
   request: {
     body: { required: true, content: { 'application/json': { schema: CreateSessionRequestSchema } } },
   },
@@ -191,9 +191,9 @@ export function createSessionsRouter(sessions: SessionService) {
   });
 
   router.openapi(createSessionRoute, async (c) => {
-    const { enrollment_id } = c.req.valid('json');
+    const { enrollment_id, listening } = c.req.valid('json');
     try {
-      const created = await sessions.createNextSession(enrollment_id);
+      const created = await sessions.createNextSession(enrollment_id, { listening: listening ?? false });
       return c.json(
         { session_id: created.sessionId, status: created.status, source: created.source },
         201,

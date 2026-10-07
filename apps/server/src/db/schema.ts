@@ -470,20 +470,31 @@ export const questions = pgTable(
     prompt: text('prompt'),
     // Phase 23. A typed card's other right answers, at most five.
     alternatives: text('alternatives').array(),
+    // Phase 24. A tiles card's tiles: its letters and two more, shuffled.
+    tiles: text('tiles').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     check('questions_options_valid', sql`${t.options} is null or question_options_valid(${t.options})`),
-    check('questions_type_known', sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation')`),
-    // Phase 23. Each type's shape (spec D13): a choice has options, a reversed
-    // or typed card stores its prompt, and only a typed card has alternatives.
+    check(
+      'questions_type_known',
+      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles')`,
+    ),
+    // Phase 23 and 24. Each type's shape (spec D13, phase 24 §2): a choice has
+    // options, every type but the Hebrew-option ones stores the Hebrew prompt,
+    // only a typed card has alternatives, and only a tiles card has tiles.
     check(
       'questions_shape_valid',
       sql`case ${t.type}
-        when 'multiple_choice' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null
-        when 'reverse_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null
-        when 'typed_translation' then ${t.options} is null and ${t.prompt} is not null
+        when 'multiple_choice' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'listen_choice' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'matching' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'reverse_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'typed_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
           and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+        when 'dictation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'letter_tiles' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null
+          and coalesce(array_length(${t.tiles}, 1), 0) between 5 and 12
         else false end`,
     ),
     foreignKey({

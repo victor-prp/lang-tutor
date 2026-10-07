@@ -3,6 +3,7 @@ import { LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
 import { LANGUAGES, stripStress, type Language, type LanguageCode } from './languages';
+import type { SessionPlan } from './plan';
 import { dropNulls, unfence } from './translation';
 
 /**
@@ -19,16 +20,33 @@ import { dropNulls, unfence } from './translation';
 /** What the model is asked to do for one item. */
 export type Task = 'meaning' | 'word' | 'typed';
 
-export function taskFor(type: QuestionType): Task {
+/** What the model is asked to do for one item, or null when a type needs
+ *  nothing generated: a dictation, a tiles card, and a board word (its board
+ *  asks through its first word, tasksFor). */
+export function taskFor(type: QuestionType): Task | null {
   switch (type) {
     case 'multiple_choice':
+    case 'listen_choice':
       return 'meaning';
     case 'reverse_choice':
       return 'word';
     case 'typed_translation':
       return 'typed';
+    case 'dictation':
+    case 'letter_tiles':
+    case 'matching':
+      return null;
   }
 }
+
+/** Phase 24. Each position's task. A board's first word asks for wrong
+ *  meanings, which its fifth meaning is taken from (spec D10). */
+export function tasksFor(plan: SessionPlan): (Task | null)[] {
+  return plan.types.map((type, position) => (position === plan.board?.start ? 'meaning' : taskFor(type)));
+}
+
+/** A position's key: `q1` is the first card, whichever positions ask nothing. */
+export const keyOf = (position: number): string => `q${position + 1}`;
 
 /** The most alternatives a typed question keeps (questions_shape_valid). */
 export const MAX_ALTERNATIVES = 5;
@@ -74,16 +92,14 @@ export type DistractorVerdict =
   | { ok: true; byKey: Map<string, Generated> }
   | { ok: false; reason: string };
 
-/** `types[i]` is the type the service chose for `context[i]`. */
-export function distractorItems(context: GenerationContext[], types: readonly QuestionType[]): DistractorItem[] {
-  return context.map((row, index) => ({
-    key: `q${index + 1}`,
-    task: taskFor(types[index]),
-    form: row.form,
-    lemma: row.lemma,
-    partOfSpeech: row.partOfSpeech,
-    translation: row.translation,
-  }));
+/** `context` in session order, `tasks[i]` its position's task. */
+export function distractorItems(context: GenerationContext[], tasks: readonly (Task | null)[]): DistractorItem[] {
+  return context.flatMap((row, index) => {
+    const task = tasks[index];
+    return task
+      ? [{ key: keyOf(index), task, form: row.form, lemma: row.lemma, partOfSpeech: row.partOfSpeech, translation: row.translation }]
+      : [];
+  });
 }
 
 function language(code: string): Language {
@@ -92,13 +108,25 @@ function language(code: string): Language {
   return found;
 }
 
+/** A session row that asks the model nothing: a dictation, a tiles card, a
+ *  board's later words. */
+export type OtherRow = { form: string; translation: string };
+
 export function buildDistractorPrompt(input: {
   items: DistractorItem[];
   from: string;
   to: string;
+  others: readonly OtherRow[];
 }): DistractorPrompt {
   const learned = language(input.from);
   const answers = language(input.to);
+  // Only a row that shares a word or a meaning with an item is one a rule can
+  // apply to; with none, the prompt is exactly what it was before they existed.
+  const forms = new Set(input.items.map((item) => comparable(item.form)));
+  const meanings = new Set(input.items.map((item) => comparable(item.translation)));
+  const related = input.others.filter(
+    (other) => forms.has(comparable(other.form)) || meanings.has(comparable(other.translation)),
+  );
   const system = [
     `You write the answers for a ${learned.name} vocabulary quiz for a Hebrew-speaking learner.`,
     'Return JSON only, matching the supplied schema.',
@@ -113,6 +141,11 @@ export function buildDistractorPrompt(input: {
     'The three wrong answers of an item must differ from each other.',
     "When several items share a word, none of an item's wrong answers may be another item's correct answer.",
     "When several items share a meaning, none of a \"word\" item's wrong answers may be another of those items' words.",
+    ...(related.length > 0
+      ? [
+          'The words under also_in_session are asked elsewhere in the same session and need no answer, but the two rules above apply to them as if they were items.',
+        ]
+      : []),
     'Answer every item, using its key exactly as given.',
     ...answers.writing,
     ...learned.writing,
@@ -127,6 +160,9 @@ export function buildDistractorPrompt(input: {
       part_of_speech: item.partOfSpeech,
       correct: item.translation,
     })),
+    ...(related.length > 0
+      ? { also_in_session: related.map((other) => ({ word: other.form, correct: other.translation })) }
+      : {}),
   });
 
   return { system, user, schema: LlmDistractorsSchema };
@@ -167,7 +203,7 @@ export function parseLlmDistractors(raw: string): LlmDistractors | null {
 // word count, then case. normalizeForm is a dictionary-key function and keeps
 // a multi-word expression's punctuation, so it is no help here. Stricter than
 // the database's question_options_valid, which compares exact text.
-const comparable = (text: string): string =>
+export const comparable = (text: string): string =>
   stripStress(text.replace(/[\u0591-\u05C7]/gu, '').replace(/\s+/g, ' '))
     .replace(/[\s.,;:!?…،؛؟]+$/u, '')
     .trim()
@@ -176,6 +212,7 @@ const comparable = (text: string): string =>
 function badChoice(
   item: DistractorItem,
   items: DistractorItem[],
+  others: readonly OtherRow[],
   found: string[],
   explanationLetters: RegExp,
 ): string | null {
@@ -197,8 +234,7 @@ function badChoice(
   // item. Turned round, two words with one meaning make each other right on a
   // word item.
   const siblings = new Set(
-    items
-      .filter((other) => other !== item)
+    [...items.filter((other) => other !== item), ...others]
       .filter((other) =>
         item.task === 'word'
           ? comparable(other.translation) === comparable(item.translation)
@@ -237,11 +273,14 @@ function cleanAlternatives(item: DistractorItem, found: string[] | undefined, ex
  * model added beyond the items asked are ignored. `explanation` is the
  * language the meanings are in (the enrollment's source): a reversed card's
  * wrong words and a typed card's alternatives must not be in its script.
+ * `others` are the session's rows that ask the model nothing: their other
+ * meanings and their words are as off limits as an item's own.
  */
 export function validateDistractors(
   items: DistractorItem[],
   answer: LlmDistractors,
   explanation: string,
+  others: readonly OtherRow[],
 ): DistractorVerdict {
   const explanationLetters = language(explanation).letters;
   const answered = new Map(answer.items.map((item) => [item.key, item]));
@@ -256,7 +295,7 @@ export function validateDistractors(
       });
       continue;
     }
-    const reason = badChoice(item, items, found.distractors, explanationLetters);
+    const reason = badChoice(item, items, others, found.distractors, explanationLetters);
     if (reason) return { ok: false, reason };
     byKey.set(item.key, { distractors: found.distractors.map((text) => text.trim()), alternatives: [] });
   }
@@ -276,23 +315,67 @@ export function optionsFor(correct: string, distractors: string[]): QuestionOpti
 /** Structurally db/schema's QuestionOption: stored data, snake_case. */
 export type QuestionOption = { position: number; text: string; is_correct: boolean };
 
+/** Phase 24 (spec D10). A board's five meanings as stored: its four words'
+ *  meanings, then the first of the first word's wrong meanings that is none of
+ *  them nor another saved meaning of one of its words, so the last pair is
+ *  never forced. Null when all three are. */
+export function boardMeanings(
+  board: readonly GenerationContext[],
+  session: readonly GenerationContext[],
+  wrong: readonly string[],
+): string[] | null {
+  const meanings = board.map((row) => row.translation);
+  // A board word's other saved meanings would show it twice on the board.
+  const boardForms = new Set(board.map((row) => comparable(row.form)));
+  const taken = new Set([
+    ...meanings.map(comparable),
+    ...session.filter((row) => boardForms.has(comparable(row.form))).map((row) => comparable(row.translation)),
+  ]);
+  const extra = wrong.map((text) => text.trim()).find((text) => !taken.has(comparable(text)));
+  return extra === undefined ? null : [...meanings, extra];
+}
+
+/** What a position needs beyond the model's answer: a tiles card's tiles, and
+ *  a board word's board (its meanings, and which of them is its own). */
+export type Extras = { tiles: string[] | null; board: { meanings: string[]; own: number } | null };
+export const NO_EXTRAS: Extras = { tiles: null, board: null };
+export const NOTHING_GENERATED: Generated = { distractors: [], alternatives: [] };
+
+export type QuestionContent = {
+  prompt: string | null;
+  options: QuestionOption[] | null;
+  alternatives: string[] | null;
+  tiles: string[] | null;
+};
+
 /**
- * Phase 23. One generated question's stored content (spec D13). Today's card
- * asks the form and offers meanings; the reversed card asks the meaning and
- * offers words; the typed card asks the meaning and keeps the alternatives.
- * The Hebrew prompt is stored, not joined: a question records what was asked.
+ * Phase 23 and 24. One generated question's stored content (phase 23 D13,
+ * phase 24 D15). Types whose options are Hebrew keep the meaning as their
+ * correct option; every other type stores it as the prompt. The prompt is
+ * stored, not joined: a question records what was asked.
  */
-export function generatedContent(
-  row: GenerationContext,
-  type: QuestionType,
-  generated: Generated,
-): { prompt: string | null; options: QuestionOption[] | null; alternatives: string[] | null } {
+export function generatedContent(row: GenerationContext, type: QuestionType, generated: Generated, extras: Extras): QuestionContent {
+  const none: QuestionContent = { prompt: null, options: null, alternatives: null, tiles: null };
   switch (type) {
     case 'multiple_choice':
-      return { prompt: null, options: optionsFor(row.translation, generated.distractors), alternatives: null };
+    case 'listen_choice':
+      return { ...none, options: optionsFor(row.translation, generated.distractors) };
     case 'reverse_choice':
-      return { prompt: row.translation, options: optionsFor(row.form, generated.distractors), alternatives: null };
+      return { ...none, prompt: row.translation, options: optionsFor(row.form, generated.distractors) };
     case 'typed_translation':
-      return { prompt: row.translation, options: null, alternatives: generated.alternatives };
+      return { ...none, prompt: row.translation, alternatives: generated.alternatives };
+    case 'dictation':
+      return { ...none, prompt: row.translation };
+    case 'letter_tiles':
+      if (!extras.tiles) throw new Error(`the tiles card for ${row.form} has no tiles`);
+      return { ...none, prompt: row.translation, tiles: extras.tiles };
+    case 'matching': {
+      const board = extras.board;
+      if (!board) throw new Error(`the board word ${row.form} has no board`);
+      return {
+        ...none,
+        options: board.meanings.map((text, position) => ({ position, text, is_correct: position === board.own })),
+      };
+    }
   }
 }

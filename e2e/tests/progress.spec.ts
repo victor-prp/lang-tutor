@@ -7,6 +7,7 @@ import { LUK, PROCHITALA } from './support/lexemes';
 import { answerChoice, answerTyped, generationStub, readCard, rightOption, type CardKind } from './support/cards';
 import { clearGemini, expectGeminiPayload } from './support/mockServer';
 import { createLearner, logIn } from './support/users';
+import { withVoices } from './support/voices';
 
 test.setTimeout(180_000);
 
@@ -16,7 +17,7 @@ const FORM_OF: Record<string, string> = { קראה: 'прочитала', הקר
 
 // Phase 23. What one right answer does to a new sense's three written levels
 // (spec D6), and the badge over them: the mean, ties up.
-const LEVELS_AFTER_RIGHT: Record<CardKind, number[]> = { choice: [2, 1, 1], reverse: [2, 2, 1], typed: [2, 2, 2] };
+const LEVELS_AFTER_RIGHT: Record<string, number[]> = { choice: [2, 1, 1], reverse: [2, 2, 1], typed: [2, 2, 2] };
 const badgeOf = (levels: number[]) => Math.floor(levels.reduce((a, b) => a + b, 0) / levels.length + 0.5);
 
 test('a session moves the words it practised up the ladder, and the list filters by level', async ({
@@ -27,6 +28,7 @@ test('a session moves the words it practised up the ladder, and the list filters
   const report = () => diagnosticReport(diagnostics);
   page.on('dialog', (dialog) => void dialog.accept());
 
+  await withVoices(page, []);
   await createLearner(request, 'e2e_progress_ru', 'ru');
   await logIn(page, 'e2e_progress_ru');
 
@@ -115,8 +117,9 @@ test('a session moves the words it practised up the ladder, and the list filters
   // 7. A word's detail: five dimensions, three live since phase 23.
   await words.filter({ hasText: 'лук' }).click();
   await expect(page.getByTestId('vocabulary-sense-level')).toHaveCount(2);
-  // Each of the two saved senses shows all five dimensions; the two spoken ones
-  // read "not practised yet" (4 of 10). Every right answer, of any type, raised
+  // Each of the two saved senses shows all five dimensions; spoken_receptive is
+  // live since phase 24 (listening cards), so it reads חדשה, and only the
+  // spoken_productive one reads "not practised yet" (2 of 10). Every right answer, of any type, raised
   // recognition.
   for (const dimension of DIMENSIONS) {
     await expect(page.getByTestId(`vocabulary-dimension-${dimension}`)).toHaveCount(2);
@@ -124,8 +127,9 @@ test('a session moves the words it practised up the ladder, and the list filters
   const dimensionRows = page.locator('[data-testid^="vocabulary-dimension-"]');
   await expect(dimensionRows).toHaveCount(10);
   await expect(page.getByTestId('vocabulary-dimension-written_receptive')).toHaveText([/נחשפה/, /נחשפה/]);
-  await expect(page.getByTestId('vocabulary-dimension-spoken_receptive').first()).toContainText('טרם תורגל');
-  await expect(dimensionRows.filter({ hasText: 'טרם תורגל' })).toHaveCount(4);
+  await expect(page.getByTestId('vocabulary-dimension-spoken_receptive')).toHaveText([/חדשה/, /חדשה/]);
+  await expect(page.getByTestId('vocabulary-dimension-spoken_productive').first()).toContainText('טרם תורגל');
+  await expect(dimensionRows.filter({ hasText: 'טרם תורגל' })).toHaveCount(2);
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

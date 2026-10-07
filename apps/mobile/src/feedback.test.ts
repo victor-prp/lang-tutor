@@ -77,3 +77,25 @@ describe('feedbackFor', () => {
     });
   });
 });
+
+describe('feedbackFor, phase 24', () => {
+  const board: Question = {
+    id: 'm1', type: 'matching', vocab_term_id: 'l', question: 'casa',
+    options: ['בית', 'חתול', 'כלב', 'עץ', 'דלת'], correct_option: 0,
+    board: { question_ids: ['m1', 'm2', 'm3', 'm4'], words: ['casa', 'gatto', 'cane', 'albero'], correct_options: [0, 1, 2, 3] },
+  };
+
+  it('counts a board by first tries, correct only at all of them', () => {
+    expect(feedbackFor(board, { board: [4, 1, 2, 3] })).toEqual({
+      tone: 'wrong', title: 'בניסיון הראשון: 3 מתוך 4', line: null, verdict: null,
+    });
+    expect(feedbackFor(board, { board: [0, 1, 2, 3] }).tone).toBe('correct');
+  });
+
+  it('names the heard form after a wrong dictation, and the meaning after a wrong listening card', () => {
+    const dictation: Question = { id: 'd', type: 'dictation', vocab_term_id: 'l', question: 'parlo', meaning: 'מדבר' };
+    expect(feedbackFor(dictation, { text: 'parlare' })).toMatchObject({ tone: 'wrong', line: 'parlo' });
+    const listen: Question = { id: 'l', type: 'listen_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 };
+    expect(feedbackFor(listen, { option_index: 1 })).toMatchObject({ tone: 'wrong', line: 'בית' });
+  });
+});

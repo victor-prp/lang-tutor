@@ -6,11 +6,15 @@ import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/d
  * read (ADR 0001 R3).
  */
 
+/** Phase 24. The types answered by an option, and by a text with its verdict. */
+export type ChoiceAnswerType = 'multiple_choice' | 'reverse_choice' | 'listen_choice' | 'matching';
+export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles';
+
 /** One answer as the rule reads it: which sense, which exercise, and how it
- *  was judged. A choice is right or wrong; a typed answer has its verdict. */
+ *  was judged. A choice is right or wrong; a text answer has its verdict. */
 export type AnsweredQuestion =
-  | { senseId: string; type: 'multiple_choice' | 'reverse_choice'; correct: boolean }
-  | { senseId: string; type: 'typed_translation'; verdict: TypedVerdict };
+  | { senseId: string; type: ChoiceAnswerType; correct: boolean }
+  | { senseId: string; type: TextAnswerType; verdict: TypedVerdict };
 
 /** One piece of evidence about one dimension. Capped evidence can carry a
  *  dimension to CAPPED_MAX_LEVEL and no further. */
@@ -64,7 +68,7 @@ export function daysBetween(from: string, to: string): number {
 
 /**
  * What one answer says about which dimensions: phase 20's §3 table, filled in
- * for phase 23's types (spec D6). A productive success also credits the
+ * for phase 23's types (spec D6) and phase 24's (spec D12). A productive success also credits the
  * receptive dimension below it; only successes are credited downward; and
  * recognition-format evidence caps a productive dimension at 3.
  */
@@ -97,6 +101,32 @@ export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
           // about spelling a form the learner did not produce.
           return [piece('written_productive', false)];
       }
+    case 'listen_choice':
+      // Hearing, then knowing the meaning: the spoken receptive dimension
+      // only. Nothing crosses modalities (phase 20).
+      return [piece('spoken_receptive', answer.correct)];
+    case 'matching':
+      // A word's first-tried meaning: recognition, as today's card.
+      return [piece('written_receptive', answer.correct)];
+    case 'dictation':
+      switch (answer.verdict) {
+        case 'exact':
+          return [piece('spoken_receptive', true), piece('spelling', true)];
+        case 'near_miss':
+          return [piece('spoken_receptive', true), piece('spelling', false)];
+        case 'alternative':
+          // A dictation accepts no alternative (spec D7); unreachable.
+          return [];
+        case 'wrong':
+          // A failure to recognise the word heard; nothing about spelling.
+          return [piece('spoken_receptive', false)];
+      }
+    case 'letter_tiles':
+      // The letters are given: production with support, capped like the
+      // reversed card, and never spelling (spec D11).
+      return answer.verdict === 'exact'
+        ? [piece('written_receptive', true), piece('written_productive', true, true)]
+        : [piece('written_productive', false, true)];
   }
 }
 

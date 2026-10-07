@@ -61,7 +61,7 @@ afterEach(async () => {
 
 /** The seed session every learner starts with, read back whole. */
 async function startSeed(enrollmentId: string) {
-  const { sessionId } = await service.createNextSession(enrollmentId);
+  const { sessionId } = await service.createNextSession(enrollmentId, { listening: false });
   return { sessionId, record: await service.getSession(sessionId) };
 }
 
@@ -69,7 +69,7 @@ describe('createNextSession', () => {
   const E = enrollmentOf('u_1');
 
   it('starts with a ready ten-question seed session', async () => {
-    const created = await service.createNextSession(E);
+    const created = await service.createNextSession(E, { listening: false });
     expect(created).toMatchObject({ status: 'ready', source: 'seed' });
     const record = await service.getSession(created.sessionId);
     expect(record.questions).toHaveLength(SESSION_LENGTH);
@@ -79,30 +79,30 @@ describe('createNextSession', () => {
   // The regression test for deleting upsertUser. Before phase 8 a session for
   // an unknown id silently created the user; it must not create an enrollment.
   it('refuses an enrollment that does not exist', async () => {
-    await expect(service.createNextSession('e_nobody')).rejects.toBeInstanceOf(EnrollmentNotFound);
+    await expect(service.createNextSession('e_nobody', { listening: false })).rejects.toBeInstanceOf(EnrollmentNotFound);
   });
 
   it('refuses a second session while one is open', async () => {
-    await service.createNextSession(E);
-    await expect(service.createNextSession(E)).rejects.toBeInstanceOf(SessionOpen);
+    await service.createNextSession(E, { listening: false });
+    await expect(service.createNextSession(E, { listening: false })).rejects.toBeInstanceOf(SessionOpen);
   });
 
   // Review Focus 1: a double tap.
   it('lets exactly one of two concurrent creates through', async () => {
-    const results = await Promise.allSettled([service.createNextSession(E), service.createNextSession(E)]);
+    const results = await Promise.allSettled([service.createNextSession(E, { listening: false }), service.createNextSession(E, { listening: false })]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
     expect(rejected.reason).toBeInstanceOf(SessionOpen);
   });
 
   it('after the seed, asks for saved words when the list is empty', async () => {
-    const { sessionId } = await service.createNextSession(E);
+    const { sessionId } = await service.createNextSession(E, { listening: false });
     await service.skipSession(sessionId);
-    await expect(service.createNextSession(E)).rejects.toBeInstanceOf(NoSavedWords);
+    await expect(service.createNextSession(E, { listening: false })).rejects.toBeInstanceOf(NoSavedWords);
   });
 
   it('after the seed, prepares a list session from at most ten saved senses', async () => {
-    const { sessionId: seed } = await service.createNextSession(E);
+    const { sessionId: seed } = await service.createNextSession(E, { listening: false });
     await service.skipSession(seed);
     const saved = await seedSavedSenses(t.db, {
       enrollmentId: E,
@@ -110,13 +110,15 @@ describe('createNextSession', () => {
       translations: ['ספר', 'כרך', 'חיבור', 'מחברת', 'דף', 'עמוד', 'פרק', 'שער', 'כותר', 'ספרון', 'קובץ', 'גליון'],
     });
 
-    const created = await service.createNextSession(E);
+    const created = await service.createNextSession(E, { listening: true });
     expect(created).toMatchObject({ status: 'preparing', source: 'list' });
 
     const jobs = await boss.findJobs<PrepareSessionPayload>(PREPARE_SESSION);
     expect(jobs).toHaveLength(1);
     expect(jobs[0].data.session_id).toBe(created.sessionId);
     expect(jobs[0].data.picks).toHaveLength(SESSION_LENGTH);
+    // Phase 24: listening on, and the ordinal is the list sessions before this one (none).
+    expect(jobs[0].data).toMatchObject({ listening: true, ordinal: 0 });
     expect(jobs[0].data.picks.every((p) => saved.senseIds.includes(p.sense_id))).toBe(true);
   });
 });
@@ -139,7 +141,7 @@ describe('currentSession', () => {
   });
 
   it('shows nothing once the session is skipped', async () => {
-    const { sessionId } = await service.createNextSession(E);
+    const { sessionId } = await service.createNextSession(E, { listening: false });
     await service.skipSession(sessionId);
     expect((await service.currentSession(E)).current).toBeNull();
   });
@@ -147,7 +149,7 @@ describe('currentSession', () => {
   // Review Focus 5: another enrollment's session is not this one's.
   it("keeps one enrollment's session out of another's", async () => {
     await seedEnrollment(t.db, { id: 'e_ru', userId: 'u_1', targetLanguage: 'ru' });
-    await service.createNextSession(E);
+    await service.createNextSession(E, { listening: false });
     expect(await service.currentSession('e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0 });
   });
 
@@ -160,7 +162,7 @@ describe('skipSession', () => {
   const E = enrollmentOf('u_1');
 
   it('skips a ready session, and a second skip is a no-op', async () => {
-    const { sessionId } = await service.createNextSession(E);
+    const { sessionId } = await service.createNextSession(E, { listening: false });
     await service.skipSession(sessionId);
     await service.skipSession(sessionId);
     expect((await service.getSession(sessionId)).status).toBe('skipped');
@@ -272,8 +274,8 @@ describe('rng', () => {
     const second = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
       .sessions;
 
-    const a = await first.getSession((await first.createNextSession(enrollmentOf('u_1'))).sessionId);
-    const b = await second.getSession((await second.createNextSession(enrollmentOf('u_2'))).sessionId);
+    const a = await first.getSession((await first.createNextSession(enrollmentOf('u_1'), { listening: false })).sessionId);
+    const b = await second.getSession((await second.createNextSession(enrollmentOf('u_2'), { listening: false })).sessionId);
 
     expect(b.questions.map((question) => question.id)).toEqual(
       a.questions.map((question) => question.id),

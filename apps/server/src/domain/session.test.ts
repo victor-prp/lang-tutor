@@ -13,7 +13,6 @@ import {
   positionOf,
   sessionScore,
   step,
-  typeFor,
   type SessionRecord,
 } from './session';
 
@@ -180,23 +179,6 @@ function typedQuestion(id: string): TypedTranslationQuestion {
     alternatives: [],
   };
 }
-
-describe('typeFor', () => {
-  it('cycles choice, reverse choice, typed, from the first position', () => {
-    expect(Array.from({ length: 10 }, (_, i) => typeFor(i))).toEqual([
-      'multiple_choice',
-      'reverse_choice',
-      'typed_translation',
-      'multiple_choice',
-      'reverse_choice',
-      'typed_translation',
-      'multiple_choice',
-      'reverse_choice',
-      'typed_translation',
-      'multiple_choice',
-    ]);
-  });
-});
 
 describe('step, typed', () => {
   const [t1, t2] = [typedQuestion('t1'), typedQuestion('t2')];

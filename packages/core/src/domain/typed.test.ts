@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import type { TypedTranslationQuestion } from '../api/types';
-import { judgeTyped, normaliseTyped } from './typed';
+import { judgeTiles, judgeTyped, normaliseTyped } from './typed';
 
 const q = (answer: string, lemma = answer, alternatives: string[] = []): TypedTranslationQuestion => ({
   id: 'q1',
@@ -91,5 +91,30 @@ describe('judgeTyped', () => {
     expect(judgeTyped(q('finestra'), 'porta')).toBe('wrong');
     expect(judgeTyped(q('finestra'), '')).toBe('wrong');
     expect(judgeTyped(q('finestra'), '   ')).toBe('wrong');
+  });
+});
+
+describe('judgeTyped, with a dictation target (phase 24, spec D7)', () => {
+  const heard = { answer: 'parlo', lemma: 'parlo', alternatives: [] };
+
+  it('is exact for the spoken form only: the lemma is another word', () => {
+    expect(judgeTyped(heard, 'Parlo ')).toBe('exact');
+    expect(judgeTyped(heard, 'parlare')).toBe('wrong');
+  });
+
+  it('takes a missing accent as a near miss', () => {
+    expect(judgeTyped({ answer: 'perché', lemma: 'perché', alternatives: [] }, 'perche')).toBe('near_miss');
+  });
+});
+
+describe('judgeTiles (phase 24, spec D11)', () => {
+  it('is exact for the word, ignoring case and Cyrillic stress', () => {
+    expect(judgeTiles('молоко́', 'молоко')).toBe('exact');
+    expect(judgeTiles('casa', 'Casa')).toBe('exact');
+  });
+
+  it('is wrong for any other order, and for nothing', () => {
+    expect(judgeTiles('casa', 'caas')).toBe('wrong');
+    expect(judgeTiles('casa', '')).toBe('wrong');
   });
 });
