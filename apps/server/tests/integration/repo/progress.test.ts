@@ -386,4 +386,27 @@ describe('phase 27: a judged answer as evidence', () => {
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
     expect(evidence!.answers).toEqual([{ senseId: asked[0].senseId, type: 'typed_meaning', verdict: 'exact' }]);
   });
+
+  it('reads the sentence cards: a choice by its option, the two typed ones by their verdict (phase 27 Part B)', async () => {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'tome', translations: ['ספר'] });
+    const sense = { senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' };
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [sense, sense, sense],
+      types: ['cloze_choice', 'cloze_typed', 'sentence_translation'],
+    });
+    await withTx(t.db, async (tx) => {
+      const sessions = createSessionRepo(tx);
+      await sessions.insertAnswer(sessionId, 0, questions[0].id, { displayIndex: 0 });
+      await sessions.insertAnswer(sessionId, 1, questions[1].id, { text: 'tome', verdict: 'exact' });
+      await sessions.insertAnswer(sessionId, 2, questions[2].id, { text: 'book', verdict: 'wrong' });
+    });
+    const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
+    expect(evidence!.answers).toEqual([
+      { senseId: sense.senseId, type: 'cloze_choice', correct: true },
+      { senseId: sense.senseId, type: 'cloze_typed', verdict: 'exact' },
+      { senseId: sense.senseId, type: 'sentence_translation', verdict: 'wrong' },
+    ]);
+  });
 });

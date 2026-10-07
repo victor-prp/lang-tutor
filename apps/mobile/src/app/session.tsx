@@ -1,4 +1,4 @@
-import type { Question } from '@lang-tutor/core/api';
+import type { ClozeChoiceQuestion, ClozeTypedQuestion, Question, SentenceTranslationQuestion } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
 import { useEffect, useRef } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -9,6 +9,8 @@ import { LetterTilesView } from '@/components/LetterTilesView';
 import { MatchingBoardView } from '@/components/MatchingBoardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { ProgressBar } from '@/components/ProgressBar';
+import { SentenceGap } from '@/components/SentenceGap';
+import { SpeakButton } from '@/components/SpeakButton';
 import { SpeakingCardView } from '@/components/SpeakingCardView';
 import { TypedAnswerView } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
@@ -16,9 +18,52 @@ import { feedbackFor } from '@/feedback';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession, type SessionValue } from '@/hooks/useSession';
+import { showsSentenceTranslation, splitAtGap } from '@/sentence';
 import { isSkip } from '@/speaking';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
+
+// Phase 27 (spec D5). The gap card's prompt: the sentence with its blank, the
+// Hebrew line under it, and once answered the sentence spoken.
+function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID?: string) {
+  return (
+    <View style={styles.gapCard} testID={testID}>
+      <SentenceGap sentence={question.sentence} gap={question.gap} filled={answered} />
+      {showsSentenceTranslation(question.type, answered) ? (
+        <Text style={styles.hebrewLine} testID="sentence-translation">
+          {question.translation}
+        </Text>
+      ) : null}
+      {answered ? <SpeakButton text={question.sentence} language={language} testID="speak-sentence" /> : null}
+    </View>
+  );
+}
+
+// Phase 27 (spec D6). The translation card's prompt: the Hebrew sentence and,
+// once judged, the reference with its practised word in bold.
+function translatePrompt(question: SentenceTranslationQuestion, answered: boolean, language: string) {
+  const { before, word, after } = splitAtGap(question.sentence, question.gap);
+  return (
+    <View style={styles.gapCard}>
+      <Text style={styles.hebrewPrompt} testID="sentence-translation">
+        {question.question}
+      </Text>
+      {answered ? (
+        <View style={styles.reference}>
+          <Text style={styles.referenceLabel}>{strings.translationReference}</Text>
+          <View style={styles.referenceRow}>
+            <Text style={styles.referenceText} testID="translation-reference">
+              {before}
+              <Text style={styles.bold}>{word}</Text>
+              {after}
+            </Text>
+            <SpeakButton text={question.sentence} language={language} testID="speak-reference" />
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 // The one place the session screen dispatches on question type. Adding a type
 // means a new case here plus a view component; the header, progress bar,
@@ -58,6 +103,48 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           direction="ltr"
           checking={false}
           failed={false}
+        />
+      );
+    case 'cloze_choice':
+      return (
+        <MultipleChoiceView
+          question={question}
+          instruction={strings.questionInstructionCloze}
+          language={language}
+          selectedOption={session.selectedOption}
+          onSelect={session.select}
+          prompt={gapPrompt(question, session.answered, language, 'cloze-card')}
+        />
+      );
+    case 'cloze_typed':
+      // Judged on the phone against the gap's word, as a typed translation is.
+      return (
+        <TypedAnswerView
+          question={question}
+          instruction={strings.questionInstructionClozeTyped(language)}
+          language={language}
+          answered={session.answered}
+          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          onSubmit={session.submitText}
+          direction="ltr"
+          checking={false}
+          failed={false}
+          prompt={gapPrompt(question, session.answered, language)}
+        />
+      );
+    case 'sentence_translation':
+      return (
+        <TypedAnswerView
+          question={question}
+          instruction={strings.questionInstructionTranslate(language)}
+          language={language}
+          answered={session.answered}
+          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          direction="ltr"
+          checking={session.judging === 'checking'}
+          failed={session.judging === 'failed'}
+          onSubmit={session.submitJudged}
+          prompt={translatePrompt(question, session.answered, language)}
         />
       );
     case 'typed_meaning':
@@ -272,6 +359,14 @@ export default function SessionScreen() {
 }
 
 const styles = StyleSheet.create({
+  gapCard: { gap: spacing.md, alignItems: 'center' },
+  hebrewLine: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
+  hebrewPrompt: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, textAlign: 'center', writingDirection: 'rtl' },
+  reference: { gap: spacing.xs, alignItems: 'center' },
+  referenceLabel: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },
+  referenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+  referenceText: { flexShrink: 1, fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, textAlign: 'center', writingDirection: 'ltr' },
+  bold: { fontWeight: '700' },
   screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   avoid: { flex: 1 },
   header: {

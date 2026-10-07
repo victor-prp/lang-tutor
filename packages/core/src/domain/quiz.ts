@@ -1,6 +1,7 @@
 import type {
   AnswerRecord,
   AnswerVerdict,
+  ClozeChoiceQuestion,
   ListenChoiceQuestion,
   MatchingQuestion,
   MissedQuestion,
@@ -10,6 +11,7 @@ import type {
   ReverseChoiceQuestion,
   SayTranslationQuestion,
   Score,
+  SentenceTranslationQuestion,
   SpeechVerdict,
   TypedMeaningQuestion,
   TypedVerdict,
@@ -35,12 +37,12 @@ export type AnswerInput =
   // Only the server builds it: the next-step schema has no `judged` field.
   | { text: string; judged: TypedVerdict };
 
-export type ChoiceQuestion = MultipleChoiceQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion;
+export type ChoiceQuestion = MultipleChoiceQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion | ClozeChoiceQuestion;
 /** Phase 25. The cards answered by voice. */
 export type SpeakingQuestion = ReadAloudQuestion | SayTranslationQuestion;
 /** Phase 24. A question answered by text: typed, heard, or built from tiles. */
 /** Phase 27 (spec D3). The cards whose text answer the server judges. */
-export type JudgedQuestion = TypedMeaningQuestion;
+export type JudgedQuestion = TypedMeaningQuestion | SentenceTranslationQuestion;
 type TextQuestion = Exclude<Question, ChoiceQuestion | SpeakingQuestion | JudgedQuestion>;
 
 export function isChoice(question: Question): question is ChoiceQuestion {
@@ -49,6 +51,7 @@ export function isChoice(question: Question): question is ChoiceQuestion {
     case 'reverse_choice':
     case 'listen_choice':
     case 'matching':
+    case 'cloze_choice':
       return true;
     case 'typed_translation':
     case 'dictation':
@@ -56,6 +59,8 @@ export function isChoice(question: Question): question is ChoiceQuestion {
     case 'read_aloud':
     case 'say_translation':
     case 'typed_meaning':
+    case 'cloze_typed':
+    case 'sentence_translation':
       return false;
   }
 }
@@ -66,7 +71,7 @@ export function isSpeaking(question: Question): question is SpeakingQuestion {
 
 /** Phase 27 (spec D3). The cards whose text answer the server judges. */
 export function isJudged(question: Question): question is JudgedQuestion {
-  return question.type === 'typed_meaning';
+  return question.type === 'typed_meaning' || question.type === 'sentence_translation';
 }
 
 /** Whether `answer` is the kind `question` takes. A read-aloud card has no
@@ -74,7 +79,7 @@ export function isJudged(question: Question): question is JudgedQuestion {
 export function answerFits(question: Question, answer: AnswerInput): boolean {
   if (isChoice(question)) return 'option_index' in answer;
   if (question.type === 'read_aloud') return 'heard' in answer || ('pass' in answer && answer.pass === 'skip');
-  if (question.type === 'say_translation') return 'heard' in answer || 'pass' in answer || 'text' in answer;
+  if (question.type === 'say_translation') return 'heard' in answer || 'pass' in answer || ('text' in answer && !('judged' in answer));
   if (isJudged(question)) return 'text' in answer && 'judged' in answer;
   return 'text' in answer && !('judged' in answer);
 }
@@ -83,6 +88,7 @@ export function answerFits(question: Question, answer: AnswerInput): boolean {
 export function rightAnswer(question: Question): string {
   if (isChoice(question)) return question.options[question.correct_option];
   if (question.type === 'typed_meaning') return question.meaning;
+  if (question.type === 'sentence_translation') return question.sentence;
   return question.type === 'dictation' || question.type === 'read_aloud' ? question.question : question.answer;
 }
 
@@ -159,6 +165,9 @@ function verdictFor(question: TextQuestion | SayTranslationQuestion, text: strin
     case 'dictation':
       // Spec D7: what was said, and nothing else — not its lemma, not a synonym.
       return judgeTyped({ answer: question.question, lemma: question.question, alternatives: [] }, text);
+    case 'cloze_typed':
+      // Phase 27 (spec D5): the form the sentence needs; its lemma is wrong unless the sentence needs it.
+      return judgeTyped({ answer: question.answer, lemma: question.answer, alternatives: question.alternatives }, text);
     case 'letter_tiles':
       return judgeTiles(question.answer, text);
   }

@@ -170,3 +170,76 @@ describe('typed_meaning banners (phase 27 D12)', () => {
     expect(feedbackFor(MEANING, { text: '', judged: 'wrong' })).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'להזמין', verdict: 'wrong' });
   });
 });
+
+describe('sentence cards (phase 27 D5, D6)', () => {
+  const CHOICE: Question = {
+    id: 'cc',
+    type: 'cloze_choice',
+    vocab_term_id: 'l',
+    sentence: 'Ieri parlavamo per ore.',
+    gap: { start: 5, end: 14 },
+    translation: 'אתמול דיברנו שעות.',
+    meaning: 'לדבר',
+    options: ['parlavamo', 'parlano'],
+    correct_option: 0,
+  };
+  const TYPED: Question = {
+    id: 'ct',
+    type: 'cloze_typed',
+    vocab_term_id: 'l',
+    sentence: 'Ieri parlavamo per ore.',
+    gap: { start: 5, end: 14 },
+    translation: 'אתמול דיברנו שעות.',
+    meaning: 'לדבר',
+    answer: 'parlavamo',
+    alternatives: [],
+  };
+  const TRANSLATE: Question = {
+    id: 'st',
+    type: 'sentence_translation',
+    vocab_term_id: 'l',
+    question: 'אתמול דיברנו שעות.',
+    meaning: 'לדבר',
+    sentence: 'Ieri parlavamo per ore.',
+    gap: { start: 5, end: 14 },
+    answer: 'parlavamo',
+  };
+
+  it('a cloze choice is worded as a choice', () => {
+    expect(feedbackFor(CHOICE, { option_index: 0 })).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: null });
+    expect(feedbackFor(CHOICE, { option_index: 1 })).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'parlavamo', verdict: null });
+  });
+
+  it('a typed cloze is judged on the gap word', () => {
+    expect(feedbackFor(TYPED, { text: 'parlavamo' }).title).toBe('נכון!');
+    expect(feedbackFor(TYPED, { text: 'parlavano' })).toMatchObject({ tone: 'correct', title: 'כמעט! כך כותבים:', line: 'parlavamo', verdict: 'near_miss' });
+    expect(feedbackFor(TYPED, { text: 'parlare' })).toMatchObject({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'parlavamo' });
+  });
+
+  it('a judged translation is worded per verdict, naming the practised word', () => {
+    expect(feedbackFor(TRANSLATE, { text: 'Ieri parlavamo per ore.', judged: 'exact' })).toEqual({
+      tone: 'correct',
+      title: 'נכון!',
+      line: null,
+      verdict: 'exact',
+    });
+    expect(feedbackFor(TRANSLATE, { text: 'Ieri parlavmo per ore.', judged: 'near_miss' })).toEqual({
+      tone: 'correct',
+      title: 'כמעט! כך כותבים:',
+      line: 'parlavamo',
+      verdict: 'near_miss',
+    });
+    expect(feedbackFor(TRANSLATE, { text: 'Ieri dicevamo per ore.', judged: 'alternative' })).toEqual({
+      tone: 'correct',
+      title: 'נכון! המילה שתרגלנו:',
+      line: 'parlavamo',
+      verdict: 'alternative',
+    });
+    expect(feedbackFor(TRANSLATE, { text: 'boh', judged: 'wrong' })).toEqual({
+      tone: 'wrong',
+      title: 'התשובה הנכונה:',
+      line: 'parlavamo',
+      verdict: 'wrong',
+    });
+  });
+});

@@ -366,3 +366,74 @@ describe('typed_meaning (phase 27 D3)', () => {
     expect(missed([MEANING], [record])).toEqual([{ question: MEANING, correct_answer: 'לדבר' }]);
   });
 });
+
+const CLOZE_CHOICE: Question = {
+  id: 'cc',
+  type: 'cloze_choice',
+  vocab_term_id: 'l1',
+  sentence: 'Vorrei prenotare un tavolo.',
+  gap: { start: 7, end: 16 },
+  translation: 'הייתי רוצה להזמין שולחן.',
+  meaning: 'להזמין',
+  options: ['prenotare', 'mangiare', 'dormire', 'correre'],
+  correct_option: 0,
+};
+const CLOZE_TYPED: Question = {
+  id: 'ct',
+  type: 'cloze_typed',
+  vocab_term_id: 'l2',
+  sentence: 'Ieri parlavamo per ore.',
+  gap: { start: 5, end: 14 },
+  translation: 'אתמול דיברנו שעות.',
+  meaning: 'לדבר',
+  answer: 'parlavamo',
+  alternatives: ['chiacchieravamo'],
+};
+const TRANSLATION: Question = {
+  id: 'st',
+  type: 'sentence_translation',
+  vocab_term_id: 'l3',
+  question: 'אני רוצה להזמין שולחן',
+  meaning: 'להזמין',
+  sentence: 'Voglio prenotare un tavolo.',
+  gap: { start: 7, end: 16 },
+  answer: 'prenotare',
+};
+
+describe('phase 27 Part B cards', () => {
+  it('a gap choice is a choice, judged by its option', () => {
+    expect(isChoice(CLOZE_CHOICE)).toBe(true);
+    expect(evaluate(CLOZE_CHOICE, { option_index: 0 })).toMatchObject({ is_correct: true, answer_string: 'prenotare' });
+    expect(rightAnswer(CLOZE_CHOICE)).toBe('prenotare');
+  });
+  it('a typed gap wants the form the sentence needs', () => {
+    expect(evaluate(CLOZE_TYPED, { text: 'parlavamo' })).toMatchObject({ verdict: 'exact', is_correct: true });
+    expect(evaluate(CLOZE_TYPED, { text: 'parlare' })).toMatchObject({ verdict: 'wrong', is_correct: false });
+    expect(evaluate(CLOZE_TYPED, { text: 'parlavano' })).toMatchObject({ verdict: 'near_miss' });
+    expect(evaluate(CLOZE_TYPED, { text: 'chiacchieravamo' })).toMatchObject({ verdict: 'alternative' });
+    expect(rightAnswer(CLOZE_TYPED)).toBe('parlavamo');
+    expect(answerFits(CLOZE_TYPED, { text: 'x', judged: 'exact' })).toBe(false);
+  });
+  it('a translation is judged by the server', () => {
+    expect(isJudged(TRANSLATION)).toBe(true);
+    expect(answerFits(TRANSLATION, { text: 'x' })).toBe(false);
+    expect(evaluate(TRANSLATION, { text: 'Vorrei prenotare un tavolo', judged: 'exact' })).toMatchObject({
+      is_correct: true,
+      verdict: 'exact',
+    });
+    expect(rightAnswer(TRANSLATION)).toBe('Voglio prenotare un tavolo.');
+  });
+  it('no card that is not judged takes a judged answer', () => {
+    const say: Question = {
+      id: 's',
+      type: 'say_translation',
+      vocab_term_id: 'l',
+      question: 'לדבר',
+      part_of_speech: 'verb',
+      answer: 'parlare',
+      lemma: 'parlare',
+      alternatives: [],
+    };
+    expect(answerFits(say, { text: 'parlare', judged: 'exact' })).toBe(false);
+  });
+});

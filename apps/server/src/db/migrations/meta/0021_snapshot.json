@@ -1,6 +1,6 @@
 {
-  "id": "3ebb7880-13af-487a-a268-837a98aa3753",
-  "prevId": "2614cbdb-3ee6-4b89-9ae4-9892ade5d371",
+  "id": "a110428a-111e-4834-aba1-f52fa6c54300",
+  "prevId": "3ebb7880-13af-487a-a268-837a98aa3753",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -604,6 +604,141 @@
         "dict_variants_entry_rank_nonneg": {
           "name": "dict_variants_entry_rank_nonneg",
           "value": "\"dict_variants\".\"entry_rank\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.enrollment_grants": {
+      "name": "enrollment_grants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "grantee_user_id": {
+          "name": "grantee_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "enrollment_grants_grantee_idx": {
+          "name": "enrollment_grants_grantee_idx",
+          "columns": [
+            {
+              "expression": "grantee_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "enrollment_grants_owner_idx": {
+          "name": "enrollment_grants_owner_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "enrollment_grants_enrollment_fk": {
+          "name": "enrollment_grants_enrollment_fk",
+          "tableFrom": "enrollment_grants",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "owner_user_id",
+            "enrollment_id"
+          ],
+          "columnsTo": [
+            "user_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_grants_grantee_fk": {
+          "name": "enrollment_grants_grantee_fk",
+          "tableFrom": "enrollment_grants",
+          "tableTo": "users",
+          "columnsFrom": [
+            "grantee_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "enrollment_grants_enrollment_grantee_key": {
+          "name": "enrollment_grants_enrollment_grantee_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "enrollment_id",
+            "grantee_user_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "enrollment_grants_not_owner": {
+          "name": "enrollment_grants_not_owner",
+          "value": "\"enrollment_grants\".\"grantee_user_id\" <> \"enrollment_grants\".\"owner_user_id\""
+        },
+        "enrollment_grants_role_known": {
+          "name": "enrollment_grants_role_known",
+          "value": "\"enrollment_grants\".\"role\" in ('tutor')"
         }
       },
       "isRLSEnabled": false
@@ -1620,6 +1755,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "added_by_user_id": {
+          "name": "added_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1710,6 +1851,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "vocabulary_entries_added_by_fk": {
+          "name": "vocabulary_entries_added_by_fk",
+          "tableFrom": "vocabulary_entries",
+          "tableTo": "users",
+          "columnsFrom": [
+            "added_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },

@@ -1,9 +1,9 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerTyped, generationStubFor, readCard } from './support/cards';
+import { answerTyped, generationStubFor, readCard, type Card } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
-import { tapUntil } from './support/interactions';
+import { skipListSession, tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini, expectGemini, expectGeminiPayload } from './support/mockServer';
 import { stripIsolates } from './support/text';
@@ -16,7 +16,7 @@ const MEANING_OF: Record<string, string> = Object.fromEntries(BOARD_WORDS.map((w
 const FORM_OF: Record<string, string> = Object.fromEntries(BOARD_WORDS.map((w) => [w.translation, w.form]));
 
 /** Past a skipped seed, with the ten words looked up and saved through the API. */
-async function saveTenWords(request: APIRequestContext, userId: string): Promise<void> {
+async function saveTenWords(request: APIRequestContext, userId: string): Promise<string> {
   const enrollments = (await (await request.get(`${API_URL}/api/users/${userId}/enrollments`)).json()) as { id: string }[];
   const enrollmentId = enrollments[0].id;
   const seed = (await (await request.post(`${API_URL}/api/sessions`, { data: { enrollment_id: enrollmentId } })).json()) as {
@@ -37,20 +37,44 @@ async function saveTenWords(request: APIRequestContext, userId: string): Promise
     });
     expect(saved.ok(), await saved.text()).toBe(true);
   }
+  return enrollmentId;
 }
 
-test('ten words: a run, a board, a listening card, tiles and a dictation', async ({ page, request }) => {
+/** Builds the word on a tiles card from its tiles. */
+async function buildFromTiles(page: Page, card: Card) {
+  const count = await page.getByTestId(/^tile-\d+$/).count();
+  const tiles = await Promise.all(Array.from({ length: count }, async (_, i) => (await page.getByTestId(`tile-${i}`).textContent()) ?? ''));
+  const used = new Set<number>();
+  for (const letter of FORM_OF[card.prompt]) {
+    const index = tiles.findIndex((tile, i) => tile === letter && !used.has(i));
+    expect(index, `tile for ${letter}`).toBeGreaterThanOrEqual(0);
+    used.add(index);
+    await page.getByTestId(`tile-${index}`).click();
+  }
+  await page.getByTestId('tiles-submit').click();
+}
+
+test('ten words: a listening card, a board, tiles and a dictation', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, ['ru-RU']);
   const user = await createLearner(request, 'e2e_listen_ru', 'ru');
-  await saveTenWords(request, user.id);
+  const enrollmentId = await saveTenWords(request, user.id);
+  // A list session made and skipped first, so the one played is ordinal 1.
+  await skipListSession(request, enrollmentId);
 
-  // Ordinal 0, listening on (spec D3): q1 meaning, q2 word, q3 typed, q4 the
-  // board's wrong meanings, q8 the listening card's. Nothing else is asked.
+  // Ordinal 1, listening on, speaking off (D9). Tiers [multiple_choice,
+  // listen_choice, typed_meaning], [reverse_choice, cloze_choice, letter_tiles],
+  // [typed_translation, cloze_typed, dictation, sentence_translation]. Six
+  // singles and a board at 4-7; single s is tier s % 3, run floor(s / 3),
+  // preferring (1 + run) % length:
+  //   1 (s0) listen_choice   2 (s1) cloze_choice, no saved example -> tiles
+  //   3 (s2) cloze_typed, its sentence unanswered by the stub -> typed_translation
+  //   8 (s3) index 2 typed_meaning   9 (s4) index 2 tiles   10 (s5) index 2 dictation.
+  // The stub is asked q1 (listen_choice's wrong meanings), q3 and q4 (the board's).
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStubFor({ 1: 'meaning', 2: 'word', 3: 'typed', 4: 'meaning', 8: 'meaning' }));
+  await expectGeminiPayload(request, generationStubFor({ 1: 'meaning', 3: 'typed', 4: 'meaning' }));
   // Past a skipped seed the home screen offers create, not start, so logIn's wait does not fit.
   await page.goto('/');
   await page.getByTestId('login-username').fill('e2e_listen_ru');
@@ -60,13 +84,23 @@ test('ten words: a run, a board, a listening card, tiles and a dictation', async
   }).toPass({ timeout: 30_000 });
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
+  const beforeFirst = (await spoken(page)).length;
   await tapUntil(page, 'start-button', 'progress-label');
 
-  // 1–3: the first run.
-  await answerChoice(page, await readCard(page, 1, 10, 'choice'), true);
+  // 1: the word is spoken on arrival and not shown; pick its meaning.
+  const listen = await readCard(page, 1, 10, 'listen');
+  const heard = await spokenAfter(page, beforeFirst);
+  expect(heard.lang).toBe('ru-RU');
+  await page.getByTestId(`option-${listen.options.indexOf(MEANING_OF[heard.text])}`).click();
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
+  await expect(page.getByTestId('question-prompt')).toHaveText(heard.text);
   await page.getByTestId('continue-button').click();
-  await answerChoice(page, await readCard(page, 2, 10, 'reverse'), true);
+
+  // 2: build the word from its tiles.
+  await buildFromTiles(page, await readCard(page, 2, 10, 'tiles'));
   await page.getByTestId('continue-button').click();
+
+  // 3: typed.
   const typed = await readCard(page, 3, 10, 'typed');
   await answerTyped(page, FORM_OF[typed.prompt]);
   await page.getByTestId('continue-button').click();
@@ -84,29 +118,15 @@ test('ten words: a run, a board, a listening card, tiles and a dictation', async
     await page.getByTestId(`board-meaning-${meanings.indexOf(MEANING_OF[word])}`).click();
   }
   await expect(page.getByTestId('feedback-title')).toHaveText(/3\s*מתוך\s*4/);
-  const beforeListen = (await spoken(page)).length;
   await page.getByTestId('continue-button').click();
 
-  // 8: the word is spoken on arrival and not shown; pick its meaning.
-  const listen = await readCard(page, 8, 10, 'listen');
-  const heard = await spokenAfter(page, beforeListen);
-  expect(heard.lang).toBe('ru-RU');
-  await page.getByTestId(`option-${listen.options.indexOf(MEANING_OF[heard.text])}`).click();
-  await expect(page.getByTestId('feedback-correct')).toBeVisible();
-  await expect(page.getByTestId('question-prompt')).toHaveText(heard.text);
+  // 8: meaning recall, passed by showing the answer.
+  await readCard(page, 8, 10, 'meaning');
+  await page.getByTestId('typed-show-answer').click();
   await page.getByTestId('continue-button').click();
 
   // 9: build the word from its tiles.
-  const tilesCard = await readCard(page, 9, 10, 'tiles');
-  const count = await page.getByTestId(/^tile-\d+$/).count();
-  const tiles = await Promise.all(Array.from({ length: count }, async (_, i) => (await page.getByTestId(`tile-${i}`).textContent()) ?? ''));
-  const used = new Set<number>();
-  for (const letter of FORM_OF[tilesCard.prompt]) {
-    const index = tiles.findIndex((tile, i) => tile === letter && !used.has(i));
-    used.add(index);
-    await page.getByTestId(`tile-${index}`).click();
-  }
-  await page.getByTestId('tiles-submit').click();
+  await buildFromTiles(page, await readCard(page, 9, 10, 'tiles'));
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   const beforeDictation = (await spoken(page)).length;
   await page.getByTestId('continue-button').click();
