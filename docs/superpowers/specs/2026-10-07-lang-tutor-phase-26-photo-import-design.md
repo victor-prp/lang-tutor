@@ -6,7 +6,60 @@
   where imports live in the app (D13), and every design section. He struck two things: checking
   whether a word is already saved (D7) and handling identical uploads (D12). Every decision is in
   §1 with its reason, so each one can be overturned in review. Those marked **(low confidence)**
-  are the ones to read first. Not yet planned or built.
+  are the ones to read first. Planned in `docs/superpowers/plans/2026-10-07-phase-26-photo-import.md`
+  and built on branch `phase-26-photo-import`. Victor asked for the plan to be built and one PR
+  opened in one go ("I trust your decisions"). These deviations were found while planning and
+  building:
+  - **One PR, not two (D15).** Victor asked for one PR. D15's gate still held: the eval ran
+    against the real model before any app task began.
+  - **The eval photos are synthetic.** Victor's photos were not available. Seven pages were
+    rendered in Chromium, printed and in handwriting fonts. They are listed in
+    `tests/eval/fixtures/photos/README.md`, where his own photos can join them.
+  - **The wire's status adds `saved` and `discarded`,** because `GET` answers any import that
+    still exists (D10). The summary's count is `settled_count`, the rows no longer pending,
+    rather than `ready_count`.
+  - **The repository has no `clearPhoto`.** Every transition clears the photo, and a table check
+    enforces it (`photo_imports_photo_only_while_reading`).
+  - **Rows store `suggested_sense_id`,** the job's choice, so `photo_import_saved` can count
+    changed senses (D14).
+  - **The reader drops items that are empty or over 100 characters,** the lookup's own cap. They
+    are counted in `photo_read.dropped_count`.
+  - **The picker answers a `PickResult`** (`photo`, `cancelled` or `denied`) rather than `null`
+    with a `denied` flag.
+  - **Mobile logic is tested as a pure module** (`src/photoImports.ts`), because the app has no
+    hook tests (D13's "usePhotoImport" tests became `photoImports.test.ts`).
+  - **e2e matches model answers by request body** (`expectGeminiMatching`), because row lookups
+    run four at a time.
+  - **Phase 25 merged mid-build, so the migration is 0018.** Phase 25 (#94) took migration 0017
+    while this branch was being built. Master was merged in and `0018_photo_imports` was
+    regenerated on top of its snapshot. The provider's vision client is built on phase 25's
+    shared `generate()`.
+  - **A row change, a save and a discard are serialized.** Review found that a tick racing a save
+    could land after the save had read the rows, saving a word the learner had unticked.
+    `updateItem`, `save` and `discard` now take the import row with `SELECT … FOR UPDATE` first
+    (`findImportForUpdate`). A route test fires an untick and a save at once and checks that the
+    outcome is consistent either way. The app also disables Save while a change is in flight.
+  - **The service method is `getImport`, not `get`.** ADR 0003's grep for raw Hono verbs matches
+    `.get(`. Renaming it (as `SessionService.getSession`) keeps the routes free of an alias
+    around the rule.
+  - **A row's position is capped at the Postgres integer range,** so an absurd position answers
+    400, not 500.
+  - **The reader skips crossed-out words by a rule of its own (rule 6).** The eval caught the
+    whiteboard's crossed-out `neve` coming back. A sentence added to rule 1 fixed it but broke
+    article dropping on the printed page. A separate rule fixed it without regressions.
+  - **One match case was wrong in the plan.** `להתייאש` means "to despair", not "give up". The
+    case now uses the idiom `להרים ידיים`.
+  - **The app's provider keeps each list under its enrollment,** as `useNextSession` does. The
+    planned reset on enrollment change swallowed home's first read after a switch or a login
+    (child effects run before the provider's).
+  - **After save or discard the app uses `router.dismissTo` home,** not `replace`, so no second
+    home stacks up. The word cell shows the corrected form when the lookup corrected it.
+  - **Home's body is a ScrollView,** to fit the new card, notice and button on a small phone. No
+    existing testID moved, and the whole e2e suite passes.
+  - **The e2e uses `cane`, not `gatto`.** E2E specs share one dictionary for the run, and
+    `voice.spec.ts` relies on `gatto` appearing in no other spec.
+  - **The e2e discard test proves the discard reached the server,** by signing in again and
+    reading the empty list.
 - **Date:** 2026-10-07
 - **Source:** the one-pager `drafts/2026-10-07-photo-word-list-one-pager.md`. `drafts/` is
   gitignored, so everything this spec depends on is restated below.
@@ -384,7 +437,7 @@ shows up as "no meaning found" or as a strange sense, and the learner unticks it
 
 ### Server
 
-- **`db/schema.ts` and migration `0017_photo_imports.sql`:** the two tables of D4.
+- **`db/schema.ts` and migration `0018_photo_imports.sql`:** the two tables of D4.
 - **`domain/jobs.ts`:**
   - the four queue names and two payload schemas;
   - `PHOTO_READ_BUDGET_MS` and the two expiries;
@@ -530,6 +583,20 @@ case changes the instruction, never the threshold.
 
 ---
 
+## POC findings
+
+Run on 2026-10-07, before the plan, to test D5's and D6's assumptions. Seven synthetic
+photos (the eval fixtures) were each sent to `gemini-2.5-flash` with D5's instruction from
+a scratch script: once with thinking at the model's default, once with `thinkingBudget: 0`.
+
+| Question | Answer |
+|---|---|
+| Does the reader find every item, in order, and skip the rest? | With default thinking, yes, on all seven. It skipped headings, the exercise line, page numbers, the whiteboard's date and a crossed-out word, and dropped articles and stress marks. |
+| Does it copy the printed Hebrew? | Yes, whole, including two-word glosses (`חדר שינה`, `מזג אוויר`). |
+| Thinking off? | Faster, 1.6–1.8 s against 3–6 s, but it dropped every Hebrew gloss on the printed Italian page, kept the crossed-out word and kept `sb`/`sth`. D5's default thinking stands. |
+| Is "to" or "the" before a phrase dropped consistently? | No: `to look after` and `the weather` were sometimes kept. The eval accepts both spellings, and a lookup handles both. |
+| How long is a read? | 3–6 s for 5–11 items at 1500 × 2000, well inside D6's 120 s. |
+
 ## Build order
 
 **PR A, the server and the eval:**
@@ -542,7 +609,7 @@ case changes the instruction, never the threshold.
 2. Domain: `photoReading`, `senseMatching`, `photoImports`, the folding export, and the job names
    and budgets.
 3. The vision client: contract, provider, config, composition.
-4. Migration 0017, the repository, the service, the queues and the worker, the routes.
+4. Migration 0018, the repository, the service, the queues and the worker, the routes.
 5. Eval fixtures and cases, run against the real model.
 6. Integration tests.
 
@@ -567,6 +634,6 @@ case changes the instruction, never the threshold.
   call and five reconciliations each, plus a match). Four item jobs at a time keep the rate where
   prepare-session already runs, but a long list takes minutes. That is acceptable in the
   background, and `photo_read`'s `item_count` with the per-row events shows it.
-- **Migration number.** Phase 25 also plans migration 0017. Whichever merges second renumbers.
+- **Migration number.** Phase 25 also planned migration 0017 and merged first, so ours became 0018.
 - **Eval photos in the repository.** Fixtures are about 500 KB each, and they must show no one's
   name or face. Victor chooses them.
