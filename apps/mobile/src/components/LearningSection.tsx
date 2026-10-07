@@ -1,5 +1,5 @@
 import type { Enrollment } from '@lang-tutor/core/api';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -7,16 +7,34 @@ import { ApiError } from '@/api/client';
 import { availableTargets } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
+import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
 import { POLL_INTERVAL_MS, homeActionOf, shouldPoll, type HomeAction } from '@/nextSession';
+import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+
+function photoCardLabel(card: NonNullable<HomePhotoCard>): string {
+  switch (card.kind) {
+    case 'working':
+      return strings.homePhotoWorking;
+    case 'ready':
+      return strings.homePhotoReady(card.count);
+    case 'failed':
+      return strings.homePhotoFailed;
+    case 'several':
+      return strings.homePhotoSeveral(card.count);
+  }
+}
 
 export function LearningSection({ active }: { active: Enrollment }) {
   const { enter } = useSession();
   const next = useNextSession();
   const { enrollments, switchTo } = useCurrentUser();
+  const { imports, reload: reloadPhotos } = usePhotoImports();
+  // Set by the review after a save (spec D13): "28 words saved".
+  const { photoSaved } = useLocalSearchParams<{ photoSaved?: string }>();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   // A ref guards re-entry (state is stale between two taps in one frame); the
   // state only drives the disabled look.
@@ -24,11 +42,15 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const inFlight = useRef(false);
 
   // Fresh on every focus: back from a session, from translate, after a switch.
+  // Both reloads change with the active enrollment, so a switch runs this
+  // again, and the providers keep each read under the enrollment it was for,
+  // so that read is the one shown.
   const { reload } = next;
   useFocusEffect(
     useCallback(() => {
       reload();
-    }, [reload]),
+      reloadPhotos();
+    }, [reload, reloadPhotos]),
   );
 
   // While preparing, and only while this screen is focused.
@@ -41,8 +63,19 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }, [polling, reload]),
   );
 
+  // The photo card moves while an import is read or looked up, the same way.
+  const photosWorking = imports.some((summary) => isWorking(summary.status));
+  useFocusEffect(
+    useCallback(() => {
+      if (!photosWorking) return undefined;
+      const timer = setInterval(reloadPhotos, POLL_INTERVAL_MS);
+      return () => clearInterval(timer);
+    }, [photosWorking, reloadPhotos]),
+  );
+
   const canAdd = availableTargets(enrollments).length > 0;
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
+  const photoCard = homePhotoCard(imports);
 
   function enterSession(sessionId: string) {
     enter(sessionId);
@@ -148,6 +181,25 @@ export function LearningSection({ active }: { active: Enrollment }) {
         onSkip={skip}
       />
 
+      {photoSaved ? (
+        <Text testID="home-photo-saved" style={styles.notice}>
+          {strings.photoImportSaved(Number(photoSaved))}
+        </Text>
+      ) : null}
+
+      {photoCard ? (
+        <Pressable
+          accessibilityRole="button"
+          testID="home-photo-card"
+          onPress={() =>
+            router.push(photoCard.kind === 'several' ? '/photo-imports' : `/photo-imports/${photoCard.id}`)
+          }
+          style={styles.card}
+        >
+          <Text style={styles.cardLabel}>{photoCardLabel(photoCard)}</Text>
+        </Pressable>
+      ) : null}
+
       <Pressable
         accessibilityRole="button"
         testID="translate-entry"
@@ -164,6 +216,15 @@ export function LearningSection({ active }: { active: Enrollment }) {
         style={styles.secondaryButton}
       >
         <Text style={styles.secondaryButtonLabel}>{strings.vocabularyEntry}</Text>
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
+        testID="photo-import-entry"
+        onPress={() => router.push('/photo-imports')}
+        style={styles.secondaryButton}
+      >
+        <Text style={styles.secondaryButtonLabel}>{strings.photoImportEntry}</Text>
       </Pressable>
     </>
   );

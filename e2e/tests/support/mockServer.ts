@@ -113,3 +113,55 @@ export async function expectTranscription(request: APIRequestContext, heard: str
   });
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
+
+/**
+ * Phase 26. A model answer for the one call whose request body matches
+ * `bodyRegex`. A photo import makes several calls at once (the read, a lookup
+ * per row, a match call) whose order is not fixed, so each answer is matched by
+ * what is in its request rather than by order. MockServer answers with the
+ * first expectation that matches, so register the narrowest first.
+ */
+export async function expectGeminiMatching(
+  request: APIRequestContext,
+  bodyRegex: string,
+  payload: unknown,
+  opts: { delayMs?: number } = {},
+): Promise<void> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: `[\\s\\S]*${bodyRegex}[\\s\\S]*` } },
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: envelope(payload),
+        ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
+      },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
+
+/** Phase 27. The meaning judge's answer, matched on the server's JUDGE_MARKER
+ *  (apps/server/src/domain/judge.ts) and ranked above the generation stub.
+ *  Consumed once, in registration order. `status` makes it a failed call
+ *  instead; `delayMs` holds the answer back so the "checking" state can be seen. */
+export async function expectJudge(
+  request: APIRequestContext,
+  verdict: 'right' | 'other_sense' | 'wrong',
+  opts: { status?: number; delayMs?: number } = {},
+): Promise<void> {
+  const failed = opts.status !== undefined && opts.status !== 200;
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      priority: 10,
+      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: "[\\s\\S]*judge the learner's answer[\\s\\S]*" } },
+      httpResponse: {
+        statusCode: opts.status ?? 200,
+        ...(failed ? { body: '{"error":{"message":"upstream"}}' } : { headers: { 'content-type': ['application/json'] }, body: envelope({ verdict }) }),
+        ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}

@@ -8,9 +8,16 @@ import type {
   Enrollment,
   Grant,
   GrantList,
+  JudgedAnswerRequest,
+  JudgedAnswerResponse,
   LoginRequest,
   NextStepRequest,
   NextStepResponse,
+  PhotoImport,
+  PhotoImportCreateRequest,
+  PhotoImportItem,
+  PhotoImportItemUpdate,
+  PhotoImportSummary,
   SaveVocabularyRequest,
   SaveVocabularyResponse,
   SessionView,
@@ -56,6 +63,13 @@ export const SPEECH_UPLOAD_TIMEOUT_MS = 15_000;
 const ACTOR_HEADER = 'X-Acting-User-Id';
 const actorHeader = (actorUserId: string | undefined): Record<string, string> =>
   actorUserId ? { [ACTOR_HEADER]: actorUserId } : {};
+/** Phase 27 (spec D13). The server's own judge gives up after 8 s; past this the
+ *  app does too, and the card offers "try again". */
+export const JUDGE_REQUEST_TIMEOUT_MS = 15_000;
+/** Phase 26. A photo is up to 2.8 MB, so it gets longer than a recording; past
+ *  this the upload screen shows its upload-failed message and keeps the photo
+ *  for a retry, instead of waiting with both buttons disabled. */
+export const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
 
 export type ApiClientDeps = {
   baseUrl: string;
@@ -79,6 +93,25 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
     });
     if (!res.ok) throw await failureOf(res);
     return (await res.json()) as TResponse;
+  }
+
+  async function patchJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await failureOf(res);
+    return (await res.json()) as TResponse;
+  }
+
+  async function postNoContent(path: string): Promise<void> {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) throw await failureOf(res);
   }
 
   async function getJson<TResponse>(path: string, actorUserId?: string): Promise<TResponse> {
@@ -122,6 +155,19 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
         clearTimeout(timer);
       }
     },
+    judgeAnswer: async (sessionId: string, request: JudgedAnswerRequest) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), JUDGE_REQUEST_TIMEOUT_MS);
+      try {
+        return await postJson<JudgedAnswerResponse>(
+          `/api/sessions/${encodeURIComponent(sessionId)}/judged-answer`,
+          request,
+          { signal: controller.signal },
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     getSession: (sessionId: string) =>
       getJson<SessionView>(`/api/sessions/${encodeURIComponent(sessionId)}`),
     skipSession: (sessionId: string) =>
@@ -156,6 +202,29 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       postJson<Grant>(`/api/grants/${encodeURIComponent(grantId)}/accept`, {}, { actorUserId }),
     endGrant: (actorUserId: string, grantId: string) =>
       deleteResource(`/api/grants/${encodeURIComponent(grantId)}`, actorUserId),
+
+    // Phase 26. Words from a photo.
+    createPhotoImport: async (enrollmentId: string, request: PhotoImportCreateRequest) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PHOTO_UPLOAD_TIMEOUT_MS);
+      try {
+        return await postJson<PhotoImportSummary>(
+          `/api/enrollments/${encodeURIComponent(enrollmentId)}/photo-imports`,
+          request,
+          { signal: controller.signal },
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    listPhotoImports: (enrollmentId: string) =>
+      getJson<PhotoImportSummary[]>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/photo-imports`),
+    getPhotoImport: (id: string) => getJson<PhotoImport>(`/api/photo-imports/${encodeURIComponent(id)}`),
+    updatePhotoImportItem: (id: string, position: number, update: PhotoImportItemUpdate) =>
+      patchJson<PhotoImportItem>(`/api/photo-imports/${encodeURIComponent(id)}/items/${position}`, update),
+    savePhotoImport: (id: string) =>
+      postJson<SaveVocabularyResponse>(`/api/photo-imports/${encodeURIComponent(id)}/save`, {}),
+    discardPhotoImport: (id: string) => postNoContent(`/api/photo-imports/${encodeURIComponent(id)}/discard`),
   };
 }
 

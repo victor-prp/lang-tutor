@@ -9,7 +9,7 @@ export const WRONG_RUSSIAN = ['писать', 'дверь', 'стена'];
 
 /** The type cycle by position (server domain/session.ts, spec D2). */
 export const CYCLE = ['choice', 'reverse', 'typed'] as const;
-export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say';
+export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning';
 
 /**
  * Phase 23. The generation stub for q1 to q10, each key answering the task of
@@ -46,6 +46,7 @@ async function kindOnScreen(page: Page): Promise<CardKind> {
     const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
     return HEBREW.test(prompt) ? 'say' : 'read';
   }
+  if (await has('meaning-card')) return 'meaning';
   if (await has('typed-input')) return 'typed';
   const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
   return HEBREW.test(prompt) ? 'reverse' : 'choice';
@@ -123,4 +124,11 @@ export async function speak(page: Page) {
   await expect(page.getByTestId('speak-status')).toBeVisible();
   await page.waitForTimeout(1_000);
   await page.getByTestId('speak-record').click();
+}
+
+/** Phase 27. Answers a meaning card. The stored meaning is judged by rule,
+ *  with no model call; anything else needs an expectJudge stub first. */
+export async function answerMeaning(page: Page, text: string) {
+  await page.getByTestId('typed-input').fill(text);
+  await page.getByTestId('typed-submit').click();
 }

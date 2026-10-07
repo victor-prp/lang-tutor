@@ -303,11 +303,20 @@ nested provider but not how it gets the client.
 work, because `scripts/lane-env.sh` changes to the repo root. The build used a wrapper that passes
 jest's config explicitly.
 
+**Merged after phases 26 and 27.** Both risks below came true:
+- The migration is now `0020_enrollment_grants`. It was regenerated on the merged schema, came out
+  the same as before apart from the backfill hand edit, and that edit was put back.
+- Phase 26's photo-import save calls `insertEntries`, and now passes the enrollment's owner as
+  `addedByUserId`. Only the owner photographs into their own list, and no grant reaches a photo
+  import, so its endpoints take no actor header.
+- Home's photo card, saved notice and photo entry live in `LearningSection` with the rest of the
+  learner's block, so a tutor who learns nothing sees none of them.
+
 ---
 
 ## 2. Changes
 
-### Data (migration `0018_enrollment_grants.sql`, renumbered at merge; see Risks)
+### Data (migration `0020_enrollment_grants.sql`, written as 0018 and renumbered at merge; see Risks)
 
 ```
 enrollment_grants

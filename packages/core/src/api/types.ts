@@ -20,8 +20,10 @@ import type {
   LlmCorrectionSchema,
   LlmDistractorsSchema,
   LlmEntrySchema,
+  LlmPhotoReadingSchema,
   LlmReconciliationSchema,
   LlmRenderingSchema,
+  LlmSenseMatchSchema,
   LlmSenseSchema,
   LlmTranslationSchema,
   LoginRequestSchema,
@@ -30,6 +32,15 @@ import type {
   NextStepRequestSchema,
   NextStepResponseSchema,
   PartOfSpeechSchema,
+  PhotoImportCreateRequestSchema,
+  PhotoImportItemReasonSchema,
+  PhotoImportItemSchema,
+  PhotoImportItemStatusSchema,
+  PhotoImportItemUpdateSchema,
+  PhotoImportOptionSchema,
+  PhotoImportSchema,
+  PhotoImportStatusSchema,
+  PhotoImportSummarySchema,
   PositionSchema,
   QuestionSchema,
   ReverseChoiceQuestionSchema,
@@ -58,6 +69,10 @@ import type {
   SpeechAnswerRequestSchema,
   SpeechAnswerResponseSchema,
   LlmTranscriptSchema,
+  TypedMeaningQuestionSchema,
+  JudgedAnswerRequestSchema,
+  JudgedAnswerResponseSchema,
+  LlmMeaningJudgeSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
   TranslationKindSchema,
@@ -153,3 +168,18 @@ export type SpeechVerdict = z.infer<typeof SpeechVerdictSchema>;
 export type SpeechAnswerRequest = z.infer<typeof SpeechAnswerRequestSchema>;
 export type SpeechAnswerResponse = z.infer<typeof SpeechAnswerResponseSchema>;
 export type LlmTranscript = z.infer<typeof LlmTranscriptSchema>;
+export type TypedMeaningQuestion = z.infer<typeof TypedMeaningQuestionSchema>;
+export type JudgedAnswerRequest = z.infer<typeof JudgedAnswerRequestSchema>;
+export type JudgedAnswerResponse = z.infer<typeof JudgedAnswerResponseSchema>;
+export type LlmMeaningJudge = z.infer<typeof LlmMeaningJudgeSchema>;
+export type PhotoImportCreateRequest = z.infer<typeof PhotoImportCreateRequestSchema>;
+export type PhotoImportStatus = z.infer<typeof PhotoImportStatusSchema>;
+export type PhotoImportItemStatus = z.infer<typeof PhotoImportItemStatusSchema>;
+export type PhotoImportItemReason = z.infer<typeof PhotoImportItemReasonSchema>;
+export type PhotoImportOption = z.infer<typeof PhotoImportOptionSchema>;
+export type PhotoImportItem = z.infer<typeof PhotoImportItemSchema>;
+export type PhotoImportSummary = z.infer<typeof PhotoImportSummarySchema>;
+export type PhotoImport = z.infer<typeof PhotoImportSchema>;
+export type PhotoImportItemUpdate = z.infer<typeof PhotoImportItemUpdateSchema>;
+export type LlmPhotoReading = z.infer<typeof LlmPhotoReadingSchema>;
+export type LlmSenseMatch = z.infer<typeof LlmSenseMatchSchema>;

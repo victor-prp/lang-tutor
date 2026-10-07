@@ -105,6 +105,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     now: createFakeClock(0),
     llm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
+    judge: createFakeLlmClient(''),
   });
   return { service, calls };
 }

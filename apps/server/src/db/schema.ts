@@ -1,5 +1,7 @@
+import type { PhotoImportOption } from '@lang-tutor/core/api';
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   date,
   foreignKey,
@@ -530,13 +532,14 @@ export const questions = pgTable(
     check('questions_options_valid', sql`${t.options} is null or question_options_valid(${t.options})`),
     check(
       'questions_type_known',
-      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation')`,
+      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning')`,
     ),
     // Phase 23 and 24. Each type's shape (spec D13, phase 24 §2): a choice has
     // options, every type but the Hebrew-option ones stores the Hebrew prompt,
     // only a typed card has alternatives, and only a tiles card has tiles.
     // Phase 25's two speaking types store the Hebrew as their prompt, and say
     // the translation its alternatives, as the typed card does.
+    // Phase 27's meaning recall stores the meaning as its prompt and nothing else.
     check(
       'questions_shape_valid',
       sql`case ${t.type}
@@ -552,6 +555,7 @@ export const questions = pgTable(
         when 'read_aloud' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'say_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
           and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+        when 'typed_meaning' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         else false end`,
     ),
     foreignKey({
@@ -671,7 +675,8 @@ export const answers = pgTable(
       'answers_verdict_known',
       sql`${t.verdict} in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped')`,
     ),
-    check('answers_typed_text_length', sql`length(${t.typedText}) <= 100`),
+    // Phase 27 (spec D11): a judged answer is at most 300 characters.
+    check('answers_typed_text_length', sql`length(${t.typedText}) <= 300`),
   ],
 );
 
@@ -708,5 +713,70 @@ export const sessionProgress = pgTable(
       'session_progress_levels_valid',
       sql`${t.levelBefore} between 1 and 5 and ${t.levelAfter} between ${t.levelBefore} and 5`,
     ),
+  ],
+);
+
+/**
+ * Phase 26. One photo of a word list (spec D4). `photo` is the base64 JPEG,
+ * kept only until the read (spec D3): every transition clears it, and the
+ * check below makes that a property of the table. `ready` is not a status: it
+ * is `read` with no row pending.
+ */
+export const photoImports = pgTable(
+  'photo_imports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    enrollmentId: text('enrollment_id').notNull(),
+    status: text('status').notNull(),
+    photo: text('photo'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'photo_imports_enrollment_fk',
+      columns: [t.enrollmentId],
+      foreignColumns: [enrollments.id],
+    }),
+    check('photo_imports_status_known', sql`${t.status} in ('reading', 'read', 'failed', 'saved', 'discarded')`),
+    check('photo_imports_photo_only_while_reading', sql`${t.photo} is null or ${t.status} = 'reading'`),
+    // The list and the cleanup both read one enrollment's imports by age.
+    index('photo_imports_enrollment_created_idx').on(t.enrollmentId, t.createdAt),
+  ],
+);
+
+/**
+ * Phase 26. One word or phrase read from an import's photo, with its lookup's
+ * saveable senses as a snapshot (`options`), the sense the job chose
+ * (`suggested_sense_id`, never changed after) and the learner's choice.
+ */
+export const photoImportItems = pgTable(
+  'photo_import_items',
+  {
+    importId: uuid('import_id').notNull(),
+    position: integer('position').notNull(),
+    text: text('text').notNull(),
+    hebrew: text('hebrew'),
+    status: text('status').notNull(),
+    correctedForm: text('corrected_form'),
+    options: jsonb('options').$type<PhotoImportOption[]>().notNull().default(sql`'[]'::jsonb`),
+    suggestedSenseId: text('suggested_sense_id'),
+    chosenSenseId: text('chosen_sense_id'),
+    ticked: boolean('ticked').notNull().default(false),
+    hebrewMismatch: boolean('hebrew_mismatch').notNull().default(false),
+    reason: text('reason'),
+  },
+  (t) => [
+    primaryKey({ name: 'photo_import_items_pkey', columns: [t.importId, t.position] }),
+    foreignKey({
+      name: 'photo_import_items_import_fk',
+      columns: [t.importId],
+      foreignColumns: [photoImports.id],
+    }).onDelete('cascade'),
+    check('photo_import_items_status_known', sql`${t.status} in ('pending', 'ready', 'failed')`),
+    check(
+      'photo_import_items_reason_known',
+      sql`${t.reason} is null or ${t.reason} in ('sentence', 'no_meaning', 'not_in_language')`,
+    ),
+    check('photo_import_items_tick_needs_sense', sql`not ${t.ticked} or ${t.chosenSenseId} is not null`),
   ],
 );

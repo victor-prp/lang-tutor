@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
 
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
+import { JUDGE_MARKER } from '../../src/domain/judge';
+import { PHOTO_READING_MARKER } from '../../src/domain/photoReading';
+import { SENSE_MATCH_MARKER } from '../../src/domain/senseMatching';
 import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
 import { geminiResponse } from './geminiResponse';
 
@@ -133,6 +136,47 @@ export async function expectReconciliation(
   });
 }
 
+/** Phase 26. The reader's answer, matched by its marker, so it never answers a
+ *  lookup. Register it before any broad expectation. */
+export async function expectPhotoRead(
+  ns: string,
+  items: { text: string; hebrew: string }[],
+  opts: { delayMs?: number } = {},
+): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${PHOTO_READING_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ items })),
+        ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
+      },
+    },
+  });
+}
+
+/** Phase 26. A reader that always fails, for the dead-letter path. */
+export async function expectPhotoReadFailure(ns: string, statusCode: number): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${PHOTO_READING_MARKER}[\\s\\S]*` } },
+    action: { httpResponse: { statusCode, body: '{"error":{"message":"upstream"}}' } },
+  });
+}
+
+/** Phase 26. The match call's answer: a sense number from 1, or 0 for none. */
+export async function expectSenseMatch(ns: string, sense: number): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${SENSE_MATCH_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ sense })),
+      },
+    },
+  });
+}
 export async function expectGeminiStatus(ns: string, statusCode: number): Promise<void> {
   await expectation(ns, {
     action: { httpResponse: { statusCode, body: '{"error":{"message":"upstream"}}' } },
@@ -299,6 +343,26 @@ export async function expectTranscription(ns: string, heard: string, opts: { onc
         body: JSON.stringify(geminiResponse({ heard })),
       },
       ...(opts.once ? { times: { remainingTimes: 1, unlimited: false } } : {}),
+    },
+  });
+}
+
+/**
+ * Phase 27. The judge call's answer, matched on JUDGE_MARKER so a generation or
+ * transcription stub in the same namespace cannot answer it. Consumed once, and
+ * prioritised so it wins over a broader stub registered earlier.
+ */
+export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' | 'wrong'): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${JUDGE_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ verdict })),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+      priority: 10,
     },
   });
 }

@@ -49,6 +49,7 @@ export function missedPair({ question, correct_answer }: MissedQuestion): { word
       return { word: question.question, meaning: correct_answer };
     case 'dictation':
     case 'read_aloud':
+    case 'typed_meaning':
       return { word: question.question, meaning: question.meaning };
     case 'reverse_choice':
     case 'say_translation':

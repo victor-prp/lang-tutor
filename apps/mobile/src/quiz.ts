@@ -1,6 +1,7 @@
 import type { MissedQuestion, NextStepResponse, Question, Score, SessionProgressItem } from '@lang-tutor/core/api';
 
 import type { CardAnswer } from '@/feedback';
+import type { JudgeAttempt } from '@/judging';
 import { IDLE_ATTEMPT, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 
 // What the background next-step call resolved to, waiting to be applied when
@@ -28,6 +29,8 @@ export type QuizState = {
   advanceRequested: boolean;
   speech: SpeechAttempt;
   speakingOff: SpeakingOff;
+  /** Phase 27 (spec D13). A judged card's check; idle on every new card. */
+  judging: JudgeAttempt;
 };
 
 export function queuedFrom(response: NextStepResponse): Queued {
@@ -51,6 +54,7 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
       queued: null,
       advanceRequested: false,
       speech: IDLE_ATTEMPT,
+      judging: 'idle',
     };
   }
   return {
@@ -61,5 +65,6 @@ export function applyQueued(current: QuizState, queued: Queued): QuizState {
     queued: null,
     advanceRequested: false,
     speech: IDLE_ATTEMPT,
+    judging: 'idle',
   };
 }

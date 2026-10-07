@@ -21,6 +21,8 @@ describe('loadConfig', () => {
       translationTimeoutMs: 25_000,
       sessionGenerationTimeoutMs: 300_000,
       speechTimeoutMs: 8_000,
+      judgeTimeoutMs: 8_000,
+      photoReadTimeoutMs: 120_000,
     });
   });
 
@@ -28,6 +30,11 @@ describe('loadConfig', () => {
     expect(loadConfig({}).speechTimeoutMs).toBe(8_000);
     expect(loadConfig({ SPEECH_TIMEOUT_MS: '3000' }).speechTimeoutMs).toBe(3_000);
     expect(loadConfig({ SPEECH_TIMEOUT_MS: 'nonsense' }).speechTimeoutMs).toBe(8_000);
+  });
+
+  it('reads the judge budget, defaulting to 8 s (phase 27)', () => {
+    expect(loadConfig({}).judgeTimeoutMs).toBe(8_000);
+    expect(loadConfig({ JUDGE_TIMEOUT_MS: '2500' }).judgeTimeoutMs).toBe(2_500);
   });
 
   it('takes every value from the environment when it is set', () => {
@@ -47,6 +54,8 @@ describe('loadConfig', () => {
       translationTimeoutMs: 12_000,
       sessionGenerationTimeoutMs: 300_000,
       speechTimeoutMs: 8_000,
+      judgeTimeoutMs: 8_000,
+      photoReadTimeoutMs: 120_000,
     });
   });
 
@@ -70,6 +79,12 @@ describe('loadConfig', () => {
   // healthy call off. The two numbers used to agree only through a comment.
   it('expires a prepare-session job no sooner than twice the default budget', () => {
     expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(2 * loadConfig({}).sessionGenerationTimeoutMs);
+  });
+
+  it('caps the photo read budget at two minutes, and defaults to it', () => {
+    expect(loadConfig({}).photoReadTimeoutMs).toBe(120_000);
+    expect(loadConfig({ PHOTO_READ_TIMEOUT_MS: '5000' }).photoReadTimeoutMs).toBe(5_000);
+    expect(loadConfig({ PHOTO_READ_TIMEOUT_MS: '999999' }).photoReadTimeoutMs).toBe(120_000);
   });
 
   it('still works with no Gemini settings at all, so db:migrate is unaffected', () => {

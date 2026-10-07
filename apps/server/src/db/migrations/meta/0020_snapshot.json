@@ -1,0 +1,1868 @@
+{
+  "id": "156af80e-2a1e-47bd-851c-910f3cce1e2b",
+  "prevId": "2614cbdb-3ee6-4b89-9ae4-9892ade5d371",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.answers": {
+      "name": "answers",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "selected_option_position": {
+          "name": "selected_option_position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "typed_text": {
+          "name": "typed_text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verdict": {
+          "name": "verdict",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "answered_at": {
+          "name": "answered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "answers_session_id_position_question_id_session_questions_session_id_position_question_id_fk": {
+          "name": "answers_session_id_position_question_id_session_questions_session_id_position_question_id_fk",
+          "tableFrom": "answers",
+          "tableTo": "session_questions",
+          "columnsFrom": [
+            "session_id",
+            "position",
+            "question_id"
+          ],
+          "columnsTo": [
+            "session_id",
+            "position",
+            "question_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "answers_session_id_position_pk": {
+          "name": "answers_session_id_position_pk",
+          "columns": [
+            "session_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "answers_selected_option_position_nonneg": {
+          "name": "answers_selected_option_position_nonneg",
+          "value": "\"answers\".\"selected_option_position\" >= 0"
+        },
+        "answers_kind_valid": {
+          "name": "answers_kind_valid",
+          "value": "(\"answers\".\"selected_option_position\" is null) = (\"answers\".\"typed_text\" is not null) and (\"answers\".\"typed_text\" is null) = (\"answers\".\"verdict\" is null)"
+        },
+        "answers_verdict_known": {
+          "name": "answers_verdict_known",
+          "value": "\"answers\".\"verdict\" in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped')"
+        },
+        "answers_typed_text_length": {
+          "name": "answers_typed_text_length",
+          "value": "length(\"answers\".\"typed_text\") <= 300"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dict_corrections": {
+      "name": "dict_corrections",
+      "schema": "",
+      "columns": {
+        "language_code": {
+          "name": "language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "typed_form": {
+          "name": "typed_form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "corrected_form": {
+          "name": "corrected_form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "alternatives": {
+          "name": "alternatives",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "dict_corrections_form_key": {
+          "name": "dict_corrections_form_key",
+          "columns": [
+            {
+              "expression": "language_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(\"typed_form\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "dict_corrections_typed_form_length": {
+          "name": "dict_corrections_typed_form_length",
+          "value": "length(\"dict_corrections\".\"typed_form\") between 1 and 100"
+        },
+        "dict_corrections_corrected_form_length": {
+          "name": "dict_corrections_corrected_form_length",
+          "value": "length(\"dict_corrections\".\"corrected_form\") between 1 and 100"
+        },
+        "dict_corrections_alternatives_valid": {
+          "name": "dict_corrections_alternatives_valid",
+          "value": "correction_alternatives_valid(\"dict_corrections\".\"alternatives\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dict_lexemes": {
+      "name": "dict_lexemes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "language_code": {
+          "name": "language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lemma": {
+          "name": "lemma",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "part_of_speech": {
+          "name": "part_of_speech",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "sense_version": {
+          "name": "sense_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dict_lexemes_language_lemma_pos_key": {
+          "name": "dict_lexemes_language_lemma_pos_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "language_code",
+            "lemma",
+            "part_of_speech"
+          ]
+        },
+        "dict_lexemes_id_lemma_key": {
+          "name": "dict_lexemes_id_lemma_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "lemma"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.dict_senses": {
+      "name": "dict_senses",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "lexeme_id": {
+          "name": "lexeme_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sense_code": {
+          "name": "sense_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dict_senses_lexeme_id_dict_lexemes_id_fk": {
+          "name": "dict_senses_lexeme_id_dict_lexemes_id_fk",
+          "tableFrom": "dict_senses",
+          "tableTo": "dict_lexemes",
+          "columnsFrom": [
+            "lexeme_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dict_senses_lexeme_code_key": {
+          "name": "dict_senses_lexeme_code_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "lexeme_id",
+            "sense_code"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.dict_var_translations": {
+      "name": "dict_var_translations",
+      "schema": "",
+      "columns": {
+        "variant_id": {
+          "name": "variant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sense_id": {
+          "name": "sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_language_code": {
+          "name": "user_language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "translation": {
+          "name": "translation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "definition_notes": {
+          "name": "definition_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "example_source": {
+          "name": "example_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "example_target": {
+          "name": "example_target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rank": {
+          "name": "rank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "dict_var_translations_sense_language_idx": {
+          "name": "dict_var_translations_sense_language_idx",
+          "columns": [
+            {
+              "expression": "sense_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_language_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "dict_var_translations_variant_id_dict_variants_id_fk": {
+          "name": "dict_var_translations_variant_id_dict_variants_id_fk",
+          "tableFrom": "dict_var_translations",
+          "tableTo": "dict_variants",
+          "columnsFrom": [
+            "variant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "dict_var_translations_sense_id_dict_senses_id_fk": {
+          "name": "dict_var_translations_sense_id_dict_senses_id_fk",
+          "tableFrom": "dict_var_translations",
+          "tableTo": "dict_senses",
+          "columnsFrom": [
+            "sense_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "dict_var_translations_variant_id_sense_id_user_language_code_pk": {
+          "name": "dict_var_translations_variant_id_sense_id_user_language_code_pk",
+          "columns": [
+            "variant_id",
+            "sense_id",
+            "user_language_code"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "dict_var_translations_variant_rank_key": {
+          "name": "dict_var_translations_variant_rank_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "variant_id",
+            "user_language_code",
+            "rank"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "dict_var_translations_rank_nonneg": {
+          "name": "dict_var_translations_rank_nonneg",
+          "value": "\"dict_var_translations\".\"rank\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dict_variant_renderings": {
+      "name": "dict_variant_renderings",
+      "schema": "",
+      "columns": {
+        "variant_id": {
+          "name": "variant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_language_code": {
+          "name": "user_language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rendered_sense_version": {
+          "name": "rendered_sense_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dict_variant_renderings_variant_fk": {
+          "name": "dict_variant_renderings_variant_fk",
+          "tableFrom": "dict_variant_renderings",
+          "tableTo": "dict_variants",
+          "columnsFrom": [
+            "variant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "dict_variant_renderings_pkey": {
+          "name": "dict_variant_renderings_pkey",
+          "columns": [
+            "variant_id",
+            "user_language_code"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.dict_variants": {
+      "name": "dict_variants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "lexeme_id": {
+          "name": "lexeme_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "language_code": {
+          "name": "language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "form": {
+          "name": "form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entry_rank": {
+          "name": "entry_rank",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "dict_variants_form_entry_rank_key": {
+          "name": "dict_variants_form_entry_rank_key",
+          "columns": [
+            {
+              "expression": "language_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(\"form\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entry_rank",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "dict_variants_lexeme_id_dict_lexemes_id_fk": {
+          "name": "dict_variants_lexeme_id_dict_lexemes_id_fk",
+          "tableFrom": "dict_variants",
+          "tableTo": "dict_lexemes",
+          "columnsFrom": [
+            "lexeme_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dict_variants_lexeme_form_key": {
+          "name": "dict_variants_lexeme_form_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "lexeme_id",
+            "form"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "dict_variants_entry_rank_nonneg": {
+          "name": "dict_variants_entry_rank_nonneg",
+          "value": "\"dict_variants\".\"entry_rank\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.enrollment_grants": {
+      "name": "enrollment_grants",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_user_id": {
+          "name": "owner_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "grantee_user_id": {
+          "name": "grantee_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "enrollment_grants_grantee_idx": {
+          "name": "enrollment_grants_grantee_idx",
+          "columns": [
+            {
+              "expression": "grantee_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "enrollment_grants_owner_idx": {
+          "name": "enrollment_grants_owner_idx",
+          "columns": [
+            {
+              "expression": "owner_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "enrollment_grants_enrollment_fk": {
+          "name": "enrollment_grants_enrollment_fk",
+          "tableFrom": "enrollment_grants",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "owner_user_id",
+            "enrollment_id"
+          ],
+          "columnsTo": [
+            "user_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_grants_grantee_fk": {
+          "name": "enrollment_grants_grantee_fk",
+          "tableFrom": "enrollment_grants",
+          "tableTo": "users",
+          "columnsFrom": [
+            "grantee_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "enrollment_grants_enrollment_grantee_key": {
+          "name": "enrollment_grants_enrollment_grantee_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "enrollment_id",
+            "grantee_user_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "enrollment_grants_not_owner": {
+          "name": "enrollment_grants_not_owner",
+          "value": "\"enrollment_grants\".\"grantee_user_id\" <> \"enrollment_grants\".\"owner_user_id\""
+        },
+        "enrollment_grants_role_known": {
+          "name": "enrollment_grants_role_known",
+          "value": "\"enrollment_grants\".\"role\" in ('tutor')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.enrollments": {
+      "name": "enrollments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_language": {
+          "name": "source_language",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_language": {
+          "name": "target_language",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "enrollments_user_fk": {
+          "name": "enrollments_user_fk",
+          "tableFrom": "enrollments",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "enrollments_user_target_key": {
+          "name": "enrollments_user_target_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "target_language"
+          ]
+        },
+        "enrollments_user_id_id_key": {
+          "name": "enrollments_user_id_id_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "user_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "enrollments_languages_differ": {
+          "name": "enrollments_languages_differ",
+          "value": "\"enrollments\".\"source_language\" <> \"enrollments\".\"target_language\""
+        },
+        "enrollments_source_known": {
+          "name": "enrollments_source_known",
+          "value": "\"enrollments\".\"source_language\" in ('he', 'en')"
+        },
+        "enrollments_target_known": {
+          "name": "enrollments_target_known",
+          "value": "\"enrollments\".\"target_language\" in ('he', 'en', 'ru', 'it')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.photo_import_items": {
+      "name": "photo_import_items",
+      "schema": "",
+      "columns": {
+        "import_id": {
+          "name": "import_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hebrew": {
+          "name": "hebrew",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "corrected_form": {
+          "name": "corrected_form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "options": {
+          "name": "options",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "suggested_sense_id": {
+          "name": "suggested_sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chosen_sense_id": {
+          "name": "chosen_sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ticked": {
+          "name": "ticked",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "hebrew_mismatch": {
+          "name": "hebrew_mismatch",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "photo_import_items_import_fk": {
+          "name": "photo_import_items_import_fk",
+          "tableFrom": "photo_import_items",
+          "tableTo": "photo_imports",
+          "columnsFrom": [
+            "import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "photo_import_items_pkey": {
+          "name": "photo_import_items_pkey",
+          "columns": [
+            "import_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "photo_import_items_status_known": {
+          "name": "photo_import_items_status_known",
+          "value": "\"photo_import_items\".\"status\" in ('pending', 'ready', 'failed')"
+        },
+        "photo_import_items_reason_known": {
+          "name": "photo_import_items_reason_known",
+          "value": "\"photo_import_items\".\"reason\" is null or \"photo_import_items\".\"reason\" in ('sentence', 'no_meaning', 'not_in_language')"
+        },
+        "photo_import_items_tick_needs_sense": {
+          "name": "photo_import_items_tick_needs_sense",
+          "value": "not \"photo_import_items\".\"ticked\" or \"photo_import_items\".\"chosen_sense_id\" is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.photo_imports": {
+      "name": "photo_imports",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "photo": {
+          "name": "photo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "photo_imports_enrollment_created_idx": {
+          "name": "photo_imports_enrollment_created_idx",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "photo_imports_enrollment_fk": {
+          "name": "photo_imports_enrollment_fk",
+          "tableFrom": "photo_imports",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "photo_imports_status_known": {
+          "name": "photo_imports_status_known",
+          "value": "\"photo_imports\".\"status\" in ('reading', 'read', 'failed', 'saved', 'discarded')"
+        },
+        "photo_imports_photo_only_while_reading": {
+          "name": "photo_imports_photo_only_while_reading",
+          "value": "\"photo_imports\".\"photo\" is null or \"photo_imports\".\"status\" = 'reading'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.questions": {
+      "name": "questions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sense_id": {
+          "name": "sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prompt_variant_id": {
+          "name": "prompt_variant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_language": {
+          "name": "target_language",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_language_code": {
+          "name": "user_language_code",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "options": {
+          "name": "options",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prompt": {
+          "name": "prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alternatives": {
+          "name": "alternatives",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tiles": {
+          "name": "tiles",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "questions_user_id_users_id_fk": {
+          "name": "questions_user_id_users_id_fk",
+          "tableFrom": "questions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "questions_sense_id_dict_senses_id_fk": {
+          "name": "questions_sense_id_dict_senses_id_fk",
+          "tableFrom": "questions",
+          "tableTo": "dict_senses",
+          "columnsFrom": [
+            "sense_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "questions_prompt_variant_id_dict_variants_id_fk": {
+          "name": "questions_prompt_variant_id_dict_variants_id_fk",
+          "tableFrom": "questions",
+          "tableTo": "dict_variants",
+          "columnsFrom": [
+            "prompt_variant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "questions_enrollment_fk": {
+          "name": "questions_enrollment_fk",
+          "tableFrom": "questions",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "user_id",
+            "enrollment_id"
+          ],
+          "columnsTo": [
+            "user_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "questions_options_valid": {
+          "name": "questions_options_valid",
+          "value": "\"questions\".\"options\" is null or question_options_valid(\"questions\".\"options\")"
+        },
+        "questions_type_known": {
+          "name": "questions_type_known",
+          "value": "\"questions\".\"type\" in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning')"
+        },
+        "questions_shape_valid": {
+          "name": "questions_shape_valid",
+          "value": "case \"questions\".\"type\"\n        when 'multiple_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'listen_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'matching' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'reverse_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'typed_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'dictation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'letter_tiles' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null\n          and coalesce(array_length(\"questions\".\"tiles\", 1), 0) between 5 and 12\n        when 'read_aloud' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'say_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'typed_meaning' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        else false end"
+        },
+        "questions_owner_complete": {
+          "name": "questions_owner_complete",
+          "value": "(\"questions\".\"user_id\" is null) = (\"questions\".\"enrollment_id\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sense_progress": {
+      "name": "sense_progress",
+      "schema": "",
+      "columns": {
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sense_id": {
+          "name": "sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dimension": {
+          "name": "dimension",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level": {
+          "name": "level",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "last_step_on": {
+          "name": "last_step_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_wrong_on": {
+          "name": "last_wrong_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "sense_progress_enrollment_dimension_idx": {
+          "name": "sense_progress_enrollment_dimension_idx",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dimension",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sense_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "level",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sense_progress_entry_fk": {
+          "name": "sense_progress_entry_fk",
+          "tableFrom": "sense_progress",
+          "tableTo": "vocabulary_entries",
+          "columnsFrom": [
+            "enrollment_id",
+            "sense_id"
+          ],
+          "columnsTo": [
+            "enrollment_id",
+            "sense_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sense_progress_pkey": {
+          "name": "sense_progress_pkey",
+          "columns": [
+            "enrollment_id",
+            "sense_id",
+            "dimension"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sense_progress_dimension_known": {
+          "name": "sense_progress_dimension_known",
+          "value": "\"sense_progress\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
+        },
+        "sense_progress_level_range": {
+          "name": "sense_progress_level_range",
+          "value": "\"sense_progress\".\"level\" between 1 and 5"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.session_progress": {
+      "name": "session_progress",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sense_id": {
+          "name": "sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dimension": {
+          "name": "dimension",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level_before": {
+          "name": "level_before",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level_after": {
+          "name": "level_after",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "session_progress_session_fk": {
+          "name": "session_progress_session_fk",
+          "tableFrom": "session_progress",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "session_progress_pkey": {
+          "name": "session_progress_pkey",
+          "columns": [
+            "session_id",
+            "sense_id",
+            "dimension"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "session_progress_dimension_known": {
+          "name": "session_progress_dimension_known",
+          "value": "\"session_progress\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
+        },
+        "session_progress_levels_valid": {
+          "name": "session_progress_levels_valid",
+          "value": "\"session_progress\".\"level_before\" between 1 and 5 and \"session_progress\".\"level_after\" between \"session_progress\".\"level_before\" and 5"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.session_questions": {
+      "name": "session_questions",
+      "schema": "",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "option_order": {
+          "name": "option_order",
+          "type": "integer[]",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "session_questions_session_id_sessions_id_fk": {
+          "name": "session_questions_session_id_sessions_id_fk",
+          "tableFrom": "session_questions",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "session_questions_question_id_questions_id_fk": {
+          "name": "session_questions_question_id_questions_id_fk",
+          "tableFrom": "session_questions",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "question_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "session_questions_session_id_position_pk": {
+          "name": "session_questions_session_id_position_pk",
+          "columns": [
+            "session_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "session_questions_position_question_key": {
+          "name": "session_questions_position_question_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "session_id",
+            "position",
+            "question_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sessions": {
+      "name": "sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "sessions_one_open_per_enrollment": {
+          "name": "sessions_one_open_per_enrollment",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"sessions\".\"status\" in ('preparing', 'ready')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "sessions_enrollment_created_idx": {
+          "name": "sessions_enrollment_created_idx",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sessions_user_id_users_id_fk": {
+          "name": "sessions_user_id_users_id_fk",
+          "tableFrom": "sessions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sessions_enrollment_fk": {
+          "name": "sessions_enrollment_fk",
+          "tableFrom": "sessions",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "user_id",
+            "enrollment_id"
+          ],
+          "columnsTo": [
+            "user_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sessions_status_known": {
+          "name": "sessions_status_known",
+          "value": "\"sessions\".\"status\" in ('preparing', 'ready', 'completed', 'skipped', 'failed')"
+        },
+        "sessions_source_known": {
+          "name": "sessions_source_known",
+          "value": "\"sessions\".\"source\" in ('seed', 'list')"
+        },
+        "sessions_completed_consistent": {
+          "name": "sessions_completed_consistent",
+          "value": "(\"sessions\".\"status\" = 'completed') = (\"sessions\".\"completed_at\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "username": {
+          "name": "username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "age": {
+          "name": "age",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "native_language": {
+          "name": "native_language",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_username_unique": {
+          "name": "users_username_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "username"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "users_username_format": {
+          "name": "users_username_format",
+          "value": "\"users\".\"username\" ~ '^[a-z0-9_]{3,30}$'"
+        },
+        "users_display_name_length": {
+          "name": "users_display_name_length",
+          "value": "length(\"users\".\"display_name\") between 1 and 60"
+        },
+        "users_age_range": {
+          "name": "users_age_range",
+          "value": "\"users\".\"age\" between 3 and 120"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.vocabulary_entries": {
+      "name": "vocabulary_entries",
+      "schema": "",
+      "columns": {
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sense_id": {
+          "name": "sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lexeme_id": {
+          "name": "lexeme_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lemma": {
+          "name": "lemma",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "variant_id": {
+          "name": "variant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "added_by_user_id": {
+          "name": "added_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "vocabulary_entries_enrollment_lemma_idx": {
+          "name": "vocabulary_entries_enrollment_lemma_idx",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lemma",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "vocabulary_entries_enrollment_fk": {
+          "name": "vocabulary_entries_enrollment_fk",
+          "tableFrom": "vocabulary_entries",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "vocabulary_entries_sense_fk": {
+          "name": "vocabulary_entries_sense_fk",
+          "tableFrom": "vocabulary_entries",
+          "tableTo": "dict_senses",
+          "columnsFrom": [
+            "sense_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "vocabulary_entries_lexeme_lemma_fk": {
+          "name": "vocabulary_entries_lexeme_lemma_fk",
+          "tableFrom": "vocabulary_entries",
+          "tableTo": "dict_lexemes",
+          "columnsFrom": [
+            "lexeme_id",
+            "lemma"
+          ],
+          "columnsTo": [
+            "id",
+            "lemma"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        },
+        "vocabulary_entries_variant_fk": {
+          "name": "vocabulary_entries_variant_fk",
+          "tableFrom": "vocabulary_entries",
+          "tableTo": "dict_variants",
+          "columnsFrom": [
+            "variant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "vocabulary_entries_added_by_fk": {
+          "name": "vocabulary_entries_added_by_fk",
+          "tableFrom": "vocabulary_entries",
+          "tableTo": "users",
+          "columnsFrom": [
+            "added_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "vocabulary_entries_pkey": {
+          "name": "vocabulary_entries_pkey",
+          "columns": [
+            "enrollment_id",
+            "sense_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

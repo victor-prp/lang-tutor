@@ -121,6 +121,18 @@ export const SayTranslationQuestionSchema = z.object({
   alternatives: z.array(z.string()),
 });
 
+// Phase 27 (spec D2, D11). The form, written; the learner types its Hebrew
+// meaning, which the server judges (D3). `meaning` is the stored meaning: shown
+// after the answer, and read by the missed list.
+export const TypedMeaningQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('typed_meaning'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  part_of_speech: z.string(),
+  meaning: z.string(),
+});
+
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
 // the compiler finds every switch that has not learnt it.
 export const QuestionSchema = z.discriminatedUnion('type', [
@@ -133,6 +145,7 @@ export const QuestionSchema = z.discriminatedUnion('type', [
   LetterTilesQuestionSchema,
   ReadAloudQuestionSchema,
   SayTranslationQuestionSchema,
+  TypedMeaningQuestionSchema,
 ]);
 
 // Phase 23. How a typed answer was judged (spec D5). Every verdict but `wrong`
@@ -328,6 +341,20 @@ export const SpeechAnswerResponseSchema = z.object({
   next: NextStepResponseSchema.optional(),
 });
 
+
+// Phase 27 (spec D3, D11). An answer to a card the server judges, with a model
+// call when no rule decides it. At most 300 characters.
+export const JudgedAnswerRequestSchema = z.object({
+  user_id: z.string().min(1),
+  question_id: z.string().min(1),
+  text: z.string().max(300),
+});
+
+export const JudgedAnswerResponseSchema = z.object({
+  verdict: TypedVerdictSchema,
+  // The next-step response, which the app queues while the banner shows.
+  next: NextStepResponseSchema,
+});
 
 // Phase 19. The home screen's one read. `current` is the enrollment's newest
 // session when it is preparing, ready or failed (never completed or skipped).
@@ -790,6 +817,12 @@ export const LlmReconciliationSchema = z.object({
 // empty string for nothing intelligible.
 export const LlmTranscriptSchema = z.object({ heard: z.string() });
 
+// Phase 27 (spec D4). The model's verdict on a meaning-recall answer. Mapped
+// to a typed verdict in the server (domain/judge.ts).
+export const LlmMeaningJudgeSchema = z.object({
+  verdict: z.enum(['right', 'other_sense', 'wrong']),
+});
+
 // Phase 19. The model's answer when asked for a session's wrong options. `key`
 // is echoed from the request (q1, q2, …) rather than a sense id: a short key is
 // one the model cannot mistype.
@@ -811,3 +844,82 @@ export const LlmDistractorsSchema = z.object({
     )
     .max(10),
 });
+
+// Phase 26. Words from a photo: an import is one photo of a word list, read in
+// the background into rows, each a word or phrase with one chosen sense. The
+// image is base64 JPEG, because the app re-encodes every photo. 2 800 000
+// characters is about 2 MB decoded (spec D6).
+export const PhotoImportCreateRequestSchema = z.object({
+  mime_type: z.literal('image/jpeg'),
+  image: z.string().min(1).max(2_800_000),
+});
+
+// `reading`, `failed`, `saved` and `discarded` are stored. `looking_up` and
+// `ready` are worked out from the rows, so two rows finishing at once never
+// race over a counter (spec D4).
+export const PhotoImportStatusSchema = z.enum(['reading', 'looking_up', 'ready', 'failed', 'saved', 'discarded']);
+export const PhotoImportItemStatusSchema = z.enum(['pending', 'ready', 'failed']);
+// Why a ready row has no options (spec D7).
+export const PhotoImportItemReasonSchema = z.enum(['sentence', 'no_meaning', 'not_in_language']);
+
+// One saveable sense of a row's word: a snapshot of the lookup's answer.
+export const PhotoImportOptionSchema = z.object({
+  sense_id: z.string(),
+  variant_id: z.string(),
+  translation: z.string(),
+  part_of_speech: z.string().optional(),
+  example: z.object({ source: z.string(), target: z.string() }).optional(),
+});
+
+export const PhotoImportItemSchema = z.object({
+  position: z.number().int().nonnegative(),
+  // As read from the photo.
+  text: z.string(),
+  // As printed beside it, or null.
+  hebrew: z.string().nullable(),
+  status: PhotoImportItemStatusSchema,
+  // Set when the lookup corrected the text (`gatlo` read, `gatto` looked up).
+  corrected_form: z.string().nullable(),
+  options: z.array(PhotoImportOptionSchema),
+  chosen_sense_id: z.string().nullable(),
+  ticked: z.boolean(),
+  // The printed Hebrew names none of the options.
+  hebrew_mismatch: z.boolean(),
+  reason: PhotoImportItemReasonSchema.nullable(),
+});
+
+// `settled_count` counts the rows no longer pending, ready or failed: the
+// "12 of 32" of the review's status line.
+export const PhotoImportSummarySchema = z.object({
+  id: z.string(),
+  status: PhotoImportStatusSchema,
+  item_count: z.number().int().nonnegative(),
+  settled_count: z.number().int().nonnegative(),
+  created_at: z.string(),
+});
+
+export const PhotoImportSchema = PhotoImportSummarySchema.extend({
+  items: z.array(PhotoImportItemSchema),
+});
+
+export const PhotoImportListSchema = z.array(PhotoImportSummarySchema);
+
+export const PhotoImportItemUpdateSchema = z
+  .object({
+    ticked: z.boolean().optional(),
+    sense_id: z.string().min(1).optional(),
+  })
+  .refine((body) => body.ticked !== undefined || body.sense_id !== undefined, {
+    message: 'nothing to update',
+  });
+
+// Phase 26. The reader's answer (spec D5). `hebrew` is an empty string when
+// nothing is printed: a flat schema, far from the complexity limit the lookup's
+// once hit.
+export const LlmPhotoReadingSchema = z.object({
+  items: z.array(z.object({ text: z.string(), hebrew: z.string() })),
+});
+
+// Phase 26. The match call's answer: a sense number counted from 1, 0 for none
+// (spec D7).
+export const LlmSenseMatchSchema = z.object({ sense: z.number().int() });

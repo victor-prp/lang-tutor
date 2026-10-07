@@ -1,5 +1,5 @@
 {
-  "id": "2d69aa36-768e-40e8-9ccb-4705096d3062",
+  "id": "e5577d58-b997-425c-a32f-6f651c5669d1",
   "prevId": "f57534e5-467e-4f71-9f45-758314e25ae8",
   "version": "7",
   "dialect": "postgresql",
@@ -608,141 +608,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.enrollment_grants": {
-      "name": "enrollment_grants",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()::text"
-        },
-        "enrollment_id": {
-          "name": "enrollment_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owner_user_id": {
-          "name": "owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "grantee_user_id": {
-          "name": "grantee_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "accepted_at": {
-          "name": "accepted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "enrollment_grants_grantee_idx": {
-          "name": "enrollment_grants_grantee_idx",
-          "columns": [
-            {
-              "expression": "grantee_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "enrollment_grants_owner_idx": {
-          "name": "enrollment_grants_owner_idx",
-          "columns": [
-            {
-              "expression": "owner_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "enrollment_grants_enrollment_fk": {
-          "name": "enrollment_grants_enrollment_fk",
-          "tableFrom": "enrollment_grants",
-          "tableTo": "enrollments",
-          "columnsFrom": [
-            "owner_user_id",
-            "enrollment_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "enrollment_grants_grantee_fk": {
-          "name": "enrollment_grants_grantee_fk",
-          "tableFrom": "enrollment_grants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "grantee_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "enrollment_grants_enrollment_grantee_key": {
-          "name": "enrollment_grants_enrollment_grantee_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "enrollment_id",
-            "grantee_user_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "enrollment_grants_not_owner": {
-          "name": "enrollment_grants_not_owner",
-          "value": "\"enrollment_grants\".\"grantee_user_id\" <> \"enrollment_grants\".\"owner_user_id\""
-        },
-        "enrollment_grants_role_known": {
-          "name": "enrollment_grants_role_known",
-          "value": "\"enrollment_grants\".\"role\" in ('tutor')"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.enrollments": {
       "name": "enrollments",
       "schema": "",
@@ -828,6 +693,219 @@
         "enrollments_target_known": {
           "name": "enrollments_target_known",
           "value": "\"enrollments\".\"target_language\" in ('he', 'en', 'ru', 'it')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.photo_import_items": {
+      "name": "photo_import_items",
+      "schema": "",
+      "columns": {
+        "import_id": {
+          "name": "import_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hebrew": {
+          "name": "hebrew",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "corrected_form": {
+          "name": "corrected_form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "options": {
+          "name": "options",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "suggested_sense_id": {
+          "name": "suggested_sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chosen_sense_id": {
+          "name": "chosen_sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ticked": {
+          "name": "ticked",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "hebrew_mismatch": {
+          "name": "hebrew_mismatch",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "photo_import_items_import_fk": {
+          "name": "photo_import_items_import_fk",
+          "tableFrom": "photo_import_items",
+          "tableTo": "photo_imports",
+          "columnsFrom": [
+            "import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "photo_import_items_pkey": {
+          "name": "photo_import_items_pkey",
+          "columns": [
+            "import_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "photo_import_items_status_known": {
+          "name": "photo_import_items_status_known",
+          "value": "\"photo_import_items\".\"status\" in ('pending', 'ready', 'failed')"
+        },
+        "photo_import_items_reason_known": {
+          "name": "photo_import_items_reason_known",
+          "value": "\"photo_import_items\".\"reason\" is null or \"photo_import_items\".\"reason\" in ('sentence', 'no_meaning', 'not_in_language')"
+        },
+        "photo_import_items_tick_needs_sense": {
+          "name": "photo_import_items_tick_needs_sense",
+          "value": "not \"photo_import_items\".\"ticked\" or \"photo_import_items\".\"chosen_sense_id\" is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.photo_imports": {
+      "name": "photo_imports",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "photo": {
+          "name": "photo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "photo_imports_enrollment_created_idx": {
+          "name": "photo_imports_enrollment_created_idx",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "photo_imports_enrollment_fk": {
+          "name": "photo_imports_enrollment_fk",
+          "tableFrom": "photo_imports",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "photo_imports_status_known": {
+          "name": "photo_imports_status_known",
+          "value": "\"photo_imports\".\"status\" in ('reading', 'read', 'failed', 'saved', 'discarded')"
+        },
+        "photo_imports_photo_only_while_reading": {
+          "name": "photo_imports_photo_only_while_reading",
+          "value": "\"photo_imports\".\"photo\" is null or \"photo_imports\".\"status\" = 'reading'"
         }
       },
       "isRLSEnabled": false
@@ -1514,12 +1592,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "added_by_user_id": {
-          "name": "added_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1610,19 +1682,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "vocabulary_entries_added_by_fk": {
-          "name": "vocabulary_entries_added_by_fk",
-          "tableFrom": "vocabulary_entries",
-          "tableTo": "users",
-          "columnsFrom": [
-            "added_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },

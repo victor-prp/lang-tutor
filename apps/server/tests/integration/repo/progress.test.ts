@@ -371,3 +371,19 @@ describe('phase 25: spoken answers as evidence', () => {
     ]);
   });
 });
+
+describe('phase 27: a judged answer as evidence', () => {
+  it('reads a typed_meaning answer by its verdict (phase 27)', async () => {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'tome', translations: ['ספר'] });
+    const asked = [{ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' }];
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked,
+      types: ['typed_meaning'],
+    });
+    await withTx(t.db, (tx) => createSessionRepo(tx).insertAnswer(sessionId, 0, questions[0].id, { text: 'ספר', verdict: 'exact' }));
+    const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
+    expect(evidence!.answers).toEqual([{ senseId: asked[0].senseId, type: 'typed_meaning', verdict: 'exact' }]);
+  });
+});

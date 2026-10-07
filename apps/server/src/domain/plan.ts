@@ -25,9 +25,11 @@ export type SessionPlan = { order: number[]; types: QuestionType[]; board: { sta
 /** Each run of three climbs these tiers: recognise, pick the form, produce.
  *  A tier's first type is always eligible. Part B inserts the cloze types at
  *  index 1 of the second and third. Phase 25 appends read aloud, a warm-up, to
- *  the first, and say the translation, recall, to the third. */
+ *  the first, and say the translation, recall, to the third. Phase 27 appends
+ *  meaning recall, receptive recall, to the first: the hardest recognise card,
+ *  so last. */
 export const TIERS: readonly (readonly QuestionType[])[] = [
-  ['multiple_choice', 'listen_choice', 'read_aloud'],
+  ['multiple_choice', 'listen_choice', 'read_aloud', 'typed_meaning'],
   ['reverse_choice', 'letter_tiles'],
   ['typed_translation', 'dictation', 'say_translation'],
 ];
@@ -43,6 +45,7 @@ function eligible(type: QuestionType, pick: PlanPick, input: PlanInput): boolean
     case 'multiple_choice':
     case 'reverse_choice':
     case 'typed_translation':
+    case 'typed_meaning':
       return true;
     case 'listen_choice':
     case 'dictation':

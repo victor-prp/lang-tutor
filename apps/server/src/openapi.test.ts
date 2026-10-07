@@ -97,9 +97,10 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all seventeen paths and nothing else', async () => {
+  it('contains all twenty-three paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
+      '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
@@ -108,8 +109,13 @@ describe('the document as a whole', () => {
       '/api/grants/{id}',
       '/api/grants/{id}/accept',
       '/api/login',
+      '/api/photo-imports/{id}',
+      '/api/photo-imports/{id}/discard',
+      '/api/photo-imports/{id}/items/{position}',
+      '/api/photo-imports/{id}/save',
       '/api/sessions',
       '/api/sessions/{id}',
+      '/api/sessions/{id}/judged-answer',
       NEXT_STEP,
       '/api/sessions/{id}/skip',
       '/api/sessions/{id}/speech',
@@ -137,6 +143,12 @@ describe('the grant endpoints in the published document (phase 28)', () => {
 });
 
 describe('the enrollment endpoints in the published document', () => {
+  it('declares the photo upload as 202 with 400, 404 and 413', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths['/api/enrollments/{id}/photo-imports'].post.responses).sort()).toEqual(['202', '400', '404', '413']);
+    expect(Object.keys(doc.paths['/api/photo-imports/{id}/items/{position}'].patch.responses).sort()).toEqual(['200', '400', '404', '409']);
+  });
+
   it('declares every status POST /api/users/{id}/enrollments can return', async () => {
     const doc = await openApiDocument();
     expect(
@@ -315,5 +327,14 @@ describe('the actor header in the published document (phase 28)', () => {
       expect(header.description).toMatch(/NOT AUTHENTICATED/);
       expect(Object.keys(operation.responses)).toContain('403');
     }
+  });
+});
+
+describe('POST /api/sessions/{id}/judged-answer in the published document', () => {
+  it('declares every status it can return, and says it costs money', async () => {
+    const doc = await openApiDocument();
+    const op = doc.paths['/api/sessions/{id}/judged-answer'].post;
+    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '404', '409', '502']);
+    expect(op.description).toMatch(/costs money/);
   });
 });

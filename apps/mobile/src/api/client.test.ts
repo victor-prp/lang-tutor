@@ -1,6 +1,12 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { ApiError, SPEECH_UPLOAD_TIMEOUT_MS, createApiClient } from './client';
+import {
+  ApiError,
+  JUDGE_REQUEST_TIMEOUT_MS,
+  PHOTO_UPLOAD_TIMEOUT_MS,
+  SPEECH_UPLOAD_TIMEOUT_MS,
+  createApiClient,
+} from './client';
 
 function buildClient(mockFetch: jest.Mock) {
   return createApiClient({
@@ -387,5 +393,80 @@ describe('api/client', () => {
       expect(calls[0].init.method).toBe('DELETE');
       expect(calls[0].init.headers).toEqual({ 'X-Acting-User-Id': 'u_1' });
     });
+  });
+
+  it('posts a judged answer and returns the verdict with the next step (phase 27)', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const body = { verdict: 'exact', next: { complete: true } };
+    const fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const api = createApiClient({ baseUrl: 'http://api', fetch });
+    const request = { user_id: 'u', question_id: 'q', text: 'להזמין' };
+    expect(await api.judgeAnswer('s 1', request)).toEqual(body);
+    expect(calls[0].url).toBe('http://api/api/sessions/s%201/judged-answer');
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(request);
+  });
+
+  it('abandons a judged answer that stalls, so the card can offer a retry (phase 27)', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetch = ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })) as unknown as typeof globalThis.fetch;
+      const api = createApiClient({ baseUrl: 'http://api', fetch });
+      const pending = api.judgeAnswer('s1', { user_id: 'u', question_id: 'q', text: 'x' });
+      const outcome = expect(pending).rejects.toThrow('aborted');
+      jest.advanceTimersByTime(JUDGE_REQUEST_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('photo imports', () => {
+  it('uploads to the enrollment, patches a row, saves and discards', async () => {
+    const calls: { url: string; method?: string; body?: unknown }[] = [];
+    const mockFetch = jest.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const status = url.endsWith('/discard') ? 204 : 200;
+      return { ok: true, status, json: async () => ({}) };
+    });
+    const client = buildClient(mockFetch as unknown as jest.Mock);
+    await client.createPhotoImport('e 1', { mime_type: 'image/jpeg', image: 'QUJD' });
+    await client.listPhotoImports('e 1');
+    await client.getPhotoImport('i1');
+    await client.updatePhotoImportItem('i1', 3, { ticked: false });
+    await client.savePhotoImport('i1');
+    await client.discardPhotoImport('i1');
+    expect(calls.map(({ url, method }) => [method ?? 'GET', url.replace('http://test.local', '')])).toEqual([
+      ['POST', '/api/enrollments/e%201/photo-imports'],
+      ['GET', '/api/enrollments/e%201/photo-imports'],
+      ['GET', '/api/photo-imports/i1'],
+      ['PATCH', '/api/photo-imports/i1/items/3'],
+      ['POST', '/api/photo-imports/i1/save'],
+      ['POST', '/api/photo-imports/i1/discard'],
+    ]);
+    expect(calls[3].body).toEqual({ ticked: false });
+  });
+
+  it('abandons a photo upload that stalls, so the screen is not stuck uploading', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetch = ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })) as unknown as typeof globalThis.fetch;
+      const api = createApiClient({ baseUrl: 'http://api', fetch });
+      const pending = api.createPhotoImport('e1', { mime_type: 'image/jpeg', image: 'QUJD' });
+      const outcome = expect(pending).rejects.toThrow('aborted');
+      jest.advanceTimersByTime(PHOTO_UPLOAD_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

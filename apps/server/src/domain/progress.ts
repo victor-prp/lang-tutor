@@ -9,7 +9,7 @@ import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/d
 /** Phase 24. The types answered by an option, and by a text with its verdict.
  *  Phase 25: a speaking card's answer is stored as a text with its verdict too. */
 export type ChoiceAnswerType = 'multiple_choice' | 'reverse_choice' | 'listen_choice' | 'matching';
-export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation';
+export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation' | 'typed_meaning';
 
 /** One answer as the rule reads it: which sense, which exercise, and how it
  *  was judged. A choice is right or wrong; a text answer has its verdict. */
@@ -155,6 +155,13 @@ export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
           // Answered by typing, after "can't speak now" (spec D8).
           return typedEvidence(answer.verdict, piece);
       }
+    case 'typed_meaning':
+      // Phase 27 (spec D10). Recalling a meaning is stronger than picking it
+      // from four, which is credited uncapped; the answer is Hebrew, so no
+      // spelling. Another sense says nothing about this one.
+      if (answer.verdict === 'exact') return [piece('written_receptive', true)];
+      if (answer.verdict === 'wrong') return [piece('written_receptive', false)];
+      return [];
   }
 }
 

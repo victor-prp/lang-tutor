@@ -1,4 +1,4 @@
-import { SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
+import { PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
 
 // A pure function of its argument: it reads no global, so a test hands it a
 // literal object rather than mutating the process environment.
@@ -10,6 +10,8 @@ export type Config = {
   translationTimeoutMs: number;
   sessionGenerationTimeoutMs: number;
   speechTimeoutMs: number;
+  judgeTimeoutMs: number;
+  photoReadTimeoutMs: number;
 };
 
 // The one place this default lives. Both composition roots read it from here.
@@ -24,6 +26,9 @@ const DEFAULT_TRANSLATION_TIMEOUT_MS = 25_000;
 // Phase 25 (spec D13). One transcription, which the POC measured at 1.5–2 s.
 // Past this the card says it could not check and offers another try.
 const DEFAULT_SPEECH_TIMEOUT_MS = 8_000;
+
+// Phase 27 (spec D4). One judged answer: the learner waits on it, as on a transcription.
+const DEFAULT_JUDGE_TIMEOUT_MS = 8_000;
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   return {
@@ -44,6 +49,13 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       SESSION_GENERATION_BUDGET_MS,
     ),
     speechTimeoutMs: Number(env.SPEECH_TIMEOUT_MS) || DEFAULT_SPEECH_TIMEOUT_MS,
+    judgeTimeoutMs: Number(env.JUDGE_TIMEOUT_MS) || DEFAULT_JUDGE_TIMEOUT_MS,
+    // Phase 26 (spec D6). A read's budget, capped like generation's: the
+    // read-photo job expires at twice PHOTO_READ_BUDGET_MS.
+    photoReadTimeoutMs: Math.min(
+      Number(env.PHOTO_READ_TIMEOUT_MS) || PHOTO_READ_BUDGET_MS,
+      PHOTO_READ_BUDGET_MS,
+    ),
   };
 }
 

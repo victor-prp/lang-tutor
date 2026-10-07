@@ -4,6 +4,8 @@ import {
   CreateSessionResponseSchema,
   CurrentSessionResponseSchema,
   ErrorSchema,
+  JudgedAnswerRequestSchema,
+  JudgedAnswerResponseSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
   SessionViewSchema,
@@ -146,7 +148,7 @@ const nextStepRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current question',
   description:
-    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response.',
+    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
@@ -188,6 +190,29 @@ const speechRoute = createRoute({
     409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
     413: failure('The body is over 300 KB.'),
     502: failure('The transcription failed or timed out; the card may be tried again.'),
+  },
+});
+
+const judgedAnswerRoute = createRoute({
+  method: 'post',
+  path: '/sessions/{id}/judged-answer',
+  tags: ['sessions'],
+  summary: 'Answer the current card that the server judges',
+  description:
+    'Takes the text answer to the current `typed_meaning` card. An empty text, or the stored meaning, is judged by rule; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`.',
+  request: {
+    params: sessionIdParam,
+    body: { required: true, content: { 'application/json': { schema: JudgedAnswerRequestSchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: JudgedAnswerResponseSchema } },
+      description: 'The answer was judged and recorded.',
+    },
+    400: failure('The request body did not validate, or the current card is not one the server judges.'),
+    404: failure('No session has this id, or it is not this learner’s.'),
+    409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
+    502: failure('The judge failed or timed out; nothing was recorded, and the answer may be sent again.'),
   },
 });
 
@@ -316,6 +341,24 @@ export function createSessionsRouter(sessions: SessionService) {
       }
       if (error instanceof AnswerKindMismatch) return c.json({ error: 'the current card is not a speaking card' }, 400);
       if (error instanceof LlmUnavailable) return c.json({ error: 'speech unavailable' }, 502);
+      throw error;
+    }
+  });
+
+  router.openapi(judgedAnswerRoute, async (c) => {
+    const { id } = c.req.valid('param');
+    const body = c.req.valid('json');
+    try {
+      const result = await sessions.answerJudged(id, { userId: body.user_id, questionId: body.question_id, text: body.text });
+      return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
+    } catch (error) {
+      if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
+      if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      if (error instanceof QuestionDesynced) {
+        return c.json({ error: "question_id does not match the session's current question" }, 409);
+      }
+      if (error instanceof AnswerKindMismatch) return c.json({ error: 'the current card is not judged by the server' }, 400);
+      if (error instanceof LlmUnavailable) return c.json({ error: 'judge unavailable' }, 502);
       throw error;
     }
   });

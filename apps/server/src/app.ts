@@ -7,6 +7,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { AppDeps } from './composition';
 import { createEnrollmentsRouter } from './routes/enrollments';
 import { createGrantsRouter } from './routes/grants';
+import { createPhotoImportsRouter } from './routes/photoImports';
 import { createSessionsRouter } from './routes/sessions';
 import { createTranslationsRouter } from './routes/translations';
 import { createUsersRouter } from './routes/users';
@@ -52,6 +53,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api', createEnrollmentsRouter(deps.enrollments));
   app.route('/api', createGrantsRouter(deps.grants));
   app.route('/api', createVocabularyRouter(deps.vocabulary));
+  app.route('/api', createPhotoImportsRouter(deps.photoImports));
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   app.route('/api', createSessionsRouter(deps.sessions));
 

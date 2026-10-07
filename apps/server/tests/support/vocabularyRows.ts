@@ -20,6 +20,8 @@ export async function seedSavedSenses(
     languageCode?: string;
     /** Who saved them; the enrollment's owner when omitted. */
     addedByUserId?: string;
+    /** Phase 27: the saved example of the first sense's rendering. */
+    example?: { source: string; target: string };
   },
 ): Promise<{ lexemeId: string; variantId: string; senseIds: string[] }> {
   const word = await insertLexeme(db, {
@@ -37,8 +39,8 @@ export async function seedSavedSenses(
           senseCode: `s${i}`,
           rank: i,
           translation,
-          exampleSource: null,
-          exampleTarget: null,
+          exampleSource: i === 0 ? (input.example?.source ?? null) : null,
+          exampleTarget: i === 0 ? (input.example?.target ?? null) : null,
         })),
       },
     ],

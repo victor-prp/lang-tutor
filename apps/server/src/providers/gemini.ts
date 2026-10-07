@@ -44,6 +44,8 @@ type GeminiDeps = {
   apiKey: string;
   model: string;
   timeoutMs: number;
+  // A setting, not a collaborator (ADR 0002 R5). Phase 27: 0 turns thinking off.
+  thinkingBudget?: number;
 };
 
 /** One generateContent call and its envelope: the budget, the key header, the
@@ -102,6 +104,7 @@ export function createGeminiClient(deps: GeminiDeps) {
         temperature: 0,
         responseMimeType: 'application/json',
         responseSchema: toGeminiSchema(request.schema),
+        ...(deps.thinkingBudget === undefined ? {} : { thinkingConfig: { thinkingBudget: deps.thinkingBudget } }),
       },
     });
 }
@@ -122,6 +125,35 @@ export function createGeminiTranscriber(deps: GeminiDeps) {
         responseMimeType: 'application/json',
         responseSchema: toGeminiSchema(request.schema),
         thinkingConfig: { thinkingBudget: 0 },
+      },
+    });
+}
+
+/**
+ * Phase 26 (spec D5). The same call with a photo in the user turn: the image
+ * part first, then the text. Its own factory, because widening LlmClient for an
+ * image would widen it for every caller. Wired only in composition.ts, where
+ * the `: VisionClient` annotation checks it.
+ */
+export function createGeminiVisionClient(deps: GeminiDeps) {
+  return (request: {
+    system: string;
+    user: string;
+    schema: ZodType;
+    image: { data: string; mimeType: string };
+  }): Promise<string> =>
+    generate(deps, {
+      systemInstruction: { parts: [{ text: request.system }] },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ inlineData: { mimeType: request.image.mimeType, data: request.image.data } }, { text: request.user }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json',
+        responseSchema: toGeminiSchema(request.schema),
       },
     });
 }

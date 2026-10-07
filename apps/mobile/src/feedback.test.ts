@@ -144,3 +144,29 @@ describe('phase 25 banners', () => {
     expect(feedbackFor(SAY, { text: 'parlare' })).toMatchObject({ tone: 'correct', verdict: 'exact' });
   });
 });
+
+describe('typed_meaning banners (phase 27 D12)', () => {
+  const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין' };
+  it('a right answer as stored is just right', () => {
+    expect(feedbackFor(MEANING, { text: 'לְהַזְמִין', judged: 'exact' })).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: 'exact' });
+  });
+  it('a right answer in other words shows the stored meaning', () => {
+    expect(feedbackFor(MEANING, { text: 'לשריין', judged: 'exact' })).toEqual({
+      tone: 'correct',
+      title: 'נכון! הפירוש השמור:',
+      line: 'להזמין',
+      verdict: 'exact',
+    });
+  });
+  it('another sense names the meaning practised', () => {
+    expect(feedbackFor(MEANING, { text: 'ספר', judged: 'alternative' })).toEqual({
+      tone: 'correct',
+      title: 'נכון, אבל כאן תרגלנו:',
+      line: 'להזמין',
+      verdict: 'alternative',
+    });
+  });
+  it('a wrong answer shows the meaning', () => {
+    expect(feedbackFor(MEANING, { text: '', judged: 'wrong' })).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'להזמין', verdict: 'wrong' });
+  });
+});

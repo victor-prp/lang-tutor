@@ -1,12 +1,15 @@
-import type { SessionSource, SessionStatus, SpeechVerdict } from '@lang-tutor/core/api';
-import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
+import type { SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
+import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
   LIVE_DIMENSIONS,
+  MAX_JUDGED_TEXT,
+  isJudged,
   isSpeaking,
   shuffleSession,
   speakable,
   spokenVerdict,
   type AnswerInput,
+  type JudgedQuestion,
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
 
@@ -22,6 +25,7 @@ import {
   validateDistractors,
   type DistractorVerdict,
 } from '../domain/distractors';
+import { buildMeaningJudgePrompt, meaningRuleVerdict, parseMeaningJudge, type MeaningJudgeContext } from '../domain/judge';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planSession } from '../domain/plan';
@@ -82,6 +86,9 @@ export type SessionResult = SessionRecord & { progress: ProgressChange[] };
  *  judged, and the session when the answer was recorded (null when not). */
 export type SpeechResult = { heard: string; verdict: SpeechVerdict; session: SessionResult | null };
 
+/** Phase 27. A judged answer: its verdict, and the session it was recorded in. */
+export type JudgedResult = { verdict: TypedVerdict; session: SessionResult };
+
 /**
  * Phase 20. Runs the progress rule over an ended session's answers, inside the
  * transaction that ended it. The status change and these writes are dependent
@@ -126,6 +133,7 @@ export function createSessionService({
   logger,
   llm,
   transcriber,
+  judge,
 }: {
   transaction: Transaction;
   rng: () => number;
@@ -133,6 +141,7 @@ export function createSessionService({
   logger: Logger;
   llm: LlmClient;
   transcriber: SpeechTranscriber;
+  judge: LlmClient;
 }) {
   const service = {
     /**
@@ -388,6 +397,83 @@ export function createSessionService({
       });
       const session = verdict === 'unheard' ? null : await service.submitAnswer(sessionId, input.questionId, { heard });
       return { heard, verdict, session };
+    },
+
+    /**
+     * Phase 27 (spec D3). A text answer the server judges. The card is checked
+     * first, so no model call is spent on a stale or wrong request; a rule
+     * decides an empty answer and the stored meaning; otherwise the judge is
+     * called outside any transaction (ADR 0001 R8); and the verdict is recorded
+     * through submitAnswer, exactly as a next-step is.
+     */
+    answerJudged: async (
+      sessionId: string,
+      input: { userId: string; questionId: string; text: string },
+    ): Promise<JudgedResult> => {
+      type Checked =
+        | { replay: JudgedResult }
+        | { current: JudgedQuestion; context: MeaningJudgeContext };
+      const checked = await transaction(async (repos): Promise<Checked> => {
+        const loaded = await repos.session.loadSession(sessionId);
+        if (!loaded || loaded.user_id !== input.userId) throw new SessionNotFound(sessionId);
+        if (loaded.status !== 'ready' && loaded.status !== 'completed') {
+          throw new SessionNotReady(sessionId, loaded.status);
+        }
+        // A retry of an answer already recorded: the stored verdict, no call.
+        // Only this endpoint answers a judged card, so any typed verdict is one.
+        const last = loaded.answers[loaded.answers.length - 1];
+        if (last && last.question_id === input.questionId) {
+          const verdict = TypedVerdictSchema.safeParse(last.verdict);
+          if (!verdict.success) throw new QuestionDesynced(input.questionId);
+          return { replay: { verdict: verdict.data, session: { ...loaded, progress: await progressOf(repos, sessionId, loaded) } } };
+        }
+        const current = currentQuestion(loaded);
+        if (!current || current.id !== input.questionId) throw new QuestionDesynced(input.questionId);
+        if (!isJudged(current)) throw new AnswerKindMismatch(input.questionId);
+        const state = await repos.session.findState(sessionId);
+        const enrolled = state ? await repos.enrollment.findById(state.enrollmentId) : undefined;
+        const found = await repos.question.findJudgeContext(current.id);
+        if (!enrolled || !found) throw new SessionNotFound(sessionId);
+        return { current, context: { language: enrolled.target_language as LanguageCode, ...found } };
+      });
+      if ('replay' in checked) return checked.replay;
+
+      const text = input.text.slice(0, MAX_JUDGED_TEXT);
+      let verdict = meaningRuleVerdict(checked.current.meaning, text);
+      const judgedBy = verdict === null ? 'model' : 'rule';
+      const started = now();
+      if (verdict === null) {
+        try {
+          const raw = await judge(buildMeaningJudgePrompt(checked.context, text));
+          verdict = parseMeaningJudge(raw);
+          if (verdict === null) throw new LlmUnavailable('the verdict was unreadable');
+        } catch (error) {
+          logger.info({
+            event: 'answer_judge_failed',
+            session_id: sessionId,
+            question_type: checked.current.type,
+            judge_ms: now() - started,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          throw error;
+        }
+      }
+      // Logged before the answer is recorded: a paid call is always logged,
+      // even when submitAnswer then throws on a desync race.
+      logger.info({
+        event: 'answer_judged',
+        session_id: sessionId,
+        question_type: checked.current.type,
+        verdict,
+        judged_by: judgedBy,
+        ...(judgedBy === 'model' ? { judge_ms: now() - started } : {}),
+        chars: text.length,
+      });
+      const session = await service.submitAnswer(sessionId, input.questionId, { text, judged: verdict });
+      // Two overlapping requests may both have paid for a call; step replayed
+      // the first, so report the verdict stored for this card, not our own.
+      const stored = TypedVerdictSchema.safeParse(session.answers.find((a) => a.question_id === input.questionId)?.verdict);
+      return { verdict: stored.success ? stored.data : verdict, session };
     },
 
     /**

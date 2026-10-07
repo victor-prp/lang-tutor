@@ -1,11 +1,11 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerTyped, generationStub, nearMiss, readCard, rightOption } from './support/cards';
+import { answerChoice, answerMeaning, answerTyped, generationStub, nearMiss, readCard, rightOption } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { PROCHITALA, ZAMOK } from './support/lexemes';
-import { clearGemini, expectGeminiPayload } from './support/mockServer';
+import { clearGemini, expectGeminiPayload, expectJudge } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { createLearner, logIn } from './support/users';
 import { withVoices } from './support/voices';
@@ -80,9 +80,13 @@ test('a list session mixes three card types, and a typed near miss counts', asyn
   await expect(page.getByTestId('typed-input')).not.toBeEditable();
   await page.getByTestId('continue-button').click();
 
-  // 4. Today's card again: the cycle repeats.
-  card = await readCard(page, 4, 4);
-  await answerChoice(page, card, true);
+  // 4. The first run's recognise slot again, now a meaning card: ordinal 0, run 1
+  // prefers listen_choice (index 1), ineligible with no voices, then read_aloud,
+  // removed with speaking off, then typed_meaning. A synonym is the judge's.
+  await readCard(page, 4, 4, 'meaning');
+  await expectJudge(request, 'right');
+  await answerMeaning(page, 'מילה');
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await page.getByTestId('continue-button').click();
 
   // Results: all four right. Over five dimensions no single card lifts a new
@@ -122,7 +126,10 @@ test('"show the answer" on a typed card is wrong, and the word is missed', async
   expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(FORM_OF[card.prompt]);
   await page.getByTestId('continue-button').click();
 
-  await answerChoice(page, await readCard(page, 4, 4), true);
+  // 4 is a meaning card (see the first test), answered by a synonym the judge accepts.
+  await readCard(page, 4, 4, 'meaning');
+  await expectJudge(request, 'right');
+  await answerMeaning(page, 'מילה');
   await page.getByTestId('continue-button').click();
 
   await expect(page.getByTestId('results-score')).toHaveText(/3\s*\/\s*4/);

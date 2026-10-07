@@ -11,6 +11,7 @@ import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
+import type { PhotoImportRepo } from '../repo/photoImports';
 import type { VocabularyRepo } from '../repo/vocabulary';
 import { createSessionService, type Transaction } from './sessions';
 
@@ -48,6 +49,9 @@ describe('repos', () => {
     },
     insertGeneratedQuestions: () => {
       throw new Error('submitAnswer must not write generated questions');
+    },
+    findJudgeContext: () => {
+      throw new Error('submitAnswer must not read the judge context');
     },
   };
 
@@ -160,6 +164,22 @@ describe('repos', () => {
     listEndedSessions: unreachableProgress,
   };
 
+  const photoImportRepo: PhotoImportRepo = {
+    insertImport: forbidden,
+    deleteExpired: forbidden,
+    findImport: forbidden,
+    findImportForUpdate: forbidden,
+    findPhoto: forbidden,
+    listOpen: forbidden,
+    transition: forbidden,
+    insertItems: forbidden,
+    listItems: forbidden,
+    findItem: forbidden,
+    writeItem: forbidden,
+    markItemFailed: forbidden,
+    updateItem: forbidden,
+  };
+
   function fakeTransaction(session: SessionRepo): Transaction {
     return (run) =>
       run({
@@ -171,6 +191,7 @@ describe('repos', () => {
         dict: dictRepo,
         vocabulary: vocabularyRepo,
         progress: progressRepo,
+        photoImport: photoImportRepo,
         jobs: {
           enqueue: () => {
             throw new Error('the submit-answer use case must not enqueue a job');
@@ -187,6 +208,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
     });
 
     await expect(
@@ -233,6 +255,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
     });
 
     const result = await service.submitAnswer('s1', 't1', { text: 'finestar' });
@@ -248,6 +271,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
     });
 
     await expect(service.submitAnswer('s1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
@@ -278,6 +302,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
     });
 
     await service.createNextSession(E, { listening: true, speaking });

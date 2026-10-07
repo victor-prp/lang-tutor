@@ -8,11 +8,14 @@ import type { TranslationService } from './services/translations';
 import type { UserService } from './services/users';
 import type { GrantService } from './services/grants';
 import type { VocabularyService } from './services/vocabulary';
-import { createFakeLogger } from '../tests/support/fakes';
+import { createFakeAppDeps, createFakeLogger } from '../tests/support/fakes';
 
 // A service that fails if it is called at all. Passing it alongside a health fake
 // proves the health route never reaches the service, rather than assuming it.
 const unreachableSessions: SessionService = {
+  answerJudged: () => {
+    throw new Error('the health route must not reach the session service');
+  },
   answerBySpeech: () => {
     throw new Error('the health route must not reach the session service');
   },
@@ -92,6 +95,7 @@ const unreachableGrants: GrantService = {
     throw new Error('the health route must not reach the grant service');
   },
 };
+const unreachablePhotoImports = createFakeAppDeps().photoImports;
 
 function depsWithPing(ok: boolean): AppDeps {
   return {
@@ -101,6 +105,7 @@ function depsWithPing(ok: boolean): AppDeps {
     enrollments: unreachableEnrollments,
     translations: unreachableTranslations,
     vocabulary: unreachableVocabulary,
+    photoImports: unreachablePhotoImports,
     health: { ping: async () => ok },
     identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001 },
     logger: createFakeLogger(),

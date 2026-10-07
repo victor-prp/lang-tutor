@@ -498,3 +498,16 @@ describe('phase 25 generation', () => {
     });
   });
 });
+
+describe('typed_meaning content (phase 27 D15)', () => {
+  it('asks the model nothing and stores the meaning as the prompt', () => {
+    const ROW = CONTEXT[0];
+    expect(taskFor('typed_meaning')).toBeNull();
+    expect(generatedContent(ROW, 'typed_meaning', NOTHING_GENERATED, NO_EXTRAS)).toEqual({
+      prompt: ROW.translation,
+      options: null,
+      alternatives: null,
+      tiles: null,
+    });
+  });
+});

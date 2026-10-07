@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
 import type {
   LanguageCode,
+  TypedVerdict,
   LlmDistractors,
   LlmEntry,
   LlmReconciliation,
@@ -18,6 +19,7 @@ import {
   parseLlmDistractors,
   type DistractorItem,
 } from '../../src/domain/distractors';
+import { buildMeaningJudgePrompt, parseMeaningJudge, type MeaningJudgeContext } from '../../src/domain/judge';
 import { parseTranscript, transcriptionSystem } from '../../src/domain/speech';
 import type { SpeechTranscriber } from '../../src/services/speech';
 import {
@@ -153,4 +155,13 @@ export async function askTranscription(
     schema: LlmTranscriptSchema,
   });
   return parseTranscript(raw);
+}
+
+/** Phase 27. The real meaning-judge prompt and parser over one answer — what
+ *  answerJudged sends when no rule decides. Null when unreadable. */
+export async function askJudge(
+  llm: LlmClient,
+  kase: { context: MeaningJudgeContext; answer: string },
+): Promise<TypedVerdict | null> {
+  return parseMeaningJudge(await llm(buildMeaningJudgePrompt(kase.context, kase.answer)));
 }
