@@ -76,6 +76,10 @@ grep -rn "'tutor'" apps/server/src --include='*.ts' --exclude='*.test.ts' \
   `repo/grants.ts` like production code. `apps/server/tests/` is outside every command.
 - R2 scans both apps' `src`, test files excepted: a test may spell the header it asserts on.
 - R3 scans `apps/server/src`, test files excepted, for the same reason.
+- **`routes/actor.ts` is a deliberate exception to [ADR 0003](adr-0003-openapi-wire-contract.md) R2.**
+  It defines the header's zod schema inside `routes/`. The header is transport, not a body
+  schema, and putting it in `packages/core` would name the header in a second place, which
+  R2 here forbids.
 - **The exceptions are the owners.** `db/schema.ts` declares the table and the role enum,
   `routes/actor.ts` and `api/client.ts` are each app's one header site, `domain/access.ts`
   holds the role map.
