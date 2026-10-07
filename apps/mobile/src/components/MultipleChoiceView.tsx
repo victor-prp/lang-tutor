@@ -1,6 +1,6 @@
 import type { MatchingQuestion } from '@lang-tutor/core/api';
 import type { ChoiceQuestion } from '@lang-tutor/core/domain';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { ListenPrompt } from '@/components/ListenPrompt';
@@ -11,6 +11,9 @@ import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 type Props = {
   question: Exclude<ChoiceQuestion, MatchingQuestion>;
+  /** Phase 27: what the card shows in place of its prompt (a gap card has no
+   *  `question` text, and its sentence speaks only once answered). */
+  prompt?: ReactNode;
   /** What the card asks, in the learner's language. */
   instruction: string;
   /** The enrollment's target language. Voice phase: today's card speaks its
@@ -23,10 +26,11 @@ type Props = {
 // Phase 23. Today's card asks a target word and offers Hebrew meanings; the
 // reversed card asks a Hebrew meaning and offers target words. Only the text
 // directions differ (spec D10).
-export function MultipleChoiceView({ question, instruction, language, selectedOption, onSelect }: Props) {
+export function MultipleChoiceView({ question, instruction, language, selectedOption, onSelect, prompt }: Props) {
   const reversed = question.type === 'reverse_choice';
-  const listening = question.type === 'listen_choice';
-  const partOfSpeech = reversed ? strings.partOfSpeech(question.part_of_speech) : undefined;
+  // The options are target words on a reversed or gap card: left to right.
+  const optionsLtr = reversed || question.type === 'cloze_choice';
+  const partOfSpeech = question.type === 'reverse_choice' ? strings.partOfSpeech(question.part_of_speech) : undefined;
   // All four buttons match the tallest, so a wrapped phrase does not leave the
   // set visually ragged. Reset on every new question.
   const [maxHeight, setMaxHeight] = useState(0);
@@ -47,9 +51,11 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
   return (
     <View style={styles.container}>
       <Text style={styles.instruction}>{instruction}</Text>
-      {listening ? (
+      {prompt !== undefined ? (
+        prompt
+      ) : question.type === 'listen_choice' ? (
         <ListenPrompt questionId={question.id} text={question.question} language={language} answered={answered} />
-      ) : (
+      ) : question.type === 'cloze_choice' ? null : (
         <View style={styles.promptRow}>
           <Text style={[styles.prompt, { writingDirection: reversed ? 'rtl' : 'ltr' }]} testID="question-prompt">
             {question.question}
@@ -68,7 +74,7 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
             key={`${question.id}-${index}`}
             testID={`option-${index}`}
             label={option}
-            direction={reversed ? 'ltr' : 'rtl'}
+            direction={optionsLtr ? 'ltr' : 'rtl'}
             state={visualState(index)}
             disabled={answered}
             minHeight={maxHeight > 0 ? maxHeight : undefined}

@@ -1,19 +1,42 @@
 import type {
   AnswerVerdict,
+  ClozeTypedQuestion,
   DictationQuestion,
   SayTranslationQuestion,
+  SentenceTranslationQuestion,
   TypedMeaningQuestion,
   TypedTranslationQuestion,
 } from '@lang-tutor/core/api';
-import { useEffect, useState } from 'react';
+import { MAX_JUDGED_TEXT } from '@lang-tutor/core/domain';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ListenPrompt } from '@/components/ListenPrompt';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
+// The card roots the e2e flows find a card by (phase 27: the two sentence cards).
+const ROOT_TEST_IDS: Record<Props['question']['type'], string | undefined> = {
+  typed_translation: undefined,
+  dictation: undefined,
+  say_translation: undefined,
+  typed_meaning: 'meaning-card',
+  cloze_typed: 'cloze-card',
+  sentence_translation: 'translate-card',
+};
+
 type Props = {
-  question: TypedTranslationQuestion | DictationQuestion | SayTranslationQuestion | TypedMeaningQuestion;
+  question:
+    | TypedTranslationQuestion
+    | DictationQuestion
+    | SayTranslationQuestion
+    | TypedMeaningQuestion
+    | ClozeTypedQuestion
+    | SentenceTranslationQuestion;
+  /** Phase 27: what the card shows in place of its prompt line (a gap card's
+   *  sentence, a translation card's Hebrew sentence and, once answered, its
+   *  reference). */
+  prompt?: ReactNode;
   /** What the card asks, naming the language: כתבו את המילה באיטלקית. */
   instruction: string;
   /** The enrollment's target language: a dictation speaks its word in it. */
@@ -38,14 +61,14 @@ type Props = {
  * right answer nor a right answer into a wrong one, so autocorrect, spellcheck
  * and autocapitalisation are off.
  */
-export function TypedAnswerView({ question, instruction, language, answered, verdict, onSubmit, direction, checking, failed }: Props) {
+export function TypedAnswerView({ question, instruction, language, answered, verdict, onSubmit, direction, checking, failed, prompt }: Props) {
   const [text, setText] = useState('');
 
   useEffect(() => {
     setText('');
   }, [question.id]);
 
-  const partOfSpeech = question.type !== 'dictation' ? strings.partOfSpeech(question.part_of_speech) : undefined;
+  const partOfSpeech = 'part_of_speech' in question ? strings.partOfSpeech(question.part_of_speech) : undefined;
   const empty = text.trim() === '';
 
   function submit(value: string) {
@@ -59,9 +82,11 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
     verdict === null ? styles.inputIdle : verdict === 'wrong' ? styles.inputWrong : styles.inputCorrect;
 
   return (
-    <View style={styles.container} testID={question.type === 'typed_meaning' ? 'meaning-card' : undefined}>
+    <View style={styles.container} testID={ROOT_TEST_IDS[question.type]}>
       <Text style={answerStyles.instruction}>{instruction}</Text>
-      {question.type === 'dictation' ? (
+      {prompt !== undefined ? (
+        prompt
+      ) : question.type === 'dictation' ? (
         <>
           <ListenPrompt questionId={question.id} text={question.question} language={language} answered={answered} />
           {answered ? (
@@ -70,7 +95,7 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
             </Text>
           ) : null}
         </>
-      ) : (
+      ) : 'question' in question ? (
         <>
           <Text style={[answerStyles.prompt, question.type === 'typed_meaning' && styles.promptLtr]} testID="question-prompt">
             {question.question}
@@ -81,7 +106,7 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
             </Text>
           ) : null}
         </>
-      )}
+      ) : null}
       <TextInput
         testID="typed-input"
         value={text}
@@ -92,7 +117,9 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
         autoCorrect={false}
         spellCheck={false}
         autoComplete="off"
-        maxLength={100}
+        // A sentence is longer than a word (spec D6); Return still submits.
+        multiline={question.type === 'sentence_translation'}
+        maxLength={question.type === 'sentence_translation' ? MAX_JUDGED_TEXT : 100}
         returnKeyType="done"
         submitBehavior="submit"
         onSubmitEditing={() => {
