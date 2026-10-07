@@ -13,6 +13,7 @@ import {
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
 
+import { findGap } from '../domain/cloze';
 import {
   NOTHING_GENERATED,
   boardMeanings,
@@ -42,6 +43,7 @@ import {
   sessionScore,
   step,
 } from '../domain/session';
+import { MAX_AVOID } from '../domain/sentences';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
@@ -500,7 +502,13 @@ export function createSessionService({
           picks: payload.picks.map((pick) => ({ senseId: pick.sense_id, variantId: pick.variant_id })),
           sourceLanguage: enrolled.source_language,
         });
-        return { state, enrolled, context };
+        // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
+        const recent = await question.findRecentSentences({
+          enrollmentId: state.enrollmentId,
+          senseIds: context.map((row) => row.senseId),
+          limit: MAX_AVOID,
+        });
+        return { state, enrolled, context, recent };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -519,17 +527,20 @@ export function createSessionService({
           translation: row.translation,
           tiles: tileEligible(row.form),
           speakable: speakable(row.form),
-          // Part B Task 4 finds the gap in the saved example.
-          clozeGap: false,
+          // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
+          clozeGap: findGap(row.example ?? '', [row.form, row.lemma]) !== null,
         })),
         { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
       );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor(plan);
-      const items = distractorItems(ordered, tasks, new Map());
+      const items = distractorItems(ordered, tasks, read.recent);
       // The rows that ask the model nothing are still in the session: the
       // validation and the prompt must know their words and meanings.
       const others = ordered.filter((_, index) => !tasks[index]);
+      // Where each pick's form sits in its saved example: the same search that
+      // made the gap item's blank and the plan's eligibility.
+      const gaps = ordered.map((row) => findGap(row.example ?? '', [row.form, row.lemma]));
 
       const started = now();
       let modelMs = 0;
@@ -587,12 +598,21 @@ export function createSessionService({
           questions: ordered.map((row, index) => {
             const made = verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED;
             // Spec D5, D6: a sentence card the model did not make usable is a
-            // typed translation. Part B Task 4 logs it and reads recent sentences.
+            // typed translation, with nothing generated for it.
             const planned = plan.types[index];
-            const type =
-              (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate)
-                ? 'typed_translation'
-                : planned;
+            const degraded =
+              (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate);
+            if (degraded) {
+              logger.info({
+                event: 'sentence_degraded',
+                session_id: sessionId,
+                position: index,
+                type: planned,
+                reason: made.degraded,
+              });
+            }
+            const type = degraded ? 'typed_translation' : planned;
+            const content = degraded ? NOTHING_GENERATED : made;
             return {
               senseId: row.senseId,
               variantId: row.variantId,
@@ -601,10 +621,10 @@ export function createSessionService({
               partOfSpeech: row.partOfSpeech,
               lexemeId: row.lexemeId,
               type,
-              ...generatedContent(row, type, made, {
+              ...generatedContent(row, type, content, {
                 tiles: type === 'letter_tiles' ? tilesFor(row.form, LANGUAGES[target].alphabet, rng) : null,
                 board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
-                gap: null,
+                gap: gaps[index],
               }),
             };
           }),

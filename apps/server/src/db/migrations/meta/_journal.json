@@ -134,6 +134,13 @@
       "when": 1791391289356,
       "tag": "0018_typed_meaning",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791395723420,
+      "tag": "0019_sentence_cards",
+      "breakpoints": true
     }
   ]
 }

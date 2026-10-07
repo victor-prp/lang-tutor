@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import type { LetterTilesQuestion, MatchingQuestion } from '@lang-tutor/core/api';
+import type { ClozeChoiceQuestion, ClozeTypedQuestion, LetterTilesQuestion, MatchingQuestion, SentenceTranslationQuestion } from '@lang-tutor/core/api';
 import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
@@ -11,6 +11,9 @@ import {
   clearNamespace,
   countGeminiRequests,
   STUB_ALTERNATIVE,
+  STUB_GAP,
+  STUB_SENTENCE,
+  STUB_SENTENCE_HEBREW,
   STUB_WRONG_ENGLISH,
   STUB_WRONG_HEBREW,
   expectDistractors,
@@ -70,7 +73,7 @@ const TEN_WORDS: Record<string, string> = {
 
 it('prepares a ten-word session with listening on: a run, the board, a run (spec D3, D10)', async () => {
   await expectDistractors(ns, {
-    tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'typed'],
+    tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'sentence'],
   });
   const seed = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
   await deps.sessions.skipSession(seed.sessionId);
@@ -84,7 +87,7 @@ it('prepares a ten-word session with listening on: a run, the board, a run (spec
   expect(questions.map((q) => q.type)).toEqual([
     'multiple_choice', 'reverse_choice', 'typed_translation',
     'matching', 'matching', 'matching', 'matching',
-    'listen_choice', 'letter_tiles', 'dictation',
+    'listen_choice', 'letter_tiles', 'cloze_typed',
   ]);
   const board = questions.slice(3, 7) as MatchingQuestion[];
   for (const word of board) {
@@ -96,6 +99,80 @@ it('prepares a ten-word session with listening on: a run, the board, a run (spec
   expect(board[0].options).toContain(STUB_WRONG_HEBREW[0]);
   const tiles = questions[8] as LetterTilesQuestion;
   expect(tiles.tiles).toHaveLength([...tiles.answer].length + 2);
+});
+
+// Phase 27 Part B (spec D5-D8): the three sentence cards, written by the job and
+// read back through getSession.
+describe('sentence cards through the queue', () => {
+  const EXAMPLE_HEBREW = 'ראינו את זה שם.';
+
+  async function saveTen(withExamples: boolean) {
+    for (const [lemma, translation] of Object.entries(TEN_WORDS)) {
+      await seedSavedSenses(t.db, {
+        enrollmentId: E,
+        lemma,
+        translations: [translation],
+        ...(withExamples ? { example: { source: `We saw the ${lemma} there.`, target: EXAMPLE_HEBREW } } : {}),
+      });
+    }
+  }
+
+  it('stores a cloze choice from the saved example and a typed cloze from the model, each with its sentence and gap', async () => {
+    await expectDistractors(ns, {
+      tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'gap', 'sentence'],
+    });
+    const seed = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
+    await deps.sessions.skipSession(seed.sessionId);
+    await saveTen(true);
+    const { sessionId } = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
+
+    await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+    const { questions } = await deps.sessions.getSession(sessionId);
+    expect(questions.slice(7).map((q) => q.type)).toEqual(['listen_choice', 'cloze_choice', 'cloze_typed']);
+
+    const choice = questions[8] as ClozeChoiceQuestion;
+    expect(choice.translation).toBe(EXAMPLE_HEBREW);
+    const answer = choice.sentence.slice(choice.gap.start, choice.gap.end);
+    // The blank is the saved example's own text for the word; the right option is that text.
+    expect(choice.sentence).toBe(`We saw the ${answer} there.`);
+    expect(choice.options[choice.correct_option]).toBe(answer);
+    expect(Object.keys(TEN_WORDS)).toContain(answer);
+    expect(choice.meaning).toBe(TEN_WORDS[answer]);
+    expect([...choice.options].sort()).toEqual([answer, ...STUB_WRONG_ENGLISH].sort());
+
+    const typed = questions[9] as ClozeTypedQuestion;
+    expect(typed.sentence).toBe(STUB_SENTENCE);
+    expect(typed.sentence.slice(typed.gap.start, typed.gap.end)).toBe(STUB_GAP);
+    expect(typed.answer).toBe(STUB_GAP);
+    expect(typed.translation).toBe(STUB_SENTENCE_HEBREW);
+    expect(logger.events.map((e) => (e as { event: string }).event)).not.toContain('sentence_degraded');
+  });
+
+  it('stores a sentence translation with its reference and gap', async () => {
+    // Ordinal 2 of ten words with listening on: the last position is a translation.
+    await expectDistractors(ns, {
+      tasks: ['typed', 'typed', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'translate'],
+    });
+    const options = { listening: true, speaking: false };
+    // The seed, then two list sessions skipped before the third (ordinal 2).
+    const seed = await deps.sessions.createNextSession(E, options);
+    await deps.sessions.skipSession(seed.sessionId);
+    await saveTen(false);
+    for (let ordinal = 0; ordinal < 2; ordinal++) {
+      const early = await deps.sessions.createNextSession(E, options);
+      await deps.sessions.skipSession(early.sessionId);
+    }
+    const { sessionId } = await deps.sessions.createNextSession(E, options);
+
+    await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+    const { questions } = await deps.sessions.getSession(sessionId);
+    expect(questions[9].type).toBe('sentence_translation');
+    const translate = questions[9] as SentenceTranslationQuestion;
+    expect(translate.question).toBe(STUB_SENTENCE_HEBREW);
+    expect(translate.sentence).toBe(STUB_SENTENCE);
+    expect(translate.answer).toBe(STUB_GAP);
+    expect(translate.sentence.slice(translate.gap.start, translate.gap.end)).toBe(STUB_GAP);
+  });
 });
 
 describe('prepare-session through the queue', () => {
