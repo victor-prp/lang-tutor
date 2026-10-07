@@ -18,10 +18,12 @@ type Props = {
 /**
  * Phase 24 (spec D6). A listening card's prompt. The word is spoken once on
  * arrival and on every tap, and shown only after the answer. A device with no
- * voice for the language shows it in writing, with a line saying why.
+ * voice for the language shows it in writing, with a line saying why. Until
+ * the device's voices are read nothing is known, so the card shows neither the
+ * word nor that line: a disabled play button, then whichever applies.
  */
 export function ListenPrompt({ questionId, text, language, answered }: Props) {
-  const { canSpeak, isPlaying, toggle } = useSpeech();
+  const { canSpeak, voicesLoaded, isPlaying, toggle } = useSpeech();
   const voiced = canSpeak(language);
   // Once per card. React's development double-run of effects would otherwise
   // call toggle twice, and the second call stops the first.
@@ -35,6 +37,21 @@ export function ListenPrompt({ questionId, text, language, answered }: Props) {
     void toggle(text, language);
   }, [questionId, voiced, text, language, toggle]);
 
+  if (!answered && !voicesLoaded) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={strings.listenAgain}
+        accessibilityState={{ disabled: true }}
+        disabled
+        testID="listen-play"
+        style={[styles.play, styles.waiting]}
+      >
+        <Text style={styles.glyph}>🔊</Text>
+      </Pressable>
+    );
+  }
+
   if (answered || !voiced) {
     return (
       <View style={styles.revealed}>
@@ -44,7 +61,7 @@ export function ListenPrompt({ questionId, text, language, answered }: Props) {
           </Text>
           <SpeakButton text={text} language={language} testID="speak-prompt" />
         </View>
-        {voiced ? null : (
+        {voiced || !voicesLoaded ? null : (
           <Text style={styles.note} testID="listen-no-voice">
             {strings.listenNoVoice}
           </Text>
@@ -88,5 +105,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   playing: { backgroundColor: colors.primary },
+  waiting: { opacity: 0.4 },
   glyph: { fontSize: fontSizes.xl },
 });

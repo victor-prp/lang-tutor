@@ -102,6 +102,23 @@ describe('createSpeaker', () => {
     expect(speaker.snapshot().tags.size).toBe(0);
   });
 
+  // Final review: a card must not show its word while the voices are unread.
+  it('is not loaded before start, and is once the voices are read', async () => {
+    const speaker = createSpeaker({ engine: fakeEngine().engine, platform: 'ios', prepareAudio: async () => undefined });
+    expect(speaker.snapshot().loaded).toBe(false);
+    await speaker.start();
+    expect(speaker.snapshot().loaded).toBe(true);
+  });
+
+  it('is loaded when the device has no voice, and when the engine rejects', async () => {
+    const none = createSpeaker({ engine: { ...fakeEngine().engine, getAvailableVoicesAsync: async () => [] }, platform: 'ios', prepareAudio: async () => undefined });
+    await none.start();
+    expect(none.snapshot()).toMatchObject({ loaded: true });
+    expect(none.snapshot().tags.size).toBe(0);
+    const { speaker } = await started(fakeEngine(new Error('engine down')));
+    expect(speaker.snapshot().loaded).toBe(true);
+  });
+
   it('start sets the audio mode and reads the voices', async () => {
     let prepared = 0;
     const speaker = createSpeaker({

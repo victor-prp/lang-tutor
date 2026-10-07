@@ -75,6 +75,9 @@ export function voiceTags(voices: readonly SpeechVoice[], platform: string): Rea
 export type SpeechSnapshot = {
   /** Language → the tag its engine gets. Empty until `start` has read the voices. */
   tags: ReadonlyMap<string, string>;
+  /** Whether `start` has finished reading the voices, whatever it found. Until
+   *  then an empty `tags` means "not known yet", not "no voice". */
+  loaded: boolean;
   /** What is speaking now, or null. */
   playing: { text: string; language: string } | null;
 };
@@ -95,7 +98,7 @@ export type SpeakerDeps = {
  * snapshot object on every change, the same one otherwise.
  */
 export function createSpeaker({ engine, platform, prepareAudio }: SpeakerDeps) {
-  let snapshot: SpeechSnapshot = { tags: new Map(), playing: null };
+  let snapshot: SpeechSnapshot = { tags: new Map(), loaded: false, playing: null };
   // Each tap takes the next ticket, and only the current ticket may speak or end
   // the playing state. A stopped utterance's late callback (the web engine
   // reports a stop as an error) must not clear the one that replaced it.
@@ -113,9 +116,10 @@ export function createSpeaker({ engine, platform, prepareAudio }: SpeakerDeps) {
     start: async (): Promise<void> => {
       if (platform === 'ios') await prepareAudio().catch(() => undefined);
       try {
-        update({ tags: voiceTags(await engine.getAvailableVoicesAsync(), platform) });
+        update({ tags: voiceTags(await engine.getAvailableVoicesAsync(), platform), loaded: true });
       } catch {
         // Nothing is speakable, so no speaker shows.
+        update({ loaded: true });
       }
     },
     snapshot: (): SpeechSnapshot => snapshot,

@@ -89,6 +89,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
     case 'matching':
       return (
         <MatchingBoardView
+          key={question.id}
           question={question}
           instruction={strings.questionInstructionMatching}
           answered={session.answered}
