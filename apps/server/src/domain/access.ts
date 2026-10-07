@@ -42,6 +42,7 @@ export function may(
 ): boolean {
   if (actorUserId === ownerUserId) return true;
   if (!grant || !grant.accepted || grant.granteeUserId !== actorUserId) return false;
+  if (grant.ownerUserId !== ownerUserId) return false;
   return isRole(grant.role) && ROLE_PERMISSIONS[grant.role].includes(permission);
 }
 

@@ -31,6 +31,10 @@ describe('may', () => {
     expect(may(STRANGER, OWNER, accepted, 'vocabulary.add')).toBe(false);
   });
 
+  it("refuses a grant on another owner's list", () => {
+    expect(may(TUTOR_ID, 'u_other', accepted, 'vocabulary.add')).toBe(false);
+  });
+
   it('refuses a role this server does not know', () => {
     expect(may(TUTOR_ID, OWNER, { ...accepted, role: 'parent' }, 'vocabulary.add')).toBe(false);
   });

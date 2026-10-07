@@ -57,7 +57,10 @@ export function createGrantService({ transaction, logger }: { transaction: Trans
         if (!grant) throw new GrantNotFound(grantId);
         if (!mayAnswerInvite(actorUserId, grantViewOf(grant))) throw denied(actorUserId, grant, 'grant.accept');
         await repos.grant.acceptGrant(grantId);
-        return (await repos.grant.findGrant(grantId))!;
+        // A concurrent end can delete the grant between the two reads.
+        const after = await repos.grant.findGrant(grantId);
+        if (!after) throw new GrantNotFound(grantId);
+        return after;
       });
       logger.info({ event: 'grant_accepted', grant_id: accepted.id, role: accepted.role });
       return accepted;
