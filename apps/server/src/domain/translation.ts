@@ -366,7 +366,7 @@ export function buildPrompt(input: {
     // `throughout` beside `throat`. Every draft before it broke one of those:
     // - an exception with no example: `pour` empty 10 of 10;
     // - defining "only" inside the rule ("with no meaning of its own in
-    //   English"): `дякую` corrected to `спасибо` 4 of 10;
+    //   English"): `дякую` corrected to `спасибо` 6 of 10;
     // - "a word that is English and also SPELLED like a word of another
     //   language": `burnt`'s adjective lemma `burnt` 10 of 10, against the
     //   participial rule above. Keep spelling out of it;
