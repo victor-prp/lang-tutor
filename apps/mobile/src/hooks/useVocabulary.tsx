@@ -46,7 +46,7 @@ export type VocabularyValue = {
 const VocabularyContext = createContext<VocabularyValue | undefined>(undefined);
 
 export function VocabularyProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
-  const { active } = useCurrentUser();
+  const { active, user } = useCurrentUser();
   const [words, setWords] = useState<VocabularyWord[]>([]);
   const [status, setStatus] = useState<VocabularyStatus>('idle');
   const [cursor, setCursor] = useState<string | null>(null);
@@ -114,17 +114,17 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
   );
   const save = useCallback(
     async (entries: VocabularyEntryInput[]) => {
-      if (!active) return;
-      await api.saveVocabulary(active.id, { entries });
+      if (!active || !user) return;
+      await api.saveVocabulary(user.id, active.id, { entries });
     },
-    [api, active],
+    [api, active, user],
   );
   const unsave = useCallback(
     async (senseId: string) => {
-      if (!active) return;
-      await api.unsaveVocabulary(active.id, senseId);
+      if (!active || !user) return;
+      await api.unsaveVocabulary(user.id, active.id, senseId);
     },
-    [api, active],
+    [api, active, user],
   );
 
   const value = useMemo<VocabularyValue>(

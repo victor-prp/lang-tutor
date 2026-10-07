@@ -76,7 +76,7 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
   const [saved, setSaved] = useState<SavedState>({});
   const [pending, setPending] = useState<Record<string, true>>({});
   const [saveFailed, setSaveFailed] = useState(false);
-  const { active } = useCurrentUser();
+  const { active, user } = useCurrentUser();
   const [direction, setDirection] = useState<LookupDirection | null>(
     active ? lookupDirection(active) : null,
   );
@@ -131,7 +131,7 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
   // keeps one request per sense in flight.
   const send = useCallback(
     async (entries: { sense_id: string; variant_id: string }[], next: boolean) => {
-      if (!active || entries.length === 0) return;
+      if (!active || !user || entries.length === 0) return;
       const ids = entries.map((entry) => entry.sense_id);
       setSaveFailed(false);
       const ok = await toggleOptimistically({
@@ -148,12 +148,12 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
           }),
         request: () =>
           next
-            ? api.saveVocabulary(active.id, { entries })
-            : api.unsaveVocabulary(active.id, ids[0]),
+            ? api.saveVocabulary(user.id, active.id, { entries })
+            : api.unsaveVocabulary(user.id, active.id, ids[0]),
       });
       setSaveFailed(!ok);
     },
-    [api, active],
+    [api, active, user],
   );
 
   const value = useMemo<TranslationValue>(

@@ -97,16 +97,17 @@ export async function sessionDay(db: Db, sessionId: string): Promise<string> {
   return rows.rows[0].day;
 }
 
-/**
- * Saves the senses of a session's questions at `positions`, through the
- * repository, so each gets its five progress rows. Returns the sense ids in
- * position order. The seed's shared questions are about real senses, which is
- * what lets a test practise saved words without the prepare-session job.
- */
-export async function saveSessionSenses(
+/** The sense and form of each question at `positions` of a session, as save
+ *  entries. Phase 28: a test can save them through the service, as a tutor. */
+export async function sessionSenseEntries(
   db: Db,
-  input: { sessionId: string; enrollmentId: string; positions: number[] },
-): Promise<string[]> {
+  input: { sessionId: string; positions: number[] },
+): Promise<{ sense_id: string; variant_id: string }[]> {
+  const rows = await selectSessionSenses(db, input);
+  return rows.map((row) => ({ sense_id: row.senseId, variant_id: row.variantId }));
+}
+
+async function selectSessionSenses(db: Db, input: { sessionId: string; positions: number[] }) {
   const rows = await db
     .select({
       position: sessionQuestions.position,
@@ -121,7 +122,20 @@ export async function saveSessionSenses(
     .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
     .where(eq(sessionQuestions.sessionId, input.sessionId))
     .orderBy(asc(sessionQuestions.position));
-  const picked = rows.filter((row) => input.positions.includes(row.position));
+  return rows.filter((row) => input.positions.includes(row.position));
+}
+
+/**
+ * Saves the senses of a session's questions at `positions`, through the
+ * repository, so each gets its five progress rows. Returns the sense ids in
+ * position order. The seed's shared questions are about real senses, which is
+ * what lets a test practise saved words without the prepare-session job.
+ */
+export async function saveSessionSenses(
+  db: Db,
+  input: { sessionId: string; enrollmentId: string; positions: number[] },
+): Promise<string[]> {
+  const picked = await selectSessionSenses(db, input);
   const addedByUserId = await ownerOf(db, input.enrollmentId);
   await withTx(db, (tx) =>
     createVocabularyRepo(tx).insertEntries({

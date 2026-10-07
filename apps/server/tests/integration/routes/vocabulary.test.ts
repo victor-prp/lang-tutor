@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { createVocabularyRouter } from '../../../src/routes/vocabulary';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
+import { seedGrant } from '../../support/grantRows';
 import { setLevel } from '../../support/progressRows';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { seedEnrollment, seedUser } from '../../support/seedUser';
@@ -73,14 +74,17 @@ function app() {
   return hono;
 }
 
-const save = (enrollmentId: string, entries: unknown) =>
+const save = (enrollmentId: string, entries: unknown, actor = 'u_1') =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Acting-User-Id': actor },
     body: JSON.stringify({ entries }),
   });
-const unsave = (enrollmentId: string, senseId: string) =>
-  app().request(`/api/enrollments/${enrollmentId}/vocabulary/senses/${senseId}`, { method: 'DELETE' });
+const unsave = (enrollmentId: string, senseId: string, actor = 'u_1') =>
+  app().request(`/api/enrollments/${enrollmentId}/vocabulary/senses/${senseId}`, {
+    method: 'DELETE',
+    headers: { 'X-Acting-User-Id': actor },
+  });
 const list = (enrollmentId: string, query = '') =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary${query}`);
 const detail = (enrollmentId: string, lemma: string) =>
@@ -507,5 +511,49 @@ describe('levels on the list (phase 20)', () => {
     const res = await list(RU, query);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+});
+
+describe('access (phase 28)', () => {
+  const asked = async () => {
+    const rama = await russianWord('рама');
+    return [{ sense_id: rama.senseIds[0], variant_id: rama.variantIds[0] }];
+  };
+
+  it('answers 400 for a save without the acting-user header', async () => {
+    const res = await app().request(`/api/enrollments/${RU}/vocabulary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries: await asked() }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid request' });
+  });
+
+  it('answers 403 for a save by someone who holds no grant', async () => {
+    await seedUser(t.db, 'u_2');
+    const res = await save(RU, await asked(), 'u_2');
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'forbidden' });
+  });
+
+  it('lets an accepted tutor save', async () => {
+    await seedUser(t.db, 'u_tutor');
+    await seedGrant(t.db, { enrollmentId: RU, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
+    expect((await save(RU, await asked(), 'u_tutor')).status).toBe(200);
+  });
+
+  it('answers 403 when that tutor unsaves', async () => {
+    await seedUser(t.db, 'u_tutor');
+    await seedGrant(t.db, { enrollmentId: RU, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
+    const entries = await asked();
+    await save(RU, entries, 'u_tutor');
+    const res = await unsave(RU, entries[0].sense_id, 'u_tutor');
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'forbidden' });
+  });
+
+  it('answers 404 before 403: an unknown enrollment is not found for anyone', async () => {
+    expect((await save('e_missing', await asked(), 'u_stranger')).status).toBe(404);
   });
 });

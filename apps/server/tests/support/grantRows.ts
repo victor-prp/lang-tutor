@@ -18,3 +18,11 @@ export async function seedGrant(
     returning id`);
   return rows.rows[0].id;
 }
+
+/** Who added each saved sense of one list, in sense order. */
+export async function addedByOf(db: Db, enrollmentId: string): Promise<string[]> {
+  const rows = await db.execute<{ added_by_user_id: string }>(
+    sql`select added_by_user_id from vocabulary_entries where enrollment_id = ${enrollmentId} order by sense_id`,
+  );
+  return rows.rows.map((row) => row.added_by_user_id);
+}

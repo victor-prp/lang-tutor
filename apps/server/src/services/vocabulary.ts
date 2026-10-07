@@ -18,6 +18,7 @@ import {
 } from '../domain/vocabulary';
 import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
+import { authorize } from './access';
 import type { Repos, Transaction } from './transaction';
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -32,6 +33,8 @@ async function enrollmentOrThrow(repos: Repos, enrollmentId: string): Promise<En
  * An enrollment's word list. One transaction per use case (ADR 0001 R8); the
  * enrollment check shares it, because an entry for an enrollment that does not
  * exist is wrong, and so is a page read against one.
+ *
+ * Phase 28: both writes name an actor and pass ADR 0008's check first.
  */
 export function createVocabularyService({
   transaction,
@@ -48,12 +51,15 @@ export function createVocabularyService({
      * with the same ids.
      */
     save: async (
+      actorUserId: string,
       enrollmentId: string,
       entries: VocabularyEntryInput[],
     ): Promise<SaveVocabularyResponse> => {
       const asked = firstPerSense(entries);
+      let by: 'owner' | 'grantee' = 'owner';
       await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
+        by = await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.add' });
         const saveable = await repos.vocabulary.findSaveable({
           entries: asked.map((entry) => ({ senseId: entry.sense_id, variantId: entry.variant_id })),
           targetLanguage: enrolled.target_language,
@@ -74,15 +80,16 @@ export function createVocabularyService({
           });
           throw new InvalidVocabularyEntry(refused.sense_id);
         }
-        await repos.vocabulary.insertEntries({ enrollmentId, addedByUserId: enrolled.user_id, entries: saveable });
+        await repos.vocabulary.insertEntries({ enrollmentId, addedByUserId: actorUserId, entries: saveable });
       });
-      logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length });
+      logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length, by });
       return { saved_sense_ids: asked.map((entry) => entry.sense_id) };
     },
 
-    unsave: async (enrollmentId: string, senseId: string): Promise<void> => {
+    unsave: async (actorUserId: string, enrollmentId: string, senseId: string): Promise<void> => {
       await transaction(async (repos) => {
-        await enrollmentOrThrow(repos, enrollmentId);
+        const enrolled = await enrollmentOrThrow(repos, enrollmentId);
+        await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.remove' });
         await repos.vocabulary.deleteEntry({ enrollmentId, senseId });
       });
       logger.info({ event: 'vocabulary_unsaved', enrollment_id: enrollmentId });

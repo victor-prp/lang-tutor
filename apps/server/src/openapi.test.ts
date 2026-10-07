@@ -256,9 +256,9 @@ describe('the vocabulary endpoints in the published document', () => {
   const BASE = '/api/enrollments/{id}/vocabulary';
 
   it.each([
-    [BASE, 'post', ['200', '400', '404']],
+    [BASE, 'post', ['200', '400', '403', '404']],
     [BASE, 'get', ['200', '400', '404']],
-    [`${BASE}/senses/{sense_id}`, 'delete', ['204', '404']],
+    [`${BASE}/senses/{sense_id}`, 'delete', ['204', '400', '403', '404']],
     [`${BASE}/word`, 'get', ['200', '400', '404']],
   ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
     const doc = await openApiDocument();
@@ -282,5 +282,20 @@ describe('POST /api/sessions/{id}/speech in the published document', () => {
     const op = doc.paths['/api/sessions/{id}/speech'].post;
     expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '404', '409', '413', '502']);
     expect(op.description).toMatch(/costs money/);
+  });
+});
+
+describe('the actor header in the published document (phase 28)', () => {
+  it('is required on both vocabulary writes, and says it authenticates nothing', async () => {
+    const doc = await openApiDocument();
+    for (const operation of [
+      doc.paths['/api/enrollments/{id}/vocabulary'].post,
+      doc.paths['/api/enrollments/{id}/vocabulary/senses/{sense_id}'].delete,
+    ]) {
+      const header = operation.parameters.find((p: { name: string }) => p.name === 'x-acting-user-id');
+      expect(header).toMatchObject({ in: 'header', required: true });
+      expect(header.description).toMatch(/NOT AUTHENTICATED/);
+      expect(Object.keys(operation.responses)).toContain('403');
+    }
   });
 });

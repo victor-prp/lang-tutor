@@ -49,6 +49,20 @@ export class UserNotFound extends Error {
   }
 }
 
+/** Phase 28 (ADR 0008). The actor may not do this to that enrollment. `action` is
+ *  a permission name, or a grant action such as 'grant.accept'. The route
+ *  answers 403 with a fixed body; the detail is only in the access_denied log. */
+export class AccessDenied extends Error {
+  constructor(
+    readonly actorUserId: string,
+    readonly enrollmentId: string,
+    readonly action: string,
+  ) {
+    super(`${actorUserId} may not ${action} on ${enrollmentId}`);
+    this.name = 'AccessDenied';
+  }
+}
+
 export class EnrollmentNotFound extends Error {
   constructor(readonly enrollmentId: string) {
     super(`no enrollment ${enrollmentId}`);
