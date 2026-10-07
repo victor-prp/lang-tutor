@@ -41,6 +41,7 @@ describe('createServerDeps', () => {
       sessionGenerationTimeoutMs: 120_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
+      photoReadTimeoutMs: 120_000,
       identity: { lane: 'test', database: 'test_db', port: 0 },
       boss: unstartedBoss(t.db),
     });

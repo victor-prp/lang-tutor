@@ -128,3 +128,32 @@ export function createGeminiTranscriber(deps: GeminiDeps) {
       },
     });
 }
+
+/**
+ * Phase 26 (spec D5). The same call with a photo in the user turn: the image
+ * part first, then the text. Its own factory, because widening LlmClient for an
+ * image would widen it for every caller. Wired only in composition.ts, where
+ * the `: VisionClient` annotation checks it.
+ */
+export function createGeminiVisionClient(deps: GeminiDeps) {
+  return (request: {
+    system: string;
+    user: string;
+    schema: ZodType;
+    image: { data: string; mimeType: string };
+  }): Promise<string> =>
+    generate(deps, {
+      systemInstruction: { parts: [{ text: request.system }] },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ inlineData: { mimeType: request.image.mimeType, data: request.image.data } }, { text: request.user }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json',
+        responseSchema: toGeminiSchema(request.schema),
+      },
+    });
+}

@@ -16,8 +16,8 @@
     same way.
   - D12's two-part banner ("right" plus the stored meaning) is one title, `נכון! הפירוש השמור:`,
     with the meaning on the line below it, in the style of phase 23's `נכון! המילה שתרגלנו:`.
-  - The migration is `0018_typed_meaning.sql`, the next number after phase 25's `0017` (phase 26
-    also claims `0017`; whichever merges second renumbers, D1).
+  - The migration is `0019_typed_meaning.sql`. It was built as `0018`; phase 26 merged first with
+    `0018_photo_imports`, so Part A's was regenerated on top of it, with identical statements (D1).
   - The judge's answer schema is per type: `typed_meaning` answers `{ "verdict": "right" |
     "other_sense" | "wrong" }`, so Gemini's response schema already refuses a verdict the type does not have; Part B adds the
     translation one.
@@ -31,7 +31,8 @@
   Part B is implemented on branch `phase-27b-sentence-cards` (stacked on Part A). Planning
   found these deviations:
   - The sentence cards store four columns (the sentence, the gap's start and end, the Hebrew
-    translation) under their own `questions_sentence_valid` check in migration `0019`, stricter
+    translation) under their own `questions_sentence_valid` check in migration `0020` (built as
+    `0019`, renumbered after phase 26's `0018` pushed Part A's to `0019`), stricter
     than the plan: a sentence column on a non-sentence type, or offsets outside the sentence, is
     refused.
   - `cloze_typed` stores no separate answer: the gap's text in the sentence is the answer, and the

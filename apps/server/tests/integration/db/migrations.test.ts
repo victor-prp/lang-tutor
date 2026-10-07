@@ -469,12 +469,12 @@ describe('0017_speaking_cards', () => {
   });
 });
 
-// Phase 27 Part A: stored questions and answers survive 0018, a meaning-recall
+// Phase 27 Part A: stored questions and answers survive 0019, a meaning-recall
 // row takes a prompt only, and a judged answer may be 300 characters.
-describe('0018_typed_meaning', () => {
+describe('0019_typed_meaning', () => {
   it('keeps every existing question and answer, and admits a typed_meaning question with a prompt only', async () => {
     const db = await emptyDatabase();
-    await runMigrationsFrom(db, migrationsUpTo('0017_speaking_cards'));
+    await runMigrationsFrom(db, migrationsUpTo('0018_photo_imports'));
 
     const options = JSON.stringify([
       { position: 0, text: 'עפיפון', is_correct: true },
@@ -562,13 +562,13 @@ describe('0018_typed_meaning', () => {
   });
 });
 
-// Phase 27 Part B (Review Focus 5): rows stored before 0019 keep loading, each
+// Phase 27 Part B (Review Focus 5): rows stored before 0020 keep loading, each
 // sentence type takes its four columns, and a sentence column anywhere else, or
 // a gap outside its sentence, is refused.
-describe('0019_sentence_cards', () => {
+describe('0020_sentence_cards', () => {
   it('keeps every existing question, admits the three sentence types, and refuses a stray or out-of-range sentence', async () => {
     const db = await emptyDatabase();
-    await runMigrationsFrom(db, migrationsUpTo('0018_typed_meaning'));
+    await runMigrationsFrom(db, migrationsUpTo('0019_typed_meaning'));
 
     const options = JSON.stringify([
       { position: 0, text: 'kite', is_correct: true },

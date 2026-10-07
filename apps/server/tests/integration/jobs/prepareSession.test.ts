@@ -42,7 +42,7 @@ beforeEach(async () => {
   logger = createFakeLogger();
   boss = await startTestBoss(t.db);
   deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns) });
-  await registerWorkers(boss, deps.sessions, { pollingIntervalSeconds: 0.5 });
+  await registerWorkers(boss, deps, { pollingIntervalSeconds: 0.5 });
 });
 
 afterEach(async () => {

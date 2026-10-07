@@ -14,9 +14,16 @@ import {
   ClozeChoiceQuestionSchema,
   ClozeTypedQuestionSchema,
   SentenceTranslationQuestionSchema,
+  LlmPhotoReadingSchema,
+  LlmSenseMatchSchema,
   LlmSenseSchema,
   LlmTranslationSchema,
   PartOfSpeechSchema,
+  PhotoImportCreateRequestSchema,
+  PhotoImportItemSchema,
+  PhotoImportItemUpdateSchema,
+  PhotoImportSchema,
+  PhotoImportStatusSchema,
   LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
@@ -761,6 +768,52 @@ describe('phase 25 wire shapes', () => {
 
   it('answers unheard with no next step', () => {
     expect(SpeechAnswerResponseSchema.safeParse({ heard: 'cane', verdict: 'unheard' }).success).toBe(true);
+  });
+});
+
+describe('phase 26 photo import schemas', () => {
+  it('takes a JPEG as base64, and nothing larger than about 2 MB', () => {
+    expect(PhotoImportCreateRequestSchema.safeParse({ mime_type: 'image/jpeg', image: 'abc' }).success).toBe(true);
+    expect(PhotoImportCreateRequestSchema.safeParse({ mime_type: 'image/png', image: 'abc' }).success).toBe(false);
+    expect(PhotoImportCreateRequestSchema.safeParse({ mime_type: 'image/jpeg', image: '' }).success).toBe(false);
+    expect(
+      PhotoImportCreateRequestSchema.safeParse({ mime_type: 'image/jpeg', image: 'a'.repeat(2_800_001) }).success,
+    ).toBe(false);
+    expect(
+      PhotoImportCreateRequestSchema.safeParse({ mime_type: 'image/jpeg', image: 'a'.repeat(2_800_000) }).success,
+    ).toBe(true);
+  });
+
+  it('refuses an item update that changes nothing', () => {
+    expect(PhotoImportItemUpdateSchema.safeParse({}).success).toBe(false);
+    expect(PhotoImportItemUpdateSchema.safeParse({ ticked: false }).success).toBe(true);
+    expect(PhotoImportItemUpdateSchema.safeParse({ sense_id: 's1' }).success).toBe(true);
+    expect(PhotoImportItemUpdateSchema.safeParse({ sense_id: '' }).success).toBe(false);
+  });
+
+  it('parses a row and an import', () => {
+    const item = {
+      position: 0,
+      text: 'gatto',
+      hebrew: 'חתול',
+      status: 'ready',
+      corrected_form: null,
+      options: [{ sense_id: 's1', variant_id: 'v1', translation: 'חתול', part_of_speech: 'noun' }],
+      chosen_sense_id: 's1',
+      ticked: true,
+      hebrew_mismatch: false,
+      reason: null,
+    };
+    expect(PhotoImportItemSchema.parse(item)).toEqual(item);
+    const summary = { id: 'i1', status: 'looking_up', item_count: 3, settled_count: 1, created_at: '2026-10-07T10:00:00.000Z' };
+    expect(PhotoImportSchema.parse({ ...summary, items: [item] }).items).toHaveLength(1);
+    expect(PhotoImportStatusSchema.options).toEqual(['reading', 'looking_up', 'ready', 'failed', 'saved', 'discarded']);
+  });
+
+  it('reads the model answers: a list of items, and a whole sense number', () => {
+    expect(LlmPhotoReadingSchema.parse({ items: [{ text: 'gatto', hebrew: '' }] }).items[0].text).toBe('gatto');
+    expect(LlmSenseMatchSchema.safeParse({ sense: 2 }).success).toBe(true);
+    expect(LlmSenseMatchSchema.safeParse({ sense: 1.5 }).success).toBe(false);
   });
 });
 

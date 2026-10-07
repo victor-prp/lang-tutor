@@ -97,14 +97,19 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all fifteen paths and nothing else', async () => {
+  it('contains all twenty paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
+      '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
       '/api/enrollments/{id}/vocabulary/word',
       '/api/login',
+      '/api/photo-imports/{id}',
+      '/api/photo-imports/{id}/discard',
+      '/api/photo-imports/{id}/items/{position}',
+      '/api/photo-imports/{id}/save',
       '/api/sessions',
       '/api/sessions/{id}',
       '/api/sessions/{id}/judged-answer',
@@ -120,6 +125,12 @@ describe('the document as a whole', () => {
 });
 
 describe('the enrollment endpoints in the published document', () => {
+  it('declares the photo upload as 202 with 400, 404 and 413', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths['/api/enrollments/{id}/photo-imports'].post.responses).sort()).toEqual(['202', '400', '404', '413']);
+    expect(Object.keys(doc.paths['/api/photo-imports/{id}/items/{position}'].patch.responses).sort()).toEqual(['200', '400', '404', '409']);
+  });
+
   it('declares every status POST /api/users/{id}/enrollments can return', async () => {
     const doc = await openApiDocument();
     expect(

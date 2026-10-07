@@ -52,6 +52,7 @@ export async function main(): Promise<void> {
     sessionGenerationTimeoutMs: config.sessionGenerationTimeoutMs,
     speechTimeoutMs: config.speechTimeoutMs,
     judgeTimeoutMs: config.judgeTimeoutMs,
+    photoReadTimeoutMs: config.photoReadTimeoutMs,
     // Resolved here, in the one place that reads the environment: app.ts must
     // not learn that a lane exists.
     identity: {
@@ -62,7 +63,7 @@ export async function main(): Promise<void> {
     boss,
   });
 
-  await registerWorkers(boss, deps.sessions, { pollingIntervalSeconds: 2 });
+  await registerWorkers(boss, deps, { pollingIntervalSeconds: 2 });
 
   const server = serve(
     { fetch: createApp(deps).fetch, port: config.port, hostname: '0.0.0.0' },

@@ -1,6 +1,6 @@
 {
-  "id": "e4995ae9-2bd1-48e4-9647-4856178cb10f",
-  "prevId": "4c71cbc8-ce65-4c5e-b662-9108fbb81526",
+  "id": "2614cbdb-3ee6-4b89-9ae4-9892ade5d371",
+  "prevId": "e5577d58-b997-425c-a32f-6f651c5669d1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -697,6 +697,219 @@
       },
       "isRLSEnabled": false
     },
+    "public.photo_import_items": {
+      "name": "photo_import_items",
+      "schema": "",
+      "columns": {
+        "import_id": {
+          "name": "import_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hebrew": {
+          "name": "hebrew",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "corrected_form": {
+          "name": "corrected_form",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "options": {
+          "name": "options",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "suggested_sense_id": {
+          "name": "suggested_sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chosen_sense_id": {
+          "name": "chosen_sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ticked": {
+          "name": "ticked",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "hebrew_mismatch": {
+          "name": "hebrew_mismatch",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "photo_import_items_import_fk": {
+          "name": "photo_import_items_import_fk",
+          "tableFrom": "photo_import_items",
+          "tableTo": "photo_imports",
+          "columnsFrom": [
+            "import_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "photo_import_items_pkey": {
+          "name": "photo_import_items_pkey",
+          "columns": [
+            "import_id",
+            "position"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "photo_import_items_status_known": {
+          "name": "photo_import_items_status_known",
+          "value": "\"photo_import_items\".\"status\" in ('pending', 'ready', 'failed')"
+        },
+        "photo_import_items_reason_known": {
+          "name": "photo_import_items_reason_known",
+          "value": "\"photo_import_items\".\"reason\" is null or \"photo_import_items\".\"reason\" in ('sentence', 'no_meaning', 'not_in_language')"
+        },
+        "photo_import_items_tick_needs_sense": {
+          "name": "photo_import_items_tick_needs_sense",
+          "value": "not \"photo_import_items\".\"ticked\" or \"photo_import_items\".\"chosen_sense_id\" is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.photo_imports": {
+      "name": "photo_imports",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "photo": {
+          "name": "photo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "photo_imports_enrollment_created_idx": {
+          "name": "photo_imports_enrollment_created_idx",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "photo_imports_enrollment_fk": {
+          "name": "photo_imports_enrollment_fk",
+          "tableFrom": "photo_imports",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "photo_imports_status_known": {
+          "name": "photo_imports_status_known",
+          "value": "\"photo_imports\".\"status\" in ('reading', 'read', 'failed', 'saved', 'discarded')"
+        },
+        "photo_imports_photo_only_while_reading": {
+          "name": "photo_imports_photo_only_while_reading",
+          "value": "\"photo_imports\".\"photo\" is null or \"photo_imports\".\"status\" = 'reading'"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.questions": {
       "name": "questions",
       "schema": "",
@@ -770,30 +983,6 @@
         "tiles": {
           "name": "tiles",
           "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sentence": {
-          "name": "sentence",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sentence_translation": {
-          "name": "sentence_translation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "gap_start": {
-          "name": "gap_start",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "gap_end": {
-          "name": "gap_end",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -872,15 +1061,11 @@
         },
         "questions_type_known": {
           "name": "questions_type_known",
-          "value": "\"questions\".\"type\" in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning', 'cloze_choice', 'cloze_typed', 'sentence_translation')"
+          "value": "\"questions\".\"type\" in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning')"
         },
         "questions_shape_valid": {
           "name": "questions_shape_valid",
-          "value": "case \"questions\".\"type\"\n        when 'multiple_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'listen_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'matching' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'reverse_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'typed_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'dictation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'letter_tiles' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null\n          and coalesce(array_length(\"questions\".\"tiles\", 1), 0) between 5 and 12\n        when 'read_aloud' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'say_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'typed_meaning' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'cloze_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'cloze_typed' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'sentence_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        else false end"
-        },
-        "questions_sentence_valid": {
-          "name": "questions_sentence_valid",
-          "value": "(\"questions\".\"type\" in ('cloze_choice', 'cloze_typed', 'sentence_translation')) = (\"questions\".\"sentence\" is not null)\n        and (\"questions\".\"type\" in ('cloze_choice', 'cloze_typed', 'sentence_translation')) = (\"questions\".\"sentence_translation\" is not null)\n        and (\"questions\".\"type\" in ('cloze_choice', 'cloze_typed', 'sentence_translation')) = (\"questions\".\"gap_start\" is not null)\n        and (\"questions\".\"type\" in ('cloze_choice', 'cloze_typed', 'sentence_translation')) = (\"questions\".\"gap_end\" is not null)\n        and (\"questions\".\"gap_start\" is null or (\"questions\".\"gap_start\" >= 0 and \"questions\".\"gap_start\" < \"questions\".\"gap_end\" and \"questions\".\"gap_end\" <= length(\"questions\".\"sentence\")))"
+          "value": "case \"questions\".\"type\"\n        when 'multiple_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'listen_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'matching' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'reverse_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'typed_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'dictation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'letter_tiles' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null\n          and coalesce(array_length(\"questions\".\"tiles\", 1), 0) between 5 and 12\n        when 'read_aloud' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'say_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'typed_meaning' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        else false end"
         },
         "questions_owner_complete": {
           "name": "questions_owner_complete",
