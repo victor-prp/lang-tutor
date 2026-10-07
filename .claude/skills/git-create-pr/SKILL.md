@@ -6,12 +6,12 @@ description: Use when the user asks to create, open, or submit a pull request fo
 # Create PR
 
 ## Overview
-Opens a PR from the current branch against `master`.
+Opens a PR from the current branch against `master`. One line of work is one PR: work planned in parts that build on each other (Part A, then Part B) ships as one PR, not one PR per part.
 
 ## Steps
 
 1. Gather context in parallel: `git status`, `git diff master...HEAD`, `git log master..HEAD`, and whether the current branch already tracks a remote.
-2. **If `git log master..HEAD` includes commits of another branch whose PR is still open, open no PR yet.** The base is always `master`, never another branch: a PR stacked on another branch's PR (`--base <that-branch>`) and merged right after it lands in that branch instead of `master`, and the work never ships. Push this branch, say in your report that its PR opens once the other one merges, and when it has, merge `master` into this branch and run this skill again.
+2. **If `git log master..HEAD` includes commits of another branch whose PR is still open, this work joins that PR; open no second PR.** Add this branch's commits to that branch, which is usually checked out in another worktree, by pushing from here: `git push origin <this-branch>:<that-branch>` (if that is refused because the other branch moved, merge `origin/<that-branch>` into this branch and push again, never with force). Then update the open PR's title and body with `gh pr edit`, and report that it now carries this work too. Never stack a PR on another one (`--base <that-branch>`): merged right after it, a stacked PR lands in that branch instead of `master`, and the work never ships.
 3. Draft a title (<70 chars) and a body (Summary bullets + Test plan checklist) from the full set of commits on the branch, not just the latest one.
 4. Push the branch (`git push -u origin <branch>`, skip if already up to date) and open the PR — no approval round first. The PR is where the user reviews the work; a title or body that needs changing is one `gh pr edit` away. Write the body to a file and pass `--body-file` rather than `--body` with a heredoc — a long body with backticks, checklists and non-ASCII survives a file intact, and the file is also what the user pastes into the web UI if `gh` fails.
 
