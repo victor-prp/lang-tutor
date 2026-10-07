@@ -121,3 +121,14 @@ describe('level names', () => {
     expect(strings.dimensionName('spelling')).toBe('איות');
   });
 });
+
+describe('missedPair, phase 24', () => {
+  it('reads word → meaning for every new type', () => {
+    expect(missedPair({ question: { id: 'l', type: 'listen_choice', vocab_term_id: 'v', question: 'casa', options: ['בית'], correct_option: 0 }, correct_answer: 'בית' }))
+      .toEqual({ word: 'casa', meaning: 'בית' });
+    expect(missedPair({ question: { id: 'd', type: 'dictation', vocab_term_id: 'v', question: 'parlo', meaning: 'מדבר' }, correct_answer: 'parlo' }))
+      .toEqual({ word: 'parlo', meaning: 'מדבר' });
+    expect(missedPair({ question: { id: 't', type: 'letter_tiles', vocab_term_id: 'v', question: 'בית', part_of_speech: 'noun', answer: 'casa', tiles: [] }, correct_answer: 'casa' }))
+      .toEqual({ word: 'casa', meaning: 'בית' });
+  });
+});

@@ -12,11 +12,26 @@ export type Feedback = {
   verdict: TypedVerdict | null;
 };
 
+/** Phase 24. What a card was answered with: an option, a text, or a board's
+ *  first tries (spec D10). */
+export type CardAnswer = AnswerInput | { board: number[] };
+
 /**
  * Phase 23. The banner after an answer. It runs the same `evaluate` the server
  * runs, so what the learner is told is what the server records (spec D9).
  */
-export function feedbackFor(question: Question, answer: AnswerInput): Feedback {
+export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
+  if ('board' in answer) {
+    if (question.type !== 'matching') throw new Error(`a board answer for a ${question.type} card`);
+    const start = question.board.question_ids.indexOf(question.id);
+    const right = answer.board.filter((meaning, i) => meaning === question.board.correct_options[start + i]).length;
+    return {
+      tone: right === answer.board.length ? 'correct' : 'wrong',
+      title: strings.boardResult(right, answer.board.length),
+      line: null,
+      verdict: null,
+    };
+  }
   const record = evaluate(question, answer);
   const verdict = record.verdict ?? null;
   const right = rightAnswer(question);
