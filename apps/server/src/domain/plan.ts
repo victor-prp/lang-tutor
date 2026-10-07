@@ -60,7 +60,7 @@ function eligible(type: QuestionType, pick: PlanPick, input: PlanInput): boolean
       // Only reached when speaking is on: planSession removes them otherwise.
     case 'cloze_typed':
     case 'sentence_translation':
-      // Phase 27 (spec D8): the sentence cards practise the form in any
+      // Phase 27 (spec D9): the sentence cards practise the form in any
       // inflection, so only a form short enough to say is one a sentence fits.
       return pick.speakable;
     case 'cloze_choice':

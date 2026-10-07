@@ -40,6 +40,9 @@ export type TranslateContent = { hebrew: string; reference: string; gap: { start
 type Input = { form: string; target: LanguageCode; explanation: LanguageCode; avoid: readonly string[] };
 type Found = { sentence?: string; gap?: string; translation?: string; alternatives?: string[] };
 
+/** Gap offsets are UTF-16 indices and the database counts characters, so a character beyond the BMP would misplace the gap. */
+const hasAstral = (...texts: string[]): boolean => texts.some((text) => /[\u{10000}-\u{10FFFF}]/u.test(text));
+
 const fail = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
 
 /** Spec D5, D6: whether a text holds a letter of the explanation language's script. */
@@ -58,6 +61,8 @@ export function validateSentenceItem(
   const gap = found.gap?.trim();
   const translation = found.translation?.trim();
   if (!sentence || !gap || !translation) return fail('the sentence, its gap or its translation is missing');
+
+  if (hasAstral(sentence, translation, gap)) return fail('the sentence holds a character outside the basic plane');
 
   const words = wordCount(sentence);
   if (words < SENTENCE_MIN_WORDS || words > SENTENCE_MAX_WORDS) return fail(`the sentence has ${words} words`);
@@ -102,6 +107,8 @@ export function validateTranslateItem(
   const reference = found.translation?.trim();
   const gap = found.gap?.trim();
   if (!hebrew || !reference || !gap) return fail('the sentence, its translation or its gap is missing');
+
+  if (hasAstral(hebrew, reference, gap)) return fail('the sentence holds a character outside the basic plane');
 
   const words = wordCount(hebrew);
   if (words < SENTENCE_MIN_WORDS || words > TRANSLATE_MAX_WORDS) return fail(`the Hebrew sentence has ${words} words`);

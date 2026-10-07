@@ -281,7 +281,8 @@ export function createQuestionRepo(tx: Tx) {
     /**
      * Phase 27 (spec D5, D6). Per sense, the sentences this enrollment's last
      * sessions asked, newest first by creation, so a new sentence is never last
-     * time's: a typed cloze's `sentence`, and a translation's reference. A cloze
+     * time's: a typed cloze's `sentence`, and a translation's Hebrew sentence (its
+     * `sentence_translation` column; its `sentence` is the reference). A cloze
      * choice shows the saved example and is not a written sentence, so it is
      * left out. At most `limit` of each; a sense with none has no entry.
      */
@@ -294,7 +295,8 @@ export function createQuestionRepo(tx: Tx) {
       if (input.senseIds.length === 0) return recent;
       const rows = await tx.execute<{ sense_id: string; type: string; sentence: string }>(sql`
         SELECT sense_id, type, sentence FROM (
-          SELECT q.sense_id, q.type, q.sentence,
+          SELECT q.sense_id, q.type,
+                 CASE WHEN q.type = 'sentence_translation' THEN q.sentence_translation ELSE q.sentence END AS sentence,
                  row_number() OVER (PARTITION BY q.sense_id, q.type ORDER BY q.created_at DESC, q.id DESC) AS recency
           FROM questions q
           WHERE q.enrollment_id = ${input.enrollmentId}

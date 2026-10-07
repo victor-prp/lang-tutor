@@ -467,6 +467,75 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
     });
   });
 
+  it('hands a translate item the recent Hebrew sentences and the example\'s Hebrew, and degrades a card that repeats one', async () => {
+    // Ordinal 2 plans a sentence_translation card among the ten.
+    // Ordinal 2 plans a sentence_translation card among the ten.
+    const PAYLOAD_T ={ ...TEN_PAYLOAD, ordinal: 2 };
+    const hebrew = (row: GenerationContext) => `אתמול ראינו שם את ${row.translation} החדש.`;
+    const recent: RecentSentences = new Map(EXAMPLES.map((row) => [row.senseId, { cloze: [], translate: [hebrew(row)] }]));
+    const probe = world({ context: EXAMPLES, reply: 'nope', recent });
+    await expect(probe.service.prepareSession(PAYLOAD_T)).rejects.toThrow();
+    const items = JSON.parse(probe.llm.calls[0].user).items as { key: string; task: string; word: string; avoid: string[] }[];
+    const translate = items.find((item) => item.task === 'translate')!;
+    const row = EXAMPLES.find((r) => r.form === translate.word)!;
+    expect(translate.avoid).toEqual([row.exampleTranslation, hebrew(row)]);
+
+    const reply = JSON.stringify({
+      items: items.map((item) =>
+        item.task === 'translate'
+          ? // The model writes last session's Hebrew sentence again.
+            { key: item.key, sentence: hebrew(row), translation: `Вчера я видел ${item.word} там.`, gap: item.word }
+          : item.task === 'gap'
+            ? { key: item.key, distractors: ['один', 'два', 'три'] }
+            : item.task === 'meaning'
+              ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
+              : item.task === 'word'
+                ? { key: item.key, distractors: ['чеснок', 'морковь', 'капуста'] }
+                : { key: item.key, distractors: [], alternatives: [] },
+      ),
+    });
+    const { service, calls, logger } = world({ context: EXAMPLES, reply, recent });
+    await service.prepareSession(PAYLOAD_T);
+    const position = Number(translate.key.slice(1)) - 1;
+    expect(typesOf(calls)[position]).toBe('typed_translation');
+    expect(logger.events).toContainEqual({
+      event: 'sentence_degraded',
+      session_id: SESSION,
+      position,
+      type: 'sentence_translation',
+      reason: expect.stringContaining('avoid'),
+    });
+  });
+
+  it('plans no gap card for a saved example with no Hebrew half', async () => {
+    const probe = world({ context: EXAMPLES.map((row) => ({ ...row, exampleTranslation: null })), reply: 'nope' });
+    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    const items = JSON.parse(probe.llm.calls[0].user).items as { task: string }[];
+    expect(items.map((item) => item.task)).not.toContain('gap');
+  });
+
+  it('logs sentence_degraded only when the session was written', async () => {
+    const probe = world({ context: EXAMPLES, reply: 'nope' });
+    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    const items = JSON.parse(probe.llm.calls[0].user).items as { key: string; task: string; word: string; example: string | null }[];
+    const reply = JSON.stringify({
+      items: items.map((item) =>
+        item.task === 'sentence'
+          ? { key: item.key, sentence: item.example, gap: item.word, translation: 'אתמול ראינו שם משהו.', alternatives: [] }
+          : item.task === 'gap'
+            ? { key: item.key, distractors: ['один', 'два', 'три'] }
+            : item.task === 'meaning'
+              ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
+              : item.task === 'word'
+                ? { key: item.key, distractors: ['чеснок', 'морковь', 'капуста'] }
+                : { key: item.key, distractors: [], alternatives: [] },
+      ),
+    });
+    const dropped = world({ context: EXAMPLES, reply, ready: false });
+    await dropped.service.prepareSession(TEN_PAYLOAD);
+    expect(dropped.logger.events.map((e) => (e as { event: string }).event)).not.toContain('sentence_degraded');
+  });
+
   it('stores a valid typed cloze with its sentence and gap, and logs nothing degraded', async () => {
     const probe = world({ context: TEN, reply: 'nope' });
     await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();

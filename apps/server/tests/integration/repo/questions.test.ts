@@ -479,7 +479,7 @@ describe('phase 27 Part B: sentence cards', () => {
       );
     }
     const typedWith = (n: number): SentenceExtra => ({ type: 'cloze_typed', alternatives: [], sentence: `Ieri parlavamo ${n}.`, gapStart: 5, gapEnd: 14 });
-    const translateWith = (n: number): SentenceExtra => ({ type: 'sentence_translation', sentence: `We parlavamo ${n}.`, gapStart: 3, gapEnd: 12 });
+    const translateWith = (n: number): SentenceExtra => ({ type: 'sentence_translation', sentence: `We parlavamo ${n}.`, sentenceTranslation: `דיברנו ${n}.`, gapStart: 3, gapEnd: 12 });
 
     it('returns, per sense, newest first, only this enrollment, only the two types, at most limit', async () => {
       await seedUser(t.db, 'u_2');
@@ -501,7 +501,8 @@ describe('phase 27 Part B: sentence cards', () => {
       const recent = await read(2);
       expect(recent.get(word.senseIds[0])).toEqual({
         cloze: ['Ieri parlavamo 3.', 'Ieri parlavamo 2.'],
-        translate: ['We parlavamo 2.', 'We parlavamo 1.'],
+        // The Hebrew sentence asked, not the reference that follows the answer.
+        translate: ['דיברנו 2.', 'דיברנו 1.'],
       });
       expect((await read(10)).get(word.senseIds[0])!.cloze).toEqual(['Ieri parlavamo 3.', 'Ieri parlavamo 2.', 'Ieri parlavamo 1.']);
       // A sense with none has no entry; no senses is an empty map.

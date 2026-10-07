@@ -528,7 +528,7 @@ export function createSessionService({
           tiles: tileEligible(row.form),
           speakable: speakable(row.form),
           // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
-          clozeGap: findGap(row.example ?? '', [row.form, row.lemma]) !== null,
+          clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
         })),
         { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
       );
@@ -586,7 +586,10 @@ export function createSessionService({
         throw error;
       }
 
+      // Logged once the session is written, not on an attempt a failed insert or a retry repeats.
+      let degradedEvents: Record<string, unknown>[] = [];
       const written = await transaction(async ({ session, question }) => {
+        degradedEvents = [];
         // Conditional: a skip that landed during the model call wins, and this
         // transaction then writes nothing at all.
         if (!(await session.transition(sessionId, ['preparing'], 'ready'))) return false;
@@ -603,7 +606,7 @@ export function createSessionService({
             const degraded =
               (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate);
             if (degraded) {
-              logger.info({
+              degradedEvents.push({
                 event: 'sentence_degraded',
                 session_id: sessionId,
                 position: index,
@@ -635,6 +638,7 @@ export function createSessionService({
         return true;
       });
 
+      if (written) for (const event of degradedEvents) logger.info(event);
       logger.info({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
         session_id: sessionId,

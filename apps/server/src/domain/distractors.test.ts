@@ -554,7 +554,10 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(distractorItems([{ ...ROW, example: null }], ['sentence'], NO_RECENT)[0].avoid).toEqual([]);
     });
     it('avoids the three newest recent translations on a translate item', () => {
-      expect(distractorItems([ROW], ['translate'], recent)[0].avoid).toEqual(['אחת', 'שתיים', 'שלוש']);
+      expect(distractorItems([{ ...ROW, exampleTranslation: null }], ['translate'], recent)[0].avoid).toEqual(['אחת', 'שתיים', 'שלוש']);
+    });
+    it('also avoids the saved example\'s Hebrew on a translate item', () => {
+      expect(distractorItems([ROW], ['translate'], recent)[0].avoid).toEqual(['אני אוהב לדבר איתך.', 'אחת', 'שתיים', 'שלוש']);
     });
     it('avoids nothing on any other item, and finds a gap item its blank', () => {
       expect(distractorItems([ROW], ['meaning'], recent)[0].avoid).toEqual([]);
@@ -585,7 +588,20 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       });
       expect(sent.items[0]).not.toHaveProperty('avoid');
       expect(sent.items[1]).toMatchObject({ task: 'sentence', avoid: ['Mi piace parlare con te.'] });
-      expect(sent.items[2]).toMatchObject({ task: 'translate', avoid: ['אחת'] });
+      expect(sent.items[2]).toMatchObject({ task: 'translate', avoid: [ROW.exampleTranslation, 'אחת'] });
+    });
+    it('sends the example keys on the sentence tasks only, as before Part B for the others', () => {
+      const old = distractorItems([ROW], ['meaning'], NO_RECENT).concat(
+        distractorItems([ROW], ['word'], NO_RECENT).map((item) => ({ ...item, key: 'q2' })),
+        distractorItems([ROW], ['typed'], NO_RECENT).map((item) => ({ ...item, key: 'q3' })),
+      );
+      const sent = JSON.parse(buildDistractorPrompt({ items: old, from: 'it', to: 'he', others: [] }).user) as { items: Record<string, unknown>[] };
+      for (const item of sent.items) {
+        expect(item).not.toHaveProperty('example');
+        expect(item).not.toHaveProperty('example_translation');
+        expect(item).not.toHaveProperty('blank');
+        expect(item).not.toHaveProperty('avoid');
+      }
     });
   });
 
@@ -662,6 +678,13 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
         gapStart: 9,
         gapEnd: 16,
       });
+    });
+    it('gives the wrong words the capital of the blank, so the right one is no tell', () => {
+      const opening = { ...ROW, example: 'Parlare è bello.', exampleTranslation: 'לדבר זה יפה.' };
+      const upper = generatedContent(opening, 'cloze_choice', { ...NOTHING_GENERATED, distractors: ['parlai', 'Parlato', 'parlò'] }, { ...NO_EXTRAS, gap: { start: 0, end: 7 } });
+      expect(upper.options!.map((o) => o.text)).toEqual(['Parlare', 'Parlai', 'Parlato', 'Parlò']);
+      const lower = generatedContent(ROW, 'cloze_choice', { ...NOTHING_GENERATED, distractors: ['Parlai', 'parlato', 'Parlò'] }, extras);
+      expect(lower.options!.map((o) => o.text)).toEqual(['parlare', 'parlai', 'parlato', 'parlò']);
     });
     it('stores a cloze typed card from its generated sentence', () => {
       const sentence = { sentence: 'Ieri parlavamo per ore.', translation: 'אתמול דיברנו שעות.', gap: { start: 5, end: 14 }, alternatives: ['chiacchieravamo'] };

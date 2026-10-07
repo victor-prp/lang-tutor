@@ -30,6 +30,8 @@ describe('validateSentenceItem (spec D5)', () => {
     ['a translation with no Hebrew', { ...good, translation: 'Yesterday we talked.' }],
     ['a translation that shows the gap word', { ...good, translation: 'אתמול parlavamo שעות.' }],
     ['an English translation for a Hebrew source', { ...good, translation: 'Yesterday we talked for hours.' }],
+    ['an emoji in the sentence', { ...good, sentence: 'Ieri parlavamo per ore 😀.' }],
+    ['an emoji in the translation', { ...good, translation: 'אתמול דיברנו שעות 😀.' }],
     ['nothing written', {}],
   ])('degrades %s', (_, found) => {
     expect(validateSentenceItem(INPUT, found).ok).toBe(false);
@@ -51,6 +53,8 @@ describe('validateTranslateItem (spec D6)', () => {
     ['too many Hebrew words', { ...good, sentence: 'אתמול בערב הזמנו חדר גדול ויפה מאוד במלון החדש שבמרכז העיר' }],
     ['a gap missing from the reference', { ...good, gap: 'prenotare' }],
     ['Hebrew in the reference', { ...good, translation: 'Abbiamo prenotato חדר.' }],
+    ['an emoji in the Hebrew sentence', { ...good, sentence: 'הזמנו חדר במלון 😀' }],
+    ['an emoji in the reference', { ...good, translation: 'Abbiamo prenotato una camera 😀.' }],
     ['a reference with no target letters', { ...good, translation: '12345', gap: '12345' }],
   ])('degrades %s', (_, found) => {
     expect(validateTranslateItem(input, found).ok).toBe(false);

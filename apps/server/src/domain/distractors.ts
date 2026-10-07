@@ -141,13 +141,16 @@ export type DistractorVerdict =
 
 /** Spec D5, D6: the sentences an item must not repeat. A gap sentence avoids
  *  the saved example (the model is shown it) and the last sessions' sentences;
- *  a translation avoids only the last sessions'. */
+ *  a translation avoids the last sessions' Hebrew sentences and the saved
+ *  example's Hebrew, so the example is not written back as the sentence. */
 function avoidFor(row: GenerationContext, task: Task, recent: RecentSentences): string[] {
   const seen = recent.get(row.senseId);
   if (task === 'sentence') {
     return [...(row.example ? [row.example] : []), ...(seen?.cloze ?? []).slice(0, MAX_AVOID)];
   }
-  if (task === 'translate') return (seen?.translate ?? []).slice(0, MAX_AVOID);
+  if (task === 'translate') {
+    return [...(row.exampleTranslation ? [row.exampleTranslation] : []), ...(seen?.translate ?? []).slice(0, MAX_AVOID)];
+  }
   return [];
 }
 
@@ -239,8 +242,9 @@ export function buildDistractorPrompt(input: {
       lemma: item.lemma,
       part_of_speech: item.partOfSpeech,
       correct: item.translation,
-      example: item.example,
-      example_translation: item.exampleTranslation,
+      ...(item.task === 'gap' || item.task === 'sentence' || item.task === 'translate'
+        ? { example: item.example, example_translation: item.exampleTranslation }
+        : {}),
       ...(item.task === 'gap' ? { sentence: item.example, blank: item.blank } : {}),
       ...(item.avoid.length > 0 ? { avoid: item.avoid } : {}),
     })),
@@ -505,10 +509,17 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
       // Spec D7: the saved example, the form's own text blanked, correct option first.
       const gap = extras.gap;
       if (!row.example || !gap) throw new Error(`the cloze card for ${row.form} has no example or gap`);
+      // The right option keeps the sentence's case (capital when the word opens
+      // it), so the wrong ones take the blank's first-letter case: it is no tell.
+      const blank = row.example.slice(gap.start, gap.end);
+      const upper = blank.charAt(0) !== blank.charAt(0).toLowerCase();
+      const cased = generated.distractors.map((text) =>
+        text === '' ? text : (upper ? text.charAt(0).toUpperCase() : text.charAt(0).toLowerCase()) + text.slice(1),
+      );
       return {
         ...none,
         prompt: row.translation,
-        options: optionsFor(row.example.slice(gap.start, gap.end), generated.distractors),
+        options: optionsFor(blank, cased),
         sentence: row.example,
         sentenceTranslation: row.exampleTranslation,
         gapStart: gap.start,
