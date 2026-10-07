@@ -4,7 +4,23 @@
   asked for the design to be made without questions ("Do brainstorming with yourself. I trust
   your judgement") and for the low-confidence decisions to be listed for review. Every decision is
   in §1 with its reason, so each one can be overturned in review. Those marked
-  **(low confidence)** are the ones to read first. Not yet planned or built.
+  **(low confidence)** are the ones to read first. Part A (D1–D7, D10–D16) is implemented on
+  branch `phase-24-more-question-types` from the plan
+  `docs/superpowers/plans/2026-10-07-phase-24-listening-variety.md`. Part B (the context cards:
+  D8, D9, the `gap` task) is not yet planned. Planning and building found these deviations:
+  - The planner lives in `domain/plan.ts`, not `domain/session.ts`.
+  - Part A's tiers hold only the types that exist: recognise `multiple_choice, listen_choice`;
+    pick the form `reverse_choice, letter_tiles`; produce `typed_translation, dictation`. Part B
+    inserts the cloze types at index 1 of the second and third.
+  - `withBoards` lives in `repo/questions.ts` beside `questionFrom` (ADR 0001 R4 lets
+    persistence import domain types only), and `shuffleSession` in core beside `shuffleOptions`.
+  - The e2e plays every Part A type in one ten-word session at ordinal 0, and checks
+    `הבנת הנשמע` on the results screen rather than on the word's page. The ordinal-1 rotation is
+    covered by unit tests.
+  - An old prepare-session payload is tested at unit level.
+  - Making `spoken_receptive` live required updating several existing tests whose fixtures had
+    treated both spoken dimensions as not live: server vocabulary unit, integration and route
+    tests, and the progress e2e.
 - **Date:** 2026-10-07
 - **Source:** the one-pager `drafts/2026-10-07-more-question-types-one-pager.md`. `drafts/` is
   gitignored, so everything this spec depends on is restated below.
