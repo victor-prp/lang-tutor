@@ -799,6 +799,11 @@ async function main(): Promise<void> {
   // different kind of failure, and a good translation score must not hide it.
   let speechPassed = 0;
   let speechTotal = 0;
+  // Phase 26's two calls, the photo read and the sense match, share a line of
+  // their own for the same reason: pooled with translation, nearly every photo
+  // check could fail with the gate still green.
+  let photoPassed = 0;
+  let photoTotal = 0;
 
   for (const row of rows) {
     const t1Bad = row.tier1.filter((check) => !check.ok);
@@ -808,6 +813,9 @@ async function main(): Promise<void> {
     if (transcriptionRows.includes(row)) {
       speechPassed += passed;
       speechTotal += row.tier2.length;
+    } else if (photoRows.includes(row) || matchRows.includes(row)) {
+      photoPassed += passed;
+      photoTotal += row.tier2.length;
     } else {
       tier2Passed += passed;
       tier2Total += row.tier2.length;
@@ -861,11 +869,14 @@ async function main(): Promise<void> {
 
   const score = tier2Total === 0 ? 0 : tier2Passed / tier2Total;
   const transcriptionScore = speechTotal === 0 ? 0 : speechPassed / speechTotal;
+  const photoScore = photoTotal === 0 ? 0 : photoPassed / photoTotal;
   console.log(
     `\ntier 1: ${tier1Failures} failure(s) (must be 0)\n` +
       `tier 2: ${tier2Passed}/${tier2Total} = ${(score * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
       `transcription tier 2: ${speechPassed}/${speechTotal} = ${(transcriptionScore * 100).toFixed(1)}% ` +
+      `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
+      `photo tier 2: ${photoPassed}/${photoTotal} = ${(photoScore * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
       `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ${photoCases.length} photo + ${matchCases.length} match cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
@@ -877,7 +888,7 @@ async function main(): Promise<void> {
   const dir = join(__dirname, '.results');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  writeFileSync(file, JSON.stringify({ model: gemini.model, score, transcriptionScore, rows }, null, 2));
+  writeFileSync(file, JSON.stringify({ model: gemini.model, score, transcriptionScore, photoScore, rows }, null, 2));
   console.log(`report: ${file}`);
 
   // A group with no checks (a filtered run) has nothing to fail on.
@@ -885,7 +896,8 @@ async function main(): Promise<void> {
   if (
     tier1Failures > 0 ||
     belowThreshold(tier2Total, score) ||
-    belowThreshold(speechTotal, transcriptionScore)
+    belowThreshold(speechTotal, transcriptionScore) ||
+    belowThreshold(photoTotal, photoScore)
   ) {
     process.exit(1);
   }
