@@ -3,12 +3,15 @@ import type { z } from 'zod';
 import type {
   AnswerRecordSchema,
   CreateEnrollmentRequestSchema,
+  CreateGrantRequestSchema,
   CreateSessionRequestSchema,
   CreateSessionResponseSchema,
   CreateUserRequestSchema,
   CurrentSessionResponseSchema,
   CurrentSessionSchema,
   EnrollmentSchema,
+  GrantListSchema,
+  GrantSchema,
   ErrorSchema,
   HealthResponseSchema,
   KnowledgeDimensionSchema,
@@ -138,6 +141,9 @@ export type LlmRendering = z.infer<typeof LlmRenderingSchema>;
 export type LlmReconciliation = z.infer<typeof LlmReconciliationSchema>;
 export type Enrollment = z.infer<typeof EnrollmentSchema>;
 export type CreateEnrollmentRequest = z.infer<typeof CreateEnrollmentRequestSchema>;
+export type CreateGrantRequest = z.infer<typeof CreateGrantRequestSchema>;
+export type Grant = z.infer<typeof GrantSchema>;
+export type GrantList = z.infer<typeof GrantListSchema>;
 export type LanguageCode = z.infer<typeof LanguageCodeSchema>;
 export type VocabularyEntryInput = z.infer<typeof VocabularyEntryInputSchema>;
 export type SaveVocabularyRequest = z.infer<typeof SaveVocabularyRequestSchema>;

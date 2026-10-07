@@ -7,6 +7,7 @@ import type { AppDeps } from '../../../src/composition';
 import { createPhotoImportsRouter } from '../../../src/routes/photoImports';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
+import { addedByOf } from '../../support/grantRows';
 import { countJobs, startTestBoss, stopTestBoss } from '../../support/jobs';
 import { seedPhotoImport } from '../../support/photoImportRows';
 import { createTestServerDeps } from '../../support/serverDeps';
@@ -157,6 +158,8 @@ describe('save and discard', () => {
     expect(await res.json()).toEqual({ saved_sense_ids: [casa[1].sense_id] });
     const page = await deps.vocabulary.listWords(IT, {});
     expect(page.items.map((item) => item.lemma)).toEqual(['casa']);
+    // Phase 28. The list's owner photographed it, so the owner added it.
+    expect(await addedByOf(t.db, IT)).toEqual(['u_1']);
 
     const again = await send('POST', `/photo-imports/${id}/save`);
     expect(again.status).toBe(200);

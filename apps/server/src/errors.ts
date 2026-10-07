@@ -49,6 +49,20 @@ export class UserNotFound extends Error {
   }
 }
 
+/** Phase 28 (ADR 0008). The actor may not do this to that enrollment. `action` is
+ *  a permission name, or a grant action such as 'grant.accept'. The route
+ *  answers 403 with a fixed body; the detail is only in the access_denied log. */
+export class AccessDenied extends Error {
+  constructor(
+    readonly actorUserId: string,
+    readonly enrollmentId: string,
+    readonly action: string,
+  ) {
+    super(`${actorUserId} may not ${action} on ${enrollmentId}`);
+    this.name = 'AccessDenied';
+  }
+}
+
 export class EnrollmentNotFound extends Error {
   constructor(readonly enrollmentId: string) {
     super(`no enrollment ${enrollmentId}`);
@@ -63,6 +77,17 @@ export class AlreadyEnrolled extends Error {
   ) {
     super(`user ${userId} is already enrolled in ${targetLanguage}`);
     this.name = 'AlreadyEnrolled';
+  }
+}
+
+/** Phase 28. This person already holds a grant on this list, pending or accepted. */
+export class GrantExists extends Error {
+  constructor(
+    readonly enrollmentId: string,
+    readonly granteeUserId: string,
+  ) {
+    super(`${granteeUserId} already holds a grant on ${enrollmentId}`);
+    this.name = 'GrantExists';
   }
 }
 
@@ -202,6 +227,33 @@ export class InvalidDistractors extends Error {
   ) {
     super(`distractors for session ${sessionId} were refused: ${reason}`);
     this.name = 'InvalidDistractors';
+  }
+}
+
+/** Phase 28. No grant has this id. */
+export class GrantNotFound extends Error {
+  constructor(readonly grantId: string) {
+    super(`no grant ${grantId}`);
+    this.name = 'GrantNotFound';
+  }
+}
+
+/** Phase 28 (spec D3). An invite names a language the student is not learning. */
+export class NotLearning extends Error {
+  constructor(
+    readonly userId: string,
+    readonly targetLanguage: string,
+  ) {
+    super(`${userId} is not learning ${targetLanguage}`);
+    this.name = 'NotLearning';
+  }
+}
+
+/** Phase 28. Nobody holds a grant on their own list. */
+export class OwnList extends Error {
+  constructor(readonly userId: string) {
+    super(`${userId} cannot be granted their own list`);
+    this.name = 'OwnList';
   }
 }
 

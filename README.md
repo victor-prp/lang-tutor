@@ -125,8 +125,9 @@ enforced.
 | [0005](docs/adr/adr-0005-identity-without-authentication.md) | Identity without authentication — a username identifies, it authorizes nothing |
 | [0006](docs/adr/adr-0006-lanes.md) | Every checkout is a self-contained lane — its ports, databases and namespaces all derive from one slot and branch name in `scripts/lane-env.sh` |
 | [0007](docs/adr/adr-0007-background-jobs.md) | Background jobs run on pg-boss, enqueued only inside a transaction — `repo/jobs.ts` is the only enqueue, `worker.ts` the only place handlers are registered |
+| [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, an asserted actor header; `repo/grants.ts` is the only reader of the table |
 
-All seven are enforced by `npm run lint:arch` (17 + 7 + 6 + 7 + 3 + 6 + 4 = 50 checks, grep only, no deps,
+All eight are enforced by `npm run lint:arch` (17 + 7 + 6 + 7 + 3 + 6 + 4 + 3 = 53 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
@@ -444,7 +445,7 @@ npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0005 identity, 0006 lanes, 0007 jobs) — grep only, no deps, no database
+npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0005 identity, 0006 lanes, 0007 jobs, 0008 grants) — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go

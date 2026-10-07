@@ -1,6 +1,6 @@
 # ADR 0005: Identity without authentication
 
-- **Status:** Accepted
+- **Status:** Accepted; amended 2026-10-07 by [ADR 0008](adr-0008-access-grants.md): authorization exists, over an asserted identity. No credential code, still.
 - **Date:** 2026-09-07
 - **Source:** [phase 8 design](../superpowers/specs/2026-09-07-lang-tutor-phase-8-onboarding-design.md)
 
@@ -19,7 +19,7 @@ username and no password: it is a lookup that returns a profile, not an authenti
   POST /api/login     lookup      returns the profile — proves nothing about who asked
         │
         ▼
-  (nothing)           authorization — deliberately absent
+  ADR 0008            authorization over an ASSERTED actor — a correctness boundary, not a security one
 ```
 
 No credential machinery — a password hash, a token, auth middleware, a third-party auth

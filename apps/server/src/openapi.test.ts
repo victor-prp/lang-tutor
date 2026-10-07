@@ -97,7 +97,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all twenty paths and nothing else', async () => {
+  it('contains all twenty-three paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/enrollments/{id}/photo-imports',
@@ -105,6 +105,9 @@ describe('the document as a whole', () => {
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
       '/api/enrollments/{id}/vocabulary/word',
+      '/api/grants',
+      '/api/grants/{id}',
+      '/api/grants/{id}/accept',
       '/api/login',
       '/api/photo-imports/{id}',
       '/api/photo-imports/{id}/discard',
@@ -121,6 +124,21 @@ describe('the document as a whole', () => {
       '/api/users/{id}/enrollments',
       '/health',
     ]);
+  });
+});
+
+describe('the grant endpoints in the published document (phase 28)', () => {
+  it.each([
+    ['/api/grants', 'post', ['201', '400', '403', '404', '409']],
+    ['/api/grants', 'get', ['200', '400']],
+    ['/api/grants/{id}/accept', 'post', ['200', '400', '403', '404']],
+    ['/api/grants/{id}', 'delete', ['204', '400', '403']],
+  ])('declares every status %s %s can return, and requires the actor header', async (path, method, statuses) => {
+    const doc = await openApiDocument();
+    const operation = doc.paths[path as string][method as string];
+    expect(Object.keys(operation.responses).sort()).toEqual(statuses);
+    const header = operation.parameters.find((p: { name: string }) => p.name === 'x-acting-user-id');
+    expect(header).toMatchObject({ in: 'header', required: true });
   });
 });
 
@@ -268,9 +286,9 @@ describe('the vocabulary endpoints in the published document', () => {
   const BASE = '/api/enrollments/{id}/vocabulary';
 
   it.each([
-    [BASE, 'post', ['200', '400', '404']],
+    [BASE, 'post', ['200', '400', '403', '404']],
     [BASE, 'get', ['200', '400', '404']],
-    [`${BASE}/senses/{sense_id}`, 'delete', ['204', '404']],
+    [`${BASE}/senses/{sense_id}`, 'delete', ['204', '400', '403', '404']],
     [`${BASE}/word`, 'get', ['200', '400', '404']],
   ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
     const doc = await openApiDocument();
@@ -294,6 +312,21 @@ describe('POST /api/sessions/{id}/speech in the published document', () => {
     const op = doc.paths['/api/sessions/{id}/speech'].post;
     expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '404', '409', '413', '502']);
     expect(op.description).toMatch(/costs money/);
+  });
+});
+
+describe('the actor header in the published document (phase 28)', () => {
+  it('is required on both vocabulary writes, and says it authenticates nothing', async () => {
+    const doc = await openApiDocument();
+    for (const operation of [
+      doc.paths['/api/enrollments/{id}/vocabulary'].post,
+      doc.paths['/api/enrollments/{id}/vocabulary/senses/{sense_id}'].delete,
+    ]) {
+      const header = operation.parameters.find((p: { name: string }) => p.name === 'x-acting-user-id');
+      expect(header).toMatchObject({ in: 'header', required: true });
+      expect(header.description).toMatch(/NOT AUTHENTICATED/);
+      expect(Object.keys(operation.responses)).toContain('403');
+    }
   });
 });
 

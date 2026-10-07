@@ -115,6 +115,11 @@ export default function VocabularyWordScreen() {
                 </Text>
               ) : null}
               <Text style={styles.translation}>{sense.translation}</Text>
+              {sense.added_by ? (
+                <Text testID="vocabulary-sense-added-by" style={styles.addedBy}>
+                  {strings.addedBy([sense.added_by])}
+                </Text>
+              ) : null}
               {sense.form.toLowerCase() !== word.lemma.toLowerCase() ? (
                 <Text style={styles.meta}>{strings.vocabularyFromForm(sense.form)}</Text>
               ) : null}
@@ -174,6 +179,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.xs,
   },
+  addedBy: { color: colors.muted, fontSize: fontSizes.sm, writingDirection: 'rtl' },
   translation: { fontSize: fontSizes.lg, lineHeight: lineHeights.lg, color: colors.text, writingDirection: 'rtl' },
   example: { gap: spacing.xs },
   progress: { gap: spacing.xs },

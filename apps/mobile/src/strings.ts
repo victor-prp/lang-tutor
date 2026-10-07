@@ -214,6 +214,47 @@ export const strings = {
     const key = value.toLowerCase();
     return Object.hasOwn(PART_OF_SPEECH_LOOKUP, key) ? PART_OF_SPEECH_LOOKUP[key] : undefined;
   },
+  // Phase 28. Tutors and students. Usernames are Latin inside Hebrew sentences,
+  // so they sit in FSI/PDI isolates, as translateCorrectionNotice's forms do.
+  enrollTeach: 'אני כאן כדי ללמד',
+  startLearning: 'התחלת לימוד שפה',
+  inviteCard: (tutor: string, language: string) =>
+    `${tutor} רוצה להוסיף מילים לרשימת ה${languageName(language)} שלך`,
+  inviteAccept: 'אישור',
+  inviteDecline: 'דחייה',
+  studentsTitle: 'התלמידים שלי',
+  personAndLanguage: (name: string, language: string) => `${name} · ${languageName(language)}`,
+  studentPending: (name: string) => `ממתין לאישור של ${name}`,
+  inviteStudent: 'הזמנת תלמיד/ה',
+  inviteUsernameLabel: 'שם המשתמש של התלמיד/ה',
+  inviteLanguageLabel: 'השפה שאת/ה מלמד/ת',
+  inviteSubmit: 'שליחת הזמנה',
+  inviteUserNotFound: 'אין משתמש בשם הזה',
+  inviteNotLearning: (username: string, language: string) =>
+    `⁨${username}⁩ עדיין לא לומד/ת ${languageName(language)} כאן`,
+  inviteOwnList: 'אי אפשר להזמין את עצמך',
+  inviteExists: 'כבר הזמנת את התלמיד/ה הזה/ו בשפה הזו',
+  inviteFailed: 'ההזמנה נכשלה, נסו שוב',
+  cancelInviteTitle: 'לבטל את ההזמנה?',
+  cancelInviteMessage: (name: string) => `${name} לא יוכל/תוכל לאשר אותה.`,
+  cancelInviteConfirm: 'ביטול ההזמנה',
+  studentWordsTitle: (name: string, language: string) => `הוספת מילים ל${name} · ${languageName(language)}`,
+  stopTutoring: (name: string) => `הפסקת הלימוד עם ${name}`,
+  stopTutoringFailed: 'הפעולה נכשלה, נסו שוב',
+  stopTutoringTitle: 'להפסיק ללמד?',
+  stopTutoringMessage: (name: string) =>
+    `לא תוכל/י יותר להוסיף מילים לרשימה של ${name}. המילים שכבר הוספת יישארו.`,
+  tutorsTitle: 'המורים שלי',
+  endTutor: 'סיום',
+  endTutorTitle: 'לסיים עם המורה?',
+  endTutorMessage: (name: string) =>
+    `${name} לא יוכל/תוכל יותר להוסיף מילים לרשימה שלך. המילים שכבר נוספו יישארו.`,
+  teachingTitle: 'הוראה',
+  tutorAdd: 'הוספה',
+  tutorAdded: 'נוסף ✓',
+  tutorAddAll: 'הוספת הכל',
+  addedBy: (names: string[]) => `נוספה ע״י ${names.join(', ')}`,
+  noneYet: '—',
   // Phase 26. Words from a photo.
   photoImportEntry: 'מילים מתמונה',
   photoImportTitle: 'מילים מתמונה',

@@ -33,9 +33,9 @@ beforeEach(async () => {
   senseId = kite.senseIds[0];
   // Directly, without progress rows: these tests write those rows themselves.
   await t.db.execute(sql`
-    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id)
+    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, added_by_user_id)
     values (${E}, ${senseId}, ${kite.lexemeId}, (select lemma from dict_lexemes where id = ${kite.lexemeId}),
-            ${kite.variantIds[0]})`);
+            ${kite.variantIds[0]}, 'u_1')`);
 });
 afterEach(async () => {
   await t.close();

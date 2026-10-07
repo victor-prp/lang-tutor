@@ -40,11 +40,11 @@ beforeAll(async () => {
        select 'pv' || g, 'pl' || g, 'ru', 'слово' || g, 'word', 0 from generate_series(1, 20000) g`,
     `insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
        select 'pv' || g, 'ps' || g, 'he', 'מילה' || g, 0 from generate_series(1, 20000) g`,
-    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at)
-       select 'pe' || e, 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval
+    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
+       select 'pe' || e, 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu' || e
        from generate_series(2, 1000) e, generate_series(1, 200) s`,
-    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at)
-       select '${HEAVY}', 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval
+    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
+       select '${HEAVY}', 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu1'
        from generate_series(1, 20000) s`,
     // Phase 20. Five progress rows per entry, levels spread over 1–5 so a level
     // filter has real work to do. `& 2147483647` keeps hashtext non-negative
@@ -147,6 +147,7 @@ describe('every vocabulary read at volume', () => {
       lemmas: FIRST_50,
       targetLanguage: 'ru',
       sourceLanguage: 'he',
+      ownerUserId: 'pu1',
     })],
     ['lemmaLexemes', () => vocabularyQueries.lemmaLexemes({ languageCode: 'ru', lemma: 'слово7' })],
     ['lemmaRenderings', () => vocabularyQueries.lemmaRenderings({
@@ -154,7 +155,7 @@ describe('every vocabulary read at volume', () => {
       lemma: 'слово7',
       userLanguageCode: 'he',
     })],
-    ['savedInLemma', () => vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7' })],
+    ['savedInLemma', () => vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7', ownerUserId: 'pu1' })],
   ])('%s scans no watched table sequentially', async (_name, build) => {
     const plan = await explain(build());
     expect(seqScans(plan)).toEqual([]);
@@ -170,7 +171,7 @@ describe('every vocabulary read at volume', () => {
   // The scan check alone cannot tell the lemma index from a bitmap scan of the
   // primary key's enrollment prefix, which reads the whole heavy enrollment.
   it('reads one lemma of the heavy enrollment through vocabulary_entries_enrollment_lemma_idx', async () => {
-    const plan = await explain(vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7' }));
+    const plan = await explain(vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7', ownerUserId: 'pu1' }));
     expect(indexesUsed(plan)).toContain('vocabulary_entries_enrollment_lemma_idx');
   });
 
@@ -179,6 +180,7 @@ describe('every vocabulary read at volume', () => {
   it.each([
     ['insertEntries', () => vocabularyQueries.insertEntries({
       enrollmentId: 'pe2',
+      addedByUserId: 'pu2',
       entries: [{ senseId: 'ps300', lexemeId: 'pl300', lemma: 'слово300', variantId: 'pv300' }],
     })],
     ['deleteEntry', () => vocabularyQueries.deleteEntry({ enrollmentId: HEAVY, senseId: 'ps5' })],

@@ -107,6 +107,9 @@ grep -n "'/doc'" apps/server/src/app.ts
 
 ## Related
 
+- [ADR 0008](adr-0008-access-grants.md) — `routes/actor.ts` defines the actor header's schema
+  in `routes/` on purpose: a header is transport, not a body schema, and R2 there keeps its
+  name in one server file. The one exception to R2 above.
 - [ADR 0001](adr-0001-layered-architecture.md) R1/R5 — `routes/` and `app.ts` may import
   `@lang-tutor/core/api*`, `@hono/zod-openapi` and `@scalar/hono-api-reference`; this ADR
   governs what those imports must look like once made, not whether they are allowed.

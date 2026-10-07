@@ -195,7 +195,13 @@ export function createPhotoImportService({
           });
           throw new InvalidVocabularyEntry(refused.sense_id);
         }
-        await vocabulary.insertEntries({ enrollmentId: row.enrollmentId, entries: saveable });
+        // Phase 28. Only the list's owner photographs into it; no grant reaches
+        // a photo import, so the owner is who added these words.
+        await vocabulary.insertEntries({
+          enrollmentId: row.enrollmentId,
+          addedByUserId: enrolled.user_id,
+          entries: saveable,
+        });
         // Conditional: a discard that landed first wins, and the throw rolls
         // the inserts back.
         if (!(await photoImport.transition(importId, ['read'], 'saved'))) {

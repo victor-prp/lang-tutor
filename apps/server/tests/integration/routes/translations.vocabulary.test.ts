@@ -62,7 +62,7 @@ async function rama() {
 describe('POST /api/translations with an enrollment', () => {
   it('carries ids on every stored sense, and saved flags for a target-language lookup', async () => {
     const ids = await rama();
-    await deps().vocabulary.save(RU, [{ sense_id: ids.senseIds[1], variant_id: ids.variantIds[0] }]);
+    await deps().vocabulary.save('u_1', RU, [{ sense_id: ids.senseIds[1], variant_id: ids.variantIds[0] }]);
 
     const res = await translate({ text: 'рама', from: 'ru', to: 'he', enrollment_id: RU });
     expect(res.status).toBe(200);
@@ -138,7 +138,7 @@ describe('POST /api/translations with an enrollment', () => {
         },
       ],
     });
-    await deps().vocabulary.save(RU, [{ sense_id: ids.senseIds[0], variant_id: ids.variantIds[0] }]);
+    await deps().vocabulary.save('u_1', RU, [{ sense_id: ids.senseIds[0], variant_id: ids.variantIds[0] }]);
 
     const res = await translate({ text: 'рамы', from: 'ru', to: 'he', enrollment_id: RU });
     expect(res.status).toBe(200);
@@ -189,7 +189,7 @@ describe('POST /api/translations with an enrollment', () => {
         },
       ],
     });
-    await deps().vocabulary.save(enrollmentId, [
+    await deps().vocabulary.save('u_legacy', enrollmentId, [
       { sense_id: sefer.senseIds[0], variant_id: sefer.variantIds[0] },
     ]);
     const { senses } = (await (

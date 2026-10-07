@@ -664,3 +664,37 @@ describe('0020_sentence_cards', () => {
     await outside('g4', 8, 13);
   });
 });
+
+// Phase 28: every entry saved before 0021 was saved by its list's owner.
+describe('0021_enrollment_grants', () => {
+  it("backfills added_by_user_id to the list's owner", async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0020_sentence_cards'));
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he'), ('u_2', 'u_2', 'two', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'en'), ('e_2', 'u_2', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech)
+        values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code)
+        values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 0);
+      insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id)
+        values ('e_1', 's1', 'l1', 'kite', 'v1'), ('e_2', 's1', 'l1', 'kite', 'v1');
+    `);
+
+    await runMigrations(db);
+
+    const rows = await db.execute<{ enrollment_id: string; added_by_user_id: string }>(
+      sql`select enrollment_id, added_by_user_id from vocabulary_entries order by enrollment_id`,
+    );
+    expect(rows.rows).toEqual([
+      { enrollment_id: 'e_1', added_by_user_id: 'u_1' },
+      { enrollment_id: 'e_2', added_by_user_id: 'u_2' },
+    ]);
+  });
+});

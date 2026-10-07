@@ -20,6 +20,7 @@ import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/spee
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
 import type { TranslationService } from '../../src/services/translations';
+import type { GrantService } from '../../src/services/grants';
 import type { VocabularyService } from '../../src/services/vocabulary';
 import type { UserService } from '../../src/services/users';
 
@@ -78,6 +79,7 @@ export function createFakeAppDeps(): AppDeps {
     listWords: unreachable,
     wordDetail: unreachable,
   };
+  const grants: GrantService = { invite: unreachable, list: unreachable, accept: unreachable, end: unreachable };
   const photoImports: PhotoImportService = {
     create: unreachable,
     list: unreachable,
@@ -96,6 +98,7 @@ export function createFakeAppDeps(): AppDeps {
     enrollments,
     translations,
     vocabulary,
+    grants,
     photoImports,
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0 },
@@ -209,6 +212,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
   const bound: Repos = {
     user: repos.user ?? unreachableRepo('user repo'),
     enrollment: repos.enrollment ?? unreachableRepo('enrollment repo'),
+    grant: repos.grant ?? unreachableRepo('grant repo'),
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),

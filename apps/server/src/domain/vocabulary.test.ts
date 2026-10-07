@@ -89,6 +89,7 @@ const summary = (lemma: string, over: Partial<WordSummary> = {}): WordSummary =>
   headlineForm: `form-${lemma}`,
   savedCount: 1,
   senseCount: 2,
+  addedBy: [],
   ...over,
 });
 
@@ -107,7 +108,14 @@ describe('assemblePage', () => {
       saved_count: 1,
       sense_count: 2,
       level: 3,
+      added_by: [],
     });
+  });
+
+  it('carries the other adders of a word', () => {
+    const rows = [{ lemma: 'a', lastSavedAt: 't1', level: 1 }];
+    const page = assemblePage(rows, [summary('a', { addedBy: ['רינה'] })]);
+    expect(page[0].added_by).toEqual(['רינה']);
   });
 
   it('drops a page row with no summary', () => {
@@ -143,7 +151,7 @@ describe('buildWordDetail', () => {
         rendering({ variantId: 'v-lemma', form: 'прочитать', translation: 'לקרוא' }),
         rendering({ variantId: 'v-past', form: 'прочитала', translation: 'קראה' }),
       ],
-      [{ senseId: 's1', variantId: 'v-past' }],
+      [{ senseId: 's1', variantId: 'v-past', addedBy: null }],
       [],
     );
     expect(detail.senses).toEqual([
@@ -189,7 +197,7 @@ describe('buildWordDetail', () => {
       LEMMA,
       VERB,
       [rendering({ variantId: 'v-lemma', form: 'прочитать' })],
-      [{ senseId: 's1', variantId: 'v-gone' }],
+      [{ senseId: 's1', variantId: 'v-gone', addedBy: null }],
       [],
     );
     expect(detail.senses).toEqual([
@@ -207,7 +215,7 @@ describe('buildWordDetail', () => {
         rendering({ senseId: 's-c', rank: 1 }),
         rendering({ senseId: 's-d', rank: 1 }),
       ],
-      [{ senseId: 's-b', variantId: 'v1' }],
+      [{ senseId: 's-b', variantId: 'v1', addedBy: null }],
       [],
     );
     expect(detail.senses.map((s) => s.sense_id)).toEqual(['s-b', 's-a', 's-c', 's-d']);
@@ -231,6 +239,22 @@ describe('buildWordDetail', () => {
     expect(detail.senses[1]).not.toHaveProperty('example');
   });
 
+  it('names who added a saved sense when it was not the owner', () => {
+    const detail = buildWordDetail(
+      LEMMA,
+      VERB,
+      [rendering({ senseId: 's1' }), rendering({ senseId: 's2', rank: 1 }), rendering({ senseId: 's3', rank: 2 })],
+      [
+        { senseId: 's1', variantId: 'v1', addedBy: 'רינה' },
+        { senseId: 's2', variantId: 'v1', addedBy: null },
+      ],
+      [],
+    );
+    expect(detail.senses[0].added_by).toBe('רינה');
+    expect(detail.senses[1]).not.toHaveProperty('added_by');
+    expect(detail.senses[2]).not.toHaveProperty('added_by');
+  });
+
   it('carries the lemma, and no lexeme fields', () => {
     expect(buildWordDetail(LEMMA, VERB, [], [], [])).toEqual({ lemma: LEMMA, level: null, senses: [] });
   });
@@ -251,7 +275,7 @@ describe('buildWordDetail', () => {
       LEMMA,
       VERB,
       [rendering({ senseId: 's1' }), rendering({ senseId: 's2', rank: 1, translation: 'להקריא' })],
-      [{ senseId: 's1', variantId: 'v1' }],
+      [{ senseId: 's1', variantId: 'v1', addedBy: null }],
       levels('s1', 3),
     );
     expect(detail.senses[0]).toMatchObject({
@@ -274,7 +298,7 @@ describe('buildWordDetail', () => {
       lastStepOn: null,
       lastWrongOn: null,
     }));
-    const detail = buildWordDetail(LEMMA, VERB, [rendering({ senseId: 's1' })], [{ senseId: 's1', variantId: 'v1' }], recognisedOnly);
+    const detail = buildWordDetail(LEMMA, VERB, [rendering({ senseId: 's1' })], [{ senseId: 's1', variantId: 'v1', addedBy: null }], recognisedOnly);
     expect(detail.senses[0].progress?.level).toBe(1);
     expect(detail.level).toBe(1);
   });
@@ -284,7 +308,7 @@ describe('buildWordDetail', () => {
       LEMMA,
       VERB,
       [rendering({ senseId: 's1' }), rendering({ senseId: 's2' })],
-      [{ senseId: 's1', variantId: 'v1' }, { senseId: 's2', variantId: 'v1' }],
+      [{ senseId: 's1', variantId: 'v1', addedBy: null }, { senseId: 's2', variantId: 'v1', addedBy: null }],
       [...levels('s1', 2), ...levels('s2', 3)],
     );
     expect(detail.level).toBe(3);
@@ -324,7 +348,7 @@ describe('buildWordDetail', () => {
           noun({ senseId: 'n1', rank: 0 }),
           noun({ senseId: 'n2', rank: 1, translation: 'עילית' }),
         ],
-        [{ senseId: 'v2', variantId: 'v-verb' }, { senseId: 'n2', variantId: 'v-noun' }],
+        [{ senseId: 'v2', variantId: 'v-verb', addedBy: null }, { senseId: 'n2', variantId: 'v-noun', addedBy: null }],
         [],
       );
       expect(detail.senses.map((s) => s.sense_id)).toEqual(['n2', 'v2', 'n1', 'v1']);
@@ -337,7 +361,7 @@ describe('buildWordDetail', () => {
         'знать',
         ZNAT,
         [verb({ senseId: 'v1' }), noun({ senseId: 'n1' })],
-        [{ senseId: 'n1', variantId: 'v-noun' }],
+        [{ senseId: 'n1', variantId: 'v-noun', addedBy: null }],
         [],
       );
       expect(detail.senses.map((s) => [s.sense_id, s.part_of_speech, s.saved])).toEqual([
@@ -351,7 +375,7 @@ describe('buildWordDetail', () => {
         'знать',
         ZNAT,
         [verb({ senseId: 'v1' }), noun({ senseId: 'n1' })],
-        [{ senseId: 'v1', variantId: 'v-verb' }, { senseId: 'n1', variantId: 'v-noun' }],
+        [{ senseId: 'v1', variantId: 'v-verb', addedBy: null }, { senseId: 'n1', variantId: 'v-noun', addedBy: null }],
         [...levels('v1', 5), ...levels('n1', 2)],
       );
       expect(detail.level).toBe(4);

@@ -87,6 +87,17 @@ export default function EnrollScreen() {
       >
         <Text style={styles.buttonLabel}>{strings.enrollSubmit}</Text>
       </Pressable>
+
+      {enrollments.length === 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          testID="enroll-teach"
+          onPress={() => router.push('/students/invite')}
+          style={styles.secondaryButton}
+        >
+          <Text style={styles.secondaryButtonLabel}>{strings.enrollTeach}</Text>
+        </Pressable>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -123,6 +134,20 @@ const styles = StyleSheet.create({
   },
   buttonLabel: {
     color: colors.onPrimary,
+    fontSize: fontSizes.md,
+    lineHeight: lineHeights.md,
+    fontWeight: '700',
+  },
+  secondaryButton: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  secondaryButtonLabel: {
+    color: colors.primary,
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     fontWeight: '700',

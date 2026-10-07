@@ -10,7 +10,8 @@ import {
 } from '@lang-tutor/core/api/schemas';
 import { z } from 'zod';
 
-import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
+import { AccessDenied, EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
+import { ActorHeadersSchema, actorOf } from './actor';
 import type { VocabularyService } from '../services/vocabulary';
 
 const BASE = '/enrollments/{id}/vocabulary';
@@ -32,6 +33,7 @@ const saveRoute = createRoute({
     'all-or-nothing.',
   request: {
     params: enrollmentParams,
+    headers: ActorHeadersSchema,
     body: { required: true, content: { 'application/json': { schema: SaveVocabularyRequestSchema } } },
   },
   responses: {
@@ -41,6 +43,7 @@ const saveRoute = createRoute({
       'The body did not validate, or an item cannot be saved here: its sense is not in the ' +
         "enrollment's target language, or its form does not render it in the source language.",
     ),
+    403: json(ErrorSchema, "The acting user is not the list's owner and holds no accepted grant that allows adding words."),
     404: NOT_ENROLLED,
   },
 });
@@ -72,9 +75,11 @@ const unsaveRoute = createRoute({
   tags: ['vocabulary'],
   summary: 'Unsave a sense',
   description: 'Idempotent: unsaving a sense that is not saved also answers 204.',
-  request: { params: z.object({ id: z.string(), sense_id: z.string() }) },
+  request: { params: z.object({ id: z.string(), sense_id: z.string() }), headers: ActorHeadersSchema },
   responses: {
     204: { description: 'The sense is not saved.' },
+    400: json(ErrorSchema, 'The acting-user header is missing.'),
+    403: json(ErrorSchema, "Only the list's owner may remove a word."),
     404: NOT_ENROLLED,
   },
 });
@@ -112,9 +117,11 @@ export function createVocabularyRouter(vocabulary: VocabularyService) {
   router.openapi(saveRoute, async (c) => {
     const { id } = c.req.valid('param');
     const { entries } = c.req.valid('json');
+    const actor = actorOf(c.req.valid('header'));
     try {
-      return c.json(await vocabulary.save(id, entries), 200);
+      return c.json(await vocabulary.save(actor, id, entries), 200);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
       if (error instanceof InvalidVocabularyEntry) {
         return c.json({ error: 'invalid vocabulary entry' }, 400);
@@ -136,10 +143,12 @@ export function createVocabularyRouter(vocabulary: VocabularyService) {
 
   router.openapi(unsaveRoute, async (c) => {
     const { id, sense_id } = c.req.valid('param');
+    const actor = actorOf(c.req.valid('header'));
     try {
-      await vocabulary.unsave(id, sense_id);
+      await vocabulary.unsave(actor, id, sense_id);
       return c.body(null, 204);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
       throw error;
     }

@@ -1,7 +1,10 @@
+import type { Grant } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { confirm } from '@/confirm';
+import { myTutors } from '@/grants';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
@@ -18,9 +21,26 @@ function Row({ label, value, testID }: { label: string; value: string; testID: s
 }
 
 export default function ProfileScreen() {
-  const { user, enrollments, signOut } = useCurrentUser();
+  const { user, enrollments, grants, endGrant, signOut } = useCurrentUser();
 
   if (!user) return <Redirect href="/login" />;
+
+  const tutors = myTutors(grants);
+
+  async function onEndTutor(g: Grant) {
+    const yes = await confirm({
+      title: strings.endTutorTitle,
+      message: strings.endTutorMessage(g.grantee.display_name),
+      confirm: strings.endTutor,
+      cancel: strings.cancel,
+    });
+    if (!yes) return;
+    try {
+      await endGrant(g.id);
+    } catch {
+      // The row stays; the next load of the grants re-reads it.
+    }
+  }
 
   function onSwitchUser() {
     signOut();
@@ -42,9 +62,45 @@ export default function ProfileScreen() {
         />
         <Row
           label={strings.onboardingTargetLabel}
-          value={enrollments.map((enrollment) => strings.languageName(enrollment.target_language)).join(', ')}
+          value={
+            enrollments.map((enrollment) => strings.languageName(enrollment.target_language)).join(', ') ||
+            strings.noneYet
+          }
           testID="profile-target"
         />
+      </View>
+
+      {tutors.length > 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{strings.tutorsTitle}</Text>
+          {tutors.map((g) => (
+            <View key={g.id} testID={`tutor-${g.grantee.username}`} style={styles.row}>
+              <Text style={styles.rowLabel}>
+                {strings.personAndLanguage(g.grantee.display_name, g.enrollment.target_language)}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                testID={`tutor-end-${g.grantee.username}`}
+                onPress={() => onEndTutor(g)}
+                style={styles.inlineButton}
+              >
+                <Text style={styles.secondaryLabel}>{strings.endTutor}</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>{strings.teachingTitle}</Text>
+        <Pressable
+          accessibilityRole="button"
+          testID="profile-invite"
+          onPress={() => router.push('/students/invite')}
+          style={styles.inlineButton}
+        >
+          <Text style={styles.secondaryLabel}>{strings.inviteStudent}</Text>
+        </Pressable>
       </View>
 
       <Pressable
@@ -82,6 +138,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
+  cardTitle: {
+    fontSize: fontSizes.md,
+    fontWeight: '700',
+    color: colors.text,
+    paddingVertical: spacing.sm,
+    writingDirection: 'rtl',
+  },
+  inlineButton: { paddingVertical: spacing.sm, alignItems: 'flex-start' },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',

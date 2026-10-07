@@ -52,7 +52,7 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   distinguish "derived" from "coincidentally identical." Enforced by review; the list of
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
   `createHealthRepo`, `createUserRepo`, `createEnrollmentRepo`, `createDictRepo`, `createVocabularyRepo`, `createProgressRepo`, `createTransaction`, `createSessionService`,
-  `createUserService`, `createEnrollmentService`, `createGeminiClient`, `createGeminiTranscriber`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
+  `createUserService`, `createEnrollmentService`, `createGrantRepo`, `createGrantService`, `createGeminiClient`, `createGeminiTranscriber`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
   `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`, `createSpeaker`, `createRecorder`, `createPhotoImportRepo`, `createPhotoImportService`, `createGeminiVisionClient`, `createPhotoPicker`) is short enough to spot-check.
   `createGeminiClient`, `createGeminiTranscriber` and `createGeminiVisionClient` are annotated at their call sites in `composition.ts` rather than at their
   definitions, because ADR 0001 R10 forbids `providers/` from importing the contracts they

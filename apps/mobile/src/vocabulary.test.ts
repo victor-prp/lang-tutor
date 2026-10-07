@@ -2,9 +2,12 @@ import { describe, expect, it, jest } from '@jest/globals';
 import type { TranslationSense, VocabularySense, VocabularyWord, VocabularyWordDetail } from '@lang-tutor/core/api';
 
 import {
+  addableStateOf,
   appendPage,
   canSaveAll,
   keepSenseOrder,
+  lookupEnrollmentId,
+  toggleIntent,
   partsOfSpeechLabel,
   savedStateOf,
   showsMark,
@@ -107,6 +110,7 @@ const word = (lemma: string, over: Partial<VocabularyWord> = {}): VocabularyWord
   saved_count: 1,
   sense_count: 1,
   level: 1,
+  added_by: [],
   ...over,
 });
 
@@ -183,5 +187,47 @@ describe('keepSenseOrder', () => {
     const shown = detail(1, [sense('a', true, 1), sense('gone', false)]);
     const fresh = detail(1, [sense('new', false), sense('a', true, 1)]);
     expect(keepSenseOrder(shown, fresh).senses.map((s) => s.sense_id)).toEqual(['a', 'new']);
+  });
+});
+
+describe('addableStateOf (phase 28, tutor mode)', () => {
+  const sense = (id: string | undefined, variant: string | undefined): TranslationSense => ({
+    translation: 't',
+    sense_id: id,
+    variant_id: variant,
+  });
+
+  it('offers every sense with ids of a target-language lookup, none of them added yet', () => {
+    expect(addableStateOf([sense('s1', 'v1'), sense('s2', 'v2')], 'it', 'it')).toEqual({ s1: false, s2: false });
+  });
+
+  it('leaves out a sense with no ids', () => {
+    expect(addableStateOf([sense(undefined, undefined), sense('s2', 'v2')], 'it', 'it')).toEqual({ s2: false });
+  });
+
+  it('offers nothing on a reverse lookup: those senses are Hebrew (Review Focus 3)', () => {
+    expect(addableStateOf([sense('s1', 'v1')], 'he', 'it')).toEqual({});
+  });
+});
+
+describe('lookupEnrollmentId', () => {
+  it("sends the enrollment for a learner's own lookup", () => {
+    expect(lookupEnrollmentId('learner', 'e1')).toEqual({ enrollment_id: 'e1' });
+  });
+
+  it("sends none for a tutor's: the server would mark the student's saved senses", () => {
+    expect(lookupEnrollmentId('tutor', 'e1')).toEqual({});
+  });
+});
+
+describe('toggleIntent', () => {
+  it('saves an unsaved sense in either mode', () => {
+    expect(toggleIntent('learner', false)).toBe('save');
+    expect(toggleIntent('tutor', false)).toBe('save');
+  });
+
+  it('unsaves for a learner and never for a tutor', () => {
+    expect(toggleIntent('learner', true)).toBe('unsave');
+    expect(toggleIntent('tutor', true)).toBe('none');
   });
 });

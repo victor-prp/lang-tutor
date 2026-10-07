@@ -1,4 +1,5 @@
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { GrantRepo } from '../repo/grants';
 import type { JobRepo } from '../repo/jobs';
 import type { PhotoImportRepo } from '../repo/photoImports';
 import type { ProgressRepo } from '../repo/progress';
@@ -16,6 +17,7 @@ export type Repos = {
   question: QuestionRepo;
   user: UserRepo;
   enrollment: EnrollmentRepo;
+  grant: GrantRepo;
   dict: DictRepo;
   vocabulary: VocabularyRepo;
   progress: ProgressRepo;

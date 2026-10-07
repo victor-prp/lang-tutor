@@ -20,6 +20,29 @@ export function savedStateOf(senses: TranslationSense[]): SavedState {
   return state;
 }
 
+/** Phase 28 (spec D10). A tutor's lookup carries no enrollment, so the server
+ *  marks nothing as saved: reading which senses the student has would be reading
+ *  their list. Every sense with ids of a lookup FROM the student's target language
+ *  can be added; a reverse lookup's senses belong to Hebrew lexemes and cannot. */
+export function addableStateOf(senses: TranslationSense[], from: string, targetLanguage: string): SavedState {
+  if (from !== targetLanguage) return {};
+  const state: SavedState = {};
+  for (const sense of senses) if (sense.sense_id && sense.variant_id) state[sense.sense_id] = false;
+  return state;
+}
+
+/** Phase 28 (spec D10). The enrollment a lookup sends: only a learner's own. A
+ *  tutor's lookup sends none, because the server would mark the student's saved
+ *  senses for any enrollment id, which is reading their list. */
+export const lookupEnrollmentId = (mode: 'learner' | 'tutor', enrollmentId: string): { enrollment_id?: string } =>
+  mode === 'learner' ? { enrollment_id: enrollmentId } : {};
+
+/** What tapping a card does: a tutor adds and never removes. */
+export function toggleIntent(mode: 'learner' | 'tutor', saved: boolean): 'save' | 'unsave' | 'none' {
+  if (!saved) return 'save';
+  return mode === 'tutor' ? 'none' : 'unsave';
+}
+
 export function unsavedEntries(senses: TranslationSense[], saved: SavedState): VocabularyEntryInput[] {
   return senses.flatMap((sense) =>
     sense.sense_id && sense.variant_id && saved[sense.sense_id] === false

@@ -46,13 +46,15 @@ export const vocabularyQueries = {
    *  creates, in one statement. Named conflict target, not bare: only the PK
    *  may be swallowed, so an FK violation still raises. First form wins — a
    *  sense already saved keeps its variant, and RETURNING leaves it out, so its
-   *  progress is untouched. */
-  insertEntries: (input: { enrollmentId: string; entries: SaveableEntry[] }): SQL => sql`
+   *  progress is untouched. First adder wins, exactly as first form does: the
+   *  conflict keeps the row, its form and its adder (spec D5). */
+  insertEntries: (input: { enrollmentId: string; addedByUserId: string; entries: SaveableEntry[] }): SQL => sql`
     WITH inserted AS (
-      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id)
+      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, added_by_user_id)
       VALUES ${sql.join(
         input.entries.map(
-          (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.lemma}, ${e.variantId})`,
+          (e) =>
+            sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.lemma}, ${e.variantId}, ${input.addedByUserId})`,
         ),
         sql`, `,
       )}
@@ -173,6 +175,7 @@ export const vocabularyQueries = {
     lemmas: string[];
     targetLanguage: string;
     sourceLanguage: string;
+    ownerUserId: string;
   }): SQL => sql`
     SELECT w.lemma,
            h.sense_id AS headline_sense_id,
@@ -186,6 +189,12 @@ export const vocabularyQueries = {
            (SELECT count(*) FROM vocabulary_entries c
              WHERE c.enrollment_id = ${input.enrollmentId}
                AND c.lemma = w.lemma)::int AS saved_count,
+           (SELECT coalesce(array_agg(DISTINCT u.display_name ORDER BY u.display_name), '{}'::text[])
+              FROM vocabulary_entries c
+              JOIN users u ON u.id = c.added_by_user_id
+             WHERE c.enrollment_id = ${input.enrollmentId}
+               AND c.lemma = w.lemma
+               AND c.added_by_user_id <> ${input.ownerUserId}) AS added_by,
            (SELECT count(*) FROM dict_lexemes l
               JOIN dict_senses s ON s.lexeme_id = l.id
              WHERE l.language_code = ${input.targetLanguage}
@@ -233,10 +242,13 @@ export const vocabularyQueries = {
 
   /** One lemma's saved senses in one enrollment, through
    *  vocabulary_entries_enrollment_lemma_idx. */
-  savedInLemma: (input: { enrollmentId: string; lemma: string }): SQL => sql`
-    SELECT sense_id, variant_id FROM vocabulary_entries
-    WHERE enrollment_id = ${input.enrollmentId}
-      AND lemma = ${input.lemma}`,
+  savedInLemma: (input: { enrollmentId: string; lemma: string; ownerUserId: string }): SQL => sql`
+    SELECT ve.sense_id, ve.variant_id,
+           CASE WHEN ve.added_by_user_id <> ${input.ownerUserId} THEN u.display_name END AS added_by
+    FROM vocabulary_entries ve
+    JOIN users u ON u.id = ve.added_by_user_id
+    WHERE ve.enrollment_id = ${input.enrollmentId}
+      AND ve.lemma = ${input.lemma}`,
 };
 
 export function createVocabularyRepo(tx: Tx) {
@@ -259,7 +271,11 @@ export function createVocabularyRepo(tx: Tx) {
     },
 
     /** First form wins: a sense already saved keeps the variant it was saved from. */
-    insertEntries: async (input: { enrollmentId: string; entries: SaveableEntry[] }): Promise<void> => {
+    insertEntries: async (input: {
+      enrollmentId: string;
+      addedByUserId: string;
+      entries: SaveableEntry[];
+    }): Promise<void> => {
       if (input.entries.length === 0) return;
       await tx.execute(vocabularyQueries.insertEntries(input));
     },
@@ -311,6 +327,7 @@ export function createVocabularyRepo(tx: Tx) {
       lemmas: string[];
       targetLanguage: string;
       sourceLanguage: string;
+      ownerUserId: string;
     }): Promise<WordSummary[]> => {
       if (input.lemmas.length === 0) return [];
       const rows = await tx.execute<{
@@ -321,6 +338,7 @@ export function createVocabularyRepo(tx: Tx) {
         headline_form: string;
         saved_count: number;
         sense_count: number;
+        added_by: string[];
       }>(vocabularyQueries.wordSummaries(input));
       return rows.rows.map((row) => ({
         lemma: row.lemma,
@@ -330,6 +348,7 @@ export function createVocabularyRepo(tx: Tx) {
         headlineForm: row.headline_form,
         savedCount: row.saved_count,
         senseCount: row.sense_count,
+        addedBy: row.added_by,
       }));
     },
 
@@ -367,11 +386,15 @@ export function createVocabularyRepo(tx: Tx) {
       }));
     },
 
-    findSavedInLemma: async (input: { enrollmentId: string; lemma: string }): Promise<SavedEntry[]> => {
-      const rows = await tx.execute<{ sense_id: string; variant_id: string }>(
+    findSavedInLemma: async (input: {
+      enrollmentId: string;
+      lemma: string;
+      ownerUserId: string;
+    }): Promise<SavedEntry[]> => {
+      const rows = await tx.execute<{ sense_id: string; variant_id: string; added_by: string | null }>(
         vocabularyQueries.savedInLemma(input),
       );
-      return rows.rows.map((row) => ({ senseId: row.sense_id, variantId: row.variant_id }));
+      return rows.rows.map((row) => ({ senseId: row.sense_id, variantId: row.variant_id, addedBy: row.added_by }));
     },
   };
 }

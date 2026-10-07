@@ -261,7 +261,7 @@ describe('api/client', () => {
   it('saveVocabulary posts the entries to the enrollment', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_sense_ids: ['s1'] }) }));
     const client = buildClient(mockFetch);
-    await client.saveVocabulary('e 1', { entries: [{ sense_id: 's1', variant_id: 'v1' }] });
+    await client.saveVocabulary('u_1', 'e 1', { entries: [{ sense_id: 's1', variant_id: 'v1' }] });
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/enrollments/e%201/vocabulary',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ entries: [{ sense_id: 's1', variant_id: 'v1' }] }) }),
@@ -271,10 +271,21 @@ describe('api/client', () => {
   it('unsaveVocabulary sends DELETE and reads no body', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 204 }));
     const client = buildClient(mockFetch);
-    await client.unsaveVocabulary('e1', 's1');
+    await client.unsaveVocabulary('u_1', 'e1', 's1');
     expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary/senses/s1', {
       method: 'DELETE',
+      headers: { 'X-Acting-User-Id': 'u_1' },
     });
+  });
+
+  it('sends the acting user on a save, and only there', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_sense_ids: ['s1'] }) }));
+    const client = buildClient(mockFetch);
+    await client.saveVocabulary('u_1', 'e1', { entries: [{ sense_id: 's1', variant_id: 'v1' }] });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/enrollments/e1/vocabulary',
+      expect.objectContaining({ headers: { 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' } }),
+    );
   });
 
   it('listVocabulary passes cursor and limit as a query string, and nothing when absent', async () => {
@@ -306,7 +317,7 @@ describe('api/client', () => {
 
   it('unsaveVocabulary throws ApiError on failure', async () => {
     const client = buildClient(jest.fn(async () => ({ ok: false, status: 404 })));
-    await expect(client.unsaveVocabulary('e1', 's1')).rejects.toBeInstanceOf(ApiError);
+    await expect(client.unsaveVocabulary('u_1', 'e1', 's1')).rejects.toBeInstanceOf(ApiError);
   });
 
   it('posts a spoken attempt to the speech endpoint (phase 25)', async () => {
@@ -337,6 +348,51 @@ describe('api/client', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  describe('grants (phase 28)', () => {
+    const recorder = (status: number, body: string | null) => {
+      const calls: { url: string; init: RequestInit }[] = [];
+      const fetch = (async (url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return new Response(body, { status });
+      }) as unknown as typeof globalThis.fetch;
+      return { calls, api: createApiClient({ baseUrl: 'http://api', fetch }) };
+    };
+    const emptyList = JSON.stringify({ tutors: [], students: [] });
+
+    it('listGrants GETs /api/grants as the actor', async () => {
+      const { calls, api } = recorder(200, emptyList);
+      await api.listGrants('u_1');
+      expect(calls[0].url).toBe('http://api/api/grants');
+      expect(calls[0].init.method).toBe('GET');
+      expect(calls[0].init.headers).toEqual({ 'X-Acting-User-Id': 'u_1' });
+    });
+
+    it('createGrant POSTs the request as the actor', async () => {
+      const { calls, api } = recorder(201, '{}');
+      await api.createGrant('u_1', { username: 'victor', target_language: 'it' });
+      expect(calls[0].url).toBe('http://api/api/grants');
+      expect(calls[0].init.method).toBe('POST');
+      expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' });
+      expect(JSON.parse(String(calls[0].init.body))).toEqual({ username: 'victor', target_language: 'it' });
+    });
+
+    it('acceptGrant POSTs to the accept path as the actor', async () => {
+      const { calls, api } = recorder(200, '{}');
+      await api.acceptGrant('u_1', 'g 1');
+      expect(calls[0].url).toBe('http://api/api/grants/g%201/accept');
+      expect(calls[0].init.method).toBe('POST');
+      expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' });
+    });
+
+    it('endGrant DELETEs the grant as the actor', async () => {
+      const { calls, api } = recorder(204, null);
+      await api.endGrant('u_1', 'g1');
+      expect(calls[0].url).toBe('http://api/api/grants/g1');
+      expect(calls[0].init.method).toBe('DELETE');
+      expect(calls[0].init.headers).toEqual({ 'X-Acting-User-Id': 'u_1' });
+    });
   });
 
   it('posts a judged answer and returns the verdict with the next step (phase 27)', async () => {

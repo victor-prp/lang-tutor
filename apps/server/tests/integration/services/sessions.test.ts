@@ -6,6 +6,7 @@ import type { PgBoss } from 'pg-boss';
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
+import { seedGrant } from '../../support/grantRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
@@ -31,6 +32,7 @@ import {
   readSnapshot,
   saveSessionSenses,
   sessionDay,
+  sessionSenseEntries,
 } from '../../support/progressRows';
 
 // The other half of this file's tests is src/services/sessions.test.ts, which
@@ -120,6 +122,28 @@ describe('createNextSession', () => {
     // Phase 24: listening on, and the ordinal is the list sessions before this one (none).
     expect(jobs[0].data).toMatchObject({ listening: true, ordinal: 0 });
     expect(jobs[0].data.picks.every((p) => saved.senseIds.includes(p.sense_id))).toBe(true);
+  });
+
+  // Phase 28, done-means 2: the planner draws a tutor's words like the owner's.
+  it('after the seed, plans a list session from words a tutor added', async () => {
+    await seedUser(t.db, 'u_tutor');
+    const { sessionId: seed } = await service.createNextSession(E, { listening: false, speaking: false });
+    await service.skipSession(seed);
+    const added = await seedSavedSenses(t.db, {
+      enrollmentId: E,
+      lemma: 'tome',
+      translations: ['ספר', 'כרך', 'חיבור', 'מחברת', 'דף', 'עמוד', 'פרק', 'שער', 'כותר', 'ספרון', 'קובץ', 'גליון'],
+      addedByUserId: 'u_tutor',
+    });
+
+    const created = await service.createNextSession(E, { listening: false, speaking: false });
+
+    const jobs = await boss.findJobs<PrepareSessionPayload>(PREPARE_SESSION);
+    expect(
+      jobs
+        .find((job) => job.data.session_id === created.sessionId)!
+        .data.picks.every((p) => added.senseIds.includes(p.sense_id)),
+    ).toBe(true);
   });
 });
 
@@ -309,6 +333,19 @@ describe('progress (phase 20)', () => {
   const receptive = (rows: Awaited<ReturnType<typeof readProgress>>, senseId: string) =>
     rows.find((row) => row.senseId === senseId && row.dimension === 'written_receptive');
 
+  // Phase 28, done-means 2: a word a tutor added is practised like any other.
+  it('practises a sense a tutor added, and a right answer lifts it', async () => {
+    await seedUser(t.db, 'u_tutor');
+    await seedGrant(t.db, { enrollmentId: E, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
+    const { sessionId, record } = await startSeed(E);
+    const [added] = await sessionSenseEntries(t.db, { sessionId, positions: [0] });
+    await vocabulary.save('u_tutor', E, [added]);
+
+    await answerAll(sessionId, record);
+
+    expect(receptive(await readProgress(t.db, E), added.sense_id)).toMatchObject({ level: 2 });
+  });
+
   it('completing a session lifts each saved sense answered right, and records what it did', async () => {
     const { sessionId, record, saved } = await seedWithSavedSenses();
     const result = await answerAll(sessionId, record, [1]);
@@ -358,7 +395,7 @@ describe('progress (phase 20)', () => {
   it('a sense unsaved mid-session is left out when the session completes', async () => {
     const { sessionId, record, saved } = await seedWithSavedSenses();
     await answer(sessionId, record.questions[0], true);
-    await vocabulary.unsave(E, saved[0]);
+    await vocabulary.unsave('u_1', E, saved[0]);
     for (const q of record.questions.slice(1)) await answer(sessionId, q, true);
 
     const finished = await service.getSession(sessionId);

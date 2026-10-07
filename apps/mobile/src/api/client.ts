@@ -1,10 +1,13 @@
 import type {
   CreateEnrollmentRequest,
+  CreateGrantRequest,
   CreateSessionRequest,
   CreateSessionResponse,
   CreateUserRequest,
   CurrentSessionResponse,
   Enrollment,
+  Grant,
+  GrantList,
   JudgedAnswerRequest,
   JudgedAnswerResponse,
   LoginRequest,
@@ -53,6 +56,13 @@ async function failureOf(res: Response): Promise<ApiError> {
  *  button disabled; past this it becomes the "couldn't check" notice. */
 export const SPEECH_UPLOAD_TIMEOUT_MS = 15_000;
 
+// Phase 28 (ADR 0008 R2). The ONE place in the app that names the actor header.
+// Asserted, not a credential: the server checks what this user may do, and login
+// will replace it. The client is built before anyone logs in, so the caller
+// passes the id; nothing here holds it.
+const ACTOR_HEADER = 'X-Acting-User-Id';
+const actorHeader = (actorUserId: string | undefined): Record<string, string> =>
+  actorUserId ? { [ACTOR_HEADER]: actorUserId } : {};
 /** Phase 27 (spec D13). The server's own judge gives up after 8 s; past this the
  *  app does too, and the card offers "try again". */
 export const JUDGE_REQUEST_TIMEOUT_MS = 15_000;
@@ -70,12 +80,16 @@ export type ApiClientDeps = {
 // global object. The literal process.env.EXPO_PUBLIC_API_URL now lives in
 // app/_layout.tsx, which is where Metro's build-time inlining still sees it.
 export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
-  async function postJson<TResponse>(path: string, body: unknown, signal?: AbortSignal): Promise<TResponse> {
+  async function postJson<TResponse>(
+    path: string,
+    body: unknown,
+    options: { signal?: AbortSignal; actorUserId?: string } = {},
+  ): Promise<TResponse> {
     const res = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...actorHeader(options.actorUserId) },
       body: JSON.stringify(body),
-      ...(signal ? { signal } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
     });
     if (!res.ok) throw await failureOf(res);
     return (await res.json()) as TResponse;
@@ -100,14 +114,20 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
     if (!res.ok) throw await failureOf(res);
   }
 
-  async function getJson<TResponse>(path: string): Promise<TResponse> {
-    const res = await fetch(`${baseUrl}${path}`, { method: 'GET' });
+  async function getJson<TResponse>(path: string, actorUserId?: string): Promise<TResponse> {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'GET',
+      ...(actorUserId ? { headers: actorHeader(actorUserId) } : {}),
+    });
     if (!res.ok) throw await failureOf(res);
     return (await res.json()) as TResponse;
   }
 
-  async function deleteResource(path: string): Promise<void> {
-    const res = await fetch(`${baseUrl}${path}`, { method: 'DELETE' });
+  async function deleteResource(path: string, actorUserId?: string): Promise<void> {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'DELETE',
+      ...(actorUserId ? { headers: actorHeader(actorUserId) } : {}),
+    });
     if (!res.ok) throw await failureOf(res);
   }
 
@@ -129,7 +149,7 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
         return await postJson<SpeechAnswerResponse>(
           `/api/sessions/${encodeURIComponent(sessionId)}/speech`,
           request,
-          controller.signal,
+          { signal: controller.signal },
         );
       } finally {
         clearTimeout(timer);
@@ -142,7 +162,7 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
         return await postJson<JudgedAnswerResponse>(
           `/api/sessions/${encodeURIComponent(sessionId)}/judged-answer`,
           request,
-          controller.signal,
+          { signal: controller.signal },
         );
       } finally {
         clearTimeout(timer);
@@ -160,10 +180,10 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       getJson<Enrollment[]>(`/api/users/${encodeURIComponent(userId)}/enrollments`),
     createEnrollment: (userId: string, request: CreateEnrollmentRequest) =>
       postJson<Enrollment>(`/api/users/${encodeURIComponent(userId)}/enrollments`, request),
-    saveVocabulary: (enrollmentId: string, request: SaveVocabularyRequest) =>
-      postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request),
-    unsaveVocabulary: (enrollmentId: string, senseId: string) =>
-      deleteResource(`${vocabularyPath(enrollmentId)}/senses/${encodeURIComponent(senseId)}`),
+    saveVocabulary: (actorUserId: string, enrollmentId: string, request: SaveVocabularyRequest) =>
+      postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request, { actorUserId }),
+    unsaveVocabulary: (actorUserId: string, enrollmentId: string, senseId: string) =>
+      deleteResource(`${vocabularyPath(enrollmentId)}/senses/${encodeURIComponent(senseId)}`, actorUserId),
     listVocabulary: (enrollmentId: string, query: { cursor?: string; limit?: number; level?: number }) => {
       const params = new URLSearchParams();
       if (query.cursor !== undefined) params.set('cursor', query.cursor);
@@ -174,6 +194,14 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
     },
     vocabularyWord: (enrollmentId: string, lemma: string) =>
       getJson<VocabularyWordDetail>(`${vocabularyPath(enrollmentId)}/word?lemma=${encodeURIComponent(lemma)}`),
+    // Phase 28. Grants: every call names the acting user (ADR 0008).
+    listGrants: (actorUserId: string) => getJson<GrantList>('/api/grants', actorUserId),
+    createGrant: (actorUserId: string, request: CreateGrantRequest) =>
+      postJson<Grant>('/api/grants', request, { actorUserId }),
+    acceptGrant: (actorUserId: string, grantId: string) =>
+      postJson<Grant>(`/api/grants/${encodeURIComponent(grantId)}/accept`, {}, { actorUserId }),
+    endGrant: (actorUserId: string, grantId: string) =>
+      deleteResource(`/api/grants/${encodeURIComponent(grantId)}`, actorUserId),
 
     // Phase 26. Words from a photo.
     createPhotoImport: async (enrollmentId: string, request: PhotoImportCreateRequest) => {
@@ -183,7 +211,7 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
         return await postJson<PhotoImportSummary>(
           `/api/enrollments/${encodeURIComponent(enrollmentId)}/photo-imports`,
           request,
-          controller.signal,
+          { signal: controller.signal },
         );
       } finally {
         clearTimeout(timer);

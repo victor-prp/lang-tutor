@@ -113,10 +113,17 @@ export function generationStubFor(tasks: Record<number, Task>, alternatives: str
   };
 }
 
+/** Whether an option is one of the stub's wrong words. Case-blind: a gap's wrong
+ *  words take the blank's capital (6252eb8), so a sentence-initial gap offers
+ *  "Стена" for the stub's "стена". Hebrew has no case, so this changes nothing there. */
+function isStubWrong(card: Card, text: string): boolean {
+  const wrong = card.kind === 'reverse' || card.kind === 'cloze-choice' ? WRONG_RUSSIAN : WRONG_HEBREW;
+  return wrong.includes(text.toLowerCase());
+}
+
 /** Picks the right option (the one not in the stub's wrong list) or a wrong one. */
 export async function answerChoice(page: Page, card: Card, right: boolean) {
-  const wrong = card.kind === 'reverse' || card.kind === 'cloze-choice' ? WRONG_RUSSIAN : WRONG_HEBREW;
-  const index = card.options.findIndex((text) => wrong.includes(text) !== right);
+  const index = card.options.findIndex((text) => isStubWrong(card, text) !== right);
   expect(index, card.options.join(' | ')).toBeGreaterThanOrEqual(0);
   await page.getByTestId(`option-${index}`).click();
   return card.options[index];
@@ -130,8 +137,7 @@ export async function answerTyped(page: Page, text: string) {
 
 /** The right option's text: the word on a reversed card, the meaning on today's. */
 export function rightOption(card: Card): string {
-  const wrong = card.kind === 'reverse' || card.kind === 'cloze-choice' ? WRONG_RUSSIAN : WRONG_HEBREW;
-  return card.options.find((text) => !wrong.includes(text))!;
+  return card.options.find((text) => !isStubWrong(card, text))!;
 }
 
 /** One swap of the second and third letters: a near miss on five letters or more. */

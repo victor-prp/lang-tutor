@@ -12,6 +12,7 @@ import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
 import { createEnrollmentRepo } from './repo/enrollments';
+import { createGrantRepo } from './repo/grants';
 import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
@@ -22,6 +23,7 @@ import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
+import { createGrantService, type GrantService } from './services/grants';
 import { createVocabularyService, type VocabularyService } from './services/vocabulary';
 
 /**
@@ -41,6 +43,7 @@ export type AppDeps = {
   enrollments: EnrollmentService;
   translations: TranslationService;
   vocabulary: VocabularyService;
+  grants: GrantService;
   photoImports: PhotoImportService;
   health: HealthRepo;
   identity: ServerIdentity;
@@ -88,6 +91,7 @@ export function createServerDeps(io: {
     question: createQuestionRepo(tx),
     user: createUserRepo(tx),
     enrollment: createEnrollmentRepo(tx),
+    grant: createGrantRepo(tx),
     dict: createDictRepo(tx),
     vocabulary: createVocabularyRepo(tx),
     progress: createProgressRepo(tx),
@@ -164,6 +168,7 @@ export function createServerDeps(io: {
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations,
     vocabulary: createVocabularyService({ transaction, logger: io.logger }),
+    grants: createGrantService({ transaction, logger: io.logger }),
     // Phase 26. Handed the lookup use case itself, so a row is looked up exactly
     // as a typed word is (spec D7). The match call shares the lookup's client
     // and budget.

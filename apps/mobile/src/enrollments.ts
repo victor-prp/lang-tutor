@@ -34,10 +34,10 @@ export function availableTargets(list: Enrollment[]): LanguageCode[] {
 export type LookupDirection = { from: LanguageCode; to: LanguageCode };
 
 /** The translate screen opens on target → source: "I met this word". */
-export function lookupDirection(enrollment: Enrollment): LookupDirection {
+export function lookupDirection(pair: { source_language: string; target_language: string }): LookupDirection {
   return {
-    from: asLanguageCode(enrollment.target_language),
-    to: asLanguageCode(enrollment.source_language),
+    from: asLanguageCode(pair.target_language),
+    to: asLanguageCode(pair.source_language),
   };
 }
 
