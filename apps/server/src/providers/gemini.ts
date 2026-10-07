@@ -37,66 +37,97 @@ export function toGeminiSchema(schema: ZodType): Record<string, unknown> {
   return strip(z.toJSONSchema(schema)) as Record<string, unknown>;
 }
 
-export function createGeminiClient(deps: {
+type GeminiDeps = {
   fetch: typeof globalThis.fetch;
   baseUrl: string;
   apiKey: string;
   model: string;
   timeoutMs: number;
-}) {
+};
+
+// One user turn's parts: text, and since phase 26 an inline image.
+type Part = { text: string } | { inlineData: { mimeType: string; data: string } };
+
+async function generate(
+  deps: GeminiDeps,
+  request: { system: string; schema: ZodType },
+  parts: Part[],
+): Promise<string> {
   const endpoint = `${deps.baseUrl}/v1beta/models/${deps.model}:generateContent`;
 
-  return async (request: { system: string; user: string; schema: ZodType }): Promise<string> => {
-    // One budget for the whole call. No retry: a learner who taps retry *is*
-    // the retry, and three sequential ten-second waits would be worse than one.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), deps.timeoutMs);
+  // One budget for the whole call. No retry: a learner who taps retry *is*
+  // the retry, and three sequential ten-second waits would be worse than one.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deps.timeoutMs);
 
-    let response: Response;
-    try {
-      response = await deps.fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          // A header, never `?key=`: a query parameter puts the secret into
-          // URLs, access logs and any intermediary proxy.
-          'x-goog-api-key': deps.apiKey,
+  let response: Response;
+  try {
+    response = await deps.fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        // A header, never `?key=`: a query parameter puts the secret into
+        // URLs, access logs and any intermediary proxy.
+        'x-goog-api-key': deps.apiKey,
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: request.system }] },
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: 'application/json',
+          responseSchema: toGeminiSchema(request.schema),
         },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: request.system }] },
-          contents: [{ role: 'user', parts: [{ text: request.user }] }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: 'application/json',
-            responseSchema: toGeminiSchema(request.schema),
-          },
-        }),
-        signal: controller.signal,
-      });
-    } catch {
-      // Abort and network failure arrive here identically. The message names the
-      // cause and never the key.
-      throw new LlmUnavailable(
-        controller.signal.aborted ? `timed out after ${deps.timeoutMs}ms` : 'network failure',
-      );
-    } finally {
-      clearTimeout(timer);
-    }
+      }),
+      signal: controller.signal,
+    });
+  } catch {
+    // Abort and network failure arrive here identically. The message names the
+    // cause and never the key.
+    throw new LlmUnavailable(
+      controller.signal.aborted ? `timed out after ${deps.timeoutMs}ms` : 'network failure',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
-    if (!response.ok) throw new LlmUnavailable(`responded ${response.status}`);
+  if (!response.ok) throw new LlmUnavailable(`responded ${response.status}`);
 
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      throw new LlmUnavailable('response body was not JSON');
-    }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new LlmUnavailable('response body was not JSON');
+  }
 
-    // A safety block arrives as promptFeedback.blockReason with no candidate.
-    // Empty string is the contract's "no content" — the input was refused, the
-    // provider was not broken.
-    const text = (body as { candidates?: { content?: { parts?: { text?: unknown }[] } }[] })
-      ?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return typeof text === 'string' ? text : '';
-  };
+  // A safety block arrives as promptFeedback.blockReason with no candidate.
+  // Empty string is the contract's "no content" — the input was refused, the
+  // provider was not broken.
+  const text = (body as { candidates?: { content?: { parts?: { text?: unknown }[] } }[] })
+    ?.candidates?.[0]?.content?.parts?.[0]?.text;
+  return typeof text === 'string' ? text : '';
+}
+
+export function createGeminiClient(deps: GeminiDeps) {
+  return async (request: { system: string; user: string; schema: ZodType }): Promise<string> =>
+    generate(deps, request, [{ text: request.user }]);
+}
+
+/**
+ * Phase 26 (spec D5). The same call with a photo in the user turn: the image
+ * part first, then the text. Its own factory, because widening LlmClient for an
+ * image would widen it for every caller. Wired only in composition.ts, where
+ * the `: VisionClient` annotation checks it.
+ */
+export function createGeminiVisionClient(deps: GeminiDeps) {
+  return async (request: {
+    system: string;
+    user: string;
+    schema: ZodType;
+    image: { data: string; mimeType: string };
+  }): Promise<string> =>
+    generate(deps, request, [
+      { inlineData: { mimeType: request.image.mimeType, data: request.image.data } },
+      { text: request.user },
+    ]);
 }

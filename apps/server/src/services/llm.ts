@@ -37,3 +37,11 @@ export type LlmJsonRequest = {
  * throws `LlmUnavailable`.
  */
 export type LlmClient = (request: LlmJsonRequest) => Promise<string>;
+
+/**
+ * Phase 26 (spec D5). LlmClient's request plus one image, for the one call that
+ * reads a photo. Its rules are LlmClient's: raw JSON text, an empty string for
+ * "no content", and LlmUnavailable for every failure.
+ */
+export type VisionJsonRequest = LlmJsonRequest & { image: { data: string; mimeType: string } };
+export type VisionClient = (request: VisionJsonRequest) => Promise<string>;

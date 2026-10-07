@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
 import { installJobs, JOB_SCHEMA } from '../../../src/db/jobs';
-import { PREPARE_SESSION, PREPARE_SESSION_FAILED } from '../../../src/domain/jobs';
+import {
+  LOOK_UP_IMPORT_ITEM,
+  LOOK_UP_IMPORT_ITEM_FAILED,
+  PREPARE_SESSION,
+  PREPARE_SESSION_FAILED,
+  READ_PHOTO,
+  READ_PHOTO_FAILED,
+} from '../../../src/domain/jobs';
 import { createTestDb, type TestDb } from '../../support/testDb';
 
 let t: TestDb;
@@ -49,6 +56,37 @@ describe('installJobs', () => {
       expire_seconds: 600,
       deletion_seconds: 86_400,
       dead_letter: PREPARE_SESSION_FAILED,
+    });
+  });
+
+  it('creates the photo import queues with their policies', async () => {
+    const rows = await t.db.execute<QueueRow>(
+      sql.raw(
+        `select name, retry_limit, retry_backoff, expire_seconds, deletion_seconds, dead_letter
+           from ${JOB_SCHEMA}.queue
+          where name in ('${READ_PHOTO}', '${READ_PHOTO_FAILED}', '${LOOK_UP_IMPORT_ITEM}', '${LOOK_UP_IMPORT_ITEM_FAILED}')
+          order by name`,
+      ),
+    );
+    expect(rows.rows.map((row) => row.name)).toEqual([
+      LOOK_UP_IMPORT_ITEM,
+      LOOK_UP_IMPORT_ITEM_FAILED,
+      READ_PHOTO,
+      READ_PHOTO_FAILED,
+    ]);
+    expect(rows.rows.find((row) => row.name === READ_PHOTO)).toMatchObject({
+      retry_limit: 2,
+      retry_backoff: true,
+      expire_seconds: 240,
+      deletion_seconds: 86_400,
+      dead_letter: READ_PHOTO_FAILED,
+    });
+    expect(rows.rows.find((row) => row.name === LOOK_UP_IMPORT_ITEM)).toMatchObject({
+      retry_limit: 2,
+      retry_backoff: true,
+      expire_seconds: 180,
+      deletion_seconds: 86_400,
+      dead_letter: LOOK_UP_IMPORT_ITEM_FAILED,
     });
   });
 

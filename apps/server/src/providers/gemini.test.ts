@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
 
 import { LlmUnavailable } from '../errors';
-import { createGeminiClient, toGeminiSchema } from './gemini';
+import { createGeminiClient, createGeminiVisionClient, toGeminiSchema } from './gemini';
 
 const request = { system: 'be helpful', user: 'book', schema: LlmTranslationSchema };
 
@@ -191,5 +191,47 @@ describe('createGeminiClient', () => {
     await expect(client(request)).rejects.toMatchObject({
       message: expect.not.stringContaining('secret') as unknown as string,
     });
+  });
+});
+
+describe('createGeminiVisionClient', () => {
+  const visionRequest = {
+    system: 'read the word list in this photo',
+    user: 'Language: Italian.',
+    schema: LlmTranslationSchema,
+    image: { data: 'QUJD', mimeType: 'image/jpeg' },
+  };
+  const visionWith = (fetchImpl: typeof globalThis.fetch) =>
+    createGeminiVisionClient({ fetch: fetchImpl, baseUrl: 'https://example.test', apiKey: 'secret', model: 'test-model', timeoutMs: 50 });
+
+  it('sends the image as inlineData before the text, with the system instruction and the schema', async () => {
+    let sent: { url: string; body: Record<string, unknown> } | undefined;
+    const vision = visionWith(async (url, init) => {
+      sent = { url: String(url), body: JSON.parse(String(init?.body)) };
+      return jsonResponse(geminiBody('{"items":[]}'));
+    });
+    expect(await vision(visionRequest)).toBe('{"items":[]}');
+    expect(sent?.url).toBe('https://example.test/v1beta/models/test-model:generateContent');
+    expect(sent?.body.contents).toEqual([
+      { role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: 'QUJD' } }, { text: 'Language: Italian.' }] },
+    ]);
+    expect(sent?.body.systemInstruction).toEqual({ parts: [{ text: 'read the word list in this photo' }] });
+    expect((sent?.body.generationConfig as Record<string, unknown>).responseMimeType).toBe('application/json');
+  });
+
+  it('answers an empty string when no candidate came back', async () => {
+    const vision = visionWith(async () => jsonResponse({ promptFeedback: { blockReason: 'SAFETY' } }));
+    expect(await vision(visionRequest)).toBe('');
+  });
+
+  it('maps a non-2xx and a timeout to LlmUnavailable', async () => {
+    await expect(visionWith(async () => jsonResponse({}, 400))(visionRequest)).rejects.toBeInstanceOf(LlmUnavailable);
+    const hanging = visionWith(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+    );
+    await expect(hanging(visionRequest)).rejects.toThrow('timed out after 50ms');
   });
 });
