@@ -15,6 +15,7 @@ import type { JobRepo } from '../../src/repo/jobs';
 import type { CorrectionRow, PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
+import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
 import type { TranslationService } from '../../src/services/translations';
@@ -104,6 +105,20 @@ export function createFakeLlmClient(...replies: (string | Error)[]) {
   };
 
   return Object.assign(client, { calls });
+}
+
+/** Phase 25. Replies in order, the last repeating, as createFakeLlmClient does.
+ *  An Error in the queue is thrown. */
+export function createFakeTranscriber(...replies: (string | Error)[]) {
+  const calls: LlmAudioRequest[] = [];
+  const queue = [...replies];
+  const transcriber: SpeechTranscriber = async (request) => {
+    calls.push(request);
+    const next = queue.length > 1 ? queue.shift()! : queue[0];
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  return Object.assign(transcriber, { calls });
 }
 
 export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown }[] };

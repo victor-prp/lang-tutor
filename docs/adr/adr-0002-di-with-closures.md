@@ -1,7 +1,7 @@
 # ADR 0002: Dependency injection via closures, constructed only at a composition root
 
 - **Status:** Accepted
-- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`
+- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md),
   *"Closure-based dependency injection is mandatory"*, and
   [phase 5 design](../superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md),
@@ -52,11 +52,11 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   distinguish "derived" from "coincidentally identical." Enforced by review; the list of
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
   `createHealthRepo`, `createUserRepo`, `createEnrollmentRepo`, `createDictRepo`, `createVocabularyRepo`, `createProgressRepo`, `createTransaction`, `createSessionService`,
-  `createUserService`, `createEnrollmentService`, `createGeminiClient`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
+  `createUserService`, `createEnrollmentService`, `createGeminiClient`, `createGeminiTranscriber`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
   `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`, `createSpeaker`) is short enough to spot-check.
-  `createGeminiClient` is annotated at its call site in `composition.ts` rather than at its
-  definition, because ADR 0001 R10 forbids `providers/` from importing the contract it
-  satisfies — the same arrangement as `createTransaction` and `Transaction`.
+  `createGeminiClient` and `createGeminiTranscriber` are annotated at their call sites in `composition.ts` rather than at their
+  definitions, because ADR 0001 R10 forbids `providers/` from importing the contracts they
+  satisfy — the same arrangement as `createTransaction` and `Transaction`.
 - **R7 — Importing a composition root performs no I/O.** `apps/server/src/index.ts` guards
   its construction behind `require.main === module`, so `main()` runs only when the file is
   executed directly. Enforced by `apps/server/src/index.test.ts`, which imports the module
