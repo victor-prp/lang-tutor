@@ -37,6 +37,7 @@ export function taskFor(type: QuestionType): Task | null {
     case 'letter_tiles':
     case 'matching':
     case 'read_aloud':
+    case 'typed_meaning':
       return null;
   }
 }
@@ -369,6 +370,7 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
       return { ...none, prompt: row.translation, alternatives: generated.alternatives };
     case 'dictation':
     case 'read_aloud':
+    case 'typed_meaning':
       return { ...none, prompt: row.translation };
     case 'letter_tiles':
       if (!extras.tiles) throw new Error(`the tiles card for ${row.form} has no tiles`);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { planSession, type PlanPick } from './plan';
+import { TIERS, planSession, type PlanPick } from './plan';
 
 const pick = (n: number, tiles = true): PlanPick => ({ form: `word${n}`, translation: `מילה${n}`, tiles, speakable: true });
 const picks = (count: number, tiles = true) => Array.from({ length: count }, (_, i) => pick(i, tiles));
@@ -24,7 +24,7 @@ describe('planSession (spec D3, D4, D10)', () => {
     expect(planSession(picks(10), { listening: true, speaking: false, ordinal: 1 }).types).toEqual([
       'listen_choice', 'letter_tiles', 'dictation',
       ...BOARD,
-      'multiple_choice', 'reverse_choice', 'typed_translation',
+      'typed_meaning', 'reverse_choice', 'typed_translation',
     ]);
   });
 
@@ -33,7 +33,7 @@ describe('planSession (spec D3, D4, D10)', () => {
     expect(plan.board).toBeNull();
     expect(plan.types).toEqual([
       'multiple_choice', 'reverse_choice', 'typed_translation',
-      'multiple_choice', 'letter_tiles', 'typed_translation',
+      'typed_meaning', 'letter_tiles', 'typed_translation',
     ]);
   });
 
@@ -50,7 +50,7 @@ describe('planSession (spec D3, D4, D10)', () => {
     const plan = planSession(picks(10, false), OFF);
     expect(plan.types.filter((type) => type !== 'matching')).toEqual([
       'multiple_choice', 'reverse_choice', 'typed_translation',
-      'multiple_choice', 'reverse_choice', 'typed_translation',
+      'typed_meaning', 'reverse_choice', 'typed_translation',
     ]);
   });
 
@@ -121,7 +121,7 @@ describe('phase 25 speaking cards in the plan', () => {
         expect(types).not.toContain('say_translation');
       }
     }
-    expect(planSession(ten, { listening: true, speaking: false, ordinal: 2 }).types[7]).toBe('listen_choice');
+    expect(planSession(ten, { listening: true, speaking: false, ordinal: 2 }).types[7]).toBe('multiple_choice');
   });
 
   it('with listening off and speaking on, ordinal 0 asks read aloud at 8 and say the translation at 10', () => {
@@ -167,6 +167,31 @@ describe('phase 25 speaking cards in the plan', () => {
         types.forEach((type, i) => {
           if (i > 0 && type !== 'matching') expect(type).not.toBe(types[i - 1]);
         });
+      }
+    }
+  });
+});
+
+describe('typed_meaning in the recognise tier (phase 27 D9)', () => {
+  it('is the last type of the recognise tier', () => {
+    expect(TIERS[0]).toEqual(['multiple_choice', 'listen_choice', 'read_aloud', 'typed_meaning']);
+  });
+  it('is chosen when its turn comes, and when listening falls through to it', () => {
+    // Four picks, ordinal 0, no listening, no speaking: the second run's
+    // recognise card prefers listen_choice, which falls through to
+    // typed_meaning (the next eligible in the tier's order).
+    const plan = planSession(picks(4), { listening: false, speaking: false, ordinal: 0 });
+    expect(plan.types).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation', 'typed_meaning']);
+  });
+  it('never puts two cards of a type in a row, over sizes 1 to 10 and ordinals 0 to 4', () => {
+    for (let size = 1; size <= 10; size++) {
+      for (let ordinal = 0; ordinal <= 4; ordinal++) {
+        for (const flags of [{ listening: false, speaking: false }, { listening: true, speaking: true }]) {
+          const types = planSession(picks(size), { ...flags, ordinal }).types;
+          types.forEach((type, i) => {
+            if (i > 0) expect(type === types[i - 1] && type !== 'matching').toBe(false);
+          });
+        }
       }
     }
   });

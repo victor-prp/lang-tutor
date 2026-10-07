@@ -83,6 +83,8 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
             return { ...base, type: q.type, question: q.form, meaning: q.prompt! };
           case 'say_translation':
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
+          case 'typed_meaning':
+            return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt! };
         }
       });
     },

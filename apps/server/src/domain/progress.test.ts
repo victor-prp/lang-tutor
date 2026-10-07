@@ -343,3 +343,16 @@ describe('phase 25 evidence (spec D10)', () => {
     expect(advance(row({ level: 2, lastStepOn: '2026-09-01' }), [{ ...right, cap: 3 }, { ...right, cap: 2 }], D).level).toBe(3);
   });
 });
+
+describe('typed_meaning evidence (phase 27 D10)', () => {
+  const answer = (verdict: 'exact' | 'alternative' | 'wrong') => ({ senseId: 's1', type: 'typed_meaning' as const, verdict });
+  it('credits written_receptive, uncapped, for a right meaning', () => {
+    expect(evidenceFor(answer('exact'))).toEqual([{ dimension: 'written_receptive', correct: true, cap: null }]);
+  });
+  it('is a written_receptive failure when wrong', () => {
+    expect(evidenceFor(answer('wrong'))).toEqual([{ dimension: 'written_receptive', correct: false, cap: null }]);
+  });
+  it('says nothing for another sense', () => {
+    expect(evidenceFor(answer('alternative'))).toEqual([]);
+  });
+});

@@ -1,0 +1,76 @@
+import type { TypedVerdict } from '@lang-tutor/core/api';
+import { LlmMeaningJudgeSchema } from '@lang-tutor/core/api/schemas';
+import { normaliseHebrew } from '@lang-tutor/core/domain';
+
+import { LANGUAGES, type LanguageCode } from './languages';
+import { unfence } from './translation';
+
+/**
+ * Phase 27 (spec D3, D4). The pure half of judging an open answer: the rules
+ * that decide without a model, what the model is told, and how its answer is
+ * read. services/sessions.ts calls the model and decides what a failure costs.
+ */
+
+/** Part of every judge instruction, and what MockServer matches to tell this
+ *  call from the others. Changing the wording means changing the stubs. */
+export const JUDGE_MARKER = "judge the learner's answer";
+
+/** What the meaning judge is told about the card: the word, and the sense its
+ *  saved example pins. The example is absent for a saved sense without one. */
+export type MeaningJudgeContext = {
+  language: LanguageCode;
+  form: string;
+  lemma: string;
+  partOfSpeech: string;
+  meaning: string;
+  example: string | null;
+  exampleTranslation: string | null;
+};
+
+/** Spec D3 step 2. Empty text is "show me the answer"; the stored meaning is
+ *  right as typed. Null: only the model can tell. */
+export function meaningRuleVerdict(meaning: string, text: string): TypedVerdict | null {
+  const typed = normaliseHebrew(text);
+  if (typed === '') return 'wrong';
+  return typed === normaliseHebrew(meaning) ? 'exact' : null;
+}
+
+export function buildMeaningJudgePrompt(context: MeaningJudgeContext, answer: string) {
+  const name = LANGUAGES[context.language].name;
+  const system = [
+    `Your task: ${JUDGE_MARKER}. A Hebrew-speaking learner of ${name} was shown a ${name} word and typed its meaning in Hebrew.`,
+    'The meaning practised is saved_meaning, in the sense the example shows.',
+    'Return JSON only, matching the supplied schema, with one field, verdict:',
+    '- "right": the answer means the same as saved_meaning in this sense. Accept a synonym, another form, tense or person of it (for example לדבר, מדבר, דיבר), with or without a prefix such as ה, ל, ו or ש, with or without niqqud, and with small Hebrew spelling slips.',
+    '- "other_sense": the answer is a correct meaning of the word, but of a different sense than the one practised.',
+    '- "wrong": anything else, including an answer that is only related, too general, or the meaning of another word.',
+  ].join('\n');
+  const user = JSON.stringify({
+    word: context.form,
+    lemma: context.lemma,
+    part_of_speech: context.partOfSpeech,
+    saved_meaning: context.meaning,
+    example: context.example,
+    example_translation: context.exampleTranslation,
+    answer,
+  });
+  return { system, user, schema: LlmMeaningJudgeSchema };
+}
+
+const MEANING_VERDICTS: Record<'right' | 'other_sense' | 'wrong', TypedVerdict> = {
+  right: 'exact',
+  other_sense: 'alternative',
+  wrong: 'wrong',
+};
+
+/** The model's verdict as a typed verdict. Null when the answer is empty (no
+ *  content is no verdict here) or cannot be read. */
+export function parseMeaningJudge(raw: string): TypedVerdict | null {
+  if (raw.trim() === '') return null;
+  try {
+    const parsed = LlmMeaningJudgeSchema.safeParse(JSON.parse(unfence(raw)));
+    return parsed.success ? MEANING_VERDICTS[parsed.data.verdict] : null;
+  } catch {
+    return null;
+  }
+}
