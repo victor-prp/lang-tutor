@@ -97,7 +97,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all fourteen paths and nothing else', async () => {
+  it('contains all fifteen paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/enrollments/{id}/sessions/current',
@@ -107,6 +107,7 @@ describe('the document as a whole', () => {
       '/api/login',
       '/api/sessions',
       '/api/sessions/{id}',
+      '/api/sessions/{id}/judged-answer',
       NEXT_STEP,
       '/api/sessions/{id}/skip',
       '/api/sessions/{id}/speech',
@@ -281,6 +282,15 @@ describe('POST /api/sessions/{id}/speech in the published document', () => {
     const doc = await openApiDocument();
     const op = doc.paths['/api/sessions/{id}/speech'].post;
     expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '404', '409', '413', '502']);
+    expect(op.description).toMatch(/costs money/);
+  });
+});
+
+describe('POST /api/sessions/{id}/judged-answer in the published document', () => {
+  it('declares every status it can return, and says it costs money', async () => {
+    const doc = await openApiDocument();
+    const op = doc.paths['/api/sessions/{id}/judged-answer'].post;
+    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '404', '409', '502']);
     expect(op.description).toMatch(/costs money/);
   });
 });

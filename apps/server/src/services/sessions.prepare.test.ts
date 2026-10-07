@@ -98,6 +98,7 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
     now: createFakeClock(1_000, 1_250),
     llm,
     transcriber: createFakeTranscriber(''),
+    judge: createFakeLlmClient(''),
   });
   return { service, calls, llm, logger };
 }

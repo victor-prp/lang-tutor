@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
 
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
+import { JUDGE_MARKER } from '../../src/domain/judge';
 import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
 import { geminiResponse } from './geminiResponse';
 
@@ -299,6 +300,26 @@ export async function expectTranscription(ns: string, heard: string, opts: { onc
         body: JSON.stringify(geminiResponse({ heard })),
       },
       ...(opts.once ? { times: { remainingTimes: 1, unlimited: false } } : {}),
+    },
+  });
+}
+
+/**
+ * Phase 27. The judge call's answer, matched on JUDGE_MARKER so a generation or
+ * transcription stub in the same namespace cannot answer it. Consumed once, and
+ * prioritised so it wins over a broader stub registered earlier.
+ */
+export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' | 'wrong'): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${JUDGE_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ verdict })),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+      priority: 10,
     },
   });
 }

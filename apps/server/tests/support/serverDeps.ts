@@ -34,6 +34,8 @@ export function createTestServerDeps(io: {
   sessionGenerationTimeoutMs?: number;
   /** Phase 25. The budget of one transcription; defaults to production's. */
   speechTimeoutMs?: number;
+  /** Phase 27. The budget of one judged answer; defaults to production's. */
+  judgeTimeoutMs?: number;
 }): AppDeps {
   return createServerDeps({
     db: io.db,
@@ -49,6 +51,7 @@ export function createTestServerDeps(io: {
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
     sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? SESSION_GENERATION_BUDGET_MS,
     speechTimeoutMs: io.speechTimeoutMs ?? 8_000,
+    judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0 },
     boss: io.boss ?? unstartedBoss(io.db),
   });

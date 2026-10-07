@@ -243,3 +243,24 @@ describe('createGeminiTranscriber (phase 25)', () => {
     ).rejects.toThrow(/timed out after 10ms/);
   });
 });
+
+describe('createGeminiClient thinkingBudget (phase 27)', () => {
+  const schema = z.object({ verdict: z.string() });
+  const seenBody = async (thinkingBudget?: number) => {
+    let body: { generationConfig: Record<string, unknown> } | undefined;
+    const fetch = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    await createGeminiClient({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, thinkingBudget })({ system: 's', user: 'u', schema });
+    return body!;
+  };
+
+  it('sends thinkingConfig when a budget is given', async () => {
+    expect((await seenBody(0)).generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+  });
+
+  it('sends no thinkingConfig key without one', async () => {
+    expect(Object.keys((await seenBody()).generationConfig)).not.toContain('thinkingConfig');
+  });
+});
