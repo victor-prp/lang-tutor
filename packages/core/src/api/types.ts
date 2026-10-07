@@ -59,6 +59,11 @@ import type {
   JudgedAnswerRequestSchema,
   JudgedAnswerResponseSchema,
   LlmMeaningJudgeSchema,
+  LlmTranslationJudgeSchema,
+  GapSchema,
+  ClozeChoiceQuestionSchema,
+  ClozeTypedQuestionSchema,
+  SentenceTranslationQuestionSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
   TranslationKindSchema,
@@ -155,3 +160,8 @@ export type TypedMeaningQuestion = z.infer<typeof TypedMeaningQuestionSchema>;
 export type JudgedAnswerRequest = z.infer<typeof JudgedAnswerRequestSchema>;
 export type JudgedAnswerResponse = z.infer<typeof JudgedAnswerResponseSchema>;
 export type LlmMeaningJudge = z.infer<typeof LlmMeaningJudgeSchema>;
+export type LlmTranslationJudge = z.infer<typeof LlmTranslationJudgeSchema>;
+export type Gap = z.infer<typeof GapSchema>;
+export type ClozeChoiceQuestion = z.infer<typeof ClozeChoiceQuestionSchema>;
+export type ClozeTypedQuestion = z.infer<typeof ClozeTypedQuestionSchema>;
+export type SentenceTranslationQuestion = z.infer<typeof SentenceTranslationQuestionSchema>;
