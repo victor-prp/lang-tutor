@@ -225,6 +225,9 @@ export function createQuestionRepo(tx: Tx) {
                 lemma: row.lemma,
                 partOfSpeech: row.part_of_speech,
                 translation: row.translation,
+                // Part B Task 3 reads the saved example here.
+                example: null,
+                exampleTranslation: null,
               },
             ]
           : [];
@@ -299,6 +302,12 @@ export function createQuestionRepo(tx: Tx) {
         options: QuestionOption[] | null;
         alternatives: string[] | null;
         tiles: string[] | null;
+        // Phase 27: a sentence card's text and gap. Optional until Part B Task 3
+        // persists them and makes them required.
+        sentence?: string | null;
+        sentenceTranslation?: string | null;
+        gapStart?: number | null;
+        gapEnd?: number | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];

@@ -15,8 +15,8 @@ const SESSION = '11111111-1111-1111-1111-111111111111';
 const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'preparing', source: 'list' };
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'ru', created_at: '' };
 const CONTEXT: GenerationContext[] = [
-  { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה' },
-  { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל' },
+  { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
+  { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
 ];
 const PAYLOAD = {
   session_id: SESSION,
@@ -64,6 +64,8 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
       };
       return input.questions.map((q, i): Question => {
         const base = { id: `g${i}`, vocab_term_id: q.lexemeId };
+        const gap = { start: q.gapStart ?? 0, end: q.gapEnd ?? 0 };
+        const gapText = (q.sentence ?? '').slice(gap.start, gap.end);
         const choice = () => ({ options: q.options!.map((o) => o.text), correct_option: correct(q) });
         switch (q.type) {
           case 'typed_translation':
@@ -85,6 +87,12 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
           case 'typed_meaning':
             return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt! };
+          case 'cloze_choice':
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, ...choice() };
+          case 'cloze_typed':
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives! };
+          case 'sentence_translation':
+            return { ...base, type: q.type, question: q.sentenceTranslation!, meaning: q.prompt!, sentence: q.sentence!, gap, answer: gapText };
         }
       });
     },
@@ -132,7 +140,7 @@ describe('prepareSession', () => {
   it('gives each position its type, in pick order, with the content each type needs', async () => {
     const context = [
       ...CONTEXT,
-      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר' },
+      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
     ];
     const reply = JSON.stringify({
       items: [
@@ -239,7 +247,7 @@ describe('prepareSession', () => {
 const FORMS = ['ромашка', 'черепаха', 'подушка', 'зонтик', 'ведро', 'скрипка', 'лопата', 'кастрюля', 'фонарь', 'ящерица'];
 const MEANINGS = ['מרגנית', 'צב', 'כרית', 'מטרייה', 'דלי', 'כינור', 'את חפירה', 'סיר', 'פנס', 'לטאה'];
 const TEN: GenerationContext[] = FORMS.map((form, i) => ({
-  senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i],
+  senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i], example: null, exampleTranslation: null,
 }));
 const TEN_PAYLOAD = {
   session_id: SESSION,
@@ -265,7 +273,7 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
     await service.prepareSession(TEN_PAYLOAD);
 
     const asked = JSON.parse(llm.calls[0].user).items.map((item: { key: string; task: string }) => `${item.key}:${item.task}`);
-    expect(asked).toEqual(['q1:meaning', 'q2:word', 'q3:typed', 'q4:meaning', 'q8:meaning']);
+    expect(asked).toEqual(['q1:meaning', 'q2:word', 'q3:typed', 'q4:meaning', 'q8:meaning', 'q10:sentence']);
 
     const [input] = calls.generated as {
       questions: { type: string; prompt: string | null; options: { text: string; is_correct: boolean }[] | null; tiles: string[] | null }[];
@@ -273,7 +281,9 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
     expect(input.questions.map((q) => q.type)).toEqual([
       'multiple_choice', 'reverse_choice', 'typed_translation',
       'matching', 'matching', 'matching', 'matching',
-      'listen_choice', 'letter_tiles', 'dictation',
+      // s3 listen_choice, s4 letter_tiles (cloze_choice has no gap yet), s5 cloze_typed,
+      // which the reply left no sentence for, so typed_translation.
+      'listen_choice', 'letter_tiles', 'typed_translation',
     ]);
     expect(input.questions[3].options!.map((o) => o.text)).toEqual(['מטרייה', 'דלי', 'כינור', 'את חפירה', 'שולחן']);
     expect(input.questions[4].options!.find((o) => o.is_correct)!.text).toBe('דלי');
@@ -292,10 +302,10 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
     await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toThrow(/board/);
   });
 
-  // Final review: a dictation asks the model nothing, yet its meaning is as
+  // Final review: a tiles card asks the model nothing, yet its meaning is as
   // off limits as an item's own.
-  it("refuses a wrong meaning that is another meaning of a listening card's word held by a dictation", async () => {
-    const context = TEN.map((row, i) => (i === 9 ? { ...row, form: TEN[7].form, lemma: TEN[7].form, translation: 'מחבת' } : row));
+  it("refuses a wrong meaning that is another meaning of a listening card's word held by a tiles card", async () => {
+    const context = TEN.map((row, i) => (i === 8 ? { ...row, form: TEN[7].form, lemma: TEN[7].form, translation: 'מחבת' } : row));
     const reply = TEN_REPLY.replace('["ענן","גשם","רוח"]', '["מחבת","גשם","רוח"]');
     const { service, calls, llm } = world({ context, reply });
     await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toBeInstanceOf(InvalidDistractors);
@@ -309,7 +319,7 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
   });
 
   it('gives a listening-off session no listening card', async () => {
-    // Listening off, the tenth card is typed (dictation falls back), so q10 is asked too.
+    // Listening off, the tenth card is a sentence card too, so q10 is asked either way.
     const reply = JSON.stringify({
       items: [...JSON.parse(TEN_REPLY).items, { key: 'q10', distractors: [], alternatives: [] }],
     });
@@ -342,7 +352,7 @@ describe('prepareSession, phase 25 (spec D4)', () => {
 
   it('plans a speaking card only when the payload says speaking', async () => {
     const on = world({ reply: JSON.stringify({ items: [{ key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] }] }) });
-    await on.service.prepareSession({ ...PAYLOAD, ordinal: 2, speaking: true });
+    await on.service.prepareSession({ ...PAYLOAD, ordinal: 6, speaking: true });
     expect(types(on.calls)).toEqual(['read_aloud', 'reverse_choice']);
 
     const off = world({});

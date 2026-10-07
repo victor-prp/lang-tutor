@@ -2,8 +2,20 @@ import type { LlmDistractors } from '@lang-tutor/core/api';
 import { LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
+import { findGap } from './cloze';
 import { LANGUAGES, stripStress, type Language, type LanguageCode } from './languages';
 import type { SessionPlan } from './plan';
+import {
+  MAX_ALTERNATIVES,
+  MAX_AVOID,
+  SENTENCE_MAX_WORDS,
+  SENTENCE_MIN_WORDS,
+  TRANSLATE_MAX_WORDS,
+  validateSentenceItem,
+  validateTranslateItem,
+  type SentenceContent,
+  type TranslateContent,
+} from './sentences';
 import { dropNulls, unfence } from './translation';
 
 /**
@@ -15,10 +27,13 @@ import { dropNulls, unfence } from './translation';
  * Phase 23. One call serves three tasks (spec D8): wrong meanings for today's
  * card, wrong target words for the reversed card, and the other right answers
  * a typed card should accept.
+ *
+ * Phase 27. Three tasks more (spec D5 to D7): wrong words for a sentence with
+ * a blank, a new sentence with its blank, and a Hebrew sentence to translate.
  */
 
 /** What the model is asked to do for one item. */
-export type Task = 'meaning' | 'word' | 'typed';
+export type Task = 'meaning' | 'word' | 'typed' | 'gap' | 'sentence' | 'translate';
 
 /** What the model is asked to do for one item, or null when a type needs
  *  nothing generated: a dictation, a tiles card, and a board word (its board
@@ -33,6 +48,12 @@ export function taskFor(type: QuestionType): Task | null {
     case 'typed_translation':
     case 'say_translation':
       return 'typed';
+    case 'cloze_choice':
+      return 'gap';
+    case 'cloze_typed':
+      return 'sentence';
+    case 'sentence_translation':
+      return 'translate';
     case 'dictation':
     case 'letter_tiles':
     case 'matching':
@@ -52,7 +73,7 @@ export function tasksFor(plan: SessionPlan): (Task | null)[] {
 export const keyOf = (position: number): string => `q${position + 1}`;
 
 /** The most alternatives a typed question keeps (questions_shape_valid). */
-export const MAX_ALTERNATIVES = 5;
+export { MAX_ALTERNATIVES };
 
 /** Part of the system prompt, and what MockServer matches to tell this call
  *  from a translation. Changing the wording means changing the stubs. */
@@ -68,7 +89,15 @@ export type GenerationContext = {
   lemma: string;
   partOfSpeech: string;
   translation: string;
+  /** Phase 27 (spec D7). The learner's saved example for this form and sense,
+   *  and its Hebrew translation: null when they saved none. */
+  example: string | null;
+  exampleTranslation: string | null;
 };
+
+/** Phase 27 (spec D5, D6). Per sense, the sentences its last sessions asked,
+ *  newest first, so a new one is never last time's. Read by the service. */
+export type RecentSentences = Map<string /* senseId */, { cloze: string[]; translate: string[] }>;
 
 export type DistractorItem = {
   key: string;
@@ -77,6 +106,12 @@ export type DistractorItem = {
   lemma: string;
   partOfSpeech: string;
   translation: string;
+  example: string | null;
+  exampleTranslation: string | null;
+  /** Sentences the model must not write again (spec D5, D6); empty for other tasks. */
+  avoid: string[];
+  /** A gap item's blanked text in `example` (spec D7); null for every other task. */
+  blank: string | null;
 };
 
 /** Structurally LlmJsonRequest; services/sessions.ts is where the two meet,
@@ -89,19 +124,58 @@ export type DistractorPrompt = {
 
 /** What one item came back with, validated: three wrong options for a choice
  *  task, cleaned alternatives for a typed one, and nothing else. */
-export type Generated = { distractors: string[]; alternatives: string[] };
+export type Generated = {
+  distractors: string[];
+  alternatives: string[];
+  /** Phase 27 (spec D5, D6). A sentence item's validated content, or why it
+   *  was not usable: `degraded` is set exactly when `sentence` and `translate`
+   *  are both null for a sentence or translate item, and null otherwise. */
+  sentence: SentenceContent | null;
+  translate: TranslateContent | null;
+  degraded: string | null;
+};
 
 export type DistractorVerdict =
   | { ok: true; byKey: Map<string, Generated> }
   | { ok: false; reason: string };
 
+/** Spec D5, D6: the sentences an item must not repeat. A gap sentence avoids
+ *  the saved example (the model is shown it) and the last sessions' sentences;
+ *  a translation avoids only the last sessions'. */
+function avoidFor(row: GenerationContext, task: Task, recent: RecentSentences): string[] {
+  const seen = recent.get(row.senseId);
+  if (task === 'sentence') {
+    return [...(row.example ? [row.example] : []), ...(seen?.cloze ?? []).slice(0, MAX_AVOID)];
+  }
+  if (task === 'translate') return (seen?.translate ?? []).slice(0, MAX_AVOID);
+  return [];
+}
+
 /** `context` in session order, `tasks[i]` its position's task. */
-export function distractorItems(context: GenerationContext[], tasks: readonly (Task | null)[]): DistractorItem[] {
+export function distractorItems(
+  context: GenerationContext[],
+  tasks: readonly (Task | null)[],
+  recent: RecentSentences,
+): DistractorItem[] {
   return context.flatMap((row, index) => {
     const task = tasks[index];
-    return task
-      ? [{ key: keyOf(index), task, form: row.form, lemma: row.lemma, partOfSpeech: row.partOfSpeech, translation: row.translation }]
-      : [];
+    if (!task) return [];
+    // Spec D7: the blank is the example's own text for the form, as its card shows it.
+    const where = task === 'gap' && row.example ? findGap(row.example, [row.form, row.lemma]) : null;
+    return [
+      {
+        key: keyOf(index),
+        task,
+        form: row.form,
+        lemma: row.lemma,
+        partOfSpeech: row.partOfSpeech,
+        translation: row.translation,
+        example: row.example,
+        exampleTranslation: row.exampleTranslation,
+        avoid: avoidFor(row, task, recent),
+        blank: where && row.example ? row.example.slice(where.start, where.end) : null,
+      },
+    ];
   });
 }
 
@@ -137,6 +211,9 @@ export function buildDistractorPrompt(input: {
     `- "meaning": the learner sees the ${learned.name} word and picks its ${answers.name} translation. Write ${DISTRACTOR_MARKER} in ${answers.name} as distractors.`,
     `- "word": the learner sees the ${answers.name} translation and picks the ${learned.name} word. Write ${DISTRACTOR_MARKER} in ${learned.name} as distractors.`,
     `- "typed": the learner sees the ${answers.name} translation and types the ${learned.name} word. Leave distractors empty. As alternatives, list every other ${learned.name} word or phrase that translates it equally well in this sense, at most ${MAX_ALTERNATIVES}, or none.`,
+    `- "gap": the learner sees the example sentence with the ${learned.name} word blanked, and picks the missing word. Write ${DISTRACTOR_MARKER} in ${learned.name}: words of the same part of speech and in the same form as the blanked word, each of which makes this sentence wrong or meaningless. Never a word that also fits the sentence.`,
+    `- "sentence": write a new, natural, everyday ${learned.name} sentence of ${SENTENCE_MIN_WORDS} to ${SENTENCE_MAX_WORDS} words that uses the word in the meaning given by correct and shown by the example, never in another sense. Use whatever form of the word the sentence needs, written as consecutive words, as many as the word has. It must differ from every sentence in avoid. Put it in sentence; the word exactly as written in the sentence in gap; the whole sentence in natural ${answers.name}, which fixes its person, number and tense, in translation; and in alternatives every other ${learned.name} word that would fill the gap equally well given that translation, in the same form, or none. Leave distractors empty.`,
+    `- "translate": write a short, natural, everyday ${answers.name} sentence of ${SENTENCE_MIN_WORDS} to ${TRANSLATE_MAX_WORDS} words that uses the meaning in correct, in the sense the example shows. It must differ from every sentence in avoid. Put it in sentence; a natural ${learned.name} translation of it that uses the word, in whatever form the translation needs, in translation; and that word exactly as written in the translation in gap. Leave distractors empty.`,
     'Each wrong answer must be plausible: the same part of speech, the same register and a',
     'similar length as the correct answer.',
     'A wrong answer must never be right: not the correct answer itself, not a synonym of it, and',
@@ -162,6 +239,10 @@ export function buildDistractorPrompt(input: {
       lemma: item.lemma,
       part_of_speech: item.partOfSpeech,
       correct: item.translation,
+      example: item.example,
+      example_translation: item.exampleTranslation,
+      ...(item.task === 'gap' ? { sentence: item.example, blank: item.blank } : {}),
+      ...(item.avoid.length > 0 ? { avoid: item.avoid } : {}),
     })),
     ...(related.length > 0
       ? { also_in_session: related.map((other) => ({ word: other.form, correct: other.translation })) }
@@ -223,13 +304,17 @@ function badChoice(
   if (texts.length !== 3 || texts.some((text) => text === '')) {
     return `${item.key} needs three non-empty wrong answers`;
   }
-  // A word item's right answer is the form, and its lemma is right too.
-  const rights = item.task === 'word' ? [item.form, item.lemma] : [item.translation];
+  // A word item's right answer is the form, and its lemma is right too; a gap
+  // item's is also the text the example actually blanks (phase 27, spec D7).
+  const isWord = item.task === 'word' || item.task === 'gap';
+  const rights = isWord
+    ? [item.form, item.lemma, ...(item.blank ? [item.blank] : [])]
+    : [item.translation];
   const all = texts.map(comparable);
   if (new Set(all).size !== all.length || all.some((text) => rights.map(comparable).includes(text))) {
     return `${item.key} repeats the answer or another wrong answer`;
   }
-  if (item.task === 'word' && texts.some((text) => explanationLetters.test(text))) {
+  if (isWord && texts.some((text) => explanationLetters.test(text))) {
     return `${item.key} offers a wrong answer in the explanation language where the options are ${item.form}'s`;
   }
   // Save-all stores every sense of a word, so the batch can hold the same
@@ -239,14 +324,14 @@ function badChoice(
   const siblings = new Set(
     [...items.filter((other) => other !== item), ...others]
       .filter((other) =>
-        item.task === 'word'
+        isWord
           ? comparable(other.translation) === comparable(item.translation)
           : comparable(other.form) === comparable(item.form),
       )
-      .map((other) => comparable(item.task === 'word' ? other.form : other.translation)),
+      .map((other) => comparable(isWord ? other.form : other.translation)),
   );
   if (all.some((text) => siblings.has(text))) {
-    return item.task === 'word'
+    return isWord
       ? `${item.key} offers another saved word with the same meaning as a wrong answer`
       : `${item.key} offers another meaning of the same word as a wrong answer`;
   }
@@ -272,7 +357,11 @@ function cleanAlternatives(item: DistractorItem, found: string[] | undefined, ex
 
 /**
  * All or nothing for the choice tasks: a session is either fully generated or
- * the attempt fails and pg-boss retries it. A typed item cannot fail. Keys the
+ * the attempt fails and pg-boss retries it. A typed item cannot fail, and nor
+ * can a sentence or translate item: it comes back `degraded` with the reason,
+ * and the service turns that card into a typed translation (phase 27, spec
+ * D5, D6), which is why it needs the `target` language its sentences are
+ * written in. A gap item is a choice task like the others. Keys the
  * model added beyond the items asked are ignored. `explanation` is the
  * language the meanings are in (the enrollment's source): a reversed card's
  * wrong words and a typed card's alternatives must not be in its script.
@@ -284,23 +373,43 @@ export function validateDistractors(
   answer: LlmDistractors,
   explanation: string,
   others: readonly OtherRow[],
+  target: LanguageCode,
 ): DistractorVerdict {
   const explanationLetters = language(explanation).letters;
   const answered = new Map(answer.items.map((item) => [item.key, item]));
   const byKey = new Map<string, Generated>();
   for (const item of items) {
     const found = answered.get(item.key);
+    if (item.task === 'sentence' || item.task === 'translate') {
+      const input = { form: item.form, target, avoid: item.avoid };
+      const checked = !found
+        ? ({ ok: false, reason: `no answer for ${item.key}` } as const)
+        : item.task === 'sentence'
+          ? validateSentenceItem(input, found)
+          : validateTranslateItem(input, found);
+      byKey.set(
+        item.key,
+        checked.ok
+          ? {
+              ...NOTHING_GENERATED,
+              sentence: item.task === 'sentence' ? (checked.content as SentenceContent) : null,
+              translate: item.task === 'translate' ? (checked.content as TranslateContent) : null,
+            }
+          : { ...NOTHING_GENERATED, degraded: checked.reason },
+      );
+      continue;
+    }
     if (!found) return { ok: false, reason: `no answer for ${item.key}` };
     if (item.task === 'typed') {
       byKey.set(item.key, {
-        distractors: [],
+        ...NOTHING_GENERATED,
         alternatives: cleanAlternatives(item, found.alternatives, explanationLetters),
       });
       continue;
     }
     const reason = badChoice(item, items, others, found.distractors, explanationLetters);
     if (reason) return { ok: false, reason };
-    byKey.set(item.key, { distractors: found.distractors.map((text) => text.trim()), alternatives: [] });
+    byKey.set(item.key, { ...NOTHING_GENERATED, distractors: found.distractors.map((text) => text.trim()) });
   }
   return { ok: true, byKey };
 }
@@ -340,15 +449,26 @@ export function boardMeanings(
 
 /** What a position needs beyond the model's answer: a tiles card's tiles, and
  *  a board word's board (its meanings, and which of them is its own). */
-export type Extras = { tiles: string[] | null; board: { meanings: string[]; own: number } | null };
-export const NO_EXTRAS: Extras = { tiles: null, board: null };
-export const NOTHING_GENERATED: Generated = { distractors: [], alternatives: [] };
+export type Extras = {
+  tiles: string[] | null;
+  board: { meanings: string[]; own: number } | null;
+  /** Phase 27 (spec D7). A cloze_choice card's gap in the saved example. */
+  gap: { start: number; end: number } | null;
+};
+export const NO_EXTRAS: Extras = { tiles: null, board: null, gap: null };
+export const NOTHING_GENERATED: Generated = { distractors: [], alternatives: [], sentence: null, translate: null, degraded: null };
 
 export type QuestionContent = {
   prompt: string | null;
   options: QuestionOption[] | null;
   alternatives: string[] | null;
   tiles: string[] | null;
+  /** Phase 27 (spec D11). A sentence card's text, the Hebrew line shown with
+   *  it, and the gap's offsets into `sentence`; all null for every other type. */
+  sentence: string | null;
+  sentenceTranslation: string | null;
+  gapStart: number | null;
+  gapEnd: number | null;
 };
 
 /**
@@ -358,7 +478,16 @@ export type QuestionContent = {
  * stored, not joined: a question records what was asked.
  */
 export function generatedContent(row: GenerationContext, type: QuestionType, generated: Generated, extras: Extras): QuestionContent {
-  const none: QuestionContent = { prompt: null, options: null, alternatives: null, tiles: null };
+  const none: QuestionContent = {
+    prompt: null,
+    options: null,
+    alternatives: null,
+    tiles: null,
+    sentence: null,
+    sentenceTranslation: null,
+    gapStart: null,
+    gapEnd: null,
+  };
   switch (type) {
     case 'multiple_choice':
     case 'listen_choice':
@@ -372,6 +501,46 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
     case 'read_aloud':
     case 'typed_meaning':
       return { ...none, prompt: row.translation };
+    case 'cloze_choice': {
+      // Spec D7: the saved example, the form's own text blanked, correct option first.
+      const gap = extras.gap;
+      if (!row.example || !gap) throw new Error(`the cloze card for ${row.form} has no example or gap`);
+      return {
+        ...none,
+        prompt: row.translation,
+        options: optionsFor(row.example.slice(gap.start, gap.end), generated.distractors),
+        sentence: row.example,
+        sentenceTranslation: row.exampleTranslation,
+        gapStart: gap.start,
+        gapEnd: gap.end,
+      };
+    }
+    case 'cloze_typed': {
+      const content = generated.sentence;
+      if (!content) throw new Error(`the cloze card for ${row.form} has no sentence`);
+      return {
+        ...none,
+        prompt: row.translation,
+        alternatives: content.alternatives,
+        sentence: content.sentence,
+        sentenceTranslation: content.translation,
+        gapStart: content.gap.start,
+        gapEnd: content.gap.end,
+      };
+    }
+    case 'sentence_translation': {
+      // Spec D6: the Hebrew sentence is asked; the reference is what follows the answer.
+      const content = generated.translate;
+      if (!content) throw new Error(`the translation card for ${row.form} has no sentence`);
+      return {
+        ...none,
+        prompt: row.translation,
+        sentence: content.reference,
+        sentenceTranslation: content.hebrew,
+        gapStart: content.gap.start,
+        gapEnd: content.gap.end,
+      };
+    }
     case 'letter_tiles':
       if (!extras.tiles) throw new Error(`the tiles card for ${row.form} has no tiles`);
       return { ...none, prompt: row.translation, tiles: extras.tiles };

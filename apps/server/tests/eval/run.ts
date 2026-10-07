@@ -24,7 +24,7 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
 import { distractorItems, validateDistractors, type Task } from '../../src/domain/distractors';
-import { isInScript } from '../../src/domain/languages';
+import { isInScript, type LanguageCode } from '../../src/domain/languages';
 import { createGeminiClient, createGeminiTranscriber } from '../../src/providers/gemini';
 import { judgeSpoken } from '@lang-tutor/core/domain';
 import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
@@ -497,8 +497,11 @@ function itemsOf(kase: DistractorCase) {
       lemma: item.lemma,
       partOfSpeech: item.partOfSpeech,
       translation: item.translation,
+      example: null,
+      exampleTranslation: null,
     })),
     kase.items.map(taskOf),
+    new Map(),
   );
 }
 
@@ -506,7 +509,7 @@ const answeredItem = (kase: DistractorCase, answer: LlmDistractors, index: numbe
   answer.items.find((answered) => answered.key === itemsOf(kase)[index].key);
 
 function distractorTier1(kase: DistractorCase, answer: LlmDistractors): Check[] {
-  const verdict = validateDistractors(itemsOf(kase), answer, kase.to, []);
+  const verdict = validateDistractors(itemsOf(kase), answer, kase.to, [], kase.from as LanguageCode);
   const checks: Check[] = [
     { name: 'every item answered as its task asks', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
   ];

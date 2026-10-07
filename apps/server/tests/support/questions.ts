@@ -2,7 +2,7 @@ import type { Question } from '@lang-tutor/core/api';
 import { isChoice, type ChoiceQuestion, type QuestionType } from '@lang-tutor/core/domain';
 
 import type { Db } from '../../src/db/client';
-import { generatedContent } from '../../src/domain/distractors';
+import { NOTHING_GENERATED, generatedContent } from '../../src/domain/distractors';
 import { LANGUAGES } from '../../src/domain/languages';
 import { tilesFor } from '../../src/domain/tiles';
 import { createQuestionRepo } from '../../src/repo/questions';
@@ -68,14 +68,15 @@ export async function insertListSession(
         lexemeId: sense.lexemeId,
         type: types[index],
         ...generatedContent(
-          { ...sense, partOfSpeech: 'noun' },
+          { ...sense, partOfSpeech: 'noun', example: null, exampleTranslation: null },
           types[index],
           types[index] === 'multiple_choice' || types[index] === 'listen_choice'
-            ? { distractors: ['שגוי1', 'שגוי2', 'שגוי3'], alternatives: [] }
-            : { distractors: ['wrong1', 'wrong2', 'wrong3'], alternatives: input.alternatives ?? [] },
+            ? { ...NOTHING_GENERATED, distractors: ['שגוי1', 'שגוי2', 'שגוי3'] }
+            : { ...NOTHING_GENERATED, distractors: ['wrong1', 'wrong2', 'wrong3'], alternatives: input.alternatives ?? [] },
           {
             tiles: types[index] === 'letter_tiles' ? tilesFor(sense.form, LANGUAGES.en.alphabet, testRng(1)) : null,
             board: types[index] === 'matching' ? { meanings, own: index - boardStart } : null,
+            gap: null,
           },
         ),
       })),

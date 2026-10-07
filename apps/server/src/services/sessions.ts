@@ -519,12 +519,14 @@ export function createSessionService({
           translation: row.translation,
           tiles: tileEligible(row.form),
           speakable: speakable(row.form),
+          // Part B Task 4 finds the gap in the saved example.
+          clozeGap: false,
         })),
         { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
       );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor(plan);
-      const items = distractorItems(ordered, tasks);
+      const items = distractorItems(ordered, tasks, new Map());
       // The rows that ask the model nothing are still in the session: the
       // validation and the prompt must know their words and meanings.
       const others = ordered.filter((_, index) => !tasks[index]);
@@ -543,7 +545,7 @@ export function createSessionService({
         // unlike a lookup, there is nothing useful to serve without it.
         const answer = raw === '' ? null : parseLlmDistractors(raw);
         if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
-        const checked = validateDistractors(items, answer, read.enrolled.source_language, others);
+        const checked = validateDistractors(items, answer, read.enrolled.source_language, others, target);
         if (!checked.ok) throw new InvalidDistractors(sessionId, checked.reason);
         verdict = checked;
 
@@ -583,7 +585,14 @@ export function createSessionService({
           targetLanguage: target,
           userLanguageCode: read.enrolled.source_language,
           questions: ordered.map((row, index) => {
-            const type = plan.types[index];
+            const made = verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED;
+            // Spec D5, D6: a sentence card the model did not make usable is a
+            // typed translation. Part B Task 4 logs it and reads recent sentences.
+            const planned = plan.types[index];
+            const type =
+              (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate)
+                ? 'typed_translation'
+                : planned;
             return {
               senseId: row.senseId,
               variantId: row.variantId,
@@ -592,9 +601,10 @@ export function createSessionService({
               partOfSpeech: row.partOfSpeech,
               lexemeId: row.lexemeId,
               type,
-              ...generatedContent(row, type, verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED, {
+              ...generatedContent(row, type, made, {
                 tiles: type === 'letter_tiles' ? tilesFor(row.form, LANGUAGES[target].alphabet, rng) : null,
                 board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
+                gap: null,
               }),
             };
           }),
