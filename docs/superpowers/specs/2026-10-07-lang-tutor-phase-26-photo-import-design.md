@@ -231,7 +231,12 @@ dead-letters, and when the import is discarded.
   3. copy the item's Hebrew whole, with all its glosses;
   4. keep page order, top to bottom and column by column;
   5. give its best reading of unclear handwriting rather than leave the item out, because the
-     lookup's correction (D8) and the review catch the rest.
+     lookup's correction (D8) and the review catch the rest;
+  6. *(added after merge, when `decorate / decoration` reached the dictionary as one form)* split
+     a slash that joins different words into one item each, and write a slash that joins forms
+     of one word (`go / going`, `amico/a`) once, in its dictionary form. The lookup gained the
+     matching rule for a slash list typed whole, sent only when the input has a slash: a
+     correction to the first word, with the rest as its alternatives.
 - **After the answer.** Items with the same text after `normalizeForm` are merged, and the first
   one's position and Hebrew are kept. Zero items gives a `read` import with no rows, which the app
   explains (D13).
