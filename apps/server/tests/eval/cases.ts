@@ -1,6 +1,7 @@
 import type { LanguageCode, PartOfSpeech, TranslationKind } from '@lang-tutor/core/api';
 
 import type { Task } from '../../src/domain/distractors';
+import type { MeaningJudgeContext } from '../../src/domain/judge';
 import type { StoredSense } from '../../src/domain/translation';
 
 /**
@@ -897,4 +898,142 @@ export const TRANSCRIPTION_CASES: TranscriptionCase[] = [
   said('en', 'en-good-morning', 'good morning'),
   other('en', 'en-taught', 'thought', 'taught'),
   other('en', 'en-bat', 'bad', 'bat'),
+];
+
+
+/**
+ * Phase 27. The meaning judge: a saved word with its example, a Hebrew answer
+ * that is not the stored meaning (the rules decide that one without a call), and
+ * the verdict a careful Hebrew-speaking teacher would give.
+ */
+export type JudgeCase = {
+  label: string;
+  context: MeaningJudgeContext;
+  answer: string;
+  expect: 'exact' | 'alternative' | 'wrong';
+};
+
+const judge = (
+  language: 'it' | 'ru' | 'en',
+  word: { form: string; lemma?: string; pos: PartOfSpeech; meaning: string; example: string; translation: string },
+  answer: string,
+  expect: JudgeCase['expect'],
+  what: string,
+): JudgeCase => ({
+  label: `judge ${language} ${what}: ${word.lemma ?? word.form} \u2192 ${answer}`,
+  context: {
+    language,
+    form: word.form,
+    lemma: word.lemma ?? word.form,
+    partOfSpeech: word.pos,
+    meaning: word.meaning,
+    example: word.example,
+    exampleTranslation: word.translation,
+  },
+  answer,
+  expect,
+});
+
+const itPrenotare = {
+  form: 'prenotare', pos: 'verb' as const, meaning: 'להזמין',
+  example: 'Voglio prenotare un tavolo per due.', translation: 'אני רוצה להזמין שולחן לשניים.',
+};
+const itComprare = {
+  form: 'compro', lemma: 'comprare', pos: 'verb' as const, meaning: 'לקנות',
+  example: 'Compro il pane ogni mattina.', translation: 'אני קונה לחם כל בוקר.',
+};
+const itParla = {
+  form: 'parla', lemma: 'parlare', pos: 'verb' as const, meaning: 'לדבר',
+  example: 'Lei parla tre lingue.', translation: 'היא מדברת בשלוש שפות.',
+};
+const itPianta = {
+  form: 'pianta', pos: 'noun' as const, meaning: 'צמח',
+  example: 'Questa pianta ha bisogno di luce.', translation: 'הצמח הזה צריך אור.',
+};
+const itCampo = {
+  form: 'campo', pos: 'noun' as const, meaning: 'שדה',
+  example: 'Il contadino lavora nel campo.', translation: 'האיכר עובד בשדה.',
+};
+
+const ruSpeshit = {
+  form: 'спешу', lemma: 'спешить', pos: 'verb' as const, meaning: 'למהר',
+  example: 'Я спешу на работу.', translation: 'אני ממהר לעבודה.',
+};
+const ruKrasivyj = {
+  form: 'красивый', pos: 'adjective' as const, meaning: 'יפה',
+  example: 'Это очень красивый город.', translation: 'זו עיר יפה מאוד.',
+};
+const ruGovorit = {
+  form: 'говорит', lemma: 'говорить', pos: 'verb' as const, meaning: 'לדבר',
+  example: 'Он говорит очень быстро.', translation: 'הוא מדבר מהר מאוד.',
+};
+const ruKniga = {
+  form: 'книга', pos: 'noun' as const, meaning: 'ספר',
+  example: 'Эта книга очень интересная.', translation: 'הספר הזה מעניין מאוד.',
+};
+const ruLuk = {
+  form: 'лук', pos: 'noun' as const, meaning: 'בצל',
+  example: 'Я режу лук для супа.', translation: 'אני חותך בצל למרק.',
+};
+const ruKlyuch = {
+  form: 'ключ', pos: 'noun' as const, meaning: 'מפתח',
+  example: 'Я потерял ключ от дома.', translation: 'איבדתי את המפתח של הבית.',
+};
+
+const enBegin = {
+  form: 'begin', pos: 'verb' as const, meaning: 'להתחיל',
+  example: 'We begin at nine.', translation: 'אנחנו מתחילים בתשע.',
+};
+const enBuy = {
+  form: 'buy', pos: 'verb' as const, meaning: 'לקנות',
+  example: 'I want to buy some bread.', translation: 'אני רוצה לקנות קצת לחם.',
+};
+const enRun = {
+  form: 'run', pos: 'verb' as const, meaning: 'לרוץ',
+  example: 'I run every morning.', translation: 'אני רץ כל בוקר.',
+};
+const enBook = {
+  form: 'book', pos: 'verb' as const, meaning: 'להזמין',
+  example: 'I want to book a table.', translation: 'אני רוצה להזמין שולחן.',
+};
+const enBank = {
+  form: 'bank', pos: 'noun' as const, meaning: 'בנק',
+  example: 'I went to the bank to take out money.', translation: 'הלכתי לבנק למשוך כסף.',
+};
+
+export const JUDGE_CASES: JudgeCase[] = [
+  judge('it', itPrenotare, 'לשריין', 'exact', 'synonym'),
+  judge('it', itComprare, 'לרכוש', 'exact', 'synonym'),
+  judge('it', itParla, 'מדבר', 'exact', 'other form'),
+  judge('it', itParla, 'דיבר', 'exact', 'other tense'),
+  judge('it', { form: 'libro', pos: 'noun', meaning: 'ספר', example: 'Leggo un libro ogni settimana.', translation: 'אני קורא ספר כל שבוע.' }, 'הספר', 'exact', 'prefix'),
+  judge('it', itPianta, 'מפה', 'alternative', 'other sense'),
+  judge('it', itCampo, 'מחנה', 'alternative', 'other sense'),
+  judge('it', itPrenotare, 'לבטל', 'wrong', 'related but different'),
+  judge('it', { form: 'cane', pos: 'noun', meaning: 'כלב', example: 'Il cane dorme sul divano.', translation: 'הכלב ישן על הספה.' }, 'חיה', 'wrong', 'too general'),
+  judge('it', { form: 'finestra', pos: 'noun', meaning: 'חלון', example: 'Apri la finestra, per favore.', translation: 'פתח את החלון, בבקשה.' }, 'שולחן', 'wrong', 'unrelated'),
+
+  judge('ru', ruSpeshit, 'להזדרז', 'exact', 'synonym'),
+  judge('ru', ruKrasivyj, 'נאה', 'exact', 'synonym'),
+  judge('ru', ruGovorit, 'מדבר', 'exact', 'other form'),
+  judge('ru', ruGovorit, 'דיבר', 'exact', 'other tense'),
+  judge('ru', ruKniga, 'הספר', 'exact', 'prefix'),
+  judge('ru', ruLuk, 'קשת', 'alternative', 'other sense'),
+  judge('ru', ruKlyuch, 'מעיין', 'alternative', 'other sense'),
+  judge('ru', { form: 'купить', pos: 'verb', meaning: 'לקנות', example: 'Я хочу купить хлеб.', translation: 'אני רוצה לקנות לחם.' }, 'למכור', 'wrong', 'related but different'),
+  judge('ru', ruSpeshit, 'ללכת', 'wrong', 'too general'),
+  judge('ru', { form: 'хлеб', pos: 'noun', meaning: 'לחם', example: 'Хлеб лежит на столе.', translation: 'הלחם מונח על השולחן.' }, 'ים', 'wrong', 'unrelated'),
+
+  // Was 'לפתוח', which the model called another sense on every run, and a teacher could too
+  // ("open" is not "begin" in this example) — replaced with להחל, an unarguable synonym.
+  judge('en', enBegin, 'להחל', 'exact', 'synonym'),
+  judge('en', enBuy, 'לרכוש', 'exact', 'synonym'),
+  judge('en', enRun, 'רץ', 'exact', 'other form'),
+  judge('en', enRun, 'רצתי', 'exact', 'other tense'),
+  judge('en', enBook, 'להזמן', 'exact', 'small typo'),
+  judge('en', enBook, 'ספר', 'alternative', 'other sense'),
+  judge('en', enBank, 'גדה', 'alternative', 'other sense'),
+  judge('en', enBook, 'לבטל', 'wrong', 'related but different'),
+  judge('en', { form: 'tulip', pos: 'noun', meaning: 'צבעוני', example: 'She planted a red tulip.', translation: 'היא שתלה צבעוני אדום.' }, 'פרח', 'wrong', 'too general'),
+  judge('en', { form: 'window', pos: 'noun', meaning: 'חלון', example: 'Please close the window.', translation: 'בבקשה סגור את החלון.' }, 'כלב', 'wrong', 'unrelated'),
 ];
