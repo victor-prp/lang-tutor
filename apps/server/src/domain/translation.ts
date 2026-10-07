@@ -357,6 +357,24 @@ export function buildPrompt(input: {
     // turned `déjà vu`, `schadenfreude` and `bon appétit` under en → he from
     // translated into empty — English uses them, but they are "of" French and
     // German. "belongs only to" is the line between a loanword and `дякую`.
+    //
+    // The last sentence came after both. English `pour` is also French "for",
+    // and answered empty in every call (10 of 10) — the only one of 58 such
+    // words scanned in English, Italian and Russian that did. As written, 10
+    // calls each: `pour` translates, `дякую` and `window` (it → he) stay
+    // empty, `burnt` still names `burned`, and `thruot` still offers
+    // `throughout` beside `throat`. Every draft before it broke one of those:
+    // - an exception with no example: `pour` empty 10 of 10;
+    // - defining "only" inside the rule ("with no meaning of its own in
+    //   English"): `дякую` corrected to `спасибо` 4 of 10;
+    // - "a word that is English and also SPELLED like a word of another
+    //   language": `burnt`'s adjective lemma `burnt` 10 of 10, against the
+    //   participial rule above. Keep spelling out of it;
+    // - "a word that is also a word of another language is still English":
+    //   `thruot` lost its alternatives 6 of 10;
+    // - that sentence beside the loanword clause instead: `pour` empty 10 of
+    //   10, and `thruot` without alternatives 5 of 10.
+    // `chair` is in no eval case or MockServer expectation.
     `The input is meant to be ${source.name}. A word or expression borrowed from another`,
     `language that is in common use in ${source.name}, a loanword or loan phrase, is`,
     `${source.name}: translate it as usual. A word that belongs only to a third language,`,
@@ -364,6 +382,8 @@ export function buildPrompt(input: {
     `is written in the ${source.name} script, and it is not a misspelling of its`,
     `${source.name} equivalent: return an empty entries array and omit \`correction\` rather`,
     'than translating it.',
+    `A word with a meaning of its own in ${source.name} is ${source.name}, even when another`,
+    'language has the same word: English "chair" is English, though French has "chair" too.',
     // Phase 13. REPLACED, not supplemented. Left standing beside the correction
     // rules below it is a flat contradiction about exactly the input this phase
     // exists for: `thruot` is not a word in either language, so the old wording
