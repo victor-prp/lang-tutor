@@ -14,6 +14,8 @@ import { flipped, lookupDirection, type LookupDirection } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
   addableStateOf,
+  lookupEnrollmentId,
+  toggleIntent,
   canSaveAll as canSaveAllOf,
   savedStateOf,
   toggleOptimistically,
@@ -134,7 +136,7 @@ export function TranslationProvider({
           // Phase 18. The server marks `saved` for a target-language lookup and
           // nothing else; the client never decides which senses are saveable.
           // A tutor's lookup sends none: it must not read the student's list.
-          ...(effective && mode === 'learner' ? { enrollment_id: effective.enrollment.id } : {}),
+          ...(effective ? lookupEnrollmentId(mode, effective.enrollment.id) : {}),
         });
         setResult(response);
         setSaved(
@@ -202,8 +204,9 @@ export function TranslationProvider({
         const sense = result?.senses.find((s) => s.sense_id === senseId);
         if (!sense?.variant_id || saved[senseId] === undefined || pending[senseId]) return;
         // A tutor adds and never removes (spec D10): an added card does nothing.
-        if (effective?.mode === 'tutor' && saved[senseId]) return;
-        void send([{ sense_id: senseId, variant_id: sense.variant_id }], !saved[senseId]);
+        const intent = toggleIntent(effective?.mode ?? 'learner', saved[senseId]);
+        if (intent === 'none') return;
+        void send([{ sense_id: senseId, variant_id: sense.variant_id }], intent === 'save');
       },
       saveAll: () => {
         if (!result) return;

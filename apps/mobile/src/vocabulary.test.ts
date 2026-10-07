@@ -6,6 +6,8 @@ import {
   appendPage,
   canSaveAll,
   keepSenseOrder,
+  lookupEnrollmentId,
+  toggleIntent,
   partsOfSpeechLabel,
   savedStateOf,
   showsMark,
@@ -205,5 +207,27 @@ describe('addableStateOf (phase 28, tutor mode)', () => {
 
   it('offers nothing on a reverse lookup: those senses are Hebrew (Review Focus 3)', () => {
     expect(addableStateOf([sense('s1', 'v1')], 'he', 'it')).toEqual({});
+  });
+});
+
+describe('lookupEnrollmentId', () => {
+  it("sends the enrollment for a learner's own lookup", () => {
+    expect(lookupEnrollmentId('learner', 'e1')).toEqual({ enrollment_id: 'e1' });
+  });
+
+  it("sends none for a tutor's: the server would mark the student's saved senses", () => {
+    expect(lookupEnrollmentId('tutor', 'e1')).toEqual({});
+  });
+});
+
+describe('toggleIntent', () => {
+  it('saves an unsaved sense in either mode', () => {
+    expect(toggleIntent('learner', false)).toBe('save');
+    expect(toggleIntent('tutor', false)).toBe('save');
+  });
+
+  it('unsaves for a learner and never for a tutor', () => {
+    expect(toggleIntent('learner', true)).toBe('unsave');
+    expect(toggleIntent('tutor', true)).toBe('none');
   });
 });
