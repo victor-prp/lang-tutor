@@ -13,6 +13,7 @@ import { ApiError, type ApiClient } from '@/api/client';
 import { flipped, lookupDirection, type LookupDirection } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
+  addableStateOf,
   canSaveAll as canSaveAllOf,
   savedStateOf,
   toggleOptimistically,
@@ -42,6 +43,8 @@ export type TranslationValue = {
   toggleSave: (senseId: string) => void;
   saveAll: () => void;
   canSaveAll: boolean;
+  /** 'tutor' on a student's list: the cards add and never remove. */
+  mode: 'learner' | 'tutor';
   /**
    * `override` exists for the correction banner's alternative chips. `submit()`
    * closes over the provider's `text` state, so `setText(alt)` followed by a bare
@@ -69,7 +72,23 @@ export type TranslationValue = {
 
 const TranslationContext = createContext<TranslationValue | undefined>(undefined);
 
-export function TranslationProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
+/** Phase 28 (spec D10). The list a lookup works on. Without one the provider uses
+ *  the user's own active enrollment in learner mode; the student's words screen
+ *  nests a provider on a student's enrollment in tutor mode. */
+export type LookupList = {
+  enrollment: { id: string; source_language: string; target_language: string };
+  mode: 'learner' | 'tutor';
+};
+
+export function TranslationProvider({
+  api,
+  list,
+  children,
+}: {
+  api: ApiClient;
+  list?: LookupList;
+  children: ReactNode;
+}) {
   const [status, setStatus] = useState<TranslationStatus>('idle');
   const [text, setText] = useState('');
   const [result, setResult] = useState<TranslationResponse | undefined>(undefined);
@@ -77,25 +96,31 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
   const [pending, setPending] = useState<Record<string, true>>({});
   const [saveFailed, setSaveFailed] = useState(false);
   const { active, user } = useCurrentUser();
+  const effective = useMemo<LookupList | null>(
+    () => list ?? (active ? { enrollment: active, mode: 'learner' } : null),
+    [list, active],
+  );
+  const enrollment = effective?.enrollment;
   const [direction, setDirection] = useState<LookupDirection | null>(
-    active ? lookupDirection(active) : null,
+    enrollment ? lookupDirection(enrollment) : null,
   );
 
   // A switch of enrollment is a new pair: start over on its target → source.
   useEffect(() => {
-    setDirection(active ? lookupDirection(active) : null);
+    setDirection(enrollment ? lookupDirection(enrollment) : null);
     setStatus('idle');
     setText('');
     setResult(undefined);
     setSaved({});
     setPending({});
     setSaveFailed(false);
-  }, [active]);
+  }, [effective?.enrollment.id]);
 
   const run = useCallback(
     async (query: string, along: LookupDirection | null) => {
       const trimmed = query.trim();
       if (!along || trimmed.length === 0 || trimmed.length > 100) return;
+      const mode = effective?.mode ?? 'learner';
 
       setStatus('loading');
       setSaved({});
@@ -108,10 +133,15 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
           to: along.to,
           // Phase 18. The server marks `saved` for a target-language lookup and
           // nothing else; the client never decides which senses are saveable.
-          ...(active ? { enrollment_id: active.id } : {}),
+          // A tutor's lookup sends none: it must not read the student's list.
+          ...(effective && mode === 'learner' ? { enrollment_id: effective.enrollment.id } : {}),
         });
         setResult(response);
-        setSaved(savedStateOf(response.senses));
+        setSaved(
+          effective && mode === 'tutor'
+            ? addableStateOf(response.senses, response.from, effective.enrollment.target_language)
+            : savedStateOf(response.senses),
+        );
         // An empty sense list is a successful answer about the input, not a
         // failure — a distinct state, not the error state.
         setStatus(response.senses.length === 0 ? 'empty' : 'answered');
@@ -124,14 +154,15 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
         setStatus('error');
       }
     },
-    [api, active],
+    [api, effective],
   );
 
   // Optimistic: flip first, revert on failure (toggleOptimistically). `pending`
   // keeps one request per sense in flight.
   const send = useCallback(
     async (entries: { sense_id: string; variant_id: string }[], next: boolean) => {
-      if (!active || !user || entries.length === 0) return;
+      if (!effective || !user || entries.length === 0) return;
+      const listId = effective.enrollment.id;
       const ids = entries.map((entry) => entry.sense_id);
       setSaveFailed(false);
       const ok = await toggleOptimistically({
@@ -148,12 +179,12 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
           }),
         request: () =>
           next
-            ? api.saveVocabulary(user.id, active.id, { entries })
-            : api.unsaveVocabulary(user.id, active.id, ids[0]),
+            ? api.saveVocabulary(user.id, listId, { entries })
+            : api.unsaveVocabulary(user.id, listId, ids[0]),
       });
       setSaveFailed(!ok);
     },
-    [api, active, user],
+    [api, effective, user],
   );
 
   const value = useMemo<TranslationValue>(
@@ -165,10 +196,13 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
       saved,
       pending,
       saveFailed,
+      mode: effective?.mode ?? 'learner',
       canSaveAll: result ? canSaveAllOf(result.senses, saved) : false,
       toggleSave: (senseId: string) => {
         const sense = result?.senses.find((s) => s.sense_id === senseId);
         if (!sense?.variant_id || saved[senseId] === undefined || pending[senseId]) return;
+        // A tutor adds and never removes (spec D10): an added card does nothing.
+        if (effective?.mode === 'tutor' && saved[senseId]) return;
         void send([{ sense_id: senseId, variant_id: sense.variant_id }], !saved[senseId]);
       },
       saveAll: () => {
@@ -211,7 +245,7 @@ export function TranslationProvider({ api, children }: { api: ApiClient; childre
         setSaveFailed(false);
       },
     }),
-    [status, text, result, saved, pending, saveFailed, send, direction, run],
+    [status, text, result, saved, pending, saveFailed, send, direction, run, effective],
   );
 
   return <TranslationContext.Provider value={value}>{children}</TranslationContext.Provider>;

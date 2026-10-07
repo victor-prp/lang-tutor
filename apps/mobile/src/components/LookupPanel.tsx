@@ -195,7 +195,7 @@ export function LookupPanel() {
               onPress={t.saveAll}
               style={styles.secondaryButton}
             >
-              <Text style={styles.secondaryLabel}>{strings.translateSaveAll}</Text>
+              <Text style={styles.secondaryLabel}>{t.mode === 'tutor' ? strings.tutorAddAll : strings.translateSaveAll}</Text>
             </Pressable>
           ) : null}
           {t.saveFailed ? (
@@ -214,6 +214,7 @@ export function LookupPanel() {
               onToggle={() => sense.sense_id && t.toggleSave(sense.sense_id)}
               from={answerFrom}
               to={answerTo}
+              tutor={t.mode === 'tutor'}
             />
           ))}
 
@@ -239,6 +240,7 @@ function SenseCard({
   onToggle,
   from,
   to,
+  tutor,
 }: {
   sense: TranslationSense;
   isTop: boolean;
@@ -248,6 +250,8 @@ function SenseCard({
   /** The response's languages: a translation is in `to`, an example in both. */
   from: string;
   to: string;
+  /** Tutor mode: the button reads add / added instead of save / saved. */
+  tutor: boolean;
 }) {
   const partOfSpeech = sense.part_of_speech
     ? strings.partOfSpeech(sense.part_of_speech)
@@ -299,7 +303,9 @@ function SenseCard({
           style={[styles.chooseButton, saveState && styles.savedButton]}
         >
           <Text style={[styles.chooseLabel, saveState && styles.savedLabel]}>
-            {saveState ? strings.translateSaved : strings.translateSave}
+            {saveState
+              ? tutor ? strings.tutorAdded : strings.translateSaved
+              : tutor ? strings.tutorAdd : strings.translateSave}
           </Text>
         </Pressable>
       ) : null}

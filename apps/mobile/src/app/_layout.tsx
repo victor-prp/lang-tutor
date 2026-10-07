@@ -14,6 +14,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createApiClient } from '@/api/client';
 import { requireEnvValue } from '@/config/requireEnvValue';
 import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '@/currentUser';
+import { ApiProvider } from '@/hooks/useApi';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
 import { RecordingProvider } from '@/hooks/useRecording';
@@ -118,25 +119,27 @@ export default function RootLayout() {
     // fallback provider, but relying on that is relying on an internal detail —
     // and on web the insets are zero without an explicit provider.
     <SafeAreaProvider>
-      <SpeechProvider speaker={speaker}>
-        <RecordingProvider recorder={recorder}>
-          <CurrentUserProvider api={api} usernameStore={usernameStore}
-            enrollmentStore={enrollmentStore}
-          >
-            <NextSessionProvider api={api}>
-              <SessionProvider api={api}>
-                <TranslationProvider api={api}>
-                  <VocabularyProvider api={api}>
-                    <View style={styles.root} {...rtlProps}>
-                      <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-                    </View>
-                  </VocabularyProvider>
-                </TranslationProvider>
-              </SessionProvider>
-            </NextSessionProvider>
-          </CurrentUserProvider>
-        </RecordingProvider>
-      </SpeechProvider>
+      <ApiProvider api={api}>
+        <SpeechProvider speaker={speaker}>
+          <RecordingProvider recorder={recorder}>
+            <CurrentUserProvider api={api} usernameStore={usernameStore}
+              enrollmentStore={enrollmentStore}
+            >
+              <NextSessionProvider api={api}>
+                <SessionProvider api={api}>
+                  <TranslationProvider api={api}>
+                    <VocabularyProvider api={api}>
+                      <View style={styles.root} {...rtlProps}>
+                        <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                      </View>
+                    </VocabularyProvider>
+                  </TranslationProvider>
+                </SessionProvider>
+              </NextSessionProvider>
+            </CurrentUserProvider>
+          </RecordingProvider>
+        </SpeechProvider>
+      </ApiProvider>
     </SafeAreaProvider>
   );
 }

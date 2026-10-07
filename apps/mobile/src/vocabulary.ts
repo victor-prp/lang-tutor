@@ -20,6 +20,17 @@ export function savedStateOf(senses: TranslationSense[]): SavedState {
   return state;
 }
 
+/** Phase 28 (spec D10). A tutor's lookup carries no enrollment, so the server
+ *  marks nothing as saved: reading which senses the student has would be reading
+ *  their list. Every sense with ids of a lookup FROM the student's target language
+ *  can be added; a reverse lookup's senses belong to Hebrew lexemes and cannot. */
+export function addableStateOf(senses: TranslationSense[], from: string, targetLanguage: string): SavedState {
+  if (from !== targetLanguage) return {};
+  const state: SavedState = {};
+  for (const sense of senses) if (sense.sense_id && sense.variant_id) state[sense.sense_id] = false;
+  return state;
+}
+
 export function unsavedEntries(senses: TranslationSense[], saved: SavedState): VocabularyEntryInput[] {
   return senses.flatMap((sense) =>
     sense.sense_id && sense.variant_id && saved[sense.sense_id] === false
