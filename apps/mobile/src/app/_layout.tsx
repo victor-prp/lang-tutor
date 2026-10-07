@@ -18,6 +18,7 @@ import { requireEnvValue } from '@/config/requireEnvValue';
 import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '@/currentUser';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
+import { PhotoImportsProvider } from '@/hooks/usePhotoImports';
 import { RecordingProvider } from '@/hooks/useRecording';
 import { SessionProvider } from '@/hooks/useSession';
 import { SpeechProvider } from '@/hooks/useSpeech';
@@ -64,7 +65,6 @@ const photoPicker = createPhotoPicker({
     },
   },
 });
-void photoPicker; // handed to a provider by the next task
 
 // Phase 23. The device's own speech engine (spec §1 D1). The audio mode is what
 // lets a tap sound with an iPhone's ring switch on silent, with the learner's
@@ -155,9 +155,11 @@ export default function RootLayout() {
               <SessionProvider api={api}>
                 <TranslationProvider api={api}>
                   <VocabularyProvider api={api}>
-                    <View style={styles.root} {...rtlProps}>
-                      <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-                    </View>
+                    <PhotoImportsProvider api={api} picker={photoPicker}>
+                      <View style={styles.root} {...rtlProps}>
+                        <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                      </View>
+                    </PhotoImportsProvider>
                   </VocabularyProvider>
                 </TranslationProvider>
               </SessionProvider>

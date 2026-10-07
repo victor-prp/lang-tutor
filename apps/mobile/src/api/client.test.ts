@@ -333,3 +333,30 @@ describe('api/client', () => {
     }
   });
 });
+
+describe('photo imports', () => {
+  it('uploads to the enrollment, patches a row, saves and discards', async () => {
+    const calls: { url: string; method?: string; body?: unknown }[] = [];
+    const mockFetch = jest.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      const status = url.endsWith('/discard') ? 204 : 200;
+      return { ok: true, status, json: async () => ({}) };
+    });
+    const client = buildClient(mockFetch as unknown as jest.Mock);
+    await client.createPhotoImport('e 1', { mime_type: 'image/jpeg', image: 'QUJD' });
+    await client.listPhotoImports('e 1');
+    await client.getPhotoImport('i1');
+    await client.updatePhotoImportItem('i1', 3, { ticked: false });
+    await client.savePhotoImport('i1');
+    await client.discardPhotoImport('i1');
+    expect(calls.map(({ url, method }) => [method ?? 'GET', url.replace('http://test.local', '')])).toEqual([
+      ['POST', '/api/enrollments/e%201/photo-imports'],
+      ['GET', '/api/enrollments/e%201/photo-imports'],
+      ['GET', '/api/photo-imports/i1'],
+      ['PATCH', '/api/photo-imports/i1/items/3'],
+      ['POST', '/api/photo-imports/i1/save'],
+      ['POST', '/api/photo-imports/i1/discard'],
+    ]);
+    expect(calls[3].body).toEqual({ ticked: false });
+  });
+});
