@@ -37,10 +37,23 @@ describe('dimensions', () => {
   });
 
   // Phases 23 and 24: each live dimension has a question type that feeds it (the
-  // written three by phase 23's cards, spoken_receptive by listening); only
-  // spoken_productive still waits.
+  // written three by phase 23's cards, spoken_receptive by listening,
+  // spoken_productive by speaking).
   it('are live exactly when some question type feeds them', () => {
-    expect([...LIVE_DIMENSIONS]).toEqual(['written_receptive', 'written_productive', 'spelling', 'spoken_receptive']);
+    expect([...LIVE_DIMENSIONS]).toEqual([
+      'written_receptive',
+      'written_productive',
+      'spelling',
+      'spoken_receptive',
+      'spoken_productive',
+    ]);
+  });
+
+  it('drops a badge by at most one level when spoken_productive goes live (phase 25 D11)', () => {
+    expect(badge([4, 4, 4, 4])).toBe(4);
+    expect(badge([4, 4, 4, 4, 1])).toBe(3);
+    expect(badge([3, 3, 3, 3, 1])).toBe(3);
+    expect(badge([5, 5, 5, 5, 1])).toBe(4);
   });
 
   it('runs levels from 1 to 5', () => {
