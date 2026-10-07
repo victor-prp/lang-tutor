@@ -39,7 +39,7 @@ describe('dimensions', () => {
   // Phase 23 (spec D7): the three written dimensions each have a question type
   // that feeds them; the two spoken ones wait for voice.
   it('are live exactly when some question type feeds them', () => {
-    expect([...LIVE_DIMENSIONS]).toEqual(['written_receptive', 'written_productive', 'spelling']);
+    expect([...LIVE_DIMENSIONS]).toEqual(['written_receptive', 'written_productive', 'spelling', 'spoken_receptive']);
   });
 
   it('runs levels from 1 to 5', () => {

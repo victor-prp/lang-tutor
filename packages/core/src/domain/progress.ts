@@ -16,12 +16,10 @@ export const DIMENSIONS = [
 ] as const;
 export type Dimension = (typeof DIMENSIONS)[number];
 
-/** The dimensions some question type feeds. Phase 23: the card, target word
- *  to Hebrew, evidences written_receptive; Hebrew to target, picked, adds
- *  written_productive (capped); typed adds spelling. The spoken two wait for
- *  voice. A badge is the mean over these, so going live recalibrates it once
- *  (phase 23 spec D7). */
-export const LIVE_DIMENSIONS: readonly Dimension[] = ['written_receptive', 'written_productive', 'spelling'];
+/** The dimensions some question type feeds. Phase 23 made the three written
+ *  ones live; phase 24's listening cards feed spoken_receptive (spec D13). A
+ *  badge is the mean over these, so each going live recalibrates it once. */
+export const LIVE_DIMENSIONS: readonly Dimension[] = ['written_receptive', 'written_productive', 'spelling', 'spoken_receptive'];
 
 export const MIN_LEVEL = 1;
 export const MAX_LEVEL = 5;

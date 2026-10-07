@@ -1,4 +1,8 @@
-import type { TypedTranslationQuestion, TypedVerdict } from '../api/types';
+import type { TypedVerdict } from '../api/types';
+
+/** What a typed answer is judged against (phase 24): a typed card's own fields,
+ *  or a dictation's spoken form as both answer and lemma with no alternatives. */
+export type TypedTarget = { answer: string; lemma: string; alternatives: readonly string[] };
 
 /**
  * Phase 23. How a typed answer is judged (spec D5). Pure, and shared on
@@ -95,14 +99,20 @@ function nearMiss(typed: string, target: string): boolean {
  *   edit away on a word of five letters or more.
  * - `wrong`: anything else, including nothing.
  */
-export function judgeTyped(question: TypedTranslationQuestion, text: string): TypedVerdict {
+export function judgeTyped(target: TypedTarget, text: string): TypedVerdict {
   const typed = normaliseTyped(text);
   if (typed === '') return 'wrong';
-  const targets = [...new Set([question.answer, question.lemma].map(normaliseTyped))];
+  const targets = [...new Set([target.answer, target.lemma].map(normaliseTyped))];
   if (targets.some((target) => same(typed, target))) return 'exact';
-  if (question.alternatives.map(normaliseTyped).some((alternative) => same(typed, alternative))) {
+  if (target.alternatives.map(normaliseTyped).some((alternative) => same(typed, alternative))) {
     return 'alternative';
   }
   if (targets.some((target) => nearMiss(typed, target))) return 'near_miss';
   return 'wrong';
+}
+
+/** Phase 24 (spec D11). Tiles cannot slip: the built word is the form, or it is wrong. */
+export function judgeTiles(answer: string, built: string): TypedVerdict {
+  const typed = normaliseTyped(built);
+  return typed !== '' && typed === normaliseTyped(answer) ? 'exact' : 'wrong';
 }

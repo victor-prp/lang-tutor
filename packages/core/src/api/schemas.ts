@@ -41,12 +41,71 @@ export const TypedTranslationQuestionSchema = z.object({
   alternatives: z.array(z.string()),
 });
 
+// Phase 24. Hear the word, pick its meaning: today's card with its prompt
+// spoken rather than shown. `question` is the form the app speaks, and shows
+// once the card is answered (spec D6).
+export const ListenChoiceQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('listen_choice'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  options: z.array(z.string()),
+  correct_option: z.number().int(),
+});
+
+// Phase 24. Hear the word, type it. Judged against the spoken form alone
+// (spec D7). `meaning` is shown after the answer and read by the missed list.
+export const DictationQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('dictation'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  meaning: z.string(),
+});
+
+// Phase 24 (spec D10). A matching board, as each of its words carries it: every
+// word's question id, the word, and its right option among the shared options.
+export const MatchingBoardSchema = z.object({
+  question_ids: z.array(z.string()),
+  words: z.array(z.string()),
+  correct_options: z.array(z.number().int()),
+});
+
+// Phase 24. One word of a board. A board is consecutive questions of this type,
+// each answered by its first-tried meaning. `options` are the board's five
+// meanings, in the one order all its words share.
+export const MatchingQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('matching'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  options: z.array(z.string()),
+  correct_option: z.number().int(),
+  board: MatchingBoardSchema,
+});
+
+// Phase 24 (spec D11). The meaning; the learner builds the word from `tiles`,
+// its letters and two more, shuffled. `answer` is the form, for the local judge.
+export const LetterTilesQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('letter_tiles'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  part_of_speech: z.string(),
+  answer: z.string(),
+  tiles: z.array(z.string()),
+});
+
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
 // the compiler finds every switch that has not learnt it.
 export const QuestionSchema = z.discriminatedUnion('type', [
   MultipleChoiceQuestionSchema,
   ReverseChoiceQuestionSchema,
   TypedTranslationQuestionSchema,
+  ListenChoiceQuestionSchema,
+  DictationQuestionSchema,
+  MatchingQuestionSchema,
+  LetterTilesQuestionSchema,
 ]);
 
 // Phase 23. How a typed answer was judged (spec D5). Every verdict but `wrong`

@@ -40,6 +40,11 @@ import type {
   SessionViewSchema,
   SkipSessionResponseSchema,
   TypedTranslationQuestionSchema,
+  ListenChoiceQuestionSchema,
+  DictationQuestionSchema,
+  MatchingBoardSchema,
+  MatchingQuestionSchema,
+  LetterTilesQuestionSchema,
   TypedVerdictSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
@@ -69,6 +74,11 @@ import type {
 export type MultipleChoiceQuestion = z.infer<typeof MultipleChoiceQuestionSchema>;
 export type ReverseChoiceQuestion = z.infer<typeof ReverseChoiceQuestionSchema>;
 export type TypedTranslationQuestion = z.infer<typeof TypedTranslationQuestionSchema>;
+export type ListenChoiceQuestion = z.infer<typeof ListenChoiceQuestionSchema>;
+export type DictationQuestion = z.infer<typeof DictationQuestionSchema>;
+export type MatchingBoard = z.infer<typeof MatchingBoardSchema>;
+export type MatchingQuestion = z.infer<typeof MatchingQuestionSchema>;
+export type LetterTilesQuestion = z.infer<typeof LetterTilesQuestionSchema>;
 export type Question = z.infer<typeof QuestionSchema>;
 export type TypedVerdict = z.infer<typeof TypedVerdictSchema>;
 export type AnswerRecord = z.infer<typeof AnswerRecordSchema>;

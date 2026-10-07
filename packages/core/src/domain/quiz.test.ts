@@ -1,6 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 
-import type { MultipleChoiceQuestion, Question } from '../api/types';
+import type {
+  DictationQuestion,
+  LetterTilesQuestion,
+  ListenChoiceQuestion,
+  MatchingQuestion,
+  MultipleChoiceQuestion,
+  Question,
+} from '../api/types';
 import { seededRng } from '../utils/rng';
 import {
   SESSION_LENGTH,
@@ -11,6 +18,7 @@ import {
   rightAnswer,
   score,
   shuffleOptions,
+  shuffleSession,
 } from './quiz';
 
 function makeQuestion(n: number): MultipleChoiceQuestion {
@@ -166,5 +174,65 @@ describe('rightAnswer and shuffleOptions', () => {
 
   it('leaves a typed card as it is: it has no options', () => {
     expect(shuffleOptions(typed, seededRng(1))).toBe(typed);
+  });
+});
+
+const listen: ListenChoiceQuestion = {
+  id: 'l1', type: 'listen_choice', vocab_term_id: 'v', question: 'casa',
+  options: ['בית', 'דלת', 'קיר', 'גג'], correct_option: 0,
+};
+const dictation: DictationQuestion = { id: 'd1', type: 'dictation', vocab_term_id: 'v', question: 'parlo', meaning: 'מדבר' };
+const tiles: LetterTilesQuestion = {
+  id: 't1', type: 'letter_tiles', vocab_term_id: 'v', question: 'בית', part_of_speech: 'noun',
+  answer: 'casa', tiles: ['s', 'a', 'c', 'x', 'a', 'q'],
+};
+const BOARD = { question_ids: ['m1', 'm2'], words: ['casa', 'gatto'], correct_options: [0, 1] };
+const word = (id: string, form: string, correct: number): MatchingQuestion => ({
+  id, type: 'matching', vocab_term_id: 'v', question: form,
+  options: ['בית', 'חתול', 'כלב'], correct_option: correct, board: BOARD,
+});
+
+describe('phase 24 types', () => {
+  it('answers a listening card and a board word by option, the rest by text', () => {
+    expect(answerFits(listen, { option_index: 0 })).toBe(true);
+    expect(answerFits(word('m1', 'casa', 0), { option_index: 2 })).toBe(true);
+    expect(answerFits(dictation, { text: 'parlo' })).toBe(true);
+    expect(answerFits(tiles, { option_index: 0 })).toBe(false);
+  });
+
+  it('judges a dictation against the spoken form, and tiles exactly', () => {
+    expect(evaluate(dictation, { text: 'parlare' })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+    expect(evaluate(dictation, { text: 'parlo' })).toMatchObject({ is_correct: true, verdict: 'exact' });
+    expect(evaluate(tiles, { text: 'casa' })).toMatchObject({ is_correct: true, verdict: 'exact' });
+    expect(evaluate(listen, { option_index: 1 })).toEqual({ question_id: 'l1', is_correct: false, answer_string: 'דלת' });
+  });
+
+  it('names the right answer: the meaning, the heard form, the built word', () => {
+    expect(rightAnswer(listen)).toBe('בית');
+    expect(rightAnswer(dictation)).toBe('parlo');
+    expect(rightAnswer(tiles)).toBe('casa');
+  });
+
+  it('leaves a board word to shuffleSession: shuffleOptions alone would split the board', () => {
+    const lone = word('m1', 'casa', 0);
+    expect(shuffleOptions(lone, seededRng(5))).toBe(lone);
+  });
+});
+
+describe('shuffleSession (phase 24, spec D10)', () => {
+  it('shuffles a board once: every word shows one order, and the board follows it', () => {
+    const shuffled = shuffleSession([listen, word('m1', 'casa', 0), word('m2', 'gatto', 1)], seededRng(5));
+    const first = shuffled[1] as MatchingQuestion;
+    const second = shuffled[2] as MatchingQuestion;
+    expect(second.options).toEqual(first.options);
+    expect(first.options[first.correct_option]).toBe('בית');
+    expect(second.options[second.correct_option]).toBe('חתול');
+    expect(first.board.correct_options).toEqual([first.correct_option, second.correct_option]);
+    expect(second.board).toEqual(first.board);
+  });
+
+  it('shuffles every other choice on its own, as shuffleOptions does', () => {
+    const [shown] = shuffleSession([listen], seededRng(5));
+    expect(shown).toEqual(shuffleOptions(listen, seededRng(5)));
   });
 });
