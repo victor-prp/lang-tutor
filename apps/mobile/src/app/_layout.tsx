@@ -6,6 +6,8 @@ import {
   setAudioModeAsync,
 } from 'expo-audio';
 import { File } from 'expo-file-system';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { Stack } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
@@ -21,6 +23,7 @@ import { SessionProvider } from '@/hooks/useSession';
 import { SpeechProvider } from '@/hooks/useSpeech';
 import { TranslationProvider } from '@/hooks/useTranslation';
 import { VocabularyProvider } from '@/hooks/useVocabulary';
+import { createPhotoPicker, type PhotoAsset } from '@/photos';
 import { createRecorder, type RecordPermission } from '@/recording';
 import { createSpeaker } from '@/speech';
 import { colors } from '@/theme';
@@ -37,6 +40,31 @@ const baseUrl = requireEnvValue(process.env.EXPO_PUBLIC_API_URL, 'EXPO_PUBLIC_AP
 const api = createApiClient({ baseUrl, fetch: globalThis.fetch });
 const usernameStore = createRememberedUsernameStore({ storage: AsyncStorage });
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
+
+const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
+  result.canceled || result.assets.length === 0
+    ? null
+    : { uri: result.assets[0].uri, width: result.assets[0].width, height: result.assets[0].height };
+
+// Phase 26. The only file that names the image packages (ADR 0002 R1).
+const photoPicker = createPhotoPicker({
+  platform: Platform.OS,
+  engine: {
+    requestCameraPermission: async () => (await ImagePicker.requestCameraPermissionsAsync()).granted,
+    requestLibraryPermission: async () => (await ImagePicker.requestMediaLibraryPermissionsAsync()).granted,
+    launchCamera: async () => firstAsset(await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 })),
+    launchLibrary: async () =>
+      firstAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 })),
+    shrink: async (uri, resize) => {
+      const context = ImageManipulator.manipulate(uri);
+      if (resize) context.resize(resize);
+      const image = await context.renderAsync();
+      const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.8, base64: true });
+      return saved.base64 ?? '';
+    },
+  },
+});
+void photoPicker; // handed to a provider by the next task
 
 // Phase 23. The device's own speech engine (spec §1 D1). The audio mode is what
 // lets a tap sound with an iPhone's ring switch on silent, with the learner's
