@@ -23,6 +23,9 @@ export type Language = {
   /** Matches ONE letter of this language's script. Marks (nikud, stress) are
    *  not letters, so they never decide anything. */
   letters: RegExp;
+  /** Phase 24 (spec D11). The letters a tiles card's two extra tiles are drawn
+   *  from, lowercase. Accented Italian vowels are letters of their own. */
+  alphabet: string;
   /** How to read input typed in this language: which headword a form belongs
    *  to. Takes the target language's name because a rule may say what it
    *  translates into. */
@@ -39,6 +42,7 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
     code: 'he',
     name: 'Hebrew',
     letters: /\p{Script=Hebrew}/u,
+    alphabet: 'אבגדהוזחטיכלמנסעפצקרשת',
     asSource: () => [],
     asTarget: [
       'For Hebrew past tense that citation form is third-person masculine singular.',
@@ -53,6 +57,7 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
     code: 'en',
     name: 'English',
     letters: /\p{Script=Latin}/u,
+    alphabet: 'abcdefghijklmnopqrstuvwxyz',
     asSource: (targetName) => [
       `A bare or "to"-marked English verb — "book", "to book" — is the base form and takes the ${targetName} infinitive.`,
     ],
@@ -63,6 +68,7 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
     code: 'ru',
     name: 'Russian',
     letters: /\p{Script=Cyrillic}/u,
+    alphabet: 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя',
     // Aspect is the likeliest miss: a model "helpfully" returns the
     // imperfective. The eval case `прочитала` is aimed at exactly this.
     asSource: () => [
@@ -90,6 +96,7 @@ export const LANGUAGES: Record<LanguageCode, Language> = {
     // not try: the client states the pair, and English typed under it → he
     // reaches the model's third-language rule (phase 22 spec, D2).
     letters: /\p{Script=Latin}/u,
+    alphabet: 'abcdefghilmnopqrstuvzàèéìòù',
     // The examples are deliberately not the eval cases (parlo, libri, bella,
     // perche, citta), so the evals measure the rule rather than recall of the
     // example.
