@@ -1,17 +1,19 @@
 # Phase 25 — Speaking cards
 
-- **Status:** Designed on 2026-10-07. Victor scoped the phase in the one-pager, chose to build it
-  after phase 24 is completed, chose recognition on the server and approved the recognition path
-  (D1, D13), then handed the remaining decisions over ("Go with all the rest section alone. I
-  trust your decisions"). Every decision is in §1 with its reason, so each one can be overturned
-  in review. Those marked **(low confidence)** are the ones to read first. A POC on the same day
-  replaced the feasibility step with measured facts (§ POC findings), and Victor moved short
-  phrases in after it (D3). Not yet planned or built: the plan is written once phase 24 has
-  merged, because this phase changes phase 24's code, which does not exist yet.
+- **Status:** Planned and built on 2026-10-07 on phase 24 Part A (#93); see the plan
+  `docs/superpowers/plans/2026-10-07-phase-25-speaking.md`. Victor scoped the phase in the
+  one-pager, approved the recognition path (D1, D13), then handed the remaining decisions over
+  ("Go with all the rest section alone. I trust your decisions"). Every decision is in §1 with its
+  reason, so each one can be overturned in review. Those marked **(low confidence)** are the ones
+  to read first. A POC on the same day replaced the feasibility step with measured facts
+  (§ POC findings), and Victor moved short phrases in after it (D3). Where the build departed from
+  what was first written here, the decision says so ("as built") and "Deviations as built" at the
+  end of §1 lists them.
 - **Date:** 2026-10-07
 - **Source:** the one-pager `drafts/2026-10-07-speaking-one-pager.md`. `drafts/` is gitignored, so
   everything this spec depends on is restated below.
-- **Builds on:** phase 24 as completed, both PRs
+- **Builds on:** Part A (#93); Part B is not required, and inserts its cloze types into these tiers
+  when it lands. Phase 24 as designed, both PRs
   (`docs/superpowers/specs/2026-10-07-lang-tutor-phase-24-more-question-types-design.md`, on branch
   `phase-24-more-question-types` until it merges): the tiered planner (D3), eligibility (D4), the
   listening flag (D5), dictation's shape and `spoken_receptive` live (D13). Phase 23 (#89:
@@ -136,8 +138,11 @@ leaving Expo Go becomes acceptable.
 | Tier | Types, in rotation order |
 |---|---|
 | recognise | `multiple_choice`, `listen_choice`, `read_aloud` |
-| pick the form | `reverse_choice`, `cloze_choice`, `letter_tiles` (unchanged) |
-| produce | `typed_translation`, `cloze_typed`, `dictation`, `say_translation` |
+| pick the form | `reverse_choice`, `letter_tiles` (Part A's; Part B inserts `cloze_choice`) |
+| produce | `typed_translation`, `dictation`, `say_translation` (Part B inserts `cloze_typed`) |
+
+**As built:** the tiers hold Part A's types plus the two. Speaking off removes the speaking types
+before the rotation, so a session without speaking is planned exactly as phase 24 plans it.
 
 - **Read aloud is a warm-up,** so it opens a run, where recognition sits. The form is in front of
   the learner and nothing has to be recalled.
@@ -166,13 +171,22 @@ leaving Expo Go becomes acceptable.
 prepare-session payload carries it with the same default, so a job enqueued before the deploy
 prepares a session without speaking cards.
 
+**As built:** on the web only a *granted* microphone counts (read from `navigator.permissions`),
+because `expo-audio`'s web permission read opens the browser's prompt when the permission was never
+granted, so it cannot be read at session start. A site that never granted gets no speaking cards, and
+the other e2e specs, which never grant it, plan as before. On a phone the rule below stands.
+
 The app sends true when it has a recorder and the microphone permission is not denied. "Not yet
-asked" counts as yes, because the permission is asked on the first tap of a microphone button
+asked" counts as yes on a phone, because the permission is asked on the first tap of a microphone button
 (D7), never at session start, where the learner would not know why. On iOS a denial holds until
 the learner changes it in Settings, so later sessions are planned without speaking cards.
 
 **D5. One endpoint answers a speaking card by speech, and an attempt the app did not understand
 records nothing.**
+
+**As built:** a session id held by another learner is a 404, as an unknown session is. A clip under
+1 000 base64 characters (about 750 bytes) is heard as nothing without a model call: it holds no word,
+and Gemini answers an empty input with a 400.
 
 `POST /api/sessions/{id}/speech` takes `user_id`, `question_id`, `mime_type` and `audio`
 (base64). The service:
@@ -404,6 +418,22 @@ of at most 200 KB, base64's extra third costs nothing worth that.
 
 ---
 
+### Deviations as built
+
+- A transcript is stored truncated to 100 characters (`answers_typed_text_length`).
+- A retried upload replays the stored answer only when it was `understood` or `alternative`; any
+  other last answer to that question (a pass, a typed answer, `gave_up`) is a 409
+  `QuestionDesynced`, since replaying a pass as "understood" would claim the word was heard.
+- A failed transcription is logged as `speech_failed` and rethrown, so the timeouts D13 asks about
+  leave a trace.
+- The five-second limit is the card's timer, its arithmetic a pure, unit-tested `secondsLeft`.
+- The card refuses a second answer while checking (the buttons are disabled), a second recorder
+  engine, and a recording left running when the card unmounts or is answered.
+- The results total comes from the server's score, so skipped cards are left out (D9).
+- `LIVE_DIMENSIONS` changed in its own task, with every badge expectation it moved.
+- Speaking types are filtered out of the tiers when speaking is off (D3), rather than made
+  ineligible.
+
 ## 2. Changes
 
 ### `packages/core`
@@ -430,7 +460,7 @@ of at most 200 KB, base64's extra third costs nothing worth that.
 
 ### Server
 
-- **Migration 0018.** `questions_type_known` admits `read_aloud` and `say_translation`.
+- **Migration 0017** (`0017_speaking_cards.sql`; the next free number on master, not 0018). `questions_type_known` admits `read_aloud` and `say_translation`.
   `questions_shape_valid` gains `read_aloud`, with a prompt and nothing else, as `dictation`; and
   `say_translation`, with a prompt and alternatives, as `typed_translation`.
   `answers_verdict_known` gains `understood`, `gave_up` and `skipped`. Every existing row passes
@@ -592,7 +622,7 @@ The feasibility step this list once began with is done: § POC findings.
    `LIVE_DIMENSIONS`.
 2. Server domain: the tiers and eligibility, evidence and the cap.
 3. The transcriber: contract, provider, config, composition.
-4. Migration 0018, the repositories, `answerBySpeech`, the routes.
+4. Migration 0017, the repositories, `answerBySpeech`, the routes.
 5. Mobile: the recorder, the card, "can't speak now", the flag.
 6. Eval fixtures and cases, run against the real model.
 7. Integration and e2e.

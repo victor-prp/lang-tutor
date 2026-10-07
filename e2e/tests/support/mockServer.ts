@@ -93,3 +93,23 @@ export async function expectGeminiPayload(request: APIRequestContext, payload: u
   });
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
+
+/** Phase 25. The transcription call's answer, matched on the server's
+ *  TRANSCRIBE_MARKER (apps/server/src/domain/speech.ts) and ranked above the
+ *  generation stub, which matches any call. Consumed once, in registration
+ *  order, so a test can queue "not understood" and then "understood". */
+export async function expectTranscription(request: APIRequestContext, heard: string): Promise<void> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      priority: 10,
+      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: '[\\s\\S]*transcribe the spoken audio[\\s\\S]*' } },
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: envelope({ heard }),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
