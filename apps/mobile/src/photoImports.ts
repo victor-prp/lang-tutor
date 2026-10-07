@@ -8,6 +8,7 @@ import type {
   PhotoImportSummary,
 } from '@lang-tutor/core/api';
 
+import { ApiError } from '@/api/client';
 import { strings } from '@/strings';
 
 /** Phase 26 (spec D13). The review's rules, kept out of the screen so they are
@@ -88,6 +89,14 @@ export function mergePolled(polled: PhotoImport, local: PhotoImport, inFlight: R
     ...polled,
     items: polled.items.map((item) => (inFlight.has(item.position) ? (mine.get(item.position) ?? item) : item)),
   };
+}
+
+/** What a row change that failed leaves behind. An ApiError is the server's
+ *  answer: it refused, so nothing changed there and the row is put back. Any
+ *  other failure (no network, a lost response) may have landed, so the row stops
+ *  being kept local and the server's copy is read and adopted. */
+export function afterFailedChange(error: unknown): 'revert' | 'adopt_server' {
+  return error instanceof ApiError ? 'revert' : 'adopt_server';
 }
 
 export type StoredImports = { enrollmentId: string; imports: PhotoImportSummary[] };

@@ -9,6 +9,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { usePhotoImports } from '@/hooks/usePhotoImports';
 import {
   IMPORT_POLL_INTERVAL_MS,
+  afterFailedChange,
   canSave,
   chosenOption,
   mergePolled,
@@ -60,14 +61,21 @@ export default function PhotoImportReviewScreen() {
   // landed may still have been read before it, so these rows keep their local
   // copy: once a row is ready, nothing but this screen changes it.
   const changed = useRef(new Set<number>());
+  // The newest read wins: an older poll answering late is dropped, as the
+  // provider's reload does.
+  const generation = useRef(0);
 
   const load = useCallback(() => {
+    const mine = ++generation.current;
     fetchImport(id)
       .then((polled) => {
+        if (mine !== generation.current) return;
         setImp((local) => (local ? mergePolled(polled, local, changed.current) : polled));
         setLoadFailed(false);
       })
-      .catch(() => setLoadFailed(true));
+      .catch(() => {
+        if (mine === generation.current) setLoadFailed(true);
+      });
   }, [fetchImport, id]);
 
   useFocusEffect(useCallback(() => load(), [load]));
@@ -91,7 +99,9 @@ export default function PhotoImportReviewScreen() {
   };
 
   // Shown at once, sent at once, and put back if the server refuses it, as the
-  // save toggles do. One change per row at a time.
+  // save toggles do. One change per row at a time. A change with no answer may
+  // have landed, so the row is read again instead: the screen must show what
+  // Save would save.
   const change = async (position: number, update: PhotoImportItemUpdate) => {
     const original = imp?.items.find((row) => row.position === position);
     if (!original || inFlight.current.has(position)) return;
@@ -101,8 +111,13 @@ export default function PhotoImportReviewScreen() {
     try {
       const row = await updateItem(id, position, update);
       setImp((current) => current && withRow(current, row));
-    } catch {
-      setImp((current) => current && withRow(current, original));
+    } catch (error) {
+      if (afterFailedChange(error) === 'revert') {
+        setImp((current) => current && withRow(current, original));
+      } else {
+        changed.current.delete(position);
+        load();
+      }
     } finally {
       mark(position, false);
     }

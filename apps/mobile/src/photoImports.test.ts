@@ -1,7 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 import type { PhotoImport, PhotoImportItem, PhotoImportSummary } from '@lang-tutor/core/api';
 
+import { ApiError } from './api/client';
 import {
+  afterFailedChange,
   canSave,
   chosenOption,
   homePhotoCard,
@@ -62,6 +64,21 @@ describe('mergePolled', () => {
     expect(merged.status).toBe('ready');
     expect(merged.items[0].ticked).toBe(false);
     expect(merged.items[1]).toEqual(item(1));
+  });
+});
+
+describe('afterFailedChange', () => {
+  it('puts the row back when the server answered and refused it', () => {
+    expect(afterFailedChange(new ApiError(409))).toBe('revert');
+    expect(afterFailedChange(new ApiError(400, 'invalid request'))).toBe('revert');
+  });
+
+  // No answer is not a refusal: the change may have landed, and only a read
+  // can tell. Keeping the row local would show one state while Save saves another.
+  it('reads the server’s row when no answer came back', () => {
+    expect(afterFailedChange(new TypeError('Network request failed'))).toBe('adopt_server');
+    expect(afterFailedChange(new Error('The operation was aborted'))).toBe('adopt_server');
+    expect(afterFailedChange('anything else')).toBe('adopt_server');
   });
 });
 
