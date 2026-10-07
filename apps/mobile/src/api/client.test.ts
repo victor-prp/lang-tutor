@@ -1,6 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { ApiError, createApiClient } from './client';
+import { ApiError, SPEECH_UPLOAD_TIMEOUT_MS, createApiClient } from './client';
 
 function buildClient(mockFetch: jest.Mock) {
   return createApiClient({
@@ -314,5 +314,22 @@ describe('api/client', () => {
     expect(await api.answerBySpeech('s 1', request)).toEqual({ heard: 'gatto', verdict: 'unheard' });
     expect(calls[0].url).toBe('http://api/api/sessions/s%201/speech');
     expect(JSON.parse(String(calls[0].init.body))).toEqual(request);
+  });
+
+  it('abandons a speech upload that stalls, so the card is not stuck checking (phase 25)', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetch = ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })) as unknown as typeof globalThis.fetch;
+      const api = createApiClient({ baseUrl: 'http://api', fetch });
+      const pending = api.answerBySpeech('s1', { user_id: 'u', question_id: 'q', mime_type: 'audio/aac', audio: 'QUJD' });
+      const outcome = expect(pending).rejects.toThrow('aborted');
+      jest.advanceTimersByTime(SPEECH_UPLOAD_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

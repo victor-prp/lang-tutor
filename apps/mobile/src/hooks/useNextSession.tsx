@@ -68,7 +68,7 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
       // Phase 24 (spec D5): only the device knows whether it can speak the
       // target, so only it can ask for listening cards.
       // Phase 25 (spec D4): likewise, only it knows whether it can record.
-      const speaking = await recorder.canRecord();
+      const speaking = await recorder.canRecord().catch(() => false);
       return await api.createSession({
         enrollment_id: active.id,
         listening: speaker.snapshot().tags.has(active.target_language),

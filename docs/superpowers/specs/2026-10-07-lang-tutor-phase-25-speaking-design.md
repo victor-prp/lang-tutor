@@ -379,7 +379,7 @@ no hook is needed. The class is `AudioModule.AudioRecorder` on a phone and
 
 - **A contract of its own.** `services/speech.ts` declares
   `SpeechTranscriber = (request: { audio: string; mimeType: string; language: Language }) =>
-  Promise<string>`, beside `LlmClient` and in its style: types only, an empty string means
+  Promise<string>` (as built: see "Deviations as built"), beside `LlmClient` and in its style: types only, an empty string means
   nothing was heard, and every failure throws `LlmUnavailable`. `providers/gemini.ts` gains
   `createGeminiTranscriber`, with `createGeminiClient`'s deps, and only `composition.ts` wires it
   (ADR 0001 R11). `LlmClient` stays text only, because widening it for audio would widen it for
@@ -435,6 +435,27 @@ of at most 200 KB, base64's extra third costs nothing worth that.
 - `LIVE_DIMENSIONS` changed in its own task, with every badge expectation it moved.
 - Speaking types are filtered out of the tiers when speaking is off (D3), rather than made
   ineligible.
+- `SpeechTranscriber` is `(request: { system, audio, mimeType, schema }) => raw JSON text`
+  (`LlmAudioRequest`), not `{ audio, mimeType, language } => transcript`; the instruction and the
+  parsing live in `domain/speech.ts`.
+- The eval's `ru-luk` (Milena saying "лук") is heard as "ОК" on every run and is kept failing
+  honestly: 25 of 26 clips pass.
+- A skipped card is in neither the practised list nor the session's progress snapshot (D7): only
+  answers that are not `skipped` count a sense as practised.
+- The card's banner uses the verdict the server recorded, carried in the answer
+  (`{ heard, verdict }`); the app never re-judges a transcript. `speak-heard` shows only for an
+  `alternative`.
+- A refused microphone shows the `אין גישה למיקרופון` line once, above whatever card is current,
+  for the rest of the session (D7), not only on a typed say-the-translation form.
+- The speech upload aborts after 15 s (`SPEECH_UPLOAD_TIMEOUT_MS`), so a stall becomes the
+  "couldn't check" notice.
+- A recorder that fails to start shows the same "couldn't check" notice rather than a dead button;
+  a recorder step that throws restores the iOS audio mode and releases the engine; a tap while a
+  recording is stopping is ignored; a permission read that throws means "cannot record" rather
+  than failing session creation.
+- `speech_judged` carries `transcribed` and omits `transcribe_ms` when the clip was too short for
+  a model call, and is logged before the answer is recorded, so a paid transcription is always
+  logged.
 
 ## 2. Changes
 
@@ -511,10 +532,11 @@ of at most 200 KB, base64's extra third costs nothing worth that.
 
 ### Eval
 
-- `tests/eval/audio/`, new: WAV fixtures, 16 kHz mono, made with macOS `say` (Alice for Italian,
-  Milena for Russian, Samantha for English), each with 0.6 s of silence before and after the word
-  (`say "[[slnc 600]] gatto [[slnc 600]]"`), as a real recording has (D12). Ten words or phrases
-  per language said right, and two per language where a different word is said. The command that makes a fixture is in `cases.ts`, so a
+- `tests/eval/audio/`, new: AAC in ADTS fixtures (Android's format), 16 kHz mono, made with macOS
+  `say` (Alice for Italian, Milena for Russian, Samantha for English), each with 0.6 s of silence
+  before and after the word (`say "[[slnc 600]] gatto [[slnc 600]]"`), as a real recording has
+  (D12). As built: 8 Italian, 6 Russian and 6 English said right, and two per language where a
+  different word is said (26 clips). The command that makes a fixture is in `cases.ts`, so a
   case can be added.
 - `cases.ts`: `TranscriptionCase` (`file`, `language`, `target`, `expect: 'understood' | 'unheard'`).
 - `run.ts`: tier 1, every response parses and `heard` is a string. Tier 2, `judgeSpoken` of what

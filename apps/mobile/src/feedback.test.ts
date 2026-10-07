@@ -114,7 +114,7 @@ describe('phase 25 banners', () => {
     alternatives: ['dico'],
   };
   it('names what was heard when understood', () => {
-    expect(feedbackFor(READ, { heard: 'il gatto' })).toEqual({
+    expect(feedbackFor(READ, { heard: 'il gatto', verdict: 'understood' })).toEqual({
       tone: 'correct',
       title: strings.feedbackHeard,
       line: 'il gatto',
@@ -122,12 +122,22 @@ describe('phase 25 banners', () => {
     });
   });
   it('names the practised word for an alternative', () => {
-    expect(feedbackFor(SAY, { heard: 'dico' })).toEqual({
+    expect(feedbackFor(SAY, { heard: 'dico', verdict: 'alternative' })).toEqual({
       tone: 'correct',
       title: strings.feedbackAlternative,
       line: 'parlo',
       verdict: 'alternative',
     });
+  });
+  it('takes the banner from the server verdict, never from its own judge', () => {
+    // The app's judgeSpoken calls this unheard; the server said understood.
+    expect(feedbackFor(READ, { heard: 'zzzz', verdict: 'understood' })).toEqual({
+      tone: 'correct',
+      title: strings.feedbackHeard,
+      line: 'zzzz',
+      verdict: 'understood',
+    });
+    expect(feedbackFor(SAY, { heard: 'zzzz', verdict: 'alternative' })).toMatchObject({ title: strings.feedbackAlternative });
   });
   it('shows the answer for show the answer, and judges a typed form as typed', () => {
     expect(feedbackFor(SAY, { pass: 'show_answer' })).toMatchObject({ tone: 'wrong', title: strings.feedbackWrong, line: 'parlo' });

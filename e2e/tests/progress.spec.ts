@@ -15,9 +15,9 @@ const DIMENSIONS = ['written_receptive', 'written_productive', 'spoken_receptive
 // The saved form of each meaning, for reversed and typed cards (phase 23).
 const FORM_OF: Record<string, string> = { קראה: 'прочитала', הקריאה: 'прочитала', בצל: 'лук', קשת: 'лук' };
 
-// Phase 23. What one right answer does to a new sense's three written levels
-// (spec D6), then the two spoken ones, which stay at 1 (phases 24, 25 made them
-// live), and the badge over all five: the mean, ties up.
+// What one right answer does to a new sense's three written levels (phase 23,
+// spec D6), then the two spoken ones, which stay at 1 (phases 24 and 25 made
+// them live), and the badge over all five: the mean, ties up.
 const LEVELS_AFTER_RIGHT: Record<string, number[]> = {
   choice: [2, 1, 1, 1, 1],
   reverse: [2, 2, 1, 1, 1],
@@ -119,7 +119,7 @@ test('a session moves the words it practised up the ladder, and the list filters
   await levelAll.click();
   await expect(words).toHaveCount(2);
 
-  // 7. A word's detail: five dimensions, three live since phase 23.
+  // 7. A word's detail: five dimensions, all live since phase 25.
   await words.filter({ hasText: 'лук' }).click();
   await expect(page.getByTestId('vocabulary-sense-level')).toHaveCount(2);
   // Each of the two saved senses shows all five dimensions; spoken_receptive is

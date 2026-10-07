@@ -54,6 +54,8 @@ export type SessionValue = {
   submitSpeech: (clip: Clip) => void;
   /** Answers a speaking card without audio: skip, or show the answer. */
   pass: (kind: 'skip' | 'show_answer') => void;
+  /** The recorder could not start: the card shows the "couldn't check" notice. */
+  markSpeechFailed: () => void;
   /** Back to a fresh attempt after one that recorded nothing. */
   retrySpeech: () => void;
   /** "Can't speak now", or a refused microphone. */
@@ -245,7 +247,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
             if (response.verdict === 'unheard' || !response.next) {
               return { ...latest, speech: { phase: 'unheard', heard: response.heard } };
             }
-            return { ...latest, speech: IDLE_ATTEMPT, answer: { heard: response.heard }, queued: queuedFrom(response.next) };
+            return { ...latest, speech: IDLE_ATTEMPT, answer: { heard: response.heard, verdict: response.verdict }, queued: queuedFrom(response.next) };
           });
         })
         .catch(() => {
@@ -268,6 +270,14 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     },
     [state, api, queueResponse],
   );
+
+  const markSpeechFailed = useCallback(() => {
+    setState((current) =>
+      current && current.answer === null && current.speech.phase !== 'checking'
+        ? { ...current, speech: { phase: 'failed' } }
+        : current,
+    );
+  }, []);
 
   const retrySpeech = useCallback(() => {
     setState((current) => (current ? { ...current, speech: IDLE_ATTEMPT } : current));
@@ -315,6 +325,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         submitSpeech,
         pass,
         retrySpeech,
+        markSpeechFailed,
         stopSpeaking,
         next,
       };
@@ -341,10 +352,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       submitSpeech,
       pass,
       retrySpeech,
+      markSpeechFailed,
       stopSpeaking,
       next,
     };
-  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, retrySpeech, stopSpeaking, next]);
+  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, retrySpeech, markSpeechFailed, stopSpeaking, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

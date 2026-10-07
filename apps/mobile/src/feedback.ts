@@ -13,8 +13,12 @@ export type Feedback = {
 };
 
 /** Phase 24. What a card was answered with: an option, a text, or a board's
- *  first tries (spec D10). */
-export type CardAnswer = AnswerInput | { board: number[] };
+ *  first tries (spec D10). Phase 25: a spoken answer carries the verdict the
+ *  server recorded for it, so the app never judges a transcript itself. */
+export type CardAnswer =
+  | Exclude<AnswerInput, { heard: string }>
+  | { board: number[] }
+  | { heard: string; verdict: 'understood' | 'alternative' };
 
 /**
  * Phase 23. The banner after an answer. It runs the same `evaluate` the server
@@ -32,11 +36,10 @@ export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
       verdict: null,
     };
   }
-  // Phase 25 (spec D7). The server judged the transcript with the same pure
-  // function, so evaluate here gives the verdict it stored.
+  // Phase 25 (spec D7). The server's verdict is the answer's: this never
+  // re-judges the transcript, so a skewed bundle cannot disagree with it.
   if ('heard' in answer) {
-    const record = evaluate(question, answer);
-    if (record.verdict === 'alternative') {
+    if (answer.verdict === 'alternative') {
       return { tone: 'correct', title: strings.feedbackAlternative, line: rightAnswer(question), verdict: 'alternative' };
     }
     return { tone: 'correct', title: strings.feedbackHeard, line: answer.heard, verdict: 'understood' };

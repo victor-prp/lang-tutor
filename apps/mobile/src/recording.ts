@@ -73,8 +73,11 @@ export function createRecorder(deps: RecorderDeps) {
   const ios = deps.platform === 'ios';
 
   async function finish(current: RecorderEngine): Promise<void> {
-    await current.stop();
-    if (ios) await deps.setRecordingMode(false);
+    try {
+      await current.stop();
+    } finally {
+      if (ios) await deps.setRecordingMode(false);
+    }
   }
 
   return {
@@ -85,9 +88,17 @@ export function createRecorder(deps: RecorderDeps) {
       if (engine) return 'recording';
       if (!(await deps.requestPermission())) return 'denied';
       if (ios) await deps.setRecordingMode(true);
-      const next = deps.makeEngine(recordingOptions(deps.platform));
-      await next.prepareToRecordAsync();
-      next.record();
+      let next: RecorderEngine | null = null;
+      try {
+        next = deps.makeEngine(recordingOptions(deps.platform));
+        await next.prepareToRecordAsync();
+        next.record();
+      } catch (error) {
+        // A failed start must not leave iOS in play-and-record, nor an engine open.
+        if (ios) await deps.setRecordingMode(false).catch(() => undefined);
+        next?.release?.();
+        throw error;
+      }
       engine = next;
       return 'recording';
     },
@@ -96,11 +107,14 @@ export function createRecorder(deps: RecorderDeps) {
       const current = engine;
       if (!current) throw new Error('not recording');
       engine = null;
-      await finish(current);
-      if (!current.uri) throw new Error('the recorder gave no uri');
-      const { base64, bytes } = await deps.readBase64(current.uri);
-      current.release?.();
-      return { audio: base64, mimeType: mimeTypeFor(deps.platform), bytes };
+      try {
+        await finish(current);
+        if (!current.uri) throw new Error('the recorder gave no uri');
+        const { base64, bytes } = await deps.readBase64(current.uri);
+        return { audio: base64, mimeType: mimeTypeFor(deps.platform), bytes };
+      } finally {
+        current.release?.();
+      }
     },
 
     /** Leaving a card mid-recording: stop and drop the clip. */

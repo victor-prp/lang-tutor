@@ -36,8 +36,8 @@ describe('dimensions', () => {
     for (const dimension of LIVE_DIMENSIONS) expect(DIMENSIONS).toContain(dimension);
   });
 
-  // Phases 23 and 24: each live dimension has a question type that feeds it (the
-  // written three by phase 23's cards, spoken_receptive by listening,
+  // All five are live since phase 25: each has a question type that feeds it
+  // (the written three by phase 23's cards, spoken_receptive by listening,
   // spoken_productive by speaking).
   it('are live exactly when some question type feeds them', () => {
     expect([...LIVE_DIMENSIONS]).toEqual([

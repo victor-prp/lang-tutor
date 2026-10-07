@@ -2,12 +2,13 @@ import { describe, expect, it } from '@jest/globals';
 
 import { MAX_RECORDING_SECONDS, canRecordWith, createRecorder, mimeTypeFor, recordingOptions, secondsLeft } from './recording';
 
-function fakes(platform: string, granted = true) {
+function fakes(platform: string, granted = true, failing: { prepare?: boolean; read?: boolean } = {}) {
   const log: string[] = [];
   const engine = {
     uri: null as string | null,
     prepareToRecordAsync: async () => {
       log.push('prepare');
+      if (failing.prepare) throw new Error('prepare failed');
     },
     record: () => {
       log.push('record');
@@ -33,6 +34,7 @@ function fakes(platform: string, granted = true) {
     },
     readBase64: async (uri) => {
       log.push(`read ${uri}`);
+      if (failing.read) throw new Error('read failed');
       return { base64: 'QUJD', bytes: 3 };
     },
   });
@@ -76,6 +78,24 @@ describe('createRecorder (spec D12)', () => {
     expect(log).toContain('mode false');
     expect(log).toContain('release');
     expect(log.some((line) => line.startsWith('read'))).toBe(false);
+  });
+});
+
+describe('createRecorder when a step throws (spec D12, the iOS risk)', () => {
+  it('a start that fails to prepare clears the iOS mode and releases the engine it made', async () => {
+    const { recorder, log } = fakes('ios', true, { prepare: true });
+    await expect(recorder.start()).rejects.toThrow('prepare failed');
+    expect(log).toEqual(['mode true', 'make .m4a', 'prepare', 'mode false', 'release']);
+    // Nothing is left recording: a retry makes a fresh engine.
+    await expect(recorder.start()).rejects.toThrow('prepare failed');
+    expect(log.filter((line) => line.startsWith('make'))).toHaveLength(2);
+  });
+
+  it('a stop whose file read fails still clears the iOS mode and releases the engine', async () => {
+    const { recorder, log } = fakes('ios', true, { read: true });
+    await recorder.start();
+    await expect(recorder.stop()).rejects.toThrow('read failed');
+    expect(log.slice(-3)).toEqual(['mode false', 'read file:///clip', 'release']);
   });
 });
 

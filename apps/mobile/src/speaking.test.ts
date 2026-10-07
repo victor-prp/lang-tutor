@@ -45,6 +45,6 @@ describe('isSkip', () => {
   it('is a skip pass only', () => {
     expect(isSkip({ pass: 'skip' })).toBe(true);
     expect(isSkip({ pass: 'show_answer' })).toBe(false);
-    expect(isSkip({ heard: 'gatto' })).toBe(false);
+    expect(isSkip({ heard: 'gatto', verdict: 'understood' })).toBe(false);
   });
 });

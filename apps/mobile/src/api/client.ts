@@ -42,6 +42,10 @@ async function failureOf(res: Response): Promise<ApiError> {
   }
 }
 
+/** Phase 25. A hung upload would leave the speaking card "checking" with every
+ *  button disabled; past this it becomes the "couldn't check" notice. */
+export const SPEECH_UPLOAD_TIMEOUT_MS = 15_000;
+
 export type ApiClientDeps = {
   baseUrl: string;
   fetch: typeof globalThis.fetch;
@@ -51,11 +55,12 @@ export type ApiClientDeps = {
 // global object. The literal process.env.EXPO_PUBLIC_API_URL now lives in
 // app/_layout.tsx, which is where Metro's build-time inlining still sees it.
 export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
-  async function postJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
+  async function postJson<TResponse>(path: string, body: unknown, signal?: AbortSignal): Promise<TResponse> {
     const res = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
     });
     if (!res.ok) throw await failureOf(res);
     return (await res.json()) as TResponse;
@@ -83,8 +88,19 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       postJson<CreateSessionResponse>('/api/sessions', request),
     nextStep: (sessionId: string, request: NextStepRequest) =>
       postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request),
-    answerBySpeech: (sessionId: string, request: SpeechAnswerRequest) =>
-      postJson<SpeechAnswerResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/speech`, request),
+    answerBySpeech: async (sessionId: string, request: SpeechAnswerRequest) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), SPEECH_UPLOAD_TIMEOUT_MS);
+      try {
+        return await postJson<SpeechAnswerResponse>(
+          `/api/sessions/${encodeURIComponent(sessionId)}/speech`,
+          request,
+          controller.signal,
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     getSession: (sessionId: string) =>
       getJson<SessionView>(`/api/sessions/${encodeURIComponent(sessionId)}`),
     skipSession: (sessionId: string) =>

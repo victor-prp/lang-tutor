@@ -113,6 +113,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onRetry={session.retrySpeech}
           onPass={session.pass}
           onCantSpeak={session.stopSpeaking}
+          onRecordFailed={session.markSpeechFailed}
         />
       );
     case 'say_translation':
@@ -120,11 +121,6 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       if (session.speakingOff !== null) {
         return (
           <View style={styles.typedForm}>
-            {session.speakingOff === 'no_mic' ? (
-              <Text style={styles.noMic} testID="speak-no-mic">
-                {strings.noMicrophone}
-              </Text>
-            ) : null}
             <TypedAnswerView
               question={question}
               instruction={strings.questionInstructionTyped(language)}
@@ -148,6 +144,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onRetry={session.retrySpeech}
           onPass={session.pass}
           onCantSpeak={session.stopSpeaking}
+          onRecordFailed={session.markSpeechFailed}
         />
       );
     default: {
@@ -232,6 +229,13 @@ export default function SessionScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Spec D7: a refused microphone says so once, above whatever card is
+              current, for the rest of the session. */}
+          {session.speakingOff === 'no_mic' ? (
+            <Text style={styles.noMic} testID="speak-no-mic">
+              {strings.noMicrophone}
+            </Text>
+          ) : null}
           {renderQuestion(question, session, language)}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -265,6 +269,6 @@ const styles = StyleSheet.create({
   skip: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, fontWeight: '700' },
   // Bottom padding keeps the last option clear of the overlaid banner.
   typedForm: { gap: spacing.md },
-  noMic: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center' },
+  noMic: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center', paddingBottom: spacing.md },
   body: { paddingTop: spacing.xl, paddingBottom: spacing.xxl * 4 },
 });

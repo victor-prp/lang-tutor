@@ -23,6 +23,8 @@ type Props = {
   onRetry: () => void;
   onPass: (kind: 'skip' | 'show_answer') => void;
   onCantSpeak: (reason: 'chosen' | 'no_mic') => void;
+  /** The recorder could not start. */
+  onRecordFailed: () => void;
 };
 
 /**
@@ -30,13 +32,16 @@ type Props = {
  * the clip is checked the button is disabled. An attempt that was not
  * understood says what was heard, in neutral colours: it is not wrong.
  */
-export function SpeakingCardView({ question, instruction, language, answer, speech, onClip, onRetry, onPass, onCantSpeak }: Props) {
+export function SpeakingCardView({ question, instruction, language, answer, speech, onClip, onRetry, onPass, onCantSpeak, onRecordFailed }: Props) {
   const recorder = useRecorder();
   const [recording, setRecording] = useState(false);
   const [left, setLeft] = useState(MAX_RECORDING_SECONDS);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   // A start waits on the permission prompt: a second tap meanwhile is ignored.
   const starting = useRef(false);
+  // Held from the start of stop() until its clip has been handed on: a tap in
+  // that window must not open a second recording.
+  const stopping = useRef(false);
   const mounted = useRef(true);
   const answeredRef = useRef(false);
   // The timer's stop reads the latest callback, not the one from when it began.
@@ -74,17 +79,21 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
   }, [answered, recorder]);
 
   async function stop() {
+    if (stopping.current) return;
+    stopping.current = true;
     clearTimer();
     setRecording(false);
     try {
       onClipRef.current(await recorder.stop());
     } catch {
       // Nothing recorded: the button is ready for another try.
+    } finally {
+      stopping.current = false;
     }
   }
 
   async function onMic() {
-    if (answered || checking || starting.current) return;
+    if (answered || checking || starting.current || stopping.current) return;
     if (recording) return stop();
     if (notice) onRetry();
     starting.current = true;
@@ -92,7 +101,8 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
     try {
       started = await recorder.start();
     } catch {
-      // Could not begin: the card stays idle, ready for another try.
+      // Could not begin: say so, rather than leave a button that does nothing.
+      if (mounted.current && !answeredRef.current) onRecordFailed();
       return;
     } finally {
       starting.current = false;
@@ -117,7 +127,6 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
     }, 250);
   }
 
-  const heard = answer && 'heard' in answer ? answer.heard : null;
   const status = recording ? strings.recordingSecondsLeft(left) : checking ? strings.checking : null;
 
   return (
@@ -158,9 +167,9 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
           <SpeakButton text={form} language={language} testID="speak-form" />
         </View>
       ) : null}
-      {heard !== null && answer && 'heard' in answer && !read ? (
+      {answer && 'heard' in answer && answer.verdict === 'alternative' ? (
         <Text style={styles.heard} testID="speak-heard">
-          {strings.heardLine(heard)}
+          {strings.heardLine(answer.heard)}
         </Text>
       ) : null}
 
