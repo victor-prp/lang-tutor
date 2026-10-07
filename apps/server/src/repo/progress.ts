@@ -21,6 +21,8 @@ const TEXT_TYPES: ReadonlySet<string> = new Set([
   'read_aloud',
   'say_translation',
   'typed_meaning',
+  'cloze_typed',
+  'sentence_translation',
 ]);
 
 /** A session's answers as the rule reads them. */

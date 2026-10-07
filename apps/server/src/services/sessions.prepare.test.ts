@@ -3,7 +3,7 @@ import type { Enrollment, Question } from '@lang-tutor/core/api';
 
 import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
-import type { GenerationContext } from '../domain/distractors';
+import type { GenerationContext, RecentSentences } from '../domain/distractors';
 import type { SessionState } from '../domain/session';
 import { InvalidDistractors } from '../errors';
 import type { EnrollmentRepo } from '../repo/enrollments';
@@ -15,8 +15,8 @@ const SESSION = '11111111-1111-1111-1111-111111111111';
 const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'preparing', source: 'list' };
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'ru', created_at: '' };
 const CONTEXT: GenerationContext[] = [
-  { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה' },
-  { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל' },
+  { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
+  { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
 ];
 const PAYLOAD = {
   session_id: SESSION,
@@ -36,8 +36,8 @@ const GOOD = JSON.stringify({
   ],
 });
 
-function world(opts: { state?: SessionState; context?: GenerationContext[]; ready?: boolean; reply?: string | Error }) {
-  const calls = { transitions: [] as string[], generated: [] as unknown[], sessionQuestions: [] as Question[][] };
+function world(opts: { state?: SessionState; context?: GenerationContext[]; ready?: boolean; reply?: string | Error; recent?: RecentSentences }) {
+  const calls = { transitions: [] as string[], generated: [] as unknown[], sessionQuestions: [] as Question[][], recentAsked: [] as unknown[] };
   const session = stub<SessionRepo>({
     findState: async () => opts.state ?? STATE,
     transition: async (_id, from, to) => {
@@ -51,6 +51,10 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
   const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
   const question = stub<QuestionRepo>({
     findGenerationContext: async () => opts.context ?? CONTEXT,
+    findRecentSentences: async (input) => {
+      calls.recentAsked.push(input);
+      return opts.recent ?? new Map();
+    },
     insertGeneratedQuestions: async (input) => {
       calls.generated.push(input);
       // Shaped as repo/questions' questionFrom and withBoards shape them; a
@@ -64,6 +68,8 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
       };
       return input.questions.map((q, i): Question => {
         const base = { id: `g${i}`, vocab_term_id: q.lexemeId };
+        const gap = { start: q.gapStart ?? 0, end: q.gapEnd ?? 0 };
+        const gapText = (q.sentence ?? '').slice(gap.start, gap.end);
         const choice = () => ({ options: q.options!.map((o) => o.text), correct_option: correct(q) });
         switch (q.type) {
           case 'typed_translation':
@@ -85,6 +91,12 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
           case 'typed_meaning':
             return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt! };
+          case 'cloze_choice':
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, ...choice() };
+          case 'cloze_typed':
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives! };
+          case 'sentence_translation':
+            return { ...base, type: q.type, question: q.sentenceTranslation!, meaning: q.prompt!, sentence: q.sentence!, gap, answer: gapText };
         }
       });
     },
@@ -132,7 +144,7 @@ describe('prepareSession', () => {
   it('gives each position its type, in pick order, with the content each type needs', async () => {
     const context = [
       ...CONTEXT,
-      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר' },
+      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
     ];
     const reply = JSON.stringify({
       items: [
@@ -239,7 +251,7 @@ describe('prepareSession', () => {
 const FORMS = ['ромашка', 'черепаха', 'подушка', 'зонтик', 'ведро', 'скрипка', 'лопата', 'кастрюля', 'фонарь', 'ящерица'];
 const MEANINGS = ['מרגנית', 'צב', 'כרית', 'מטרייה', 'דלי', 'כינור', 'את חפירה', 'סיר', 'פנס', 'לטאה'];
 const TEN: GenerationContext[] = FORMS.map((form, i) => ({
-  senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i],
+  senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i], example: null, exampleTranslation: null,
 }));
 const TEN_PAYLOAD = {
   session_id: SESSION,
@@ -265,7 +277,7 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
     await service.prepareSession(TEN_PAYLOAD);
 
     const asked = JSON.parse(llm.calls[0].user).items.map((item: { key: string; task: string }) => `${item.key}:${item.task}`);
-    expect(asked).toEqual(['q1:meaning', 'q2:word', 'q3:typed', 'q4:meaning', 'q8:meaning']);
+    expect(asked).toEqual(['q1:meaning', 'q2:word', 'q3:typed', 'q4:meaning', 'q8:meaning', 'q10:sentence']);
 
     const [input] = calls.generated as {
       questions: { type: string; prompt: string | null; options: { text: string; is_correct: boolean }[] | null; tiles: string[] | null }[];
@@ -273,7 +285,9 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
     expect(input.questions.map((q) => q.type)).toEqual([
       'multiple_choice', 'reverse_choice', 'typed_translation',
       'matching', 'matching', 'matching', 'matching',
-      'listen_choice', 'letter_tiles', 'dictation',
+      // s3 listen_choice, s4 letter_tiles (cloze_choice has no gap yet), s5 cloze_typed,
+      // which the reply left no sentence for, so typed_translation.
+      'listen_choice', 'letter_tiles', 'typed_translation',
     ]);
     expect(input.questions[3].options!.map((o) => o.text)).toEqual(['מטרייה', 'דלי', 'כינור', 'את חפירה', 'שולחן']);
     expect(input.questions[4].options!.find((o) => o.is_correct)!.text).toBe('דלי');
@@ -292,10 +306,10 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
     await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toThrow(/board/);
   });
 
-  // Final review: a dictation asks the model nothing, yet its meaning is as
+  // Final review: a tiles card asks the model nothing, yet its meaning is as
   // off limits as an item's own.
-  it("refuses a wrong meaning that is another meaning of a listening card's word held by a dictation", async () => {
-    const context = TEN.map((row, i) => (i === 9 ? { ...row, form: TEN[7].form, lemma: TEN[7].form, translation: 'מחבת' } : row));
+  it("refuses a wrong meaning that is another meaning of a listening card's word held by a tiles card", async () => {
+    const context = TEN.map((row, i) => (i === 8 ? { ...row, form: TEN[7].form, lemma: TEN[7].form, translation: 'מחבת' } : row));
     const reply = TEN_REPLY.replace('["ענן","גשם","רוח"]', '["מחבת","גשם","רוח"]');
     const { service, calls, llm } = world({ context, reply });
     await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toBeInstanceOf(InvalidDistractors);
@@ -309,7 +323,7 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
   });
 
   it('gives a listening-off session no listening card', async () => {
-    // Listening off, the tenth card is typed (dictation falls back), so q10 is asked too.
+    // Listening off, the tenth card is a sentence card too, so q10 is asked either way.
     const reply = JSON.stringify({
       items: [...JSON.parse(TEN_REPLY).items, { key: 'q10', distractors: [], alternatives: [] }],
     });
@@ -342,7 +356,7 @@ describe('prepareSession, phase 25 (spec D4)', () => {
 
   it('plans a speaking card only when the payload says speaking', async () => {
     const on = world({ reply: JSON.stringify({ items: [{ key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] }] }) });
-    await on.service.prepareSession({ ...PAYLOAD, ordinal: 2, speaking: true });
+    await on.service.prepareSession({ ...PAYLOAD, ordinal: 6, speaking: true });
     expect(types(on.calls)).toEqual(['read_aloud', 'reverse_choice']);
 
     const off = world({});
@@ -354,5 +368,196 @@ describe('prepareSession, phase 25 (spec D4)', () => {
     const { service, calls } = world({});
     await service.prepareSession({ ...PAYLOAD, ordinal: 2 });
     expect(types(calls)).not.toContain('read_aloud');
+  });
+});
+
+// Phase 27 Part B (spec D5-D8, Review Focus 1 and 2).
+describe('prepareSession, phase 27 Part B: sentence cards', () => {
+  // The Russian examples hold the form once, so every pick could be a cloze choice.
+  const EXAMPLES = TEN.map((row) => ({
+    ...row,
+    example: `Вчера мы видели ${row.form} там.`,
+    exampleTranslation: `אתמול ראינו את ${row.translation} שם.`,
+  }));
+  const KEYS = (llm: { calls: { user: string }[] }) =>
+    JSON.parse(llm.calls[0].user).items.map((item: { key: string; task: string }) => `${item.key}:${item.task}`);
+
+  function typesOf(calls: { generated: unknown[] }) {
+    const [input] = calls.generated as { questions: { type: string }[] }[];
+    return input.questions.map((q) => q.type);
+  }
+  const answers = (llm: { calls: { user: string }[] }, fill: (item: { key: string; task: string; word: string; example: string | null; avoid: string[] }) => object) =>
+    JSON.stringify({ items: JSON.parse(llm.calls[0].user).items.map(fill) });
+
+  it('asks a gap item with the blank taken from the saved example, and keeps that gap on the card', async () => {
+    const probe = world({ context: EXAMPLES, reply: 'nope' });
+    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    const gapItems = JSON.parse(probe.llm.calls[0].user).items.filter((item: { task: string }) => item.task === 'gap');
+    expect(gapItems.length).toBeGreaterThan(0);
+    for (const item of gapItems) {
+      expect(item.blank).toBe(item.word);
+    }
+
+    const reply = (items: { key: string; task: string }[]) =>
+      JSON.stringify({
+        items: items.map((item) =>
+          item.task === 'gap'
+            ? { key: item.key, distractors: ['один', 'два', 'три'] }
+            : item.task === 'meaning'
+              ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
+              : item.task === 'word'
+                ? { key: item.key, distractors: ['чеснок', 'морковь', 'капуста'] }
+                : { key: item.key, distractors: [], alternatives: [] },
+        ),
+      });
+    const { service, calls, llm } = world({ context: EXAMPLES, reply: reply(JSON.parse(probe.llm.calls[0].user).items) });
+    await service.prepareSession(TEN_PAYLOAD);
+    expect(KEYS(llm)).toEqual(KEYS(probe.llm));
+    const [input] = calls.generated as { questions: { type: string; sentence: string | null; gapStart: number | null; gapEnd: number | null; options: { text: string; is_correct: boolean }[] | null }[] }[];
+    const cloze = input.questions.filter((q) => q.type === 'cloze_choice');
+    expect(cloze.length).toBeGreaterThan(0);
+    for (const q of cloze) {
+      expect(q.sentence!.slice(q.gapStart!, q.gapEnd!)).toMatch(/^[а-яё]+$/u);
+      expect(q.options!.find((o) => o.is_correct)!.text).toBe(q.sentence!.slice(q.gapStart!, q.gapEnd!));
+    }
+  });
+
+  it('reads the recent sentences of the picked senses in the read step, and hands them to the items as what to avoid', async () => {
+    const recent: RecentSentences = new Map(
+      TEN.map((row) => [row.senseId, { cloze: [`Вчера ${row.form} там один раз.`, 'second'], translate: [`Я вижу ${row.form} здесь.`] }]),
+    );
+    const { service, calls, llm } = world({ context: TEN, reply: TEN_REPLY, recent });
+    await service.prepareSession(TEN_PAYLOAD);
+    expect(calls.recentAsked).toEqual([{ enrollmentId: 'e1', senseIds: TEN.map((row) => row.senseId), limit: 3 }]);
+    const item = JSON.parse(llm.calls[0].user).items.find((i: { task: string }) => i.task === 'sentence');
+    expect(item.avoid).toEqual([`Вчера ${item.word} там один раз.`, 'second']);
+  });
+
+  it('turns a sentence the model wrote back into a typed translation with no alternatives, and logs why', async () => {
+    const probe = world({ context: EXAMPLES, reply: 'nope' });
+    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    const items = JSON.parse(probe.llm.calls[0].user).items as { key: string; task: string; word: string; example: string | null }[];
+    const sentenceItem = items.find((item) => item.task === 'sentence')!;
+    const reply = JSON.stringify({
+      items: items.map((item) =>
+        item.task === 'sentence'
+          ? // The model writes the saved example back, with its gap and a Hebrew translation.
+            { key: item.key, sentence: item.example, gap: item.word, translation: 'אתמול ראינו שם משהו.', alternatives: [] }
+          : item.task === 'gap'
+            ? { key: item.key, distractors: ['один', 'два', 'три'] }
+            : item.task === 'meaning'
+              ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
+              : item.task === 'word'
+                ? { key: item.key, distractors: ['чеснок', 'морковь', 'капуста'] }
+                : { key: item.key, distractors: [], alternatives: [] },
+      ),
+    });
+    const { service, calls, logger } = world({ context: EXAMPLES, reply });
+    await service.prepareSession(TEN_PAYLOAD);
+
+    const position = Number(sentenceItem.key.slice(1)) - 1;
+    const [input] = calls.generated as { questions: { type: string; alternatives: string[] | null; sentence: string | null; prompt: string }[] }[];
+    expect(input.questions[position]).toMatchObject({ type: 'typed_translation', alternatives: [], sentence: null });
+    expect(logger.events).toContainEqual({
+      event: 'sentence_degraded',
+      session_id: SESSION,
+      position,
+      type: 'cloze_typed',
+      reason: expect.stringContaining('avoid'),
+    });
+  });
+
+  it('hands a translate item the recent Hebrew sentences and the example\'s Hebrew, and degrades a card that repeats one', async () => {
+    // Ordinal 2 plans a sentence_translation card among the ten.
+    // Ordinal 2 plans a sentence_translation card among the ten.
+    const PAYLOAD_T ={ ...TEN_PAYLOAD, ordinal: 2 };
+    const hebrew = (row: GenerationContext) => `אתמול ראינו שם את ${row.translation} החדש.`;
+    const recent: RecentSentences = new Map(EXAMPLES.map((row) => [row.senseId, { cloze: [], translate: [hebrew(row)] }]));
+    const probe = world({ context: EXAMPLES, reply: 'nope', recent });
+    await expect(probe.service.prepareSession(PAYLOAD_T)).rejects.toThrow();
+    const items = JSON.parse(probe.llm.calls[0].user).items as { key: string; task: string; word: string; avoid: string[] }[];
+    const translate = items.find((item) => item.task === 'translate')!;
+    const row = EXAMPLES.find((r) => r.form === translate.word)!;
+    expect(translate.avoid).toEqual([row.exampleTranslation, hebrew(row)]);
+
+    const reply = JSON.stringify({
+      items: items.map((item) =>
+        item.task === 'translate'
+          ? // The model writes last session's Hebrew sentence again.
+            { key: item.key, sentence: hebrew(row), translation: `Вчера я видел ${item.word} там.`, gap: item.word }
+          : item.task === 'gap'
+            ? { key: item.key, distractors: ['один', 'два', 'три'] }
+            : item.task === 'meaning'
+              ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
+              : item.task === 'word'
+                ? { key: item.key, distractors: ['чеснок', 'морковь', 'капуста'] }
+                : { key: item.key, distractors: [], alternatives: [] },
+      ),
+    });
+    const { service, calls, logger } = world({ context: EXAMPLES, reply, recent });
+    await service.prepareSession(PAYLOAD_T);
+    const position = Number(translate.key.slice(1)) - 1;
+    expect(typesOf(calls)[position]).toBe('typed_translation');
+    expect(logger.events).toContainEqual({
+      event: 'sentence_degraded',
+      session_id: SESSION,
+      position,
+      type: 'sentence_translation',
+      reason: expect.stringContaining('avoid'),
+    });
+  });
+
+  it('plans no gap card for a saved example with no Hebrew half', async () => {
+    const probe = world({ context: EXAMPLES.map((row) => ({ ...row, exampleTranslation: null })), reply: 'nope' });
+    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    const items = JSON.parse(probe.llm.calls[0].user).items as { task: string }[];
+    expect(items.map((item) => item.task)).not.toContain('gap');
+  });
+
+  it('logs sentence_degraded only when the session was written', async () => {
+    const probe = world({ context: EXAMPLES, reply: 'nope' });
+    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    const items = JSON.parse(probe.llm.calls[0].user).items as { key: string; task: string; word: string; example: string | null }[];
+    const reply = JSON.stringify({
+      items: items.map((item) =>
+        item.task === 'sentence'
+          ? { key: item.key, sentence: item.example, gap: item.word, translation: 'אתמול ראינו שם משהו.', alternatives: [] }
+          : item.task === 'gap'
+            ? { key: item.key, distractors: ['один', 'два', 'три'] }
+            : item.task === 'meaning'
+              ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
+              : item.task === 'word'
+                ? { key: item.key, distractors: ['чеснок', 'морковь', 'капуста'] }
+                : { key: item.key, distractors: [], alternatives: [] },
+      ),
+    });
+    const dropped = world({ context: EXAMPLES, reply, ready: false });
+    await dropped.service.prepareSession(TEN_PAYLOAD);
+    expect(dropped.logger.events.map((e) => (e as { event: string }).event)).not.toContain('sentence_degraded');
+  });
+
+  it('stores a valid typed cloze with its sentence and gap, and logs nothing degraded', async () => {
+    const probe = world({ context: TEN, reply: 'nope' });
+    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    const items = JSON.parse(probe.llm.calls[0].user).items as { key: string; task: string; word: string }[];
+    const reply = JSON.stringify({
+      items: items.map((item) =>
+        item.task === 'sentence'
+          ? { key: item.key, sentence: `Я вижу ${item.word} там сейчас.`, gap: item.word, translation: 'אני רואה את זה שם עכשיו.', alternatives: [] }
+          : item.task === 'meaning'
+            ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
+            : item.task === 'word'
+              ? { key: item.key, distractors: ['чеснок', 'морковь', 'капуста'] }
+              : { key: item.key, distractors: [], alternatives: [] },
+      ),
+    });
+    const { service, calls, logger } = world({ context: TEN, reply });
+    await service.prepareSession(TEN_PAYLOAD);
+    expect(typesOf(calls)).toContain('cloze_typed');
+    const [input] = calls.generated as { questions: { type: string; sentence: string | null; gapStart: number | null; gapEnd: number | null; sentenceTranslation: string | null }[] }[];
+    const typed = input.questions.find((q) => q.type === 'cloze_typed')!;
+    expect(typed.sentence!.slice(typed.gapStart!, typed.gapEnd!)).toMatch(/^[а-яё]+$/u);
+    expect(typed.sentenceTranslation).toBe('אני רואה את זה שם עכשיו.');
+    expect(logger.events.map((e) => (e as { event: string }).event)).not.toContain('sentence_degraded');
   });
 });

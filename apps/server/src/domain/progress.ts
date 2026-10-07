@@ -8,8 +8,8 @@ import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/d
 
 /** Phase 24. The types answered by an option, and by a text with its verdict.
  *  Phase 25: a speaking card's answer is stored as a text with its verdict too. */
-export type ChoiceAnswerType = 'multiple_choice' | 'reverse_choice' | 'listen_choice' | 'matching';
-export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation' | 'typed_meaning';
+export type ChoiceAnswerType = 'multiple_choice' | 'reverse_choice' | 'listen_choice' | 'matching' | 'cloze_choice';
+export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation' | 'typed_meaning' | 'cloze_typed' | 'sentence_translation';
 
 /** One answer as the rule reads it: which sense, which exercise, and how it
  *  was judged. A choice is right or wrong; a text answer has its verdict. */
@@ -104,12 +104,17 @@ export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
     case 'multiple_choice':
       return [piece('written_receptive', answer.correct)];
     case 'reverse_choice':
+    case 'cloze_choice':
+      // Phase 27 (spec D10): choosing the blanked word is the same recognition.
       // Picking the form out of four is recognition of it: productive evidence,
       // capped. A failure says nothing about knowing the meaning.
       return answer.correct
         ? [piece('written_receptive', true), piece('written_productive', true, CAPPED_MAX_LEVEL)]
         : [piece('written_productive', false, CAPPED_MAX_LEVEL)];
     case 'typed_translation':
+    case 'cloze_typed':
+    case 'sentence_translation':
+      // Phase 27 (spec D10): producing the word in a sentence is what a typed translation is.
       return typedEvidence(answer.verdict, piece);
     case 'listen_choice':
       // Hearing, then knowing the meaning: the spoken receptive dimension

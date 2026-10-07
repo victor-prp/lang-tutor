@@ -474,20 +474,30 @@ export const questions = pgTable(
     alternatives: text('alternatives').array(),
     // Phase 24. A tiles card's tiles: its letters and two more, shuffled.
     tiles: text('tiles').array(),
+    // Phase 27. A sentence card's text in the target language (a cloze card's
+    // blanked sentence, a translation card's reference), its Hebrew, and the
+    // gap's offsets into `sentence`. All four are set for the three sentence
+    // types and null for every other (questions_sentence_valid).
+    sentence: text('sentence'),
+    sentenceTranslation: text('sentence_translation'),
+    gapStart: integer('gap_start'),
+    gapEnd: integer('gap_end'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     check('questions_options_valid', sql`${t.options} is null or question_options_valid(${t.options})`),
     check(
       'questions_type_known',
-      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning')`,
+      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning', 'cloze_choice', 'cloze_typed', 'sentence_translation')`,
     ),
     // Phase 23 and 24. Each type's shape (spec D13, phase 24 §2): a choice has
     // options, every type but the Hebrew-option ones stores the Hebrew prompt,
     // only a typed card has alternatives, and only a tiles card has tiles.
     // Phase 25's two speaking types store the Hebrew as their prompt, and say
     // the translation its alternatives, as the typed card does.
-    // Phase 27's meaning recall stores the meaning as its prompt and nothing else.
+    // Phase 27's meaning recall stores the meaning as its prompt and nothing else;
+    // its sentence cards store the Hebrew meaning as the prompt, a cloze choice with
+    // options, a typed cloze with alternatives, a translation with neither.
     check(
       'questions_shape_valid',
       sql`case ${t.type}
@@ -504,7 +514,21 @@ export const questions = pgTable(
         when 'say_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
           and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
         when 'typed_meaning' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'cloze_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'cloze_typed' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+        when 'sentence_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         else false end`,
+    ),
+    // Phase 27 (spec D11). The sentence columns belong to the three sentence
+    // types, all four together, and the gap lies inside the sentence.
+    check(
+      'questions_sentence_valid',
+      sql`(${t.type} in ('cloze_choice', 'cloze_typed', 'sentence_translation')) = (${t.sentence} is not null)
+        and (${t.type} in ('cloze_choice', 'cloze_typed', 'sentence_translation')) = (${t.sentenceTranslation} is not null)
+        and (${t.type} in ('cloze_choice', 'cloze_typed', 'sentence_translation')) = (${t.gapStart} is not null)
+        and (${t.type} in ('cloze_choice', 'cloze_typed', 'sentence_translation')) = (${t.gapEnd} is not null)
+        and (${t.gapStart} is null or (${t.gapStart} >= 0 and ${t.gapStart} < ${t.gapEnd} and ${t.gapEnd} <= length(${t.sentence})))`,
     ),
     foreignKey({
       name: 'questions_enrollment_fk',

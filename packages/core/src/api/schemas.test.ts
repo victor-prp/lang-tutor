@@ -9,6 +9,11 @@ import {
   LlmEntrySchema,
   JudgedAnswerRequestSchema,
   LlmMeaningJudgeSchema,
+  LlmTranslationJudgeSchema,
+  GapSchema,
+  ClozeChoiceQuestionSchema,
+  ClozeTypedQuestionSchema,
+  SentenceTranslationQuestionSchema,
   LlmPhotoReadingSchema,
   LlmSenseMatchSchema,
   LlmSenseSchema,
@@ -829,5 +834,43 @@ describe('phase 27 Part A schemas', () => {
   it('the meaning judge answers one of three verdicts', () => {
     expect(LlmMeaningJudgeSchema.safeParse({ verdict: 'other_sense' }).success).toBe(true);
     expect(LlmMeaningJudgeSchema.safeParse({ verdict: 'misspelled' }).success).toBe(false);
+  });
+});
+
+describe('phase 27 Part B shapes', () => {
+  const gap = { start: 7, end: 16 };
+  it('parses each of the three cards', () => {
+    expect(
+      ClozeChoiceQuestionSchema.safeParse({
+        id: 'a', type: 'cloze_choice', vocab_term_id: 'l', sentence: 's', gap, translation: 't', meaning: 'm',
+        options: ['a', 'b'], correct_option: 0,
+      }).success,
+    ).toBe(true);
+    expect(
+      ClozeTypedQuestionSchema.safeParse({
+        id: 'a', type: 'cloze_typed', vocab_term_id: 'l', sentence: 's', gap, translation: 't', meaning: 'm',
+        answer: 'x', alternatives: [],
+      }).success,
+    ).toBe(true);
+    const translation = {
+      id: 'a', type: 'sentence_translation', vocab_term_id: 'l', question: 'q', meaning: 'm', sentence: 's', gap, answer: 'x',
+    };
+    expect(SentenceTranslationQuestionSchema.safeParse(translation).success).toBe(true);
+    expect(QuestionSchema.safeParse(translation).success).toBe(true);
+  });
+  it('a gap starts at zero or later', () => {
+    expect(GapSchema.safeParse({ start: -1, end: 3 }).success).toBe(false);
+    expect(GapSchema.safeParse({ start: 0, end: 3 }).success).toBe(true);
+  });
+  it('a distractor item may carry a sentence, a gap and a translation', () => {
+    expect(
+      LlmDistractorsSchema.safeParse({
+        items: [{ key: 'q1', distractors: [], sentence: 'Ieri parlavamo.', gap: 'parlavamo', translation: 'אתמול' }],
+      }).success,
+    ).toBe(true);
+  });
+  it('the translation judge answers one of four verdicts', () => {
+    expect(LlmTranslationJudgeSchema.safeParse({ verdict: 'misspelled' }).success).toBe(true);
+    expect(LlmTranslationJudgeSchema.safeParse({ verdict: 'other_sense' }).success).toBe(false);
   });
 });

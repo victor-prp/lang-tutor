@@ -28,6 +28,40 @@
   - The planner's rotation shifts: with no voices a fourth card of a four-pick session is now a
     meaning card (D9's fall-through), so the end-to-end specs that reached a second run were
     updated; the new `meaning-recall.spec.ts` covers the card and its failed check.
+  Part B is implemented on branch `phase-27b-sentence-cards` (stacked on Part A). Planning
+  found these deviations:
+  - The sentence cards store four columns (the sentence, the gap's start and end, the Hebrew
+    translation) under their own `questions_sentence_valid` check in migration `0020` (built as
+    `0019`, renumbered after phase 26's `0018` pushed Part A's to `0019`), stricter
+    than the plan: a sentence column on a non-sentence type, or offsets outside the sentence, is
+    refused.
+  - `cloze_typed` stores no separate answer: the gap's text in the sentence is the answer, and the
+    phone judges the typed text against it (its lemma counts as wrong unless the gap is the lemma).
+  - `cloze_choice`'s right option is the text at the gap, so a sentence-initial word keeps its
+    capital letter.
+  - A wrong translation's banner names the practised word (`התשובה הנכונה:`), and the card shows
+    the reference under `תרגום לדוגמה:` once judged.
+  - The eval's cases are grouped on their own lines per task.
+
+  Building found:
+  - The validators and the judge prompts use the enrollment's source language, not a hard-coded
+    Hebrew.
+  - A `sentence` or `translate` item the model leaves unanswered (as an older stub does, answering
+    only `distractors`) degrades its card to `typed_translation`, logged as `sentence_degraded`,
+    rather than failing the session.
+  - A gap card's Hebrew line never contains the gap word: a translation that did would give the
+    answer away.
+  - The gap prompt now makes the model test each wrong word in the sentence before offering it
+    (gap tier 2: 5/9 to 9/9).
+  - The translation judge's prompt treats a changed detail (a number, a name, a tense that alters
+    the meaning) as not conveyed (tier 2: 25/27).
+  - The rotation shifted the end-to-end specs again. `speaking.spec.ts` and
+    `listening-variety.spec.ts` now play a session of ordinal 1 (a list session is made and
+    skipped first), because at ordinal 0 the third tier's index 1 is now `cloze_typed`, which left
+    no run position for `say_translation` or `dictation`. The new `sentence-cards.spec.ts` plays
+    ordinal 1 with six saved words: typed_meaning, cloze_choice, cloze_typed, typed_meaning,
+    letter_tiles, sentence_translation. A session's first card can now be a speaking card, so the
+    spec's `speak` helper retries its first tap until the recorder is up.
 - **Date:** 2026-10-07
 - **Source:** the one-pager `drafts/2026-10-07-deeper-question-types-one-pager.md` (main
   checkout). `drafts/` is gitignored, so everything this spec depends on is restated below.

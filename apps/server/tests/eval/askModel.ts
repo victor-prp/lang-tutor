@@ -9,6 +9,7 @@ import type {
   LlmEntry,
   LlmReconciliation,
   PartOfSpeech,
+  SentenceTranslationQuestion,
   TranslationCorrection,
   TranslationKind,
   TranslationSense,
@@ -19,7 +20,14 @@ import {
   parseLlmDistractors,
   type DistractorItem,
 } from '../../src/domain/distractors';
-import { buildMeaningJudgePrompt, parseMeaningJudge, type MeaningJudgeContext } from '../../src/domain/judge';
+import {
+  buildMeaningJudgePrompt,
+  buildTranslationJudgePrompt,
+  parseMeaningJudge,
+  parseTranslationJudge,
+  type JudgeContext,
+  type MeaningJudgeContext,
+} from '../../src/domain/judge';
 import { parseTranscript, transcriptionSystem } from '../../src/domain/speech';
 import type { SpeechTranscriber } from '../../src/services/speech';
 import {
@@ -159,6 +167,13 @@ export async function askTranscription(
 
 /** Phase 27. The real meaning-judge prompt and parser over one answer — what
  *  answerJudged sends when no rule decides. Null when unreadable. */
+export async function askTranslationJudge(
+  llm: LlmClient,
+  kase: { question: SentenceTranslationQuestion; context: JudgeContext; answer: string },
+): Promise<TypedVerdict | null> {
+  return parseTranslationJudge(await llm(buildTranslationJudgePrompt(kase.question, kase.context, kase.answer)));
+}
+
 export async function askJudge(
   llm: LlmClient,
   kase: { context: MeaningJudgeContext; answer: string },
