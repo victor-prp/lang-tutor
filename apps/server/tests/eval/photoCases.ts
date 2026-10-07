@@ -123,6 +123,6 @@ export const MATCH_CASES: MatchCase[] = [
   { label: 'match: a bench is not a bank', word: 'banca', target: 'it', hebrew: 'ספסל', options: [noun('בנק')], expect: 'none', tier: 1 },
   { label: 'match: a bow is not an onion', word: 'лук', target: 'ru', hebrew: 'קשת', options: [noun('בצל')], expect: 'none', tier: 1 },
   { label: 'match: a synonym of the money sense', word: 'bank', target: 'en', hebrew: 'מוסד כספי', options: [noun('בנק'), noun('גדה')], expect: 0, tier: 2 },
-  { label: 'match: a near-synonym verb', word: 'give up', target: 'en', hebrew: 'להתייאש', options: [verb('לוותר'), verb('להפסיק')], expect: 0, tier: 2 },
+  { label: 'match: an idiom for giving up', word: 'give up', target: 'en', hebrew: 'להרים ידיים', options: [verb('לוותר'), verb('להפסיק')], expect: 0, tier: 2 },
   { label: 'match: "not heavy" is the weight sense', word: 'light', target: 'en', hebrew: 'לא כבד', options: [noun('אור'), { translation: 'קל', part_of_speech: 'adjective' }, { translation: 'בהיר', part_of_speech: 'adjective' }], expect: 1, tier: 2 },
 ];

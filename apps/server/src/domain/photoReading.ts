@@ -40,6 +40,7 @@ export function buildPhotoReadingPrompt(target: LanguageCode): PhotoReadingPromp
     '3. If Hebrew is written next to an item as its translation, copy that Hebrew whole, with all its glosses, into "hebrew". Otherwise "hebrew" is an empty string.',
     '4. When handwriting is unclear, give your best reading rather than leaving the item out.',
     '5. Never translate, explain, or add an item that is not on the page.',
+    '6. A word with a line drawn through it is crossed out: skip it, even when nothing is written beside it.',
   ].join('\n');
   return { system, user: `Language: ${name}.`, schema: LlmPhotoReadingSchema };
 }
