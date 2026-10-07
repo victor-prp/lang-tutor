@@ -55,6 +55,10 @@ import type {
   SpeechAnswerRequestSchema,
   SpeechAnswerResponseSchema,
   LlmTranscriptSchema,
+  TypedMeaningQuestionSchema,
+  JudgedAnswerRequestSchema,
+  JudgedAnswerResponseSchema,
+  LlmMeaningJudgeSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
   TranslationKindSchema,
@@ -147,3 +151,7 @@ export type SpeechVerdict = z.infer<typeof SpeechVerdictSchema>;
 export type SpeechAnswerRequest = z.infer<typeof SpeechAnswerRequestSchema>;
 export type SpeechAnswerResponse = z.infer<typeof SpeechAnswerResponseSchema>;
 export type LlmTranscript = z.infer<typeof LlmTranscriptSchema>;
+export type TypedMeaningQuestion = z.infer<typeof TypedMeaningQuestionSchema>;
+export type JudgedAnswerRequest = z.infer<typeof JudgedAnswerRequestSchema>;
+export type JudgedAnswerResponse = z.infer<typeof JudgedAnswerResponseSchema>;
+export type LlmMeaningJudge = z.infer<typeof LlmMeaningJudgeSchema>;

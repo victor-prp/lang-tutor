@@ -12,9 +12,12 @@ import type {
 } from '../api/types';
 import { seededRng } from '../utils/rng';
 import {
+  MAX_JUDGED_TEXT,
   SESSION_LENGTH,
   answerFits,
   evaluate,
+  isChoice,
+  isJudged,
   missed,
   pickQuestions,
   rightAnswer,
@@ -316,5 +319,50 @@ describe('phase 25 speaking cards', () => {
   it('knows which stored verdicts are right', () => {
     expect(['exact', 'near_miss', 'alternative', 'understood'].every((v) => verdictCorrect(v as never))).toBe(true);
     expect(['wrong', 'gave_up', 'skipped'].some((v) => verdictCorrect(v as never))).toBe(false);
+  });
+});
+
+const MEANING: Question = {
+  id: 'm1',
+  type: 'typed_meaning',
+  vocab_term_id: 'l1',
+  question: 'parlare',
+  part_of_speech: 'verb',
+  meaning: 'לדבר',
+};
+
+describe('typed_meaning (phase 27 D3)', () => {
+  it('is judged, not a choice and not speaking', () => {
+    expect(isJudged(MEANING)).toBe(true);
+    expect(isChoice(MEANING)).toBe(false);
+    expect(isJudged({ ...MEANING, type: 'typed_translation', answer: 'x', lemma: 'x', alternatives: [] } as Question)).toBe(false);
+  });
+  it('takes only a judged text', () => {
+    expect(answerFits(MEANING, { text: 'לדבר', judged: 'exact' })).toBe(true);
+    expect(answerFits(MEANING, { text: 'לדבר' })).toBe(false);
+    expect(answerFits(MEANING, { option_index: 0 })).toBe(false);
+  });
+  it('records the verdict it was given, never judging itself', () => {
+    expect(evaluate(MEANING, { text: 'לשוחח', judged: 'exact' })).toEqual({
+      question_id: 'm1',
+      is_correct: true,
+      answer_string: 'לשוחח',
+      verdict: 'exact',
+    });
+    expect(evaluate(MEANING, { text: 'ספר', judged: 'alternative' })).toMatchObject({ is_correct: true, verdict: 'alternative' });
+    expect(evaluate(MEANING, { text: 'לאכול', judged: 'wrong' })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+  });
+  it('stores at most MAX_JUDGED_TEXT characters', () => {
+    const long = 'א'.repeat(MAX_JUDGED_TEXT + 20);
+    expect(evaluate(MEANING, { text: long, judged: 'wrong' }).answer_string).toHaveLength(MAX_JUDGED_TEXT);
+  });
+  it('a typed card still refuses a judged answer', () => {
+    const typed: Question = { id: 't1', type: 'typed_translation', vocab_term_id: 'l1', question: 'לדבר', part_of_speech: 'verb', answer: 'parlare', lemma: 'parlare', alternatives: [] };
+    expect(answerFits(typed, { text: 'parlare', judged: 'exact' })).toBe(false);
+  });
+  it('its right answer is the meaning, and it is missed like any card', () => {
+    expect(rightAnswer(MEANING)).toBe('לדבר');
+    const record = evaluate(MEANING, { text: '', judged: 'wrong' });
+    expect(missed([MEANING], [record])).toEqual([{ question: MEANING, correct_answer: 'לדבר' }]);
   });
 });

@@ -121,6 +121,18 @@ export const SayTranslationQuestionSchema = z.object({
   alternatives: z.array(z.string()),
 });
 
+// Phase 27 (spec D2, D11). The form, written; the learner types its Hebrew
+// meaning, which the server judges (D3). `meaning` is the stored meaning: shown
+// after the answer, and read by the missed list.
+export const TypedMeaningQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('typed_meaning'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  part_of_speech: z.string(),
+  meaning: z.string(),
+});
+
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
 // the compiler finds every switch that has not learnt it.
 export const QuestionSchema = z.discriminatedUnion('type', [
@@ -133,6 +145,7 @@ export const QuestionSchema = z.discriminatedUnion('type', [
   LetterTilesQuestionSchema,
   ReadAloudQuestionSchema,
   SayTranslationQuestionSchema,
+  TypedMeaningQuestionSchema,
 ]);
 
 // Phase 23. How a typed answer was judged (spec D5). Every verdict but `wrong`
@@ -328,6 +341,20 @@ export const SpeechAnswerResponseSchema = z.object({
   next: NextStepResponseSchema.optional(),
 });
 
+
+// Phase 27 (spec D3, D11). An answer to a card the server judges, with a model
+// call when no rule decides it. At most 300 characters.
+export const JudgedAnswerRequestSchema = z.object({
+  user_id: z.string().min(1),
+  question_id: z.string().min(1),
+  text: z.string().max(300),
+});
+
+export const JudgedAnswerResponseSchema = z.object({
+  verdict: TypedVerdictSchema,
+  // The next-step response, which the app queues while the banner shows.
+  next: NextStepResponseSchema,
+});
 
 // Phase 19. The home screen's one read. `current` is the enrollment's newest
 // session when it is preparing, ready or failed (never completed or skipped).
@@ -739,6 +766,12 @@ export const LlmReconciliationSchema = z.object({
 // Phase 25 (spec D13). The transcriber's answer: the words it heard, or an
 // empty string for nothing intelligible.
 export const LlmTranscriptSchema = z.object({ heard: z.string() });
+
+// Phase 27 (spec D4). The model's verdict on a meaning-recall answer. Mapped
+// to a typed verdict in the server (domain/judge.ts).
+export const LlmMeaningJudgeSchema = z.object({
+  verdict: z.enum(['right', 'other_sense', 'wrong']),
+});
 
 // Phase 19. The model's answer when asked for a session's wrong options. `key`
 // is echoed from the request (q1, q2, …) rather than a sense id: a short key is

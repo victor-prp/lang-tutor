@@ -1,8 +1,11 @@
+export { normaliseHebrew } from './hebrew';
 export {
+  MAX_JUDGED_TEXT,
   SESSION_LENGTH,
   answerFits,
   evaluate,
   isChoice,
+  isJudged,
   isSpeaking,
   missed,
   pickQuestions,
@@ -14,7 +17,7 @@ export {
   spokenVerdict,
   verdictCorrect,
 } from './quiz';
-export type { AnswerInput, ChoiceQuestion, QuestionType, SpeakingQuestion } from './quiz';
+export type { AnswerInput, ChoiceQuestion, JudgedQuestion, QuestionType, SpeakingQuestion } from './quiz';
 export { MAX_SPOKEN_WORDS, judgeSpoken, speakable, spokenWords } from './spoken';
 export type { SpokenTarget } from './spoken';
 export { judgeTiles, judgeTyped, normaliseTyped } from './typed';
