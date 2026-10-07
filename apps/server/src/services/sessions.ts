@@ -1,14 +1,20 @@
 import type { SessionSource, SessionStatus } from '@lang-tutor/core/api';
-import { LIVE_DIMENSIONS, shuffleOptions, type AnswerInput } from '@lang-tutor/core/domain';
+import { LIVE_DIMENSIONS, shuffleSession, type AnswerInput } from '@lang-tutor/core/domain';
 
 import {
+  NOTHING_GENERATED,
+  boardMeanings,
   buildDistractorPrompt,
   distractorItems,
   generatedContent,
+  keyOf,
   parseLlmDistractors,
+  tasksFor,
   validateDistractors,
 } from '../domain/distractors';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
+import { LANGUAGES, type LanguageCode } from '../domain/languages';
+import { BOARD_SIZE, planSession } from '../domain/plan';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
 import type { SessionRecord, SessionSummary } from '../domain/session';
 import {
@@ -20,8 +26,8 @@ import {
   pickSenses,
   sessionScore,
   step,
-  typeFor,
 } from '../domain/session';
+import { tileEligible, tilesFor } from '../domain/tiles';
 import {
   AnswerKindMismatch,
   EnrollmentNotFound,
@@ -119,6 +125,7 @@ export function createSessionService({
      */
     createNextSession: (
       enrollmentId: string,
+      options: { listening: boolean },
     ): Promise<{ sessionId: string; status: SessionStatus; source: SessionSource }> =>
       transaction(async ({ session, question, enrollment, vocabulary, jobs }) => {
         const enrolled = await enrollment.findById(enrollmentId);
@@ -148,10 +155,15 @@ export function createSessionService({
         const saved = await vocabulary.listSavedSenses(enrollmentId);
         if (saved.length === 0) throw new NoSavedWords(enrollmentId);
         const picks = pickSenses(saved, SESSION_LENGTH, rng);
+        // Phase 24 (spec D3): the rotation's step is how many list sessions came
+        // before this one. Read before the insert, so it does not count itself.
+        const ordinal = await session.countListSessions(enrollmentId);
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
         await jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,
           picks: picks.map((pick) => ({ sense_id: pick.senseId, variant_id: pick.variantId })),
+          listening: options.listening,
+          ordinal,
         });
         return { sessionId, status: 'preparing' as const, source: 'list' as const };
       }),
@@ -295,18 +307,18 @@ export function createSessionService({
         throw new InvalidDistractors(sessionId, 'none of the picked senses is in the dictionary any more');
       }
 
-      // Phase 23 (spec D2). The picks are in random order already; position
-      // decides the type, and the order is kept from here on.
-      const types = read.context.map((_, index) => typeFor(index));
-      const items = distractorItems(read.context, types);
-      const started = now();
-      const raw = await llm(
-        buildDistractorPrompt({
-          items,
-          from: read.enrolled.target_language,
-          to: read.enrolled.source_language,
-        }),
+      // Phase 24 (spec D3, D4). The plan decides each position's type and the
+      // order of the picks, before the model is asked anything.
+      const target = read.enrolled.target_language as LanguageCode;
+      const plan = planSession(
+        read.context.map((row) => ({ form: row.form, translation: row.translation, tiles: tileEligible(row.form) })),
+        { listening: payload.listening, ordinal: payload.ordinal },
       );
+      const ordered = plan.order.map((index) => read.context[index]);
+      const items = distractorItems(ordered, tasksFor(plan));
+
+      const started = now();
+      const raw = await llm(buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language }));
       const modelMs = now() - started;
       // An empty string is the provider's "no content" (a safety block). Here,
       // unlike a lookup, there is nothing useful to serve without it.
@@ -315,6 +327,19 @@ export function createSessionService({
       const verdict = validateDistractors(items, answer, read.enrolled.source_language);
       if (!verdict.ok) throw new InvalidDistractors(sessionId, verdict.reason);
 
+      // Spec D10: the board's fifth meaning is its first word's first wrong
+      // meaning that is none of the four.
+      const board = plan.board;
+      const meanings = board
+        ? boardMeanings(
+            ordered.slice(board.start, board.start + BOARD_SIZE).map((row) => row.translation),
+            verdict.byKey.get(keyOf(board.start))!.distractors,
+          )
+        : null;
+      if (board && !meanings) {
+        throw new InvalidDistractors(sessionId, "every wrong meaning of the board is one of its words' own");
+      }
+
       const written = await transaction(async ({ session, question }) => {
         // Conditional: a skip that landed during the model call wins, and this
         // transaction then writes nothing at all.
@@ -322,25 +347,28 @@ export function createSessionService({
         const generated = await question.insertGeneratedQuestions({
           userId: read.state.userId,
           enrollmentId: read.state.enrollmentId,
-          targetLanguage: read.enrolled.target_language,
+          targetLanguage: target,
           userLanguageCode: read.enrolled.source_language,
-          questions: read.context.map((row, index) => ({
-            senseId: row.senseId,
-            variantId: row.variantId,
-            form: row.form,
-            lemma: row.lemma,
-            partOfSpeech: row.partOfSpeech,
-            lexemeId: row.lexemeId,
-            type: types[index],
-            ...generatedContent(row, types[index], verdict.byKey.get(items[index].key)!),
-          })),
+          questions: ordered.map((row, index) => {
+            const type = plan.types[index];
+            return {
+              senseId: row.senseId,
+              variantId: row.variantId,
+              form: row.form,
+              lemma: row.lemma,
+              partOfSpeech: row.partOfSpeech,
+              lexemeId: row.lexemeId,
+              type,
+              ...generatedContent(row, type, verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED, {
+                tiles: type === 'letter_tiles' ? tilesFor(row.form, LANGUAGES[target].alphabet, rng) : null,
+                board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
+              }),
+            };
+          }),
         });
-        // Options are shuffled as a seed session's are; the question order is
-        // not, because the type cycle is by position.
-        await session.insertSessionQuestions(
-          sessionId,
-          generated.map((question) => shuffleOptions(question, rng)),
-        );
+        // Each choice shuffled on its own, a board's words once together; the
+        // question order is the plan's and is not shuffled.
+        await session.insertSessionQuestions(sessionId, shuffleSession(generated, rng));
         return true;
       });
 

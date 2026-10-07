@@ -474,7 +474,6 @@ function renderingTier2(kase: RenderingCase, answer: LlmReconciliation): Check[]
   return checks;
 }
 
-const TYPE_OF_TASK = { meaning: 'multiple_choice', word: 'reverse_choice', typed: 'typed_translation' } as const;
 const taskOf = (item: DistractorCase['items'][number]): Task => item.task ?? 'meaning';
 
 /** Phase 19. The items as prepareSession builds them, keyed q1, q2, …. Phase
@@ -490,7 +489,7 @@ function itemsOf(kase: DistractorCase) {
       partOfSpeech: item.partOfSpeech,
       translation: item.translation,
     })),
-    kase.items.map((item) => TYPE_OF_TASK[taskOf(item)]),
+    kase.items.map(taskOf),
   );
 }
 

@@ -188,6 +188,9 @@ export const PositionSchema = z.object({
 
 export const CreateSessionRequestSchema = z.object({
   enrollment_id: z.string().min(1),
+  // Phase 24 (spec D5). Whether the device has a voice for the target, so the
+  // session may hold listening cards. Absent means no.
+  listening: z.boolean().optional(),
 });
 
 // Phase 19. Creating a session no longer returns its first question: a list

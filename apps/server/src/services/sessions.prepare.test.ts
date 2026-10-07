@@ -24,6 +24,8 @@ const PAYLOAD = {
     { sense_id: 's1', variant_id: 'v1' },
     { sense_id: 's2', variant_id: 'v2' },
   ],
+  listening: false,
+  ordinal: 0,
 };
 // Phase 23: q2 is the second position, a reversed card, so its wrong options
 // are Russian words.
@@ -51,17 +53,33 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
     findGenerationContext: async () => opts.context ?? CONTEXT,
     insertGeneratedQuestions: async (input) => {
       calls.generated.push(input);
-      // Shaped as repo/questions' questionFrom shapes them; a services test may
-      // import a repository only as a type (ADR 0001 R2).
+      // Shaped as repo/questions' questionFrom and withBoards shape them; a
+      // services test may import a repository only as a type (ADR 0001 R2).
+      const onBoard = input.questions.flatMap((q, i) => (q.type === 'matching' ? [i] : []));
+      const correct = (q: (typeof input.questions)[number]) => q.options!.findIndex((o) => o.is_correct);
+      const board = {
+        question_ids: onBoard.map((i) => `g${i}`),
+        words: onBoard.map((i) => input.questions[i].form),
+        correct_options: onBoard.map((i) => correct(input.questions[i])),
+      };
       return input.questions.map((q, i): Question => {
         const base = { id: `g${i}`, vocab_term_id: q.lexemeId };
-        if (q.type === 'typed_translation') {
-          return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
+        const choice = () => ({ options: q.options!.map((o) => o.text), correct_option: correct(q) });
+        switch (q.type) {
+          case 'typed_translation':
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
+          case 'dictation':
+            return { ...base, type: q.type, question: q.form, meaning: q.prompt! };
+          case 'letter_tiles':
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, tiles: q.tiles! };
+          case 'reverse_choice':
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, ...choice() };
+          case 'matching':
+            return { ...base, type: q.type, question: q.form, ...choice(), board };
+          case 'multiple_choice':
+          case 'listen_choice':
+            return { ...base, type: q.type, question: q.form, ...choice() };
         }
-        const choice = { options: q.options!.map((o) => o.text), correct_option: 0 };
-        return q.type === 'reverse_choice'
-          ? { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, ...choice }
-          : { ...base, type: q.type, question: q.form, ...choice };
       });
     },
   });
@@ -184,6 +202,75 @@ describe('prepareSession', () => {
 
   it('rejects a payload that is not one (an older deploy, a hand-made job)', async () => {
     await expect(world({}).service.prepareSession({ session_id: SESSION })).rejects.toThrow();
+  });
+});
+
+const FORMS = ['ромашка', 'черепаха', 'подушка', 'зонтик', 'ведро', 'скрипка', 'лопата', 'кастрюля', 'фонарь', 'ящерица'];
+const MEANINGS = ['מרגנית', 'צב', 'כרית', 'מטרייה', 'דלי', 'כינור', 'את חפירה', 'סיר', 'פנס', 'לטאה'];
+const TEN: GenerationContext[] = FORMS.map((form, i) => ({
+  senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i],
+}));
+const TEN_PAYLOAD = {
+  session_id: SESSION,
+  picks: TEN.map((row) => ({ sense_id: row.senseId, variant_id: row.variantId })),
+  listening: true,
+  ordinal: 0,
+};
+// q4 is the board's first word. Its first wrong meaning, דלי, is a board word's
+// own meaning, so the fifth meaning must be the next one.
+const TEN_REPLY = JSON.stringify({
+  items: [
+    { key: 'q1', distractors: ['דלת', 'קיר', 'תקרה'] },
+    { key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] },
+    { key: 'q3', distractors: [], alternatives: [] },
+    { key: 'q4', distractors: ['דלי', 'שולחן', 'כיסא'] },
+    { key: 'q8', distractors: ['ענן', 'גשם', 'רוח'] },
+  ],
+});
+
+describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
+  it('plans ten words as a run, the board and a run, and writes each its content', async () => {
+    const { service, calls, llm } = world({ context: TEN, reply: TEN_REPLY });
+    await service.prepareSession(TEN_PAYLOAD);
+
+    const asked = JSON.parse(llm.calls[0].user).items.map((item: { key: string; task: string }) => `${item.key}:${item.task}`);
+    expect(asked).toEqual(['q1:meaning', 'q2:word', 'q3:typed', 'q4:meaning', 'q8:meaning']);
+
+    const [input] = calls.generated as {
+      questions: { type: string; prompt: string | null; options: { text: string; is_correct: boolean }[] | null; tiles: string[] | null }[];
+    }[];
+    expect(input.questions.map((q) => q.type)).toEqual([
+      'multiple_choice', 'reverse_choice', 'typed_translation',
+      'matching', 'matching', 'matching', 'matching',
+      'listen_choice', 'letter_tiles', 'dictation',
+    ]);
+    expect(input.questions[3].options!.map((o) => o.text)).toEqual(['מטרייה', 'דלי', 'כינור', 'את חפירה', 'שולחן']);
+    expect(input.questions[4].options!.find((o) => o.is_correct)!.text).toBe('דלי');
+    expect(input.questions[8].tiles).toHaveLength([...'фонарь'].length + 2);
+    expect(input.questions[9]).toMatchObject({ prompt: 'לטאה', options: null, tiles: null });
+
+    const shown = calls.sessionQuestions[0] as { options?: string[] }[];
+    for (const i of [4, 5, 6]) expect(shown[i].options).toEqual(shown[3].options);
+  });
+
+  it("refuses a board whose wrong meanings are all its words' own, so pg-boss retries", async () => {
+    // Each is valid for q4 (none is зонтик's own מטרייה), and each is another
+    // board word's meaning: only the board check can refuse them.
+    const reply = TEN_REPLY.replace('["דלי","שולחן","כיסא"]', '["דלי","כינור","את חפירה"]');
+    const { service } = world({ context: TEN, reply });
+    await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toThrow(/board/);
+  });
+
+  it('gives a listening-off session no listening card', async () => {
+    // Listening off, the tenth card is typed (dictation falls back), so q10 is asked too.
+    const reply = JSON.stringify({
+      items: [...JSON.parse(TEN_REPLY).items, { key: 'q10', distractors: [], alternatives: [] }],
+    });
+    const { service, calls } = world({ context: TEN, reply });
+    await service.prepareSession({ ...TEN_PAYLOAD, listening: false });
+    const [input] = calls.generated as { questions: { type: string }[] }[];
+    expect(input.questions.map((q) => q.type)).not.toContain('listen_choice');
+    expect(input.questions.map((q) => q.type)).not.toContain('dictation');
   });
 });
 

@@ -131,14 +131,14 @@ describe('recomputeProgress', () => {
 
     // Completed: three saved senses, answered right, wrong, right; the other
     // seven questions are about unsaved senses and must change nothing.
-    const { sessionId: completed } = await live.createNextSession(E);
+    const { sessionId: completed } = await live.createNextSession(E, { listening: false });
     const completedRecord = await live.getSession(completed);
     await saveSessionSenses(t.db, { sessionId: completed, enrollmentId: E, positions: [0, 1, 2] });
     for (const [i, q] of completedRecord.questions.entries()) await answer(completed, q, i !== 1);
     expect((await live.getSession(completed)).status).toBe('completed');
 
     // Skipped: two saved senses, one answered right and one wrong, then the skip.
-    const { sessionId: skipped } = await live.createNextSession(E2);
+    const { sessionId: skipped } = await live.createNextSession(E2, { listening: false });
     const skippedRecord = await live.getSession(skipped);
     await saveSessionSenses(t.db, { sessionId: skipped, enrollmentId: E2, positions: [0, 1] });
     await answer(skipped, skippedRecord.questions[0], true);

@@ -166,6 +166,7 @@ describe('phase 23: typed answers', () => {
           prompt: 'ספר',
           options: null,
           alternatives: ['book'],
+          tiles: null,
         },
       ],
     });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { createFakeClock, createFakeLlmClient, createFakeLogger } from '../../tests/support/fakes';
+import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { SessionRecord } from '../domain/session';
 import { AnswerKindMismatch, SessionNotFound } from '../errors';
@@ -33,6 +33,7 @@ describe('repos', () => {
       findState: notStubbed,
       transition: notStubbed,
       findLatest: notStubbed,
+      countListSessions: notStubbed,
       ...overrides,
     };
   }
@@ -230,3 +231,34 @@ describe('repos', () => {
     await expect(service.submitAnswer('s1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
   });
 });
+
+describe('createNextSession, phase 24 (spec D3, D5)', () => {
+  const E = 'e1';
+  it('carries the listening flag and the list-session ordinal into the job', async () => {
+    const jobs = createFakeJobRepo();
+    const service = createSessionService({
+      transaction: createFakeTransaction({
+        enrollment: stub<EnrollmentRepo>({
+          findById: async () => ({ id: E, user_id: 'u1', source_language: 'he', target_language: 'ru', created_at: '' }),
+        }),
+        session: stub<SessionRepo>({
+          findLatest: async () => ({ id: 's0', status: 'completed', source: 'seed' }) as never,
+          countListSessions: async () => 2,
+          insertPreparingSession: async () => 's1',
+        }),
+        vocabulary: stub<VocabularyRepo>({
+          listSavedSenses: async () => [{ senseId: 's1', variantId: 'v1', lexemeId: 'l1' }] as never,
+        }),
+        jobs,
+      }),
+      rng: testRng(7),
+      logger: createFakeLogger(),
+      now: createFakeClock(0),
+      llm: createFakeLlmClient(''),
+    });
+
+    await service.createNextSession(E, { listening: true });
+    expect(jobs.enqueued[0].data).toMatchObject({ listening: true, ordinal: 2 });
+  });
+});
+

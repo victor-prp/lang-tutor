@@ -5,18 +5,24 @@ import type { QuestionType } from '@lang-tutor/core/domain';
 import {
   DISTRACTOR_MARKER,
   MAX_ALTERNATIVES,
+  NOTHING_GENERATED,
+  NO_EXTRAS,
+  boardMeanings,
   buildDistractorPrompt,
   distractorItems,
   generatedContent,
   optionsFor,
   parseLlmDistractors,
+  taskFor,
+  tasksFor,
   validateDistractors,
   type GenerationContext,
 } from './distractors';
+import { planSession } from './plan';
 
 /** Items for today's card only, as every batch was before phase 23. */
 const meaningItems = (context: GenerationContext[]) =>
-  distractorItems(context, context.map((): QuestionType => 'multiple_choice'));
+  distractorItems(context, context.map((): QuestionType => 'multiple_choice').map(taskFor));
 
 const CONTEXT: GenerationContext[] = [
   { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה' },
@@ -220,7 +226,7 @@ describe('a learner of Hebrew explained in English', () => {
     { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'ספר', lemma: 'ספר', partOfSpeech: 'noun', translation: 'book' },
     { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'חלון', lemma: 'חלון', partOfSpeech: 'noun', translation: 'window' },
   ];
-  const items = distractorItems(HEBREW_WORDS, ['reverse_choice', 'typed_translation']);
+  const items = distractorItems(HEBREW_WORDS, (['reverse_choice', 'typed_translation'] as QuestionType[]).map(taskFor));
 
   it('accepts Hebrew wrong words and refuses English ones', () => {
     const reply = (q1: string[]) => ({ items: [{ key: 'q1', distractors: q1 }, { key: 'q2', distractors: [] }] });
@@ -256,7 +262,7 @@ describe('three tasks', () => {
     { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר' },
   ];
   const TYPES: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
-  const MIXED = distractorItems(CONTEXT3, TYPES);
+  const MIXED = distractorItems(CONTEXT3, TYPES.map(taskFor));
   const reply = (q2: string[], q3: { distractors?: string[]; alternatives?: string[] } = {}) => ({
     items: [
       { key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] },
@@ -297,7 +303,7 @@ describe('three tasks', () => {
         { senseId: 'a', variantId: 'va', lexemeId: 'la', form: 'bella', lemma: 'bello', partOfSpeech: 'adjective', translation: 'יפה' },
         { senseId: 'b', variantId: 'vb', lexemeId: 'lb', form: 'carina', lemma: 'carino', partOfSpeech: 'adjective', translation: 'יפה' },
       ],
-      ['reverse_choice', 'reverse_choice'],
+      ['word', 'word'],
     );
     const verdict = validateDistractors(same, {
       items: [
@@ -332,20 +338,66 @@ describe('three tasks', () => {
 
   it('builds each type’s stored content', () => {
     const generated = { distractors: ['a', 'b', 'c'], alternatives: ['x'] };
-    expect(generatedContent(CONTEXT3[0], 'multiple_choice', generated)).toEqual({
+    expect(generatedContent(CONTEXT3[0], 'multiple_choice', generated, NO_EXTRAS)).toEqual({
       prompt: null,
       options: optionsFor('קראה', ['a', 'b', 'c']),
       alternatives: null,
+      tiles: null,
     });
-    expect(generatedContent(CONTEXT3[1], 'reverse_choice', generated)).toEqual({
+    expect(generatedContent(CONTEXT3[1], 'reverse_choice', generated, NO_EXTRAS)).toEqual({
       prompt: 'בצל',
       options: optionsFor('лук', ['a', 'b', 'c']),
       alternatives: null,
+      tiles: null,
     });
-    expect(generatedContent(CONTEXT3[2], 'typed_translation', generated)).toEqual({
+    expect(generatedContent(CONTEXT3[2], 'typed_translation', generated, NO_EXTRAS)).toEqual({
       prompt: 'מהר',
       options: null,
       alternatives: ['x'],
+      tiles: null,
     });
+  });
+});
+
+describe('phase 24 generation (spec D2, D10)', () => {
+  it('asks nothing for a dictation, a tiles card or a board word but the first', () => {
+    expect(taskFor('dictation')).toBeNull();
+    expect(taskFor('letter_tiles')).toBeNull();
+    expect(taskFor('matching')).toBeNull();
+    expect(taskFor('listen_choice')).toBe('meaning');
+    const plan = planSession(
+      Array.from({ length: 10 }, (_, i) => ({ form: `w${i}`, translation: `מ${i}`, tiles: true })),
+      { listening: true, ordinal: 0 },
+    );
+    expect(tasksFor(plan)).toEqual(['meaning', 'word', 'typed', 'meaning', null, null, null, 'meaning', null, null]);
+  });
+
+  it('keys an item by its position, whichever positions ask nothing', () => {
+    const rows = ['a', 'b', 'c'].map((form) => ({ ...CONTEXT[0], form, lemma: form }));
+    expect(distractorItems(rows, ['meaning', null, 'typed']).map((item) => item.key)).toEqual(['q1', 'q3']);
+  });
+
+  it("takes a board's fifth meaning from the first wrong one that is none of its four", () => {
+    expect(boardMeanings(['בית', 'דלי', 'עץ', 'סיר'], ['דלי', 'שולחן', 'כיסא'])).toEqual(['בית', 'דלי', 'עץ', 'סיר', 'שולחן']);
+    expect(boardMeanings(['בית', 'דלי', 'עץ', 'סיר'], ['בית ', 'דלי', 'עץ'])).toBeNull();
+  });
+
+  it('stores each new type in its shape (spec D15)', () => {
+    const ROW = CONTEXT[0];
+    expect(generatedContent(ROW, 'listen_choice', { distractors: ['א', 'ב', 'ג'], alternatives: [] }, NO_EXTRAS)).toMatchObject({
+      prompt: null, alternatives: null, tiles: null,
+    });
+    expect(generatedContent(ROW, 'dictation', NOTHING_GENERATED, NO_EXTRAS)).toEqual({
+      prompt: ROW.translation, options: null, alternatives: null, tiles: null,
+    });
+    expect(generatedContent(ROW, 'letter_tiles', NOTHING_GENERATED, { tiles: ['a', 'b', 'c', 'd', 'e'], board: null })).toEqual({
+      prompt: ROW.translation, options: null, alternatives: null, tiles: ['a', 'b', 'c', 'd', 'e'],
+    });
+    const board = generatedContent(ROW, 'matching', NOTHING_GENERATED, {
+      tiles: null,
+      board: { meanings: ['א', 'ב', 'ג', 'ד', 'ה'], own: 2 },
+    });
+    expect(board.options!.map((o) => o.is_correct)).toEqual([false, false, true, false, false]);
+    expect(board.prompt).toBeNull();
   });
 });

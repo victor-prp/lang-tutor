@@ -3,6 +3,7 @@ import { LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
 import { LANGUAGES, stripStress, type Language, type LanguageCode } from './languages';
+import type { SessionPlan } from './plan';
 import { dropNulls, unfence } from './translation';
 
 /**
@@ -19,16 +20,33 @@ import { dropNulls, unfence } from './translation';
 /** What the model is asked to do for one item. */
 export type Task = 'meaning' | 'word' | 'typed';
 
-export function taskFor(type: QuestionType): Task {
+/** What the model is asked to do for one item, or null when a type needs
+ *  nothing generated: a dictation, a tiles card, and a board word (its board
+ *  asks through its first word, tasksFor). */
+export function taskFor(type: QuestionType): Task | null {
   switch (type) {
     case 'multiple_choice':
+    case 'listen_choice':
       return 'meaning';
     case 'reverse_choice':
       return 'word';
     case 'typed_translation':
       return 'typed';
+    case 'dictation':
+    case 'letter_tiles':
+    case 'matching':
+      return null;
   }
 }
+
+/** Phase 24. Each position's task. A board's first word asks for wrong
+ *  meanings, which its fifth meaning is taken from (spec D10). */
+export function tasksFor(plan: SessionPlan): (Task | null)[] {
+  return plan.types.map((type, position) => (position === plan.board?.start ? 'meaning' : taskFor(type)));
+}
+
+/** A position's key: `q1` is the first card, whichever positions ask nothing. */
+export const keyOf = (position: number): string => `q${position + 1}`;
 
 /** The most alternatives a typed question keeps (questions_shape_valid). */
 export const MAX_ALTERNATIVES = 5;
@@ -74,16 +92,14 @@ export type DistractorVerdict =
   | { ok: true; byKey: Map<string, Generated> }
   | { ok: false; reason: string };
 
-/** `types[i]` is the type the service chose for `context[i]`. */
-export function distractorItems(context: GenerationContext[], types: readonly QuestionType[]): DistractorItem[] {
-  return context.map((row, index) => ({
-    key: `q${index + 1}`,
-    task: taskFor(types[index]),
-    form: row.form,
-    lemma: row.lemma,
-    partOfSpeech: row.partOfSpeech,
-    translation: row.translation,
-  }));
+/** `context` in session order, `tasks[i]` its position's task. */
+export function distractorItems(context: GenerationContext[], tasks: readonly (Task | null)[]): DistractorItem[] {
+  return context.flatMap((row, index) => {
+    const task = tasks[index];
+    return task
+      ? [{ key: keyOf(index), task, form: row.form, lemma: row.lemma, partOfSpeech: row.partOfSpeech, translation: row.translation }]
+      : [];
+  });
 }
 
 function language(code: string): Language {
@@ -276,23 +292,56 @@ export function optionsFor(correct: string, distractors: string[]): QuestionOpti
 /** Structurally db/schema's QuestionOption: stored data, snake_case. */
 export type QuestionOption = { position: number; text: string; is_correct: boolean };
 
+/** Phase 24 (spec D10). A board's five meanings as stored: its four words'
+ *  meanings, then the first of the first word's wrong meanings that is none of
+ *  them, so the last pair is never forced. Null when all three are. */
+export function boardMeanings(meanings: readonly string[], wrong: readonly string[]): string[] | null {
+  const taken = new Set(meanings.map(comparable));
+  const extra = wrong.map((text) => text.trim()).find((text) => !taken.has(comparable(text)));
+  return extra === undefined ? null : [...meanings, extra];
+}
+
+/** What a position needs beyond the model's answer: a tiles card's tiles, and
+ *  a board word's board (its meanings, and which of them is its own). */
+export type Extras = { tiles: string[] | null; board: { meanings: string[]; own: number } | null };
+export const NO_EXTRAS: Extras = { tiles: null, board: null };
+export const NOTHING_GENERATED: Generated = { distractors: [], alternatives: [] };
+
+export type QuestionContent = {
+  prompt: string | null;
+  options: QuestionOption[] | null;
+  alternatives: string[] | null;
+  tiles: string[] | null;
+};
+
 /**
- * Phase 23. One generated question's stored content (spec D13). Today's card
- * asks the form and offers meanings; the reversed card asks the meaning and
- * offers words; the typed card asks the meaning and keeps the alternatives.
- * The Hebrew prompt is stored, not joined: a question records what was asked.
+ * Phase 23 and 24. One generated question's stored content (phase 23 D13,
+ * phase 24 D15). Types whose options are Hebrew keep the meaning as their
+ * correct option; every other type stores it as the prompt. The prompt is
+ * stored, not joined: a question records what was asked.
  */
-export function generatedContent(
-  row: GenerationContext,
-  type: QuestionType,
-  generated: Generated,
-): { prompt: string | null; options: QuestionOption[] | null; alternatives: string[] | null } {
+export function generatedContent(row: GenerationContext, type: QuestionType, generated: Generated, extras: Extras): QuestionContent {
+  const none: QuestionContent = { prompt: null, options: null, alternatives: null, tiles: null };
   switch (type) {
     case 'multiple_choice':
-      return { prompt: null, options: optionsFor(row.translation, generated.distractors), alternatives: null };
+    case 'listen_choice':
+      return { ...none, options: optionsFor(row.translation, generated.distractors) };
     case 'reverse_choice':
-      return { prompt: row.translation, options: optionsFor(row.form, generated.distractors), alternatives: null };
+      return { ...none, prompt: row.translation, options: optionsFor(row.form, generated.distractors) };
     case 'typed_translation':
-      return { prompt: row.translation, options: null, alternatives: generated.alternatives };
+      return { ...none, prompt: row.translation, alternatives: generated.alternatives };
+    case 'dictation':
+      return { ...none, prompt: row.translation };
+    case 'letter_tiles':
+      if (!extras.tiles) throw new Error(`the tiles card for ${row.form} has no tiles`);
+      return { ...none, prompt: row.translation, tiles: extras.tiles };
+    case 'matching': {
+      const board = extras.board;
+      if (!board) throw new Error(`the board word ${row.form} has no board`);
+      return {
+        ...none,
+        options: board.meanings.map((text, position) => ({ position, text, is_correct: position === board.own })),
+      };
+    }
   }
 }

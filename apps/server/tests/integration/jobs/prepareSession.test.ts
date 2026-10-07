@@ -51,12 +51,12 @@ const WORDS: Record<string, string> = { tome: 'ספר', sprint: 'ריצה', lant
 
 /** Past the seed (skipped), three saved words, and a list session requested. */
 async function requestListSession(): Promise<string> {
-  const seed = await deps.sessions.createNextSession(E);
+  const seed = await deps.sessions.createNextSession(E, { listening: false });
   await deps.sessions.skipSession(seed.sessionId);
   for (const [lemma, translation] of Object.entries(WORDS)) {
     await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
   }
-  const { sessionId } = await deps.sessions.createNextSession(E);
+  const { sessionId } = await deps.sessions.createNextSession(E, { listening: false });
   return sessionId;
 }
 
