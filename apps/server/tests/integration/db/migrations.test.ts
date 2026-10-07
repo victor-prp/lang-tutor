@@ -391,13 +391,17 @@ describe('0017_speaking_cards', () => {
     ).rows;
     await db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)
-        values (${session.id}, 0, 'q1', '{0,1,2,3}'), (${session.id}, 1, 'q3', '{}')`);
+        values (${session.id}, 0, 'q1', '{0,1,2,3}'), (${session.id}, 1, 'q3', '{}'),
+               (${session.id}, 2, 'q3', '{}'), (${session.id}, 3, 'q3', '{}'), (${session.id}, 4, 'q3', '{}'),
+               (${session.id}, 5, 'q1', '{0,1,2,3}'), (${session.id}, 6, 'q3', '{}')`);
     await db.execute(sql`
       insert into answers (session_id, position, question_id, selected_option_position)
         values (${session.id}, 0, 'q1', 0)`);
+    // One typed answer of each phase 23 verdict.
     await db.execute(sql`
       insert into answers (session_id, position, question_id, typed_text, verdict)
-        values (${session.id}, 1, 'q3', 'kite', 'near_miss')`);
+        values (${session.id}, 1, 'q3', 'kite', 'exact'), (${session.id}, 2, 'q3', 'kyte', 'near_miss'),
+               (${session.id}, 3, 'q3', 'toy', 'alternative'), (${session.id}, 4, 'q3', 'bird', 'wrong')`);
 
     await runMigrations(db);
 
@@ -416,7 +420,10 @@ describe('0017_speaking_cards', () => {
     );
     expect(stored.rows).toEqual([
       { position: 0, verdict: null },
-      { position: 1, verdict: 'near_miss' },
+      { position: 1, verdict: 'exact' },
+      { position: 2, verdict: 'near_miss' },
+      { position: 3, verdict: 'alternative' },
+      { position: 4, verdict: 'wrong' },
     ]);
 
     // The new shapes.
@@ -428,23 +435,35 @@ describe('0017_speaking_cards', () => {
     // The new verdicts.
     await db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)
-        values (${session.id}, 2, 'r1', '{}'), (${session.id}, 3, 'r2', '{}'), (${session.id}, 4, 'r1', '{}'),
-               (${session.id}, 5, 'r2', '{}')`);
+        values (${session.id}, 7, 'r1', '{}'), (${session.id}, 8, 'r2', '{}'), (${session.id}, 9, 'r1', '{}'),
+               (${session.id}, 10, 'r2', '{}')`);
     const answer = (position: number, questionId: string, verdict: string) =>
       db.execute(sql`
         insert into answers (session_id, position, question_id, typed_text, verdict)
           values (${session.id}, ${position}, ${questionId}, '', ${verdict})`);
-    await answer(2, 'r1', 'understood');
-    await answer(3, 'r2', 'gave_up');
-    await answer(4, 'r1', 'skipped');
-    await expect(answer(5, 'r2', 'unheard')).rejects.toMatchObject({ cause: { constraint: 'answers_verdict_known' } });
+    await answer(7, 'r1', 'understood');
+    await answer(8, 'r2', 'gave_up');
+    await answer(9, 'r1', 'skipped');
+    await expect(answer(10, 'r2', 'unheard')).rejects.toMatchObject({ cause: { constraint: 'answers_verdict_known' } });
 
     // A stored session still loads and takes an answer.
     await db.transaction(async (tx) => {
-      const loaded = await createSessionRepo(tx).loadSession(session.id);
-      expect(loaded!.answers.slice(0, 2)).toEqual([
+      const repo = createSessionRepo(tx);
+      const before = await repo.loadSession(session.id);
+      expect(before!.answers.slice(0, 5)).toEqual([
         { question_id: 'q1', is_correct: true, answer_string: 'עפיפון' },
-        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'near_miss' },
+        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact' },
+        { question_id: 'q3', is_correct: true, answer_string: 'kyte', verdict: 'near_miss' },
+        { question_id: 'q3', is_correct: true, answer_string: 'toy', verdict: 'alternative' },
+        { question_id: 'q3', is_correct: false, answer_string: 'bird', verdict: 'wrong' },
+      ]);
+
+      await repo.insertAnswer(session.id, 5, 'q1', { displayIndex: 1 });
+      await repo.insertAnswer(session.id, 6, 'q3', { text: 'kite', verdict: 'exact' });
+      const after = await repo.loadSession(session.id);
+      expect(after!.answers.slice(5, 7)).toEqual([
+        { question_id: 'q1', is_correct: false, answer_string: 'א' },
+        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact' },
       ]);
     });
   });
