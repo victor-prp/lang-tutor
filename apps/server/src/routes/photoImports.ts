@@ -21,8 +21,8 @@ import {
 } from '../errors';
 import type { PhotoImportService } from '../services/photoImports';
 
-/** Spec D6: the upload alone has a body limit, the app's first. A 2 MB JPEG
- *  is about 2.7 MB of base64 inside its JSON. */
+/** Spec D6: the upload has a body limit, the second, after the speech upload's. A 2 MB
+ *  JPEG is about 2.7 MB of base64 inside its JSON. */
 export const PHOTO_BODY_LIMIT_BYTES = 3 * 1024 * 1024;
 
 const json = <T extends z.ZodType>(schema: T, description: string) => ({
@@ -31,7 +31,7 @@ const json = <T extends z.ZodType>(schema: T, description: string) => ({
 });
 const enrollmentParams = z.object({ id: z.string() });
 const importParams = z.object({ id: z.string() });
-const itemParams = z.object({ id: z.string(), position: z.coerce.number().int().nonnegative() });
+const itemParams = z.object({ id: z.string(), position: z.coerce.number().int().nonnegative().max(2_147_483_647) });
 const NO_IMPORT = json(ErrorSchema, 'No photo import has this id.');
 const CONFLICT = json(ErrorSchema, 'The import is in the wrong state: a row still being looked up, or an import already saved or discarded.');
 
@@ -126,9 +126,6 @@ const discardImportRoute = createRoute({
 
 // Transport only (ADR 0001 R1). Mounted at /api.
 export function createPhotoImportsRouter(photoImports: PhotoImportService) {
-  // Bound once: ADR 0003 R1's grep for a dotted get call cannot tell a service call from a
-  // route registered without createRoute.
-  const getImport = photoImports.get;
   const router = new OpenAPIHono({
     defaultHook: (result, c) => {
       if (!result.success) return c.json({ error: 'invalid request' }, 400);
@@ -163,7 +160,7 @@ export function createPhotoImportsRouter(photoImports: PhotoImportService) {
   router.openapi(getImportRoute, async (c) => {
     const { id } = c.req.valid('param');
     try {
-      return c.json(await getImport(id), 200);
+      return c.json(await photoImports.getImport(id), 200);
     } catch (error) {
       if (error instanceof PhotoImportNotFound) return c.json({ error: 'photo import not found' }, 404);
       throw error;

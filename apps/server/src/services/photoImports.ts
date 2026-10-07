@@ -130,7 +130,7 @@ export function createPhotoImportService({
         }));
       }),
 
-    get: async (importId: string): Promise<PhotoImport> =>
+    getImport: async (importId: string): Promise<PhotoImport> =>
       transaction(async ({ photoImport }) => {
         const row = await photoImport.findImport(importId);
         if (!row) throw new PhotoImportNotFound(importId);

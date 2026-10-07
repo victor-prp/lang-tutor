@@ -109,7 +109,7 @@ describe('get', () => {
       listItems: async () => [itemRow(), itemRow({ position: 1, status: 'pending', options: [], chosenSenseId: null, suggestedSenseId: null, ticked: false })],
     });
     const { service } = setup({ photoImport });
-    const found = await service.get(ID);
+    const found = await service.getImport(ID);
     expect(found).toMatchObject({ id: ID, status: 'looking_up', item_count: 2, settled_count: 1 });
     expect(found.items[0]).toEqual({
       position: 0, text: 'gatto', hebrew: null, status: 'ready', corrected_form: null,
@@ -119,7 +119,7 @@ describe('get', () => {
 
   it('answers PhotoImportNotFound for a missing import', async () => {
     const { service } = setup({ photoImport: stub<PhotoImportRepo>({ findImport: async () => null }) });
-    await expect(service.get(ID)).rejects.toBeInstanceOf(PhotoImportNotFound);
+    await expect(service.getImport(ID)).rejects.toBeInstanceOf(PhotoImportNotFound);
   });
 });
 

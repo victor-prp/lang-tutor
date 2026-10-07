@@ -80,7 +80,7 @@ export function createFakeAppDeps(): AppDeps {
   const photoImports: PhotoImportService = {
     create: unreachable,
     list: unreachable,
-    get: unreachable,
+    getImport: unreachable,
     updateItem: unreachable,
     save: unreachable,
     discard: unreachable,

@@ -125,6 +125,12 @@ describe('PATCH /api/photo-imports/{id}/items/{position}', () => {
     expect((await send('PATCH', `/photo-imports/${id}/items/1`, { ticked: true })).status).toBe(400);
   });
 
+  it('answers 400, not 500, for a position past Postgres integer range', async () => {
+    const options = await word('casa', ['בית', 'משפחה']);
+    const id = await seedPhotoImport(t.db, { enrollmentId: IT, status: 'read', items: [{ text: 'casa', options }] });
+    expect((await send('PATCH', `/photo-imports/${id}/items/2147483648`, { ticked: false })).status).toBe(400);
+  });
+
   it('answers 409 for a row still being looked up, and for a discarded import (Review Focus 2)', async () => {
     const options = await word('casa', ['בית', 'משפחה']);
     const id = await seedPhotoImport(t.db, { enrollmentId: IT, status: 'read', items: [{ text: 'casa', options }, { text: 'gatto' }] });
