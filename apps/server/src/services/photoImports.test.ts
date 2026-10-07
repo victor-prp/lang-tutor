@@ -127,7 +127,7 @@ describe('updateItem', () => {
   const repoWith = (item: PhotoImportItemRow, row: PhotoImportRow = importRow()) => {
     const updates: unknown[] = [];
     const photoImport = stub<PhotoImportRepo>({
-      findImport: async () => row,
+      findImportForUpdate: async () => row,
       findItem: async () => item,
       updateItem: async (_id, _position, update) => {
         updates.push(update);
@@ -167,7 +167,7 @@ describe('updateItem', () => {
   });
 
   it('answers PhotoImportNotFound for a row that does not exist', async () => {
-    const photoImport = stub<PhotoImportRepo>({ findImport: async () => importRow(), findItem: async () => null });
+    const photoImport = stub<PhotoImportRepo>({ findImportForUpdate: async () => importRow(), findItem: async () => null });
     const { service } = setup({ photoImport });
     await expect(service.updateItem(ID, 9, { ticked: false })).rejects.toBeInstanceOf(PhotoImportNotFound);
   });
@@ -185,7 +185,7 @@ describe('save', () => {
       itemRow({ position: 2, ticked: false }),
     ];
     const photoImport = stub<PhotoImportRepo>({
-      findImport: async () => importRow(),
+      findImportForUpdate: async () => importRow(),
       listItems: async () => items,
       transition: async (...args) => {
         transitions.push(args);
@@ -207,7 +207,7 @@ describe('save', () => {
   });
 
   it('answers a repeated save with the same ids and writes nothing', async () => {
-    const photoImport = stub<PhotoImportRepo>({ findImport: async () => importRow({ status: 'saved' }), listItems: async () => [itemRow()] });
+    const photoImport = stub<PhotoImportRepo>({ findImportForUpdate: async () => importRow({ status: 'saved' }), listItems: async () => [itemRow()] });
     const { service } = setup({ photoImport, vocabulary: stub<VocabularyRepo>({}) });
     expect(await service.save(ID)).toEqual({ saved_sense_ids: ['s1'] });
   });
@@ -218,14 +218,14 @@ describe('save', () => {
       [importRow({ status: 'discarded' }), [itemRow()]],
       [importRow({ status: 'reading' }), []],
     ] as const) {
-      const photoImport = stub<PhotoImportRepo>({ findImport: async () => row, listItems: async () => [...items] });
+      const photoImport = stub<PhotoImportRepo>({ findImportForUpdate: async () => row, listItems: async () => [...items] });
       const { service } = setup({ photoImport, vocabulary: stub<VocabularyRepo>({}) });
       await expect(service.save(ID)).rejects.toBeInstanceOf(PhotoImportConflict);
     }
   });
 
   it('is all or nothing: a refused sense throws before anything is written', async () => {
-    const photoImport = stub<PhotoImportRepo>({ findImport: async () => importRow(), listItems: async () => [itemRow()] });
+    const photoImport = stub<PhotoImportRepo>({ findImportForUpdate: async () => importRow(), listItems: async () => [itemRow()] });
     const vocabulary = stub<VocabularyRepo>({ findSaveable: async () => [] });
     const { service } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT) });
     await expect(service.save(ID)).rejects.toBeInstanceOf(InvalidVocabularyEntry);
@@ -233,7 +233,7 @@ describe('save', () => {
 
   it('refuses when a discard won the race to the final transition', async () => {
     const photoImport = stub<PhotoImportRepo>({
-      findImport: async () => importRow(),
+      findImportForUpdate: async () => importRow(),
       listItems: async () => [itemRow()],
       transition: async () => false,
     });
@@ -248,7 +248,7 @@ describe('discard', () => {
     const transitions: unknown[] = [];
     const repoFor = (row: PhotoImportRow) =>
       stub<PhotoImportRepo>({
-        findImport: async () => row,
+        findImportForUpdate: async () => row,
         transition: async (...args) => {
           transitions.push(args);
           return true;
@@ -260,7 +260,7 @@ describe('discard', () => {
   });
 
   it('refuses to discard a saved import', async () => {
-    const { service } = setup({ photoImport: stub<PhotoImportRepo>({ findImport: async () => importRow({ status: 'saved' }) }) });
+    const { service } = setup({ photoImport: stub<PhotoImportRepo>({ findImportForUpdate: async () => importRow({ status: 'saved' }) }) });
     await expect(service.discard(ID)).rejects.toBeInstanceOf(PhotoImportConflict);
   });
 });

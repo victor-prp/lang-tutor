@@ -43,6 +43,12 @@ describe('photo import repository', () => {
     expect(await repo((r) => r.findImport('nope'))).toBeNull();
   });
 
+  it('reads an import with a lock, and answers null for a missing or non-uuid id', async () => {
+    const { id } = await repo((r) => r.insertImport({ enrollmentId: E, photo: 'QUJD' }));
+    expect(await repo((r) => r.findImportForUpdate(id))).toMatchObject({ id, enrollmentId: E, status: 'reading' });
+    expect(await repo((r) => r.findImportForUpdate('nope'))).toBeNull();
+  });
+
   it('writes rows pending, then a result once, and a failure only while pending', async () => {
     const { id } = await repo((r) => r.insertImport({ enrollmentId: E, photo: 'QUJD' }));
     await repo((r) =>

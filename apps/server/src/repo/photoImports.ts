@@ -98,6 +98,14 @@ export function createPhotoImportRepo(tx: Tx) {
       return row ? { ...row, status: row.status as StoredImportStatus } : null;
     },
 
+    /** findImport that locks the row until the transaction ends. It serializes the
+     *  learner's changes, save and discard on one import. */
+    findImportForUpdate: async (id: string): Promise<PhotoImportRow | null> => {
+      if (!UUID_RE.test(id)) return null;
+      const [row] = await tx.select().from(photoImports).where(eq(photoImports.id, id)).for('update');
+      return row ? { ...row, status: row.status as StoredImportStatus } : null;
+    },
+
     /** Open imports (not saved or discarded, made since `since`) with their row
      *  counts, newest first. One enrollment's, served by the enrollment index. */
     listOpen: async (input: { enrollmentId: string; since: Date }): Promise<PhotoImportListRow[]> => {

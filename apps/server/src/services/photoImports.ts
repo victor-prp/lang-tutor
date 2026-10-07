@@ -132,7 +132,7 @@ export function createPhotoImportService({
 
     updateItem: async (importId: string, position: number, update: ItemUpdate): Promise<PhotoImportItem> =>
       transaction(async ({ photoImport }) => {
-        const row = await photoImport.findImport(importId);
+        const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
         if (!isOpen(row.status, row.createdAt, now())) throw new PhotoImportConflict(importId, 'not open');
         const item = await photoImport.findItem(importId, position);
@@ -157,7 +157,7 @@ export function createPhotoImportService({
      */
     save: async (importId: string): Promise<SaveVocabularyResponse> => {
       const outcome = await transaction(async ({ photoImport, enrollment, vocabulary }) => {
-        const row = await photoImport.findImport(importId);
+        const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
         const items = await photoImport.listItems(importId);
         const entries = firstPerSense(entriesToSave(items));
@@ -202,7 +202,7 @@ export function createPhotoImportService({
     /** Idempotent on a discarded import. A saved one is refused (409). */
     discard: async (importId: string): Promise<void> => {
       const discarded = await transaction(async ({ photoImport }) => {
-        const row = await photoImport.findImport(importId);
+        const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
         if (row.status === 'discarded') return false;
         if (row.status === 'saved') throw new PhotoImportConflict(importId, 'already saved');
