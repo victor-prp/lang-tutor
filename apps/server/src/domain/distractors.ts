@@ -31,10 +31,12 @@ export function taskFor(type: QuestionType): Task | null {
     case 'reverse_choice':
       return 'word';
     case 'typed_translation':
+    case 'say_translation':
       return 'typed';
     case 'dictation':
     case 'letter_tiles':
     case 'matching':
+    case 'read_aloud':
       return null;
   }
 }
@@ -363,8 +365,10 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
     case 'reverse_choice':
       return { ...none, prompt: row.translation, options: optionsFor(row.form, generated.distractors) };
     case 'typed_translation':
+    case 'say_translation':
       return { ...none, prompt: row.translation, alternatives: generated.alternatives };
     case 'dictation':
+    case 'read_aloud':
       return { ...none, prompt: row.translation };
     case 'letter_tiles':
       if (!extras.tiles) throw new Error(`the tiles card for ${row.form} has no tiles`);

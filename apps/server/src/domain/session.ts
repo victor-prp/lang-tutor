@@ -4,9 +4,11 @@ import {
   answerFits,
   evaluate,
   isChoice,
+  isSpeaking,
   missed,
   pickQuestions,
   score,
+  spokenVerdict,
   type AnswerInput,
 } from '@lang-tutor/core/domain';
 
@@ -53,6 +55,7 @@ export type StepOutcome =
   | { status: 'invalid_question' }
   | { status: 'out_of_range' }
   | { status: 'wrong_answer_kind' }
+  | { status: 'unheard' }
   | { status: 'advanced' | 'replayed'; record: SessionRecord; justCompleted: boolean };
 
 // Records the answer to `questionId` if it is the session's current question,
@@ -79,6 +82,11 @@ export function step(record: SessionRecord, questionId: string, answer: AnswerIn
   const expected = currentQuestion(record);
   if (expected && questionId === expected.id) {
     if (!answerFits(expected, answer)) return { status: 'wrong_answer_kind' };
+    // Phase 25 (spec D5). A transcript that is not the word records nothing:
+    // a recogniser's reject is no evidence and never wrong (phase 20).
+    if ('heard' in answer && isSpeaking(expected) && spokenVerdict(expected, answer.heard) === 'unheard') {
+      return { status: 'unheard' };
+    }
     if ('option_index' in answer && isChoice(expected)) {
       if (answer.option_index < 0 || answer.option_index >= expected.options.length) {
         return { status: 'out_of_range' };

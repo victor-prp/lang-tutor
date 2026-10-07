@@ -476,3 +476,25 @@ describe('rows that ask the model nothing', () => {
     });
   });
 });
+
+describe('phase 25 generation', () => {
+  const row = { senseId: 's', variantId: 'v', lexemeId: 'l', form: 'gatto', lemma: 'gatto', partOfSpeech: 'noun', translation: 'חתול' };
+  it('asks the typed task for say the translation, and nothing for read aloud', () => {
+    expect(taskFor('say_translation')).toBe('typed');
+    expect(taskFor('read_aloud')).toBeNull();
+  });
+  it('stores the Hebrew as the prompt of both, and the alternatives of say the translation', () => {
+    expect(generatedContent(row, 'read_aloud', NOTHING_GENERATED, NO_EXTRAS)).toEqual({
+      prompt: 'חתול',
+      options: null,
+      alternatives: null,
+      tiles: null,
+    });
+    expect(generatedContent(row, 'say_translation', { distractors: [], alternatives: ['micio'] }, NO_EXTRAS)).toEqual({
+      prompt: 'חתול',
+      options: null,
+      alternatives: ['micio'],
+      tiles: null,
+    });
+  });
+});
