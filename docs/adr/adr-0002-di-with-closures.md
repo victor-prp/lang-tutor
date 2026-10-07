@@ -1,7 +1,7 @@
 # ADR 0002: Dependency injection via closures, constructed only at a composition root
 
 - **Status:** Accepted
-- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25)
+- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25); R1 widened 2026-10-07 (phase 25): `expo-file-system`
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md),
   *"Closure-based dependency injection is mandatory"*, and
   [phase 5 design](../superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md),
@@ -34,7 +34,7 @@ other file receives what it needs as a parameter and stays swappable for a test'
 
 | # | Subject | Must not appear outside a composition root |
 |---|---|---|
-| R1 | Concrete I/O/randomness implementations | `Math.random` (server); `@react-native-async-storage/async-storage`, `expo-crypto`, `expo-speech`, `expo-audio` imports (mobile) |
+| R1 | Concrete I/O/randomness implementations | `Math.random` (server); `@react-native-async-storage/async-storage`, `expo-crypto`, `expo-speech`, `expo-audio`, `expo-file-system` imports (mobile) |
 | R2 | `process.env` | any read of `process.env`, in either app |
 | R3 | Module-level exported singletons | `export const x = createX(...)` / `export const x = new X(...)` at module scope |
 | R4 | `jest.mock` | anywhere in `apps/server` or `apps/mobile` |
@@ -53,7 +53,7 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
   `createHealthRepo`, `createUserRepo`, `createEnrollmentRepo`, `createDictRepo`, `createVocabularyRepo`, `createProgressRepo`, `createTransaction`, `createSessionService`,
   `createUserService`, `createEnrollmentService`, `createGeminiClient`, `createGeminiTranscriber`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
-  `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`, `createSpeaker`) is short enough to spot-check.
+  `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`, `createSpeaker`, `createRecorder`) is short enough to spot-check.
   `createGeminiClient` and `createGeminiTranscriber` are annotated at their call sites in `composition.ts` rather than at their
   definitions, because ADR 0001 R10 forbids `providers/` from importing the contracts they
   satisfy — the same arrangement as `createTransaction` and `Transaction`.
@@ -71,7 +71,7 @@ mirrors this block verbatim. Each command must print nothing.
 ```bash
 # R1 — concrete I/O/randomness implementations named only at a composition root
 grep -rn "Math\.random" apps/server/src --include='*.ts' | grep -v -e '/index\.ts:' -e '\.test\.ts:'
-grep -rln "from '@react-native-async-storage/async-storage'\|from 'expo-crypto'\|from 'expo-speech'\|from 'expo-audio'" apps/mobile/src --include='*.ts' --include='*.tsx' | grep -v '_layout\.tsx'
+grep -rln "from '@react-native-async-storage/async-storage'\|from 'expo-crypto'\|from 'expo-speech'\|from 'expo-audio'\|from 'expo-file-system'" apps/mobile/src --include='*.ts' --include='*.tsx' | grep -v '_layout\.tsx'
 
 # R2 — process.env read only at a composition root
 grep -rn "process\.env" apps/server/src apps/mobile/src --include='*.ts' --include='*.tsx' \
