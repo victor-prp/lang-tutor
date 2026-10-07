@@ -9,6 +9,7 @@ import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
+import { asChoice } from '../../support/questions';
 import { testRng } from '../../support/testRng';
 import {
   EnrollmentNotFound,
@@ -129,7 +130,7 @@ describe('currentSession', () => {
 
   it('shows the open session with its progress', async () => {
     const { sessionId, record } = await startSeed(E);
-    await service.submitAnswer(sessionId, record.questions[0].id, 0);
+    await service.submitAnswer(sessionId, record.questions[0].id, { option_index: 0 });
     expect(await service.currentSession(E)).toEqual({
       current: { id: sessionId, status: 'ready', source: 'seed', answered: 1, total: SESSION_LENGTH },
       nextSource: 'list',
@@ -167,7 +168,7 @@ describe('skipSession', () => {
 
   it('refuses a completed session', async () => {
     const { sessionId, record } = await startSeed(E);
-    for (const question of record.questions) await service.submitAnswer(sessionId, question.id, 0);
+    for (const question of record.questions) await service.submitAnswer(sessionId, question.id, { option_index: 0 });
     await expect(service.skipSession(sessionId)).rejects.toBeInstanceOf(SessionNotSkippable);
   });
 
@@ -178,7 +179,7 @@ describe('skipSession', () => {
   it('a skipped session takes no more answers', async () => {
     const { sessionId, record } = await startSeed(E);
     await service.skipSession(sessionId);
-    await expect(service.submitAnswer(sessionId, record.questions[0].id, 0)).rejects.toBeInstanceOf(SessionNotReady);
+    await expect(service.submitAnswer(sessionId, record.questions[0].id, { option_index: 0 })).rejects.toBeInstanceOf(SessionNotReady);
   });
 });
 
@@ -191,8 +192,8 @@ describe('getSession', () => {
 describe('submitAnswer', () => {
   it('advances on a fresh answer', async () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
-    const question = record.questions[0];
-    const after = await service.submitAnswer(sessionId, question.id, question.correct_option);
+    const question = asChoice(record.questions[0]);
+    const after = await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
     expect(after.answers).toHaveLength(1);
     expect(after.answers[0]).toEqual({
       question_id: question.id,
@@ -204,29 +205,29 @@ describe('submitAnswer', () => {
 
   it('replays a retried answer without double-counting it', async () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
-    const question = record.questions[0];
-    await service.submitAnswer(sessionId, question.id, question.correct_option);
-    const retry = await service.submitAnswer(sessionId, question.id, question.correct_option);
+    const question = asChoice(record.questions[0]);
+    await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
+    const retry = await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
     expect(retry.answers).toHaveLength(1);
   });
 
   it('throws SessionNotFound for an unknown session', async () => {
     await expect(
-      service.submitAnswer('00000000-0000-0000-0000-000000000000', 'q-window', 0),
+      service.submitAnswer('00000000-0000-0000-0000-000000000000', 'q-window', { option_index: 0 }),
     ).rejects.toBeInstanceOf(SessionNotFound);
   });
 
   it('throws QuestionDesynced for a question that is not current', async () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
     await expect(
-      service.submitAnswer(sessionId, record.questions[3].id, 0),
+      service.submitAnswer(sessionId, record.questions[3].id, { option_index: 0 }),
     ).rejects.toBeInstanceOf(QuestionDesynced);
   });
 
   it('throws OptionOutOfRange for an option index past the last option', async () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
     await expect(
-      service.submitAnswer(sessionId, record.questions[0].id, 99),
+      service.submitAnswer(sessionId, record.questions[0].id, { option_index: 99 }),
     ).rejects.toBeInstanceOf(OptionOutOfRange);
   });
 
@@ -235,8 +236,8 @@ describe('submitAnswer', () => {
 
     let current = record;
     for (let i = 0; i < SESSION_LENGTH; i++) {
-      const question = current.questions[i];
-      current = await service.submitAnswer(sessionId, question.id, question.correct_option);
+      const question = asChoice(current.questions[i]);
+      current = await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
     }
 
     expect(current.complete).toBe(true);
@@ -253,13 +254,13 @@ describe('submitAnswer', () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
     let current = record;
     for (let i = 0; i < SESSION_LENGTH; i++) {
-      const question = current.questions[i];
-      current = await service.submitAnswer(sessionId, question.id, question.correct_option);
+      const question = asChoice(current.questions[i]);
+      current = await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
     }
     expect(logger.events).toHaveLength(1);
 
-    const last = record.questions[SESSION_LENGTH - 1];
-    await service.submitAnswer(sessionId, last.id, last.correct_option);
+    const last = asChoice(record.questions[SESSION_LENGTH - 1]);
+    await service.submitAnswer(sessionId, last.id, { option_index: last.correct_option });
     expect(logger.events).toHaveLength(1);
   });
 });
@@ -290,8 +291,11 @@ describe('progress (phase 20)', () => {
     return { sessionId, record, saved };
   }
 
-  async function answer(sessionId: string, q: SessionRecord['questions'][number], right: boolean) {
-    return service.submitAnswer(sessionId, q.id, right ? q.correct_option : (q.correct_option + 1) % q.options.length);
+  async function answer(sessionId: string, question: SessionRecord['questions'][number], right: boolean) {
+    const q = asChoice(question);
+    return service.submitAnswer(sessionId, q.id, {
+      option_index: right ? q.correct_option : (q.correct_option + 1) % q.options.length,
+    });
   }
 
   async function answerAll(sessionId: string, record: SessionRecord, wrongAt: number[] = []) {
@@ -314,10 +318,12 @@ describe('progress (phase 20)', () => {
     expect(receptive(rows, saved[2])).toMatchObject({ level: 2, lastStepOn: day });
     expect(rows.filter((row) => row.dimension !== 'written_receptive').every((row) => row.level === 1)).toBe(true);
     expect(await readSnapshot(t.db, sessionId)).toHaveLength(15);
-    expect(result.progress.map((p) => [p.senseId, p.levelBefore, p.levelAfter])).toEqual([
-      [saved[0], 1, 2],
-      [saved[1], 1, 1],
-      [saved[2], 1, 2],
+    // Phase 23: recognition alone moves one of three live dimensions, so the
+    // badge, (2, 1, 1), still reads 1; `raised` says what did move.
+    expect(result.progress.map((p) => [p.senseId, p.levelBefore, p.levelAfter, p.raised])).toEqual([
+      [saved[0], 1, 1, ['written_receptive']],
+      [saved[1], 1, 1, []],
+      [saved[2], 1, 1, ['written_receptive']],
     ]);
   });
 

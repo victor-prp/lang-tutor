@@ -1,15 +1,37 @@
 import type { LlmDistractors } from '@lang-tutor/core/api';
 import { LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
+import type { QuestionType } from '@lang-tutor/core/domain';
 
 import { LANGUAGES, stripStress, type Language, type LanguageCode } from './languages';
-import { unfence } from './translation';
+import { dropNulls, unfence } from './translation';
 
 /**
  * Phase 19. The pure core of a list session's generation: what to ask the
  * model for wrong options, and whether its answer is usable. No I/O, no clock,
  * no randomness (ADR 0001 R3). services/sessions.ts calls the model and
  * decides what a refusal costs.
+ *
+ * Phase 23. One call serves three tasks (spec D8): wrong meanings for today's
+ * card, wrong target words for the reversed card, and the other right answers
+ * a typed card should accept.
  */
+
+/** What the model is asked to do for one item. */
+export type Task = 'meaning' | 'word' | 'typed';
+
+export function taskFor(type: QuestionType): Task {
+  switch (type) {
+    case 'multiple_choice':
+      return 'meaning';
+    case 'reverse_choice':
+      return 'word';
+    case 'typed_translation':
+      return 'typed';
+  }
+}
+
+/** The most alternatives a typed question keeps (questions_shape_valid). */
+export const MAX_ALTERNATIVES = 5;
 
 /** Part of the system prompt, and what MockServer matches to tell this call
  *  from a translation. Changing the wording means changing the stubs. */
@@ -29,6 +51,7 @@ export type GenerationContext = {
 
 export type DistractorItem = {
   key: string;
+  task: Task;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -43,13 +66,19 @@ export type DistractorPrompt = {
   schema: typeof LlmDistractorsSchema;
 };
 
+/** What one item came back with, validated: three wrong options for a choice
+ *  task, cleaned alternatives for a typed one, and nothing else. */
+export type Generated = { distractors: string[]; alternatives: string[] };
+
 export type DistractorVerdict =
-  | { ok: true; byKey: Map<string, string[]> }
+  | { ok: true; byKey: Map<string, Generated> }
   | { ok: false; reason: string };
 
-export function distractorItems(context: GenerationContext[]): DistractorItem[] {
+/** `types[i]` is the type the service chose for `context[i]`. */
+export function distractorItems(context: GenerationContext[], types: readonly QuestionType[]): DistractorItem[] {
   return context.map((row, index) => ({
     key: `q${index + 1}`,
+    task: taskFor(types[index]),
     form: row.form,
     lemma: row.lemma,
     partOfSpeech: row.partOfSpeech,
@@ -71,23 +100,28 @@ export function buildDistractorPrompt(input: {
   const learned = language(input.from);
   const answers = language(input.to);
   const system = [
-    `You write multiple-choice options for a ${learned.name} vocabulary quiz for a Hebrew-speaking learner.`,
+    `You write the answers for a ${learned.name} vocabulary quiz for a Hebrew-speaking learner.`,
     'Return JSON only, matching the supplied schema.',
-    `Each item is a ${learned.name} word or phrase and its correct ${answers.name} translation.`,
-    `For each item write ${DISTRACTOR_MARKER} in ${answers.name}.`,
+    `Each item is a ${learned.name} word or phrase with its lemma and part of speech, its correct ${answers.name} translation, and a task:`,
+    `- "meaning": the learner sees the ${learned.name} word and picks its ${answers.name} translation. Write ${DISTRACTOR_MARKER} in ${answers.name} as distractors.`,
+    `- "word": the learner sees the ${answers.name} translation and picks the ${learned.name} word. Write ${DISTRACTOR_MARKER} in ${learned.name} as distractors.`,
+    `- "typed": the learner sees the ${answers.name} translation and types the ${learned.name} word. Leave distractors empty. As alternatives, list every other ${learned.name} word or phrase that translates it equally well in this sense, at most ${MAX_ALTERNATIVES}, or none.`,
     'Each wrong answer must be plausible: the same part of speech, the same register and a',
-    'similar length as the correct translation.',
-    'A wrong answer must never be right: not the translation itself, not a synonym of it, and',
+    'similar length as the correct answer.',
+    'A wrong answer must never be right: not the correct answer itself, not a synonym of it, and',
     'not another valid translation of the word.',
     'The three wrong answers of an item must differ from each other.',
-    'When several items share a word, none of an item\'s wrong answers may be another item\'s correct answer.',
+    "When several items share a word, none of an item's wrong answers may be another item's correct answer.",
+    "When several items share a meaning, none of a \"word\" item's wrong answers may be another of those items' words.",
     'Answer every item, using its key exactly as given.',
     ...answers.writing,
+    ...learned.writing,
   ].join('\n');
 
   const user = JSON.stringify({
     items: input.items.map((item) => ({
       key: item.key,
+      task: item.task,
       word: item.form,
       lemma: item.lemma,
       part_of_speech: item.partOfSpeech,
@@ -98,6 +132,24 @@ export function buildDistractorPrompt(input: {
   return { system, user, schema: LlmDistractorsSchema };
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** A null list is "none" (structured output's spelling, dropNulls), and a
+ *  missing `distractors` is an empty one: a typed item has no wrong options to
+ *  give (phase 23, D8). What an empty list costs is the per-task validation's
+ *  call, not the parser's. */
+function withEmptyLists(json: unknown): unknown {
+  const cleaned = dropNulls(json);
+  if (!isRecord(cleaned) || !Array.isArray(cleaned.items)) return cleaned;
+  return {
+    ...cleaned,
+    items: cleaned.items.map((item) =>
+      isRecord(item) && !('distractors' in item) ? { ...item, distractors: [] } : item,
+    ),
+  };
+}
+
 /** `null` means unreadable; the caller decides what that costs. */
 export function parseLlmDistractors(raw: string): LlmDistractors | null {
   let json: unknown;
@@ -106,7 +158,7 @@ export function parseLlmDistractors(raw: string): LlmDistractors | null {
   } catch {
     return null;
   }
-  const result = LlmDistractorsSchema.safeParse(json);
+  const result = LlmDistractorsSchema.safeParse(withEmptyLists(json));
   return result.success ? result.data : null;
 }
 
@@ -121,48 +173,126 @@ const comparable = (text: string): string =>
     .trim()
     .toLowerCase();
 
+function badChoice(
+  item: DistractorItem,
+  items: DistractorItem[],
+  found: string[],
+  explanationLetters: RegExp,
+): string | null {
+  const texts = found.map((text) => text.trim());
+  if (texts.length !== 3 || texts.some((text) => text === '')) {
+    return `${item.key} needs three non-empty wrong answers`;
+  }
+  // A word item's right answer is the form, and its lemma is right too.
+  const rights = item.task === 'word' ? [item.form, item.lemma] : [item.translation];
+  const all = texts.map(comparable);
+  if (new Set(all).size !== all.length || all.some((text) => rights.map(comparable).includes(text))) {
+    return `${item.key} repeats the answer or another wrong answer`;
+  }
+  if (item.task === 'word' && texts.some((text) => explanationLetters.test(text))) {
+    return `${item.key} offers a wrong answer in the explanation language where the options are ${item.form}'s`;
+  }
+  // Save-all stores every sense of a word, so the batch can hold the same
+  // form twice; the other sense's translation is a right answer on a meaning
+  // item. Turned round, two words with one meaning make each other right on a
+  // word item.
+  const siblings = new Set(
+    items
+      .filter((other) => other !== item)
+      .filter((other) =>
+        item.task === 'word'
+          ? comparable(other.translation) === comparable(item.translation)
+          : comparable(other.form) === comparable(item.form),
+      )
+      .map((other) => comparable(item.task === 'word' ? other.form : other.translation)),
+  );
+  if (all.some((text) => siblings.has(text))) {
+    return item.task === 'word'
+      ? `${item.key} offers another saved word with the same meaning as a wrong answer`
+      : `${item.key} offers another meaning of the same word as a wrong answer`;
+  }
+  return null;
+}
+
+/** Never a refusal: alternatives only widen what a typed card accepts, so a
+ *  bad one is dropped (empty, in the explanation language, the answer itself,
+ *  a repeat) and the rest kept, up to MAX_ALTERNATIVES. */
+function cleanAlternatives(item: DistractorItem, found: string[] | undefined, explanationLetters: RegExp): string[] {
+  const seen = new Set([item.form, item.lemma].map(comparable));
+  const kept: string[] = [];
+  for (const raw of found ?? []) {
+    const text = raw.trim();
+    const key = comparable(text);
+    if (text === '' || explanationLetters.test(text) || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(text);
+    if (kept.length === MAX_ALTERNATIVES) break;
+  }
+  return kept;
+}
+
 /**
- * All or nothing: a session is either fully generated or the attempt fails and
- * pg-boss retries it. Keys the model added beyond the items asked are ignored.
+ * All or nothing for the choice tasks: a session is either fully generated or
+ * the attempt fails and pg-boss retries it. A typed item cannot fail. Keys the
+ * model added beyond the items asked are ignored. `explanation` is the
+ * language the meanings are in (the enrollment's source): a reversed card's
+ * wrong words and a typed card's alternatives must not be in its script.
  */
-export function validateDistractors(items: DistractorItem[], answer: LlmDistractors): DistractorVerdict {
-  const answered = new Map(answer.items.map((item) => [item.key, item.distractors]));
-  const byKey = new Map<string, string[]>();
+export function validateDistractors(
+  items: DistractorItem[],
+  answer: LlmDistractors,
+  explanation: string,
+): DistractorVerdict {
+  const explanationLetters = language(explanation).letters;
+  const answered = new Map(answer.items.map((item) => [item.key, item]));
+  const byKey = new Map<string, Generated>();
   for (const item of items) {
     const found = answered.get(item.key);
     if (!found) return { ok: false, reason: `no answer for ${item.key}` };
-    const texts = found.map((text) => text.trim());
-    if (texts.length !== 3 || texts.some((text) => text === '')) {
-      return { ok: false, reason: `${item.key} needs three non-empty wrong answers` };
+    if (item.task === 'typed') {
+      byKey.set(item.key, {
+        distractors: [],
+        alternatives: cleanAlternatives(item, found.alternatives, explanationLetters),
+      });
+      continue;
     }
-    const all = [item.translation, ...texts].map(comparable);
-    if (new Set(all).size !== all.length) {
-      return { ok: false, reason: `${item.key} repeats the answer or another wrong answer` };
-    }
-    // Save-all stores every sense of a word, so the batch can hold the same
-    // form twice; the other sense's translation is a right answer here.
-    const siblings = new Set(
-      items
-        .filter((other) => other !== item && comparable(other.form) === comparable(item.form))
-        .map((other) => comparable(other.translation)),
-    );
-    if (all.slice(1).some((text) => siblings.has(text))) {
-      return { ok: false, reason: `${item.key} offers another meaning of the same word as a wrong answer` };
-    }
-    byKey.set(item.key, texts);
+    const reason = badChoice(item, items, found.distractors, explanationLetters);
+    if (reason) return { ok: false, reason };
+    byKey.set(item.key, { distractors: found.distractors.map((text) => text.trim()), alternatives: [] });
   }
   return { ok: true, byKey };
 }
 
 /** A generated question's options as stored: correct first. The shown order is
  *  shuffled per session by pickQuestions, exactly as for seed questions. */
-export function optionsFor(
-  translation: string,
-  distractors: string[],
-): { position: number; text: string; is_correct: boolean }[] {
-  return [translation, ...distractors].map((text, position) => ({
+export function optionsFor(correct: string, distractors: string[]): QuestionOption[] {
+  return [correct, ...distractors].map((text, position) => ({
     position,
     text,
     is_correct: position === 0,
   }));
+}
+
+/** Structurally db/schema's QuestionOption: stored data, snake_case. */
+export type QuestionOption = { position: number; text: string; is_correct: boolean };
+
+/**
+ * Phase 23. One generated question's stored content (spec D13). Today's card
+ * asks the form and offers meanings; the reversed card asks the meaning and
+ * offers words; the typed card asks the meaning and keeps the alternatives.
+ * The Hebrew prompt is stored, not joined: a question records what was asked.
+ */
+export function generatedContent(
+  row: GenerationContext,
+  type: QuestionType,
+  generated: Generated,
+): { prompt: string | null; options: QuestionOption[] | null; alternatives: string[] | null } {
+  switch (type) {
+    case 'multiple_choice':
+      return { prompt: null, options: optionsFor(row.translation, generated.distractors), alternatives: null };
+    case 'reverse_choice':
+      return { prompt: row.translation, options: optionsFor(row.form, generated.distractors), alternatives: null };
+    case 'typed_translation':
+      return { prompt: row.translation, options: null, alternatives: generated.alternatives };
+  }
 }

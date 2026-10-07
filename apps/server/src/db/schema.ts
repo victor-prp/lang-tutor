@@ -462,11 +462,30 @@ export const questions = pgTable(
     targetLanguage: varchar('target_language', { length: 10 }).notNull(),
     userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
     type: varchar('type', { length: 50 }).notNull(),
-    options: jsonb('options').$type<QuestionOption[]>().notNull(),
+    // Phase 23. A choice's options; null on a typed card, which has none.
+    options: jsonb('options').$type<QuestionOption[]>(),
+    // Phase 23. The Hebrew prompt of a reversed or typed card, stored rather
+    // than joined: a later repair may rewrite the rendering, and a question
+    // records what was asked. Today's card prompts with the variant's form.
+    prompt: text('prompt'),
+    // Phase 23. A typed card's other right answers, at most five.
+    alternatives: text('alternatives').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    check('questions_options_valid', sql`question_options_valid(${t.options})`),
+    check('questions_options_valid', sql`${t.options} is null or question_options_valid(${t.options})`),
+    check('questions_type_known', sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation')`),
+    // Phase 23. Each type's shape (spec D13): a choice has options, a reversed
+    // or typed card stores its prompt, and only a typed card has alternatives.
+    check(
+      'questions_shape_valid',
+      sql`case ${t.type}
+        when 'multiple_choice' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null
+        when 'reverse_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null
+        when 'typed_translation' then ${t.options} is null and ${t.prompt} is not null
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+        else false end`,
+    ),
     foreignKey({
       name: 'questions_enrollment_fk',
       columns: [t.userId, t.enrollmentId],
@@ -554,7 +573,12 @@ export const answers = pgTable(
     sessionId: uuid('session_id').notNull(),
     position: integer('position').notNull(),
     questionId: text('question_id').notNull(),
-    selectedOptionPosition: integer('selected_option_position').notNull(),
+    // Null for a typed answer (phase 23), which records its text and verdict.
+    selectedOptionPosition: integer('selected_option_position'),
+    typedText: text('typed_text'),
+    // How the typed text was judged when it was answered: the history records
+    // what the learner was told (spec D12).
+    verdict: text('verdict'),
     answeredAt: timestamp('answered_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -570,6 +594,13 @@ export const answers = pgTable(
       ],
     }).onDelete('cascade'),
     check('answers_selected_option_position_nonneg', sql`${t.selectedOptionPosition} >= 0`),
+    // Phase 23. Exactly one kind of answer, and a verdict exactly with text.
+    check(
+      'answers_kind_valid',
+      sql`(${t.selectedOptionPosition} is null) = (${t.typedText} is not null) and (${t.typedText} is null) = (${t.verdict} is null)`,
+    ),
+    check('answers_verdict_known', sql`${t.verdict} in ('exact', 'near_miss', 'alternative', 'wrong')`),
+    check('answers_typed_text_length', sql`length(${t.typedText}) <= 100`),
   ],
 );
 

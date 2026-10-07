@@ -3,6 +3,7 @@ import { DIMENSIONS } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
 import { createProgressRepo } from '../../../src/repo/progress';
+import { createSessionRepo } from '../../../src/repo/sessions';
 import { insertLexeme } from '../../support/dictRows';
 import {
   insertAnsweredSession,
@@ -10,8 +11,10 @@ import {
   readProgress,
   readSnapshot,
 } from '../../support/progressRows';
+import { insertListSession } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
+import { seedSavedSenses } from '../../support/vocabularyRows';
 import { withTx } from '../../support/withTx';
 
 let t: TestDb;
@@ -257,5 +260,55 @@ describe("the recompute's reads", () => {
       answers: [{ position: 0, correct: true, at: '2026-10-07 10:00:00+00' }],
     });
     expect(await repo((r) => r.listEndedSessions())).toEqual([earlier, later]);
+  });
+});
+
+// Phase 23. A typed answer is read by its stored verdict, and a reversed or
+// typed card's meaning comes from its stored prompt.
+describe('phase 23: reversed and typed questions', () => {
+  async function mixedSession() {
+    const asked = [];
+    for (const [lemma, translation] of [
+      ['tome', 'ספר'],
+      ['quill', 'נוצה'],
+      ['lantern', 'פנס'],
+    ]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { sessionId, questions } = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked });
+    await withTx(t.db, async (tx) => {
+      const sessions = createSessionRepo(tx);
+      await sessions.insertAnswer(sessionId, 0, questions[0].id, { displayIndex: 0 });
+      await sessions.insertAnswer(sessionId, 1, questions[1].id, { displayIndex: 1 });
+      await sessions.insertAnswer(sessionId, 2, questions[2].id, { text: 'lantren', verdict: 'near_miss' });
+    });
+    return { sessionId, asked };
+  }
+
+  it('reads a choice by its option and a typed answer by its verdict', async () => {
+    const { sessionId, asked } = await mixedSession();
+    const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
+    expect(evidence!.answers).toEqual([
+      { senseId: asked[0].senseId, type: 'multiple_choice', correct: true },
+      { senseId: asked[1].senseId, type: 'reverse_choice', correct: false },
+      { senseId: asked[2].senseId, type: 'typed_translation', verdict: 'near_miss' },
+    ]);
+  });
+
+  it('reads every snapshot row as the word and its meaning, whichever way the card asked', async () => {
+    const { sessionId, asked } = await mixedSession();
+    await withTx(t.db, (tx) =>
+      createProgressRepo(tx).insertSnapshot({
+        sessionId,
+        rows: asked.map((sense) => ({ senseId: sense.senseId, dimension: 'written_receptive', levelBefore: 1, levelAfter: 1 })),
+      }),
+    );
+    const read = await withTx(t.db, (tx) => createProgressRepo(tx).findSnapshot(sessionId));
+    expect(read.map((row) => [row.form, row.translation]).sort()).toEqual([
+      ['lantern', 'פנס'],
+      ['quill', 'נוצה'],
+      ['tome', 'ספר'],
+    ]);
   });
 });

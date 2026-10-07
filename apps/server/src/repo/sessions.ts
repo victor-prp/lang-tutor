@@ -1,19 +1,20 @@
-import type { AnswerRecord, Question, SessionSource, SessionStatus } from '@lang-tutor/core/api';
+import type { AnswerRecord, Question, SessionSource, SessionStatus, TypedVerdict } from '@lang-tutor/core/api';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import type { SessionRecord, SessionState, SessionSummary } from '../domain/session';
 import {
   answers,
+  dictLexemes,
+  dictVariants,
   questions,
   sessionQuestions,
   sessions,
-  dictVariants,
   type QuestionOption,
 } from '../db/schema';
 import { SessionOpen } from '../errors';
 import { isUniqueViolation } from './pgErrors';
-import { canonicalOptions, questionFrom } from './questions';
+import { canonicalOptions, questionColumns, questionFrom } from './questions';
 
 // `sessions.id` is a `uuid` column: a malformed value makes Postgres raise
 // 22P02 (invalid input syntax for type uuid) before a WHERE clause can even
@@ -42,10 +43,10 @@ export function createSessionRepo(tx: Tx) {
   }
 
   /**
-   * `picked` comes from `pickQuestions`, so its options are already shuffled.
-   * Each option's text is mapped back to its canonical position to build
-   * `option_order` — unambiguous because `question_options_valid` guarantees
-   * distinct texts within a question.
+   * `picked` has its options already shuffled (`shuffleOptions`). Each option's
+   * text is mapped back to its canonical position to build `option_order` —
+   * unambiguous because `question_options_valid` guarantees distinct texts
+   * within a question. A typed card has no options, so its order is `{}`.
    */
   async function insertSessionQuestions(sessionId: string, picked: Question[]): Promise<void> {
     const rows = await tx
@@ -58,11 +59,14 @@ export function createSessionRepo(tx: Tx) {
         ),
       );
     const canonicalById = new Map<string, QuestionOption[]>(
-      rows.map((row) => [row.id, canonicalOptions(row.options)]),
+      rows.flatMap((row) => (row.options ? [[row.id, canonicalOptions(row.options)] as const] : [])),
     );
 
     await tx.insert(sessionQuestions).values(
       picked.map((question, position) => {
+        if (question.type === 'typed_translation') {
+          return { sessionId, position, questionId: question.id, optionOrder: [] };
+        }
         const canonical = canonicalById.get(question.id);
         if (!canonical) throw new Error(`question ${question.id} is not in the database`);
         return {
@@ -180,16 +184,11 @@ export function createSessionRepo(tx: Tx) {
       if (!session) return undefined;
 
       const questionRows = await tx
-        .select({
-          id: questions.id,
-          options: questions.options,
-          form: dictVariants.form,
-          lexemeId: dictVariants.lexemeId,
-          optionOrder: sessionQuestions.optionOrder,
-        })
+        .select({ ...questionColumns, optionOrder: sessionQuestions.optionOrder })
         .from(sessionQuestions)
         .innerJoin(questions, eq(questions.id, sessionQuestions.questionId))
         .innerJoin(dictVariants, eq(dictVariants.id, questions.promptVariantId))
+        .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
         .where(eq(sessionQuestions.sessionId, sessionId))
         .orderBy(asc(sessionQuestions.position));
 
@@ -198,15 +197,25 @@ export function createSessionRepo(tx: Tx) {
           position: answers.position,
           questionId: answers.questionId,
           selectedOptionPosition: answers.selectedOptionPosition,
+          typedText: answers.typedText,
+          verdict: answers.verdict,
         })
         .from(answers)
         .where(eq(answers.sessionId, sessionId))
         .orderBy(asc(answers.position));
 
+      // answers_kind_valid: an answer is an option or a text with its verdict.
       const answerRecords: AnswerRecord[] = answerRows.map((answer) => {
-        const chosen = canonicalOptions(questionRows[answer.position].options)[
-          answer.selectedOptionPosition
-        ];
+        if (answer.typedText !== null) {
+          const verdict = answer.verdict as TypedVerdict;
+          return {
+            question_id: answer.questionId,
+            is_correct: verdict !== 'wrong',
+            answer_string: answer.typedText,
+            verdict,
+          };
+        }
+        const chosen = canonicalOptions(questionRows[answer.position].options!)[answer.selectedOptionPosition!];
         return {
           question_id: answer.questionId,
           is_correct: chosen.is_correct,
@@ -226,18 +235,30 @@ export function createSessionRepo(tx: Tx) {
     },
 
     /**
-     * `displayIndex` is the index the learner saw. Translating it to the option's
-     * authored position is this module's own business — `option_order` is the
-     * encoding `insertSession` wrote, so nothing above needs to know it exists.
-     * The extra lookup is one primary-key read inside a transaction that is
-     * already holding this session's row.
+     * A choice's `displayIndex` is the index the learner saw. Translating it to
+     * the option's authored position is this module's own business —
+     * `option_order` is the encoding `insertSession` wrote, so nothing above
+     * needs to know it exists. The extra lookup is one primary-key read inside
+     * a transaction that is already holding this session's row. A typed answer
+     * (phase 23) is stored as its text and the verdict the learner was shown.
      */
     insertAnswer: async (
       sessionId: string,
       position: number,
       questionId: string,
-      displayIndex: number,
+      answer: { displayIndex: number } | { text: string; verdict: TypedVerdict },
     ): Promise<void> => {
+      if ('text' in answer) {
+        await tx.insert(answers).values({
+          sessionId,
+          position,
+          questionId,
+          typedText: answer.text,
+          verdict: answer.verdict,
+        });
+        return;
+      }
+
       const [row] = await tx
         .select({ optionOrder: sessionQuestions.optionOrder })
         .from(sessionQuestions)
@@ -250,7 +271,7 @@ export function createSessionRepo(tx: Tx) {
         sessionId,
         position,
         questionId,
-        selectedOptionPosition: row.optionOrder[displayIndex],
+        selectedOptionPosition: row.optionOrder[answer.displayIndex],
       });
     },
 

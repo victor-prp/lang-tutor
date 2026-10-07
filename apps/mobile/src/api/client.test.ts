@@ -57,6 +57,19 @@ describe('api/client', () => {
     expect(result).toEqual(responseBody);
   });
 
+  // Phase 23. A typed card is answered with its text.
+  it('nextStep sends a typed answer as text', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
+    const client = buildClient(mockFetch);
+
+    await client.nextStep('s1', { user_id: 'u1', question_id: 't1', text: 'finestra' });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/sessions/s1/next-step',
+      expect.objectContaining({ body: JSON.stringify({ user_id: 'u1', question_id: 't1', text: 'finestra' }) }),
+    );
+  });
+
   it('throws an ApiError carrying the response status when the request fails', async () => {
     const mockFetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }));
     const client = buildClient(mockFetch);

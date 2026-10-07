@@ -335,7 +335,8 @@ describe('findWordsPage', () => {
   it('reads only the live dimensions', async () => {
     const [w] = await lexemes(1);
     await saveAt(w.lexemeId, w.senseId, w.variantId, '2026-10-04 12:00:00+00');
-    await setLevel(t.db, { enrollmentId: E, senseId: w.senseId, level: 5, dimension: 'spelling' });
+    // Phase 23 made spelling live; the spoken dimensions still are not.
+    await setLevel(t.db, { enrollmentId: E, senseId: w.senseId, level: 5, dimension: 'spoken_receptive' });
     expect(await page()).toEqual([expect.objectContaining({ lemma: 'word0', level: 1 })]);
   });
 

@@ -1,33 +1,75 @@
 import type { Question } from '@lang-tutor/core/api';
+import type { QuestionType } from '@lang-tutor/core/domain';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import type { GenerationContext } from '../domain/distractors';
-import { questions, dictVariants, type QuestionOption } from '../db/schema';
+import { dictLexemes, dictVariants, questions, type QuestionOption } from '../db/schema';
 
 /** Options as authored, ordered by their canonical position. */
 export function canonicalOptions(options: QuestionOption[]): QuestionOption[] {
   return [...options].sort((a, b) => a.position - b.position);
 }
 
+/** A question row with what its variant and lexeme add: everything any of the
+ *  three types is built from. */
+export type QuestionRow = {
+  id: string;
+  type: string;
+  prompt: string | null;
+  options: QuestionOption[] | null;
+  alternatives: string[] | null;
+  form: string;
+  lemma: string;
+  partOfSpeech: string;
+  lexemeId: string;
+};
+
+/** The columns a QuestionRow reads, for every select that builds one. Joins
+ *  dict_variants and dict_lexemes. */
+export const questionColumns = {
+  id: questions.id,
+  type: questions.type,
+  prompt: questions.prompt,
+  options: questions.options,
+  alternatives: questions.alternatives,
+  form: dictVariants.form,
+  lemma: dictLexemes.lemma,
+  partOfSpeech: dictLexemes.partOfSpeech,
+  lexemeId: dictVariants.lexemeId,
+};
+
 /**
  * Turns a question row into the API's `Question`. `order` is a session's
- * `option_order`; without it the options come back in canonical order.
+ * `option_order`; without it, or for a typed card (whose order is `{}`), the
+ * options come back in canonical order.
+ *
+ * Phase 23: today's card asks the variant's form; the reversed and typed cards
+ * ask the stored Hebrew prompt. A typed card's answer is the variant's form and
+ * is never stored twice.
  */
-export function questionFrom(
-  row: { id: string; options: QuestionOption[]; form: string; lexemeId: string },
-  order: number[] | null,
-): Question {
-  const canonical = canonicalOptions(row.options);
-  const shown = order ? order.map((position) => canonical[position]) : canonical;
-  return {
-    id: row.id,
-    type: 'multiple_choice',
-    vocab_term_id: row.lexemeId,
-    question: row.form,
+export function questionFrom(row: QuestionRow, order: number[] | null): Question {
+  const base = { id: row.id, vocab_term_id: row.lexemeId };
+  if (row.type === 'typed_translation') {
+    return {
+      ...base,
+      type: 'typed_translation',
+      question: row.prompt!,
+      part_of_speech: row.partOfSpeech,
+      answer: row.form,
+      lemma: row.lemma,
+      alternatives: row.alternatives ?? [],
+    };
+  }
+  const canonical = canonicalOptions(row.options!);
+  const shown = order && order.length > 0 ? order.map((position) => canonical[position]) : canonical;
+  const choice = {
     options: shown.map((option) => option.text),
     correct_option: shown.findIndex((option) => option.is_correct),
   };
+  return row.type === 'reverse_choice'
+    ? { ...base, type: 'reverse_choice', question: row.prompt!, part_of_speech: row.partOfSpeech, ...choice }
+    : { ...base, type: 'multiple_choice', question: row.form, ...choice };
 }
 
 export function createQuestionRepo(tx: Tx) {
@@ -42,14 +84,10 @@ export function createQuestionRepo(tx: Tx) {
       userLanguageCode: string,
     ): Promise<Question[]> => {
       const rows = await tx
-        .select({
-          id: questions.id,
-          options: questions.options,
-          form: dictVariants.form,
-          lexemeId: dictVariants.lexemeId,
-        })
+        .select(questionColumns)
         .from(questions)
         .innerJoin(dictVariants, eq(dictVariants.id, questions.promptVariantId))
+        .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
         .where(
           and(
             isNull(questions.userId),
@@ -114,8 +152,9 @@ export function createQuestionRepo(tx: Tx) {
       });
     },
 
-    /** One list session's questions, owned by its enrollment. Ids come from the
-     *  database, as users.id does, so no randomness enters this layer. */
+    /** One list session's questions, owned by its enrollment, each of the type
+     *  the service chose (phase 23). Ids come from the database, as users.id
+     *  does, so no randomness enters this layer. */
     insertGeneratedQuestions: async (input: {
       userId: string;
       enrollmentId: string;
@@ -125,8 +164,13 @@ export function createQuestionRepo(tx: Tx) {
         senseId: string;
         variantId: string;
         form: string;
+        lemma: string;
+        partOfSpeech: string;
         lexemeId: string;
-        options: QuestionOption[];
+        type: QuestionType;
+        prompt: string | null;
+        options: QuestionOption[] | null;
+        alternatives: string[] | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -141,22 +185,30 @@ export function createQuestionRepo(tx: Tx) {
             promptVariantId: question.variantId,
             targetLanguage: input.targetLanguage,
             userLanguageCode: input.userLanguageCode,
-            type: 'multiple_choice',
+            type: question.type,
+            prompt: question.prompt,
             options: question.options,
+            alternatives: question.alternatives,
           })),
         )
         .returning({ id: questions.id });
-      return rows.map((row, index) =>
-        questionFrom(
+      return rows.map((row, index) => {
+        const question = input.questions[index];
+        return questionFrom(
           {
             id: row.id,
-            options: input.questions[index].options,
-            form: input.questions[index].form,
-            lexemeId: input.questions[index].lexemeId,
+            type: question.type,
+            prompt: question.prompt,
+            options: question.options,
+            alternatives: question.alternatives,
+            form: question.form,
+            lemma: question.lemma,
+            partOfSpeech: question.partOfSpeech,
+            lexemeId: question.lexemeId,
           },
           null,
-        ),
-      );
+        );
+      });
     },
   };
 }

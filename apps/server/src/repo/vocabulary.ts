@@ -103,9 +103,17 @@ export const vocabularyQueries = {
 
   /**
    * One page of lemmas with their level, newest save first, optionally one level
-   * only. The join reads this enrollment's live-dimension progress rows through
-   * sense_progress_enrollment_dimension_idx, an index-only scan, and the grouping
-   * is on the entry's own copy of the lemma, so no dictionary row is read.
+   * only.
+   *
+   * Phase 23: the page comes first and the level second. `w` groups the
+   * enrollment's entries by their own copy of the lemma (an index-only scan of
+   * vocabulary_entries_enrollment_lemma_idx; no dictionary row is read) and sorts
+   * them; the LATERAL then computes each lemma's level from its live-dimension
+   * progress rows, through sense_progress_enrollment_dimension_idx. `w`'s own
+   * ORDER BY is what lets the outer LIMIT stop the nested loop early, so a page
+   * costs about its own size: the first shape aggregated every progress row of
+   * the enrollment before sorting, which tripled when three dimensions went
+   * live. A level filter reads levels in save order until the page is full.
    *
    * The timestamp goes out as `::text` and comes back with `::timestamptz` —
    * microseconds intact; see VocabularyCursor. The comparison is strictly
@@ -119,24 +127,33 @@ export const vocabularyQueries = {
     level: number | null;
     live: readonly Dimension[];
   }): SQL => {
-    const having: SQL[] = [];
-    if (input.level !== null) having.push(sql`${LEVEL} = ${input.level}`);
-    if (input.after) having.push(afterCursor(input.after));
-    // The join below is an inner join: an entry with no live-dimension progress
-    // rows drops out of the list, while the detail reads the same entry as level 1
-    // (senseProgressOf's fallback). Acceptable because it cannot happen today: the
-    // only writer of entries (insertEntries) creates their rows in the same
+    // A lemma with no live-dimension progress rows gets a null level and drops
+    // out of the list, while the detail reads the same entry as level 1
+    // (senseProgressOf's fallback). Acceptable because it cannot happen today:
+    // the only writer of entries (insertEntries) creates their rows in the same
     // statement, and the migration backfilled the older ones.
     return sql`
-      SELECT ve.lemma, ${SAVED_AT}::text AS last_saved_at, ${LEVEL} AS level
-      FROM vocabulary_entries ve
-      JOIN sense_progress p ON p.enrollment_id = ve.enrollment_id
-                           AND p.sense_id = ve.sense_id
-                           AND p.dimension IN (${inList([...input.live])})
-      WHERE ve.enrollment_id = ${input.enrollmentId}
-      GROUP BY ve.lemma
-      ${having.length > 0 ? sql`HAVING ${sql.join(having, sql` AND `)}` : sql``}
-      ORDER BY ${SAVED_AT} DESC, ve.lemma DESC
+      SELECT w.lemma, w.last_saved_at::text AS last_saved_at, lv.level
+      FROM (
+        SELECT ve.lemma, ${SAVED_AT} AS last_saved_at
+        FROM vocabulary_entries ve
+        WHERE ve.enrollment_id = ${input.enrollmentId}
+        GROUP BY ve.lemma
+        ${input.after ? sql`HAVING ${afterCursor(input.after)}` : sql``}
+        ORDER BY ${SAVED_AT} DESC, ve.lemma DESC
+      ) w
+      CROSS JOIN LATERAL (
+        SELECT ${LEVEL} AS level
+        FROM vocabulary_entries ve
+        JOIN sense_progress p ON p.enrollment_id = ve.enrollment_id
+                             AND p.sense_id = ve.sense_id
+                             AND p.dimension IN (${inList([...input.live])})
+        WHERE ve.enrollment_id = ${input.enrollmentId}
+          AND ve.lemma = w.lemma
+      ) lv
+      WHERE lv.level IS NOT NULL
+        ${input.level !== null ? sql`AND lv.level = ${input.level}` : sql``}
+      ORDER BY w.last_saved_at DESC, w.lemma DESC
       LIMIT ${input.limit}`;
   },
 

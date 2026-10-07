@@ -25,10 +25,12 @@ const PAYLOAD = {
     { sense_id: 's2', variant_id: 'v2' },
   ],
 };
+// Phase 23: q2 is the second position, a reversed card, so its wrong options
+// are Russian words.
 const GOOD = JSON.stringify({
   items: [
     { key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] },
-    { key: 'q2', distractors: ['שום', 'גזר', 'כרוב'] },
+    { key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] },
   ],
 });
 
@@ -49,14 +51,18 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
     findGenerationContext: async () => opts.context ?? CONTEXT,
     insertGeneratedQuestions: async (input) => {
       calls.generated.push(input);
-      return input.questions.map((q, i) => ({
-        id: `g${i}`,
-        type: 'multiple_choice' as const,
-        vocab_term_id: q.lexemeId,
-        question: q.form,
-        options: q.options.map((o) => o.text),
-        correct_option: 0,
-      }));
+      // Shaped as repo/questions' questionFrom shapes them; a services test may
+      // import a repository only as a type (ADR 0001 R2).
+      return input.questions.map((q, i): Question => {
+        const base = { id: `g${i}`, vocab_term_id: q.lexemeId };
+        if (q.type === 'typed_translation') {
+          return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
+        }
+        const choice = { options: q.options!.map((o) => o.text), correct_option: 0 };
+        return q.type === 'reverse_choice'
+          ? { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, ...choice }
+          : { ...base, type: q.type, question: q.form, ...choice };
+      });
     },
   });
   const llm = createFakeLlmClient(opts.reply ?? GOOD);
@@ -83,6 +89,34 @@ describe('prepareSession', () => {
       { position: 3, text: 'ראתה', is_correct: false },
     ]);
     expect(calls.sessionQuestions[0]).toHaveLength(2);
+  });
+
+  // Phase 23 (spec D2): types follow positions, in pick order.
+  it('gives each position its type, in pick order, with the content each type needs', async () => {
+    const context = [
+      ...CONTEXT,
+      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר' },
+    ];
+    const reply = JSON.stringify({
+      items: [
+        { key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] },
+        { key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] },
+        { key: 'q3', distractors: [], alternatives: ['скоро'] },
+      ],
+    });
+    const { service, calls, llm } = world({ context, reply });
+    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { sense_id: 's3', variant_id: 'v3' }] });
+
+    expect(JSON.parse(llm.calls[0].user).items.map((item: { task: string }) => item.task)).toEqual(['meaning', 'word', 'typed']);
+    const [input] = calls.generated as {
+      questions: { type: string; prompt: string | null; options: { text: string }[] | null; alternatives: string[] | null }[];
+    }[];
+    expect(input.questions.map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation']);
+    expect(input.questions[1]).toMatchObject({ prompt: 'בצל', alternatives: null });
+    expect(input.questions[1].options!.map((o) => o.text)).toEqual(['лук', 'чеснок', 'морковь', 'капуста']);
+    expect(input.questions[2]).toMatchObject({ prompt: 'מהר', options: null, alternatives: ['скоро'] });
+    // Not reshuffled: the type cycle depends on the order.
+    expect(calls.sessionQuestions[0].map((q) => q.id)).toEqual(['g0', 'g1', 'g2']);
   });
 
   it('does nothing for a session that is no longer preparing — no model call', async () => {
@@ -118,7 +152,7 @@ describe('prepareSession', () => {
     const bad = JSON.stringify({
       items: [
         { key: 'q1', distractors: ['קראה', 'שמעה', 'ראתה'] },
-        { key: 'q2', distractors: ['שום', 'גזר', 'כרוב'] },
+        { key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] },
       ],
     });
     const { service, calls } = world({ reply: bad });

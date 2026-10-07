@@ -5,6 +5,7 @@ import { z } from 'zod';
 // inferred from it in ./types. Plain Zod 4 on purpose: core must not depend on
 // a Hono adapter, and Zod 4's native JSON Schema output is what lets the
 // adapter document these without one.
+// Today's card: the target word, four meanings in the learner's language.
 export const MultipleChoiceQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('multiple_choice'),
@@ -14,17 +15,54 @@ export const MultipleChoiceQuestionSchema = z.object({
   correct_option: z.number().int(),
 });
 
-// A tagged union with one member today. The `type` field exists from day one so
-// consumers switch on it; adding a question type is then additive.
-export const QuestionSchema = MultipleChoiceQuestionSchema;
+// Phase 23. The same card turned round: the meaning, four target words.
+// `part_of_speech` disambiguates a Hebrew prompt (ספר is a book or "counted").
+export const ReverseChoiceQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('reverse_choice'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  part_of_speech: z.string(),
+  options: z.array(z.string()),
+  correct_option: z.number().int(),
+});
 
-// Scoring reads `is_correct` and nothing else, so any future question type
-// satisfies it. `answer_string` is the audit-log field: text rather than an
-// option index, because option order is shuffled per session.
+// Phase 23. The meaning; the learner types the target word. The client holds
+// what it needs to judge locally, as it holds `correct_option` on a choice: the
+// saved form, its lemma, and other words the model said are also right.
+export const TypedTranslationQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('typed_translation'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  part_of_speech: z.string(),
+  answer: z.string(),
+  lemma: z.string(),
+  alternatives: z.array(z.string()),
+});
+
+// A tagged union. Consumers switch on `type`, so adding a type is additive and
+// the compiler finds every switch that has not learnt it.
+export const QuestionSchema = z.discriminatedUnion('type', [
+  MultipleChoiceQuestionSchema,
+  ReverseChoiceQuestionSchema,
+  TypedTranslationQuestionSchema,
+]);
+
+// Phase 23. How a typed answer was judged (spec D5). Every verdict but `wrong`
+// counts in the score.
+export const TypedVerdictSchema = z.enum(['exact', 'near_miss', 'alternative', 'wrong']);
+
+// Scoring reads `is_correct` and nothing else, so any question type satisfies
+// it. `answer_string` is the audit-log field: the chosen option's text rather
+// than its index, because option order is shuffled per session, or the text
+// typed.
 export const AnswerRecordSchema = z.object({
   question_id: z.string(),
   is_correct: z.boolean(),
   answer_string: z.string(),
+  // Phase 23. Present for a typed answer only.
+  verdict: TypedVerdictSchema.optional(),
 });
 
 export const ScoreSchema = z.object({
@@ -66,6 +104,9 @@ export const SessionProgressItemSchema = z.object({
   translation: z.string(),
   level_before: LevelSchema,
   level_after: LevelSchema,
+  // Phase 23. The live dimensions that rose in this session, in DIMENSIONS
+  // order. A word can move a dimension without moving its badge.
+  raised: z.array(KnowledgeDimensionSchema),
 });
 
 // Phase 19. A session's lifecycle: preparing → ready → completed, or skipped /
@@ -110,11 +151,20 @@ export const SessionViewSchema = z.object({
   progress: z.array(SessionProgressItemSchema),
 });
 
-export const NextStepRequestSchema = z.object({
-  user_id: z.string().min(1),
-  question_id: z.string().min(1),
-  option_index: z.number().int().nonnegative(),
-});
+// Phase 23. A choice is answered by index, a typed card by its text. Empty
+// text is "show me the answer", which is wrong.
+export const NextStepRequestSchema = z.union([
+  z.object({
+    user_id: z.string().min(1),
+    question_id: z.string().min(1),
+    option_index: z.number().int().nonnegative(),
+  }),
+  z.object({
+    user_id: z.string().min(1),
+    question_id: z.string().min(1),
+    text: z.string().max(100),
+  }),
+]);
 
 // A discriminated union on `complete`: when true, the caller has everything
 // the Results screen needs (score, missed_questions) in this same response —
@@ -547,10 +597,22 @@ export const LlmReconciliationSchema = z.object({
 
 // Phase 19. The model's answer when asked for a session's wrong options. `key`
 // is echoed from the request (q1, q2, …) rather than a sense id: a short key is
-// one the model cannot mistype. Exactly three per item, so the schema itself
-// says what a usable answer is.
+// one the model cannot mistype.
+//
+// Phase 23. Three tasks share the call (spec D8). A choice item has three
+// `distractors` and a typed item none, so the count is the domain's check, not
+// the schema's. `alternatives` (other right answers for a typed item) is
+// optional and capped at twice the five kept, for the reason
+// LlmTranslationSchema.alternatives gives: a missing or surplus list must never
+// fail a session the model otherwise answered.
 export const LlmDistractorsSchema = z.object({
   items: z
-    .array(z.object({ key: z.string(), distractors: z.array(z.string()).length(3) }))
+    .array(
+      z.object({
+        key: z.string(),
+        distractors: z.array(z.string()).max(3),
+        alternatives: z.array(z.string()).max(10).optional(),
+      }),
+    )
     .max(10),
 });

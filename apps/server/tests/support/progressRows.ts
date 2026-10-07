@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
-import { DIMENSIONS, type Dimension } from '@lang-tutor/core/domain';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { DIMENSIONS, LIVE_DIMENSIONS, type Dimension } from '@lang-tutor/core/domain';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
 import {
@@ -32,6 +32,9 @@ export async function insertProgressRows(db: Db, enrollmentId: string, senseIds:
 }
 
 /** Puts one row at a level, so a test about sorting or badges need not answer weeks of sessions. */
+/** Sets one dimension's level, or, with none named, every live one: a sense
+ *  evenly at `level`, whose badge is `level` however many dimensions are live
+ *  (phase 23 made three live). */
 export async function setLevel(
   db: Db,
   input: { enrollmentId: string; senseId: string; level: number; dimension?: Dimension },
@@ -43,7 +46,7 @@ export async function setLevel(
       and(
         eq(senseProgress.enrollmentId, input.enrollmentId),
         eq(senseProgress.senseId, input.senseId),
-        eq(senseProgress.dimension, input.dimension ?? 'written_receptive'),
+        inArray(senseProgress.dimension, input.dimension ? [input.dimension] : [...LIVE_DIMENSIONS]),
       ),
     );
 }

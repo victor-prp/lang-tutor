@@ -29,6 +29,7 @@ import type {
   PartOfSpeechSchema,
   PositionSchema,
   QuestionSchema,
+  ReverseChoiceQuestionSchema,
   SaveVocabularyRequestSchema,
   SaveVocabularyResponseSchema,
   ScoreSchema,
@@ -38,6 +39,8 @@ import type {
   SessionStatusSchema,
   SessionViewSchema,
   SkipSessionResponseSchema,
+  TypedTranslationQuestionSchema,
+  TypedVerdictSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
   TranslationKindSchema,
@@ -64,7 +67,10 @@ import type {
 // import of Zod, which is what lets ./index.ts stay a pure type barrel.
 
 export type MultipleChoiceQuestion = z.infer<typeof MultipleChoiceQuestionSchema>;
+export type ReverseChoiceQuestion = z.infer<typeof ReverseChoiceQuestionSchema>;
+export type TypedTranslationQuestion = z.infer<typeof TypedTranslationQuestionSchema>;
 export type Question = z.infer<typeof QuestionSchema>;
+export type TypedVerdict = z.infer<typeof TypedVerdictSchema>;
 export type AnswerRecord = z.infer<typeof AnswerRecordSchema>;
 export type Score = z.infer<typeof ScoreSchema>;
 export type MissedQuestion = z.infer<typeof MissedQuestionSchema>;

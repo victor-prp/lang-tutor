@@ -1,4 +1,4 @@
-import type { MultipleChoiceQuestion } from '@lang-tutor/core/api';
+import type { ChoiceQuestion } from '@lang-tutor/core/domain';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -7,12 +7,19 @@ import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 type Props = {
-  question: MultipleChoiceQuestion;
+  question: ChoiceQuestion;
+  /** What the card asks, in the learner's language. */
+  instruction: string;
   selectedOption: number | null;
   onSelect: (optionIndex: number) => void;
 };
 
-export function MultipleChoiceView({ question, selectedOption, onSelect }: Props) {
+// Phase 23. Today's card asks a target word and offers Hebrew meanings; the
+// reversed card asks a Hebrew meaning and offers target words. Only the text
+// directions differ (spec D10).
+export function MultipleChoiceView({ question, instruction, selectedOption, onSelect }: Props) {
+  const reversed = question.type === 'reverse_choice';
+  const partOfSpeech = reversed ? strings.partOfSpeech(question.part_of_speech) : undefined;
   // All four buttons match the tallest, so a wrapped phrase does not leave the
   // set visually ragged. Reset on every new question.
   const [maxHeight, setMaxHeight] = useState(0);
@@ -32,14 +39,22 @@ export function MultipleChoiceView({ question, selectedOption, onSelect }: Props
 
   return (
     <View style={styles.container}>
-      <Text style={styles.instruction}>{strings.questionInstruction}</Text>
-      <Text style={styles.prompt} testID="question-prompt">{question.question}</Text>
+      <Text style={styles.instruction}>{instruction}</Text>
+      <Text style={[styles.prompt, { writingDirection: reversed ? 'rtl' : 'ltr' }]} testID="question-prompt">
+        {question.question}
+      </Text>
+      {partOfSpeech ? (
+        <Text style={styles.partOfSpeech} testID="question-part-of-speech">
+          {partOfSpeech}
+        </Text>
+      ) : null}
       <View style={styles.options}>
         {question.options.map((option, index) => (
           <OptionButton
             key={`${question.id}-${index}`}
             testID={`option-${index}`}
             label={option}
+            direction={reversed ? 'ltr' : 'rtl'}
             state={visualState(index)}
             disabled={answered}
             minHeight={maxHeight > 0 ? maxHeight : undefined}
@@ -62,14 +77,21 @@ const styles = StyleSheet.create({
     color: colors.muted,
     writingDirection: 'rtl',
   },
-  // The English prompt is centred and explicitly LTR so it reads correctly
-  // inside the mirrored screen, punctuation included.
+  // The prompt is centred, with an explicit direction (set per card) so a
+  // target word reads correctly inside the mirrored screen, punctuation
+  // included.
   prompt: {
     fontSize: fontSizes.xl,
     lineHeight: lineHeights.xl,
     color: colors.text,
     textAlign: 'center',
-    writingDirection: 'ltr',
+  },
+  partOfSpeech: {
+    fontSize: fontSizes.sm,
+    lineHeight: lineHeights.sm,
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: -spacing.md,
   },
   options: { gap: spacing.sm },
 });

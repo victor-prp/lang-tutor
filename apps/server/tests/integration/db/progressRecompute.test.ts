@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import type { Question } from '@lang-tutor/core/api';
 import { sql } from 'drizzle-orm';
 
 import { recomputeProgress } from '../../../src/db/progressRecompute';
@@ -12,10 +13,12 @@ import {
   saveSessionSenses,
   setLevel,
 } from '../../support/progressRows';
+import { asChoice, insertListSession } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
+import { seedSavedSenses } from '../../support/vocabularyRows';
 
 let t: TestDb;
 const E = enrollmentOf('u_1');
@@ -119,8 +122,12 @@ describe('recomputeProgress', () => {
     const E2 = enrollmentOf('u_2');
     const { sessions: live } = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
 
-    const answer = (sessionId: string, q: { id: string; correct_option: number; options: unknown[] }, right: boolean) =>
-      live.submitAnswer(sessionId, q.id, right ? q.correct_option : (q.correct_option + 1) % q.options.length);
+    const answer = (sessionId: string, question: Question, right: boolean) => {
+      const q = asChoice(question);
+      return live.submitAnswer(sessionId, q.id, {
+        option_index: right ? q.correct_option : (q.correct_option + 1) % q.options.length,
+      });
+    };
 
     // Completed: three saved senses, answered right, wrong, right; the other
     // seven questions are about unsaved senses and must change nothing.
@@ -154,6 +161,43 @@ describe('recomputeProgress', () => {
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 2 });
 
+    expect(await written()).toEqual(before);
+  });
+
+  // Phase 23. The recompute reads a typed answer's stored verdict and a
+  // reversed card's capped evidence the way the live path did.
+  it('writes back exactly what the live path wrote for a session of all three types', async () => {
+    const { sessions: live } = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+    const words = [];
+    for (const [lemma, translation] of [
+      ['tome', 'ספר'],
+      ['quill', 'נוצה'],
+      ['lantern', 'פנס'],
+    ]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { sessionId, questions } = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: words });
+    expect(questions.map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation']);
+
+    await live.submitAnswer(sessionId, questions[0].id, { option_index: 0 });
+    await live.submitAnswer(sessionId, questions[1].id, { option_index: 0 });
+    // One letter swapped in a seven-letter word: a near miss.
+    const done = await live.submitAnswer(sessionId, questions[2].id, { text: 'lantren' });
+    expect(done.status).toBe('completed');
+
+    const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });
+    const before = await written();
+    const level = (senseId: string, dimension: string) =>
+      before.progress.find((row) => row.senseId === senseId && row.dimension === dimension)!.level;
+    // The live path's own evidence (spec D6), so the comparison below is not
+    // between two empty results.
+    expect(level(words[0].senseId, 'written_receptive')).toBe(2);
+    expect(level(words[1].senseId, 'written_productive')).toBe(2);
+    expect(level(words[2].senseId, 'written_productive')).toBe(2);
+    expect(level(words[2].senseId, 'spelling')).toBe(1);
+
+    expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });
     expect(await written()).toEqual(before);
   });
 });

@@ -1,5 +1,14 @@
 import type { AnswerRecord, MissedQuestion, Position, Question, Score, SessionSource, SessionStatus } from '@lang-tutor/core/api';
-import { SESSION_LENGTH, evaluate, missed, pickQuestions, score } from '@lang-tutor/core/domain';
+import {
+  SESSION_LENGTH,
+  answerFits,
+  evaluate,
+  missed,
+  pickQuestions,
+  score,
+  type AnswerInput,
+  type QuestionType,
+} from '@lang-tutor/core/domain';
 
 export { SESSION_LENGTH };
 
@@ -43,6 +52,7 @@ export function positionOf(record: SessionRecord): Position {
 export type StepOutcome =
   | { status: 'invalid_question' }
   | { status: 'out_of_range' }
+  | { status: 'wrong_answer_kind' }
   | { status: 'advanced' | 'replayed'; record: SessionRecord; justCompleted: boolean };
 
 // Records the answer to `questionId` if it is the session's current question,
@@ -51,11 +61,14 @@ export type StepOutcome =
 // is returned unchanged rather than double-counting the answer. Any other
 // `questionId` means the client and server have desynced.
 //
-// An `optionIndex` outside the current question's options is `out_of_range`.
+// An option index outside the current question's options is `out_of_range`.
 // That check belongs here rather than in a caller: the question knows how many
 // options it has, and answering it before `evaluate` runs is what keeps a record
-// carrying `answer_string: undefined` from ever being constructed.
-export function step(record: SessionRecord, questionId: string, optionIndex: number): StepOutcome {
+// carrying `answer_string: undefined` from ever being constructed. For the same
+// reason a text sent to a choice, or an index sent to a typed card, is
+// `wrong_answer_kind` (phase 23). A replay ignores the answer entirely: the
+// record comes back unchanged, so there is nothing to judge.
+export function step(record: SessionRecord, questionId: string, answer: AnswerInput): StepOutcome {
   if (record.complete) {
     const lastQuestion = record.questions[record.questions.length - 1];
     return questionId === lastQuestion.id
@@ -65,10 +78,13 @@ export function step(record: SessionRecord, questionId: string, optionIndex: num
 
   const expected = currentQuestion(record);
   if (expected && questionId === expected.id) {
-    if (optionIndex < 0 || optionIndex >= expected.options.length) {
-      return { status: 'out_of_range' };
+    if (!answerFits(expected, answer)) return { status: 'wrong_answer_kind' };
+    if ('option_index' in answer && expected.type !== 'typed_translation') {
+      if (answer.option_index < 0 || answer.option_index >= expected.options.length) {
+        return { status: 'out_of_range' };
+      }
     }
-    const answers = [...record.answers, evaluate(expected, optionIndex)];
+    const answers = [...record.answers, evaluate(expected, answer)];
     const complete = answers.length === record.questions.length;
     const updated: SessionRecord = {
       ...record,
@@ -109,6 +125,16 @@ export function isOpen(status: SessionStatus): boolean {
 
 export function isCurrent(status: SessionStatus): boolean {
   return CURRENT_STATUSES.includes(status);
+}
+
+/** Phase 23. A list session's types, by position (spec D2): every session opens
+ *  on recognition, two cards in a row always differ, and each run of three
+ *  climbs from recognition to recall. The picks are already in random order,
+ *  so which word gets which type is random. */
+export const TYPE_CYCLE: readonly QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
+
+export function typeFor(position: number): QuestionType {
+  return TYPE_CYCLE[position % TYPE_CYCLE.length];
 }
 
 /** The first session of an enrollment is the seed; every later one, after a

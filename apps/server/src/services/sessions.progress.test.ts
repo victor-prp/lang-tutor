@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import type { Question } from '@lang-tutor/core/api';
+import type { MultipleChoiceQuestion } from '@lang-tutor/core/api';
 import { DIMENSIONS } from '@lang-tutor/core/domain';
 
 import { createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
@@ -12,7 +12,7 @@ import { createSessionService } from './sessions';
 
 const SESSION = '22222222-2222-2222-2222-222222222222';
 const DAY = '2026-10-05';
-const question = (n: number): Question => ({
+const question = (n: number): MultipleChoiceQuestion => ({
   id: `q${n}`,
   type: 'multiple_choice',
   vocab_term_id: `l${n}`,
@@ -58,7 +58,11 @@ const SNAPSHOT: SnapshotRead[] = DIMENSIONS.map((dimension) => ({
   translation: 'right0',
   position: 0,
 }));
-const CHANGE = [{ senseId: 's1', form: 'word0', translation: 'right0', levelBefore: 1, levelAfter: 2 }];
+// Phase 23: written_receptive rose, and the badge over the three live written
+// dimensions did not: (2, 1, 1) still reads 1.
+const CHANGE = [
+  { senseId: 's1', form: 'word0', translation: 'right0', levelBefore: 1, levelAfter: 1, raised: ['written_receptive'] },
+];
 
 function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null; rows?: ProgressRow[] }) {
   const calls = {
@@ -106,7 +110,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
 describe('progress when a session ends', () => {
   it('completing a session runs the rule over its answers and answers with the change', async () => {
     const { service, calls } = world({ record: record(9) });
-    const result = await service.submitAnswer(SESSION, 'q9', 0);
+    const result = await service.submitAnswer(SESSION, 'q9', { option_index: 0 });
     expect(calls.completed).toBe(1);
     expect(calls.asked).toEqual([['s1', 'sX']]);
     expect(calls.updated).toEqual([
@@ -118,14 +122,14 @@ describe('progress when a session ends', () => {
 
   it('an answer that does not complete the session writes no progress', async () => {
     const { service, calls } = world({ record: record(8) });
-    const result = await service.submitAnswer(SESSION, 'q8', 0);
+    const result = await service.submitAnswer(SESSION, 'q8', { option_index: 0 });
     expect(calls.evidence).toBe(0);
     expect(result.progress).toEqual([]);
   });
 
   it('a replayed final answer writes nothing and still answers with the change', async () => {
     const { service, calls } = world({ record: record(10) });
-    const result = await service.submitAnswer(SESSION, 'q9', 0);
+    const result = await service.submitAnswer(SESSION, 'q9', { option_index: 0 });
     expect(calls.evidence).toBe(0);
     expect(result.progress).toEqual(CHANGE);
   });
@@ -147,7 +151,7 @@ describe('progress when a session ends', () => {
 
   it('a session about senses that are not saved writes nothing', async () => {
     const { service, calls } = world({ record: record(9), rows: [] });
-    await service.submitAnswer(SESSION, 'q9', 0);
+    await service.submitAnswer(SESSION, 'q9', { option_index: 0 });
     expect(calls.asked).toHaveLength(1);
     expect(calls.updated).toEqual([]);
     expect(calls.snapshots).toEqual([]);
