@@ -332,12 +332,12 @@ describe('findWordsPage', () => {
     expect((await page())[0].level).toBe(3);
   });
 
-  it('reads only the live dimensions', async () => {
+  it('reads every dimension, spoken_productive included', async () => {
     const [w] = await lexemes(1);
     await saveAt(w.lexemeId, w.senseId, w.variantId, '2026-10-04 12:00:00+00');
-    // Phases 23 and 24 made spelling and spoken_receptive live; spoken_productive still is not.
+    // Phase 25 made spoken_productive live: (1+1+1+1+5)/5 = 1.8 reads 2.
     await setLevel(t.db, { enrollmentId: E, senseId: w.senseId, level: 5, dimension: 'spoken_productive' });
-    expect(await page()).toEqual([expect.objectContaining({ lemma: 'word0', level: 1 })]);
+    expect(await page()).toEqual([expect.objectContaining({ lemma: 'word0', level: 2 })]);
   });
 
   it('filters to one level, newest first, and continues a filtered walk after its cursor', async () => {

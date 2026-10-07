@@ -1,15 +1,20 @@
 import type {
   AnswerRecord,
+  AnswerVerdict,
   ListenChoiceQuestion,
   MatchingQuestion,
   MissedQuestion,
   MultipleChoiceQuestion,
   Question,
+  ReadAloudQuestion,
   ReverseChoiceQuestion,
+  SayTranslationQuestion,
   Score,
+  SpeechVerdict,
   TypedVerdict,
 } from '../api/types';
 import { shuffle } from '../utils/shuffle';
+import { judgeSpoken, type SpokenTarget } from './spoken';
 import { judgeTiles, judgeTyped } from './typed';
 
 export const SESSION_LENGTH = 10;
@@ -17,12 +22,20 @@ export const SESSION_LENGTH = 10;
 /** Phase 23. Derived here rather than in api/types.ts, which holds z.infers only. */
 export type QuestionType = Question['type'];
 
-/** Phase 23. A choice is answered by index, a typed card by its text. */
-export type AnswerInput = { option_index: number } | { text: string };
+/** Phase 23. A choice is answered by index, a typed card by its text. Phase 25:
+ *  a speaking card by a transcript, which only the server builds from the audio
+ *  it judged, or by a pass (spec D5). */
+export type AnswerInput =
+  | { option_index: number }
+  | { text: string }
+  | { heard: string }
+  | { pass: 'skip' | 'show_answer' };
 
 export type ChoiceQuestion = MultipleChoiceQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion;
+/** Phase 25. The cards answered by voice. */
+export type SpeakingQuestion = ReadAloudQuestion | SayTranslationQuestion;
 /** Phase 24. A question answered by text: typed, heard, or built from tiles. */
-type TextQuestion = Exclude<Question, ChoiceQuestion>;
+type TextQuestion = Exclude<Question, ChoiceQuestion | SpeakingQuestion>;
 
 export function isChoice(question: Question): question is ChoiceQuestion {
   switch (question.type) {
@@ -34,19 +47,48 @@ export function isChoice(question: Question): question is ChoiceQuestion {
     case 'typed_translation':
     case 'dictation':
     case 'letter_tiles':
+    case 'read_aloud':
+    case 'say_translation':
       return false;
   }
 }
 
-/** Whether `answer` is the kind `question` takes. */
+export function isSpeaking(question: Question): question is SpeakingQuestion {
+  return question.type === 'read_aloud' || question.type === 'say_translation';
+}
+
+/** Whether `answer` is the kind `question` takes. A read-aloud card has no
+ *  "show the answer": its word is on the screen. */
 export function answerFits(question: Question, answer: AnswerInput): boolean {
-  return isChoice(question) ? 'option_index' in answer : 'text' in answer;
+  if (isChoice(question)) return 'option_index' in answer;
+  if (question.type === 'read_aloud') return 'heard' in answer || ('pass' in answer && answer.pass === 'skip');
+  if (question.type === 'say_translation') return 'heard' in answer || 'pass' in answer || 'text' in answer;
+  return 'text' in answer;
 }
 
 /** What the learner should have answered, as the feedback and the missed list show it. */
 export function rightAnswer(question: Question): string {
   if (isChoice(question)) return question.options[question.correct_option];
-  return question.type === 'dictation' ? question.question : question.answer;
+  return question.type === 'dictation' || question.type === 'read_aloud' ? question.question : question.answer;
+}
+
+/** Phase 25 (spec D6). What a speaking card's transcript is judged against:
+ *  read aloud, the form shown; say the translation, the form or its lemma, and
+ *  the alternatives. */
+export function spokenTarget(question: SpeakingQuestion): SpokenTarget {
+  return question.type === 'read_aloud'
+    ? { forms: [question.question], alternatives: [] }
+    : { forms: [question.answer, question.lemma], alternatives: question.alternatives };
+}
+
+export function spokenVerdict(question: SpeakingQuestion, heard: string): SpeechVerdict {
+  return judgeSpoken(spokenTarget(question), heard);
+}
+
+/** Phase 25 (spec D9). Whether a stored verdict counts as right. A skip is
+ *  not right, and score leaves it out of the total. */
+export function verdictCorrect(verdict: AnswerVerdict): boolean {
+  return verdict !== 'wrong' && verdict !== 'gave_up' && verdict !== 'skipped';
 }
 
 /** A choice's options in a new order. A text card has none and comes back as
@@ -95,9 +137,10 @@ export function pickQuestions(
     .map((question) => shuffleOptions(question, rng));
 }
 
-function verdictFor(question: TextQuestion, text: string): TypedVerdict {
+function verdictFor(question: TextQuestion | SayTranslationQuestion, text: string): TypedVerdict {
   switch (question.type) {
     case 'typed_translation':
+    case 'say_translation':
       return judgeTyped(question, text);
     case 'dictation':
       // Spec D7: what was said, and nothing else — not its lemma, not a synonym.
@@ -107,8 +150,12 @@ function verdictFor(question: TextQuestion, text: string): TypedVerdict {
   }
 }
 
+// answers_typed_text_length: a transcript is stored as the text of its answer.
+const MAX_ANSWER_TEXT = 100;
+
 // Callers check answerFits, and an option's range, first: the session's step
-// owns those outcomes, so here a mismatch is a programming error.
+// owns those outcomes, so here a mismatch is a programming error. So is an
+// unheard transcript, which step refuses before it gets here (spec D5).
 export function evaluate(question: Question, answer: AnswerInput): AnswerRecord {
   if (isChoice(question) && 'option_index' in answer) {
     return {
@@ -117,17 +164,27 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
       answer_string: question.options[answer.option_index],
     };
   }
-  if (!isChoice(question) && 'text' in answer) {
+  if (isSpeaking(question) && 'heard' in answer) {
+    const verdict = spokenVerdict(question, answer.heard);
+    if (verdict === 'unheard') throw new Error('an unheard transcript is never recorded (spec D5)');
+    return { question_id: question.id, is_correct: true, answer_string: answer.heard.slice(0, MAX_ANSWER_TEXT), verdict };
+  }
+  if (isSpeaking(question) && 'pass' in answer) {
+    const verdict = answer.pass === 'skip' ? 'skipped' : 'gave_up';
+    return { question_id: question.id, is_correct: false, answer_string: '', verdict };
+  }
+  if (!isChoice(question) && question.type !== 'read_aloud' && 'text' in answer) {
     const verdict = verdictFor(question, answer.text);
-    return { question_id: question.id, is_correct: verdict !== 'wrong', answer_string: answer.text, verdict };
+    return { question_id: question.id, is_correct: verdictCorrect(verdict), answer_string: answer.text, verdict };
   }
   throw new Error(`the answer does not fit a ${question.type} question`);
 }
 
+/** Phase 25 (spec D9). A skipped card is not in the total: a skip is not a failure. */
 export function score(questions: readonly Question[], answers: readonly AnswerRecord[]): Score {
   return {
     correct: answers.filter((record) => record.is_correct).length,
-    total: questions.length,
+    total: questions.length - answers.filter((record) => record.verdict === 'skipped').length,
   };
 }
 
@@ -136,7 +193,7 @@ export function missed(
   answers: readonly AnswerRecord[],
 ): MissedQuestion[] {
   return answers
-    .filter((record) => !record.is_correct)
+    .filter((record) => !record.is_correct && record.verdict !== 'skipped')
     .flatMap((record) => {
       const question = questions.find((item) => item.id === record.question_id);
       return question ? [{ question, correct_answer: rightAnswer(question) }] : [];

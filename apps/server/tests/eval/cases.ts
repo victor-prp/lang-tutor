@@ -836,3 +836,65 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
     ],
   },
 ];
+
+/**
+ * Phase 25 (spec §2, Eval). One clip each, said right or said as another word.
+ * Made with macOS `say` and 0.6 s of silence on each side, as a recording has:
+ *
+ *   say -v Alice -o "$TMPDIR/clip.wav" --file-format=WAVE --data-format=LEI16@16000 "[[slnc 600]] gatto [[slnc 600]]"
+ *   afconvert -f adts -d aac "$TMPDIR/clip.wav" apps/server/tests/eval/audio/it-gatto.aac
+ *
+ * Synthetic voices, not a learner's accent: these prove the path and the
+ * instruction, not accuracy for Victor's voice (spec, Risks).
+ */
+export type TranscriptionCase = {
+  label: string;
+  file: string;
+  language: 'it' | 'ru' | 'en';
+  target: string;
+  expect: 'understood' | 'unheard';
+};
+
+const said = (language: TranscriptionCase['language'], file: string, target: string): TranscriptionCase => ({
+  label: `${language}: ${target} said right`,
+  file,
+  language,
+  target,
+  expect: 'understood',
+});
+const other = (language: TranscriptionCase['language'], file: string, target: string, spoken: string): TranscriptionCase => ({
+  label: `${language}: ${spoken} said for ${target}`,
+  file,
+  language,
+  target,
+  expect: 'unheard',
+});
+
+export const TRANSCRIPTION_CASES: TranscriptionCase[] = [
+  said('it', 'it-gatto', 'gatto'),
+  said('it', 'it-perche', 'perché'),
+  said('it', 'it-finestra', 'finestra'),
+  said('it', 'it-cucchiaio', 'cucchiaio'),
+  said('it', 'it-citta', 'città'),
+  said('it', 'it-per-favore', 'per favore'),
+  said('it', 'it-caffe-con-cornetto', 'caffè con cornetto'),
+  said('it', 'it-grazie-mille', 'grazie mille'),
+  other('it', 'it-gato', 'gatto', 'gato'),
+  other('it', 'it-cane', 'gatto', 'cane'),
+  said('ru', 'ru-moloko', 'молоко'),
+  said('ru', 'ru-yolka', 'ёлка'),
+  said('ru', 'ru-luk', 'лук'),
+  said('ru', 'ru-spasibo', 'спасибо'),
+  said('ru', 'ru-lozhka', 'ложка'),
+  said('ru', 'ru-dobroe-utro', 'доброе утро'),
+  other('ru', 'ru-lyuk', 'лук', 'люк'),
+  other('ru', 'ru-les', 'лук', 'лес'),
+  said('en', 'en-through', 'through'),
+  said('en', 'en-weather', 'weather'),
+  said('en', 'en-knife', 'knife'),
+  said('en', 'en-island', 'island'),
+  said('en', 'en-thank-you', 'thank you'),
+  said('en', 'en-good-morning', 'good morning'),
+  other('en', 'en-taught', 'thought', 'taught'),
+  other('en', 'en-bat', 'bad', 'bat'),
+];

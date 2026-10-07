@@ -20,8 +20,15 @@ describe('loadConfig', () => {
       poolMax: 5,
       translationTimeoutMs: 25_000,
       sessionGenerationTimeoutMs: 300_000,
+      speechTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
     });
+  });
+
+  it('reads the speech budget, defaulting to 8 s (phase 25)', () => {
+    expect(loadConfig({}).speechTimeoutMs).toBe(8_000);
+    expect(loadConfig({ SPEECH_TIMEOUT_MS: '3000' }).speechTimeoutMs).toBe(3_000);
+    expect(loadConfig({ SPEECH_TIMEOUT_MS: 'nonsense' }).speechTimeoutMs).toBe(8_000);
   });
 
   it('takes every value from the environment when it is set', () => {
@@ -40,6 +47,7 @@ describe('loadConfig', () => {
       poolMax: 20,
       translationTimeoutMs: 12_000,
       sessionGenerationTimeoutMs: 300_000,
+      speechTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
     });
   });

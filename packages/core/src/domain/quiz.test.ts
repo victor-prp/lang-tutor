@@ -7,6 +7,8 @@ import type {
   MatchingQuestion,
   MultipleChoiceQuestion,
   Question,
+  ReadAloudQuestion,
+  SayTranslationQuestion,
 } from '../api/types';
 import { seededRng } from '../utils/rng';
 import {
@@ -19,6 +21,8 @@ import {
   score,
   shuffleOptions,
   shuffleSession,
+  spokenVerdict,
+  verdictCorrect,
 } from './quiz';
 
 function makeQuestion(n: number): MultipleChoiceQuestion {
@@ -234,5 +238,83 @@ describe('shuffleSession (phase 24, spec D10)', () => {
   it('shuffles every other choice on its own, as shuffleOptions does', () => {
     const [shown] = shuffleSession([listen], seededRng(5));
     expect(shown).toEqual(shuffleOptions(listen, seededRng(5)));
+  });
+});
+
+const READ: ReadAloudQuestion = { id: 'r1', type: 'read_aloud', vocab_term_id: 'l1', question: 'gatto', meaning: 'חתול' };
+const SAY: SayTranslationQuestion = {
+  id: 's1',
+  type: 'say_translation',
+  vocab_term_id: 'l2',
+  question: 'מדבר',
+  part_of_speech: 'verb',
+  answer: 'parlo',
+  lemma: 'parlare',
+  alternatives: ['dico'],
+};
+
+describe('phase 25 speaking cards', () => {
+  it('takes a transcript or a pass on a speaking card, and a text only on say the translation', () => {
+    expect(answerFits(READ, { heard: 'gatto' })).toBe(true);
+    expect(answerFits(READ, { pass: 'skip' })).toBe(true);
+    expect(answerFits(READ, { pass: 'show_answer' })).toBe(false);
+    expect(answerFits(READ, { text: 'gatto' })).toBe(false);
+    expect(answerFits(READ, { option_index: 0 })).toBe(false);
+    expect(answerFits(SAY, { heard: 'parlo' })).toBe(true);
+    expect(answerFits(SAY, { pass: 'show_answer' })).toBe(true);
+    expect(answerFits(SAY, { text: 'parlo' })).toBe(true);
+    expect(answerFits(SAY, { option_index: 0 })).toBe(false);
+  });
+
+  it('a heard answer stores the transcript with its verdict, and counts as correct', () => {
+    expect(evaluate(READ, { heard: 'il gatto' })).toEqual({
+      question_id: 'r1',
+      is_correct: true,
+      answer_string: 'il gatto',
+      verdict: 'understood',
+    });
+    expect(evaluate(SAY, { heard: 'parlare' })).toMatchObject({ is_correct: true, verdict: 'understood' });
+    expect(evaluate(SAY, { heard: 'dico' })).toMatchObject({ is_correct: true, verdict: 'alternative' });
+  });
+
+  it('read aloud takes the form only, not its lemma', () => {
+    const shown: ReadAloudQuestion = { ...READ, question: 'parlo' };
+    expect(spokenVerdict(shown, 'parlare')).toBe('unheard');
+    expect(spokenVerdict(SAY, 'parlare')).toBe('understood');
+  });
+
+  it('never records an unheard transcript', () => {
+    expect(() => evaluate(READ, { heard: 'cane' })).toThrow(/unheard/);
+  });
+
+  it('stores at most 100 characters of a transcript', () => {
+    const heard = `gatto ${'a'.repeat(200)}`;
+    expect(evaluate(READ, { heard }).answer_string).toHaveLength(100);
+  });
+
+  it('a skip is neither right nor counted; show the answer is a failure', () => {
+    expect(evaluate(READ, { pass: 'skip' })).toEqual({ question_id: 'r1', is_correct: false, answer_string: '', verdict: 'skipped' });
+    expect(evaluate(SAY, { pass: 'show_answer' })).toEqual({ question_id: 's1', is_correct: false, answer_string: '', verdict: 'gave_up' });
+  });
+
+  it('a typed answer to say the translation is judged as a typed card', () => {
+    expect(evaluate(SAY, { text: 'parlare' })).toMatchObject({ is_correct: true, verdict: 'exact' });
+    expect(evaluate(SAY, { text: 'mangio' })).toMatchObject({ is_correct: false, verdict: 'wrong' });
+  });
+
+  it('the right answer of a read-aloud card is its form, of say the translation its word', () => {
+    expect(rightAnswer(READ)).toBe('gatto');
+    expect(rightAnswer(SAY)).toBe('parlo');
+  });
+
+  it('leaves a skipped card out of the score and of the missed list (spec D9)', () => {
+    const answers = [evaluate(READ, { pass: 'skip' }), evaluate(SAY, { pass: 'show_answer' })];
+    expect(score([READ, SAY], answers)).toEqual({ correct: 0, total: 1 });
+    expect(missed([READ, SAY], answers).map((item) => item.question.id)).toEqual(['s1']);
+  });
+
+  it('knows which stored verdicts are right', () => {
+    expect(['exact', 'near_miss', 'alternative', 'understood'].every((v) => verdictCorrect(v as never))).toBe(true);
+    expect(['wrong', 'gave_up', 'skipped'].some((v) => verdictCorrect(v as never))).toBe(false);
   });
 });

@@ -31,6 +31,9 @@ export const PrepareSessionPayloadSchema = z.object({
   // Phase 24 (spec D5, D3). Absent in a job enqueued before the deploy: such a
   // session gets no listening cards, and the rotation's first step.
   listening: z.boolean().default(false),
+  // Phase 25 (spec D4). Absent in a job enqueued before the deploy: such a
+  // session gets no speaking cards.
+  speaking: z.boolean().default(false),
   ordinal: z.number().int().nonnegative().default(0),
 });
 export type PrepareSessionPayload = z.infer<typeof PrepareSessionPayloadSchema>;

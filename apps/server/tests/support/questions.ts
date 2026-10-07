@@ -86,3 +86,10 @@ export async function insertListSession(
     return { sessionId, questions: generated };
   });
 }
+
+/** The answers a session has stored, as the repo loads them. Route tests read
+ *  through this: they may not reach past composition for a repository. */
+export async function readStoredAnswers(db: Db, sessionId: string) {
+  const record = await withTx(db, (tx) => createSessionRepo(tx).loadSession(sessionId));
+  return record?.answers ?? [];
+}

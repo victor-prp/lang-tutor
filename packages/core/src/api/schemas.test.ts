@@ -20,6 +20,8 @@ import {
   LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
+  SpeechAnswerRequestSchema,
+  SpeechAnswerResponseSchema,
   QuestionSchema,
   SaveVocabularyRequestSchema,
   TranslationCorrectionSchema,
@@ -722,6 +724,43 @@ describe('VocabularyPageQuerySchema', () => {
 describe('VocabularyPageSchema', () => {
   it('accepts a last page', () => {
     expect(VocabularyPageSchema.safeParse({ items: [], next_cursor: null }).success).toBe(true);
+  });
+});
+
+describe('phase 25 wire shapes', () => {
+  it('parses both speaking questions', () => {
+    expect(QuestionSchema.parse({ id: 'r', type: 'read_aloud', vocab_term_id: 'l', question: 'gatto', meaning: 'חתול' }).type).toBe(
+      'read_aloud',
+    );
+    expect(
+      QuestionSchema.parse({
+        id: 's',
+        type: 'say_translation',
+        vocab_term_id: 'l',
+        question: 'חתול',
+        part_of_speech: 'noun',
+        answer: 'gatto',
+        lemma: 'gatto',
+        alternatives: [],
+      }).type,
+    ).toBe('say_translation');
+  });
+
+  it('takes a pass on next-step, and refuses an unknown one', () => {
+    expect(NextStepRequestSchema.safeParse({ user_id: 'u', question_id: 'q', pass: 'skip' }).success).toBe(true);
+    expect(NextStepRequestSchema.safeParse({ user_id: 'u', question_id: 'q', pass: 'later' }).success).toBe(false);
+  });
+
+  it('bounds the audio and names the formats', () => {
+    const base = { user_id: 'u', question_id: 'q', mime_type: 'audio/aac' };
+    expect(SpeechAnswerRequestSchema.safeParse({ ...base, audio: 'AAAA' }).success).toBe(true);
+    expect(SpeechAnswerRequestSchema.safeParse({ ...base, audio: '' }).success).toBe(false);
+    expect(SpeechAnswerRequestSchema.safeParse({ ...base, audio: 'A'.repeat(270_001) }).success).toBe(false);
+    expect(SpeechAnswerRequestSchema.safeParse({ ...base, mime_type: 'audio/wav', audio: 'AAAA' }).success).toBe(false);
+  });
+
+  it('answers unheard with no next step', () => {
+    expect(SpeechAnswerResponseSchema.safeParse({ heard: 'cane', verdict: 'unheard' }).success).toBe(true);
   });
 });
 

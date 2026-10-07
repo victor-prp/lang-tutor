@@ -13,7 +13,7 @@ export type TypedTarget = { answer: string; lemma: string; alternatives: readonl
 // One leading word a learner may add or drop: an English or Italian article,
 // or the English infinitive marker. Language-agnostic, because a false accept
 // ("a casa" for "casa") costs nothing and knowing the language costs a field.
-const LEADING = new Set(['to', 'a', 'an', 'the', 'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una']);
+export const LEADING_WORDS = new Set(['to', 'a', 'an', 'the', 'il', 'lo', 'la', 'i', 'gli', 'le', 'un', 'uno', 'una']);
 const ELIDED = ["l'", "un'"];
 
 // Below five letters one edit is too often another word (bat/bad): phase 20's
@@ -37,7 +37,7 @@ export function normaliseTyped(text: string): string {
 /** The text without one leading article or "to", when anything is left. */
 function bare(text: string): string {
   const space = text.indexOf(' ');
-  if (space > 0 && LEADING.has(text.slice(0, space))) return text.slice(space + 1);
+  if (space > 0 && LEADING_WORDS.has(text.slice(0, space))) return text.slice(space + 1);
   for (const prefix of ELIDED) {
     if (text.startsWith(prefix) && text.length > prefix.length) return text.slice(prefix.length);
   }
@@ -48,7 +48,7 @@ const same = (a: string, b: string) => a === b || bare(a) === bare(b);
 
 /** Without diacritics: `perché` → `perche`, `ёлка` → `елка`. The breve stays:
  *  й is its own letter, not a marked и, so `мои` is another word than `мой`. */
-const undotted = (text: string) =>
+export const foldDiacritics = (text: string) =>
   text
     .normalize('NFD')
     .replace(/(?!\u0306)\p{M}/gu, '')
@@ -85,7 +85,7 @@ const letterCount = (text: string) => (text.match(/\p{L}/gu) ?? []).length;
 function nearMiss(typed: string, target: string): boolean {
   const t = bare(typed);
   const w = bare(target);
-  if (undotted(markAsAccent(t)) === undotted(w)) return true;
+  if (foldDiacritics(markAsAccent(t)) === foldDiacritics(w)) return true;
   return letterCount(w) >= NEAR_MISS_MIN_LETTERS && oneEditApart(t, w);
 }
 

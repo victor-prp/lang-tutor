@@ -124,8 +124,15 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1791388161884,
-      "tag": "0017_photo_imports",
+      "when": 1791381695890,
+      "tag": "0017_speaking_cards",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791388901122,
+      "tag": "0018_photo_imports",
       "breakpoints": true
     }
   ]

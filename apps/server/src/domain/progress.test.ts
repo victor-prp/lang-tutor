@@ -7,6 +7,7 @@ import {
   evaluateSession,
   evidenceFor,
   progressChanges,
+  READ_ALOUD_MAX_LEVEL,
   type AnsweredQuestion,
   type Evidence,
   type ProgressRow,
@@ -21,9 +22,9 @@ const row = (over: Partial<ProgressRow> = {}): ProgressRow => ({
   lastWrongOn: null,
   ...over,
 });
-const right: Evidence = { dimension: 'written_receptive', correct: true, capped: false };
+const right: Evidence = { dimension: 'written_receptive', correct: true, cap: null };
 const wrong: Evidence = { ...right, correct: false };
-const cappedRight: Evidence = { ...right, capped: true };
+const cappedRight: Evidence = { ...right, cap: 3 };
 const D = '2026-10-05';
 
 describe('daysBetween', () => {
@@ -49,37 +50,37 @@ describe('evidenceFor', () => {
 // Phase 23: spec D6, every row.
 describe('evidenceFor, every type and verdict', () => {
   it.each([
-    [{ senseId: 's', type: 'multiple_choice', correct: true }, [['written_receptive', true, false]]],
-    [{ senseId: 's', type: 'multiple_choice', correct: false }, [['written_receptive', false, false]]],
+    [{ senseId: 's', type: 'multiple_choice', correct: true }, [['written_receptive', true, null]]],
+    [{ senseId: 's', type: 'multiple_choice', correct: false }, [['written_receptive', false, null]]],
     [
       { senseId: 's', type: 'reverse_choice', correct: true },
       [
-        ['written_receptive', true, false],
-        ['written_productive', true, true],
+        ['written_receptive', true, null],
+        ['written_productive', true, 3],
       ],
     ],
-    [{ senseId: 's', type: 'reverse_choice', correct: false }, [['written_productive', false, true]]],
+    [{ senseId: 's', type: 'reverse_choice', correct: false }, [['written_productive', false, 3]]],
     [
       { senseId: 's', type: 'typed_translation', verdict: 'exact' },
       [
-        ['written_receptive', true, false],
-        ['written_productive', true, false],
-        ['spelling', true, false],
+        ['written_receptive', true, null],
+        ['written_productive', true, null],
+        ['spelling', true, null],
       ],
     ],
     [
       { senseId: 's', type: 'typed_translation', verdict: 'near_miss' },
       [
-        ['written_receptive', true, false],
-        ['written_productive', true, false],
-        ['spelling', false, false],
+        ['written_receptive', true, null],
+        ['written_productive', true, null],
+        ['spelling', false, null],
       ],
     ],
     [{ senseId: 's', type: 'typed_translation', verdict: 'alternative' }, []],
-    [{ senseId: 's', type: 'typed_translation', verdict: 'wrong' }, [['written_productive', false, false]]],
+    [{ senseId: 's', type: 'typed_translation', verdict: 'wrong' }, [['written_productive', false, null]]],
   ])('%o gives %j', (answer, expected) => {
     expect(
-      evidenceFor(answer as AnsweredQuestion).map((piece) => [piece.dimension, piece.correct, piece.capped]),
+      evidenceFor(answer as AnsweredQuestion).map((piece) => [piece.dimension, piece.correct, piece.cap]),
     ).toEqual(expected);
   });
 });
@@ -178,6 +179,20 @@ describe('evaluateSession', () => {
   it('ignores answers about a sense that has no rows, an unsaved one', () => {
     expect(evaluateSession(fiveRows('s1'), [answer('sX', true)], D)).toEqual({ changed: [], snapshot: [] });
   });
+
+  it('does not count a skipped card as practised (spec D7), but does count an understood one', () => {
+    const rows = [...fiveRows('s1'), ...fiveRows('s2')];
+    const outcome = evaluateSession(
+      rows,
+      [
+        { senseId: 's1', type: 'read_aloud', verdict: 'skipped' },
+        { senseId: 's2', type: 'read_aloud', verdict: 'understood' },
+      ],
+      D,
+    );
+    expect(outcome.snapshot.some((s) => s.senseId === 's1')).toBe(false);
+    expect(outcome.snapshot.filter((s) => s.senseId === 's2')).toHaveLength(5);
+  });
 });
 
 describe('evaluateSession, reverse choice only', () => {
@@ -256,7 +271,7 @@ describe('progressChanges', () => {
 
 describe('evidenceFor, phase 24 (spec D12)', () => {
   const sense = 's1';
-  const piece = (dimension: string, correct: boolean, capped = false) => ({ dimension, correct, capped });
+  const piece = (dimension: string, correct: boolean, cap: number | null = null) => ({ dimension, correct, cap });
   const cases: [AnsweredQuestion, Evidence[]][] = [
     [{ senseId: sense, type: 'listen_choice', correct: true }, [piece('spoken_receptive', true)] as Evidence[]],
     [{ senseId: sense, type: 'listen_choice', correct: false }, [piece('spoken_receptive', false)] as Evidence[]],
@@ -267,9 +282,9 @@ describe('evidenceFor, phase 24 (spec D12)', () => {
     [{ senseId: sense, type: 'matching', correct: false }, [piece('written_receptive', false)] as Evidence[]],
     [
       { senseId: sense, type: 'letter_tiles', verdict: 'exact' },
-      [piece('written_receptive', true), piece('written_productive', true, true)] as Evidence[],
+      [piece('written_receptive', true), piece('written_productive', true, 3)] as Evidence[],
     ],
-    [{ senseId: sense, type: 'letter_tiles', verdict: 'wrong' }, [piece('written_productive', false, true)] as Evidence[]],
+    [{ senseId: sense, type: 'letter_tiles', verdict: 'wrong' }, [piece('written_productive', false, 3)] as Evidence[]],
   ];
   it.each(cases)('%o', (answer, expected) => {
     expect(evidenceFor(answer)).toEqual(expected);
@@ -278,5 +293,53 @@ describe('evidenceFor, phase 24 (spec D12)', () => {
   it('never credits a written dimension for listening: nothing crosses modalities', () => {
     const dimensions = evidenceFor({ senseId: sense, type: 'dictation', verdict: 'exact' }).map((p) => p.dimension);
     expect(dimensions.filter((d) => d.startsWith('written'))).toEqual([]);
+  });
+});
+
+describe('phase 25 evidence (spec D10)', () => {
+  const s = 's1';
+  it('reads aloud as spoken_productive capped at 2, crediting nothing below', () => {
+    expect(evidenceFor({ senseId: s, type: 'read_aloud', verdict: 'understood' })).toEqual([
+      { dimension: 'spoken_productive', correct: true, cap: READ_ALOUD_MAX_LEVEL },
+    ]);
+    expect(evidenceFor({ senseId: s, type: 'read_aloud', verdict: 'skipped' })).toEqual([]);
+  });
+
+  it('says the translation as spoken_productive, credited down to spoken_receptive', () => {
+    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'understood' })).toEqual([
+      { dimension: 'spoken_receptive', correct: true, cap: null },
+      { dimension: 'spoken_productive', correct: true, cap: null },
+    ]);
+    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'gave_up' })).toEqual([
+      { dimension: 'spoken_productive', correct: false, cap: null },
+    ]);
+    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'alternative' })).toEqual([]);
+    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'skipped' })).toEqual([]);
+  });
+
+  it('reads a typed answer to say the translation as a typed card', () => {
+    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'exact' })).toEqual(
+      evidenceFor({ senseId: s, type: 'typed_translation', verdict: 'exact' }),
+    );
+    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'wrong' })).toEqual([
+      { dimension: 'written_productive', correct: false, cap: null },
+    ]);
+  });
+
+  it('stops read aloud at level 2, and lifts the cap when say the translation is right the same day', () => {
+    const D = '2026-10-07';
+    const capped2: Evidence = { dimension: 'spoken_productive', correct: true, cap: 2 };
+    const full: Evidence = { dimension: 'spoken_productive', correct: true, cap: null };
+    expect(advance(row({ level: 1 }), [capped2], D).level).toBe(2);
+    const atTwo = row({ level: 2, lastStepOn: '2026-09-01' });
+    expect(advance(atTwo, [capped2], D)).toBe(atTwo);
+    expect(advance(atTwo, [capped2, full], D).level).toBe(3);
+  });
+
+  it('keeps recognition-format evidence at 3 when a cap of 2 joins it', () => {
+    const atThree = row({ level: 3, lastStepOn: '2026-09-01' });
+    const D = '2026-10-07';
+    expect(advance(atThree, [{ ...right, cap: 3 }, { ...right, cap: 2 }], D)).toBe(atThree);
+    expect(advance(row({ level: 2, lastStepOn: '2026-09-01' }), [{ ...right, cap: 3 }, { ...right, cap: 2 }], D).level).toBe(3);
   });
 });

@@ -15,9 +15,14 @@ const DIMENSIONS = ['written_receptive', 'written_productive', 'spoken_receptive
 // The saved form of each meaning, for reversed and typed cards (phase 23).
 const FORM_OF: Record<string, string> = { קראה: 'прочитала', הקריאה: 'прочитала', בצל: 'лук', קשת: 'лук' };
 
-// Phase 23. What one right answer does to a new sense's three written levels
-// (spec D6), and the badge over them: the mean, ties up.
-const LEVELS_AFTER_RIGHT: Record<string, number[]> = { choice: [2, 1, 1], reverse: [2, 2, 1], typed: [2, 2, 2] };
+// What one right answer does to a new sense's three written levels (phase 23,
+// spec D6), then the two spoken ones, which stay at 1 (phases 24 and 25 made
+// them live), and the badge over all five: the mean, ties up.
+const LEVELS_AFTER_RIGHT: Record<string, number[]> = {
+  choice: [2, 1, 1, 1, 1],
+  reverse: [2, 2, 1, 1, 1],
+  typed: [2, 2, 2, 1, 1],
+};
 const badgeOf = (levels: number[]) => Math.floor(levels.reduce((a, b) => a + b, 0) / levels.length + 0.5);
 
 test('a session moves the words it practised up the ladder, and the list filters by level', async ({
@@ -68,8 +73,8 @@ test('a session moves the words it practised up the ladder, and the list filters
   }
   expect(lukKinds).toHaveLength(2);
 
-  // 3. Results: four practised words. A лук card that was reversed or typed
-  // raises its badge to נחשפה; one that was today's card moves recognition
+  // 3. Results: four practised words. A лук card that was typed
+  // raises its badge to נחשפה (the mean of 2,2,2,1,1 is 1.6); one that was today's card moves recognition
   // only, and says so. прочитала moves nothing.
   const lukBadges = lukKinds.map((kind) => badgeOf(LEVELS_AFTER_RIGHT[kind]));
   await expect(page.getByTestId('practised-row')).toHaveCount(4);
@@ -114,13 +119,13 @@ test('a session moves the words it practised up the ladder, and the list filters
   await levelAll.click();
   await expect(words).toHaveCount(2);
 
-  // 7. A word's detail: five dimensions, three live since phase 23.
+  // 7. A word's detail: five dimensions, all live since phase 25.
   await words.filter({ hasText: 'лук' }).click();
   await expect(page.getByTestId('vocabulary-sense-level')).toHaveCount(2);
   // Each of the two saved senses shows all five dimensions; spoken_receptive is
-  // live since phase 24 (listening cards), so it reads חדשה, and only the
-  // spoken_productive one reads "not practised yet" (2 of 10). Every right answer, of any type, raised
-  // recognition.
+  // live since phase 24 (listening cards) and spoken_productive since phase 25
+  // (speaking cards), so both read חדשה and nothing reads "not practised yet".
+  // Every right answer, of any type, raised recognition.
   for (const dimension of DIMENSIONS) {
     await expect(page.getByTestId(`vocabulary-dimension-${dimension}`)).toHaveCount(2);
   }
@@ -128,8 +133,8 @@ test('a session moves the words it practised up the ladder, and the list filters
   await expect(dimensionRows).toHaveCount(10);
   await expect(page.getByTestId('vocabulary-dimension-written_receptive')).toHaveText([/נחשפה/, /נחשפה/]);
   await expect(page.getByTestId('vocabulary-dimension-spoken_receptive')).toHaveText([/חדשה/, /חדשה/]);
-  await expect(page.getByTestId('vocabulary-dimension-spoken_productive').first()).toContainText('טרם תורגל');
-  await expect(dimensionRows.filter({ hasText: 'טרם תורגל' })).toHaveCount(2);
+  await expect(page.getByTestId('vocabulary-dimension-spoken_productive')).toHaveText([/חדשה/, /חדשה/]);
+  await expect(dimensionRows.filter({ hasText: 'טרם תורגל' })).toHaveCount(0);
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

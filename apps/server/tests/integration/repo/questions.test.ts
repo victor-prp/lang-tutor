@@ -7,7 +7,7 @@ import { withTx } from '../../support/withTx';
 import { content, optionsFor } from '../../../src/db/content';
 import { dictSenses, dictVariants } from '../../../src/db/schema';
 import { optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
-import { asChoice } from '../../support/questions';
+import { asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createQuestionRepo } from '../../../src/repo/questions';
 
@@ -232,4 +232,35 @@ describe('phase 23: reversed and typed questions', () => {
       ).rejects.toThrow();
     });
   }
+});
+
+describe('phase 25: speaking questions', () => {
+  it('stores and reads back both speaking types (phase 25)', async () => {
+    const asked = [];
+    for (const [lemma, translation] of [
+      ['tome', 'ספר'],
+      ['lantern', 'פנס'],
+    ]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
+      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked,
+      alternatives: ['lamp'],
+      types: ['read_aloud', 'say_translation'],
+    });
+    expect(questions[0]).toEqual({ id: questions[0].id, type: 'read_aloud', vocab_term_id: asked[0].lexemeId, question: 'tome', meaning: 'ספר' });
+    expect(questions[1]).toEqual({
+      id: questions[1].id,
+      type: 'say_translation',
+      vocab_term_id: asked[1].lexemeId,
+      question: 'פנס',
+      part_of_speech: 'noun',
+      answer: 'lantern',
+      lemma: 'lantern',
+      alternatives: ['lamp'],
+    });
+  });
 });

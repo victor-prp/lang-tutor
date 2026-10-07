@@ -57,6 +57,15 @@ import type {
   MatchingQuestionSchema,
   LetterTilesQuestionSchema,
   TypedVerdictSchema,
+  ReadAloudQuestionSchema,
+  SayTranslationQuestionSchema,
+  SpokenVerdictSchema,
+  AnswerVerdictSchema,
+  SpeechMimeTypeSchema,
+  SpeechVerdictSchema,
+  SpeechAnswerRequestSchema,
+  SpeechAnswerResponseSchema,
+  LlmTranscriptSchema,
   TranslationCorrectionSchema,
   TranslationGuardReasonSchema,
   TranslationKindSchema,
@@ -140,6 +149,15 @@ export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
 export type SenseProgress = z.infer<typeof SenseProgressSchema>;
 export type SessionProgressItem = z.infer<typeof SessionProgressItemSchema>;
 export type SkipSessionResponse = z.infer<typeof SkipSessionResponseSchema>;
+export type ReadAloudQuestion = z.infer<typeof ReadAloudQuestionSchema>;
+export type SayTranslationQuestion = z.infer<typeof SayTranslationQuestionSchema>;
+export type SpokenVerdict = z.infer<typeof SpokenVerdictSchema>;
+export type AnswerVerdict = z.infer<typeof AnswerVerdictSchema>;
+export type SpeechMimeType = z.infer<typeof SpeechMimeTypeSchema>;
+export type SpeechVerdict = z.infer<typeof SpeechVerdictSchema>;
+export type SpeechAnswerRequest = z.infer<typeof SpeechAnswerRequestSchema>;
+export type SpeechAnswerResponse = z.infer<typeof SpeechAnswerResponseSchema>;
+export type LlmTranscript = z.infer<typeof LlmTranscriptSchema>;
 export type PhotoImportCreateRequest = z.infer<typeof PhotoImportCreateRequestSchema>;
 export type PhotoImportStatus = z.infer<typeof PhotoImportStatusSchema>;
 export type PhotoImportItemStatus = z.infer<typeof PhotoImportItemStatusSchema>;

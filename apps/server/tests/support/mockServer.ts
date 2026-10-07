@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
 
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
+import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
 import { geminiResponse } from './geminiResponse';
 
 // tests/support/ is the test composition root, so naming a concrete URL and
@@ -279,6 +280,25 @@ export async function expectDistractors(ns: string, opts: { delayMs?: number; ta
         body: JSON.stringify(geminiResponse({ items })),
         ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
       },
+    },
+  });
+}
+
+/**
+ * Phase 25. The transcription call's answer, matched on TRANSCRIBE_MARKER so a
+ * generation or translation stub in the same namespace cannot answer it, and
+ * the other way round. `once` consumes it, in registration order.
+ */
+export async function expectTranscription(ns: string, heard: string, opts: { once?: boolean } = {}): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${TRANSCRIBE_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ heard })),
+      },
+      ...(opts.once ? { times: { remainingTimes: 1, unlimited: false } } : {}),
     },
   });
 }

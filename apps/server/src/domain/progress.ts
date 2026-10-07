@@ -1,4 +1,4 @@
-import type { TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerVerdict } from '@lang-tutor/core/api';
 import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/domain';
 
 /**
@@ -6,19 +6,20 @@ import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/d
  * read (ADR 0001 R3).
  */
 
-/** Phase 24. The types answered by an option, and by a text with its verdict. */
+/** Phase 24. The types answered by an option, and by a text with its verdict.
+ *  Phase 25: a speaking card's answer is stored as a text with its verdict too. */
 export type ChoiceAnswerType = 'multiple_choice' | 'reverse_choice' | 'listen_choice' | 'matching';
-export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles';
+export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation';
 
 /** One answer as the rule reads it: which sense, which exercise, and how it
  *  was judged. A choice is right or wrong; a text answer has its verdict. */
 export type AnsweredQuestion =
   | { senseId: string; type: ChoiceAnswerType; correct: boolean }
-  | { senseId: string; type: TextAnswerType; verdict: TypedVerdict };
+  | { senseId: string; type: TextAnswerType; verdict: AnswerVerdict };
 
-/** One piece of evidence about one dimension. Capped evidence can carry a
- *  dimension to CAPPED_MAX_LEVEL and no further. */
-export type Evidence = { dimension: Dimension; correct: boolean; capped: boolean };
+/** One piece of evidence about one dimension. A capped piece alone can carry
+ *  a dimension to its cap and no further; null is no cap. */
+export type Evidence = { dimension: Dimension; correct: boolean; cap: number | null };
 
 /** One row of sense_progress. Days are UTC calendar dates, `YYYY-MM-DD`. */
 export type ProgressRow = {
@@ -54,6 +55,9 @@ export const GAP_DAYS: readonly number[] = [0, 1, 7, 21];
 /** The highest level capped evidence alone can reach. */
 export const CAPPED_MAX_LEVEL = 3;
 
+/** Phase 25 (spec D10). Reading a shown word aloud: "said it", and no more. */
+export const READ_ALOUD_MAX_LEVEL = 2;
+
 const DAY_MS = 86_400_000;
 
 function dayNumber(day: string): number {
@@ -66,6 +70,24 @@ export function daysBetween(from: string, to: string): number {
   return dayNumber(to) - dayNumber(from);
 }
 
+/** A typed answer's evidence (phase 23 D6), for a typed card and for the
+ *  typed form of say the translation (phase 25 D8). */
+function typedEvidence(verdict: AnswerVerdict, piece: (dimension: Dimension, correct: boolean) => Evidence): Evidence[] {
+  switch (verdict) {
+    case 'exact':
+      return [piece('written_receptive', true), piece('written_productive', true), piece('spelling', true)];
+    case 'near_miss':
+      return [piece('written_receptive', true), piece('written_productive', true), piece('spelling', false)];
+    case 'wrong':
+      // A failure to recall is the productive failure; it says nothing
+      // about spelling a form the learner did not produce.
+      return [piece('written_productive', false)];
+    default:
+      // An alternative is right but not this word: nothing about this sense.
+      return [];
+  }
+}
+
 /**
  * What one answer says about which dimensions: phase 20's §3 table, filled in
  * for phase 23's types (spec D6) and phase 24's (spec D12). A productive success also credits the
@@ -73,10 +95,10 @@ export function daysBetween(from: string, to: string): number {
  * recognition-format evidence caps a productive dimension at 3.
  */
 export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
-  const piece = (dimension: Dimension, correct: boolean, capped = false): Evidence => ({
+  const piece = (dimension: Dimension, correct: boolean, cap: number | null = null): Evidence => ({
     dimension,
     correct,
-    capped,
+    cap,
   });
   switch (answer.type) {
     case 'multiple_choice':
@@ -85,22 +107,10 @@ export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
       // Picking the form out of four is recognition of it: productive evidence,
       // capped. A failure says nothing about knowing the meaning.
       return answer.correct
-        ? [piece('written_receptive', true), piece('written_productive', true, true)]
-        : [piece('written_productive', false, true)];
+        ? [piece('written_receptive', true), piece('written_productive', true, CAPPED_MAX_LEVEL)]
+        : [piece('written_productive', false, CAPPED_MAX_LEVEL)];
     case 'typed_translation':
-      switch (answer.verdict) {
-        case 'exact':
-          return [piece('written_receptive', true), piece('written_productive', true), piece('spelling', true)];
-        case 'near_miss':
-          return [piece('written_receptive', true), piece('written_productive', true), piece('spelling', false)];
-        case 'alternative':
-          // Right, but not this word: nothing about this sense.
-          return [];
-        case 'wrong':
-          // A failure to recall is the productive failure; it says nothing
-          // about spelling a form the learner did not produce.
-          return [piece('written_productive', false)];
-      }
+      return typedEvidence(answer.verdict, piece);
     case 'listen_choice':
       // Hearing, then knowing the meaning: the spoken receptive dimension
       // only. Nothing crosses modalities (phase 20).
@@ -114,19 +124,37 @@ export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
           return [piece('spoken_receptive', true), piece('spelling', true)];
         case 'near_miss':
           return [piece('spoken_receptive', true), piece('spelling', false)];
-        case 'alternative':
-          // A dictation accepts no alternative (spec D7); unreachable.
-          return [];
         case 'wrong':
           // A failure to recognise the word heard; nothing about spelling.
           return [piece('spoken_receptive', false)];
+        default:
+          // A dictation accepts no alternative (spec D7); unreachable.
+          return [];
       }
     case 'letter_tiles':
       // The letters are given: production with support, capped like the
       // reversed card, and never spelling (spec D11).
       return answer.verdict === 'exact'
-        ? [piece('written_receptive', true), piece('written_productive', true, true)]
-        : [piece('written_productive', false, true)];
+        ? [piece('written_receptive', true), piece('written_productive', true, CAPPED_MAX_LEVEL)]
+        : [piece('written_productive', false, CAPPED_MAX_LEVEL)];
+    case 'read_aloud':
+      // Phase 25 (spec D10): saying a word that is shown is part of being
+      // understood when speaking, and none of recall. Capped at 2, and nothing
+      // downward: reading a word aloud shows nothing about understanding it.
+      return answer.verdict === 'understood' ? [piece('spoken_productive', true, READ_ALOUD_MAX_LEVEL)] : [];
+    case 'say_translation':
+      switch (answer.verdict) {
+        case 'understood':
+          return [piece('spoken_receptive', true), piece('spoken_productive', true)];
+        case 'gave_up':
+          return [piece('spoken_productive', false)];
+        case 'skipped':
+        case 'alternative':
+          return [];
+        default:
+          // Answered by typing, after "can't speak now" (spec D8).
+          return typedEvidence(answer.verdict, piece);
+      }
   }
 }
 
@@ -153,7 +181,10 @@ export function advance(row: ProgressRow, pieces: readonly Evidence[], day: stri
   }
   if (row.lastWrongOn === day || row.lastStepOn === day) return row;
   if (row.level >= MAX_LEVEL) return row;
-  const cap = pieces.every((piece) => piece.capped) ? CAPPED_MAX_LEVEL : MAX_LEVEL;
+  // The day's cap is the highest of its pieces' caps; one uncapped piece lifts it.
+  const cap = pieces.some((piece) => piece.cap === null)
+    ? MAX_LEVEL
+    : Math.max(...pieces.map((piece) => piece.cap!));
   if (row.level + 1 > cap) return row;
   const since = later(row.lastStepOn, row.lastWrongOn);
   if (since !== null && daysBetween(since, day) < GAP_DAYS[row.level - 1]) return row;
@@ -183,7 +214,10 @@ export function evaluateSession(
       pieces.set(key, [...(pieces.get(key) ?? []), piece]);
     }
   }
-  const practised = new Set(answers.map((answer) => answer.senseId));
+  // A skipped card (spec D7) is in neither list: choice answers never skip.
+  const practised = new Set(
+    answers.filter((answer) => !('verdict' in answer && answer.verdict === 'skipped')).map((answer) => answer.senseId),
+  );
 
   const changed: ProgressRow[] = [];
   const snapshot: SnapshotRow[] = [];

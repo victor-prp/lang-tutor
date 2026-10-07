@@ -1,4 +1,5 @@
-import type { AnswerRecord, Question, SessionSource, SessionStatus, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerRecord, AnswerVerdict, Question, SessionSource, SessionStatus } from '@lang-tutor/core/api';
+import { verdictCorrect } from '@lang-tutor/core/domain';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
@@ -217,10 +218,10 @@ export function createSessionRepo(tx: Tx) {
       // answers_kind_valid: an answer is an option or a text with its verdict.
       const answerRecords: AnswerRecord[] = answerRows.map((answer) => {
         if (answer.typedText !== null) {
-          const verdict = answer.verdict as TypedVerdict;
+          const verdict = answer.verdict as AnswerVerdict;
           return {
             question_id: answer.questionId,
-            is_correct: verdict !== 'wrong',
+            is_correct: verdictCorrect(verdict),
             answer_string: answer.typedText,
             verdict,
           };
@@ -250,13 +251,15 @@ export function createSessionRepo(tx: Tx) {
      * `option_order` is the encoding `insertSession` wrote, so nothing above
      * needs to know it exists. The extra lookup is one primary-key read inside
      * a transaction that is already holding this session's row. A typed answer
-     * (phase 23) is stored as its text and the verdict the learner was shown.
+     * (phase 23) is stored as its text and the verdict the learner was shown. A spoken
+     * answer (phase 25) is stored the same way: the transcript, or '' for a
+     * pass, and its verdict.
      */
     insertAnswer: async (
       sessionId: string,
       position: number,
       questionId: string,
-      answer: { displayIndex: number } | { text: string; verdict: TypedVerdict },
+      answer: { displayIndex: number } | { text: string; verdict: AnswerVerdict },
     ): Promise<void> => {
       if ('text' in answer) {
         await tx.insert(answers).values({

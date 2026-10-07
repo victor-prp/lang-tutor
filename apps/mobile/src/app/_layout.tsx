@@ -1,5 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { setAudioModeAsync } from 'expo-audio';
+import {
+  AudioModule,
+  getRecordingPermissionsAsync,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+} from 'expo-audio';
+import { File } from 'expo-file-system';
 import { Stack } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
@@ -10,10 +16,12 @@ import { requireEnvValue } from '@/config/requireEnvValue';
 import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '@/currentUser';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
+import { RecordingProvider } from '@/hooks/useRecording';
 import { SessionProvider } from '@/hooks/useSession';
 import { SpeechProvider } from '@/hooks/useSpeech';
 import { TranslationProvider } from '@/hooks/useTranslation';
 import { VocabularyProvider } from '@/hooks/useVocabulary';
+import { createRecorder, type RecordPermission } from '@/recording';
 import { createSpeaker } from '@/speech';
 import { colors } from '@/theme';
 
@@ -39,6 +47,55 @@ const speaker = createSpeaker({
   prepareAudio: () => setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers' }),
 });
 
+// Phase 25 (spec D12). The recorder class useAudioRecorder wraps, built outside
+// any hook. The web build names it AudioRecorderWeb (POC).
+const recorder = createRecorder({
+  platform: Platform.OS,
+  makeEngine: (options) =>
+    Platform.OS === 'web'
+      ? new (AudioModule as unknown as { AudioRecorderWeb: typeof AudioModule.AudioRecorder }).AudioRecorderWeb(options)
+      : new AudioModule.AudioRecorder(options),
+  // expo-audio's web read opens the browser's prompt when the site was never
+  // granted, so the web reads the permission itself, which never prompts.
+  permission: async (): Promise<RecordPermission> => {
+    if (Platform.OS === 'web') {
+      try {
+        const { state } = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+        return state === 'granted' ? 'granted' : state === 'denied' ? 'denied' : 'undetermined';
+      } catch {
+        return 'denied';
+      }
+    }
+    const answer = await getRecordingPermissionsAsync();
+    return answer.granted ? 'granted' : answer.canAskAgain ? 'undetermined' : 'denied';
+  },
+  requestPermission: async () => (await requestRecordingPermissionsAsync()).granted,
+  setRecordingMode: (on) =>
+    setAudioModeAsync(
+      on
+        ? { allowsRecording: true, playsInSilentMode: true }
+        : { allowsRecording: false, playsInSilentMode: true, interruptionMode: 'mixWithOthers' },
+    ),
+  // A phone reads the file directly: fetch(file://) with FileReader uploaded
+  // 15 bytes from Android (POC). The web's uri is a blob: URL. fetch is held in
+  // a local, because a browser refuses it called as a method of another object.
+  readBase64: async (uri) => {
+    if (Platform.OS !== 'web') {
+      const file = new File(uri);
+      return { base64: await file.base64(), bytes: file.size ?? 0 };
+    }
+    const fetchUri = globalThis.fetch;
+    const blob = await (await fetchUri(uri)).blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    return { base64: dataUrl.slice(dataUrl.indexOf(',') + 1), bytes: blob.size };
+  },
+});
+
 // RTL is set two different ways because the platforms disagree about how.
 //
 // Native: I18nManager is the real mechanism, but it only applies a flip on
@@ -62,21 +119,23 @@ export default function RootLayout() {
     // and on web the insets are zero without an explicit provider.
     <SafeAreaProvider>
       <SpeechProvider speaker={speaker}>
-        <CurrentUserProvider api={api} usernameStore={usernameStore}
-          enrollmentStore={enrollmentStore}
-        >
-          <NextSessionProvider api={api}>
-            <SessionProvider api={api}>
-              <TranslationProvider api={api}>
-                <VocabularyProvider api={api}>
-                  <View style={styles.root} {...rtlProps}>
-                    <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-                  </View>
-                </VocabularyProvider>
-              </TranslationProvider>
-            </SessionProvider>
-          </NextSessionProvider>
-        </CurrentUserProvider>
+        <RecordingProvider recorder={recorder}>
+          <CurrentUserProvider api={api} usernameStore={usernameStore}
+            enrollmentStore={enrollmentStore}
+          >
+            <NextSessionProvider api={api}>
+              <SessionProvider api={api}>
+                <TranslationProvider api={api}>
+                  <VocabularyProvider api={api}>
+                    <View style={styles.root} {...rtlProps}>
+                      <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                    </View>
+                  </VocabularyProvider>
+                </TranslationProvider>
+              </SessionProvider>
+            </NextSessionProvider>
+          </CurrentUserProvider>
+        </RecordingProvider>
       </SpeechProvider>
     </SafeAreaProvider>
   );

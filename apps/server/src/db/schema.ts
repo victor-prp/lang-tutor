@@ -480,11 +480,13 @@ export const questions = pgTable(
     check('questions_options_valid', sql`${t.options} is null or question_options_valid(${t.options})`),
     check(
       'questions_type_known',
-      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles')`,
+      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation')`,
     ),
     // Phase 23 and 24. Each type's shape (spec D13, phase 24 §2): a choice has
     // options, every type but the Hebrew-option ones stores the Hebrew prompt,
     // only a typed card has alternatives, and only a tiles card has tiles.
+    // Phase 25's two speaking types store the Hebrew as their prompt, and say
+    // the translation its alternatives, as the typed card does.
     check(
       'questions_shape_valid',
       sql`case ${t.type}
@@ -497,6 +499,9 @@ export const questions = pgTable(
         when 'dictation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'letter_tiles' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null
           and coalesce(array_length(${t.tiles}, 1), 0) between 5 and 12
+        when 'read_aloud' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'say_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
         else false end`,
     ),
     foreignKey({
@@ -612,7 +617,10 @@ export const answers = pgTable(
       'answers_kind_valid',
       sql`(${t.selectedOptionPosition} is null) = (${t.typedText} is not null) and (${t.typedText} is null) = (${t.verdict} is null)`,
     ),
-    check('answers_verdict_known', sql`${t.verdict} in ('exact', 'near_miss', 'alternative', 'wrong')`),
+    check(
+      'answers_verdict_known',
+      sql`${t.verdict} in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped')`,
+    ),
     check('answers_typed_text_length', sql`length(${t.typedText}) <= 100`),
   ],
 );

@@ -275,3 +275,39 @@ describe('step and status', () => {
     expect(record.status).toBe('completed');
   });
 });
+
+describe('phase 25 speaking cards in step', () => {
+  const record = (): SessionRecord => ({
+    user_id: 'u1',
+    questions: [
+      { id: 'r1', type: 'read_aloud', vocab_term_id: 'l1', question: 'gatto', meaning: 'חתול' },
+      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+    ],
+    answers: [],
+    complete: false,
+    completed_at: null,
+    status: 'ready',
+    source: 'list',
+  });
+
+  it('records an understood transcript and advances', () => {
+    const outcome = step(record(), 'r1', { heard: 'gatto' });
+    expect(outcome).toMatchObject({ status: 'advanced' });
+    if (outcome.status === 'advanced') expect(outcome.record.answers[0]).toMatchObject({ verdict: 'understood' });
+  });
+
+  it('refuses an unheard transcript and changes nothing (spec D5)', () => {
+    expect(step(record(), 'r1', { heard: 'cane' })).toEqual({ status: 'unheard' });
+  });
+
+  it('passes a read-aloud card with skip, and refuses show_answer there', () => {
+    expect(step(record(), 'r1', { pass: 'skip' })).toMatchObject({ status: 'advanced' });
+    expect(step(record(), 'r1', { pass: 'show_answer' })).toEqual({ status: 'wrong_answer_kind' });
+  });
+
+  it('replays a transcript sent again for the card just answered', () => {
+    const outcome = step(record(), 'r1', { heard: 'gatto' });
+    if (outcome.status !== 'advanced') throw new Error('expected advanced');
+    expect(step(outcome.record, 'r1', { heard: 'gatto' })).toMatchObject({ status: 'replayed' });
+  });
+});

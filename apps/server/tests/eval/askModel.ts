@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
 import type {
   LanguageCode,
   LlmDistractors,
@@ -14,6 +18,8 @@ import {
   parseLlmDistractors,
   type DistractorItem,
 } from '../../src/domain/distractors';
+import { parseTranscript, transcriptionSystem } from '../../src/domain/speech';
+import type { SpeechTranscriber } from '../../src/services/speech';
 import {
   buildPrompt,
   buildRenderingPrompt,
@@ -131,4 +137,20 @@ export async function askDistractors(
   const answer = raw === '' ? null : parseLlmDistractors(raw);
   if (!answer) throw new Error(`unreadable distractor answer: ${raw.slice(0, 200)}`);
   return answer;
+}
+
+/** Phase 25. The real instruction and the real parser over one clip — what
+ *  answerBySpeech does to it, without a database. Null when unreadable. */
+export async function askTranscription(
+  transcriber: SpeechTranscriber,
+  input: { file: string; language: 'it' | 'ru' | 'en' },
+): Promise<string | null> {
+  const audio = readFileSync(join(__dirname, 'audio', `${input.file}.aac`)).toString('base64');
+  const raw = await transcriber({
+    system: transcriptionSystem(input.language),
+    audio,
+    mimeType: 'audio/aac',
+    schema: LlmTranscriptSchema,
+  });
+  return parseTranscript(raw);
 }

@@ -50,6 +50,7 @@ export async function main(): Promise<void> {
     gemini,
     translationTimeoutMs: config.translationTimeoutMs,
     sessionGenerationTimeoutMs: config.sessionGenerationTimeoutMs,
+    speechTimeoutMs: config.speechTimeoutMs,
     // Resolved here, in the one place that reads the environment: app.ts must
     // not learn that a lane exists.
     identity: {

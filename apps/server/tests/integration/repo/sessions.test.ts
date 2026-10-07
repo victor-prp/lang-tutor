@@ -354,3 +354,32 @@ describe('countListSessions', () => {
     });
   });
 });
+
+describe('phase 25: spoken answers', () => {
+  it('stores a spoken answer and a pass, and reads every verdict back', async () => {
+    const asked = [];
+    for (const [lemma, translation] of [
+      ['tome', 'ספר'],
+      ['lantern', 'פנס'],
+    ]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
+      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked,
+      alternatives: ['lamp'],
+      types: ['read_aloud', 'say_translation'],
+    });
+    await withTx(t.db, async (tx) => {
+      const repo = createSessionRepo(tx);
+      await repo.insertAnswer(sessionId, 0, questions[0].id, { text: 'tome', verdict: 'understood' });
+      await repo.insertAnswer(sessionId, 1, questions[1].id, { text: '', verdict: 'skipped' });
+      expect((await repo.loadSession(sessionId))!.answers).toEqual([
+        { question_id: questions[0].id, is_correct: true, answer_string: 'tome', verdict: 'understood' },
+        { question_id: questions[1].id, is_correct: false, answer_string: '', verdict: 'skipped' },
+      ]);
+    });
+  });
+});

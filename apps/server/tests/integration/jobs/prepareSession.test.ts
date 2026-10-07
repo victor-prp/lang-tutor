@@ -52,12 +52,12 @@ const WORDS: Record<string, string> = { tome: 'ספר', sprint: 'ריצה', lant
 
 /** Past the seed (skipped), three saved words, and a list session requested. */
 async function requestListSession(): Promise<string> {
-  const seed = await deps.sessions.createNextSession(E, { listening: false });
+  const seed = await deps.sessions.createNextSession(E, { listening: false, speaking: false });
   await deps.sessions.skipSession(seed.sessionId);
   for (const [lemma, translation] of Object.entries(WORDS)) {
     await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
   }
-  const { sessionId } = await deps.sessions.createNextSession(E, { listening: false });
+  const { sessionId } = await deps.sessions.createNextSession(E, { listening: false, speaking: false });
   return sessionId;
 }
 
@@ -72,12 +72,12 @@ it('prepares a ten-word session with listening on: a run, the board, a run (spec
   await expectDistractors(ns, {
     tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'typed'],
   });
-  const seed = await deps.sessions.createNextSession(E, { listening: true });
+  const seed = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
   await deps.sessions.skipSession(seed.sessionId);
   for (const [lemma, translation] of Object.entries(TEN_WORDS)) {
     await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
   }
-  const { sessionId } = await deps.sessions.createNextSession(E, { listening: true });
+  const { sessionId } = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
 
   await waitFor(async () => (await statusOf(sessionId)) === 'ready');
   const { questions } = await deps.sessions.getSession(sessionId);

@@ -8,7 +8,10 @@ import {
   NextStepResponseSchema,
   SessionViewSchema,
   SkipSessionResponseSchema,
+  SpeechAnswerRequestSchema,
+  SpeechAnswerResponseSchema,
 } from '@lang-tutor/core/api/schemas';
+import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 
 import type { ProgressChange } from '../domain/progress';
@@ -22,6 +25,7 @@ import {
   AnswerKindMismatch,
   EnrollmentNotFound,
   InsufficientQuestions,
+  LlmUnavailable,
   NoSavedWords,
   OptionOutOfRange,
   QuestionDesynced,
@@ -90,7 +94,7 @@ const createSessionRoute = createRoute({
   tags: ['sessions'],
   summary: 'Create the next session',
   description:
-    "An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, and listening cards only when the request says `listening: true`. Read it with GET /sessions/{id}.",
+    "An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, listening cards only when the request says `listening: true`, and speaking cards only when it says `speaking: true`. Read it with GET /sessions/{id}.",
   request: {
     body: { required: true, content: { 'application/json': { schema: CreateSessionRequestSchema } } },
   },
@@ -142,7 +146,7 @@ const nextStepRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current question',
   description:
-    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. Re-sending the same answer replays the same response.',
+    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
@@ -160,6 +164,30 @@ const nextStepRoute = createRoute({
     409: failure(
       "`question_id` is not the session's current question, or the session is not ready (`session_not_ready`).",
     ),
+  },
+});
+
+const speechRoute = createRoute({
+  method: 'post',
+  path: '/sessions/{id}/speech',
+  tags: ['sessions'],
+  summary: 'Answer the current speaking card by voice',
+  description:
+    'Takes one recorded attempt at the current `read_aloud` or `say_translation` card, as base64 audio (`audio/aac`, `audio/mp4` or `audio/webm`, at most 200 KB). The server transcribes it with a language model, which costs money on every call, and judges the transcript. `understood` and `alternative` record the answer and carry `next`, the next-step response. `unheard` records nothing: the card stays current and may be tried again. Re-sending an attempt that was recorded replays it without a model call.',
+  request: {
+    params: sessionIdParam,
+    body: { required: true, content: { 'application/json': { schema: SpeechAnswerRequestSchema } } },
+  },
+  responses: {
+    200: {
+      content: { 'application/json': { schema: SpeechAnswerResponseSchema } },
+      description: 'The attempt was judged. `next` is present when the answer was recorded.',
+    },
+    400: failure('The request body did not validate, or the current card is not a speaking card.'),
+    404: failure('No session has this id, or it is not this learner’s.'),
+    409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
+    413: failure('The body is over 300 KB.'),
+    502: failure('The transcription failed or timed out; the card may be tried again.'),
   },
 });
 
@@ -191,9 +219,12 @@ export function createSessionsRouter(sessions: SessionService) {
   });
 
   router.openapi(createSessionRoute, async (c) => {
-    const { enrollment_id, listening } = c.req.valid('json');
+    const { enrollment_id, listening, speaking } = c.req.valid('json');
     try {
-      const created = await sessions.createNextSession(enrollment_id, { listening: listening ?? false });
+      const created = await sessions.createNextSession(enrollment_id, {
+        listening: listening ?? false,
+        speaking: speaking ?? false,
+      });
       return c.json(
         { session_id: created.sessionId, status: created.status, source: created.source },
         201,
@@ -232,7 +263,8 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(nextStepRoute, async (c) => {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
-    const answer = 'text' in body ? { text: body.text } : { option_index: body.option_index };
+    const answer =
+      'text' in body ? { text: body.text } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index };
     try {
       const record = await sessions.submitAnswer(id, body.question_id, answer);
       return c.json(buildNextStepResponse(id, record), 200);
@@ -249,6 +281,42 @@ export function createSessionsRouter(sessions: SessionService) {
         return c.json({ error: 'the answer is not the kind this question takes' }, 400);
       }
       throw error; // anything else is a real failure: app.ts's onError makes it a 500
+    }
+  });
+
+  // Phase 25 (spec D13). 270 000 characters of base64 and the JSON around them.
+  router.use(
+    '/sessions/:id/speech',
+    bodyLimit({ maxSize: 300 * 1024, onError: (c) => c.json({ error: 'audio too large' }, 413) }),
+  );
+
+  router.openapi(speechRoute, async (c) => {
+    const { id } = c.req.valid('param');
+    const body = c.req.valid('json');
+    try {
+      const result = await sessions.answerBySpeech(id, {
+        userId: body.user_id,
+        questionId: body.question_id,
+        audio: body.audio,
+        mimeType: body.mime_type,
+      });
+      return c.json(
+        {
+          heard: result.heard,
+          verdict: result.verdict,
+          ...(result.session ? { next: buildNextStepResponse(id, result.session) } : {}),
+        },
+        200,
+      );
+    } catch (error) {
+      if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
+      if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      if (error instanceof QuestionDesynced) {
+        return c.json({ error: "question_id does not match the session's current question" }, 409);
+      }
+      if (error instanceof AnswerKindMismatch) return c.json({ error: 'the current card is not a speaking card' }, 400);
+      if (error instanceof LlmUnavailable) return c.json({ error: 'speech unavailable' }, 502);
+      throw error;
     }
   });
 

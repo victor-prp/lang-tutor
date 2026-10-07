@@ -368,8 +368,8 @@ describe('phase 24 generation (spec D2, D10)', () => {
     expect(taskFor('matching')).toBeNull();
     expect(taskFor('listen_choice')).toBe('meaning');
     const plan = planSession(
-      Array.from({ length: 10 }, (_, i) => ({ form: `w${i}`, translation: `מ${i}`, tiles: true })),
-      { listening: true, ordinal: 0 },
+      Array.from({ length: 10 }, (_, i) => ({ form: `w${i}`, translation: `מ${i}`, tiles: true, speakable: false })),
+      { listening: true, speaking: false, ordinal: 0 },
     );
     expect(tasksFor(plan)).toEqual(['meaning', 'word', 'typed', 'meaning', null, null, null, 'meaning', null, null]);
   });
@@ -473,6 +473,28 @@ describe('rows that ask the model nothing', () => {
     it('lists a row that shares only the meaning', () => {
       const prompt = buildDistractorPrompt({ items: castle, from: 'ru', to: 'he', others: [{ form: 'дворец', translation: 'טירה' }] });
       expect(JSON.parse(prompt.user).also_in_session).toEqual([{ word: 'дворец', correct: 'טירה' }]);
+    });
+  });
+});
+
+describe('phase 25 generation', () => {
+  const row = { senseId: 's', variantId: 'v', lexemeId: 'l', form: 'gatto', lemma: 'gatto', partOfSpeech: 'noun', translation: 'חתול' };
+  it('asks the typed task for say the translation, and nothing for read aloud', () => {
+    expect(taskFor('say_translation')).toBe('typed');
+    expect(taskFor('read_aloud')).toBeNull();
+  });
+  it('stores the Hebrew as the prompt of both, and the alternatives of say the translation', () => {
+    expect(generatedContent(row, 'read_aloud', NOTHING_GENERATED, NO_EXTRAS)).toEqual({
+      prompt: 'חתול',
+      options: null,
+      alternatives: null,
+      tiles: null,
+    });
+    expect(generatedContent(row, 'say_translation', { distractors: [], alternatives: ['micio'] }, NO_EXTRAS)).toEqual({
+      prompt: 'חתול',
+      options: null,
+      alternatives: ['micio'],
+      tiles: null,
     });
   });
 });

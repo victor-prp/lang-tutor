@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
+import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { SessionRecord } from '../domain/session';
 import { AnswerKindMismatch, SessionNotFound } from '../errors';
@@ -184,6 +184,7 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      transcriber: createFakeTranscriber(''),
     });
 
     await expect(
@@ -229,6 +230,7 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      transcriber: createFakeTranscriber(''),
     });
 
     const result = await service.submitAnswer('s1', 't1', { text: 'finestar' });
@@ -243,6 +245,7 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      transcriber: createFakeTranscriber(''),
     });
 
     await expect(service.submitAnswer('s1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
@@ -251,7 +254,7 @@ describe('repos', () => {
 
 describe('createNextSession, phase 24 (spec D3, D5)', () => {
   const E = 'e1';
-  it('carries the listening flag and the list-session ordinal into the job', async () => {
+  it.each([true, false])('carries the listening flag, speaking %s and the list-session ordinal into the job', async (speaking) => {
     const jobs = createFakeJobRepo();
     const service = createSessionService({
       transaction: createFakeTransaction({
@@ -272,10 +275,11 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      transcriber: createFakeTranscriber(''),
     });
 
-    await service.createNextSession(E, { listening: true });
-    expect(jobs.enqueued[0].data).toMatchObject({ listening: true, ordinal: 2 });
+    await service.createNextSession(E, { listening: true, speaking });
+    expect(jobs.enqueued[0].data).toMatchObject({ listening: true, speaking, ordinal: 2 });
   });
 });
 

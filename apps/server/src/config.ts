@@ -9,6 +9,7 @@ export type Config = {
   poolMax: number;
   translationTimeoutMs: number;
   sessionGenerationTimeoutMs: number;
+  speechTimeoutMs: number;
   photoReadTimeoutMs: number;
 };
 
@@ -20,6 +21,10 @@ const DEFAULT_DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/lang_t
 // indefinitely. Configurable so a test can inject a short budget instead of
 // paying this in wall-clock time on every run.
 const DEFAULT_TRANSLATION_TIMEOUT_MS = 25_000;
+
+// Phase 25 (spec D13). One transcription, which the POC measured at 1.5–2 s.
+// Past this the card says it could not check and offers another try.
+const DEFAULT_SPEECH_TIMEOUT_MS = 8_000;
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   return {
@@ -39,6 +44,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       Number(env.SESSION_GENERATION_TIMEOUT_MS) || SESSION_GENERATION_BUDGET_MS,
       SESSION_GENERATION_BUDGET_MS,
     ),
+    speechTimeoutMs: Number(env.SPEECH_TIMEOUT_MS) || DEFAULT_SPEECH_TIMEOUT_MS,
     // Phase 26 (spec D6). A read's budget, capped like generation's: the
     // read-photo job expires at twice PHOTO_READ_BUDGET_MS.
     photoReadTimeoutMs: Math.min(

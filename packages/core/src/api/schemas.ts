@@ -96,6 +96,31 @@ export const LetterTilesQuestionSchema = z.object({
   tiles: z.array(z.string()),
 });
 
+
+// Phase 25 (spec D2). The form, written; the learner says it. `meaning` is
+// shown after the answer and read by the missed list, as dictation's is.
+export const ReadAloudQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('read_aloud'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  meaning: z.string(),
+});
+
+// Phase 25 (spec D2). The meaning; the learner says the word. It carries what
+// the typed card carries, which is also what its typed form needs when the
+// learner cannot speak (spec D8).
+export const SayTranslationQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('say_translation'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  part_of_speech: z.string(),
+  answer: z.string(),
+  lemma: z.string(),
+  alternatives: z.array(z.string()),
+});
+
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
 // the compiler finds every switch that has not learnt it.
 export const QuestionSchema = z.discriminatedUnion('type', [
@@ -106,11 +131,29 @@ export const QuestionSchema = z.discriminatedUnion('type', [
   DictationQuestionSchema,
   MatchingQuestionSchema,
   LetterTilesQuestionSchema,
+  ReadAloudQuestionSchema,
+  SayTranslationQuestionSchema,
 ]);
 
 // Phase 23. How a typed answer was judged (spec D5). Every verdict but `wrong`
 // counts in the score.
 export const TypedVerdictSchema = z.enum(['exact', 'near_miss', 'alternative', 'wrong']);
+
+// Phase 25 (spec D5). How a speaking card was answered: understood as the
+// word, as another right word, given up on, or passed. An attempt that was not
+// understood is never recorded, so it has no verdict here.
+export const SpokenVerdictSchema = z.enum(['understood', 'alternative', 'gave_up', 'skipped']);
+
+// Every verdict an answer can be stored with.
+export const AnswerVerdictSchema = z.enum([
+  'exact',
+  'near_miss',
+  'alternative',
+  'wrong',
+  'understood',
+  'gave_up',
+  'skipped',
+]);
 
 // Scoring reads `is_correct` and nothing else, so any question type satisfies
 // it. `answer_string` is the audit-log field: the chosen option's text rather
@@ -120,8 +163,8 @@ export const AnswerRecordSchema = z.object({
   question_id: z.string(),
   is_correct: z.boolean(),
   answer_string: z.string(),
-  // Phase 23. Present for a typed answer only.
-  verdict: TypedVerdictSchema.optional(),
+  // Phase 23. Present for a typed answer; phase 25, for a spoken one too.
+  verdict: AnswerVerdictSchema.optional(),
 });
 
 export const ScoreSchema = z.object({
@@ -191,6 +234,9 @@ export const CreateSessionRequestSchema = z.object({
   // Phase 24 (spec D5). Whether the device has a voice for the target, so the
   // session may hold listening cards. Absent means no.
   listening: z.boolean().optional(),
+  // Phase 25 (spec D4). Whether the device can record, so the session may hold
+  // speaking cards. Absent means no.
+  speaking: z.boolean().optional(),
 });
 
 // Phase 19. Creating a session no longer returns its first question: a list
@@ -226,6 +272,13 @@ export const NextStepRequestSchema = z.union([
     question_id: z.string().min(1),
     text: z.string().max(100),
   }),
+  // Phase 25 (spec D5). A speaking card answered without audio: passed, or
+  // "show me the answer".
+  z.object({
+    user_id: z.string().min(1),
+    question_id: z.string().min(1),
+    pass: z.enum(['skip', 'show_answer']),
+  }),
 ]);
 
 // A discriminated union on `complete`: when true, the caller has everything
@@ -249,6 +302,32 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     progress: z.array(SessionProgressItemSchema),
   }),
 ]);
+
+// Phase 25 (spec D12). What each platform records: Android AAC in ADTS, iOS AAC
+// in M4A, and the browser's WebM. Gemini takes all three as they are (POC).
+export const SpeechMimeTypeSchema = z.enum(['audio/aac', 'audio/mp4', 'audio/webm']);
+
+// Phase 25 (spec D14). One spoken attempt at the current card. At most 200 KB of
+// audio, as base64 (spec D13).
+export const SpeechAnswerRequestSchema = z.object({
+  user_id: z.string().min(1),
+  question_id: z.string().min(1),
+  mime_type: SpeechMimeTypeSchema,
+  audio: z.string().min(1).max(270_000),
+});
+
+// How an attempt was judged. `unheard` records nothing (spec D5).
+export const SpeechVerdictSchema = z.enum(['understood', 'alternative', 'unheard']);
+
+export const SpeechAnswerResponseSchema = z.object({
+  // What the model heard, at most 100 characters: shown on the card.
+  heard: z.string(),
+  verdict: SpeechVerdictSchema,
+  // The next-step response when the answer was recorded, which the app queues
+  // while the banner shows. Absent when the word was not understood.
+  next: NextStepResponseSchema.optional(),
+});
+
 
 // Phase 19. The home screen's one read. `current` is the enrollment's newest
 // session when it is preparing, ready or failed (never completed or skipped).
@@ -656,6 +735,10 @@ export const LlmReconciliationSchema = z.object({
   // a new code only for a reading the stored list does not contain.
   senses: z.array(LlmRenderingSchema).max(5),
 });
+
+// Phase 25 (spec D13). The transcriber's answer: the words it heard, or an
+// empty string for nothing intelligible.
+export const LlmTranscriptSchema = z.object({ heard: z.string() });
 
 // Phase 19. The model's answer when asked for a session's wrong options. `key`
 // is echoed from the request (q1, q2, …) rather than a sense id: a short key is

@@ -1,0 +1,33 @@
+import { describe, expect, it } from '@jest/globals';
+
+import { applyQueued, type QuizState } from './quiz';
+import { IDLE_ATTEMPT } from './speaking';
+
+const BASE: QuizState = {
+  sessionId: 's',
+  userId: 'u',
+  question: undefined,
+  position: 10,
+  total: 10,
+  answer: { pass: 'skip' },
+  complete: false,
+  correctCount: 0,
+  missedQuestions: [],
+  progress: [],
+  queued: null,
+  advanceRequested: true,
+  speech: IDLE_ATTEMPT,
+  speakingOff: 'chosen',
+};
+
+describe('applyQueued (spec D9, Review Focus 3)', () => {
+  it('a completion takes the score total, which leaves a skipped card out', () => {
+    const done = applyQueued(BASE, {
+      complete: true,
+      score: { correct: 9, total: 9 },
+      missedQuestions: [],
+      progress: [],
+    });
+    expect(done).toMatchObject({ complete: true, correctCount: 9, total: 9 });
+  });
+});
