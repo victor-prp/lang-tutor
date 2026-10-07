@@ -7,6 +7,8 @@ import {
   LlmCorrectionSchema,
   LlmDistractorsSchema,
   LlmEntrySchema,
+  JudgedAnswerRequestSchema,
+  LlmMeaningJudgeSchema,
   LlmPhotoReadingSchema,
   LlmSenseMatchSchema,
   LlmSenseSchema,
@@ -807,5 +809,25 @@ describe('phase 26 photo import schemas', () => {
     expect(LlmPhotoReadingSchema.parse({ items: [{ text: 'gatto', hebrew: '' }] }).items[0].text).toBe('gatto');
     expect(LlmSenseMatchSchema.safeParse({ sense: 2 }).success).toBe(true);
     expect(LlmSenseMatchSchema.safeParse({ sense: 1.5 }).success).toBe(false);
+  });
+});
+
+describe('phase 27 Part A schemas', () => {
+  it('parses a typed_meaning question', () => {
+    const q = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'parlare', part_of_speech: 'verb', meaning: 'לדבר' };
+    expect(QuestionSchema.parse(q)).toEqual(q);
+  });
+  it('bounds a judged answer at 300 characters and needs ids', () => {
+    expect(JudgedAnswerRequestSchema.safeParse({ user_id: 'u', question_id: 'q', text: 'א'.repeat(300) }).success).toBe(true);
+    expect(JudgedAnswerRequestSchema.safeParse({ user_id: 'u', question_id: 'q', text: 'א'.repeat(301) }).success).toBe(false);
+    expect(JudgedAnswerRequestSchema.safeParse({ user_id: '', question_id: 'q', text: 'x' }).success).toBe(false);
+  });
+  it('a next-step body cannot carry a verdict', () => {
+    const parsed = NextStepRequestSchema.parse({ user_id: 'u', question_id: 'q', text: 'x', judged: 'exact' });
+    expect(parsed).not.toHaveProperty('judged');
+  });
+  it('the meaning judge answers one of three verdicts', () => {
+    expect(LlmMeaningJudgeSchema.safeParse({ verdict: 'other_sense' }).success).toBe(true);
+    expect(LlmMeaningJudgeSchema.safeParse({ verdict: 'misspelled' }).success).toBe(false);
   });
 });

@@ -30,14 +30,16 @@ import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient }
 import { judgeSpoken } from '@lang-tutor/core/domain';
 import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askDistractors, askModel, askRendering, askTranscription, type ModelAnswer } from './askModel';
+import { askDistractors, askJudge, askModel, askRendering, askTranscription, type ModelAnswer } from './askModel';
 import {
   CASES,
   DISTRACTOR_CASES,
+  JUDGE_CASES,
   RENDERING_CASES,
   TRANSCRIPTION_CASES,
   type DistractorCase,
   type EvalCase,
+  type JudgeCase,
   type RenderingCase,
   type TranscriptionCase,
 } from './cases';
@@ -82,6 +84,8 @@ type Row = {
   photo?: ReadItem[];
   /** Set on a match row: the sense the model chose. */
   match?: number | 'none';
+  /** Set on a judge row: the verdict received. */
+  verdict?: string;
   error?: string;
 };
 
@@ -621,10 +625,11 @@ async function main(): Promise<void> {
   );
   const photoCases = PHOTO_CASES.filter((kase) => matches(kase.label, kase.file));
   const matchCases = MATCH_CASES.filter((kase) => matches(kase.label, kase.word));
+  const judgeCases = JUDGE_CASES.filter((kase) => matches(kase.label, kase.answer, kase.context.form));
   if (filter) console.log(`filter "${filter}"`);
   if (
     cases.length + renderingCases.length + distractorCases.length + transcriptionCases.length +
-      photoCases.length + matchCases.length === 0
+      photoCases.length + matchCases.length + judgeCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
@@ -635,6 +640,16 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     timeoutMs: TIMEOUT_MS,
+  });
+  // Matches the options composition.ts gives the judge client, except the
+  // timeout: the eval uses its own TIMEOUT_MS (30 s), not production's budget.
+  const judgeLlm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    timeoutMs: TIMEOUT_MS,
+    thinkingBudget: 0,
   });
   const transcriber = createGeminiTranscriber({
     fetch: globalThis.fetch,
@@ -775,19 +790,50 @@ async function main(): Promise<void> {
     }
   };
 
+  const scoreJudge = async (kase: JudgeCase): Promise<Row> => {
+    try {
+      const verdict = await askJudge(judgeLlm, kase);
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the answer parses', ok: verdict !== null, detail: verdict === null ? 'unreadable' : undefined }],
+        tier2: [{ name: `judged ${kase.expect}`, ok: verdict === kase.expect, detail: `verdict ${verdict ?? 'none'}` }],
+        verdict: verdict ?? undefined,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   // Every call site of the provider, scored in one run and one scorecard. They
   // share the concurrency budget rather than each taking their own: the quota
   // they compete for is the same one.
   const started = Date.now();
-  const [translationRows, renderingRows, distractorRows, transcriptionRows, photoRows, matchRows] = await Promise.all([
-    mapWithConcurrency(cases, CONCURRENCY, scoreCase),
-    mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
-    mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
-    mapWithConcurrency(transcriptionCases, CONCURRENCY, scoreTranscription),
-    mapWithConcurrency(photoCases, CONCURRENCY, scorePhoto),
-    mapWithConcurrency(matchCases, CONCURRENCY, scoreMatch),
-  ]);
-  const rows = [...translationRows, ...renderingRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows];
+  const [translationRows, renderingRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows] =
+    await Promise.all([
+      mapWithConcurrency(cases, CONCURRENCY, scoreCase),
+      mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
+      mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
+      mapWithConcurrency(transcriptionCases, CONCURRENCY, scoreTranscription),
+      mapWithConcurrency(photoCases, CONCURRENCY, scorePhoto),
+      mapWithConcurrency(matchCases, CONCURRENCY, scoreMatch),
+      mapWithConcurrency(judgeCases, CONCURRENCY, scoreJudge),
+    ]);
+  const rows = [
+    ...translationRows,
+    ...renderingRows,
+    ...distractorRows,
+    ...transcriptionRows,
+    ...photoRows,
+    ...matchRows,
+    ...judgeRows,
+  ];
   const elapsedMs = Date.now() - started;
 
   // Scorecard. Every case prints its actual output, so a drop is diagnosable
@@ -804,6 +850,9 @@ async function main(): Promise<void> {
   // check could fail with the gate still green.
   let photoPassed = 0;
   let photoTotal = 0;
+  // Phase 27's judge too: a different call, judging a learner's answer.
+  let judgePassed = 0;
+  let judgeTotal = 0;
 
   for (const row of rows) {
     const t1Bad = row.tier1.filter((check) => !check.ok);
@@ -816,6 +865,9 @@ async function main(): Promise<void> {
     } else if (photoRows.includes(row) || matchRows.includes(row)) {
       photoPassed += passed;
       photoTotal += row.tier2.length;
+    } else if (judgeRows.includes(row)) {
+      judgePassed += passed;
+      judgeTotal += row.tier2.length;
     } else {
       tier2Passed += passed;
       tier2Total += row.tier2.length;
@@ -839,6 +891,7 @@ async function main(): Promise<void> {
         );
       }
     }
+    if (row.verdict !== undefined) console.log(`       verdict=${row.verdict}`);
     if (row.heard !== undefined) console.log(`       heard=${row.heard}`);
     if (row.photo) {
       console.log(`       items=${row.photo.map((item) => `${item.text}${item.hebrew ? `=${item.hebrew}` : ''}`).join(' | ') || '(none)'}`);
@@ -870,6 +923,7 @@ async function main(): Promise<void> {
   const score = tier2Total === 0 ? 0 : tier2Passed / tier2Total;
   const transcriptionScore = speechTotal === 0 ? 0 : speechPassed / speechTotal;
   const photoScore = photoTotal === 0 ? 0 : photoPassed / photoTotal;
+  const judgeScore = judgeTotal === 0 ? 0 : judgePassed / judgeTotal;
   console.log(
     `\ntier 1: ${tier1Failures} failure(s) (must be 0)\n` +
       `tier 2: ${tier2Passed}/${tier2Total} = ${(score * 100).toFixed(1)}% ` +
@@ -878,7 +932,9 @@ async function main(): Promise<void> {
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
       `photo tier 2: ${photoPassed}/${photoTotal} = ${(photoScore * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
-      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ${photoCases.length} photo + ${matchCases.length} match cases in ` +
+      `judge tier 2: ${judgePassed}/${judgeTotal} = ${(judgeScore * 100).toFixed(1)}% ` +
+      `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
+      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -888,7 +944,7 @@ async function main(): Promise<void> {
   const dir = join(__dirname, '.results');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  writeFileSync(file, JSON.stringify({ model: gemini.model, score, transcriptionScore, photoScore, rows }, null, 2));
+  writeFileSync(file, JSON.stringify({ model: gemini.model, score, transcriptionScore, photoScore, judgeScore, rows }, null, 2));
   console.log(`report: ${file}`);
 
   // A group with no checks (a filtered run) has nothing to fail on.
@@ -897,7 +953,8 @@ async function main(): Promise<void> {
     tier1Failures > 0 ||
     belowThreshold(tier2Total, score) ||
     belowThreshold(speechTotal, transcriptionScore) ||
-    belowThreshold(photoTotal, photoScore)
+    belowThreshold(photoTotal, photoScore) ||
+    belowThreshold(judgeTotal, judgeScore)
   ) {
     process.exit(1);
   }

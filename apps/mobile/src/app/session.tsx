@@ -55,6 +55,23 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
           onSubmit={session.submitText}
+          direction="ltr"
+          checking={false}
+          failed={false}
+        />
+      );
+    case 'typed_meaning':
+      return (
+        <TypedAnswerView
+          question={question}
+          instruction={strings.questionInstructionMeaning}
+          language={language}
+          answered={session.answered}
+          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          direction="rtl"
+          checking={session.judging === 'checking'}
+          failed={session.judging === 'failed'}
+          onSubmit={session.submitJudged}
         />
       );
     case 'listen_choice':
@@ -76,6 +93,9 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
           onSubmit={session.submitText}
+          direction="ltr"
+          checking={false}
+          failed={false}
         />
       );
     case 'letter_tiles':
@@ -128,6 +148,9 @@ function renderQuestion(question: Question, session: SessionValue, language: str
               answered={session.answered}
               verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
               onSubmit={session.submitText}
+              direction="ltr"
+              checking={false}
+              failed={false}
             />
           </View>
         );
@@ -160,6 +183,7 @@ export default function SessionScreen() {
   const { active } = useCurrentUser();
   // Re-entry guard: a fast double tap on skip must not stack two confirms.
   const skipping = useRef(false);
+  // Phase 27: what a meaning card last sent, so "try again" sends the same text.
 
   // Results replaces Session in the stack, so backing out of Results reaches
   // Home rather than a finished quiz.
