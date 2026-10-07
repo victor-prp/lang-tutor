@@ -51,6 +51,18 @@ export function mergePolled(polled: PhotoImport, local: PhotoImport, inFlight: R
   };
 }
 
+export type StoredImports = { enrollmentId: string; imports: PhotoImportSummary[] };
+
+const NO_IMPORTS: PhotoImportSummary[] = [];
+
+/** The active enrollment's open imports. A list read for any other enrollment
+ *  (a slow answer that landed after a switch) is never shown. Keyed rather than
+ *  cleared on a switch, as useNextSession is: a clearing effect in the provider
+ *  runs after home's own focus effect (children first) and discards its read. */
+export function importsFor(stored: StoredImports | null, activeId: string | undefined): PhotoImportSummary[] {
+  return stored !== null && stored.enrollmentId === activeId ? stored.imports : NO_IMPORTS;
+}
+
 export type HomePhotoCard =
   | { kind: 'working'; id: string }
   | { kind: 'ready'; id: string; count: number }

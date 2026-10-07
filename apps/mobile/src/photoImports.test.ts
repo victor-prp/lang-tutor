@@ -1,7 +1,16 @@
 import { describe, expect, it } from '@jest/globals';
 import type { PhotoImport, PhotoImportItem, PhotoImportSummary } from '@lang-tutor/core/api';
 
-import { canSave, chosenOption, homePhotoCard, mergePolled, shouldPollImport, tickedCount, withChange } from './photoImports';
+import {
+  canSave,
+  chosenOption,
+  homePhotoCard,
+  importsFor,
+  mergePolled,
+  shouldPollImport,
+  tickedCount,
+  withChange,
+} from './photoImports';
 
 const option = (n: number) => ({ sense_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
 const item = (position: number, over: Partial<PhotoImportItem> = {}): PhotoImportItem => ({
@@ -60,5 +69,21 @@ describe('homePhotoCard', () => {
     expect(homePhotoCard([summary('a', 'ready', 32)])).toEqual({ kind: 'ready', id: 'a', count: 32 });
     expect(homePhotoCard([summary('a', 'failed')])).toEqual({ kind: 'failed', id: 'a' });
     expect(homePhotoCard([summary('a', 'ready'), summary('b', 'reading')])).toEqual({ kind: 'several', count: 2 });
+  });
+});
+
+describe('importsFor', () => {
+  // Keyed rather than cleared on a switch: a clearing effect in the provider runs
+  // after home's own focus effect (children first) and would discard its read.
+  it('shows a list only under the enrollment it was read for', () => {
+    const stored = { enrollmentId: 'e1', imports: [summary('a', 'ready')] };
+    expect(importsFor(stored, 'e1')).toEqual([summary('a', 'ready')]);
+    expect(importsFor(stored, 'e2')).toEqual([]);
+    expect(importsFor(stored, undefined)).toEqual([]);
+    expect(importsFor(null, 'e1')).toEqual([]);
+  });
+
+  it('answers the same empty list every time, so a memo keyed on it holds', () => {
+    expect(importsFor(null, 'e1')).toBe(importsFor({ enrollmentId: 'e1', imports: [] }, 'e2'));
   });
 });

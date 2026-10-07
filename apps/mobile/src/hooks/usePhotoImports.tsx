@@ -5,10 +5,11 @@ import type {
   PhotoImportSummary,
   SaveVocabularyResponse,
 } from '@lang-tutor/core/api';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { importsFor, type StoredImports } from '@/photoImports';
 import type { Photo, PhotoPicker, PickResult } from '@/photos';
 
 type PhotoImportsValue = {
@@ -28,47 +29,57 @@ const PhotoImportsContext = createContext<PhotoImportsValue | null>(null);
 
 export function PhotoImportsProvider({ api, picker, children }: { api: ApiClient; picker: PhotoPicker; children: ReactNode }) {
   const { active } = useCurrentUser();
-  const [imports, setImports] = useState<PhotoImportSummary[]>([]);
-  const [loadFailed, setLoadFailed] = useState(false);
+  // Keyed by the enrollment each list was read for, not cleared on a switch
+  // (see importsFor). `reload` changes with `active`, so home's focus effect
+  // runs again on a switch, and its read is the one that lands.
+  const [stored, setStored] = useState<StoredImports | null>(null);
+  const [failedFor, setFailedFor] = useState<string | null>(null);
+  const imports = importsFor(stored, active?.id);
+  const loadFailed = active !== null && failedFor === active.id;
+  // The newest read wins: an older poll answering late is dropped.
   const generation = useRef(0);
-
-  useEffect(() => {
-    generation.current += 1;
-    setImports([]);
-    setLoadFailed(false);
-  }, [active]);
 
   const reload = useCallback(() => {
     if (!active) return;
+    const enrollmentId = active.id;
     const mine = ++generation.current;
     api
-      .listPhotoImports(active.id)
+      .listPhotoImports(enrollmentId)
       .then((list) => {
         if (mine !== generation.current) return;
-        setImports(list);
-        setLoadFailed(false);
+        setStored({ enrollmentId, imports: list });
+        setFailedFor((failed) => (failed === enrollmentId ? null : failed));
       })
       .catch(() => {
-        if (mine === generation.current) setLoadFailed(true);
+        if (mine === generation.current) setFailedFor(enrollmentId);
       });
   }, [api, active]);
 
+  // Stable identities, not inline arrows in the memo below: the review screen
+  // puts fetchImport in its load callback, which its focus and poll effects
+  // depend on. New functions whenever the list changed would re-run them.
+  const pick = useCallback(
+    (source: 'camera' | 'gallery') => (source === 'camera' ? picker.take() : picker.choose()),
+    [picker],
+  );
+  const upload = useCallback(
+    async (photo: Photo) => {
+      if (!active) throw new Error('no active enrollment');
+      return api.createPhotoImport(active.id, { mime_type: photo.mimeType, image: photo.base64 });
+    },
+    [api, active],
+  );
+  const fetchImport = useCallback((id: string) => api.getPhotoImport(id), [api]);
+  const updateItem = useCallback(
+    (id: string, position: number, update: PhotoImportItemUpdate) => api.updatePhotoImportItem(id, position, update),
+    [api],
+  );
+  const save = useCallback((id: string) => api.savePhotoImport(id), [api]);
+  const discard = useCallback((id: string) => api.discardPhotoImport(id), [api]);
+
   const value = useMemo<PhotoImportsValue>(
-    () => ({
-      imports,
-      loadFailed,
-      reload,
-      pick: (source) => (source === 'camera' ? picker.take() : picker.choose()),
-      upload: async (photo) => {
-        if (!active) throw new Error('no active enrollment');
-        return api.createPhotoImport(active.id, { mime_type: photo.mimeType, image: photo.base64 });
-      },
-      fetchImport: (id) => api.getPhotoImport(id),
-      updateItem: (id, position, update) => api.updatePhotoImportItem(id, position, update),
-      save: (id) => api.savePhotoImport(id),
-      discard: (id) => api.discardPhotoImport(id),
-    }),
-    [api, picker, active, imports, loadFailed, reload],
+    () => ({ imports, loadFailed, reload, pick, upload, fetchImport, updateItem, save, discard }),
+    [imports, loadFailed, reload, pick, upload, fetchImport, updateItem, save, discard],
   );
 
   return <PhotoImportsContext.Provider value={value}>{children}</PhotoImportsContext.Provider>;
