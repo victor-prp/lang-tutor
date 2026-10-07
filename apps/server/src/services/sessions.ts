@@ -368,20 +368,25 @@ export function createSessionService({
           throw error;
         }
       }
+      const transcribed = input.audio.length >= MIN_AUDIO_CHARS;
       const transcribeMs = now() - started;
 
       const verdict = spokenVerdict(checked.current, heard);
-      const session = verdict === 'unheard' ? null : await service.submitAnswer(sessionId, input.questionId, { heard });
+      // Logged before the answer is recorded: it is the model's judgement, which
+      // was paid for even when submitAnswer then throws on a desync race. A clip
+      // too short for a call made none, so it has no wait to report.
       logger.info({
         event: 'speech_judged',
         session_id: sessionId,
         question_type: checked.current.type,
         verdict,
         heard,
-        transcribe_ms: transcribeMs,
+        transcribed,
+        ...(transcribed ? { transcribe_ms: transcribeMs } : {}),
         bytes: Math.floor((input.audio.length * 3) / 4),
         mime_type: input.mimeType,
       });
+      const session = verdict === 'unheard' ? null : await service.submitAnswer(sessionId, input.questionId, { heard });
       return { heard, verdict, session };
     },
 

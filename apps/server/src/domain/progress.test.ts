@@ -179,6 +179,20 @@ describe('evaluateSession', () => {
   it('ignores answers about a sense that has no rows, an unsaved one', () => {
     expect(evaluateSession(fiveRows('s1'), [answer('sX', true)], D)).toEqual({ changed: [], snapshot: [] });
   });
+
+  it('does not count a skipped card as practised (spec D7), but does count an understood one', () => {
+    const rows = [...fiveRows('s1'), ...fiveRows('s2')];
+    const outcome = evaluateSession(
+      rows,
+      [
+        { senseId: 's1', type: 'read_aloud', verdict: 'skipped' },
+        { senseId: 's2', type: 'read_aloud', verdict: 'understood' },
+      ],
+      D,
+    );
+    expect(outcome.snapshot.some((s) => s.senseId === 's1')).toBe(false);
+    expect(outcome.snapshot.filter((s) => s.senseId === 's2')).toHaveLength(5);
+  });
 });
 
 describe('evaluateSession, reverse choice only', () => {

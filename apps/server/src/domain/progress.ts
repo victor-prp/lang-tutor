@@ -70,12 +70,6 @@ export function daysBetween(from: string, to: string): number {
   return dayNumber(to) - dayNumber(from);
 }
 
-/**
- * What one answer says about which dimensions: phase 20's §3 table, filled in
- * for phase 23's types (spec D6) and phase 24's (spec D12). A productive success also credits the
- * receptive dimension below it; only successes are credited downward; and
- * recognition-format evidence caps a productive dimension at 3.
- */
 /** A typed answer's evidence (phase 23 D6), for a typed card and for the
  *  typed form of say the translation (phase 25 D8). */
 function typedEvidence(verdict: AnswerVerdict, piece: (dimension: Dimension, correct: boolean) => Evidence): Evidence[] {
@@ -94,6 +88,12 @@ function typedEvidence(verdict: AnswerVerdict, piece: (dimension: Dimension, cor
   }
 }
 
+/**
+ * What one answer says about which dimensions: phase 20's §3 table, filled in
+ * for phase 23's types (spec D6) and phase 24's (spec D12). A productive success also credits the
+ * receptive dimension below it; only successes are credited downward; and
+ * recognition-format evidence caps a productive dimension at 3.
+ */
 export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
   const piece = (dimension: Dimension, correct: boolean, cap: number | null = null): Evidence => ({
     dimension,
@@ -214,7 +214,10 @@ export function evaluateSession(
       pieces.set(key, [...(pieces.get(key) ?? []), piece]);
     }
   }
-  const practised = new Set(answers.map((answer) => answer.senseId));
+  // A skipped card (spec D7) is in neither list: choice answers never skip.
+  const practised = new Set(
+    answers.filter((answer) => !('verdict' in answer && answer.verdict === 'skipped')).map((answer) => answer.senseId),
+  );
 
   const changed: ProgressRow[] = [];
   const snapshot: SnapshotRow[] = [];

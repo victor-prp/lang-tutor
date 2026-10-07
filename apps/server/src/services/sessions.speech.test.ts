@@ -150,10 +150,40 @@ describe('answerBySpeech (spec D5)', () => {
       question_type: 'read_aloud',
       verdict: 'understood',
       heard: 'gatto',
+      transcribed: true,
       transcribe_ms: 1_500,
       bytes: 1_500,
       mime_type: 'audio/aac',
     });
+  });
+
+  it('logs a clip too short for a model call as not transcribed, with no wait', async () => {
+    const { service, logger } = setup(createFakeTranscriber(''));
+    await service.answerBySpeech(SESSION, { ...attempt, audio: 'AAAA' });
+    const event = logger.events.find((entry) => (entry as { event?: string }).event === 'speech_judged');
+    expect(event).toMatchObject({ verdict: 'unheard', transcribed: false });
+    expect(event).not.toHaveProperty('transcribe_ms');
+  });
+
+  it('logs speech_judged even when recording the answer then fails', async () => {
+    const logger = createFakeLogger();
+    let loads = 0;
+    // The first read finds the card current; by submitAnswer's read it is gone (a desync race).
+    const session = stub<SessionRepo>({
+      loadSession: async () => (++loads === 1 ? record() : { ...record(), questions: [CHOICE] }),
+      findState: async () => STATE,
+      insertAnswer: async () => {},
+    });
+    const service = createSessionService({
+      transaction: createFakeTransaction({ session, enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }) }),
+      rng: testRng(7),
+      now: createFakeClock(1_000, 2_500),
+      logger,
+      llm: createFakeLlmClient(''),
+      transcriber: createFakeTranscriber('{"heard":"gatto"}'),
+    });
+    await expect(service.answerBySpeech(SESSION, attempt)).rejects.toBeInstanceOf(QuestionDesynced);
+    expect(logger.events.filter((e) => (e as { event?: string }).event === 'speech_judged')).toHaveLength(1);
   });
 });
 

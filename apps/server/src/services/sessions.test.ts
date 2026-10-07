@@ -237,7 +237,7 @@ describe('repos', () => {
 
 describe('createNextSession, phase 24 (spec D3, D5)', () => {
   const E = 'e1';
-  it('carries the listening flag and the list-session ordinal into the job', async () => {
+  it.each([true, false])('carries the listening flag, speaking %s and the list-session ordinal into the job', async (speaking) => {
     const jobs = createFakeJobRepo();
     const service = createSessionService({
       transaction: createFakeTransaction({
@@ -261,8 +261,8 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       transcriber: createFakeTranscriber(''),
     });
 
-    await service.createNextSession(E, { listening: true, speaking: false });
-    expect(jobs.enqueued[0].data).toMatchObject({ listening: true, ordinal: 2 });
+    await service.createNextSession(E, { listening: true, speaking });
+    expect(jobs.enqueued[0].data).toMatchObject({ listening: true, speaking, ordinal: 2 });
   });
 });
 

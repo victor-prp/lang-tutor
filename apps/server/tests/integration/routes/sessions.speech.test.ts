@@ -129,7 +129,6 @@ describe('POST /api/sessions/:id/speech', () => {
     expect((await at(questions[0].id)).status).toBe(502);
     expect((await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[0].id, pass: 'skip' })).status).toBe(200);
     await clearNamespace(ns);
-    await expectTranscription(ns, 'lantern');
     expect((await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[1].id, text: 'lantern' })).status).toBe(200);
     expect((await at(questions[2].id)).status).toBe(400);
   });
