@@ -469,12 +469,12 @@ describe('0017_speaking_cards', () => {
   });
 });
 
-// Phase 27 Part A: stored questions and answers survive 0018, a meaning-recall
+// Phase 27 Part A: stored questions and answers survive 0019, a meaning-recall
 // row takes a prompt only, and a judged answer may be 300 characters.
-describe('0018_typed_meaning', () => {
+describe('0019_typed_meaning', () => {
   it('keeps every existing question and answer, and admits a typed_meaning question with a prompt only', async () => {
     const db = await emptyDatabase();
-    await runMigrationsFrom(db, migrationsUpTo('0017_speaking_cards'));
+    await runMigrationsFrom(db, migrationsUpTo('0018_photo_imports'));
 
     const options = JSON.stringify([
       { position: 0, text: 'עפיפון', is_correct: true },

@@ -38,8 +38,38 @@ export const PrepareSessionPayloadSchema = z.object({
 });
 export type PrepareSessionPayload = z.infer<typeof PrepareSessionPayloadSchema>;
 
+/** Phase 26. Reads one import's photo into rows. */
+export const READ_PHOTO = 'read-photo';
+export const READ_PHOTO_FAILED = 'read-photo-failed';
+/** Phase 26. Looks up one row and chooses its sense. */
+export const LOOK_UP_IMPORT_ITEM = 'look-up-import-item';
+export const LOOK_UP_IMPORT_ITEM_FAILED = 'look-up-import-item-failed';
+
+/** Phase 26 (spec D6). The most one read may take. A long handwritten list is a
+ *  long answer. The environment may lower it (config.ts). */
+export const PHOTO_READ_BUDGET_MS = 120_000;
+/** Twice the budget, phase 19's rule. */
+export const READ_PHOTO_EXPIRY_SECONDS = (2 * PHOTO_READ_BUDGET_MS) / 1000;
+/** A row's longest chain is the lookup's main call, its reconciliation, then
+ *  the match call, each within the lookup's 25 s: 75 s. 180 s leaves room, and
+ *  a crashed worker's row is retried within three minutes. */
+export const LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS = 180;
+
+export const ReadPhotoPayloadSchema = z.object({ import_id: z.string().min(1) });
+export type ReadPhotoPayload = z.infer<typeof ReadPhotoPayloadSchema>;
+
+export const LookUpImportItemPayloadSchema = z.object({
+  import_id: z.string().min(1),
+  position: z.number().int().nonnegative(),
+});
+export type LookUpImportItemPayload = z.infer<typeof LookUpImportItemPayloadSchema>;
+
 export type JobPayloads = {
   [PREPARE_SESSION]: PrepareSessionPayload;
   [PREPARE_SESSION_FAILED]: PrepareSessionPayload;
+  [READ_PHOTO]: ReadPhotoPayload;
+  [READ_PHOTO_FAILED]: ReadPhotoPayload;
+  [LOOK_UP_IMPORT_ITEM]: LookUpImportItemPayload;
+  [LOOK_UP_IMPORT_ITEM_FAILED]: LookUpImportItemPayload;
 };
 export type JobName = keyof JobPayloads;

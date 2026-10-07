@@ -1,22 +1,40 @@
-import { Redirect, router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ApiError } from '@/api/client';
 import { availableTargets } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
+import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
 import { POLL_INTERVAL_MS, homeActionOf, shouldPoll, type HomeAction } from '@/nextSession';
+import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+
+function photoCardLabel(card: NonNullable<HomePhotoCard>): string {
+  switch (card.kind) {
+    case 'working':
+      return strings.homePhotoWorking;
+    case 'ready':
+      return strings.homePhotoReady(card.count);
+    case 'failed':
+      return strings.homePhotoFailed;
+    case 'several':
+      return strings.homePhotoSeveral(card.count);
+  }
+}
 
 export default function HomeScreen() {
   const { enter } = useSession();
   const next = useNextSession();
   const { user, enrollments, active, switchTo } = useCurrentUser();
+  const { imports, reload: reloadPhotos } = usePhotoImports();
+  // Set by the review after a save (spec D13): "28 words saved".
+  const { photoSaved } = useLocalSearchParams<{ photoSaved?: string }>();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   // A ref guards re-entry (state is stale between two taps in one frame); the
   // state only drives the disabled look.
@@ -24,11 +42,15 @@ export default function HomeScreen() {
   const inFlight = useRef(false);
 
   // Fresh on every focus: back from a session, from translate, after a switch.
+  // Both reloads change with the active enrollment, so a switch runs this
+  // again, and the providers keep each read under the enrollment it was for,
+  // so that read is the one shown.
   const { reload } = next;
   useFocusEffect(
     useCallback(() => {
       reload();
-    }, [reload]),
+      reloadPhotos();
+    }, [reload, reloadPhotos]),
   );
 
   // While preparing, and only while this screen is focused.
@@ -41,6 +63,16 @@ export default function HomeScreen() {
     }, [polling, reload]),
   );
 
+  // The photo card moves while an import is read or looked up, the same way.
+  const photosWorking = imports.some((summary) => isWorking(summary.status));
+  useFocusEffect(
+    useCallback(() => {
+      if (!photosWorking) return undefined;
+      const timer = setInterval(reloadPhotos, POLL_INTERVAL_MS);
+      return () => clearInterval(timer);
+    }, [photosWorking, reloadPhotos]),
+  );
+
   if (!user) return <Redirect href="/login" />;
   // Zero enrollments is a valid state (spec §5): sign-up, a login that finds
   // none, or a sign-up whose second call never landed all arrive here.
@@ -48,6 +80,7 @@ export default function HomeScreen() {
 
   const canAdd = availableTargets(enrollments).length > 0;
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
+  const photoCard = homePhotoCard(imports);
 
   function enterSession(sessionId: string) {
     enter(sessionId);
@@ -82,109 +115,139 @@ export default function HomeScreen() {
   const skip = (sessionId: string) => run(() => next.skip(sessionId));
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <Text style={styles.title}>{strings.appTitle}</Text>
-      <Text style={styles.subtitle}>{strings.homeSubtitle}</Text>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <ScrollView contentContainerStyle={styles.screen}>
+        <Text style={styles.title}>{strings.appTitle}</Text>
+        <Text style={styles.subtitle}>{strings.homeSubtitle}</Text>
 
-      <Pressable
-        accessibilityRole="button"
-        testID="profile-button"
-        onPress={() => router.push('/profile')}
-        style={styles.profileLink}
-      >
-        <Text style={styles.profileLinkLabel}>{user.display_name}</Text>
-      </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          testID="profile-button"
+          onPress={() => router.push('/profile')}
+          style={styles.profileLink}
+        >
+          <Text style={styles.profileLinkLabel}>{user.display_name}</Text>
+        </Pressable>
 
-      <Pressable
-        accessibilityRole="button"
-        testID="enrollment-switcher"
-        onPress={() => setSwitcherOpen((open) => !open)}
-        style={styles.switcher}
-      >
-        <Text style={styles.switcherLabel}>
-          {strings.learningLabel(strings.languageName(active.target_language))}
-        </Text>
-      </Pressable>
-
-      {switcherOpen ? (
-        <View style={styles.switcherList}>
-          {enrollments.map((enrollment) => (
-            <Pressable
-              key={enrollment.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected: enrollment.id === active.id }}
-              testID={`enrollment-option-${enrollment.target_language}`}
-              onPress={() => {
-                switchTo(enrollment.id);
-                setSwitcherOpen(false);
-              }}
-              style={[styles.switcherItem, enrollment.id === active.id && styles.switcherItemActive]}
-            >
-              <Text style={styles.switcherItemLabel}>
-                {strings.languageName(enrollment.target_language)}
-              </Text>
-            </Pressable>
-          ))}
-          {canAdd ? (
-            <Pressable
-              accessibilityRole="button"
-              testID="enrollment-add"
-              onPress={() => {
-                setSwitcherOpen(false);
-                router.push('/enroll');
-              }}
-              style={styles.switcherItem}
-            >
-              <Text style={styles.switcherAddLabel}>{strings.addLanguage}</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-
-      {action?.kind === 'start-seed' ? (
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>
-            {strings.homeSetLabel(SESSION_LENGTH, strings.languageName(active.target_language))}
+        <Pressable
+          accessibilityRole="button"
+          testID="enrollment-switcher"
+          onPress={() => setSwitcherOpen((open) => !open)}
+          style={styles.switcher}
+        >
+          <Text style={styles.switcherLabel}>
+            {strings.learningLabel(strings.languageName(active.target_language))}
           </Text>
-        </View>
-      ) : next.current ? (
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>
-            {strings.homeSavedLabel(next.current.saved_count, strings.languageName(active.target_language))}
+        </Pressable>
+
+        {switcherOpen ? (
+          <View style={styles.switcherList}>
+            {enrollments.map((enrollment) => (
+              <Pressable
+                key={enrollment.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: enrollment.id === active.id }}
+                testID={`enrollment-option-${enrollment.target_language}`}
+                onPress={() => {
+                  switchTo(enrollment.id);
+                  setSwitcherOpen(false);
+                }}
+                style={[styles.switcherItem, enrollment.id === active.id && styles.switcherItemActive]}
+              >
+                <Text style={styles.switcherItemLabel}>
+                  {strings.languageName(enrollment.target_language)}
+                </Text>
+              </Pressable>
+            ))}
+            {canAdd ? (
+              <Pressable
+                accessibilityRole="button"
+                testID="enrollment-add"
+                onPress={() => {
+                  setSwitcherOpen(false);
+                  router.push('/enroll');
+                }}
+                style={styles.switcherItem}
+              >
+                <Text style={styles.switcherAddLabel}>{strings.addLanguage}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+
+        {action?.kind === 'start-seed' ? (
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>
+              {strings.homeSetLabel(SESSION_LENGTH, strings.languageName(active.target_language))}
+            </Text>
+          </View>
+        ) : next.current ? (
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>
+              {strings.homeSavedLabel(next.current.saved_count, strings.languageName(active.target_language))}
+            </Text>
+          </View>
+        ) : null}
+
+        <SessionAction
+          action={action}
+          loadFailed={next.loadFailed}
+          busy={busy}
+          onRetry={reload}
+          onCreate={create}
+          onEnter={enterSession}
+          onSkip={skip}
+        />
+
+        {photoSaved ? (
+          <Text testID="home-photo-saved" style={styles.notice}>
+            {strings.photoImportSaved(Number(photoSaved))}
           </Text>
-        </View>
-      ) : null}
+        ) : null}
 
-      <SessionAction
-        action={action}
-        loadFailed={next.loadFailed}
-        busy={busy}
-        onRetry={reload}
-        onCreate={create}
-        onEnter={enterSession}
-        onSkip={skip}
-      />
+        {photoCard ? (
+          <Pressable
+            accessibilityRole="button"
+            testID="home-photo-card"
+            onPress={() =>
+              router.push(photoCard.kind === 'several' ? '/photo-imports' : `/photo-imports/${photoCard.id}`)
+            }
+            style={styles.card}
+          >
+            <Text style={styles.cardLabel}>{photoCardLabel(photoCard)}</Text>
+          </Pressable>
+        ) : null}
 
-      <Pressable
-        accessibilityRole="button"
-        testID="translate-entry"
-        onPress={() => router.push('/translate')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonLabel}>{strings.translateEntry}</Text>
-      </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          testID="translate-entry"
+          onPress={() => router.push('/translate')}
+          style={styles.secondaryButton}
+        >
+          <Text style={styles.secondaryButtonLabel}>{strings.translateEntry}</Text>
+        </Pressable>
 
-      <Pressable
-        accessibilityRole="button"
-        testID="vocabulary-entry"
-        onPress={() => router.push('/vocabulary')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryButtonLabel}>{strings.vocabularyEntry}</Text>
-      </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          testID="vocabulary-entry"
+          onPress={() => router.push('/vocabulary')}
+          style={styles.secondaryButton}
+        >
+          <Text style={styles.secondaryButtonLabel}>{strings.vocabularyEntry}</Text>
+        </Pressable>
 
-      {/* Deliberately empty. Streak, points and daily-target widgets land here. */}
-      <View style={styles.futureSpace} />
+        <Pressable
+          accessibilityRole="button"
+          testID="photo-import-entry"
+          onPress={() => router.push('/photo-imports')}
+          style={styles.secondaryButton}
+        >
+          <Text style={styles.secondaryButtonLabel}>{strings.photoImportEntry}</Text>
+        </Pressable>
+
+        {/* Deliberately empty. Streak, points and daily-target widgets land here. */}
+        <View style={styles.futureSpace} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -291,7 +354,10 @@ function SessionAction({
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.md },
+  safe: { flex: 1 },
+  // Phase 26. Scrolls: a preparing session, a photo card and a saved notice
+  // together are taller than a small phone, and the last button would be cut off.
+  screen: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.md },
   title: {
     fontSize: fontSizes.xxl,
     lineHeight: lineHeights.xxl,

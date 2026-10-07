@@ -2,7 +2,7 @@ import type { PgBoss } from 'pg-boss';
 
 import { createServerDeps, type AppDeps } from '../../src/composition';
 import type { Db } from '../../src/db/client';
-import { SESSION_GENERATION_BUDGET_MS } from '../../src/domain/jobs';
+import { PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from '../../src/domain/jobs';
 import type { Logger } from '../../src/logger';
 import { unstartedBoss } from './jobs';
 
@@ -36,6 +36,8 @@ export function createTestServerDeps(io: {
   speechTimeoutMs?: number;
   /** Phase 27. The budget of one judged answer; defaults to production's. */
   judgeTimeoutMs?: number;
+  /** Phase 26. A read's budget; defaults to production's. */
+  photoReadTimeoutMs?: number;
 }): AppDeps {
   return createServerDeps({
     db: io.db,
@@ -52,6 +54,7 @@ export function createTestServerDeps(io: {
     sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? SESSION_GENERATION_BUDGET_MS,
     speechTimeoutMs: io.speechTimeoutMs ?? 8_000,
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
+    photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0 },
     boss: io.boss ?? unstartedBoss(io.db),
   });

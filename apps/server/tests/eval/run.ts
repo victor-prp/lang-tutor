@@ -23,9 +23,10 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
-import { distractorItems, validateDistractors, type Task } from '../../src/domain/distractors';
-import { isInScript } from '../../src/domain/languages';
-import { createGeminiClient, createGeminiTranscriber } from '../../src/providers/gemini';
+import { comparable, distractorItems, validateDistractors, type Task } from '../../src/domain/distractors';
+import { isInScript, stripStress } from '../../src/domain/languages';
+import type { ReadItem } from '../../src/domain/photoReading';
+import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
 import { judgeSpoken } from '@lang-tutor/core/domain';
 import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
@@ -42,9 +43,13 @@ import {
   type RenderingCase,
   type TranscriptionCase,
 } from './cases';
+import { askPhoto, askSenseMatch } from './askPhoto';
+import { MATCH_CASES, PHOTO_CASES, type MatchCase, type PhotoCase } from './photoCases';
 
 const TIER2_THRESHOLD = 0.85;
 const TIMEOUT_MS = 30_000;
+/** A photo read's production budget. */
+const PHOTO_TIMEOUT_MS = 120_000;
 
 /**
  * Cases run concurrently, not in parallel: each one is a single HTTP call this
@@ -75,6 +80,10 @@ type Row = {
   distractors?: LlmDistractors;
   /** Set on a transcription row: what the model heard. */
   heard?: string;
+  /** Set on a photo row: what the reading found. */
+  photo?: ReadItem[];
+  /** Set on a match row: the sense the model chose. */
+  match?: number | 'none';
   /** Set on a judge row: the verdict received. */
   verdict?: string;
   error?: string;
@@ -554,6 +563,37 @@ function distractorTier2(kase: DistractorCase, answer: LlmDistractors): Check[] 
   });
 }
 
+const sameText = (a: string, b: string) =>
+  stripStress(a).replace(/\s+/g, ' ').trim().toLowerCase() === stripStress(b).replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Phase 26. Each expected item is found when some read item has one of its
+ *  spellings and, if Hebrew is expected, the same Hebrew after folding. Every
+ *  read item no expectation claims is an extra. */
+function photoChecks(kase: PhotoCase, items: ReadItem[]): Check[] {
+  const claimed = new Set<number>();
+  const checks: Check[] = kase.expect.map((expected) => {
+    const index = items.findIndex(
+      (item, i) =>
+        !claimed.has(i) &&
+        expected.text.some((text) => sameText(text, item.text)) &&
+        (expected.hebrew === undefined || comparable(item.hebrew ?? '') === comparable(expected.hebrew)),
+    );
+    if (index !== -1) claimed.add(index);
+    return {
+      name: `found ${expected.text[0]}${expected.hebrew ? ` = ${expected.hebrew}` : ''}`,
+      ok: index !== -1,
+    };
+  });
+  items.forEach((item, i) => {
+    if (!claimed.has(i)) checks.push({ name: `no extra item`, ok: false, detail: `${item.text}${item.hebrew ? ` = ${item.hebrew}` : ''}` });
+  });
+  return checks;
+}
+
+function matchCheck(kase: MatchCase, answer: number | 'none'): Check[] {
+  return [{ name: `chose ${kase.expect === 'none' ? 'none' : `sense ${kase.expect + 1}`}`, ok: answer === kase.expect, detail: `${answer === 'none' ? 'none' : `sense ${answer + 1}`}` }];
+}
+
 async function main(): Promise<void> {
   // Exits non-zero with a clear message rather than skipping quietly: a green
   // "0 cases ran" is the one outcome worse than a red suite.
@@ -583,9 +623,14 @@ async function main(): Promise<void> {
   const transcriptionCases = TRANSCRIPTION_CASES.filter((kase) =>
     matches(kase.label, kase.target, kase.file),
   );
+  const photoCases = PHOTO_CASES.filter((kase) => matches(kase.label, kase.file));
+  const matchCases = MATCH_CASES.filter((kase) => matches(kase.label, kase.word));
   const judgeCases = JUDGE_CASES.filter((kase) => matches(kase.label, kase.answer, kase.context.form));
   if (filter) console.log(`filter "${filter}"`);
-  if (cases.length + renderingCases.length + distractorCases.length + transcriptionCases.length + judgeCases.length === 0) {
+  if (
+    cases.length + renderingCases.length + distractorCases.length + transcriptionCases.length +
+      photoCases.length + matchCases.length + judgeCases.length === 0
+  ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
 
@@ -612,6 +657,13 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     timeoutMs: TIMEOUT_MS,
+  });
+  const vision = createGeminiVisionClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    timeoutMs: PHOTO_TIMEOUT_MS,
   });
 
   // One case, scored. Every failure is caught and becomes a tier 1 row rather
@@ -717,6 +769,27 @@ async function main(): Promise<void> {
     }
   };
 
+  const scorePhoto = async (kase: PhotoCase): Promise<Row> => {
+    try {
+      const items = await askPhoto(vision, { file: kase.file, language: kase.language });
+      const checks = photoChecks(kase, items);
+      return { label: kase.label, text: kase.file, tier1: kase.tier === 1 ? checks : [], tier2: kase.tier === 2 ? checks : [], photo: items };
+    } catch (error) {
+      return { label: kase.label, text: kase.file, tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }], tier2: [], error: (error as Error).message };
+    }
+  };
+
+  const scoreMatch = async (kase: MatchCase): Promise<Row> => {
+    const text = `${kase.word} ← ${kase.hebrew}`;
+    try {
+      const answer = await askSenseMatch(llm, { word: kase.word, target: kase.target, hebrew: kase.hebrew, options: kase.options });
+      const checks = matchCheck(kase, answer);
+      return { label: kase.label, text, tier1: kase.tier === 1 ? checks : [], tier2: kase.tier === 2 ? checks : [], match: answer };
+    } catch (error) {
+      return { label: kase.label, text, tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }], tier2: [], error: (error as Error).message };
+    }
+  };
+
   const scoreJudge = async (kase: JudgeCase): Promise<Row> => {
     try {
       const verdict = await askJudge(judgeLlm, kase);
@@ -742,14 +815,25 @@ async function main(): Promise<void> {
   // share the concurrency budget rather than each taking their own: the quota
   // they compete for is the same one.
   const started = Date.now();
-  const [translationRows, renderingRows, distractorRows, transcriptionRows, judgeRows] = await Promise.all([
-    mapWithConcurrency(cases, CONCURRENCY, scoreCase),
-    mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
-    mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
-    mapWithConcurrency(transcriptionCases, CONCURRENCY, scoreTranscription),
-    mapWithConcurrency(judgeCases, CONCURRENCY, scoreJudge),
-  ]);
-  const rows = [...translationRows, ...renderingRows, ...distractorRows, ...transcriptionRows, ...judgeRows];
+  const [translationRows, renderingRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows] =
+    await Promise.all([
+      mapWithConcurrency(cases, CONCURRENCY, scoreCase),
+      mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
+      mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
+      mapWithConcurrency(transcriptionCases, CONCURRENCY, scoreTranscription),
+      mapWithConcurrency(photoCases, CONCURRENCY, scorePhoto),
+      mapWithConcurrency(matchCases, CONCURRENCY, scoreMatch),
+      mapWithConcurrency(judgeCases, CONCURRENCY, scoreJudge),
+    ]);
+  const rows = [
+    ...translationRows,
+    ...renderingRows,
+    ...distractorRows,
+    ...transcriptionRows,
+    ...photoRows,
+    ...matchRows,
+    ...judgeRows,
+  ];
   const elapsedMs = Date.now() - started;
 
   // Scorecard. Every case prints its actual output, so a drop is diagnosable
@@ -761,6 +845,12 @@ async function main(): Promise<void> {
   // different kind of failure, and a good translation score must not hide it.
   let speechPassed = 0;
   let speechTotal = 0;
+  // Phase 26's two calls, the photo read and the sense match, share a line of
+  // their own for the same reason: pooled with translation, nearly every photo
+  // check could fail with the gate still green.
+  let photoPassed = 0;
+  let photoTotal = 0;
+  // Phase 27's judge too: a different call, judging a learner's answer.
   let judgePassed = 0;
   let judgeTotal = 0;
 
@@ -772,6 +862,9 @@ async function main(): Promise<void> {
     if (transcriptionRows.includes(row)) {
       speechPassed += passed;
       speechTotal += row.tier2.length;
+    } else if (photoRows.includes(row) || matchRows.includes(row)) {
+      photoPassed += passed;
+      photoTotal += row.tier2.length;
     } else if (judgeRows.includes(row)) {
       judgePassed += passed;
       judgeTotal += row.tier2.length;
@@ -800,6 +893,10 @@ async function main(): Promise<void> {
     }
     if (row.verdict !== undefined) console.log(`       verdict=${row.verdict}`);
     if (row.heard !== undefined) console.log(`       heard=${row.heard}`);
+    if (row.photo) {
+      console.log(`       items=${row.photo.map((item) => `${item.text}${item.hebrew ? `=${item.hebrew}` : ''}`).join(' | ') || '(none)'}`);
+    }
+    if (row.match !== undefined) console.log(`       chose=${row.match === 'none' ? 'none' : `sense ${row.match + 1}`}`);
     if (row.rendering) {
       console.log(
         `       senses=${
@@ -825,6 +922,7 @@ async function main(): Promise<void> {
 
   const score = tier2Total === 0 ? 0 : tier2Passed / tier2Total;
   const transcriptionScore = speechTotal === 0 ? 0 : speechPassed / speechTotal;
+  const photoScore = photoTotal === 0 ? 0 : photoPassed / photoTotal;
   const judgeScore = judgeTotal === 0 ? 0 : judgePassed / judgeTotal;
   console.log(
     `\ntier 1: ${tier1Failures} failure(s) (must be 0)\n` +
@@ -832,9 +930,11 @@ async function main(): Promise<void> {
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
       `transcription tier 2: ${speechPassed}/${speechTotal} = ${(transcriptionScore * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
+      `photo tier 2: ${photoPassed}/${photoTotal} = ${(photoScore * 100).toFixed(1)}% ` +
+      `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
       `judge tier 2: ${judgePassed}/${judgeTotal} = ${(judgeScore * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
-      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ${judgeCases.length} judge cases in ` +
+      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -844,7 +944,7 @@ async function main(): Promise<void> {
   const dir = join(__dirname, '.results');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  writeFileSync(file, JSON.stringify({ model: gemini.model, score, transcriptionScore, judgeScore, rows }, null, 2));
+  writeFileSync(file, JSON.stringify({ model: gemini.model, score, transcriptionScore, photoScore, judgeScore, rows }, null, 2));
   console.log(`report: ${file}`);
 
   // A group with no checks (a filtered run) has nothing to fail on.
@@ -853,6 +953,7 @@ async function main(): Promise<void> {
     tier1Failures > 0 ||
     belowThreshold(tier2Total, score) ||
     belowThreshold(speechTotal, transcriptionScore) ||
+    belowThreshold(photoTotal, photoScore) ||
     belowThreshold(judgeTotal, judgeScore)
   ) {
     process.exit(1);

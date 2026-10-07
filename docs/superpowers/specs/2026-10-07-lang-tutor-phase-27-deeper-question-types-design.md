@@ -16,8 +16,8 @@
     same way.
   - D12's two-part banner ("right" plus the stored meaning) is one title, `נכון! הפירוש השמור:`,
     with the meaning on the line below it, in the style of phase 23's `נכון! המילה שתרגלנו:`.
-  - The migration is `0018_typed_meaning.sql`, the next number after phase 25's `0017` (phase 26
-    also claims `0017`; whichever merges second renumbers, D1).
+  - The migration is `0019_typed_meaning.sql`. It was built as `0018`; phase 26 merged first with
+    `0018_photo_imports`, so Part A's was regenerated on top of it, with identical statements (D1).
   - The judge's answer schema is per type: `typed_meaning` answers `{ "verdict": "right" |
     "other_sense" | "wrong" }`, so Gemini's response schema already refuses a verdict the type does not have; Part B adds the
     translation one.

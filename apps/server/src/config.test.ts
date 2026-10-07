@@ -22,6 +22,7 @@ describe('loadConfig', () => {
       sessionGenerationTimeoutMs: 300_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
+      photoReadTimeoutMs: 120_000,
     });
   });
 
@@ -54,6 +55,7 @@ describe('loadConfig', () => {
       sessionGenerationTimeoutMs: 300_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
+      photoReadTimeoutMs: 120_000,
     });
   });
 
@@ -77,6 +79,12 @@ describe('loadConfig', () => {
   // healthy call off. The two numbers used to agree only through a comment.
   it('expires a prepare-session job no sooner than twice the default budget', () => {
     expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(2 * loadConfig({}).sessionGenerationTimeoutMs);
+  });
+
+  it('caps the photo read budget at two minutes, and defaults to it', () => {
+    expect(loadConfig({}).photoReadTimeoutMs).toBe(120_000);
+    expect(loadConfig({ PHOTO_READ_TIMEOUT_MS: '5000' }).photoReadTimeoutMs).toBe(5_000);
+    expect(loadConfig({ PHOTO_READ_TIMEOUT_MS: '999999' }).photoReadTimeoutMs).toBe(120_000);
   });
 
   it('still works with no Gemini settings at all, so db:migrate is unaffected', () => {

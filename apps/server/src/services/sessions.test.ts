@@ -10,6 +10,7 @@ import type { SessionRepo } from '../repo/sessions';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
+import type { PhotoImportRepo } from '../repo/photoImports';
 import type { VocabularyRepo } from '../repo/vocabulary';
 import { createSessionService, type Transaction } from './sessions';
 
@@ -145,6 +146,22 @@ describe('repos', () => {
     listEndedSessions: unreachableProgress,
   };
 
+  const photoImportRepo: PhotoImportRepo = {
+    insertImport: forbidden,
+    deleteExpired: forbidden,
+    findImport: forbidden,
+    findImportForUpdate: forbidden,
+    findPhoto: forbidden,
+    listOpen: forbidden,
+    transition: forbidden,
+    insertItems: forbidden,
+    listItems: forbidden,
+    findItem: forbidden,
+    writeItem: forbidden,
+    markItemFailed: forbidden,
+    updateItem: forbidden,
+  };
+
   function fakeTransaction(session: SessionRepo): Transaction {
     return (run) =>
       run({
@@ -155,6 +172,7 @@ describe('repos', () => {
         dict: dictRepo,
         vocabulary: vocabularyRepo,
         progress: progressRepo,
+        photoImport: photoImportRepo,
         jobs: {
           enqueue: () => {
             throw new Error('the submit-answer use case must not enqueue a job');

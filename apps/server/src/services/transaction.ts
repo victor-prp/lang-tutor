@@ -1,5 +1,6 @@
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { JobRepo } from '../repo/jobs';
+import type { PhotoImportRepo } from '../repo/photoImports';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
@@ -19,6 +20,7 @@ export type Repos = {
   vocabulary: VocabularyRepo;
   progress: ProgressRepo;
   jobs: JobRepo;
+  photoImport: PhotoImportRepo;
 };
 
 /**
