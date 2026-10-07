@@ -36,11 +36,31 @@ export function buildPhotoReadingPrompt(target: LanguageCode): PhotoReadingPromp
     'Return JSON only, matching the supplied schema.',
     'Rules:',
     `1. Only items in ${name}. Skip headings, titles, instructions, exercise text, example sentences, page numbers, exercise numbers, dates, and anything crossed out.`,
-    '2. Write each item the way the learner would type it into a dictionary: drop a leading article or the infinitive marker "to" (il gatto -> gatto, to run -> run), unless the item is a fixed expression; drop grammar labels such as (m.), (f.), (pl.), (v.), (n.), (adj.), (conj.), sb, sth; drop stress marks over vowels; otherwise keep the item exactly as written.',
+    // The `take care of sb` example came with rule 7, which on its own made the
+    // model keep `sb` and `sth` on en-printed-plain (see rule 7). It is in no
+    // fixture.
+    '2. Write each item the way the learner would type it into a dictionary: drop a leading article or the infinitive marker "to" (il gatto -> gatto, to run -> run), unless the item is a fixed expression; drop grammar labels such as (m.), (f.), (pl.), (v.), (n.), (adj.), (conj.), and the placeholders sb and sth (take care of sb -> take care of); drop stress marks over vowels; otherwise keep the item exactly as written.',
     '3. If Hebrew is written next to an item as its translation, copy that Hebrew whole, with all its glosses, into "hebrew". Otherwise "hebrew" is an empty string.',
     '4. When handwriting is unclear, give your best reading rather than leaving the item out.',
     '5. Never translate, explain, or add an item that is not on the page.',
     '6. A word with a line drawn through it is crossed out: skip it, even when nothing is written beside it.',
+    // Phase 26 follow-up. Kept whole, `decorate / decoration` was looked up as
+    // one form and written into the dictionary as a form of both lexemes. Only
+    // the model can tell the two kinds of slash apart: no rule in code can,
+    // with `amico/a` on Italian pages and `9/11` already a dictionary form.
+    //
+    // Each part of the shape was measured against the drafts it replaced:
+    // - It says nothing about the Hebrew. "each with the item's Hebrew whole"
+    //   made 3 of 9 reads of en-textbook-handwritten come back with nikud and
+    //   a misread gloss; as written, 8 of 8 read it cleanly, as master did 5
+    //   of 5. Rule 3 already says to copy the Hebrew whole, and a split half
+    //   matches as well (glossesOf).
+    // - It is its own rule. Folded into rule 2, it read `לאמן` beside `train`
+    //   as `רכבת` in 8 of 8 reads of that page.
+    // - Rule 2 does not point at it. With "except as rule 7 says" there, every
+    //   read of en-printed-plain kept `sb` and `sth` (8 of 8); without it, 4
+    //   of 8 still did, and the example in rule 2 brought that to 0 of 8.
+    '7. A slash inside an item joins either different words or forms of one word. Different words, as in "decide / decision": return each word as its own item, in the order written. Forms of one word, such as another tense ("sing / sang") or another ending or article ("rosso/a", "un/una"): return one item, the word in its dictionary form ("sing", "rosso").',
   ].join('\n');
   return { system, user: `Language: ${name}.`, schema: LlmPhotoReadingSchema };
 }

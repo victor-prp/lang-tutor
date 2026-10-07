@@ -5,20 +5,24 @@ import type { MatchOption } from '../../src/domain/senseMatching';
 /**
  * Phase 26. A photo and what reading it must find. `text` lists every accepted
  * spelling, because "to" and "the" before a phrase are dropped inconsistently
- * (spec, POC findings). `hebrew` is checked when given. Tier 1 (clean printed
- * pages): every item found and nothing extra. Tier 2: one check per expected
- * item, plus one failing check per extra item.
+ * (spec, POC findings). `hebrew` is checked when given, and is a set for the
+ * same reason: a split slash pair carries the item's Hebrew whole or its own
+ * half of it, and either matches (glossesOf splits at `/`). Tier 1 (clean
+ * printed pages): every item found and nothing extra. Tier 2: one check per
+ * expected item, plus one failing check per extra item.
  */
 export type PhotoCase = {
   label: string;
   file: string;
   language: LanguageCode;
   tier: 1 | 2;
-  expect: { text: string[]; hebrew?: string }[];
+  expect: { text: string[]; hebrew?: string[] }[];
 };
 
-const one = (text: string, hebrew?: string) => ({ text: [text], ...(hebrew ? { hebrew } : {}) });
-const any = (texts: string[], hebrew?: string) => ({ text: texts, ...(hebrew ? { hebrew } : {}) });
+const hebrewOf = (hebrew?: string | string[]) =>
+  hebrew === undefined ? {} : { hebrew: typeof hebrew === 'string' ? [hebrew] : hebrew };
+const one = (text: string, hebrew?: string | string[]) => ({ text: [text], ...hebrewOf(hebrew) });
+const any = (texts: string[], hebrew?: string | string[]) => ({ text: texts, ...hebrewOf(hebrew) });
 
 export const PHOTO_CASES: PhotoCase[] = [
   {
@@ -94,6 +98,71 @@ export const PHOTO_CASES: PhotoCase[] = [
     expect: [
       one('улица', 'רחוב'), one('автобус', 'אוטובוס'), one('работа', 'עבודה'), one('рынок', 'שוק'),
       one('идти пешком', 'ללכת ברגל'),
+    ],
+  },
+  // Phase 26 follow-up. A slash joining different words is two items, so each
+  // gets its own tick, lookup and sense; read as one, `decorate / decoration`
+  // was written into the dictionary as a form of both lexemes and shown in
+  // sessions. A slash joining forms of one word is one item in its dictionary
+  // form: `go / going` as two rows would land both on the same sense, and the
+  // save keeps one entry per sense.
+  {
+    label: 'photo: printed English slash pairs, different words split and forms of one word kept as one',
+    file: 'en-printed-pairs.jpg',
+    language: 'en',
+    tier: 1,
+    expect: [
+      one('decorate', ['לקשט / קישוט', 'לקשט']), one('decoration', ['לקשט / קישוט', 'קישוט']),
+      one('kitchen', 'מטבח'), one('locate', ['לאתר / מיקום', 'לאתר']), one('location', ['לאתר / מיקום', 'מיקום']),
+      one('go', 'ללכת'), one('communicate'), one('communication'), one('make sure', 'לוודא'),
+      one('buy', 'לקנות'), one('river', 'נהר'),
+    ],
+  },
+  // The other half of the same rule, and the one a split in code would get
+  // wrong: a gender ending or an article choice is not a second word.
+  {
+    label: 'photo: printed Italian gender endings and article choices stay one item, word families split',
+    file: 'it-printed-endings.jpg',
+    language: 'it',
+    tier: 1,
+    expect: [
+      one('amico', 'חבר/ה'), one('cantante', 'זמר/ת'), one('cucinare', ['לבשל / מטבח', 'לבשל']),
+      one('cucina', ['לבשל / מטבח', 'מטבח']), one('bello', 'יפה'), one('lavorare', ['לעבוד / עבודה', 'לעבוד']),
+      one('lavoro', ['לעבוד / עבודה', 'עבודה']), one('stanco', 'עייף/ה'), one('scuola', 'בית ספר'),
+      one('parlare', 'לדבר'),
+    ],
+  },
+  // Victor's textbook page, the photo the defect was found on. Two columns, and
+  // three of the four pairs wrap onto a second line.
+  {
+    label: 'photo: real textbook page, two columns with wrapped slash pairs',
+    file: 'en-textbook-printed.jpg',
+    language: 'en',
+    tier: 2,
+    expect: [
+      one('adventure'), one('approximately'), one('avoid'), one('base'), one('by the way'),
+      any(['café', 'cafe']), one('capital'), one('chance'), one('click'), one('combine'), one('combination'),
+      one('communicate'), one('communication'), one('competition'), one('cooking'), one('cream'),
+      one('culture'), one('decorate'), one('decoration'), one('dish'), one('download'), one('drum'),
+      one('flour'), one('in order to'), one('ingredient'), one('island'), one('label'), one('locate'),
+      one('location'), one('loud'), one('make sure'), one('pour'), one('range'), any(['remember to', 'remember']),
+      one('rich'), one('river'), one('sense'), one('shopping'), one('sound'), one('step'),
+      one('traditional'), one('traffic'), one('used to'), one('western'),
+    ],
+  },
+  // Victor's handwritten notebook page: numbered lines and Hebrew in cursive.
+  // `outated` is what the page says; reading it as `outdated` is as good, since
+  // the lookup corrects it either way. The Hebrew beside `notation` is not
+  // legible enough to score.
+  {
+    label: 'photo: real handwritten notebook, numbered lines and cursive Hebrew',
+    file: 'en-textbook-handwritten.jpg',
+    language: 'en',
+    tier: 2,
+    expect: [
+      any(['outdated', 'outated'], 'מיושן'), one('compose', 'להלחין'), one('train', 'לאמן'), one('century', 'מאה'),
+      one('notation'), any(['be exposed to', 'to be exposed to'], ['להיחשף ל', 'להיחשף']),
+      one('generation', 'דור'), one('worth', 'שווה'), one('instrument', 'כלי נגינה'), one('amazing', 'מדהים'),
     ],
   },
 ];

@@ -563,8 +563,8 @@ const sameText = (a: string, b: string) =>
   stripStress(a).replace(/\s+/g, ' ').trim().toLowerCase() === stripStress(b).replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** Phase 26. Each expected item is found when some read item has one of its
- *  spellings and, if Hebrew is expected, the same Hebrew after folding. Every
- *  read item no expectation claims is an extra. */
+ *  spellings and, if Hebrew is expected, one of its Hebrew readings after
+ *  folding. Every read item no expectation claims is an extra. */
 function photoChecks(kase: PhotoCase, items: ReadItem[]): Check[] {
   const claimed = new Set<number>();
   const checks: Check[] = kase.expect.map((expected) => {
@@ -572,11 +572,12 @@ function photoChecks(kase: PhotoCase, items: ReadItem[]): Check[] {
       (item, i) =>
         !claimed.has(i) &&
         expected.text.some((text) => sameText(text, item.text)) &&
-        (expected.hebrew === undefined || comparable(item.hebrew ?? '') === comparable(expected.hebrew)),
+        (expected.hebrew === undefined ||
+          expected.hebrew.some((hebrew) => comparable(item.hebrew ?? '') === comparable(hebrew))),
     );
     if (index !== -1) claimed.add(index);
     return {
-      name: `found ${expected.text[0]}${expected.hebrew ? ` = ${expected.hebrew}` : ''}`,
+      name: `found ${expected.text[0]}${expected.hebrew ? ` = ${expected.hebrew[0]}` : ''}`,
       ok: index !== -1,
     };
   });
