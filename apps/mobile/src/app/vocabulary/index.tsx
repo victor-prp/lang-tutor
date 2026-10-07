@@ -130,6 +130,11 @@ export default function VocabularyScreen() {
                 <LevelBadge level={item.level} testID="vocabulary-word-level" />
                 {partsOfSpeech ? <Text style={styles.meta}>{partsOfSpeech}</Text> : null}
                 <Text style={styles.translation}>{item.headline.translation}</Text>
+                {item.added_by.length > 0 ? (
+                  <Text testID="vocabulary-added-by" style={styles.addedBy}>
+                    {strings.addedBy(item.added_by)}
+                  </Text>
+                ) : null}
               </Pressable>
               {/* A sibling, not a child: a button inside the row's button is
                   announced badly by screen readers (spec §1 D10). */}
@@ -166,6 +171,7 @@ const styles = StyleSheet.create({
   mark: { fontSize: fontSizes.sm, color: colors.muted },
   meta: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
   translation: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.text, writingDirection: 'rtl' },
+  addedBy: { color: colors.muted, fontSize: fontSizes.sm, writingDirection: 'rtl' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   chip: {
     borderRadius: radii.md,
