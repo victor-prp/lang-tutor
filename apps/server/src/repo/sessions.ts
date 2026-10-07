@@ -43,7 +43,7 @@ export function createSessionRepo(tx: Tx) {
   }
 
   /**
-   * `picked` has its options already shuffled (`shuffleOptions`). Each option's
+   * `picked` has its options already shuffled (`shuffleSession`). Each option's
    * text is mapped back to its canonical position to build `option_order` —
    * unambiguous because `question_options_valid` guarantees distinct texts
    * within a question. A text card (typed, dictation, tiles) has no options, so its order is `{}`.

@@ -103,11 +103,11 @@ export function judgeTyped(target: TypedTarget, text: string): TypedVerdict {
   const typed = normaliseTyped(text);
   if (typed === '') return 'wrong';
   const targets = [...new Set([target.answer, target.lemma].map(normaliseTyped))];
-  if (targets.some((target) => same(typed, target))) return 'exact';
+  if (targets.some((form) => same(typed, form))) return 'exact';
   if (target.alternatives.map(normaliseTyped).some((alternative) => same(typed, alternative))) {
     return 'alternative';
   }
-  if (targets.some((target) => nearMiss(typed, target))) return 'near_miss';
+  if (targets.some((form) => nearMiss(typed, form))) return 'near_miss';
   return 'wrong';
 }
 

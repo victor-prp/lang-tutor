@@ -36,8 +36,9 @@ describe('dimensions', () => {
     for (const dimension of LIVE_DIMENSIONS) expect(DIMENSIONS).toContain(dimension);
   });
 
-  // Phase 23 (spec D7): the three written dimensions each have a question type
-  // that feeds them; the two spoken ones wait for voice.
+  // Phases 23 and 24: each live dimension has a question type that feeds it (the
+  // written three by phase 23's cards, spoken_receptive by listening); only
+  // spoken_productive still waits.
   it('are live exactly when some question type feeds them', () => {
     expect([...LIVE_DIMENSIONS]).toEqual(['written_receptive', 'written_productive', 'spelling', 'spoken_receptive']);
   });

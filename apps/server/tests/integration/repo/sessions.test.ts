@@ -339,3 +339,18 @@ describe('phase 24: boards', () => {
     });
   });
 });
+
+describe('countListSessions', () => {
+  it('counts every list session the enrollment has had, whatever its status', async () => {
+    const E = enrollmentOf('u_1');
+    await withTx(t.db, async (tx) => {
+      const repo = createSessionRepo(tx);
+      expect(await repo.countListSessions(E)).toBe(0);
+      const failed = await repo.insertPreparingSession('u_1', E);
+      await repo.transition(failed, ['preparing'], 'failed');
+      const skipped = await repo.insertPreparingSession('u_1', E);
+      await repo.transition(skipped, ['preparing'], 'skipped');
+      expect(await repo.countListSessions(E)).toBe(2);
+    });
+  });
+});

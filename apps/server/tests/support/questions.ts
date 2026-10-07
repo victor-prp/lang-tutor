@@ -13,7 +13,7 @@ import { withTx } from './withTx';
 /**
  * Phase 23. A question a test knows is a choice, narrowed so it can read the
  * options: every seed question is one, as is the first of a list session
- * (the type cycle starts on today's card). Throws for a typed card, so a test
+ * (phase 23's cycle starts on today's card, unless `types` says otherwise). Throws for a typed card, so a test
  * that assumed wrong fails at the assumption rather than on an undefined.
  */
 export function asChoice(question: Question | undefined): ChoiceQuestion {
@@ -37,8 +37,8 @@ export type AskedSense = {
 const CYCLE: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
 
 /**
- * Phase 23. A ready list session over `asked`, with the types the type cycle
- * gives their positions, written through the production repositories exactly
+ * Phase 23. A ready list session over `asked`, with phase 23's type cycle as
+ * the default for their positions (`types` overrides it), written through the production repositories exactly
  * as prepare-session writes it, minus the model: wrong options are fixed
  * strings and a typed card accepts `alternatives`. Options keep their canonical
  * order: the right index is 0, except for a board word, whose right index is

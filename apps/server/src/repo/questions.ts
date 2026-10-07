@@ -11,8 +11,8 @@ export function canonicalOptions(options: QuestionOption[]): QuestionOption[] {
   return [...options].sort((a, b) => a.position - b.position);
 }
 
-/** A question row with what its variant and lexeme add: everything any of the
- *  three types is built from. */
+/** A question row with what its variant and lexeme add: everything any
+ *  question type is built from. */
 export type QuestionRow = {
   id: string;
   type: string;

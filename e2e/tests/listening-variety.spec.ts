@@ -119,4 +119,5 @@ test('ten words: a run, a board, a listening card, tiles and a dictation', async
 
   // Results: listening is practice now (spec D13).
   await expect(page.getByText(/הבנת הנשמע/).first(), report()).toBeVisible();
+  expect(diagnostics.pageErrors, report()).toEqual([]);
 });

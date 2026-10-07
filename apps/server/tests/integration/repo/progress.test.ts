@@ -200,6 +200,35 @@ describe('insertSnapshot and findSnapshot', () => {
   });
 });
 
+// Phase 24: a listening card, a dictation, a tiles card and a board word each
+// store their meaning in their own shape; the results read form → meaning.
+describe('findSnapshot over the phase 24 types', () => {
+  it('reads form and meaning for listen_choice, dictation, letter_tiles and matching questions', async () => {
+    const words = [];
+    const pairs = [['tome', 'ספר'], ['quill', 'נוצה'], ['lantern', 'פנס'], ['kettle', 'קומקום'], ['anvil', 'סדן'], ['rope', 'חבל'], ['cart', 'עגלה']];
+    for (const [lemma, translation] of pairs) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { sessionId } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: words,
+      types: ['listen_choice', 'dictation', 'letter_tiles', 'matching', 'matching', 'matching', 'matching'],
+    });
+    await repo((r) =>
+      r.insertSnapshot({
+        sessionId,
+        rows: words.map((word) => ({ senseId: word.senseId, dimension: 'written_receptive' as const, levelBefore: 1, levelAfter: 2 })),
+      }),
+    );
+    const read = await repo((r) => r.findSnapshot(sessionId));
+    expect(read.map((row) => [row.position, row.form, row.translation]).sort((a, b) => Number(a[0]) - Number(b[0]))).toEqual(
+      pairs.map(([form, translation], position) => [position, form, translation]),
+    );
+  });
+});
+
 describe("the recompute's reads", () => {
   it('resets every row and every snapshot', async () => {
     await saveAt('2026-10-01 00:00:00+00', [0]);
