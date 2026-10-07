@@ -7,6 +7,7 @@ import type { Logger } from './logger';
 import { createGeminiClient } from './providers/gemini';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createJobRepo } from './repo/jobs';
+import { createPhotoImportRepo } from './repo/photoImports';
 import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
@@ -80,6 +81,7 @@ export function createServerDeps(io: {
     vocabulary: createVocabularyRepo(tx),
     progress: createProgressRepo(tx),
     jobs: createJobRepo(tx, io.boss),
+    photoImport: createPhotoImportRepo(tx),
   }));
 
   // The one place in the repo that names both `createGeminiClient` and

@@ -184,6 +184,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
     progress: repos.progress ?? unreachableRepo('progress repo'),
     jobs: repos.jobs ?? unreachableRepo('jobs repo'),
+    photoImport: repos.photoImport ?? unreachableRepo('photo import repo'),
   };
   return (run) => run(bound);
 }
