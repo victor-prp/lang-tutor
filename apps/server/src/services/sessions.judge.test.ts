@@ -23,6 +23,16 @@ const SESSION = '22222222-2222-2222-2222-222222222222';
 const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'ready', source: 'list' };
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'it', created_at: '' };
 const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין' };
+const SENTENCE: Question = {
+  id: 's1',
+  type: 'sentence_translation',
+  vocab_term_id: 'l1',
+  question: 'אני רוצה להזמין שולחן.',
+  meaning: 'להזמין',
+  sentence: 'I want to book a table.',
+  gap: { start: 10, end: 14 },
+  answer: 'book',
+};
 const CHOICE: Question = { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 };
 const CONTEXT = { form: 'prenotare', lemma: 'prenotare', partOfSpeech: 'verb', meaning: 'להזמין', example: 'Vorrei prenotare un tavolo.', exampleTranslation: 'הייתי רוצה להזמין שולחן.' };
 
@@ -172,5 +182,34 @@ describe('answerJudged (spec D3)', () => {
     const choiceFirst = record([CHOICE, MEANING]);
     await expect(setup(judge, choiceFirst).service.answerJudged(SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(AnswerKindMismatch);
     expect(judge.calls).toHaveLength(0);
+  });
+
+  describe('a sentence_translation card', () => {
+    const sentence = (text: string) => ({ userId: 'u1', questionId: 's1', text });
+    const first = () => record([SENTENCE, CHOICE]);
+
+    it('rules the reference exact, without a call', async () => {
+      const judge = createFakeLlmClient('{"verdict":"wrong"}');
+      const { service } = setup(judge, first());
+      expect((await service.answerJudged(SESSION, sentence('i want to book a table'))).verdict).toBe('exact');
+      expect(judge.calls).toHaveLength(0);
+    });
+
+    it('asks the model once otherwise, with the sentence and the reference', async () => {
+      const judge = createFakeLlmClient('{"verdict":"right"}');
+      const { service } = setup(judge, first());
+      expect((await service.answerJudged(SESSION, sentence('I wish to reserve a table'))).verdict).toBe('exact');
+      expect(judge.calls).toHaveLength(1);
+      expect(JSON.parse(judge.calls[0].user)).toMatchObject({
+        hebrew_sentence: 'אני רוצה להזמין שולחן.',
+        reference_translation: 'I want to book a table.',
+      });
+    });
+
+    it('records misspelled as a near miss', async () => {
+      const { service, inserted } = setup(createFakeLlmClient('{"verdict":"misspelled"}'), first());
+      expect((await service.answerJudged(SESSION, sentence('I want to bok a table'))).verdict).toBe('near_miss');
+      expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'I want to bok a table', verdict: 'near_miss' }]]);
+    });
   });
 });

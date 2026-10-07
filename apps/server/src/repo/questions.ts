@@ -3,7 +3,7 @@ import type { QuestionType } from '@lang-tutor/core/domain';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import type { GenerationContext } from '../domain/distractors';
+import type { GenerationContext, RecentSentences } from '../domain/distractors';
 import { dictLexemes, dictVariants, questions, type QuestionOption } from '../db/schema';
 
 /** Options as authored, ordered by their canonical position. */
@@ -20,6 +20,11 @@ export type QuestionRow = {
   options: QuestionOption[] | null;
   alternatives: string[] | null;
   tiles: string[] | null;
+  /** Phase 27. A sentence card's text, its Hebrew, and the gap in `sentence`. */
+  sentence: string | null;
+  sentenceTranslation: string | null;
+  gapStart: number | null;
+  gapEnd: number | null;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -35,6 +40,10 @@ export const questionColumns = {
   options: questions.options,
   alternatives: questions.alternatives,
   tiles: questions.tiles,
+  sentence: questions.sentence,
+  sentenceTranslation: questions.sentenceTranslation,
+  gapStart: questions.gapStart,
+  gapEnd: questions.gapEnd,
   form: dictVariants.form,
   lemma: dictLexemes.lemma,
   partOfSpeech: dictLexemes.partOfSpeech,
@@ -91,6 +100,29 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         part_of_speech: row.partOfSpeech,
         meaning: row.prompt!,
       };
+    case 'cloze_typed':
+      // Phase 27 (spec D5). The gap's text is the answer; the client judges it.
+      return {
+        ...base,
+        type: 'cloze_typed',
+        sentence: row.sentence!,
+        gap: { start: row.gapStart!, end: row.gapEnd! },
+        translation: row.sentenceTranslation!,
+        meaning: row.prompt!,
+        answer: row.sentence!.slice(row.gapStart!, row.gapEnd!),
+        alternatives: row.alternatives ?? [],
+      };
+    case 'sentence_translation':
+      // Phase 27 (spec D6). The Hebrew sentence is asked; `sentence` is the reference.
+      return {
+        ...base,
+        type: 'sentence_translation',
+        question: row.sentenceTranslation!,
+        meaning: row.prompt!,
+        sentence: row.sentence!,
+        gap: { start: row.gapStart!, end: row.gapEnd! },
+        answer: row.sentence!.slice(row.gapStart!, row.gapEnd!),
+      };
     case 'letter_tiles':
       return {
         ...base,
@@ -108,6 +140,16 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
     correct_option: shown.findIndex((option) => option.is_correct),
   };
   switch (row.type) {
+    case 'cloze_choice':
+      return {
+        ...base,
+        type: 'cloze_choice',
+        sentence: row.sentence!,
+        gap: { start: row.gapStart!, end: row.gapEnd! },
+        translation: row.sentenceTranslation!,
+        meaning: row.prompt!,
+        ...choice,
+      };
     case 'reverse_choice':
       return { ...base, type: 'reverse_choice', question: row.prompt!, part_of_speech: row.partOfSpeech, ...choice };
     case 'listen_choice':
@@ -201,8 +243,11 @@ export function createQuestionRepo(tx: Tx) {
         lemma: string;
         part_of_speech: string;
         translation: string;
+        example_source: string | null;
+        example_target: string | null;
       }>(sql`
-        SELECT tr.sense_id, tr.variant_id, l.id AS lexeme_id, v.form, l.lemma, l.part_of_speech, tr.translation
+        SELECT tr.sense_id, tr.variant_id, l.id AS lexeme_id, v.form, l.lemma, l.part_of_speech, tr.translation,
+               tr.example_source, tr.example_target
         FROM (VALUES ${sql.join(
           input.picks.map((pick) => sql`(${pick.senseId}::text, ${pick.variantId}::text)`),
           sql`, `,
@@ -225,10 +270,47 @@ export function createQuestionRepo(tx: Tx) {
                 lemma: row.lemma,
                 partOfSpeech: row.part_of_speech,
                 translation: row.translation,
+                example: row.example_source,
+                exampleTranslation: row.example_target,
               },
             ]
           : [];
       });
+    },
+
+    /**
+     * Phase 27 (spec D5, D6). Per sense, the sentences this enrollment's last
+     * sessions asked, newest first by creation, so a new sentence is never last
+     * time's: a typed cloze's `sentence`, and a translation's Hebrew sentence (its
+     * `sentence_translation` column; its `sentence` is the reference). A cloze
+     * choice shows the saved example and is not a written sentence, so it is
+     * left out. At most `limit` of each; a sense with none has no entry.
+     */
+    findRecentSentences: async (input: {
+      enrollmentId: string;
+      senseIds: string[];
+      limit: number;
+    }): Promise<RecentSentences> => {
+      const recent: RecentSentences = new Map();
+      if (input.senseIds.length === 0) return recent;
+      const rows = await tx.execute<{ sense_id: string; type: string; sentence: string }>(sql`
+        SELECT sense_id, type, sentence FROM (
+          SELECT q.sense_id, q.type,
+                 CASE WHEN q.type = 'sentence_translation' THEN q.sentence_translation ELSE q.sentence END AS sentence,
+                 row_number() OVER (PARTITION BY q.sense_id, q.type ORDER BY q.created_at DESC, q.id DESC) AS recency
+          FROM questions q
+          WHERE q.enrollment_id = ${input.enrollmentId}
+            AND q.type IN ('cloze_typed', 'sentence_translation')
+            AND q.sense_id IN (${sql.join(input.senseIds.map((id) => sql`${id}`), sql`, `)})
+        ) ranked
+        WHERE recency <= ${input.limit}
+        ORDER BY sense_id, type, recency`);
+      for (const row of rows.rows) {
+        const entry = recent.get(row.sense_id) ?? { cloze: [], translate: [] };
+        (row.type === 'cloze_typed' ? entry.cloze : entry.translate).push(row.sentence);
+        recent.set(row.sense_id, entry);
+      }
+      return recent;
     },
 
     /**
@@ -299,6 +381,12 @@ export function createQuestionRepo(tx: Tx) {
         options: QuestionOption[] | null;
         alternatives: string[] | null;
         tiles: string[] | null;
+        // Phase 27: a sentence card's text and gap; left out (null) on every
+        // other type, which questions_sentence_valid enforces.
+        sentence?: string | null;
+        sentenceTranslation?: string | null;
+        gapStart?: number | null;
+        gapEnd?: number | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -318,6 +406,10 @@ export function createQuestionRepo(tx: Tx) {
             options: question.options,
             alternatives: question.alternatives,
             tiles: question.tiles,
+            sentence: question.sentence ?? null,
+            sentenceTranslation: question.sentenceTranslation ?? null,
+            gapStart: question.gapStart ?? null,
+            gapEnd: question.gapEnd ?? null,
           })),
         )
         .returning({ id: questions.id });
@@ -331,6 +423,10 @@ export function createQuestionRepo(tx: Tx) {
             options: question.options,
             alternatives: question.alternatives,
             tiles: question.tiles,
+            sentence: question.sentence ?? null,
+            sentenceTranslation: question.sentenceTranslation ?? null,
+            gapStart: question.gapStart ?? null,
+            gapEnd: question.gapEnd ?? null,
             form: question.form,
             lemma: question.lemma,
             partOfSpeech: question.partOfSpeech,

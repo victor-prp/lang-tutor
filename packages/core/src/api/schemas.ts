@@ -133,6 +133,56 @@ export const TypedMeaningQuestionSchema = z.object({
   meaning: z.string(),
 });
 
+// Phase 27 (spec D7, D11). Where a word sits in a sentence: JavaScript string
+// indices, [start, end), computed in TypeScript and never in SQL.
+export const GapSchema = z.object({
+  start: z.number().int().nonnegative(),
+  end: z.number().int().positive(),
+});
+
+// Phase 27 (spec D7). The saved example with the word blanked; four target
+// words to pick from. `translation` (Hebrew) and `meaning` show after the answer.
+export const ClozeChoiceQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('cloze_choice'),
+  vocab_term_id: z.string(),
+  sentence: z.string(),
+  gap: GapSchema,
+  translation: z.string(),
+  meaning: z.string(),
+  options: z.array(z.string()),
+  correct_option: z.number().int(),
+});
+
+// Phase 27 (spec D5). A sentence written for this session, the word blanked in
+// whatever form it needs, and the whole sentence in Hebrew. `answer` is the
+// gap's text: the client judges locally against it and `alternatives`.
+export const ClozeTypedQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('cloze_typed'),
+  vocab_term_id: z.string(),
+  sentence: z.string(),
+  gap: GapSchema,
+  translation: z.string(),
+  meaning: z.string(),
+  answer: z.string(),
+  alternatives: z.array(z.string()),
+});
+
+// Phase 27 (spec D6). A Hebrew sentence to translate, judged by the server.
+// `sentence` is a reference translation, `gap` and `answer` the practised word
+// in it: shown after the answer.
+export const SentenceTranslationQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('sentence_translation'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  meaning: z.string(),
+  sentence: z.string(),
+  gap: GapSchema,
+  answer: z.string(),
+});
+
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
 // the compiler finds every switch that has not learnt it.
 export const QuestionSchema = z.discriminatedUnion('type', [
@@ -146,6 +196,9 @@ export const QuestionSchema = z.discriminatedUnion('type', [
   ReadAloudQuestionSchema,
   SayTranslationQuestionSchema,
   TypedMeaningQuestionSchema,
+  ClozeChoiceQuestionSchema,
+  ClozeTypedQuestionSchema,
+  SentenceTranslationQuestionSchema,
 ]);
 
 // Phase 23. How a typed answer was judged (spec D5). Every verdict but `wrong`
@@ -773,6 +826,11 @@ export const LlmMeaningJudgeSchema = z.object({
   verdict: z.enum(['right', 'other_sense', 'wrong']),
 });
 
+// Phase 27 (spec D4). The model's verdict on a sentence translation.
+export const LlmTranslationJudgeSchema = z.object({
+  verdict: z.enum(['right', 'misspelled', 'other_word', 'wrong']),
+});
+
 // Phase 19. The model's answer when asked for a session's wrong options. `key`
 // is echoed from the request (q1, q2, …) rather than a sense id: a short key is
 // one the model cannot mistype.
@@ -790,6 +848,10 @@ export const LlmDistractorsSchema = z.object({
         key: z.string(),
         distractors: z.array(z.string()).max(3),
         alternatives: z.array(z.string()).max(10).optional(),
+        // Phase 27: the sentence tasks' answers (spec D5, D6).
+        sentence: z.string().optional(),
+        gap: z.string().optional(),
+        translation: z.string().optional(),
       }),
     )
     .max(10),

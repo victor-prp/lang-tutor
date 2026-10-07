@@ -13,6 +13,7 @@ import {
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
 
+import { findGap } from '../domain/cloze';
 import {
   NOTHING_GENERATED,
   boardMeanings,
@@ -25,7 +26,7 @@ import {
   validateDistractors,
   type DistractorVerdict,
 } from '../domain/distractors';
-import { buildMeaningJudgePrompt, meaningRuleVerdict, parseMeaningJudge, type MeaningJudgeContext } from '../domain/judge';
+import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planSession } from '../domain/plan';
@@ -42,6 +43,7 @@ import {
   sessionScore,
   step,
 } from '../domain/session';
+import { MAX_AVOID } from '../domain/sentences';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
@@ -412,7 +414,7 @@ export function createSessionService({
     ): Promise<JudgedResult> => {
       type Checked =
         | { replay: JudgedResult }
-        | { current: JudgedQuestion; context: MeaningJudgeContext };
+        | { current: JudgedQuestion; context: JudgeContext };
       const checked = await transaction(async (repos): Promise<Checked> => {
         const loaded = await repos.session.loadSession(sessionId);
         if (!loaded || loaded.user_id !== input.userId) throw new SessionNotFound(sessionId);
@@ -434,18 +436,18 @@ export function createSessionService({
         const enrolled = state ? await repos.enrollment.findById(state.enrollmentId) : undefined;
         const found = await repos.question.findJudgeContext(current.id);
         if (!enrolled || !found) throw new SessionNotFound(sessionId);
-        return { current, context: { language: enrolled.target_language as LanguageCode, ...found } };
+        return { current, context: { language: enrolled.target_language as LanguageCode, explanation: enrolled.source_language as LanguageCode, ...found } };
       });
       if ('replay' in checked) return checked.replay;
 
       const text = input.text.slice(0, MAX_JUDGED_TEXT);
-      let verdict = meaningRuleVerdict(checked.current.meaning, text);
+      let verdict = ruleVerdict(checked.current, text);
       const judgedBy = verdict === null ? 'model' : 'rule';
       const started = now();
       if (verdict === null) {
         try {
-          const raw = await judge(buildMeaningJudgePrompt(checked.context, text));
-          verdict = parseMeaningJudge(raw);
+          const raw = await judge(judgePrompt(checked.current, checked.context, text));
+          verdict = parseJudge(checked.current.type, raw);
           if (verdict === null) throw new LlmUnavailable('the verdict was unreadable');
         } catch (error) {
           logger.info({
@@ -500,7 +502,13 @@ export function createSessionService({
           picks: payload.picks.map((pick) => ({ senseId: pick.sense_id, variantId: pick.variant_id })),
           sourceLanguage: enrolled.source_language,
         });
-        return { state, enrolled, context };
+        // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
+        const recent = await question.findRecentSentences({
+          enrollmentId: state.enrollmentId,
+          senseIds: context.map((row) => row.senseId),
+          limit: MAX_AVOID,
+        });
+        return { state, enrolled, context, recent };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -519,15 +527,20 @@ export function createSessionService({
           translation: row.translation,
           tiles: tileEligible(row.form),
           speakable: speakable(row.form),
+          // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
+          clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
         })),
         { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
       );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor(plan);
-      const items = distractorItems(ordered, tasks);
+      const items = distractorItems(ordered, tasks, read.recent);
       // The rows that ask the model nothing are still in the session: the
       // validation and the prompt must know their words and meanings.
       const others = ordered.filter((_, index) => !tasks[index]);
+      // Where each pick's form sits in its saved example: the same search that
+      // made the gap item's blank and the plan's eligibility.
+      const gaps = ordered.map((row) => findGap(row.example ?? '', [row.form, row.lemma]));
 
       const started = now();
       let modelMs = 0;
@@ -543,7 +556,7 @@ export function createSessionService({
         // unlike a lookup, there is nothing useful to serve without it.
         const answer = raw === '' ? null : parseLlmDistractors(raw);
         if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
-        const checked = validateDistractors(items, answer, read.enrolled.source_language, others);
+        const checked = validateDistractors(items, answer, read.enrolled.source_language, others, target);
         if (!checked.ok) throw new InvalidDistractors(sessionId, checked.reason);
         verdict = checked;
 
@@ -573,7 +586,10 @@ export function createSessionService({
         throw error;
       }
 
+      // Logged once the session is written, not on an attempt a failed insert or a retry repeats.
+      let degradedEvents: Record<string, unknown>[] = [];
       const written = await transaction(async ({ session, question }) => {
+        degradedEvents = [];
         // Conditional: a skip that landed during the model call wins, and this
         // transaction then writes nothing at all.
         if (!(await session.transition(sessionId, ['preparing'], 'ready'))) return false;
@@ -583,7 +599,23 @@ export function createSessionService({
           targetLanguage: target,
           userLanguageCode: read.enrolled.source_language,
           questions: ordered.map((row, index) => {
-            const type = plan.types[index];
+            const made = verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED;
+            // Spec D5, D6: a sentence card the model did not make usable is a
+            // typed translation, with nothing generated for it.
+            const planned = plan.types[index];
+            const degraded =
+              (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate);
+            if (degraded) {
+              degradedEvents.push({
+                event: 'sentence_degraded',
+                session_id: sessionId,
+                position: index,
+                type: planned,
+                reason: made.degraded,
+              });
+            }
+            const type = degraded ? 'typed_translation' : planned;
+            const content = degraded ? NOTHING_GENERATED : made;
             return {
               senseId: row.senseId,
               variantId: row.variantId,
@@ -592,9 +624,10 @@ export function createSessionService({
               partOfSpeech: row.partOfSpeech,
               lexemeId: row.lexemeId,
               type,
-              ...generatedContent(row, type, verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED, {
+              ...generatedContent(row, type, content, {
                 tiles: type === 'letter_tiles' ? tilesFor(row.form, LANGUAGES[target].alphabet, rng) : null,
                 board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
+                gap: gaps[index],
               }),
             };
           }),
@@ -605,6 +638,7 @@ export function createSessionService({
         return true;
       });
 
+      if (written) for (const event of degradedEvents) logger.info(event);
       logger.info({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
         session_id: sessionId,

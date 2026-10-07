@@ -303,6 +303,10 @@ export const STUB_ALTERNATIVE = 'volume';
  *  ordinal 0 with listening off, at every position that asks anything. */
 const CYCLE_TASKS: Task[] = Array.from({ length: 10 }, (_, i) => (['meaning', 'word', 'typed'] as const)[i % 3]);
 
+export const STUB_SENTENCE = 'Tome sprint lantern kettle pillow ladder bucket violin turtle lizard';
+export const STUB_SENTENCE_HEBREW = 'אני רואה ספר ופנס בבית';
+export const STUB_GAP = 'lantern';
+
 export async function expectDistractors(ns: string, opts: { delayMs?: number; tasks?: Task[] } = {}): Promise<void> {
   const items = (opts.tasks ?? CYCLE_TASKS).map((task, i) => {
     const key = `q${i + 1}`;
@@ -313,6 +317,15 @@ export async function expectDistractors(ns: string, opts: { delayMs?: number; ta
         return { key, distractors: STUB_WRONG_ENGLISH };
       case 'typed':
         return { key, distractors: [], alternatives: [STUB_ALTERNATIVE] };
+      case 'gap':
+        return { key, distractors: STUB_WRONG_ENGLISH };
+      // Phase 27 Part B. One sentence holds every word the tests save, once, so
+      // whichever word a position asks, `gap` is a word of it. The sentence
+      // is English (the enrollment's target), its translation Hebrew.
+      case 'sentence':
+        return { key, distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] };
+      case 'translate':
+        return { key, distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE };
     }
   });
   await expectation(ns, {

@@ -46,6 +46,9 @@ describe('repos', () => {
     findGenerationContext: () => {
       throw new Error('submitAnswer must not read the generation context');
     },
+    findRecentSentences: () => {
+      throw new Error('submitAnswer must not read recent sentences');
+    },
     insertGeneratedQuestions: () => {
       throw new Error('submitAnswer must not write generated questions');
     },
