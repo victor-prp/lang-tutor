@@ -1,8 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 import { LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
+import { z } from 'zod';
 
 import { LlmUnavailable } from '../errors';
-import { createGeminiClient, toGeminiSchema } from './gemini';
+import { createGeminiClient, createGeminiTranscriber, toGeminiSchema } from './gemini';
 
 const request = { system: 'be helpful', user: 'book', schema: LlmTranslationSchema };
 
@@ -191,5 +192,54 @@ describe('createGeminiClient', () => {
     await expect(client(request)).rejects.toMatchObject({
       message: expect.not.stringContaining('secret') as unknown as string,
     });
+  });
+});
+
+describe('createGeminiTranscriber (phase 25)', () => {
+  const schema = z.object({ heard: z.string() });
+
+  it('sends the clip as inlineData, the instruction as the system part, and thinking off', async () => {
+    const seen: { url: string; init: RequestInit }[] = [];
+    const fetch = (async (url: string, init: RequestInit) => {
+      seen.push({ url, init });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"heard":"gatto"}' }] } }] }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000 });
+
+    expect(await transcribe({ system: 'transcribe the spoken audio', audio: 'QUJD', mimeType: 'audio/aac', schema })).toBe('{"heard":"gatto"}');
+    expect(seen[0].url).toBe('http://g/v1beta/models/m:generateContent');
+    expect((seen[0].init.headers as Record<string, string>)['x-goog-api-key']).toBe('k');
+    const body = JSON.parse(String(seen[0].init.body));
+    expect(body.systemInstruction.parts[0].text).toBe('transcribe the spoken audio');
+    expect(body.contents[0].parts).toEqual([{ inlineData: { mimeType: 'audio/aac', data: 'QUJD' } }]);
+    expect(body.generationConfig).toMatchObject({ temperature: 0, responseMimeType: 'application/json', thinkingConfig: { thinkingBudget: 0 } });
+  });
+
+  it('answers an empty candidate with the empty string', async () => {
+    const fetch = (async () => new Response(JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } }), { status: 200 })) as unknown as typeof globalThis.fetch;
+    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000 });
+    expect(await transcribe({ system: 's', audio: 'QUJD', mimeType: 'audio/aac', schema })).toBe('');
+  });
+
+  it('turns a failure status and a timeout into LlmUnavailable', async () => {
+    const failing = (async () => new Response('{}', { status: 400 })) as unknown as typeof globalThis.fetch;
+    await expect(
+      createGeminiTranscriber({ fetch: failing, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000 })({
+        system: 's',
+        audio: 'QUJD',
+        mimeType: 'audio/aac',
+        schema,
+      }),
+    ).rejects.toBeInstanceOf(LlmUnavailable);
+    const hanging = ((_: string, init: RequestInit) =>
+      new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(new Error('aborted'))))) as unknown as typeof globalThis.fetch;
+    await expect(
+      createGeminiTranscriber({ fetch: hanging, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 10 })({
+        system: 's',
+        audio: 'QUJD',
+        mimeType: 'audio/aac',
+        schema,
+      }),
+    ).rejects.toThrow(/timed out after 10ms/);
   });
 });

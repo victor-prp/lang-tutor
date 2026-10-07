@@ -9,7 +9,7 @@ export const WRONG_RUSSIAN = ['писать', 'дверь', 'стена'];
 
 /** The type cycle by position (server domain/session.ts, spec D2). */
 export const CYCLE = ['choice', 'reverse', 'typed'] as const;
-export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board';
+export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say';
 
 /**
  * Phase 23. The generation stub for q1 to q10, each key answering the task of
@@ -42,6 +42,10 @@ async function kindOnScreen(page: Page): Promise<CardKind> {
   if (await has('board')) return 'board';
   if (await has('tiles')) return 'tiles';
   if (await has('listen-play')) return (await has('typed-input')) ? 'dictation' : 'listen';
+  if (await has('speak-record')) {
+    const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
+    return HEBREW.test(prompt) ? 'say' : 'read';
+  }
   if (await has('typed-input')) return 'typed';
   const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
   return HEBREW.test(prompt) ? 'reverse' : 'choice';
@@ -110,4 +114,13 @@ export function nearMiss(word: string): string {
   const letters = [...word];
   [letters[1], letters[2]] = [letters[2], letters[1]];
   return letters.join('');
+}
+
+/** Phase 25. Records one attempt on the speaking card: tap, about a second of
+ *  Chromium's fake microphone, tap. */
+export async function speak(page: Page) {
+  await page.getByTestId('speak-record').click();
+  await expect(page.getByTestId('speak-status')).toBeVisible();
+  await page.waitForTimeout(1_000);
+  await page.getByTestId('speak-record').click();
 }

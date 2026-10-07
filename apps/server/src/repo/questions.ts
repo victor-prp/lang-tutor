@@ -49,8 +49,10 @@ export const questionColumns = {
  * Phase 23: today's card asks the variant's form; the reversed and typed cards
  * ask the stored Hebrew prompt. Phase 24: a listening card and a board word ask
  * the form too (spoken, or beside its meanings); a dictation speaks the form
- * and keeps the Hebrew as its meaning; a tiles card asks the Hebrew. A matching
- * row comes back as a board of one, which withBoards joins.
+ * and keeps the Hebrew as its meaning; a tiles card asks the Hebrew. Phase 25: a
+ * read-aloud card shows the form and keeps the Hebrew as its meaning; say the
+ * translation asks the Hebrew, as the typed card does. A matching row comes back
+ * as a board of one, which withBoards joins.
  */
 export function questionFrom(row: QuestionRow, order: number[] | null): Question {
   const base = { id: row.id, vocab_term_id: row.lexemeId };
@@ -67,6 +69,18 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
       };
     case 'dictation':
       return { ...base, type: 'dictation', question: row.form, meaning: row.prompt! };
+    case 'read_aloud':
+      return { ...base, type: 'read_aloud', question: row.form, meaning: row.prompt! };
+    case 'say_translation':
+      return {
+        ...base,
+        type: 'say_translation',
+        question: row.prompt!,
+        part_of_speech: row.partOfSpeech,
+        answer: row.form,
+        lemma: row.lemma,
+        alternatives: row.alternatives ?? [],
+      };
     case 'letter_tiles':
       return {
         ...base,

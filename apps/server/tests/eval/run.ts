@@ -25,17 +25,20 @@ import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
 import { distractorItems, validateDistractors, type Task } from '../../src/domain/distractors';
 import { isInScript } from '../../src/domain/languages';
-import { createGeminiClient } from '../../src/providers/gemini';
+import { createGeminiClient, createGeminiTranscriber } from '../../src/providers/gemini';
+import { judgeSpoken } from '@lang-tutor/core/domain';
 import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askDistractors, askModel, askRendering, type ModelAnswer } from './askModel';
+import { askDistractors, askModel, askRendering, askTranscription, type ModelAnswer } from './askModel';
 import {
   CASES,
   DISTRACTOR_CASES,
   RENDERING_CASES,
+  TRANSCRIPTION_CASES,
   type DistractorCase,
   type EvalCase,
   type RenderingCase,
+  type TranscriptionCase,
 } from './cases';
 
 const TIER2_THRESHOLD = 0.85;
@@ -68,6 +71,8 @@ type Row = {
   rendering?: LlmReconciliation;
   /** Set on a distractor row, the third call's answer. */
   distractors?: LlmDistractors;
+  /** Set on a transcription row: what the model heard. */
+  heard?: string;
   error?: string;
 };
 
@@ -571,12 +576,22 @@ async function main(): Promise<void> {
   const distractorCases = DISTRACTOR_CASES.filter((kase) =>
     matches(kase.label, ...kase.items.map((item) => item.form)),
   );
+  const transcriptionCases = TRANSCRIPTION_CASES.filter((kase) =>
+    matches(kase.label, kase.target, kase.file),
+  );
   if (filter) console.log(`filter "${filter}"`);
-  if (cases.length + renderingCases.length + distractorCases.length === 0) {
+  if (cases.length + renderingCases.length + distractorCases.length + transcriptionCases.length === 0) {
     throw new Error(`filter "${filter}" matched no case`);
   }
 
   const llm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    timeoutMs: TIMEOUT_MS,
+  });
+  const transcriber = createGeminiTranscriber({
     fetch: globalThis.fetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
@@ -665,16 +680,39 @@ async function main(): Promise<void> {
     }
   };
 
+  const scoreTranscription = async (kase: TranscriptionCase): Promise<Row> => {
+    try {
+      const heard = await askTranscription(transcriber, { file: kase.file, language: kase.language });
+      const verdict = heard === null ? null : judgeSpoken({ forms: [kase.target], alternatives: [] }, heard) === 'understood' ? 'understood' : 'unheard';
+      return {
+        label: kase.label,
+        text: kase.file,
+        tier1: [{ name: 'the answer parses', ok: heard !== null, detail: heard === null ? 'unreadable' : undefined }],
+        tier2: [{ name: `judged ${kase.expect}`, ok: verdict === kase.expect, detail: `heard "${heard ?? ''}"` }],
+        heard: heard ?? undefined,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text: kase.file,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   // Every call site of the provider, scored in one run and one scorecard. They
   // share the concurrency budget rather than each taking their own: the quota
   // they compete for is the same one.
   const started = Date.now();
-  const [translationRows, renderingRows, distractorRows] = await Promise.all([
+  const [translationRows, renderingRows, distractorRows, transcriptionRows] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
     mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
+    mapWithConcurrency(transcriptionCases, CONCURRENCY, scoreTranscription),
   ]);
-  const rows = [...translationRows, ...renderingRows, ...distractorRows];
+  const rows = [...translationRows, ...renderingRows, ...distractorRows, ...transcriptionRows];
   const elapsedMs = Date.now() - started;
 
   // Scorecard. Every case prints its actual output, so a drop is diagnosable
@@ -682,13 +720,23 @@ async function main(): Promise<void> {
   let tier1Failures = 0;
   let tier2Passed = 0;
   let tier2Total = 0;
+  // Transcription is scored on a line of its own: it is a different call and a
+  // different kind of failure, and a good translation score must not hide it.
+  let speechPassed = 0;
+  let speechTotal = 0;
 
   for (const row of rows) {
     const t1Bad = row.tier1.filter((check) => !check.ok);
     const t2Bad = row.tier2.filter((check) => !check.ok);
     tier1Failures += t1Bad.length;
-    tier2Passed += row.tier2.filter((check) => check.ok).length;
-    tier2Total += row.tier2.length;
+    const passed = row.tier2.filter((check) => check.ok).length;
+    if (transcriptionRows.includes(row)) {
+      speechPassed += passed;
+      speechTotal += row.tier2.length;
+    } else {
+      tier2Passed += passed;
+      tier2Total += row.tier2.length;
+    }
 
     const mark = t1Bad.length > 0 ? 'FAIL' : t2Bad.length > 0 ? 'warn' : 'ok  ';
     console.log(`\n[${mark}] ${row.text} — ${row.label}`);
@@ -708,6 +756,7 @@ async function main(): Promise<void> {
         );
       }
     }
+    if (row.heard !== undefined) console.log(`       heard=${row.heard}`);
     if (row.rendering) {
       console.log(
         `       senses=${
@@ -732,11 +781,14 @@ async function main(): Promise<void> {
   }
 
   const score = tier2Total === 0 ? 0 : tier2Passed / tier2Total;
+  const transcriptionScore = speechTotal === 0 ? 0 : speechPassed / speechTotal;
   console.log(
     `\ntier 1: ${tier1Failures} failure(s) (must be 0)\n` +
       `tier 2: ${tier2Passed}/${tier2Total} = ${(score * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
-      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor cases in ` +
+      `transcription tier 2: ${speechPassed}/${speechTotal} = ${(transcriptionScore * 100).toFixed(1)}% ` +
+      `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
+      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -746,10 +798,18 @@ async function main(): Promise<void> {
   const dir = join(__dirname, '.results');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  writeFileSync(file, JSON.stringify({ model: gemini.model, score, rows }, null, 2));
+  writeFileSync(file, JSON.stringify({ model: gemini.model, score, transcriptionScore, rows }, null, 2));
   console.log(`report: ${file}`);
 
-  if (tier1Failures > 0 || score < TIER2_THRESHOLD) process.exit(1);
+  // A group with no checks (a filtered run) has nothing to fail on.
+  const belowThreshold = (total: number, value: number) => total > 0 && value < TIER2_THRESHOLD;
+  if (
+    tier1Failures > 0 ||
+    belowThreshold(tier2Total, score) ||
+    belowThreshold(speechTotal, transcriptionScore)
+  ) {
+    process.exit(1);
+  }
 }
 
 main().catch((error) => {

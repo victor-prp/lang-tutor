@@ -85,12 +85,13 @@ test('a list session mixes three card types, and a typed near miss counts', asyn
   await answerChoice(page, card, true);
   await page.getByTestId('continue-button').click();
 
-  // Results: all four right. The reversed and typed words move their badge;
-  // the two choice words move recognition only, and say so.
+  // Results: all four right. Over five dimensions no single card lifts a new
+  // word's badge (a typed near miss leaves spelling new, so 2,2,1,1,1 is 1.4;
+  // phase 25 recalibrated), so every word moves a level and says so.
   await expect(page.getByTestId('results-score')).toBeVisible();
   await expect(page.getByTestId('practised-row')).toHaveCount(4);
-  await expect(page.getByTestId('practised-raised')).toHaveCount(2);
-  await expect(page.getByTestId('practised-progressed')).toHaveCount(2);
+  await expect(page.getByTestId('practised-raised')).toHaveCount(0);
+  await expect(page.getByTestId('practised-progressed')).toHaveCount(4);
   await expect(page.getByTestId('practised-progressed').first()).toHaveText('התקדמות: זיהוי בכתב');
 
   // The typed sense: writing has a level, and the near miss left spelling new.

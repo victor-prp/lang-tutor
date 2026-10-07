@@ -9,12 +9,14 @@ import { comparable } from './distractors';
  * position's type without a seeded rng.
  */
 
-/** One pick as the plan reads it. `tiles`: the form can be built from tiles. */
-export type PlanPick = { form: string; translation: string; tiles: boolean };
+/** One pick as the plan reads it. `tiles`: the form can be built from tiles.
+ *  `speakable`: it is one to four words, so it can be said (phase 25 D3). */
+export type PlanPick = { form: string; translation: string; tiles: boolean; speakable: boolean };
 
 /** `listening`: the app said its device has a voice for the target (spec D5).
+ *  `speaking`: the app said it can record (phase 25 D4).
  *  `ordinal`: how many list sessions the enrollment had before this one. */
-export type PlanInput = { listening: boolean; ordinal: number };
+export type PlanInput = { listening: boolean; speaking: boolean; ordinal: number };
 
 /** `order[i]` is the index into the picks asked at position `i`, `types[i]`
  *  its type. A board takes positions `start` to `start + 3`. */
@@ -22,12 +24,15 @@ export type SessionPlan = { order: number[]; types: QuestionType[]; board: { sta
 
 /** Each run of three climbs these tiers: recognise, pick the form, produce.
  *  A tier's first type is always eligible. Part B inserts the cloze types at
- *  index 1 of the second and third. */
+ *  index 1 of the second and third. Phase 25 appends read aloud, a warm-up, to
+ *  the first, and say the translation, recall, to the third. */
 export const TIERS: readonly (readonly QuestionType[])[] = [
-  ['multiple_choice', 'listen_choice'],
+  ['multiple_choice', 'listen_choice', 'read_aloud'],
   ['reverse_choice', 'letter_tiles'],
-  ['typed_translation', 'dictation'],
+  ['typed_translation', 'dictation', 'say_translation'],
 ];
+
+const SPEAKING: ReadonlySet<QuestionType> = new Set(['read_aloud', 'say_translation']);
 
 export const BOARD_SIZE = 4;
 export const BOARD_MIN_PICKS = 7;
@@ -44,6 +49,10 @@ function eligible(type: QuestionType, pick: PlanPick, input: PlanInput): boolean
       return input.listening;
     case 'letter_tiles':
       return pick.tiles;
+    case 'read_aloud':
+    case 'say_translation':
+      // Only reached when speaking is on: planSession removes them otherwise.
+      return pick.speakable;
     case 'matching':
       return false;
   }
@@ -83,6 +92,12 @@ export function planSession(picks: readonly PlanPick[], input: PlanInput): Sessi
   const singles = picks.map((_, index) => index).filter((index) => !onBoard.has(index));
   const order = board ? [...singles.slice(0, firstRun), ...board, ...singles.slice(firstRun)] : singles;
 
+  // Phase 25. Speaking off, or a session of one word (whose only card "can't
+  // speak now" could pass, leaving nothing to score): the speaking types leave
+  // the tiers, so the rotation is phase 24's exactly.
+  const speaking = input.speaking && picks.length > 1;
+  const tiers = speaking ? TIERS : TIERS.map((tier) => tier.filter((type) => !SPEAKING.has(type)));
+
   const types: QuestionType[] = [];
   let single = 0;
   for (const index of order) {
@@ -90,7 +105,7 @@ export function planSession(picks: readonly PlanPick[], input: PlanInput): Sessi
       types.push('matching');
       continue;
     }
-    const tier = TIERS[single % RUN];
+    const tier = tiers[single % RUN];
     const run = Math.floor(single / RUN);
     types.push(typeIn(tier, (input.ordinal + run) % tier.length, picks[index], input));
     single++;

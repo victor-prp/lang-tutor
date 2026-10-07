@@ -10,6 +10,7 @@ import {
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useRecorder } from '@/hooks/useRecording';
 import { useSpeaker } from '@/hooks/useSpeech';
 import { currentFor, loadFailedFor, type StoredCurrent } from '@/nextSession';
 
@@ -34,6 +35,7 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   // Not useSpeech: that would re-render the provider, and every screen under
   // it, on every utterance. The tags are read when a session is created.
   const speaker = useSpeaker();
+  const recorder = useRecorder();
   // Keyed by the enrollment the read was about, not cleared on a switch: a
   // slow answer about Russian lands under Russian's id and is simply never
   // shown while English is active, and the newest read for the active
@@ -65,11 +67,17 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
     try {
       // Phase 24 (spec D5): only the device knows whether it can speak the
       // target, so only it can ask for listening cards.
-      return await api.createSession({ enrollment_id: active.id, listening: speaker.snapshot().tags.has(active.target_language) });
+      // Phase 25 (spec D4): likewise, only it knows whether it can record.
+      const speaking = await recorder.canRecord().catch(() => false);
+      return await api.createSession({
+        enrollment_id: active.id,
+        listening: speaker.snapshot().tags.has(active.target_language),
+        speaking,
+      });
     } finally {
       reload();
     }
-  }, [api, active, speaker, reload]);
+  }, [api, active, speaker, recorder, reload]);
 
   const skip = useCallback(
     async (sessionId: string) => {

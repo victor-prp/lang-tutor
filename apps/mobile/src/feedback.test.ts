@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { Question } from '@lang-tutor/core/api';
 
 import { feedbackFor } from './feedback';
+import { strings } from './strings';
 
 const choice: Question = {
   id: 'c',
@@ -97,5 +98,49 @@ describe('feedbackFor, phase 24', () => {
     expect(feedbackFor(dictation, { text: 'parlare' })).toMatchObject({ tone: 'wrong', line: 'parlo' });
     const listen: Question = { id: 'l', type: 'listen_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 };
     expect(feedbackFor(listen, { option_index: 1 })).toMatchObject({ tone: 'wrong', line: 'בית' });
+  });
+});
+
+describe('phase 25 banners', () => {
+  const READ: Question = { id: 'r', type: 'read_aloud', vocab_term_id: 'l', question: 'gatto', meaning: 'חתול' };
+  const SAY: Question = {
+    id: 's',
+    type: 'say_translation',
+    vocab_term_id: 'l',
+    question: 'מדבר',
+    part_of_speech: 'verb',
+    answer: 'parlo',
+    lemma: 'parlare',
+    alternatives: ['dico'],
+  };
+  it('names what was heard when understood', () => {
+    expect(feedbackFor(READ, { heard: 'il gatto', verdict: 'understood' })).toEqual({
+      tone: 'correct',
+      title: strings.feedbackHeard,
+      line: 'il gatto',
+      verdict: 'understood',
+    });
+  });
+  it('names the practised word for an alternative', () => {
+    expect(feedbackFor(SAY, { heard: 'dico', verdict: 'alternative' })).toEqual({
+      tone: 'correct',
+      title: strings.feedbackAlternative,
+      line: 'parlo',
+      verdict: 'alternative',
+    });
+  });
+  it('takes the banner from the server verdict, never from its own judge', () => {
+    // The app's judgeSpoken calls this unheard; the server said understood.
+    expect(feedbackFor(READ, { heard: 'zzzz', verdict: 'understood' })).toEqual({
+      tone: 'correct',
+      title: strings.feedbackHeard,
+      line: 'zzzz',
+      verdict: 'understood',
+    });
+    expect(feedbackFor(SAY, { heard: 'zzzz', verdict: 'alternative' })).toMatchObject({ title: strings.feedbackAlternative });
+  });
+  it('shows the answer for show the answer, and judges a typed form as typed', () => {
+    expect(feedbackFor(SAY, { pass: 'show_answer' })).toMatchObject({ tone: 'wrong', title: strings.feedbackWrong, line: 'parlo' });
+    expect(feedbackFor(SAY, { text: 'parlare' })).toMatchObject({ tone: 'correct', verdict: 'exact' });
   });
 });

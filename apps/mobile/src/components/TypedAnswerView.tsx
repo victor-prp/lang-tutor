@@ -1,4 +1,4 @@
-import type { DictationQuestion, TypedTranslationQuestion, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerVerdict, DictationQuestion, SayTranslationQuestion, TypedTranslationQuestion } from '@lang-tutor/core/api';
 import { useEffect, useState } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -7,7 +7,7 @@ import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 type Props = {
-  question: TypedTranslationQuestion | DictationQuestion;
+  question: TypedTranslationQuestion | DictationQuestion | SayTranslationQuestion;
   /** What the card asks, naming the language: כתבו את המילה באיטלקית. */
   instruction: string;
   /** The enrollment's target language: a dictation speaks its word in it. */
@@ -15,7 +15,7 @@ type Props = {
   /** Whether this card has been answered: the input locks once it has. */
   answered: boolean;
   /** How the answer was judged, for the input's border. Null until answered. */
-  verdict: TypedVerdict | null;
+  verdict: AnswerVerdict | null;
   onSubmit: (text: string) => void;
 };
 
@@ -32,8 +32,7 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
     setText('');
   }, [question.id]);
 
-  const partOfSpeech =
-    question.type === 'typed_translation' ? strings.partOfSpeech(question.part_of_speech) : undefined;
+  const partOfSpeech = question.type !== 'dictation' ? strings.partOfSpeech(question.part_of_speech) : undefined;
   const empty = text.trim() === '';
 
   function submit(value: string) {

@@ -39,6 +39,7 @@ describe('createServerDeps', () => {
       gemini: { apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/never-registered', model: 'm' },
       translationTimeoutMs: 25_000,
       sessionGenerationTimeoutMs: 120_000,
+      speechTimeoutMs: 8_000,
       identity: { lane: 'test', database: 'test_db', port: 0 },
       boss: unstartedBoss(t.db),
     });
@@ -52,7 +53,7 @@ describe('createServerDeps', () => {
 
   it('assembles a session service that works against that database', async () => {
     const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
-    const { sessionId } = await deps.sessions.createNextSession(enrollmentOf('u_1'), { listening: false });
+    const { sessionId } = await deps.sessions.createNextSession(enrollmentOf('u_1'), { listening: false, speaking: false });
     const record = await deps.sessions.getSession(sessionId);
     expect(record.questions).toHaveLength(SESSION_LENGTH);
   });

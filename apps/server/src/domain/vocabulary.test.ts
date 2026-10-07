@@ -235,14 +235,13 @@ describe('buildWordDetail', () => {
     expect(buildWordDetail(LEMMA, VERB, [], [], [])).toEqual({ lemma: LEMMA, level: null, senses: [] });
   });
 
-  // Phases 23-24: the live dimensions (written three, spoken_receptive) are
-  // the ones a sense is practised in, so a sense practised evenly has them all
-  // at `live`; spoken_productive stays not practised.
+  // Phases 23-25: every dimension is live, so a sense practised evenly has
+  // them all at `live`.
   const levels = (senseId: string, live: number): ProgressRow[] =>
     DIMENSIONS.map((dimension) => ({
       senseId,
       dimension,
-      level: dimension === 'spoken_productive' ? 1 : live,
+      level: live,
       lastStepOn: null,
       lastWrongOn: null,
     }));
@@ -259,7 +258,7 @@ describe('buildWordDetail', () => {
       sense_id: 's1',
       progress: {
         level: 3,
-        dimensions: { written_receptive: 3, written_productive: 3, spoken_receptive: 3, spoken_productive: 1, spelling: 3 },
+        dimensions: { written_receptive: 3, written_productive: 3, spoken_receptive: 3, spoken_productive: 3, spelling: 3 },
       },
     });
     expect(detail.senses[1]).not.toHaveProperty('progress');
@@ -267,7 +266,7 @@ describe('buildWordDetail', () => {
 
   // Phase 23 (spec D7): a word known only by recognition reads lower once
   // writing and spelling are live.
-  it('averages the badge over the three written dimensions', () => {
+  it('averages the badge over all five dimensions', () => {
     const recognisedOnly = DIMENSIONS.map((dimension) => ({
       senseId: 's1',
       dimension,
@@ -276,8 +275,8 @@ describe('buildWordDetail', () => {
       lastWrongOn: null,
     }));
     const detail = buildWordDetail(LEMMA, VERB, [rendering({ senseId: 's1' })], [{ senseId: 's1', variantId: 'v1' }], recognisedOnly);
-    expect(detail.senses[0].progress?.level).toBe(2);
-    expect(detail.level).toBe(2);
+    expect(detail.senses[0].progress?.level).toBe(1);
+    expect(detail.level).toBe(1);
   });
 
   it("gives the word one flat mean over every saved sense's live-dimension levels, rounded once, ties up", () => {

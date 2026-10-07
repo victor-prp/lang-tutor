@@ -1,4 +1,4 @@
-import type { LetterTilesQuestion, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerVerdict, LetterTilesQuestion } from '@lang-tutor/core/api';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -11,7 +11,7 @@ type Props = {
   question: LetterTilesQuestion;
   instruction: string;
   answered: boolean;
-  verdict: TypedVerdict | null;
+  verdict: AnswerVerdict | null;
   onSubmit: (text: string) => void;
 };
 
