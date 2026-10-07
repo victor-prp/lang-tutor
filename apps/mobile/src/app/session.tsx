@@ -24,7 +24,7 @@ import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 // means a new case here plus a view component; the header, progress bar,
 // feedback banner and scoring are untouched, and the `never` below fails the
 // build for a type with no case.
-function renderQuestion(question: Question, session: SessionValue, language: string, lastText: { current: string }) {
+function renderQuestion(question: Question, session: SessionValue, language: string) {
   switch (question.type) {
     case 'multiple_choice':
       return (
@@ -58,7 +58,6 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           direction="ltr"
           checking={false}
           failed={false}
-          onRetry={() => undefined}
         />
       );
     case 'typed_meaning':
@@ -72,11 +71,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           direction="rtl"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
-          onRetry={() => session.submitJudged(lastText.current)}
-          onSubmit={(text) => {
-            lastText.current = text;
-            session.submitJudged(text);
-          }}
+          onSubmit={session.submitJudged}
         />
       );
     case 'listen_choice':
@@ -101,7 +96,6 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           direction="ltr"
           checking={false}
           failed={false}
-          onRetry={() => undefined}
         />
       );
     case 'letter_tiles':
@@ -157,7 +151,6 @@ function renderQuestion(question: Question, session: SessionValue, language: str
               direction="ltr"
               checking={false}
               failed={false}
-              onRetry={() => undefined}
             />
           </View>
         );
@@ -191,7 +184,6 @@ export default function SessionScreen() {
   // Re-entry guard: a fast double tap on skip must not stack two confirms.
   const skipping = useRef(false);
   // Phase 27: what a meaning card last sent, so "try again" sends the same text.
-  const lastTextRef = useRef('');
 
   // Results replaces Session in the stack, so backing out of Results reaches
   // Home rather than a finished quiz.
@@ -268,7 +260,7 @@ export default function SessionScreen() {
               {strings.noMicrophone}
             </Text>
           ) : null}
-          {renderQuestion(question, session, language, lastTextRef)}
+          {renderQuestion(question, session, language)}
         </ScrollView>
       </KeyboardAvoidingView>
 

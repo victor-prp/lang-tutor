@@ -28,9 +28,8 @@ type Props = {
   direction: 'ltr' | 'rtl';
   /** A judged card's text is with the server: the card is locked until it answers. */
   checking: boolean;
-  /** The server could not judge it: the text stays, and retry sends it again. */
+  /** The server could not judge it: the text stays, and retry sends what is in the box. */
   failed: boolean;
-  onRetry: () => void;
 };
 
 /**
@@ -39,7 +38,7 @@ type Props = {
  * right answer nor a right answer into a wrong one, so autocorrect, spellcheck
  * and autocapitalisation are off.
  */
-export function TypedAnswerView({ question, instruction, language, answered, verdict, onSubmit, direction, checking, failed, onRetry }: Props) {
+export function TypedAnswerView({ question, instruction, language, answered, verdict, onSubmit, direction, checking, failed }: Props) {
   const [text, setText] = useState('');
 
   useEffect(() => {
@@ -73,7 +72,7 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
         </>
       ) : (
         <>
-          <Text style={answerStyles.prompt} testID="question-prompt">
+          <Text style={[answerStyles.prompt, question.type === 'typed_meaning' && styles.promptLtr]} testID="question-prompt">
             {question.question}
           </Text>
           {partOfSpeech ? (
@@ -119,7 +118,7 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
               <Text style={answerStyles.showAnswer} testID="judge-failed">
                 {strings.couldNotCheck}
               </Text>
-              <Pressable accessibilityRole="button" testID="judge-try-again" hitSlop={8} onPress={onRetry}>
+              <Pressable accessibilityRole="button" testID="judge-try-again" disabled={empty} hitSlop={8} onPress={() => submit(text)}>
                 <Text style={answerStyles.showAnswer}>{strings.tryAgain}</Text>
               </Pressable>
             </>
@@ -193,6 +192,8 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.lg,
     color: colors.text,
   },
+  // The meaning card asks with a target-language form, which reads left to right.
+  promptLtr: { writingDirection: 'ltr' },
   inputIdle: { borderColor: colors.border },
   inputCorrect: { borderColor: colors.correct, backgroundColor: colors.correctSurface },
   inputWrong: { borderColor: colors.wrong, backgroundColor: colors.wrongSurface },

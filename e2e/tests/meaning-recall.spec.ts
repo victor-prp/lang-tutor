@@ -97,8 +97,12 @@ test('a meaning card: a failed check keeps the text, and trying again can still 
   await expect(page.getByTestId('feedback-correct')).not.toBeVisible();
   await expect(page.getByTestId('feedback-wrong')).not.toBeVisible();
 
+  // The box is editable again: trying again judges what is in it, not the text that failed.
+  const EDITED = 'לשריין מקום';
+  await page.getByTestId('typed-input').fill(EDITED);
   await expectJudge(request, 'wrong');
   await page.getByTestId('judge-try-again').click();
+  await expect(page.getByTestId('typed-input')).toHaveValue(EDITED);
   await expect(page.getByTestId('feedback-wrong')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('התשובה הנכונה:');
   expect(MEANINGS_OF[card.prompt]).toContain(stripIsolates(await page.getByTestId('feedback-line').textContent()));
