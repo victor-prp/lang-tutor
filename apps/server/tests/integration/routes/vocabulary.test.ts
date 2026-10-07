@@ -108,6 +108,7 @@ describe('POST /api/enrollments/{id}/vocabulary', () => {
         saved_count: 1,
         sense_count: 2,
         level: 1,
+        added_by: [],
       },
     ]);
     expect(page.next_cursor).toBeNull();
@@ -312,6 +313,7 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
           saved_count: 2,
           sense_count: 3,
           level: 3,
+          added_by: [],
         },
       ]);
     });
@@ -551,6 +553,22 @@ describe('access (phase 28)', () => {
     const res = await unsave(RU, entries[0].sense_id, 'u_tutor');
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'forbidden' });
+  });
+
+  it("labels a tutor's word with the tutor's display name, on the list and the word's page", async () => {
+    await seedUser(t.db, 'u_tutor');
+    await seedGrant(t.db, { enrollmentId: RU, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
+    const rama = await russianWord('рама');
+    await save(RU, [{ sense_id: rama.senseIds[0], variant_id: rama.variantIds[0] }], 'u_tutor');
+    await save(RU, [{ sense_id: rama.senseIds[1], variant_id: rama.variantIds[0] }], 'u_1');
+
+    const page = (await (await list(RU)).json()) as { items: { added_by: string[] }[] };
+    expect(page.items).toEqual([expect.objectContaining({ lemma: 'рама', saved_count: 2, added_by: ['test u_tutor'] })]);
+
+    const body = (await (await detail(RU, 'рама')).json()) as { senses: { sense_id: string; added_by?: string }[] };
+    const bySense = new Map(body.senses.map((s) => [s.sense_id, s]));
+    expect(bySense.get(rama.senseIds[0])).toHaveProperty('added_by', 'test u_tutor');
+    expect(bySense.get(rama.senseIds[1])).not.toHaveProperty('added_by');
   });
 
   it('answers 404 before 403: an unknown enrollment is not found for anyone', async () => {

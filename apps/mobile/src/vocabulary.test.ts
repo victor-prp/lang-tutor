@@ -107,6 +107,7 @@ const word = (lemma: string, over: Partial<VocabularyWord> = {}): VocabularyWord
   saved_count: 1,
   sense_count: 1,
   level: 1,
+  added_by: [],
   ...over,
 });
 

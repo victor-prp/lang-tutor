@@ -147,6 +147,7 @@ describe('every vocabulary read at volume', () => {
       lemmas: FIRST_50,
       targetLanguage: 'ru',
       sourceLanguage: 'he',
+      ownerUserId: 'pu1',
     })],
     ['lemmaLexemes', () => vocabularyQueries.lemmaLexemes({ languageCode: 'ru', lemma: 'слово7' })],
     ['lemmaRenderings', () => vocabularyQueries.lemmaRenderings({
@@ -154,7 +155,7 @@ describe('every vocabulary read at volume', () => {
       lemma: 'слово7',
       userLanguageCode: 'he',
     })],
-    ['savedInLemma', () => vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7' })],
+    ['savedInLemma', () => vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7', ownerUserId: 'pu1' })],
   ])('%s scans no watched table sequentially', async (_name, build) => {
     const plan = await explain(build());
     expect(seqScans(plan)).toEqual([]);
@@ -170,7 +171,7 @@ describe('every vocabulary read at volume', () => {
   // The scan check alone cannot tell the lemma index from a bitmap scan of the
   // primary key's enrollment prefix, which reads the whole heavy enrollment.
   it('reads one lemma of the heavy enrollment through vocabulary_entries_enrollment_lemma_idx', async () => {
-    const plan = await explain(vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7' }));
+    const plan = await explain(vocabularyQueries.savedInLemma({ enrollmentId: HEAVY, lemma: 'слово7', ownerUserId: 'pu1' }));
     expect(indexesUsed(plan)).toContain('vocabulary_entries_enrollment_lemma_idx');
   });
 

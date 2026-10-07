@@ -598,6 +598,10 @@ export const VocabularyWordSchema = z.object({
   sense_count: z.number().int(),
   // Phase 20. The word's badge: the rounded mean over its saved senses and the live dimensions.
   level: LevelSchema,
+  // Phase 28 (spec D11). The display names of the people OTHER than the list's
+  // owner who added any of this word's saved senses, distinct and sorted; [] when
+  // the learner added everything themselves.
+  added_by: z.array(z.string()),
 });
 
 export const VocabularyPageSchema = z.object({
@@ -619,6 +623,9 @@ export const VocabularySenseSchema = z.object({
   saved: z.boolean(),
   // Phase 20. Present on a saved sense only: its badge and five levels.
   progress: SenseProgressSchema.optional(),
+  // Phase 28. Present on a saved sense someone other than the list's owner added:
+  // their display name.
+  added_by: z.string().optional(),
 });
 
 // Phase 21. One word is every lexeme with this lemma in the enrollment's target

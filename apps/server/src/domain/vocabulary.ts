@@ -90,6 +90,8 @@ export type WordSummary = {
   headlineForm: string;
   savedCount: number;
   senseCount: number;
+  /** Display names of everyone but the list's owner who saved a sense of it. */
+  addedBy: string[];
 };
 
 /**
@@ -119,6 +121,7 @@ export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): Voc
         saved_count: s.savedCount,
         sense_count: s.senseCount,
         level: row.level,
+        added_by: s.addedBy,
       },
     ];
   });
@@ -140,7 +143,8 @@ export type LexemeRendering = {
   exampleTarget: string | null;
 };
 
-export type SavedEntry = { senseId: string; variantId: string };
+/** `addedBy` is the adder's display name, or null when the list's owner saved it. */
+export type SavedEntry = { senseId: string; variantId: string; addedBy: string | null };
 
 /** A saved sense's five levels and its badge over the live dimensions. A
  *  dimension with no row reads as level 1: every entry has five rows, so that
@@ -184,6 +188,7 @@ export function buildWordDetail(
 ): VocabularyWordDetail {
   const partOfSpeech = new Map(lexemes.map((lexeme) => [lexeme.lexemeId, lexeme.partOfSpeech]));
   const savedVariant = new Map(saved.map((entry) => [entry.senseId, entry.variantId]));
+  const addedBy = new Map(saved.map((entry) => [entry.senseId, entry.addedBy]));
   const perVariant = new Map<string, number>();
   for (const r of renderings) perVariant.set(r.variantId, (perVariant.get(r.variantId) ?? 0) + 1);
 
@@ -238,6 +243,7 @@ export function buildWordDetail(
         ? { example: { source: r.exampleSource, target: r.exampleTarget } }
         : {}),
       saved: isSaved,
+      ...(isSaved && addedBy.get(r.senseId) ? { added_by: addedBy.get(r.senseId)! } : {}),
       ...(isSaved && progressBySense.has(r.senseId)
         ? { progress: senseProgressOf(progressBySense.get(r.senseId)!) }
         : {}),

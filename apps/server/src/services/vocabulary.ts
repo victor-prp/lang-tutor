@@ -121,6 +121,7 @@ export function createVocabularyService({
           lemmas: rows.map((row) => row.lemma),
           targetLanguage: enrolled.target_language,
           sourceLanguage: enrolled.source_language,
+          ownerUserId: enrolled.user_id,
         });
         return {
           items: assemblePage(rows, summaries),
@@ -144,7 +145,11 @@ export function createVocabularyService({
           lemma,
           userLanguageCode: enrolled.source_language,
         });
-        const saved = await repos.vocabulary.findSavedInLemma({ enrollmentId, lemma });
+        const saved = await repos.vocabulary.findSavedInLemma({
+          enrollmentId,
+          lemma,
+          ownerUserId: enrolled.user_id,
+        });
         const progress = await repos.progress.findRows({
           enrollmentId,
           senseIds: saved.map((entry) => entry.senseId),
