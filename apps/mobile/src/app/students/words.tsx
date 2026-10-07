@@ -1,4 +1,5 @@
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
+import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -18,9 +19,13 @@ export default function StudentWordsScreen() {
   const api = useApi();
   const { grant: grantId } = useLocalSearchParams<{ grant: string }>();
   const { user, grants, endGrant } = useCurrentUser();
+  // Ending the grant empties the list this screen reads, which would render the
+  // Redirect while router.back() also runs (enroll.tsx guards the same hazard).
+  const leaving = useRef(false);
+  const [stopFailed, setStopFailed] = useState(false);
   if (!user) return <Redirect href="/login" />;
   const grant = grantId ? studentGrant(grants, grantId) : undefined;
-  if (!grant) return <Redirect href="/" />;
+  if (!grant) return leaving.current ? null : <Redirect href="/" />;
 
   async function onStop() {
     if (!grant) return;
@@ -31,7 +36,15 @@ export default function StudentWordsScreen() {
       cancel: strings.cancel,
     });
     if (!yes) return;
-    await endGrant(grant.id);
+    setStopFailed(false);
+    leaving.current = true;
+    try {
+      await endGrant(grant.id);
+    } catch {
+      leaving.current = false;
+      setStopFailed(true);
+      return;
+    }
     router.back();
   }
 
@@ -48,6 +61,11 @@ export default function StudentWordsScreen() {
       <TranslationProvider api={api} list={{ enrollment: grant.enrollment, mode: 'tutor' }}>
         <LookupPanel />
       </TranslationProvider>
+      {stopFailed ? (
+        <Text testID="student-stop-failed" style={styles.failed}>
+          {strings.stopTutoringFailed}
+        </Text>
+      ) : null}
       <Pressable accessibilityRole="button" testID="student-stop" onPress={onStop} style={styles.stop}>
         <Text style={styles.link}>{strings.stopTutoring(grant.owner.display_name)}</Text>
       </Pressable>
@@ -60,5 +78,6 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: fontSizes.lg, fontWeight: '700', color: colors.text, writingDirection: 'rtl' },
   link: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
+  failed: { color: colors.wrong, fontSize: fontSizes.md, writingDirection: 'rtl', textAlign: 'center' },
   stop: { paddingVertical: spacing.md, alignItems: 'center' },
 });

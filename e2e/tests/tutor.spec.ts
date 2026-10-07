@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { API_URL } from '../urls';
 import { lookUp, tapAndWaitForWrite } from './support/interactions';
 import { LUK } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
@@ -69,4 +70,33 @@ test('a tutor invites a student, adds a word to their list, and the student ends
   await logIn(page, TUTOR, 'enroll-teach');
   await expect(page.getByTestId('students-section')).toHaveCount(0);
   await expect(page.getByTestId(`student-${STUDENT}`)).toHaveCount(0);
+});
+
+test("a tutor stops tutoring a student from the student's screen", async ({ page, request }) => {
+  const tutorName = 'e2e_tutor_stopper';
+  const studentName = 'e2e_tutor_stopped';
+  const tutor = await createUser(request, tutorName, 'שרה');
+  const learner = await createLearner(request, studentName, 'ru');
+
+  const invited = await request.post(`${API_URL}/api/grants`, {
+    headers: { 'X-Acting-User-Id': tutor.id },
+    data: { username: studentName, target_language: 'ru' },
+  });
+  expect(invited.ok()).toBe(true);
+  const grant = (await invited.json()) as { id: string };
+  const accepted = await request.post(`${API_URL}/api/grants/${grant.id}/accept`, {
+    headers: { 'X-Acting-User-Id': learner.id },
+  });
+  expect(accepted.ok()).toBe(true);
+
+  await logIn(page, tutorName, `student-${studentName}`);
+  await page.getByTestId(`student-${studentName}`).click();
+  await expect(page.getByTestId('student-words-title')).toBeVisible();
+
+  page.once('dialog', (dialog) => void dialog.accept());
+  await tapAndWaitForGrant(page, 'student-stop', 'DELETE');
+
+  // A tutor with no grants and no enrollments is sent to choose a language.
+  await expect(page.getByTestId('enroll-teach')).toBeVisible();
+  await expect(page.getByTestId(`student-${studentName}`)).toHaveCount(0);
 });

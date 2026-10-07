@@ -231,6 +231,7 @@ export const strings = {
   cancelInviteConfirm: 'ביטול ההזמנה',
   studentWordsTitle: (name: string, language: string) => `הוספת מילים ל${name} · ${languageName(language)}`,
   stopTutoring: (name: string) => `הפסקת הלימוד עם ${name}`,
+  stopTutoringFailed: 'הפעולה נכשלה, נסו שוב',
   stopTutoringTitle: 'להפסיק ללמד?',
   stopTutoringMessage: (name: string) =>
     `לא תוכל/י יותר להוסיף מילים לרשימה של ${name}. המילים שכבר הוספת יישארו.`,
