@@ -923,6 +923,7 @@ const judge = (
   label: `judge ${language} ${what}: ${word.lemma ?? word.form} \u2192 ${answer}`,
   context: {
     language,
+    explanation: 'he',
     form: word.form,
     lemma: word.lemma ?? word.form,
     partOfSpeech: word.pos,

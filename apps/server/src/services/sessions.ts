@@ -25,7 +25,7 @@ import {
   validateDistractors,
   type DistractorVerdict,
 } from '../domain/distractors';
-import { buildMeaningJudgePrompt, meaningRuleVerdict, parseMeaningJudge, type MeaningJudgeContext } from '../domain/judge';
+import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planSession } from '../domain/plan';
@@ -412,7 +412,7 @@ export function createSessionService({
     ): Promise<JudgedResult> => {
       type Checked =
         | { replay: JudgedResult }
-        | { current: JudgedQuestion; context: MeaningJudgeContext };
+        | { current: JudgedQuestion; context: JudgeContext };
       const checked = await transaction(async (repos): Promise<Checked> => {
         const loaded = await repos.session.loadSession(sessionId);
         if (!loaded || loaded.user_id !== input.userId) throw new SessionNotFound(sessionId);
@@ -434,18 +434,18 @@ export function createSessionService({
         const enrolled = state ? await repos.enrollment.findById(state.enrollmentId) : undefined;
         const found = await repos.question.findJudgeContext(current.id);
         if (!enrolled || !found) throw new SessionNotFound(sessionId);
-        return { current, context: { language: enrolled.target_language as LanguageCode, ...found } };
+        return { current, context: { language: enrolled.target_language as LanguageCode, explanation: enrolled.source_language as LanguageCode, ...found } };
       });
       if ('replay' in checked) return checked.replay;
 
       const text = input.text.slice(0, MAX_JUDGED_TEXT);
-      let verdict = meaningRuleVerdict(checked.current.meaning, text);
+      let verdict = ruleVerdict(checked.current, text);
       const judgedBy = verdict === null ? 'model' : 'rule';
       const started = now();
       if (verdict === null) {
         try {
-          const raw = await judge(buildMeaningJudgePrompt(checked.context, text));
-          verdict = parseMeaningJudge(raw);
+          const raw = await judge(judgePrompt(checked.current, checked.context, text));
+          verdict = parseJudge(checked.current.type, raw);
           if (verdict === null) throw new LlmUnavailable('the verdict was unreadable');
         } catch (error) {
           logger.info({

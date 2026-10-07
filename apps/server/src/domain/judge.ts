@@ -1,6 +1,6 @@
-import type { TypedVerdict } from '@lang-tutor/core/api';
-import { LlmMeaningJudgeSchema } from '@lang-tutor/core/api/schemas';
-import { normaliseHebrew } from '@lang-tutor/core/domain';
+import type { SentenceTranslationQuestion, TypedVerdict } from '@lang-tutor/core/api';
+import { LlmMeaningJudgeSchema, LlmTranslationJudgeSchema } from '@lang-tutor/core/api/schemas';
+import { normaliseHebrew, normaliseTyped, type JudgedQuestion } from '@lang-tutor/core/domain';
 
 import { LANGUAGES, type LanguageCode } from './languages';
 import { unfence } from './translation';
@@ -19,6 +19,8 @@ export const JUDGE_MARKER = "judge the learner's answer";
  *  saved example pins. The example is absent for a saved sense without one. */
 export type MeaningJudgeContext = {
   language: LanguageCode;
+  /** The enrollment's source language: the one the learner reads and types in. */
+  explanation: LanguageCode;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -37,8 +39,9 @@ export function meaningRuleVerdict(meaning: string, text: string): TypedVerdict 
 
 export function buildMeaningJudgePrompt(context: MeaningJudgeContext, answer: string) {
   const name = LANGUAGES[context.language].name;
+  const source = LANGUAGES[context.explanation].name;
   const system = [
-    `Your task: ${JUDGE_MARKER}. A Hebrew-speaking learner of ${name} was shown a ${name} word and typed its meaning in Hebrew.`,
+    `Your task: ${JUDGE_MARKER}. A ${source}-speaking learner of ${name} was shown a ${name} word and typed its meaning in ${source}.`,
     'The meaning practised is saved_meaning, in the sense the example shows.',
     'Return JSON only, matching the supplied schema, with one field, verdict:',
     '- "right": the answer means the same as saved_meaning in this sense. Accept a synonym, another form, tense or person of it (for example לדבר, מדבר, דיבר), with or without a prefix such as ה, ל, ו or ש, with or without niqqud, and with small Hebrew spelling slips.',
@@ -72,5 +75,84 @@ export function parseMeaningJudge(raw: string): TypedVerdict | null {
     return parsed.success ? MEANING_VERDICTS[parsed.data.verdict] : null;
   } catch {
     return null;
+  }
+}
+
+export type JudgeContext = MeaningJudgeContext;
+
+/** The translation card's rule: empty is "show me the answer"; the reference
+ *  is right as typed, whatever its case or full stop. Null: only the model can tell. */
+export function translationRuleVerdict(reference: string, text: string): TypedVerdict | null {
+  const typed = normaliseTyped(text);
+  if (typed === '') return 'wrong';
+  return typed === normaliseTyped(reference) ? 'exact' : null;
+}
+
+export function buildTranslationJudgePrompt(question: SentenceTranslationQuestion, context: JudgeContext, answer: string) {
+  const name = LANGUAGES[context.language].name;
+  const source = LANGUAGES[context.explanation].name;
+  const system = [
+    `Your task: ${JUDGE_MARKER}. A ${source}-speaking learner of ${name} was shown a ${source} sentence and typed its translation into ${name}.`,
+    'The word practised is word, in the sense of meaning. reference_translation is one good translation, not the only one.',
+    `Judge on conveying the ${source} sentence and on the practised word, in any form the sentence needs; ignore slips in other words, and small grammar slips that do not touch the practised word.`,
+    'Return JSON only, matching the supplied schema, with one field, verdict:',
+    '- "right": the answer conveys the sentence and uses the practised word in a form the sentence needs.',
+    '- "misspelled": as "right", but the practised word has a one-letter or accent slip.',
+    '- "other_word": the answer conveys the sentence but uses another word instead of it.',
+    '- "wrong": the meaning is missed, the answer is not a sentence, or the practised word is left out or used wrongly, including the wrong form.',
+  ].join('\n');
+  const user = JSON.stringify({
+    hebrew_sentence: question.question,
+    reference_translation: question.sentence,
+    word: context.form,
+    lemma: context.lemma,
+    part_of_speech: context.partOfSpeech,
+    meaning: context.meaning,
+    answer,
+  });
+  return { system, user, schema: LlmTranslationJudgeSchema };
+}
+
+const TRANSLATION_VERDICTS: Record<'right' | 'misspelled' | 'other_word' | 'wrong', TypedVerdict> = {
+  right: 'exact',
+  misspelled: 'near_miss',
+  other_word: 'alternative',
+  wrong: 'wrong',
+};
+
+export function parseTranslationJudge(raw: string): TypedVerdict | null {
+  if (raw.trim() === '') return null;
+  try {
+    const parsed = LlmTranslationJudgeSchema.safeParse(JSON.parse(unfence(raw)));
+    return parsed.success ? TRANSLATION_VERDICTS[parsed.data.verdict] : null;
+  } catch {
+    return null;
+  }
+}
+
+export function ruleVerdict(question: JudgedQuestion, text: string): TypedVerdict | null {
+  switch (question.type) {
+    case 'typed_meaning':
+      return meaningRuleVerdict(question.meaning, text);
+    case 'sentence_translation':
+      return translationRuleVerdict(question.sentence, text);
+  }
+}
+
+export function judgePrompt(question: JudgedQuestion, context: JudgeContext, text: string) {
+  switch (question.type) {
+    case 'typed_meaning':
+      return buildMeaningJudgePrompt(context, text);
+    case 'sentence_translation':
+      return buildTranslationJudgePrompt(question, context, text);
+  }
+}
+
+export function parseJudge(type: JudgedQuestion['type'], raw: string): TypedVerdict | null {
+  switch (type) {
+    case 'typed_meaning':
+      return parseMeaningJudge(raw);
+    case 'sentence_translation':
+      return parseTranslationJudge(raw);
   }
 }
