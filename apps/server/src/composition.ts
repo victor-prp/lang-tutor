@@ -4,7 +4,7 @@ import type { GeminiConfig } from './config';
 import type { Db } from './db/client';
 import { createTransaction } from './db/transaction';
 import type { Logger } from './logger';
-import { createGeminiClient, createGeminiTranscriber } from './providers/gemini';
+import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from './providers/gemini';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createJobRepo } from './repo/jobs';
 import { createPhotoImportRepo } from './repo/photoImports';
@@ -16,7 +16,8 @@ import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
-import type { LlmClient } from './services/llm';
+import type { LlmClient, VisionClient } from './services/llm';
+import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
 import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
 import { createTranslationService, type TranslationService } from './services/translations';
@@ -40,6 +41,7 @@ export type AppDeps = {
   enrollments: EnrollmentService;
   translations: TranslationService;
   vocabulary: VocabularyService;
+  photoImports: PhotoImportService;
   health: HealthRepo;
   identity: ServerIdentity;
   logger: Logger;
@@ -68,6 +70,9 @@ export function createServerDeps(io: {
   // Phase 25 (spec D13). One transcription's budget: short, because a learner
   // is waiting on a card.
   speechTimeoutMs: number;
+  // Phase 26 (spec D5). One photo read's budget: a long call over an image,
+  // longer than a lookup's.
+  photoReadTimeoutMs: number;
   identity: ServerIdentity;
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
@@ -120,6 +125,18 @@ export function createServerDeps(io: {
     timeoutMs: io.speechTimeoutMs,
   });
 
+  // Phase 26 (spec D5). The same provider reading a photo, with a read's budget.
+  // The annotation is what checks it satisfies the contract (ADR 0001 R11).
+  const vision: VisionClient = createGeminiVisionClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.photoReadTimeoutMs,
+  });
+
+  const translations = createTranslationService({ llm, transaction, logger: io.logger });
+
   return {
     sessions: createSessionService({
       transaction,
@@ -131,8 +148,19 @@ export function createServerDeps(io: {
     }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
-    translations: createTranslationService({ llm, transaction, logger: io.logger }),
+    translations,
     vocabulary: createVocabularyService({ transaction, logger: io.logger }),
+    // Phase 26. Handed the lookup use case itself, so a row is looked up exactly
+    // as a typed word is (spec D7). The match call shares the lookup's client
+    // and budget.
+    photoImports: createPhotoImportService({
+      transaction,
+      vision,
+      llm,
+      lookup: translations.translate,
+      now: io.now,
+      logger: io.logger,
+    }),
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,
     logger: io.logger,

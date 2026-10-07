@@ -14,6 +14,7 @@ import type { UserRepo } from '../../src/repo/users';
 import type { JobRepo } from '../../src/repo/jobs';
 import type { CorrectionRow, PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
+import type { PhotoImportService } from '../../src/services/photoImports';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
 import type { SessionService } from '../../src/services/sessions';
@@ -76,12 +77,25 @@ export function createFakeAppDeps(): AppDeps {
     listWords: unreachable,
     wordDetail: unreachable,
   };
+  const photoImports: PhotoImportService = {
+    create: unreachable,
+    list: unreachable,
+    get: unreachable,
+    updateItem: unreachable,
+    save: unreachable,
+    discard: unreachable,
+    readPhoto: unreachable,
+    failRead: unreachable,
+    lookUpItem: unreachable,
+    failItem: unreachable,
+  };
   return {
     sessions,
     users,
     enrollments,
     translations,
     vocabulary,
+    photoImports,
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0 },
     logger: createFakeLogger(),
