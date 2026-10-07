@@ -1,5 +1,7 @@
+import type { PhotoImportOption } from '@lang-tutor/core/api';
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   date,
   foreignKey,
@@ -656,5 +658,70 @@ export const sessionProgress = pgTable(
       'session_progress_levels_valid',
       sql`${t.levelBefore} between 1 and 5 and ${t.levelAfter} between ${t.levelBefore} and 5`,
     ),
+  ],
+);
+
+/**
+ * Phase 26. One photo of a word list (spec D4). `photo` is the base64 JPEG,
+ * kept only until the read (spec D3): every transition clears it, and the
+ * check below makes that a property of the table. `ready` is not a status: it
+ * is `read` with no row pending.
+ */
+export const photoImports = pgTable(
+  'photo_imports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    enrollmentId: text('enrollment_id').notNull(),
+    status: text('status').notNull(),
+    photo: text('photo'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'photo_imports_enrollment_fk',
+      columns: [t.enrollmentId],
+      foreignColumns: [enrollments.id],
+    }),
+    check('photo_imports_status_known', sql`${t.status} in ('reading', 'read', 'failed', 'saved', 'discarded')`),
+    check('photo_imports_photo_only_while_reading', sql`${t.photo} is null or ${t.status} = 'reading'`),
+    // The list and the cleanup both read one enrollment's imports by age.
+    index('photo_imports_enrollment_created_idx').on(t.enrollmentId, t.createdAt),
+  ],
+);
+
+/**
+ * Phase 26. One word or phrase read from an import's photo, with its lookup's
+ * saveable senses as a snapshot (`options`), the sense the job chose
+ * (`suggested_sense_id`, never changed after) and the learner's choice.
+ */
+export const photoImportItems = pgTable(
+  'photo_import_items',
+  {
+    importId: uuid('import_id').notNull(),
+    position: integer('position').notNull(),
+    text: text('text').notNull(),
+    hebrew: text('hebrew'),
+    status: text('status').notNull(),
+    correctedForm: text('corrected_form'),
+    options: jsonb('options').$type<PhotoImportOption[]>().notNull().default(sql`'[]'::jsonb`),
+    suggestedSenseId: text('suggested_sense_id'),
+    chosenSenseId: text('chosen_sense_id'),
+    ticked: boolean('ticked').notNull().default(false),
+    hebrewMismatch: boolean('hebrew_mismatch').notNull().default(false),
+    reason: text('reason'),
+  },
+  (t) => [
+    primaryKey({ name: 'photo_import_items_pkey', columns: [t.importId, t.position] }),
+    foreignKey({
+      name: 'photo_import_items_import_fk',
+      columns: [t.importId],
+      foreignColumns: [photoImports.id],
+    }).onDelete('cascade'),
+    check('photo_import_items_status_known', sql`${t.status} in ('pending', 'ready', 'failed')`),
+    check(
+      'photo_import_items_reason_known',
+      sql`${t.reason} is null or ${t.reason} in ('sentence', 'no_meaning', 'not_in_language')`,
+    ),
+    check('photo_import_items_tick_needs_sense', sql`not ${t.ticked} or ${t.chosenSenseId} is not null`),
   ],
 );

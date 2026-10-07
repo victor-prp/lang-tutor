@@ -1,7 +1,18 @@
 import { sql } from 'drizzle-orm';
 import { PgBoss, fromDrizzle } from 'pg-boss';
 
-import { PREPARE_SESSION, PREPARE_SESSION_EXPIRY_SECONDS, PREPARE_SESSION_FAILED, type JobName } from '../domain/jobs';
+import {
+  LOOK_UP_IMPORT_ITEM,
+  LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
+  LOOK_UP_IMPORT_ITEM_FAILED,
+  PREPARE_SESSION,
+  PREPARE_SESSION_EXPIRY_SECONDS,
+  PREPARE_SESSION_FAILED,
+  READ_PHOTO,
+  READ_PHOTO_EXPIRY_SECONDS,
+  READ_PHOTO_FAILED,
+  type JobName,
+} from '../domain/jobs';
 import type { Db } from './client';
 
 /**
@@ -41,6 +52,28 @@ export const JOB_QUEUES: QueueDefinition[] = [
       expireInSeconds: PREPARE_SESSION_EXPIRY_SECONDS,
       deleteAfterSeconds: 86_400,
       deadLetter: PREPARE_SESSION_FAILED,
+    },
+  },
+  { name: READ_PHOTO_FAILED, options: { retryLimit: 2, deleteAfterSeconds: 86_400 } },
+  {
+    name: READ_PHOTO,
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: READ_PHOTO_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
+      deadLetter: READ_PHOTO_FAILED,
+    },
+  },
+  { name: LOOK_UP_IMPORT_ITEM_FAILED, options: { retryLimit: 2, deleteAfterSeconds: 86_400 } },
+  {
+    name: LOOK_UP_IMPORT_ITEM,
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
+      deadLetter: LOOK_UP_IMPORT_ITEM_FAILED,
     },
   },
 ];

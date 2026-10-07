@@ -204,3 +204,46 @@ export class InvalidDistractors extends Error {
     this.name = 'InvalidDistractors';
   }
 }
+
+// Phase 26. An import, or a row of one, that does not exist.
+export class PhotoImportNotFound extends Error {
+  constructor(readonly importId: string, readonly position?: number) {
+    super(position === undefined ? `no photo import ${importId}` : `no row ${position} in photo import ${importId}`);
+    this.name = 'PhotoImportNotFound';
+  }
+}
+
+// Phase 26. The import is in the wrong state for the request: a row still
+// being looked up, an import saved or discarded, a save before it is ready (409).
+export class PhotoImportConflict extends Error {
+  constructor(readonly importId: string, readonly reason: string) {
+    super(`photo import ${importId}: ${reason}`);
+    this.name = 'PhotoImportConflict';
+  }
+}
+
+// Phase 26. A change a row cannot take: a sense that is not one of its options,
+// or a tick on a row with none (400).
+export class InvalidPhotoImportItem extends Error {
+  constructor(readonly importId: string, readonly position: number, readonly reason: string) {
+    super(`photo import ${importId} row ${position}: ${reason}`);
+    this.name = 'InvalidPhotoImportItem';
+  }
+}
+
+// Phase 26. The reader's answer was not the schema. Thrown inside a job, so
+// pg-boss retries it.
+export class PhotoUnreadable extends Error {
+  constructor(readonly importId: string) {
+    super(`the reading of photo import ${importId} was unreadable`);
+    this.name = 'PhotoUnreadable';
+  }
+}
+
+// Phase 26. The match call's answer was not the schema. A retry, like the above.
+export class SenseMatchUnreadable extends Error {
+  constructor(readonly importId: string, readonly position: number) {
+    super(`the sense match for photo import ${importId} row ${position} was unreadable`);
+    this.name = 'SenseMatchUnreadable';
+  }
+}

@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19)
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19); R8 note 2026-10-07 (phase 26), no rule change
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -133,6 +133,16 @@ Three rules that are not import rules:
   belongs to the *same* use case as the first, so it buys the same one factory no new
   caller shares. The trigger to watch is therefore a *second use case* wanting a read
   outside its write, not a second read.
+
+  **Phase 26 runs the lookup inside a job, under the same wording.** The photo-import service
+  is the first service handed another service's use case: the composition root passes it
+  `lookup: TranslationService['translate']` as a closure, as it passes `llm`, and the service
+  imports only the type. Inside the `look-up-import-item` job the lookup's own dictionary
+  writes run as their own transactions, independent and idempotent exactly as the amendment
+  above accepts for a typed lookup, and the import row's write is the job's one dependent
+  write, in one transaction of its own after the calls. No rule changed. The judgement is the
+  [phase 26 design](../superpowers/specs/2026-10-07-lang-tutor-phase-26-photo-import-design.md)'s
+  D7.
 - **R9 — Repositories expose primitives, services expose use cases.** A repository
   function is one persistence step (`loadSession`, `insertAnswer`); a service function is
   one use case (`startSession`, `submitAnswer`) taking only its own arguments.

@@ -1,4 +1,4 @@
-import { SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
+import { PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
 
 // A pure function of its argument: it reads no global, so a test hands it a
 // literal object rather than mutating the process environment.
@@ -10,6 +10,7 @@ export type Config = {
   translationTimeoutMs: number;
   sessionGenerationTimeoutMs: number;
   speechTimeoutMs: number;
+  photoReadTimeoutMs: number;
 };
 
 // The one place this default lives. Both composition roots read it from here.
@@ -44,6 +45,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       SESSION_GENERATION_BUDGET_MS,
     ),
     speechTimeoutMs: Number(env.SPEECH_TIMEOUT_MS) || DEFAULT_SPEECH_TIMEOUT_MS,
+    // Phase 26 (spec D6). A read's budget, capped like generation's: the
+    // read-photo job expires at twice PHOTO_READ_BUDGET_MS.
+    photoReadTimeoutMs: Math.min(
+      Number(env.PHOTO_READ_TIMEOUT_MS) || PHOTO_READ_BUDGET_MS,
+      PHOTO_READ_BUDGET_MS,
+    ),
   };
 }
 
