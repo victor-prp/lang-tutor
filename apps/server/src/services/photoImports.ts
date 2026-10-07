@@ -184,7 +184,17 @@ export function createPhotoImportService({
         });
         const passed = new Set(saveable.map((entry) => `${entry.senseId} ${entry.variantId}`));
         const refused = entries.find((entry) => !passed.has(`${entry.sense_id} ${entry.variant_id}`));
-        if (refused) throw new InvalidVocabularyEntry(refused.sense_id);
+        if (refused) {
+          // As today's save logs it: the 400 body is fixed, and an import that
+          // can never be saved is diagnosed only from here.
+          logger.info({
+            event: 'photo_import_entry_refused',
+            import_id: importId,
+            sense_id: refused.sense_id,
+            variant_id: refused.variant_id,
+          });
+          throw new InvalidVocabularyEntry(refused.sense_id);
+        }
         await vocabulary.insertEntries({ enrollmentId: row.enrollmentId, entries: saveable });
         // Conditional: a discard that landed first wins, and the throw rolls
         // the inserts back.

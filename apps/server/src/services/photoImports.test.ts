@@ -224,11 +224,14 @@ describe('save', () => {
     }
   });
 
-  it('is all or nothing: a refused sense throws before anything is written', async () => {
+  it('is all or nothing: a refused sense throws before anything is written, and is logged', async () => {
     const photoImport = stub<PhotoImportRepo>({ findImportForUpdate: async () => importRow(), listItems: async () => [itemRow()] });
     const vocabulary = stub<VocabularyRepo>({ findSaveable: async () => [] });
-    const { service } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT) });
+    const { service, logger } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT) });
     await expect(service.save(ID)).rejects.toBeInstanceOf(InvalidVocabularyEntry);
+    // The 400 body is fixed: the log is the only place that names the sense
+    // an import that can never be saved is stuck on.
+    expect(logger.events).toEqual([{ event: 'photo_import_entry_refused', import_id: ID, sense_id: 's1', variant_id: 'v1' }]);
   });
 
   it('refuses when a discard won the race to the final transition', async () => {
