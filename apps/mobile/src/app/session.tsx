@@ -9,12 +9,14 @@ import { LetterTilesView } from '@/components/LetterTilesView';
 import { MatchingBoardView } from '@/components/MatchingBoardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { ProgressBar } from '@/components/ProgressBar';
+import { SpeakingCardView } from '@/components/SpeakingCardView';
 import { TypedAnswerView } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
 import { feedbackFor } from '@/feedback';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession, type SessionValue } from '@/hooks/useSession';
+import { isSkip } from '@/speaking';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
@@ -94,6 +96,58 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           instruction={strings.questionInstructionMatching}
           answered={session.answered}
           onComplete={session.submitBoard}
+        />
+      );
+    case 'read_aloud':
+      // Spec D8: with speaking off, the card is passed unseen.
+      if (session.speakingOff !== null) return null;
+      return (
+        <SpeakingCardView
+          key={question.id}
+          question={question}
+          instruction={strings.questionInstructionReadAloud}
+          language={language}
+          answer={session.answer}
+          speech={session.speech}
+          onClip={session.submitSpeech}
+          onRetry={session.retrySpeech}
+          onPass={session.pass}
+          onCantSpeak={session.stopSpeaking}
+        />
+      );
+    case 'say_translation':
+      // Spec D8: with speaking off, the same card is typed.
+      if (session.speakingOff !== null) {
+        return (
+          <View style={styles.typedForm}>
+            {session.speakingOff === 'no_mic' ? (
+              <Text style={styles.noMic} testID="speak-no-mic">
+                {strings.noMicrophone}
+              </Text>
+            ) : null}
+            <TypedAnswerView
+              question={question}
+              instruction={strings.questionInstructionTyped(language)}
+              language={language}
+              answered={session.answered}
+              verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+              onSubmit={session.submitText}
+            />
+          </View>
+        );
+      }
+      return (
+        <SpeakingCardView
+          key={question.id}
+          question={question}
+          instruction={strings.questionInstructionSay(language)}
+          language={language}
+          answer={session.answer}
+          speech={session.speech}
+          onClip={session.submitSpeech}
+          onRetry={session.retrySpeech}
+          onPass={session.pass}
+          onCantSpeak={session.stopSpeaking}
         />
       );
     default: {
@@ -182,7 +236,7 @@ export default function SessionScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {session.answer ? (
+      {session.answer && !isSkip(session.answer) ? (
         <FeedbackBanner feedback={feedbackFor(question, session.answer)} onContinue={session.next} />
       ) : null}
     </SafeAreaView>
@@ -210,5 +264,7 @@ const styles = StyleSheet.create({
   headerEnd: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   skip: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, fontWeight: '700' },
   // Bottom padding keeps the last option clear of the overlaid banner.
+  typedForm: { gap: spacing.md },
+  noMic: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, textAlign: 'center' },
   body: { paddingTop: spacing.xl, paddingBottom: spacing.xxl * 4 },
 });

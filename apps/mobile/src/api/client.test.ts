@@ -302,4 +302,17 @@ describe('api/client', () => {
     const client = buildClient(jest.fn(async () => ({ ok: false, status: 404 })));
     await expect(client.unsaveVocabulary('e1', 's1')).rejects.toBeInstanceOf(ApiError);
   });
+
+  it('posts a spoken attempt to the speech endpoint (phase 25)', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ heard: 'gatto', verdict: 'unheard' }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const api = createApiClient({ baseUrl: 'http://api', fetch });
+    const request = { user_id: 'u', question_id: 'q', mime_type: 'audio/aac' as const, audio: 'QUJD' };
+    expect(await api.answerBySpeech('s 1', request)).toEqual({ heard: 'gatto', verdict: 'unheard' });
+    expect(calls[0].url).toBe('http://api/api/sessions/s%201/speech');
+    expect(JSON.parse(String(calls[0].init.body))).toEqual(request);
+  });
 });

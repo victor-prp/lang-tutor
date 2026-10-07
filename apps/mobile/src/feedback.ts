@@ -1,4 +1,4 @@
-import type { Question, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerVerdict, Question } from '@lang-tutor/core/api';
 import { evaluate, rightAnswer, type AnswerInput } from '@lang-tutor/core/domain';
 
 import { strings } from '@/strings';
@@ -9,7 +9,7 @@ export type Feedback = {
   tone: 'correct' | 'wrong';
   title: string;
   line: string | null;
-  verdict: TypedVerdict | null;
+  verdict: AnswerVerdict | null;
 };
 
 /** Phase 24. What a card was answered with: an option, a text, or a board's
@@ -31,6 +31,15 @@ export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
       line: null,
       verdict: null,
     };
+  }
+  // Phase 25 (spec D7). The server judged the transcript with the same pure
+  // function, so evaluate here gives the verdict it stored.
+  if ('heard' in answer) {
+    const record = evaluate(question, answer);
+    if (record.verdict === 'alternative') {
+      return { tone: 'correct', title: strings.feedbackAlternative, line: rightAnswer(question), verdict: 'alternative' };
+    }
+    return { tone: 'correct', title: strings.feedbackHeard, line: answer.heard, verdict: 'understood' };
   }
   const record = evaluate(question, answer);
   const verdict = record.verdict ?? null;

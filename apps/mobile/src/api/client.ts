@@ -12,6 +12,8 @@ import type {
   SaveVocabularyResponse,
   SessionView,
   SkipSessionResponse,
+  SpeechAnswerRequest,
+  SpeechAnswerResponse,
   TranslationRequest,
   TranslationResponse,
   User,
@@ -81,6 +83,8 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       postJson<CreateSessionResponse>('/api/sessions', request),
     nextStep: (sessionId: string, request: NextStepRequest) =>
       postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request),
+    answerBySpeech: (sessionId: string, request: SpeechAnswerRequest) =>
+      postJson<SpeechAnswerResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/speech`, request),
     getSession: (sessionId: string) =>
       getJson<SessionView>(`/api/sessions/${encodeURIComponent(sessionId)}`),
     skipSession: (sessionId: string) =>
