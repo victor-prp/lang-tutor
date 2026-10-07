@@ -9,7 +9,7 @@ export const WRONG_RUSSIAN = ['писать', 'дверь', 'стена'];
 
 /** The type cycle by position (server domain/session.ts, spec D2). */
 export const CYCLE = ['choice', 'reverse', 'typed'] as const;
-export type CardKind = (typeof CYCLE)[number];
+export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board';
 
 /**
  * Phase 23. The generation stub for q1 to q10, each key answering the task of
@@ -36,22 +36,52 @@ export type Card = { kind: CardKind; prompt: string; options: string[] };
 
 const HEBREW = /\p{Script=Hebrew}/u;
 
+/** The kind of the card on screen, from what it renders. */
+async function kindOnScreen(page: Page): Promise<CardKind> {
+  const has = async (id: string) => (await page.getByTestId(id).count()) > 0;
+  if (await has('board')) return 'board';
+  if (await has('tiles')) return 'tiles';
+  if (await has('listen-play')) return (await has('typed-input')) ? 'dictation' : 'listen';
+  if (await has('typed-input')) return 'typed';
+  const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
+  return HEBREW.test(prompt) ? 'reverse' : 'choice';
+}
+
 /**
  * The card at `position` of `total`, read once the counter shows it, and
- * checked against the type its position must have.
+ * checked against `expected`: by default phase 23's cycle, which a session of
+ * four words at ordinal 0 with no voices still follows (phase 24 plan).
  */
-export async function readCard(page: Page, position: number, total: number): Promise<Card> {
+export async function readCard(
+  page: Page,
+  position: number,
+  total: number,
+  expected: CardKind = CYCLE[(position - 1) % 3],
+): Promise<Card> {
   await expect(page.getByTestId('progress-label')).toHaveText(new RegExp(`${position}\\s*/\\s*${total}`));
-  const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
-  const typed = (await page.getByTestId('typed-input').count()) > 0;
-  const options = typed
-    ? []
-    : await Promise.all(
-        [0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`option-${i}`).textContent())),
-      );
-  const kind: CardKind = typed ? 'typed' : HEBREW.test(prompt) ? 'reverse' : 'choice';
-  expect(kind, `position ${position}`).toBe(CYCLE[(position - 1) % 3]);
+  const kind = await kindOnScreen(page);
+  expect(kind, `position ${position}`).toBe(expected);
+  const prompt =
+    (await page.getByTestId('question-prompt').count()) > 0
+      ? stripIsolates(await page.getByTestId('question-prompt').textContent())
+      : '';
+  const options =
+    kind === 'choice' || kind === 'reverse' || kind === 'listen'
+      ? await Promise.all([0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`option-${i}`).textContent())))
+      : [];
   return { kind, prompt, options };
+}
+
+/** Phase 24. A stub answering exactly the keys a plan asks, each by its task. */
+export function generationStubFor(tasks: Record<number, 'meaning' | 'word' | 'typed'>, alternatives: string[] = []) {
+  return {
+    items: Object.entries(tasks).map(([position, task]) => {
+      const key = `q${position}`;
+      if (task === 'meaning') return { key, distractors: WRONG_HEBREW };
+      if (task === 'word') return { key, distractors: WRONG_RUSSIAN };
+      return { key, distractors: [], alternatives };
+    }),
+  };
 }
 
 /** Picks the right option (the one not in the stub's wrong list) or a wrong one. */

@@ -63,3 +63,25 @@ export const ZAMOK = {
     },
   ],
 };
+
+/** Phase 24. Ten single-sense Russian nouns: none in the seed (checked against
+ *  content.ts and content.generated.ts), each of five to eight letters so any
+ *  can be a tiles card, each with its own meaning so any four make a board. */
+const single = (form: string, translation: string, code: string) => ({
+  form,
+  translation,
+  payload: { kind: 'word' as const, entries: [{ lemma: form, part_of_speech: 'noun', senses: [{ translation, sense_code: code }] }] },
+});
+
+export const BOARD_WORDS = [
+  single('ромашка', 'מרגנית', 'daisy'),
+  single('черепаха', 'צב', 'turtle'),
+  single('подушка', 'כרית', 'pillow'),
+  single('зонтик', 'מטרייה', 'umbrella'),
+  single('ведро', 'דלי', 'bucket'),
+  single('скрипка', 'כינור', 'violin'),
+  single('лопата', 'את חפירה', 'shovel'),
+  single('кастрюля', 'סיר', 'pot'),
+  single('фонарь', 'פנס', 'lantern'),
+  single('ящерица', 'לטאה', 'lizard'),
+];

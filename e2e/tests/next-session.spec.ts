@@ -7,6 +7,7 @@ import { LUK, PROCHITALA } from './support/lexemes';
 import { answerChoice, generationStub, readCard, rightOption } from './support/cards';
 import { clearGemini, expectGeminiPayload } from './support/mockServer';
 import { createLearner, logIn } from './support/users';
+import { withVoices } from './support/voices';
 
 test.setTimeout(180_000);
 
@@ -18,6 +19,7 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   const report = () => diagnosticReport(diagnostics);
   page.on('dialog', (dialog) => void dialog.accept());
 
+  await withVoices(page, []);
   await createLearner(request, 'e2e_next_ru', 'ru');
   await logIn(page, 'e2e_next_ru');
 
@@ -72,6 +74,7 @@ test('past the seed, a session is built from the saved words', async ({ page, re
 });
 
 test('leaving mid-session offers resume', async ({ page, request }) => {
+  await withVoices(page, []);
   await createLearner(request, 'e2e_resume_ru', 'ru');
   await logIn(page, 'e2e_resume_ru');
 
