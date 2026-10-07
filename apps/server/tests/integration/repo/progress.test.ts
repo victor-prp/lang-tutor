@@ -11,7 +11,7 @@ import {
   readProgress,
   readSnapshot,
 } from '../../support/progressRows';
-import { insertListSession } from '../../support/questions';
+import { insertListSession, type AskedSense } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -204,7 +204,7 @@ describe('insertSnapshot and findSnapshot', () => {
 // store their meaning in their own shape; the results read form → meaning.
 describe('findSnapshot over the phase 24 types', () => {
   it('reads form and meaning for listen_choice, dictation, letter_tiles and matching questions', async () => {
-    const words = [];
+    const words: AskedSense[] = [];
     const pairs = [['tome', 'ספר'], ['quill', 'נוצה'], ['lantern', 'פנס'], ['kettle', 'קומקום'], ['anvil', 'סדן'], ['rope', 'חבל'], ['cart', 'עגלה']];
     for (const [lemma, translation] of pairs) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
