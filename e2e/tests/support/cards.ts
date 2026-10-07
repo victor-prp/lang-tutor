@@ -147,9 +147,11 @@ export async function speak(page: Page) {
   // Retried: a click before the static export hydrates is a silent no-op, and
   // the first card of a session can be this one (the rotation, phase 27).
   await expect(async () => {
-    await page.getByTestId('speak-record').click();
-    await expect(page.getByTestId('speak-status')).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 15_000 });
+    // Only while nothing is recording: a second tap would stop the recording
+    // a slow recorder.start() has just begun.
+    if ((await page.getByTestId('speak-status').count()) === 0) await page.getByTestId('speak-record').click();
+    await expect(page.getByTestId('speak-status')).toBeVisible({ timeout: 4_000 });
+  }).toPass({ timeout: 20_000 });
   await page.waitForTimeout(1_000);
   await page.getByTestId('speak-record').click();
 }

@@ -46,6 +46,7 @@ async function buildFromTiles(page: Page, card: Card) {
   const used = new Set<number>();
   for (const letter of FORM_OF[card.prompt]) {
     const index = tiles.findIndex((tile, i) => tile === letter && !used.has(i));
+    expect(index, `tile for ${letter}`).toBeGreaterThanOrEqual(0);
     used.add(index);
     await page.getByTestId(`tile-${index}`).click();
   }
