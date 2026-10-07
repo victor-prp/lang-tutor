@@ -297,3 +297,9 @@ export function createFakeDictRepo(): FakeDictRepo {
   };
   return repo;
 }
+
+/** Phase 24. A clock that returns `ticks` in turn, then stays on the last. */
+export function createFakeClock(...ticks: number[]): () => number {
+  const queue = [...ticks];
+  return () => (queue.length > 1 ? queue.shift()! : queue[0]);
+}

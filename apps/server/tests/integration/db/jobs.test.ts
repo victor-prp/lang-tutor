@@ -46,7 +46,7 @@ describe('installJobs', () => {
     expect(prepare).toMatchObject({
       retry_limit: 2,
       retry_backoff: true,
-      expire_seconds: 240,
+      expire_seconds: 600,
       deletion_seconds: 86_400,
       dead_letter: PREPARE_SESSION_FAILED,
     });

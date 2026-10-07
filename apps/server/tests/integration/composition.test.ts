@@ -34,6 +34,7 @@ describe('createServerDeps', () => {
       db: t.db,
       logger,
       rng: testRng(7),
+      now: () => 0,
       fetch: globalThis.fetch,
       gemini: { apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/never-registered', model: 'm' },
       translationTimeoutMs: 25_000,

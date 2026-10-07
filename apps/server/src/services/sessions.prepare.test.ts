@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Enrollment, Question } from '@lang-tutor/core/api';
 
-import { createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
+import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { GenerationContext } from '../domain/distractors';
 import type { SessionState } from '../domain/session';
@@ -66,16 +66,27 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
     },
   });
   const llm = createFakeLlmClient(opts.reply ?? GOOD);
+  const logger = createFakeLogger();
   const service = createSessionService({
     transaction: createFakeTransaction({ session, enrollment, question }),
     rng: testRng(7),
-    logger: createFakeLogger(),
+    logger,
+    now: createFakeClock(1_000, 1_250),
     llm,
   });
-  return { service, calls, llm };
+  return { service, calls, llm, logger };
 }
 
 describe('prepareSession', () => {
+  // Phase 24 (spec D16): the slowness is measured per session, not felt.
+  it('logs how long the model took and how many items it was asked', async () => {
+    const { service, logger } = world({});
+    await service.prepareSession(PAYLOAD);
+    expect(logger.events).toContainEqual(
+      expect.objectContaining({ event: 'session_prepared', model_ms: 250, item_count: 2 }),
+    );
+  });
+
   it('generates every pick, flips the session to ready, and writes its questions', async () => {
     const { service, calls, llm } = world({});
     await service.prepareSession(PAYLOAD);

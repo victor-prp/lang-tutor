@@ -14,6 +14,14 @@ export const PREPARE_SESSION = 'prepare-session';
  *  expired. pg-boss copies the job's `data` across unchanged. */
 export const PREPARE_SESSION_FAILED = 'prepare-session-failed';
 
+/** Phase 24 (spec D16). The most one generation call may take: five minutes,
+ *  Victor's cap. The environment may lower it (config.ts); tests do. */
+export const SESSION_GENERATION_BUDGET_MS = 300_000;
+
+/** Twice the budget, phase 19's rule: a worker that crashed mid-call expires
+ *  and is retried, and a healthy call is never cut off. */
+export const PREPARE_SESSION_EXPIRY_SECONDS = (2 * SESSION_GENERATION_BUDGET_MS) / 1000;
+
 export const PrepareSessionPayloadSchema = z.object({
   session_id: z.string().min(1),
   picks: z

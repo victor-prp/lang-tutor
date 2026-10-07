@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { createFakeLlmClient, createFakeLogger } from '../../tests/support/fakes';
+import { createFakeClock, createFakeLlmClient, createFakeLogger } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { SessionRecord } from '../domain/session';
 import { AnswerKindMismatch, SessionNotFound } from '../errors';
@@ -164,6 +164,7 @@ describe('repos', () => {
       transaction: fakeTransaction(sessionRepoWith({ loadSession: async () => undefined })),
       rng: testRng(7),
       logger: createFakeLogger(),
+      now: createFakeClock(0),
       llm: createFakeLlmClient(''),
     });
 
@@ -208,6 +209,7 @@ describe('repos', () => {
       ),
       rng: testRng(7),
       logger: createFakeLogger(),
+      now: createFakeClock(0),
       llm: createFakeLlmClient(''),
     });
 
@@ -221,6 +223,7 @@ describe('repos', () => {
       transaction: fakeTransaction(sessionRepoWith({ loadSession: async () => TYPED_SESSION })),
       rng: testRng(7),
       logger: createFakeLogger(),
+      now: createFakeClock(0),
       llm: createFakeLlmClient(''),
     });
 

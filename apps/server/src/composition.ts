@@ -51,6 +51,8 @@ export function createServerDeps(io: {
   db: Db;
   logger: Logger;
   rng: () => number;
+  // Phase 24. A clock, received as rng is: it times the generation call.
+  now: () => number;
   fetch: typeof globalThis.fetch;
   gemini: GeminiConfig;
   // The provider's whole budget for one call. No retry: a learner who taps
@@ -103,7 +105,7 @@ export function createServerDeps(io: {
   });
 
   return {
-    sessions: createSessionService({ transaction, rng: io.rng, logger: io.logger, llm: sessionLlm }),
+    sessions: createSessionService({ transaction, rng: io.rng, now: io.now, logger: io.logger, llm: sessionLlm }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations: createTranslationService({ llm, transaction, logger: io.logger }),

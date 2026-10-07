@@ -45,6 +45,7 @@ export async function main(): Promise<void> {
     db,
     logger,
     rng: Math.random,
+    now: Date.now,
     fetch: globalThis.fetch,
     gemini,
     translationTimeoutMs: config.translationTimeoutMs,

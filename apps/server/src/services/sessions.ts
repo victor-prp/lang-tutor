@@ -98,11 +98,13 @@ async function progressOf(repos: Repos, sessionId: string, record: SessionRecord
 export function createSessionService({
   transaction,
   rng,
+  now,
   logger,
   llm,
 }: {
   transaction: Transaction;
   rng: () => number;
+  now: () => number;
   logger: Logger;
   llm: LlmClient;
 }) {
@@ -297,6 +299,7 @@ export function createSessionService({
       // decides the type, and the order is kept from here on.
       const types = read.context.map((_, index) => typeFor(index));
       const items = distractorItems(read.context, types);
+      const started = now();
       const raw = await llm(
         buildDistractorPrompt({
           items,
@@ -304,6 +307,7 @@ export function createSessionService({
           to: read.enrolled.source_language,
         }),
       );
+      const modelMs = now() - started;
       // An empty string is the provider's "no content" (a safety block). Here,
       // unlike a lookup, there is nothing useful to serve without it.
       const answer = raw === '' ? null : parseLlmDistractors(raw);
@@ -344,6 +348,8 @@ export function createSessionService({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
         session_id: sessionId,
         question_count: written ? read.context.length : 0,
+        item_count: items.length,
+        model_ms: modelMs,
         ...(written ? {} : { stage: 'write' }),
       });
     },
