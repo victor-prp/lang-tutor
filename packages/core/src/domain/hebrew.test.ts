@@ -14,7 +14,14 @@ describe('normaliseHebrew (phase 27 D3)', () => {
     expect(normaliseHebrew('ספר   טוב')).toBe('ספר טוב');
     expect(normaliseHebrew('מלך')).toBe('מלך');
   });
-  it('is NFC', () => {
-    expect(normaliseHebrew('שָׁלוֹם'.normalize('NFD'))).toBe('שלום');
+  it('removes invisible format marks', () => {
+    expect(normaliseHebrew('להזמין\u200F')).toBe('להזמין');
+    expect(normaliseHebrew('לה\u200Cזמין')).toBe('להזמין');
+    expect(normaliseHebrew('\u200Eלהזמין\u200D')).toBe('להזמין');
+  });
+  it('composes first, so a presentation form reads as its letter', () => {
+    // U+FB2A (shin with shin dot) decomposes under NFC to U+05E9 U+05C1; the dot is then stripped.
+    expect('\uFB2A'.normalize('NFC')).not.toBe('\uFB2A');
+    expect(normaliseHebrew('\uFB2A')).toBe('ש');
   });
 });

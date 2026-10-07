@@ -392,8 +392,8 @@ active enrollment, as in phase 23 D9.
 - **Migration (Part A).** `questions_type_known` admits `typed_meaning`, and `questions_shape_valid`
   gives it a prompt and no options, alternatives or tiles. `answers_typed_text_length` rises to 300.
 - `domain/plan.ts`: `typed_meaning` appended to the recognise tier, always eligible.
-- `domain/judge.ts` (new): `normaliseHebrew`, `ruleVerdict` (D3 step 2), `buildJudgePrompt`,
-  `parseJudgeVerdict` and the mapping of D4. All pure.
+- `domain/judge.ts` (new): `normaliseHebrew`, `meaningRuleVerdict` (D3 step 2), `buildMeaningJudgePrompt`,
+  `parseMeaningJudge` and the mapping of D4. All pure.
 - `domain/progress.ts`: `evidenceFor` for `typed_meaning` (D10), and the text-answer types.
 - `domain/distractors.ts`: `typed_meaning` asks the model nothing at preparation.
 - `repo/questions.ts`: `questionFrom` builds the new shape. `findJudgeContext(questionId)` reads
@@ -477,8 +477,8 @@ active enrollment, as in phase 23 D9.
 - **core:** the union parses every new shape. `answerFits` gives a judged card only `{ text,
   judged }`, and `evaluate` records its verdict. `rightAnswer` covers each new type. `judgeTyped`
   with D5's target refuses the lemma of an inflected gap.
-- **server domain:** `normaliseHebrew` and `ruleVerdict` (points, punctuation, an exact match, and
-  empty text); both judge prompts carry the marker and the context; `parseJudgeVerdict` maps every
+- **server domain:** `normaliseHebrew` and `meaningRuleVerdict` (points, punctuation, an exact match, and
+  empty text); both judge prompts carry the marker and the context; `parseMeaningJudge` maps every
   verdict and refuses an unknown one. The planner places each type in its tier, with the rotation
   and eligibility of D9, and never puts two of a type in a row over sizes 1 to 10. `evidenceFor`
   covers every row of D10. `findGap`. Both item validators: a gap with too many words, a sentence

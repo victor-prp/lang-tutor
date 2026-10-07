@@ -470,7 +470,10 @@ export function createSessionService({
         chars: text.length,
       });
       const session = await service.submitAnswer(sessionId, input.questionId, { text, judged: verdict });
-      return { verdict, session };
+      // Two overlapping requests may both have paid for a call; step replayed
+      // the first, so report the verdict stored for this card, not our own.
+      const stored = TypedVerdictSchema.safeParse(session.answers.find((a) => a.question_id === input.questionId)?.verdict);
+      return { verdict: stored.success ? stored.data : verdict, session };
     },
 
     /**

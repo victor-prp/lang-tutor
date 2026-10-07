@@ -596,7 +596,8 @@ async function main(): Promise<void> {
     model: gemini.model,
     timeoutMs: TIMEOUT_MS,
   });
-  // Exactly as composition.ts builds the judge client.
+  // Matches the options composition.ts gives the judge client, except the
+  // timeout: the eval uses its own TIMEOUT_MS (30 s), not production's budget.
   const judgeLlm = createGeminiClient({
     fetch: globalThis.fetch,
     baseUrl: gemini.baseUrl,

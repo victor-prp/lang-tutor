@@ -14,6 +14,7 @@ import { JUDGE_MARKER } from '../domain/judge';
 import type { SessionRecord, SessionState } from '../domain/session';
 import { AnswerKindMismatch, LlmUnavailable, QuestionDesynced, SessionNotFound } from '../errors';
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
@@ -47,8 +48,9 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
   });
   const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
   const question = stub<QuestionRepo>({ findJudgeContext: async () => CONTEXT });
+  const progress = stub<ProgressRepo>({ findSnapshot: async () => [] });
   const service = createSessionService({
-    transaction: createFakeTransaction({ session, enrollment, question }),
+    transaction: createFakeTransaction({ session, enrollment, question, progress }),
     rng: testRng(7),
     now: createFakeClock(1_000, 1_400),
     logger,
@@ -117,6 +119,48 @@ describe('answerJudged (spec D3)', () => {
     const { service, inserted } = setup(judge, answered);
     const result = await service.answerJudged(SESSION, answer('לשריין'));
     expect(result.verdict).toBe('exact');
+    expect(judge.calls).toHaveLength(0);
+    expect(inserted).toEqual([]);
+  });
+
+  it('reports the stored verdict when an overlapping request was recorded first', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const stored = record([MEANING, CHOICE], [{ question_id: 'm1', is_correct: false, answer_string: 'ספר', verdict: 'wrong' }]);
+    let loads = 0;
+    const session = stub<SessionRepo>({
+      loadSession: async () => (++loads === 1 ? record() : stored),
+      findState: async () => STATE,
+      insertAnswer: async () => undefined,
+    });
+    const service = createSessionService({
+      transaction: createFakeTransaction({
+        session,
+        enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
+        question: stub<QuestionRepo>({ findJudgeContext: async () => CONTEXT }),
+      }),
+      rng: testRng(7),
+      now: createFakeClock(1_000, 1_400),
+      logger: createFakeLogger(),
+      llm: createFakeLlmClient(''),
+      transcriber: createFakeTranscriber(''),
+      judge,
+    });
+    const result = await service.answerJudged(SESSION, answer('לשריין'));
+    expect(judge.calls).toHaveLength(1);
+    expect(result.verdict).toBe('wrong');
+  });
+
+  it('replays a completed session\'s last answer, and refuses any other card, without a call', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const done: SessionRecord = {
+      ...record([CHOICE, MEANING], [{ question_id: 'm1', is_correct: true, answer_string: 'לשריין', verdict: 'exact' }]),
+      complete: true,
+      completed_at: 1_000,
+      status: 'completed',
+    };
+    const { service, inserted } = setup(judge, done);
+    expect((await service.answerJudged(SESSION, answer('לשריין'))).verdict).toBe('exact');
+    await expect(service.answerJudged(SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(QuestionDesynced);
     expect(judge.calls).toHaveLength(0);
     expect(inserted).toEqual([]);
   });
