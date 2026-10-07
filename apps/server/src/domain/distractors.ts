@@ -381,7 +381,7 @@ export function validateDistractors(
   for (const item of items) {
     const found = answered.get(item.key);
     if (item.task === 'sentence' || item.task === 'translate') {
-      const input = { form: item.form, target, avoid: item.avoid };
+      const input = { form: item.form, target, explanation: explanation as LanguageCode, avoid: item.avoid };
       const checked = !found
         ? ({ ok: false, reason: `no answer for ${item.key}` } as const)
         : item.task === 'sentence'

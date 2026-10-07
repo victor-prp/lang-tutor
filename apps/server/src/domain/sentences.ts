@@ -36,13 +36,18 @@ export type SentenceContent = {
 /** Spec D6: what a valid translation card stores. */
 export type TranslateContent = { hebrew: string; reference: string; gap: { start: number; end: number } };
 
-type Input = { form: string; target: LanguageCode; avoid: readonly string[] };
+/** `explanation` is the enrollment's source language, the one the translations are in (spec D5, D6). */
+type Input = { form: string; target: LanguageCode; explanation: LanguageCode; avoid: readonly string[] };
 type Found = { sentence?: string; gap?: string; translation?: string; alternatives?: string[] };
 
 const fail = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
 
-/** Spec D5, D6: a script test as the validators read it; Hebrew is the explanation language. */
-const hasHebrew = (text: string): boolean => LANGUAGES.he.letters.test(text);
+/** Spec D5, D6: whether a text holds a letter of the explanation language's script. */
+const hasExplanation = (input: Input, text: string): boolean => LANGUAGES[input.explanation].letters.test(text);
+
+/** Spec D6: two sentences compared as the explanation language compares them (Hebrew has points). */
+const sameSentence = (input: Input, a: string, b: string): boolean =>
+  input.explanation === 'he' ? normaliseHebrew(a) === normaliseHebrew(b) : normaliseTyped(a) === normaliseTyped(b);
 
 /** Spec D5: the sentence the model wrote for a gap card, its gap located and checked. */
 export function validateSentenceItem(
@@ -57,14 +62,17 @@ export function validateSentenceItem(
   const words = wordCount(sentence);
   if (words < SENTENCE_MIN_WORDS || words > SENTENCE_MAX_WORDS) return fail(`the sentence has ${words} words`);
 
-  if (hasHebrew(sentence) || !LANGUAGES[input.target].letters.test(sentence)) {
+  if (hasExplanation(input, sentence) || !LANGUAGES[input.target].letters.test(sentence)) {
     return fail(`the sentence is not written in ${LANGUAGES[input.target].name}`);
   }
-  if (!hasHebrew(translation)) return fail('the translation is not in Hebrew');
+  if (!hasExplanation(input, translation)) return fail(`the translation is not in ${LANGUAGES[input.explanation].name}`);
 
   if (wordCount(gap) !== wordCount(input.form)) return fail(`the gap "${gap}" has not as many words as ${input.form}`);
   const where = findGap(sentence, [gap]);
   if (!where) return fail(`the gap "${gap}" is not in the sentence exactly once`);
+
+  // Spec D5: a translation that shows the gap's word gives the answer away.
+  if (findGap(translation, [gap])) return fail('the translation shows the gap word');
 
   if (input.avoid.some((old) => normaliseTyped(old) === normaliseTyped(sentence))) {
     return fail('the sentence repeats one it was told to avoid');
@@ -77,7 +85,7 @@ export function validateSentenceItem(
   for (const raw of found.alternatives ?? []) {
     const text = raw.trim();
     const key = normaliseTyped(text);
-    if (text === '' || hasHebrew(text) || seen.has(key)) continue;
+    if (text === '' || hasExplanation(input, text) || seen.has(key)) continue;
     seen.add(key);
     alternatives.push(text);
     if (alternatives.length === MAX_ALTERNATIVES) break;
@@ -98,16 +106,18 @@ export function validateTranslateItem(
   const words = wordCount(hebrew);
   if (words < SENTENCE_MIN_WORDS || words > TRANSLATE_MAX_WORDS) return fail(`the Hebrew sentence has ${words} words`);
 
-  if (!hasHebrew(hebrew) || LANGUAGES[input.target].letters.test(hebrew)) {
+  if (!hasExplanation(input, hebrew) || LANGUAGES[input.target].letters.test(hebrew)) {
     return fail('the sentence to translate is not only Hebrew');
   }
-  if (hasHebrew(reference)) return fail('the reference translation has Hebrew in it');
+  if (hasExplanation(input, reference) || !LANGUAGES[input.target].letters.test(reference)) {
+    return fail(`the reference translation is not written in ${LANGUAGES[input.target].name}`);
+  }
 
   if (wordCount(gap) !== wordCount(input.form)) return fail(`the gap "${gap}" has not as many words as ${input.form}`);
   const where = findGap(reference, [gap]);
   if (!where) return fail(`the gap "${gap}" is not in the reference exactly once`);
 
-  if (input.avoid.some((old) => normaliseHebrew(old) === normaliseHebrew(hebrew))) {
+  if (input.avoid.some((old) => sameSentence(input, old, hebrew))) {
     return fail('the sentence repeats one it was told to avoid');
   }
   return { ok: true, content: { hebrew, reference, gap: where } };

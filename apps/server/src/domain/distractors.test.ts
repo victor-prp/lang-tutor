@@ -603,7 +603,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(validateDistractors(gapItem, gapReply(['parlai', 'דיבר', 'parlò']), 'he', [], 'it').ok).toBe(false);
       expect(validateDistractors(gapItem, gapReply(['parlai', 'parlò']), 'he', [], 'it').ok).toBe(false);
     });
-    it('refuses a gap item that offers its own blank when the blank is another form', () => {
+    it('refuses a gap item that offers its own form when the example blanks another one', () => {
       const inflected = distractorItems([{ ...ROW, form: 'parlavamo', lemma: 'parlare', example: 'Ieri parlavamo per ore.' }], ['gap'], NO_RECENT);
       expect(validateDistractors(inflected, gapReply(['parlai', 'parlavamo', 'parlò']), 'he', [], 'it').ok).toBe(false);
     });
