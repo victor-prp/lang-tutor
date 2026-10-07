@@ -123,7 +123,7 @@ describe('the document as a whole', () => {
 
 describe('the grant endpoints in the published document (phase 28)', () => {
   it.each([
-    ['/api/grants', 'post', ['201', '400', '404', '409']],
+    ['/api/grants', 'post', ['201', '400', '403', '404', '409']],
     ['/api/grants', 'get', ['200', '400']],
     ['/api/grants/{id}/accept', 'post', ['200', '400', '403', '404']],
     ['/api/grants/{id}', 'delete', ['204', '400', '403']],

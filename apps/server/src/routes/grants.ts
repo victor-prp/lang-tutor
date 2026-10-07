@@ -28,6 +28,7 @@ const inviteRoute = createRoute({
   responses: {
     201: json(GrantSchema, 'The invite, pending.'),
     400: NO_HEADER,
+    403: json(ErrorSchema, 'The acting user is not a user.'),
     404: json(ErrorSchema, 'No user has this username.'),
     409: json(
       ErrorSchema,
@@ -93,6 +94,7 @@ export function createGrantsRouter(grants: GrantService) {
     try {
       return c.json(await grants.invite(actor, c.req.valid('json')), 201);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof UserNotFound) return c.json({ error: 'user not found' }, 404);
       if (error instanceof NotLearning) return c.json({ error: 'not_learning' }, 409);
       if (error instanceof OwnList) return c.json({ error: 'own_list' }, 409);

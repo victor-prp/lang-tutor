@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { AccessDenied, GrantExists, GrantNotFound, NotLearning, OwnList, UserNotFound } from '../../../src/errors';
 import type { GrantService } from '../../../src/services/grants';
 import type { VocabularyService } from '../../../src/services/vocabulary';
+import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { seedEnrollment, seedUser } from '../../support/seedUser';
@@ -54,6 +55,11 @@ describe('invite', () => {
 
   it('refuses inviting yourself', async () => {
     await expect(grants.invite('u_student', { username: 'u_student', target_language: 'ru' })).rejects.toBeInstanceOf(OwnList);
+  });
+
+  it('refuses an actor who is not a user, and creates nothing', async () => {
+    await expect(grants.invite('u_nobody', { username: 'u_student', target_language: 'ru' })).rejects.toBeInstanceOf(AccessDenied);
+    expect(await grants.list('u_student')).toEqual({ tutors: [], students: [] });
   });
 
   it('refuses a second invite to the same list', async () => {
@@ -118,12 +124,31 @@ describe('end', () => {
     await expect(grants.end('u_student', 'g_missing')).resolves.toBeUndefined();
   });
 
-  it('stops the tutor adding words, mid-session (Review Focus 1)', async () => {
+  it('stops the tutor adding words once the student ends it (Review Focus 1)', async () => {
+    const word = await insertLexeme(t.db, {
+      lemma: 'рама',
+      languageCode: 'ru',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'first' }],
+      variants: [
+        {
+          form: 'рама',
+          kind: 'word',
+          entryRank: 0,
+          translations: [
+            { senseCode: 'first', rank: 0, translation: 'рама-1', exampleSource: null, exampleTarget: null },
+          ],
+        },
+      ],
+    });
+    const entries = [{ sense_id: word.senseIds[0], variant_id: word.variantIds[0] }];
     const grant = await inviteRussian();
     await grants.accept('u_student', grant.id);
+    await expect(vocabulary.save('u_tutor', 'e_student_ru', entries)).resolves.toEqual({
+      saved_sense_ids: [word.senseIds[0]],
+    });
     await grants.end('u_student', grant.id);
-    await expect(vocabulary.save('u_tutor', 'e_student_ru', [{ sense_id: 's', variant_id: 'v' }])).rejects.toBeInstanceOf(
-      AccessDenied,
-    );
+    await expect(vocabulary.save('u_tutor', 'e_student_ru', entries)).rejects.toBeInstanceOf(AccessDenied);
   });
 });

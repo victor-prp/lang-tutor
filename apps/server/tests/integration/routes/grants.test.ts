@@ -91,6 +91,12 @@ describe('POST /api/grants', () => {
     expect(await res.json()).toEqual({ error: 'own_list' });
   });
 
+  it('answers 403 forbidden when the acting user is not a user', async () => {
+    const res = await invite({ username: 'u_student', target_language: 'ru' }, 'u_nobody');
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'forbidden' });
+  });
+
   it('answers 409 grant_exists for a second invite', async () => {
     await inviteRussian();
     const res = await inviteRussian();

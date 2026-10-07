@@ -24,6 +24,15 @@ export function createGrantService({ transaction, logger }: { transaction: Trans
         if (student.id === actorUserId) throw new OwnList(actorUserId);
         const enrollment = await repos.enrollment.findByUserAndTarget(student.id, input.target_language);
         if (!enrollment) throw new NotLearning(student.id, input.target_language);
+        if (!(await repos.user.findById(actorUserId))) {
+          logger.info({
+            event: 'access_denied',
+            actor_user_id: actorUserId,
+            enrollment_id: enrollment.id,
+            permission: 'grant.invite',
+          });
+          throw new AccessDenied(actorUserId, enrollment.id, 'grant.invite');
+        }
         return repos.grant.insertGrant({
           enrollmentId: enrollment.id,
           ownerUserId: student.id,
