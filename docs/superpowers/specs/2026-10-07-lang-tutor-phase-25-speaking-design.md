@@ -4,9 +4,10 @@
   after phase 24 is completed, chose recognition on the server and approved the recognition path
   (D1, D13), then handed the remaining decisions over ("Go with all the rest section alone. I
   trust your decisions"). Every decision is in §1 with its reason, so each one can be overturned
-  in review. Those marked **(low confidence)** are the ones to read first. Not yet planned or
-  built: the plan is written once phase 24 has merged, because this phase changes phase 24's code,
-  which does not exist yet.
+  in review. Those marked **(low confidence)** are the ones to read first. A POC on the same day
+  replaced the feasibility step with measured facts (§ POC findings), and Victor moved short
+  phrases in after it (D3). Not yet planned or built: the plan is written once phase 24 has
+  merged, because this phase changes phase 24's code, which does not exist yet.
 - **Date:** 2026-10-07
 - **Source:** the one-pager `drafts/2026-10-07-speaking-one-pager.md`. `drafts/` is gitignored, so
   everything this spec depends on is restated below.
@@ -19,8 +20,9 @@
   table in its §3, "a recogniser reject is no evidence, never wrong").
 - **Touches:** the wire's `Question` union gains two members, `NextStepRequest` one body,
   `CreateSessionRequest` one field, and there is one new endpoint, all additive under ADR 0003. A
-  new contract, `SpeechTranscriber`, sits beside `LlmClient` under ADR 0001 R11. ADR 0002 R6's list
-  of factories gains two. No new check script.
+  new contract, `SpeechTranscriber`, sits beside `LlmClient` under ADR 0001 R11. ADR 0002 R1 gains
+  `expo-file-system`, with its existing check script extended, and R6's list of factories gains
+  two. No new check script.
 
 ## Goal
 
@@ -99,9 +101,11 @@ recognition on the device and over a dedicated speech-to-text service.
 - *Blind.* The model is told the language and never the expected word. Told the word, a model
   tends to hear it, and "what the app heard" would stop being true. Judging happens afterwards, in
   a pure function (D6).
-- *The wait.* About one second after the learner stops is expected: no wait for silence (D7), an
-  upload of tens of kilobytes, and a call with thinking off (D13). This is an estimate, not a
-  measurement. `transcribe_ms` measures it.
+- *The wait,* measured in the POC: **about 1.7–2.0 s** after the learner stops, almost all of it
+  the model call (1.73 s at the median and 2.0 s at the 90th percentile over Victor's 14 attempts on
+  Android). Reading and uploading a clip of about 13 KB add little. Victor judged it good enough to
+  build on ("works well"), and his use after merge is still the acceptance. `transcribe_ms`
+  keeps measuring it.
 
 **Switch signal:** after merge, Victor reports that the wait is too long, or that the app often
 mishears a word he said right. A dedicated speech-to-text service then becomes a phase of its own
@@ -329,23 +333,30 @@ same.
 
 **D12. Recording.** `apps/mobile/src/recording.ts` declares the narrow engine it needs and a
 factory, `createRecorder({ engine, platform, prepareAudio, readBase64 })`, which returns closures
-(ADR 0002 R6), as `createSpeaker` does. Only `_layout.tsx` imports `expo-audio` (ADR 0002 R1). It
-builds the engine from `AudioModule.AudioRecorder`, the class `useAudioRecorder` wraps, so no hook
-is needed.
+(ADR 0002 R6), as `createSpeaker` does. Only `_layout.tsx` imports `expo-audio` and
+`expo-file-system` (ADR 0002 R1). It builds the engine from the class `useAudioRecorder` wraps, so
+no hook is needed. The class is `AudioModule.AudioRecorder` on a phone and
+`AudioModule.AudioRecorderWeb` on the web, which has no `release()` (POC).
 
-- **Formats. (low confidence on the web's)** iOS records WAV, 16 kHz mono, 16-bit, about 32 KB a
-  second. Android records AAC in ADTS, 16 kHz mono. The web records the browser's `audio/webm`
-  (Opus), the only format Chrome's `MediaRecorder` offers. WAV and AAC are on Gemini's documented
-  list of audio formats; WebM is not, so Build order step 0 checks it. If Gemini refuses it,
-  speaking works on the web only in e2e, where MockServer answers whatever is sent, and the phone
-  apps are unaffected.
+- **Formats.** Android records AAC in ADTS, 16 kHz mono, sent as `audio/aac`; iOS records AAC in
+  M4A, 16 kHz mono, sent as `audio/mp4`; the web records the browser's WebM (Opus), the only format
+  Chrome's `MediaRecorder` offers, sent as `audio/webm`. Gemini accepted all three as they are in
+  the POC, WebM included although its documentation does not list it. AAC keeps a clip near
+  13 KB, where WAV would be about 32 KB a second.
+- **Silence around the word matters.** In the POC, half-second clips with no silence around the
+  word failed on 4 to 6 of 20 words said right (`лук` came back as `хлеб`). The same words with
+  0.6 s of silence on each side were all right. A tap-to-stop recording has that silence, so the
+  recorder must never trim it, and the eval's fixtures are made with it (§2, Eval).
 - **The iOS audio mode.** Recording needs `allowsRecording: true`, which moves iOS to the
   play-and-record category, where speech plays from the earpiece. The recorder therefore sets it
   just before recording and clears it right after, so every speaker button keeps sounding as
   phase 23 voice D8 set it up. On Android and the web the mode is not touched, as there.
-- **Reading the clip as base64.** `readBase64(uri)` fetches the recording's URI and reads the
-  blob. Build order step 0 checks this on an iPhone in Expo Go. If it fails there, `expo-file-system`,
-  which is also part of Expo Go, reads the file instead and joins ADR 0002 R1's list.
+- **Reading the clip as base64.** On a phone, `expo-file-system`'s `new File(uri).base64()`, which
+  is part of Expo Go. In the POC, fetching the `file://` URI and reading the blob with `FileReader`
+  uploaded 15 bytes from Android. On the web the URI is a `blob:` URL, which `fetch` and
+  `FileReader` read; `fetch` must not be called as a method of another object, which a browser
+  refuses as an illegal invocation. `expo-file-system` joins `apps/mobile/package.json` at the
+  range SDK 57 pins (`~57.0.5`) and ADR 0002 R1's list.
 - **Five seconds at most,** and the clip is dropped once uploaded.
 
 **D13. The transcriber.**
@@ -362,10 +373,18 @@ is needed.
   intelligible was said. The audio goes as `inlineData`, and the response is JSON
   `{ heard: string }`. The instruction carries a fixed marker, `transcribe the spoken audio`, so
   MockServer can tell this call from the others, as `three wrong answers` does today.
-- **Thinking off.** The request sets the lowest thinking the configured model accepts:
-  `thinkingBudget: 0` on the 2.5 family, `thinkingLevel: 'minimal'` on 3. Build order step 0
-  checks which field `GEMINI_MODEL` takes. The other calls send no thinking setting today, and
-  this phase does not change them.
+- **Thinking off.** The request sends `thinkingBudget: 0`, which the configured `gemini-2.5-flash`
+  accepts. It saves about 0.3 s. A text-only call takes about 0.45 s, so roughly a second of each
+  call is the model processing audio, whatever the settings. The other calls send no thinking
+  setting today, and this phase does not change them.
+- **The model stays `GEMINI_MODEL`.** In the POC, the newer Flash models (3.5, 3.6, 3.8) and
+  3.1 Flash-Lite were no more accurate and not faster by enough to matter. 3.8 Flash was slower
+  (2.9 s at the median) and refuses `thinkingLevel: 'minimal'`. A change of model re-checks the
+  thinking field it accepts.
+- **The instruction** is the one the POC used: the language, "write exactly the words that were
+  spoken, in its standard spelling with its accents", "do not correct the speaker or guess what
+  they meant", and an empty answer for nothing intelligible. With it, `gato` and `люк` came back as
+  said, not as the target.
 - **A budget.** `SPEECH_TIMEOUT_MS`, default 8 000. At the budget the call aborts, the endpoint
   answers 502 as a lookup does when the model fails, and the card offers to try again (D7). No
   retry: the learner's "try again" is the retry, as `createGeminiClient` already reasons.
@@ -396,7 +415,7 @@ of at most 200 KB, base64's extra third costs nothing worth that.
   - `NextStepRequestSchema` gains `{ user_id, question_id, pass: 'skip' | 'show_answer' }`.
   - `SpokenVerdictSchema`: `understood`, `alternative`, `gave_up`, `skipped`.
     `AnswerRecord.verdict` takes a typed or a spoken verdict.
-  - `SpeechAnswerRequestSchema`: `user_id`, `question_id`, `mime_type` (`audio/wav`, `audio/aac`,
+  - `SpeechAnswerRequestSchema`: `user_id`, `question_id`, `mime_type` (`audio/aac`, `audio/mp4`,
     `audio/webm`), `audio` (at most 270 000 characters). `SpeechAnswerResponseSchema`: `heard`,
     `verdict` (`understood`, `alternative`, `unheard`), `next` (a `NextStepResponse`, present
     unless `unheard`).
@@ -434,15 +453,20 @@ of at most 200 KB, base64's extra third costs nothing worth that.
   is 400 `AnswerKindMismatch`), and `LlmUnavailable` maps to 502 as in `routes/translations.ts`.
   Next-step's `pass` body, and the create body's `speaking`.
 - `repo/progress.ts`: `findSessionEvidence` reads the new verdicts.
-- ADR 0002: R6's list gains `createGeminiTranscriber` and `createRecorder`.
+- ADR 0002: R1 names `expo-file-system` beside `expo-audio`, and its detection command and
+  `scripts/check-adr-0002-di-with-closures.sh` change together. A planted import must make the
+  check fire before it counts (CLAUDE.md). R6's list gains `createGeminiTranscriber` and
+  `createRecorder`.
 
 ### Mobile
 
 - `src/recording.ts`, new (D12).
 - `src/hooks/useRecording.tsx`, new: `RecordingProvider`, exposing `canRecord()`, the permission
   state, `start()` and `stop()`.
-- `src/app/_layout.tsx`: imports what the recorder needs from `expo-audio`, builds it, and wraps
-  the tree in `RecordingProvider`.
+- `package.json`: `expo-file-system` at `~57.0.5` (D12), installed with npm at that range, since
+  `npx expo install` refuses to run under this npm.
+- `src/app/_layout.tsx`: imports what the recorder needs from `expo-audio` and `expo-file-system`,
+  builds it, and wraps the tree in `RecordingProvider`.
 - `src/components/SpeakingCardView.tsx`, new: the microphone button, the states of D7, its
   banners and its buttons.
 - `src/hooks/useSession.tsx`: `submitSpeech(clip)`, `pass(kind)`, and `speakingOff` for the
@@ -456,8 +480,9 @@ of at most 200 KB, base64's extra third costs nothing worth that.
 ### Eval
 
 - `tests/eval/audio/`, new: WAV fixtures, 16 kHz mono, made with macOS `say` (Alice for Italian,
-  Milena for Russian, Samantha for English). Ten words per language said right, and two per
-  language where a different word is said. The command that makes a fixture is in `cases.ts`, so a
+  Milena for Russian, Samantha for English), each with 0.6 s of silence before and after the word
+  (`say "[[slnc 600]] gatto [[slnc 600]]"`), as a real recording has (D12). Ten words or phrases
+  per language said right, and two per language where a different word is said. The command that makes a fixture is in `cases.ts`, so a
   case can be added.
 - `cases.ts`: `TranscriptionCase` (`file`, `language`, `target`, `expect: 'understood' | 'unheard'`).
 - `run.ts`: tier 1, every response parses and `heard` is a string. Tier 2, `judgeSpoken` of what
@@ -533,15 +558,36 @@ changes the instruction, never the threshold.
 
 ---
 
+## POC findings
+
+Run on 2026-10-07, before any plan, to test D1's assumptions. Two steps:
+
+- **A desk test.** 24 clips made with macOS `say`: 20 words said right, in Italian, Russian and
+  English, and 4 where another word is said. Each clip was sent in four formats to five models
+  with the instruction in D13, from a scratch script.
+- **A phone test.** A throwaway screen recorded in Expo Go on Victor's Android phone and uploaded
+  to a scratch server, which called Gemini. Victor said 14 Italian words and phrases.
+
+The screen is on branch `poc-25-speaking`, which is never merged. The scripts were not kept.
+
+| Question | Answer |
+|---|---|
+| Does a blind transcriber hear single words? | Yes, once a clip has silence around the word: 24 of 24 on `gemini-2.5-flash`, with the wrong words reported as said (`gato`, `люк`). Without that silence, 18 of 24 (D12). On the phone, 14 of 14. |
+| Phrases? | Every phrase Victor said came back exactly (`per favore`, `caffè con cornetto`, `grazie mille`), so phrases moved in (D3). |
+| Does Gemini take each platform's format as it is? | Yes: AAC (ADTS), AAC in M4A as `audio/mp4`, WAV, and Chrome's WebM (D12). |
+| How long is the wait? | 1.5–2.0 s for the model call, whatever the model or format; about 1.7–2.0 s after tapping stop on the phone. Thinking off saves about 0.3 s (D1, D13). |
+| Does a newer model do better? | No. 3.5, 3.6 and 3.8 Flash and 3.1 Flash-Lite were no more accurate; 3.8 was slower (D13). |
+| Does recording work in Expo Go without a hook? | Yes, with the class picked per platform (D12). |
+| Can the app read the clip for upload? | On Android only through `expo-file-system`: `fetch(file://)` with `FileReader` uploaded 15 bytes (D12). |
+| Does a speaker button still sound after recording? | Not checked on iOS, where the risk is (§ Risks). |
+
 ## Build order
 
 One PR. It changes no existing prompt. The only new model call is the transcriber, which has its
 own cases.
 
-0. **Feasibility, before anything is built on it.** One real clip in each platform's format
-   through Gemini, with the thinking field `GEMINI_MODEL` accepts; a clip read as base64 on an
-   iPhone in Expo Go; `AudioModule.AudioRecorder` built and used outside a hook. Each result goes
-   into the plan as a fact, and a failure stops the plan for a decision.
+The feasibility step this list once began with is done: § POC findings.
+
 1. Core: the union members, `judgeSpoken`, `pass`, `score` and `missed`, the verdicts,
    `LIVE_DIMENSIONS`.
 2. Server domain: the tiers and eligibility, evidence and the cap.
@@ -558,12 +604,15 @@ own cases.
   eval measures the rest on clean audio; Victor's use decides (D1's switch signal).
 - **Synthetic fixtures are not a learner's accent.** The eval proves the path and the instruction,
   not accuracy for Victor's voice. His own recordings can become cases later.
-- **The wait is an estimate.** About a second is expected, and `transcribe_ms` will say. The
-  levers, in order: a smaller model for this call only, then a dedicated service (D1).
-- **WebM may be refused** (D12). Only real use on the web is affected, not e2e.
-- **iOS audio routing.** If the mode is not restored after recording, speech from a speaker button
-  plays quietly from the earpiece (D12). Unit-tested with a fake engine, and checked on Victor's
-  phone.
+- **The wait is about two seconds,** measured (D1). No setting within this approach cuts it much:
+  the floor is the model processing audio. The levers, if Victor's use says it is too long: a
+  dedicated speech-to-text service, then recognition on the device (D1's switch signal).
+- **A clipped recording.** A learner who taps stop the instant the word ends may cut its tail, and
+  clips with no silence transcribe badly (D12). If "not understood" is common for words said
+  right, keep recording for 300 ms after the tap.
+- **iOS is untested on a device.** The POC ran on Victor's Android phone and in Chromium. The iOS
+  audio mode (D12) is unit-tested with a fake engine only. If it is not restored after recording,
+  speech from a speaker button plays quietly from the earpiece.
 - **Badges drop once** (D11), by at most one level. Announced in the PR.
 - **Over-credit from several words said** (D6, low confidence). If badges climb on say the
   translation in a way Victor does not trust, require the transcript to be the target alone.
