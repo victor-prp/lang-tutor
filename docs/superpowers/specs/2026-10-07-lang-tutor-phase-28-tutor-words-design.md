@@ -1,6 +1,7 @@
 # Phase 28 — A tutor adds words to a student's list
 
-- **Status:** Designed on 2026-10-07. Victor scoped the phase in the one-pager, then approved, in
+- **Status:** Designed on 2026-10-07. Built on 2026-10-07; see the plan
+  `docs/superpowers/plans/2026-10-07-phase-28-tutor-words.md`. Victor scoped the phase in the one-pager, then approved, in
   conversation, linking a tutor to one of the student's languages (D2), a tutor who learns nothing
   (D13), access grants with one check as the first step towards general access control (D1, D6,
   D7), and the data shape (§2). He then handed the remaining decisions over ("Continue with the
@@ -284,6 +285,24 @@ carries the actor, the enrollment and the permission. `vocabulary_saved` gains `
 'grantee'`. No usernames are logged: the ids are enough, and the same rule already holds for
 learners.
 
+### Deviations as built
+
+**Invite link on profile.** Profile gains an "Invite a student" link for everyone, which D14 did
+not mention, so that a learner can become a tutor. Home's invite button appears only once there is
+a first student.
+
+**A nonexistent actor on `POST /api/grants`.** The route also answers 403 `forbidden` when the
+acting user id is no user, a case D9's table did not list. Without it the grantee foreign key
+surfaced as a 500. This matches how a nonexistent actor is refused on vocabulary writes.
+
+**`ApiProvider` and `useApi`.** The tutor's words screen reads the client from an
+`ApiProvider`/`useApi` context so that it can nest its own `TranslationProvider`. D16 named the
+nested provider but not how it gets the client.
+
+**Single-file integration runs.** The plan's command for running one integration file did not
+work, because `scripts/lane-env.sh` changes to the repo root. The build used a wrapper that passes
+jest's config explicitly.
+
 ---
 
 ## 2. Changes
@@ -392,6 +411,11 @@ vocabulary_entries
 3. the tutor logs in, opens the student, looks up a word (MockServer), and adds it;
 4. the learner opens the saved list, and the word reads "added by" the tutor;
 5. the learner ends the link from profile, and the tutor's home no longer lists them.
+
+Locally, `e2e/tests/speaking.spec.ts` ("read aloud, say the translation, and can't speak now")
+fails on this machine on master (d20652b) as well as on this branch. The cause is environmental
+(the fake microphone and expo-audio in headless Chromium), so CI is the judge. `tutor.spec.ts`
+passes.
 
 ### Architecture
 `scripts/check-adr-0008-access-grants.sh`: for each rule, plant a violation, see it reported, and
