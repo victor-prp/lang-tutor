@@ -61,6 +61,13 @@ describe('createRecorder (spec D12)', () => {
     expect(log).toEqual([]);
   });
 
+  it('does not start a second engine while one is recording', async () => {
+    const { recorder, log } = fakes('android');
+    await recorder.start();
+    expect(await recorder.start()).toBe('recording');
+    expect(log.filter((line) => line.startsWith('make'))).toHaveLength(1);
+  });
+
   it('stops nothing when nothing is recording, and cancel drops a clip', async () => {
     const { recorder, log } = fakes('ios');
     await expect(recorder.stop()).rejects.toThrow(/not recording/);

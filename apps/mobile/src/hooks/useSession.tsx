@@ -1,4 +1,4 @@
-import type { MissedQuestion, NextStepResponse, Question, Score, SessionProgressItem } from '@lang-tutor/core/api';
+import type { MissedQuestion, NextStepResponse, Question, SessionProgressItem } from '@lang-tutor/core/api';
 import { SESSION_LENGTH, type AnswerInput } from '@lang-tutor/core/domain';
 import { router } from 'expo-router';
 import {
@@ -17,6 +17,7 @@ import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import type { CardAnswer } from '@/feedback';
 import type { Clip } from '@/recording';
+import { applyQueued, queuedFrom, type QuizState } from '@/quiz';
 import { IDLE_ATTEMPT, passesUnseen, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
 
@@ -60,33 +61,6 @@ export type SessionValue = {
   next: () => void;
 };
 
-// What the background next-step call resolved to, waiting to be applied when
-// the learner taps Continue. Only one of these is ever in flight at a time,
-// since `select` cannot fire again until a new question is on screen.
-type Queued =
-  | { complete: false; question: Question; position: number }
-  | { complete: true; score: Score; missedQuestions: MissedQuestion[]; progress: SessionProgressItem[] };
-
-type QuizState = {
-  sessionId: string;
-  userId: string;
-  question: Question | undefined;
-  position: number;
-  total: number;
-  answer: CardAnswer | null;
-  complete: boolean;
-  correctCount: number;
-  missedQuestions: MissedQuestion[];
-  progress: SessionProgressItem[];
-  queued: Queued | null;
-  // Set when Continue is tapped before the background next-step call has
-  // resolved. Applied the moment that call does resolve, so the learner
-  // never has to tap Continue a second time.
-  advanceRequested: boolean;
-  speech: SpeechAttempt;
-  speakingOff: SpeakingOff;
-};
-
 const SessionContext = createContext<SessionValue | null>(null);
 
 function handleApiFailure(message: string = strings.errorMessage) {
@@ -99,38 +73,6 @@ function handleApiFailure(message: string = strings.errorMessage) {
     [{ text: strings.errorAction, onPress: () => router.replace('/') }],
     { cancelable: false },
   );
-}
-
-function queuedFrom(response: NextStepResponse): Queued {
-  return response.complete
-    ? { complete: true, score: response.score, missedQuestions: response.missed_questions, progress: response.progress }
-    : { complete: false, question: response.question, position: response.position.position };
-}
-
-function applyQueued(current: QuizState, queued: Queued): QuizState {
-  if (queued.complete) {
-    return {
-      ...current,
-      question: undefined,
-      complete: true,
-      correctCount: queued.score.correct,
-      missedQuestions: queued.missedQuestions,
-      progress: queued.progress,
-      answer: null,
-      queued: null,
-      advanceRequested: false,
-      speech: IDLE_ATTEMPT,
-    };
-  }
-  return {
-    ...current,
-    question: queued.question,
-    position: queued.position,
-    answer: null,
-    queued: null,
-    advanceRequested: false,
-    speech: IDLE_ATTEMPT,
-  };
 }
 
 export function SessionProvider({ api, children }: { api: ApiClient; children: ReactNode }) {
@@ -286,7 +228,14 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     (clip: Clip) => {
       if (!state || state.answer !== null || !state.question || state.speech.phase === 'checking') return;
       const { sessionId, userId, question } = state;
-      const mine = (latest: QuizState | null) => latest !== null && latest.sessionId === sessionId && latest.question?.id === question.id;
+      // Only an attempt still being checked on this card may land: a card
+      // answered meanwhile (show the answer, can't speak now) keeps its answer.
+      const mine = (latest: QuizState | null) =>
+        latest !== null &&
+        latest.sessionId === sessionId &&
+        latest.question?.id === question.id &&
+        latest.answer === null &&
+        latest.speech.phase === 'checking';
       setState((current) => (current ? { ...current, speech: { phase: 'checking' } } : current));
       void api
         .answerBySpeech(sessionId, { user_id: userId, question_id: question.id, mime_type: clip.mimeType, audio: clip.audio })
@@ -310,7 +259,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // appears as soon as the server answers (spec D8).
   const pass = useCallback(
     (kind: 'skip' | 'show_answer') => {
-      if (!state || state.answer !== null || !state.question) return;
+      if (!state || state.answer !== null || !state.question || state.speech.phase === 'checking') return;
       const { sessionId, userId, question } = state;
       setState((current) =>
         current ? { ...current, answer: { pass: kind }, speech: IDLE_ATTEMPT, advanceRequested: kind === 'skip' } : current,
@@ -325,7 +274,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   }, []);
 
   const stopSpeaking = useCallback((reason: 'chosen' | 'no_mic') => {
-    setState((current) => (current && current.speakingOff === null ? { ...current, speakingOff: reason, speech: IDLE_ATTEMPT } : current));
+    setState((current) => (current && current.speakingOff === null && current.speech.phase !== 'checking' ? { ...current, speakingOff: reason, speech: IDLE_ATTEMPT } : current));
   }, []);
 
   // Spec D8: with speaking off, a read-aloud card is passed without being shown.

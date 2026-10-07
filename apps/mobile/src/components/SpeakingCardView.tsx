@@ -35,11 +35,16 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
   const [recording, setRecording] = useState(false);
   const [left, setLeft] = useState(MAX_RECORDING_SECONDS);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // A start waits on the permission prompt: a second tap meanwhile is ignored.
+  const starting = useRef(false);
+  const mounted = useRef(true);
+  const answeredRef = useRef(false);
   // The timer's stop reads the latest callback, not the one from when it began.
   const onClipRef = useRef(onClip);
   onClipRef.current = onClip;
 
   const answered = answer !== null;
+  answeredRef.current = answered;
   const checking = speech.phase === 'checking';
   const notice = attemptNotice(speech);
   const read = question.type === 'read_aloud';
@@ -51,13 +56,22 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
   };
 
   // Leaving the card mid-recording drops the clip.
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
       clearTimer();
       void recorder.cancel();
-    },
-    [recorder],
-  );
+    };
+  }, [recorder]);
+
+  // Answered mid-recording (show the answer): the clip is no longer wanted.
+  useEffect(() => {
+    if (!answered) return;
+    clearTimer();
+    setRecording(false);
+    void recorder.cancel();
+  }, [answered, recorder]);
 
   async function stop() {
     clearTimer();
@@ -70,14 +84,22 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
   }
 
   async function onMic() {
-    if (answered || checking) return;
+    if (answered || checking || starting.current) return;
     if (recording) return stop();
     if (notice) onRetry();
+    starting.current = true;
     let started: 'recording' | 'denied';
     try {
       started = await recorder.start();
     } catch {
       // Could not begin: the card stays idle, ready for another try.
+      return;
+    } finally {
+      starting.current = false;
+    }
+    if (!mounted.current || answeredRef.current) {
+      // The card went away, or was answered, while the microphone opened.
+      void recorder.cancel();
       return;
     }
     if (started === 'denied') {
@@ -87,6 +109,7 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
     const startedAt = Date.now();
     setLeft(MAX_RECORDING_SECONDS);
     setRecording(true);
+    clearTimer();
     timer.current = setInterval(() => {
       const remaining = secondsLeft(startedAt, Date.now());
       setLeft(remaining);
@@ -182,11 +205,25 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
 
           <View style={answerStyles.actions}>
             {read ? null : (
-              <Pressable accessibilityRole="button" testID="speak-show-answer" hitSlop={8} onPress={() => onPass('show_answer')}>
+              <Pressable
+                accessibilityRole="button"
+                testID="speak-show-answer"
+                hitSlop={8}
+                disabled={checking}
+                onPress={() => onPass('show_answer')}
+                style={checking && styles.micBusy}
+              >
                 <Text style={answerStyles.showAnswer}>{strings.typedShowAnswer}</Text>
               </Pressable>
             )}
-            <Pressable accessibilityRole="button" testID="speak-cant-speak" hitSlop={8} onPress={() => onCantSpeak('chosen')}>
+            <Pressable
+              accessibilityRole="button"
+              testID="speak-cant-speak"
+              hitSlop={8}
+              disabled={checking}
+              onPress={() => onCantSpeak('chosen')}
+              style={checking && styles.micBusy}
+            >
               <Text style={answerStyles.showAnswer}>{strings.cantSpeak}</Text>
             </Pressable>
           </View>

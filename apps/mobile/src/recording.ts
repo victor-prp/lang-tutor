@@ -81,6 +81,8 @@ export function createRecorder(deps: RecorderDeps) {
     canRecord: async (): Promise<boolean> => canRecordWith(await deps.permission(), deps.platform),
 
     start: async (): Promise<'recording' | 'denied'> => {
+      // One engine at a time: a second start must not leave a microphone open.
+      if (engine) return 'recording';
       if (!(await deps.requestPermission())) return 'denied';
       if (ios) await deps.setRecordingMode(true);
       const next = deps.makeEngine(recordingOptions(deps.platform));
