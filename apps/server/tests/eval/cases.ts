@@ -1,7 +1,7 @@
-import type { LanguageCode, PartOfSpeech, TranslationKind } from '@lang-tutor/core/api';
+import type { LanguageCode, PartOfSpeech, SentenceTranslationQuestion, TranslationKind } from '@lang-tutor/core/api';
 
 import type { Task } from '../../src/domain/distractors';
-import type { MeaningJudgeContext } from '../../src/domain/judge';
+import type { JudgeContext, MeaningJudgeContext } from '../../src/domain/judge';
 import type { StoredSense } from '../../src/domain/translation';
 
 /**
@@ -1037,4 +1037,278 @@ export const JUDGE_CASES: JudgeCase[] = [
   judge('en', enBook, 'לבטל', 'wrong', 'related but different'),
   judge('en', { form: 'tulip', pos: 'noun', meaning: 'צבעוני', example: 'She planted a red tulip.', translation: 'היא שתלה צבעוני אדום.' }, 'פרח', 'wrong', 'too general'),
   judge('en', { form: 'window', pos: 'noun', meaning: 'חלון', example: 'Please close the window.', translation: 'בבקשה סגור את החלון.' }, 'כלב', 'wrong', 'unrelated'),
+
+  // Part A's deferred finding: the harder answers a learner really types.
+  // Niqqud on a form the rules do not already know (the stored meaning with points
+  // is the rule's, so these are other forms).
+  judge('it', itPrenotare, 'לְשַׁרְיֵן', 'exact', 'niqqud'),
+  judge('ru', ruGovorit, 'מְדַבֵּר', 'exact', 'niqqud'),
+  judge('en', enRun, 'רָץ', 'exact', 'niqqud'),
+  // ש and ו prefixes in front of the right meaning.
+  judge('it', { form: 'libro', pos: 'noun', meaning: 'ספר', example: 'Leggo un libro ogni settimana.', translation: 'אני קורא ספר כל שבוע.' }, 'וספר', 'exact', 'ו prefix'),
+  judge('ru', ruGovorit, 'שמדבר', 'exact', 'ש prefix'),
+  judge('en', enBuy, 'ולקנות', 'exact', 'ו and ל prefixes'),
+  // A near-synonym in another register is still the meaning.
+  judge('ru', ruSpeshit, 'להיחפז', 'exact', 'formal register'),
+  judge('ru', ruKrasivyj, 'יפהפה', 'exact', 'stronger register'),
+  // An answer in English is not an answer in Hebrew (spec D3).
+  judge('it', itParla, 'to speak', 'wrong', 'English answer'),
+  judge('ru', ruKniga, 'book', 'wrong', 'English answer'),
+  judge('en', enBuy, 'to buy', 'wrong', 'English answer'),
+  // The word typed back, untranslated.
+  judge('it', itParla, 'parla', 'wrong', 'the word typed back'),
+  judge('ru', ruKniga, 'книга', 'wrong', 'the word typed back'),
+  judge('en', enBook, 'book', 'wrong', 'the word typed back'),
+];
+
+/**
+ * Phase 27 Part B. The three tasks that write a sentence or wrong words for one,
+ * run as prepareSession runs them (several items to one call) and scored on what
+ * the card would need:
+ *
+ *  - gap: the wrong options of a saved example's blank. Tier 1 is validateDistractors
+ *    (three distinct non-empty options in the learned language, none the answer);
+ *    tier 2 is that none of `fits`, the words that would also fill the blank, is offered.
+ *  - sentence / translate: a new sentence. Tier 1 is that the item passes validation
+ *    (not degraded: a degrading prompt means a learner sees a typed translation
+ *    instead of the card); tier 2 is that no `offSense` word, one that only the
+ *    wrong sense of a polysemous word would bring, appears as a whole word in the
+ *    sentence or its translation.
+ */
+export type SentenceCaseItem = {
+  form: string;
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  /** The saved meaning, in Hebrew. */
+  translation: string;
+  example: string;
+  exampleTranslation: string;
+  /** Gap only: words that would also fit the blank and so must never be offered. */
+  fits?: string[];
+  /** Sentence and translate: words whose presence shows the wrong sense. */
+  offSense?: string[];
+  /** Sentences of earlier sessions: in the learned language for a sentence card,
+   *  in Hebrew for a translation card. */
+  avoidTarget?: string[];
+  avoidHebrew?: string[];
+};
+
+export type SentenceCase = {
+  label: string;
+  task: 'gap' | 'sentence' | 'translate';
+  from: LanguageCode;
+  items: SentenceCaseItem[];
+};
+
+const word = (
+  form: string,
+  lemma: string,
+  partOfSpeech: PartOfSpeech,
+  translation: string,
+  example: string,
+  exampleTranslation: string,
+  rest: Partial<SentenceCaseItem> = {},
+): SentenceCaseItem => ({ form, lemma, partOfSpeech, translation, example, exampleTranslation, ...rest });
+
+export const GAP_CASES: SentenceCase[] = [
+  {
+    label: 'gap it: a table could also be set, cleaned or reserved',
+    task: 'gap',
+    from: 'it',
+    items: [
+      word('prenotare', 'prenotare', 'verb', 'להזמין', 'Voglio prenotare un tavolo per due.', 'אני רוצה להזמין שולחן לשניים.', {
+        fits: ['riservare', 'apparecchiare', 'pulire', 'preparare', 'sistemare'],
+      }),
+      word('parla', 'parlare', 'verb', 'לדבר', 'Lei parla tre lingue.', 'היא מדברת בשלוש שפות.', {
+        fits: ['conosce', 'sa', 'studia', 'impara'],
+      }),
+      word('compro', 'comprare', 'verb', 'לקנות', 'Compro il pane ogni mattina.', 'אני קונה לחם כל בוקר.', {
+        fits: ['mangio', 'prendo', 'taglio', 'faccio', 'vendo', 'preparo'],
+      }),
+    ],
+  },
+  {
+    label: 'gap ru: a city has many good adjectives',
+    task: 'gap',
+    from: 'ru',
+    items: [
+      word('купить', 'купить', 'verb', 'לקנות', 'Я хочу купить хлеб.', 'אני רוצה לקנות לחם.', {
+        fits: ['съесть', 'взять', 'испечь', 'заказать', 'нарезать', 'приготовить'],
+      }),
+      word('красивый', 'красивый', 'adjective', 'יפה', 'Это очень красивый город.', 'זו עיר יפה מאוד.', {
+        fits: ['большой', 'старый', 'тихий', 'чистый', 'маленький', 'современный', 'древний'],
+      }),
+      word('лук', 'лук', 'noun', 'בצל', 'Я режу лук для супа.', 'אני חותך בצל למרק.', {
+        fits: ['морковь', 'картошку', 'капусту', 'мясо', 'хлеб', 'сыр', 'чеснок', 'овощи'],
+      }),
+    ],
+  },
+  {
+    // The brief's careless-word case: `I want to ___ a table` takes book, and clean fits too.
+    label: 'gap en: a table could also be cleaned, set or reserved',
+    task: 'gap',
+    from: 'en',
+    items: [
+      word('book', 'book', 'verb', 'להזמין', 'I want to book a table.', 'אני רוצה להזמין שולחן.', {
+        fits: ['clean', 'set', 'reserve', 'buy', 'wipe', 'paint', 'move', 'build'],
+      }),
+      word('begin', 'begin', 'verb', 'להתחיל', 'We begin at nine.', 'אנחנו מתחילים בתשע.', {
+        fits: ['start', 'meet', 'leave', 'eat', 'finish', 'close', 'open', 'arrive'],
+      }),
+      word('tulip', 'tulip', 'noun', 'צבעוני', 'She planted a red tulip.', 'היא שתלה צבעוני אדום.', {
+        fits: ['rose', 'flower', 'poppy', 'daisy', 'lily', 'geranium'],
+      }),
+    ],
+  },
+];
+
+/** Four words per language: two of several senses, one with sentences to avoid, one plain. */
+const SENTENCE_WORDS: Record<'it' | 'ru' | 'en', SentenceCaseItem[]> = {
+  it: [
+    word('pianta', 'pianta', 'noun', 'צמח', 'Questa pianta ha bisogno di luce.', 'הצמח הזה צריך אור.', {
+      offSense: ['mappa', 'cartina', 'piede', 'edificio', 'מפה', 'תוכנית', 'מפת'],
+    }),
+    word('campo', 'campo', 'noun', 'שדה', 'Il contadino lavora nel campo.', 'האיכר עובד בשדה.', {
+      offSense: ['tenda', 'campeggio', 'accampamento', 'מחנה', 'אוהל', 'קמפינג'],
+    }),
+    word('prenotare', 'prenotare', 'verb', 'להזמין', 'Voglio prenotare un tavolo per due.', 'אני רוצה להזמין שולחן לשניים.', {
+      avoidTarget: ['Devo prenotare un hotel per domani.'],
+      avoidHebrew: ['אני צריך להזמין מלון למחר.'],
+    }),
+    word('parla', 'parlare', 'verb', 'לדבר', 'Lei parla tre lingue.', 'היא מדברת בשלוש שפות.'),
+  ],
+  ru: [
+    word('ключ', 'ключ', 'noun', 'מפתח', 'Я потерял ключ от дома.', 'איבדתי את המפתח של הבית.', {
+      offSense: ['родник', 'источник', 'родника', 'источника', 'מעיין', 'מעיינות', 'скрипичный'],
+    }),
+    word('лук', 'лук', 'noun', 'בצל', 'Я режу лук для супа.', 'אני חותך בצל למרק.', {
+      offSense: ['стрела', 'стрелы', 'стрелять', 'лучник', 'קשת', 'חץ', 'חצים', 'לירות'],
+    }),
+    word('красивый', 'красивый', 'adjective', 'יפה', 'Это очень красивый город.', 'זו עיר יפה מאוד.', {
+      avoidTarget: ['Она очень красивая девушка.'],
+      avoidHebrew: ['היא ילדה יפה מאוד.'],
+    }),
+    word('говорит', 'говорить', 'verb', 'לדבר', 'Он говорит очень быстро.', 'הוא מדבר מהר מאוד.'),
+  ],
+  en: [
+    word('book', 'book', 'verb', 'להזמין', 'I want to book a table.', 'אני רוצה להזמין שולחן.', {
+      offSense: ['read', 'page', 'pages', 'novel', 'novels', 'library', 'ספר', 'ספרים', 'ספרייה'],
+    }),
+    word('run', 'run', 'verb', 'לנהל', 'She wants to run a small shop.', 'היא רוצה לנהל חנות קטנה.', {
+      offSense: ['fast', 'marathon', 'race', 'jog', 'jogging', 'לרוץ', 'רצה', 'רץ', 'מרתון', 'ריצה'],
+    }),
+    word('bank', 'bank', 'noun', 'גדה', 'We sat on the bank of the river.', 'ישבנו על גדת הנהר.', {
+      offSense: ['money', 'account', 'loan', 'cash', 'atm', 'בנק', 'כסף', 'חשבון', 'הלוואה'],
+    }),
+    word('begin', 'begin', 'verb', 'להתחיל', 'We begin at nine.', 'אנחנו מתחילים בתשע.', {
+      avoidTarget: ['The class begins at ten.'],
+      avoidHebrew: ['השיעור מתחיל בעשר.'],
+    }),
+  ],
+};
+
+const sentenceCases = (task: 'sentence' | 'translate'): SentenceCase[] =>
+  (['it', 'ru', 'en'] as const).map((from) => ({
+    label: `${task} ${from}: ${SENTENCE_WORDS[from].map((item) => item.form).join(', ')}`,
+    task,
+    from,
+    items: SENTENCE_WORDS[from],
+  }));
+
+export const SENTENCE_CASES: SentenceCase[] = sentenceCases('sentence');
+export const TRANSLATE_CASES: SentenceCase[] = sentenceCases('translate');
+
+/**
+ * Phase 27 Part B (spec D4). The translation judge: a Hebrew sentence, one good
+ * reference, and an answer that is not the reference (the rule decides that one
+ * without a call), with the verdict a careful teacher would give: exact is
+ * "right", near_miss is "misspelled", alternative is "other_word".
+ */
+export type TranslationJudgeCase = {
+  label: string;
+  question: SentenceTranslationQuestion;
+  context: JudgeContext;
+  answer: string;
+  expect: 'exact' | 'near_miss' | 'alternative' | 'wrong';
+};
+
+type Sentence = { hebrew: string; reference: string; gap: string };
+
+const tjudge = (
+  language: 'it' | 'ru' | 'en',
+  practised: { form: string; lemma?: string; pos: PartOfSpeech; meaning: string },
+  sentence: Sentence,
+  answer: string,
+  expect: TranslationJudgeCase['expect'],
+  what: string,
+): TranslationJudgeCase => {
+  const start = sentence.reference.indexOf(sentence.gap);
+  return {
+    label: `tjudge ${language} ${what}: ${answer}`,
+    question: {
+      id: 'q',
+      type: 'sentence_translation',
+      vocab_term_id: 'v',
+      question: sentence.hebrew,
+      meaning: practised.meaning,
+      sentence: sentence.reference,
+      gap: { start, end: start + sentence.gap.length },
+      answer: sentence.gap,
+    },
+    context: {
+      language,
+      explanation: 'he',
+      form: practised.form,
+      lemma: practised.lemma ?? practised.form,
+      partOfSpeech: practised.pos,
+      meaning: practised.meaning,
+      example: null,
+      exampleTranslation: null,
+    },
+    answer,
+    expect,
+  };
+};
+
+const itTable: Sentence = { hebrew: 'אני רוצה להזמין שולחן לשניים.', reference: 'Voglio prenotare un tavolo per due.', gap: 'prenotare' };
+const itYesterday: Sentence = { hebrew: 'הוא הזמין אתמול שולחן לשניים.', reference: 'Ieri ha prenotato un tavolo per due.', gap: 'prenotato' };
+const itBook = { form: 'prenotare', pos: 'verb' as const, meaning: 'להזמין' };
+
+const ruCity: Sentence = { hebrew: 'העיר הזאת יפה מאוד.', reference: 'Этот город очень красивый.', gap: 'красивый' };
+const ruBeautiful = { form: 'красивый', pos: 'adjective' as const, meaning: 'יפה' };
+
+const enTable: Sentence = { hebrew: 'אני רוצה להזמין שולחן לשניים.', reference: 'I want to book a table for two.', gap: 'book' };
+const enYesterday: Sentence = { hebrew: 'הזמנתי אתמול שולחן לשניים.', reference: 'I booked a table for two yesterday.', gap: 'booked' };
+const enBookWord = { form: 'book', pos: 'verb' as const, meaning: 'להזמין' };
+
+export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
+  tjudge('it', itBook, itTable, 'Vorrei prenotare un tavolo per due persone.', 'exact', 'paraphrase'),
+  tjudge('it', itBook, itTable, 'Desidero prenotare un tavolo per due.', 'exact', 'paraphrase'),
+  tjudge('it', itBook, itYesterday, 'Ieri prenotò un tavolo per due.', 'exact', 'other tense of the word'),
+  tjudge('it', itBook, itTable, 'Voglio prenottare un tavolo per due.', 'near_miss', 'misspelled word'),
+  tjudge('it', itBook, itTable, 'Voglio riservare un tavolo per due.', 'alternative', 'other word'),
+  tjudge('it', itBook, itTable, 'Voglio prenotato un tavolo per due.', 'wrong', 'wrong form of the word'),
+  tjudge('it', itBook, itTable, 'Voglio prenotare una camera per tre.', 'wrong', 'missed meaning'),
+  tjudge('it', itBook, itTable, 'Non capisco.', 'wrong', 'not a translation'),
+  tjudge('it', itBook, itTable, 'Voglio prenotare un tavolo per dui.', 'exact', 'slip in another word'),
+
+  tjudge('ru', ruBeautiful, ruCity, 'Этот город чрезвычайно красивый.', 'exact', 'paraphrase'),
+  tjudge('ru', ruBeautiful, ruCity, 'Этот город очень, очень красивый.', 'exact', 'paraphrase'),
+  tjudge('ru', ruBeautiful, ruCity, 'Этот город очень красив.', 'exact', 'short form of the word'),
+  tjudge('ru', ruBeautiful, ruCity, 'Этот город очень красевый.', 'near_miss', 'misspelled word'),
+  tjudge('ru', ruBeautiful, ruCity, 'Этот город очень прекрасный.', 'alternative', 'other word'),
+  tjudge('ru', ruBeautiful, ruCity, 'Этот город очень красивая.', 'wrong', 'wrong form of the word'),
+  tjudge('ru', ruBeautiful, ruCity, 'Этот город очень большой.', 'wrong', 'missed meaning'),
+  tjudge('ru', ruBeautiful, ruCity, 'красивый', 'wrong', 'not a sentence'),
+  tjudge('ru', ruBeautiful, ruCity, 'Этот горот очень красивый.', 'exact', 'slip in another word'),
+
+  tjudge('en', enBookWord, enTable, "I'd like to book a table for two, please.", 'exact', 'paraphrase'),
+  tjudge('en', enBookWord, enTable, 'I want to book a table for two people.', 'exact', 'paraphrase'),
+  tjudge('en', enBookWord, enYesterday, 'I did book a table for two yesterday.', 'exact', 'other form of the word'),
+  tjudge('en', enBookWord, enTable, 'I want to bok a table for two.', 'near_miss', 'misspelled word'),
+  tjudge('en', enBookWord, enTable, 'I want to reserve a table for two.', 'alternative', 'other word'),
+  tjudge('en', enBookWord, enTable, 'I want to booking a table for two.', 'wrong', 'wrong form of the word'),
+  tjudge('en', enBookWord, enTable, 'I want to book a table for four.', 'wrong', 'missed meaning'),
+  tjudge('en', enBookWord, enTable, 'table', 'wrong', 'not a sentence'),
+  tjudge('en', enBookWord, enTable, 'I want to book a tabel for two.', 'exact', 'slip in another word'),
 ];

@@ -94,11 +94,11 @@ export function buildTranslationJudgePrompt(question: SentenceTranslationQuestio
   const system = [
     `Your task: ${JUDGE_MARKER}. A ${source}-speaking learner of ${name} was shown a ${source} sentence and typed its translation into ${name}.`,
     'The word practised is word, in the sense of meaning. reference_translation is one good translation, not the only one.',
-    `Judge on conveying the ${source} sentence and on the practised word, in any form the sentence needs; ignore slips in other words, and small grammar slips that do not touch the practised word.`,
+    `Judge on conveying the ${source} sentence and on the practised word, in any form the sentence needs; ignore slips in other words, and small grammar slips that do not touch the practised word. Any other detail of the sentence changed (a number, a person, a tense, an object, a quality) means it is not conveyed.`,
     'Return JSON only, matching the supplied schema, with one field, verdict:',
     '- "right": the answer conveys the sentence and uses the practised word in a form the sentence needs.',
-    '- "misspelled": as "right", but the practised word has a one-letter or accent slip.',
-    '- "other_word": the answer conveys the sentence but uses another word instead of it.',
+    '- "misspelled": as "right", but the practised word itself has a one-letter or accent slip. A slip in any other word is still "right".',
+    '- "other_word": the answer conveys the sentence but uses another word instead of it, one that keeps the meaning. Another word that changes the meaning is "wrong".',
     '- "wrong": the meaning is missed, the answer is not a sentence, or the practised word is left out or used wrongly, including the wrong form.',
   ].join('\n');
   const user = JSON.stringify({

@@ -23,24 +23,30 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
-import { distractorItems, validateDistractors, type Task } from '../../src/domain/distractors';
+import { comparable, distractorItems, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, type LanguageCode } from '../../src/domain/languages';
 import { createGeminiClient, createGeminiTranscriber } from '../../src/providers/gemini';
 import { judgeSpoken } from '@lang-tutor/core/domain';
 import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askDistractors, askJudge, askModel, askRendering, askTranscription, type ModelAnswer } from './askModel';
+import { askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
   CASES,
   DISTRACTOR_CASES,
+  GAP_CASES,
   JUDGE_CASES,
   RENDERING_CASES,
+  SENTENCE_CASES,
   TRANSCRIPTION_CASES,
+  TRANSLATE_CASES,
+  TRANSLATION_JUDGE_CASES,
   type DistractorCase,
   type EvalCase,
   type JudgeCase,
   type RenderingCase,
+  type SentenceCase,
   type TranscriptionCase,
+  type TranslationJudgeCase,
 } from './cases';
 
 const TIER2_THRESHOLD = 0.85;
@@ -77,6 +83,8 @@ type Row = {
   heard?: string;
   /** Set on a judge row: the verdict received. */
   verdict?: string;
+  /** Set on a gap, sentence or translate row: what the model wrote, one line per item. */
+  written?: string[];
   error?: string;
 };
 
@@ -557,6 +565,98 @@ function distractorTier2(kase: DistractorCase, answer: LlmDistractors): Check[] 
   });
 }
 
+/** Phase 27 Part B. The items as prepareSession builds them for a gap, sentence or
+ *  translate case: each with its saved example, and the sentences to avoid as the
+ *  service reads them from the last sessions. */
+function sentenceItemsOf(kase: SentenceCase) {
+  const recent: RecentSentences = new Map(
+    kase.items.map((item, index) => [`s${index}`, { cloze: item.avoidTarget ?? [], translate: item.avoidHebrew ?? [] }]),
+  );
+  return distractorItems(
+    kase.items.map((item, index) => ({
+      senseId: `s${index}`,
+      variantId: `v${index}`,
+      lexemeId: `l${index}`,
+      form: item.form,
+      lemma: item.lemma,
+      partOfSpeech: item.partOfSpeech,
+      translation: item.translation,
+      example: item.example,
+      exampleTranslation: item.exampleTranslation,
+    })),
+    kase.items.map(() => kase.task),
+    recent,
+  );
+}
+
+/** Whole words, in any script: letters with their points, split on everything else. */
+const wordsOf = (text: string): Set<string> =>
+  new Set(text.toLowerCase().split(/[^\p{L}\p{M}]+/u).filter((token) => token !== ''));
+
+function sentenceTier1(kase: SentenceCase, answer: LlmDistractors): Check[] {
+  const items = sentenceItemsOf(kase);
+  const verdict = validateDistractors(items, answer, 'he', [], kase.from as LanguageCode);
+  if (!verdict.ok) return [{ name: 'every item answered as its task asks', ok: false, detail: verdict.reason }];
+  if (kase.task === 'gap') {
+    return [
+      { name: 'every item answered as its task asks', ok: true },
+      ...kase.items.map((item, index): Check => {
+        const options = answer.items.find((answered) => answered.key === items[index].key)?.distractors ?? [];
+        return {
+          name: `${item.form}: every wrong option is in ${kase.from} script`,
+          ok: options.every((text) => isInScript(text, kase.from)),
+          detail: options.join(' | '),
+        };
+      }),
+    ];
+  }
+  // A degraded item is what a learner would see as a typed translation instead.
+  return kase.items.map((item, index): Check => {
+    const generated = verdict.byKey.get(items[index].key);
+    const degraded = generated ? generated.degraded : 'no answer';
+    return { name: `${item.form}: the ${kase.task} card is usable`, ok: degraded === null, detail: degraded ?? undefined };
+  });
+}
+
+function sentenceTier2(kase: SentenceCase, answer: LlmDistractors): Check[] {
+  const items = sentenceItemsOf(kase);
+  return kase.items.flatMap((item, index): Check[] => {
+    const got = answer.items.find((answered) => answered.key === items[index].key);
+    if (kase.task === 'gap') {
+      const offered = got?.distractors ?? [];
+      const fits = (item.fits ?? []).map(comparable);
+      const offenders = offered.filter((text) => fits.includes(comparable(text)));
+      return [
+        {
+          name: `${item.form}: no wrong option also fits the blank`,
+          ok: offenders.length === 0,
+          detail: offenders.length ? offenders.join(', ') : offered.join(' | '),
+        },
+      ];
+    }
+    if (!item.offSense?.length) return [];
+    const seen = new Set([...wordsOf(got?.sentence ?? ''), ...wordsOf(got?.translation ?? '')]);
+    const offenders = item.offSense.filter((text) => seen.has(text.toLowerCase()));
+    return [
+      {
+        name: `${item.form}: no word of another sense`,
+        ok: offenders.length === 0,
+        detail: offenders.length ? offenders.join(', ') : `${got?.sentence} / ${got?.translation}`,
+      },
+    ];
+  });
+}
+
+const writtenBy = (kase: SentenceCase, answer: LlmDistractors): string[] => {
+  const items = sentenceItemsOf(kase);
+  return kase.items.map((item, index) => {
+    const got = answer.items.find((answered) => answered.key === items[index].key);
+    return kase.task === 'gap'
+      ? `${item.form}: ${(got?.distractors ?? []).join(' / ')}`
+      : `${item.form}: ${got?.sentence ?? '(none)'} [${got?.gap ?? ''}] = ${got?.translation ?? '(none)'}${got?.alternatives?.length ? ` +${got.alternatives.join('/')}` : ''}`;
+  });
+};
+
 async function main(): Promise<void> {
   // Exits non-zero with a clear message rather than skipping quietly: a green
   // "0 cases ran" is the one outcome worse than a red suite.
@@ -587,8 +687,17 @@ async function main(): Promise<void> {
     matches(kase.label, kase.target, kase.file),
   );
   const judgeCases = JUDGE_CASES.filter((kase) => matches(kase.label, kase.answer, kase.context.form));
+  // The Part B groups match on their label alone: a filter such as "sentence" or
+  // "gap" must select a group, not every case whose word happens to contain it.
+  const gapCases = GAP_CASES.filter((kase) => matches(kase.label));
+  const sentenceCases = SENTENCE_CASES.filter((kase) => matches(kase.label));
+  const translateCases = TRANSLATE_CASES.filter((kase) => matches(kase.label));
+  const tjudgeCases = TRANSLATION_JUDGE_CASES.filter((kase) => matches(kase.label));
   if (filter) console.log(`filter "${filter}"`);
-  if (cases.length + renderingCases.length + distractorCases.length + transcriptionCases.length + judgeCases.length === 0) {
+  if (
+    cases.length + renderingCases.length + distractorCases.length + transcriptionCases.length + judgeCases.length +
+      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length === 0
+  ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
 
@@ -741,18 +850,71 @@ async function main(): Promise<void> {
     }
   };
 
+  const scoreSentences = async (kase: SentenceCase): Promise<Row> => {
+    const text = kase.items.map((item) => item.form).join(', ');
+    try {
+      const answer = await askDistractors(llm, { from: kase.from, to: 'he', items: sentenceItemsOf(kase) });
+      return {
+        label: kase.label,
+        text,
+        tier1: sentenceTier1(kase, answer),
+        tier2: sentenceTier2(kase, answer),
+        written: writtenBy(kase, answer),
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  const scoreTranslationJudge = async (kase: TranslationJudgeCase): Promise<Row> => {
+    try {
+      const verdict = await askTranslationJudge(judgeLlm, kase);
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the answer parses', ok: verdict !== null, detail: verdict === null ? 'unreadable' : undefined }],
+        tier2: [{ name: `judged ${kase.expect}`, ok: verdict === kase.expect, detail: `verdict ${verdict ?? 'none'}` }],
+        verdict: verdict ?? undefined,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   // Every call site of the provider, scored in one run and one scorecard. They
   // share the concurrency budget rather than each taking their own: the quota
   // they compete for is the same one.
   const started = Date.now();
-  const [translationRows, renderingRows, distractorRows, transcriptionRows, judgeRows] = await Promise.all([
+  const [
+    translationRows, renderingRows, distractorRows, transcriptionRows, judgeRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows,
+  ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
     mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
     mapWithConcurrency(transcriptionCases, CONCURRENCY, scoreTranscription),
     mapWithConcurrency(judgeCases, CONCURRENCY, scoreJudge),
+    mapWithConcurrency(gapCases, CONCURRENCY, scoreSentences),
+    mapWithConcurrency(sentenceCases, CONCURRENCY, scoreSentences),
+    mapWithConcurrency(translateCases, CONCURRENCY, scoreSentences),
+    mapWithConcurrency(tjudgeCases, CONCURRENCY, scoreTranslationJudge),
   ]);
-  const rows = [...translationRows, ...renderingRows, ...distractorRows, ...transcriptionRows, ...judgeRows];
+  const rows = [
+    ...translationRows, ...renderingRows, ...distractorRows, ...transcriptionRows, ...judgeRows,
+    ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows,
+  ];
   const elapsedMs = Date.now() - started;
 
   // Scorecard. Every case prints its actual output, so a drop is diagnosable
@@ -766,6 +928,13 @@ async function main(): Promise<void> {
   let speechTotal = 0;
   let judgePassed = 0;
   let judgeTotal = 0;
+  // Each Part B group has a line of its own for the same reason: a good score in
+  // one must not hide a drop in another.
+  const groups = [
+    { name: 'gap', rows: gapRows, passed: 0, total: 0 },
+    { name: 'sentence', rows: [...sentenceRows, ...translateRows], passed: 0, total: 0 },
+    { name: 'translation judge', rows: tjudgeRows, passed: 0, total: 0 },
+  ];
 
   for (const row of rows) {
     const t1Bad = row.tier1.filter((check) => !check.ok);
@@ -778,6 +947,10 @@ async function main(): Promise<void> {
     } else if (judgeRows.includes(row)) {
       judgePassed += passed;
       judgeTotal += row.tier2.length;
+    } else if (groups.some((group) => group.rows.includes(row))) {
+      const group = groups.find((candidate) => candidate.rows.includes(row))!;
+      group.passed += passed;
+      group.total += row.tier2.length;
     } else {
       tier2Passed += passed;
       tier2Total += row.tier2.length;
@@ -802,6 +975,7 @@ async function main(): Promise<void> {
       }
     }
     if (row.verdict !== undefined) console.log(`       verdict=${row.verdict}`);
+    for (const line of row.written ?? []) console.log(`       ${line}`);
     if (row.heard !== undefined) console.log(`       heard=${row.heard}`);
     if (row.rendering) {
       console.log(
@@ -829,6 +1003,7 @@ async function main(): Promise<void> {
   const score = tier2Total === 0 ? 0 : tier2Passed / tier2Total;
   const transcriptionScore = speechTotal === 0 ? 0 : speechPassed / speechTotal;
   const judgeScore = judgeTotal === 0 ? 0 : judgePassed / judgeTotal;
+  const groupScore = (group: { passed: number; total: number }) => (group.total === 0 ? 0 : group.passed / group.total);
   console.log(
     `\ntier 1: ${tier1Failures} failure(s) (must be 0)\n` +
       `tier 2: ${tier2Passed}/${tier2Total} = ${(score * 100).toFixed(1)}% ` +
@@ -837,7 +1012,15 @@ async function main(): Promise<void> {
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
       `judge tier 2: ${judgePassed}/${judgeTotal} = ${(judgeScore * 100).toFixed(1)}% ` +
       `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n` +
-      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ${judgeCases.length} judge cases in ` +
+      groups
+        .map(
+          (group) =>
+            `${group.name} tier 2: ${group.passed}/${group.total} = ${((groupScore(group)) * 100).toFixed(1)}% ` +
+            `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n`,
+        )
+        .join('') +
+      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ${judgeCases.length} judge + ` +
+      `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -847,7 +1030,21 @@ async function main(): Promise<void> {
   const dir = join(__dirname, '.results');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  writeFileSync(file, JSON.stringify({ model: gemini.model, score, transcriptionScore, judgeScore, rows }, null, 2));
+  writeFileSync(file, JSON.stringify(
+      {
+        model: gemini.model,
+        score,
+        transcriptionScore,
+        judgeScore,
+        gapScore: groupScore(groups[0]),
+        sentenceScore: groupScore(groups[1]),
+        translationJudgeScore: groupScore(groups[2]),
+        rows,
+      },
+      null,
+      2,
+    ),
+  );
   console.log(`report: ${file}`);
 
   // A group with no checks (a filtered run) has nothing to fail on.
@@ -856,7 +1053,8 @@ async function main(): Promise<void> {
     tier1Failures > 0 ||
     belowThreshold(tier2Total, score) ||
     belowThreshold(speechTotal, transcriptionScore) ||
-    belowThreshold(judgeTotal, judgeScore)
+    belowThreshold(judgeTotal, judgeScore) ||
+    groups.some((group) => belowThreshold(group.total, groupScore(group)))
   ) {
     process.exit(1);
   }
