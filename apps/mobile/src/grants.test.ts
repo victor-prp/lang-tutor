@@ -79,6 +79,7 @@ describe('normalizeUsername (Review Focus 2)', () => {
 describe('inviteErrorMessage', () => {
   it.each([
     [new ApiError(404, 'user not found'), strings.inviteUserNotFound],
+    [new ApiError(400, 'invalid'), strings.inviteUserNotFound],
     [new ApiError(409, 'not_learning'), strings.inviteNotLearning('victor', 'it')],
     [new ApiError(409, 'own_list'), strings.inviteOwnList],
     [new ApiError(409, 'grant_exists'), strings.inviteExists],

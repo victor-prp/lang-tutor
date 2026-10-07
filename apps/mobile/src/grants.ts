@@ -30,7 +30,8 @@ export const normalizeUsername = (typed: string): string => typed.trim().toLower
 
 export function inviteErrorMessage(error: unknown, username: string, language: string): string {
   if (error instanceof ApiError) {
-    if (error.status === 404) return strings.inviteUserNotFound;
+    // 400: the name fails the server's username rule, so no such user can exist.
+    if (error.status === 404 || error.status === 400) return strings.inviteUserNotFound;
     if (error.code === 'not_learning') return strings.inviteNotLearning(username, language);
     if (error.code === 'own_list') return strings.inviteOwnList;
     if (error.code === 'grant_exists') return strings.inviteExists;

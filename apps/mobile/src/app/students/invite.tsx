@@ -25,7 +25,9 @@ export default function InviteStudentScreen() {
     setError(null);
     try {
       await invite(username, selected);
-      router.dismissTo('/');
+      // From /enroll the stack is [enroll, invite]: leave it whole, so home is the root.
+      if (router.canDismiss()) router.dismissAll();
+      router.replace('/');
     } catch (failure) {
       setError(inviteErrorMessage(failure, normalizeUsername(username), selected));
     } finally {
