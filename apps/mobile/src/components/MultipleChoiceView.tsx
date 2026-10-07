@@ -1,14 +1,16 @@
+import type { MatchingQuestion } from '@lang-tutor/core/api';
 import type { ChoiceQuestion } from '@lang-tutor/core/domain';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { ListenPrompt } from '@/components/ListenPrompt';
 import { OptionButton, type OptionVisualState } from '@/components/OptionButton';
 import { SpeakButton } from '@/components/SpeakButton';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 type Props = {
-  question: ChoiceQuestion;
+  question: Exclude<ChoiceQuestion, MatchingQuestion>;
   /** What the card asks, in the learner's language. */
   instruction: string;
   /** The enrollment's target language. Voice phase: today's card speaks its
@@ -23,6 +25,7 @@ type Props = {
 // directions differ (spec D10).
 export function MultipleChoiceView({ question, instruction, language, selectedOption, onSelect }: Props) {
   const reversed = question.type === 'reverse_choice';
+  const listening = question.type === 'listen_choice';
   const partOfSpeech = reversed ? strings.partOfSpeech(question.part_of_speech) : undefined;
   // All four buttons match the tallest, so a wrapped phrase does not leave the
   // set visually ragged. Reset on every new question.
@@ -44,12 +47,16 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
   return (
     <View style={styles.container}>
       <Text style={styles.instruction}>{instruction}</Text>
-      <View style={styles.promptRow}>
-        <Text style={[styles.prompt, { writingDirection: reversed ? 'rtl' : 'ltr' }]} testID="question-prompt">
-          {question.question}
-        </Text>
-        {reversed ? null : <SpeakButton text={question.question} language={language} testID="speak-prompt" />}
-      </View>
+      {listening ? (
+        <ListenPrompt questionId={question.id} text={question.question} language={language} answered={answered} />
+      ) : (
+        <View style={styles.promptRow}>
+          <Text style={[styles.prompt, { writingDirection: reversed ? 'rtl' : 'ltr' }]} testID="question-prompt">
+            {question.question}
+          </Text>
+          {reversed ? null : <SpeakButton text={question.question} language={language} testID="speak-prompt" />}
+        </View>
+      )}
       {partOfSpeech ? (
         <Text style={styles.partOfSpeech} testID="question-part-of-speech">
           {partOfSpeech}

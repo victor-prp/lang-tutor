@@ -1,4 +1,4 @@
-import type { MissedQuestion, Question, Score, SessionProgressItem } from '@lang-tutor/core/api';
+import type { MissedQuestion, NextStepResponse, Question, Score, SessionProgressItem } from '@lang-tutor/core/api';
 import { SESSION_LENGTH, type AnswerInput } from '@lang-tutor/core/domain';
 import { router } from 'expo-router';
 import {
@@ -15,6 +15,7 @@ import { Alert } from 'react-native';
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import type { CardAnswer } from '@/feedback';
 import { strings } from '@/strings';
 
 export type SessionValue = {
@@ -23,7 +24,7 @@ export type SessionValue = {
   position: number;
   total: number;
   /** Phase 23. The answer to the card on screen: an option or a typed text. */
-  answer: AnswerInput | null;
+  answer: CardAnswer | null;
   /** The chosen option, for a choice card; null otherwise. */
   selectedOption: number | null;
   answered: boolean;
@@ -40,6 +41,8 @@ export type SessionValue = {
   select: (optionIndex: number) => void;
   /** Phase 23. Answers a typed card. An empty text is "show me the answer". */
   submitText: (text: string) => void;
+  /** Phase 24. Answers a board: each word's first-tried meaning, in board order. */
+  submitBoard: (firstAttempts: number[]) => void;
   next: () => void;
 };
 
@@ -56,7 +59,7 @@ type QuizState = {
   question: Question | undefined;
   position: number;
   total: number;
-  answer: AnswerInput | null;
+  answer: CardAnswer | null;
   complete: boolean;
   correctCount: number;
   missedQuestions: MissedQuestion[];
@@ -180,6 +183,32 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     [api],
   );
 
+  // What a next-step response becomes once it lands: queued for Continue, or
+  // applied at once when Continue was already tapped. Shared by a single
+  // answer and a board's last one.
+  const queueResponse = useCallback((sessionId: string, call: Promise<NextStepResponse>) => {
+    void call
+      .then((response) => {
+        const queued: Queued = response.complete
+          ? {
+              complete: true,
+              score: response.score,
+              missedQuestions: response.missed_questions,
+              progress: response.progress,
+            }
+          : { complete: false, question: response.question, position: response.position.position };
+        setState((latest) => {
+          if (!latest || latest.sessionId !== sessionId) return latest;
+          return latest.advanceRequested ? applyQueued(latest, queued) : { ...latest, queued };
+        });
+      })
+      .catch(() => {
+        // The session may have been abandoned while this was in flight; only
+        // the session it belongs to may alert. stateRef, not the stale closure.
+        if (stateRef.current?.sessionId === sessionId) handleApiFailure();
+      });
+  }, []);
+
   // Reads `state` directly (and depends on it) rather than going through
   // setState's updater-function form, because the updater form is invoked
   // twice by React Strict Mode to catch exactly the kind of impurity that a
@@ -199,36 +228,37 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       // the moment this returns (feedbackFor runs the server's own evaluate),
       // so this call only has to register the answer server-side and fetch
       // what's next before Continue is tapped.
-      void api.nextStep(sessionId, { user_id: userId, question_id: question.id, ...input })
-        .then((response) => {
-          const queued: Queued = response.complete
-            ? {
-                complete: true,
-                score: response.score,
-                missedQuestions: response.missed_questions,
-                progress: response.progress,
-              }
-            : { complete: false, question: response.question, position: response.position.position };
-          setState((latest) => {
-            if (!latest || latest.sessionId !== sessionId) return latest;
-            return latest.advanceRequested ? applyQueued(latest, queued) : { ...latest, queued };
-          });
-        })
-        .catch(() => {
-          // Guarded the same way the .then() above is: if the learner has
-          // since abandoned this session (e.g. backed out and started a new
-          // one) while this call was in flight, its rejection must not
-          // alert-and-redirect-home over top of a perfectly healthy new
-          // session. Reads stateRef rather than `state` because this runs
-          // after the async gap, when the closure's `state` is stale.
-          if (stateRef.current?.sessionId === sessionId) handleApiFailure();
-        });
+      queueResponse(sessionId, api.nextStep(sessionId, { user_id: userId, question_id: question.id, ...input }));
     },
-    [state, api],
+    [state, api, queueResponse],
   );
 
   const select = useCallback((optionIndex: number) => answerWith({ option_index: optionIndex }), [answerWith]);
   const submitText = useCallback((text: string) => answerWith({ text }), [answerWith]);
+
+  // Phase 24 (spec D10). A board's words are separate questions: their answers
+  // go in board order, one call after another, and only the last response is
+  // queued — the ones between are the board's own next words.
+  const submitBoard = useCallback(
+    (firstAttempts: number[]) => {
+      if (!state || state.answer !== null || state.question?.type !== 'matching') return;
+      const { sessionId, userId, question } = state;
+      const ids = question.board.question_ids.slice(question.board.question_ids.indexOf(question.id));
+      setState((current) => (current ? { ...current, answer: { board: firstAttempts } } : current));
+      queueResponse(
+        sessionId,
+        (async () => {
+          let response: NextStepResponse | undefined;
+          for (const [index, id] of ids.entries()) {
+            response = await api.nextStep(sessionId, { user_id: userId, question_id: id, option_index: firstAttempts[index] });
+          }
+          if (!response) throw new Error('a board with no words to answer');
+          return response;
+        })(),
+      );
+    },
+    [state, api, queueResponse],
+  );
 
   const next = useCallback(() => {
     setState((current) => {
@@ -257,6 +287,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         enter,
         select,
         submitText,
+        submitBoard,
         next,
       };
     }
@@ -276,9 +307,10 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       enter,
       select,
       submitText,
+      submitBoard,
       next,
     };
-  }, [state, enter, select, submitText, next]);
+  }, [state, enter, select, submitText, submitBoard, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

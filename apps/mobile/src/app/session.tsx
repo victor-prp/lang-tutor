@@ -5,6 +5,8 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FeedbackBanner } from '@/components/FeedbackBanner';
+import { LetterTilesView } from '@/components/LetterTilesView';
+import { MatchingBoardView } from '@/components/MatchingBoardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
 import { ProgressBar } from '@/components/ProgressBar';
 import { TypedAnswerView } from '@/components/TypedAnswerView';
@@ -47,9 +49,50 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionTyped(language)}
+          language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
           onSubmit={session.submitText}
+        />
+      );
+    case 'listen_choice':
+      return (
+        <MultipleChoiceView
+          question={question}
+          instruction={strings.questionInstructionListen}
+          language={language}
+          selectedOption={session.selectedOption}
+          onSelect={session.select}
+        />
+      );
+    case 'dictation':
+      return (
+        <TypedAnswerView
+          question={question}
+          instruction={strings.questionInstructionDictation(language)}
+          language={language}
+          answered={session.answered}
+          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          onSubmit={session.submitText}
+        />
+      );
+    case 'letter_tiles':
+      return (
+        <LetterTilesView
+          question={question}
+          instruction={strings.questionInstructionTiles(language)}
+          answered={session.answered}
+          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          onSubmit={session.submitText}
+        />
+      );
+    case 'matching':
+      return (
+        <MatchingBoardView
+          question={question}
+          instruction={strings.questionInstructionMatching}
+          answered={session.answered}
+          onComplete={session.submitBoard}
         />
       );
     default: {
