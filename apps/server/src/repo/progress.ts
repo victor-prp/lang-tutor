@@ -4,8 +4,17 @@ import { sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { sessionProgress, type QuestionOption } from '../db/schema';
-import type { AnsweredQuestion, ProgressRow, SnapshotRead, SnapshotRow } from '../domain/progress';
+import type {
+  AnsweredQuestion,
+  ChoiceAnswerType,
+  ProgressRow,
+  SnapshotRead,
+  SnapshotRow,
+  TextAnswerType,
+} from '../domain/progress';
 import { canonicalOptions } from './questions';
+
+const TEXT_TYPES: ReadonlySet<string> = new Set(['typed_translation', 'dictation', 'letter_tiles']);
 
 /** A session's answers as the rule reads them. */
 export type SessionEvidence = {
@@ -60,13 +69,13 @@ export function createProgressRepo(tx: Tx) {
         day: first.day,
         lastAnsweredAt: first.last_answered_at,
         answers: rows.rows.map((row): AnsweredQuestion => {
-          // Phase 23. A typed answer carries the verdict it was shown.
-          if (row.type === 'typed_translation') {
-            return { senseId: row.sense_id, type: 'typed_translation', verdict: row.verdict as TypedVerdict };
+          // Phase 23 and 24. A text answer carries the verdict it was shown.
+          if (TEXT_TYPES.has(row.type)) {
+            return { senseId: row.sense_id, type: row.type as TextAnswerType, verdict: row.verdict as TypedVerdict };
           }
           return {
             senseId: row.sense_id,
-            type: row.type as 'multiple_choice' | 'reverse_choice',
+            type: row.type as ChoiceAnswerType,
             // selected_option_position is canonical (sessions.insertAnswer), and
             // question_options_valid makes positions 0..n-1.
             correct: canonicalOptions(row.options!)[row.selected_option_position!].is_correct,

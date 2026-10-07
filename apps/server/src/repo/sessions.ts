@@ -14,7 +14,7 @@ import {
 } from '../db/schema';
 import { SessionOpen } from '../errors';
 import { isUniqueViolation } from './pgErrors';
-import { canonicalOptions, questionColumns, questionFrom } from './questions';
+import { canonicalOptions, questionColumns, questionFrom, withBoards } from './questions';
 
 // `sessions.id` is a `uuid` column: a malformed value makes Postgres raise
 // 22P02 (invalid input syntax for type uuid) before a WHERE clause can even
@@ -46,7 +46,7 @@ export function createSessionRepo(tx: Tx) {
    * `picked` has its options already shuffled (`shuffleOptions`). Each option's
    * text is mapped back to its canonical position to build `option_order` —
    * unambiguous because `question_options_valid` guarantees distinct texts
-   * within a question. A typed card has no options, so its order is `{}`.
+   * within a question. A text card (typed, dictation, tiles) has no options, so its order is `{}`.
    */
   async function insertSessionQuestions(sessionId: string, picked: Question[]): Promise<void> {
     const rows = await tx
@@ -64,7 +64,7 @@ export function createSessionRepo(tx: Tx) {
 
     await tx.insert(sessionQuestions).values(
       picked.map((question, position) => {
-        if (question.type === 'typed_translation') {
+        if (!('options' in question)) {
           return { sessionId, position, questionId: question.id, optionOrder: [] };
         }
         const canonical = canonicalById.get(question.id);
@@ -100,6 +100,16 @@ export function createSessionRepo(tx: Tx) {
       insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list' }),
 
     insertSessionQuestions,
+
+    /** Phase 24 (spec D3). How many list sessions an enrollment has had, of any
+     *  status: the planner's rotation step for the next one. */
+    countListSessions: async (enrollmentId: string): Promise<number> => {
+      const [row] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(sessions)
+        .where(and(eq(sessions.enrollmentId, enrollmentId), eq(sessions.source, 'list')));
+      return row.count;
+    },
 
     /** Locks the row, so a status read here and changed later in the same
      *  transaction cannot race a concurrent skip or job. */
@@ -225,7 +235,7 @@ export function createSessionRepo(tx: Tx) {
 
       return {
         user_id: session.userId,
-        questions: questionRows.map((row) => questionFrom(row, row.optionOrder)),
+        questions: withBoards(questionRows.map((row) => questionFrom(row, row.optionOrder))),
         answers: answerRecords,
         complete: session.completedAt !== null,
         completed_at: session.completedAt === null ? null : session.completedAt.getTime(),

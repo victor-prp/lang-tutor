@@ -1,4 +1,4 @@
-import type { Question } from '@lang-tutor/core/api';
+import type { MatchingQuestion, Question } from '@lang-tutor/core/api';
 import type { QuestionType } from '@lang-tutor/core/domain';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 
@@ -19,6 +19,7 @@ export type QuestionRow = {
   prompt: string | null;
   options: QuestionOption[] | null;
   alternatives: string[] | null;
+  tiles: string[] | null;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -33,6 +34,7 @@ export const questionColumns = {
   prompt: questions.prompt,
   options: questions.options,
   alternatives: questions.alternatives,
+  tiles: questions.tiles,
   form: dictVariants.form,
   lemma: dictLexemes.lemma,
   partOfSpeech: dictLexemes.partOfSpeech,
@@ -41,25 +43,39 @@ export const questionColumns = {
 
 /**
  * Turns a question row into the API's `Question`. `order` is a session's
- * `option_order`; without it, or for a typed card (whose order is `{}`), the
+ * `option_order`; without it, or for a text card (whose order is `{}`), the
  * options come back in canonical order.
  *
  * Phase 23: today's card asks the variant's form; the reversed and typed cards
- * ask the stored Hebrew prompt. A typed card's answer is the variant's form and
- * is never stored twice.
+ * ask the stored Hebrew prompt. Phase 24: a listening card and a board word ask
+ * the form too (spoken, or beside its meanings); a dictation speaks the form
+ * and keeps the Hebrew as its meaning; a tiles card asks the Hebrew. A matching
+ * row comes back as a board of one, which withBoards joins.
  */
 export function questionFrom(row: QuestionRow, order: number[] | null): Question {
   const base = { id: row.id, vocab_term_id: row.lexemeId };
-  if (row.type === 'typed_translation') {
-    return {
-      ...base,
-      type: 'typed_translation',
-      question: row.prompt!,
-      part_of_speech: row.partOfSpeech,
-      answer: row.form,
-      lemma: row.lemma,
-      alternatives: row.alternatives ?? [],
-    };
+  switch (row.type) {
+    case 'typed_translation':
+      return {
+        ...base,
+        type: 'typed_translation',
+        question: row.prompt!,
+        part_of_speech: row.partOfSpeech,
+        answer: row.form,
+        lemma: row.lemma,
+        alternatives: row.alternatives ?? [],
+      };
+    case 'dictation':
+      return { ...base, type: 'dictation', question: row.form, meaning: row.prompt! };
+    case 'letter_tiles':
+      return {
+        ...base,
+        type: 'letter_tiles',
+        question: row.prompt!,
+        part_of_speech: row.partOfSpeech,
+        answer: row.form,
+        tiles: row.tiles!,
+      };
   }
   const canonical = canonicalOptions(row.options!);
   const shown = order && order.length > 0 ? order.map((position) => canonical[position]) : canonical;
@@ -67,9 +83,48 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
     options: shown.map((option) => option.text),
     correct_option: shown.findIndex((option) => option.is_correct),
   };
-  return row.type === 'reverse_choice'
-    ? { ...base, type: 'reverse_choice', question: row.prompt!, part_of_speech: row.partOfSpeech, ...choice }
-    : { ...base, type: 'multiple_choice', question: row.form, ...choice };
+  switch (row.type) {
+    case 'reverse_choice':
+      return { ...base, type: 'reverse_choice', question: row.prompt!, part_of_speech: row.partOfSpeech, ...choice };
+    case 'listen_choice':
+      return { ...base, type: 'listen_choice', question: row.form, ...choice };
+    case 'matching':
+      return {
+        ...base,
+        type: 'matching',
+        question: row.form,
+        ...choice,
+        board: { question_ids: [row.id], words: [row.form], correct_options: [choice.correct_option] },
+      };
+    default:
+      return { ...base, type: 'multiple_choice', question: row.form, ...choice };
+  }
+}
+
+/**
+ * Phase 24 (spec D10). Gives each run of consecutive matching questions the
+ * whole board: every word's question id, the word, and its correct option. A
+ * session holds at most one board, and its words share one option order.
+ */
+export function withBoards(questions: readonly Question[]): Question[] {
+  const result = [...questions];
+  for (let start = 0; start < result.length; ) {
+    let end = start;
+    while (end < result.length && result[end].type === 'matching') end++;
+    if (end === start) {
+      start++;
+      continue;
+    }
+    const run = result.slice(start, end) as MatchingQuestion[];
+    const board = {
+      question_ids: run.map((question) => question.id),
+      words: run.map((question) => question.question),
+      correct_options: run.map((question) => question.correct_option),
+    };
+    for (let i = start; i < end; i++) result[i] = { ...(result[i] as MatchingQuestion), board };
+    start = end;
+  }
+  return result;
 }
 
 export function createQuestionRepo(tx: Tx) {
@@ -171,6 +226,7 @@ export function createQuestionRepo(tx: Tx) {
         prompt: string | null;
         options: QuestionOption[] | null;
         alternatives: string[] | null;
+        tiles: string[] | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -189,10 +245,11 @@ export function createQuestionRepo(tx: Tx) {
             prompt: question.prompt,
             options: question.options,
             alternatives: question.alternatives,
+            tiles: question.tiles,
           })),
         )
         .returning({ id: questions.id });
-      return rows.map((row, index) => {
+      return withBoards(rows.map((row, index) => {
         const question = input.questions[index];
         return questionFrom(
           {
@@ -201,6 +258,7 @@ export function createQuestionRepo(tx: Tx) {
             prompt: question.prompt,
             options: question.options,
             alternatives: question.alternatives,
+            tiles: question.tiles,
             form: question.form,
             lemma: question.lemma,
             partOfSpeech: question.partOfSpeech,
@@ -208,7 +266,7 @@ export function createQuestionRepo(tx: Tx) {
           },
           null,
         );
-      });
+      }));
     },
   };
 }
