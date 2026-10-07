@@ -1,6 +1,6 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { ApiError, SPEECH_UPLOAD_TIMEOUT_MS, createApiClient } from './client';
+import { ApiError, PHOTO_UPLOAD_TIMEOUT_MS, SPEECH_UPLOAD_TIMEOUT_MS, createApiClient } from './client';
 
 function buildClient(mockFetch: jest.Mock) {
   return createApiClient({
@@ -358,5 +358,22 @@ describe('photo imports', () => {
       ['POST', '/api/photo-imports/i1/discard'],
     ]);
     expect(calls[3].body).toEqual({ ticked: false });
+  });
+
+  it('abandons a photo upload that stalls, so the screen is not stuck uploading', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetch = ((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })) as unknown as typeof globalThis.fetch;
+      const api = createApiClient({ baseUrl: 'http://api', fetch });
+      const pending = api.createPhotoImport('e1', { mime_type: 'image/jpeg', image: 'QUJD' });
+      const outcome = expect(pending).rejects.toThrow('aborted');
+      jest.advanceTimersByTime(PHOTO_UPLOAD_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

@@ -227,6 +227,7 @@ export const strings = {
   photoImportRowFailed: 'החיפוש נכשל',
   photoImportPending: 'מחפשים…',
   photoImportSave: (count: number) => `שמירת ${isolateLtr(String(count))} מילים`,
+  photoImportSaveFailed: 'השמירה נכשלה. נסו שוב.',
   photoImportDiscard: 'ביטול הרשימה',
   photoImportDiscardTitle: 'לבטל את הרשימה?',
   photoImportDiscardMessage: 'המילים שבה לא יישמרו.',

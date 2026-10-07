@@ -1,5 +1,5 @@
 import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -16,8 +16,12 @@ import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 export default function PhotoImportsScreen() {
   const { active } = useCurrentUser();
   const { imports, reload, pick, upload } = usePhotoImports();
-  // An upload in flight: both buttons wait for it.
+  // From the first tap to the review: picking, shrinking and uploading are one
+  // sequence, and both buttons wait for all of it, so a slow shrink cannot
+  // start a second import. The ref guards re-entry (state is stale between two
+  // taps in one frame); the state draws the disabled look.
   const [busy, setBusy] = useState(false);
+  const running = useRef(false);
   const [error, setError] = useState<string | null>(null);
   // A photo whose upload failed, kept so a retry does not pick it again.
   const [kept, setKept] = useState<Photo | null>(null);
@@ -37,29 +41,48 @@ export default function PhotoImportsScreen() {
 
   if (!active) return <Redirect href="/" />;
 
-  async function send(photo: Photo) {
+  // `work` answers true once it has gone on to the review: the screen is then
+  // on its way out, and stays busy.
+  async function begin(work: () => Promise<boolean>) {
+    if (running.current) return;
+    running.current = true;
     setBusy(true);
     setError(null);
+    let left = false;
+    try {
+      left = await work();
+    } finally {
+      if (!left) {
+        running.current = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function send(photo: Photo): Promise<boolean> {
     try {
       const summary = await upload(photo);
       setKept(null);
       // Replaced, not pushed: back from the review is home, not this screen.
       router.replace(`/photo-imports/${summary.id}`);
+      return true;
     } catch {
+      // Refused, no network, or no answer within PHOTO_UPLOAD_TIMEOUT_MS.
       setKept(photo);
       setError(strings.photoImportUploadFailed);
-      setBusy(false);
+      return false;
     }
   }
 
-  async function choose(source: 'camera' | 'gallery') {
-    setError(null);
-    // Shrinking the photo can fail too, which to the learner is the same failure.
-    const result = await pick(source).catch(() => null);
-    if (result === null) setError(strings.photoImportUploadFailed);
-    else if (result.kind === 'denied') setError(strings.photoImportDenied);
-    else if (result.kind === 'photo') await send(result.photo);
-  }
+  const choose = (source: 'camera' | 'gallery') =>
+    begin(async () => {
+      // Shrinking the photo can fail too, which to the learner is the same failure.
+      const result = await pick(source).catch(() => null);
+      if (result === null) setError(strings.photoImportUploadFailed);
+      else if (result.kind === 'denied') setError(strings.photoImportDenied);
+      else if (result.kind === 'photo') return send(result.photo);
+      return false;
+    });
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -101,7 +124,7 @@ export default function PhotoImportsScreen() {
         <Pressable
           accessibilityRole="button"
           testID="photo-import-retry"
-          onPress={() => void send(kept)}
+          onPress={() => void begin(() => send(kept))}
           style={styles.secondaryButton}
         >
           <Text style={styles.secondaryButtonLabel}>{strings.translateRetry}</Text>

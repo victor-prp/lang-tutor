@@ -51,6 +51,11 @@ async function failureOf(res: Response): Promise<ApiError> {
  *  button disabled; past this it becomes the "couldn't check" notice. */
 export const SPEECH_UPLOAD_TIMEOUT_MS = 15_000;
 
+/** Phase 26. A photo is up to 2.8 MB, so it gets longer than a recording; past
+ *  this the upload screen shows its upload-failed message and keeps the photo
+ *  for a retry, instead of waiting with both buttons disabled. */
+export const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
+
 export type ApiClientDeps = {
   baseUrl: string;
   fetch: typeof globalThis.fetch;
@@ -153,8 +158,19 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       getJson<VocabularyWordDetail>(`${vocabularyPath(enrollmentId)}/word?lemma=${encodeURIComponent(lemma)}`),
 
     // Phase 26. Words from a photo.
-    createPhotoImport: (enrollmentId: string, request: PhotoImportCreateRequest) =>
-      postJson<PhotoImportSummary>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/photo-imports`, request),
+    createPhotoImport: async (enrollmentId: string, request: PhotoImportCreateRequest) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PHOTO_UPLOAD_TIMEOUT_MS);
+      try {
+        return await postJson<PhotoImportSummary>(
+          `/api/enrollments/${encodeURIComponent(enrollmentId)}/photo-imports`,
+          request,
+          controller.signal,
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     listPhotoImports: (enrollmentId: string) =>
       getJson<PhotoImportSummary[]>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/photo-imports`),
     getPhotoImport: (id: string) => getJson<PhotoImport>(`/api/photo-imports/${encodeURIComponent(id)}`),

@@ -14,6 +14,7 @@ import {
   chosenOption,
   mergePolled,
   rowNotes,
+  savedWordCount,
   shouldPollImport,
   statusLabel,
   tickedCount,
@@ -52,6 +53,7 @@ export default function PhotoImportReviewScreen() {
   // between two taps in one frame); the state draws the disabled look.
   const [busy, setBusy] = useState(false);
   const acting = useRef(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   // The rows whose change has not landed. The ref guards re-entry; the state
   // draws them disabled, and holds Save back until all have landed, so a save
   // never races a change it would refuse or save without.
@@ -65,26 +67,33 @@ export default function PhotoImportReviewScreen() {
   // provider's reload does.
   const generation = useRef(0);
 
-  const load = useCallback(() => {
+  // Answers the import it read, or null when the read failed or a newer one
+  // superseded it.
+  const load = useCallback(async (): Promise<PhotoImport | null> => {
     const mine = ++generation.current;
-    fetchImport(id)
-      .then((polled) => {
-        if (mine !== generation.current) return;
-        setImp((local) => (local ? mergePolled(polled, local, changed.current) : polled));
-        setLoadFailed(false);
-      })
-      .catch(() => {
-        if (mine === generation.current) setLoadFailed(true);
-      });
+    try {
+      const polled = await fetchImport(id);
+      if (mine !== generation.current) return null;
+      setImp((local) => (local ? mergePolled(polled, local, changed.current) : polled));
+      setLoadFailed(false);
+      return polled;
+    } catch {
+      if (mine === generation.current) setLoadFailed(true);
+      return null;
+    }
   }, [fetchImport, id]);
 
-  useFocusEffect(useCallback(() => load(), [load]));
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
   // While reading or looking up, and only while this screen is focused.
   const polling = shouldPollImport(imp);
   useFocusEffect(
     useCallback(() => {
       if (!polling) return undefined;
-      const timer = setInterval(load, IMPORT_POLL_INTERVAL_MS);
+      const timer = setInterval(() => void load(), IMPORT_POLL_INTERVAL_MS);
       return () => clearInterval(timer);
     }, [polling, load]),
   );
@@ -116,7 +125,7 @@ export default function PhotoImportReviewScreen() {
         setImp((current) => current && withRow(current, original));
       } else {
         changed.current.delete(position);
-        load();
+        void load();
       }
     } finally {
       mark(position, false);
@@ -135,16 +144,24 @@ export default function PhotoImportReviewScreen() {
     }
   }
 
+  // Back to the home that is already under this screen, with the count.
+  const leaveSaved = (count: number) =>
+    router.dismissTo({ pathname: '/', params: { photoSaved: String(count) } });
+
   const onSave = () =>
     act(async () => {
+      setSaveFailed(false);
       try {
         const { saved_sense_ids } = await save(id);
-        // Back to the home that is already under this screen, with the count.
-        router.dismissTo({ pathname: '/', params: { photoSaved: String(saved_sense_ids.length) } });
+        leaveSaved(saved_sense_ids.length);
       } catch {
-        // Refused (discarded elsewhere, or a row changed under it): the import
-        // as it now is explains why.
-        load();
+        // The save landed and only its answer was lost: the import read back
+        // says saved, and this ends as a save does. Otherwise it was refused
+        // (discarded elsewhere, or a row changed under it), or never arrived,
+        // and the import as it now is shows under the error.
+        const saved = savedWordCount(await load());
+        if (saved !== null) leaveSaved(saved);
+        else setSaveFailed(true);
       }
     });
 
@@ -161,7 +178,7 @@ export default function PhotoImportReviewScreen() {
         await discard(id);
         router.dismissTo('/');
       } catch {
-        load();
+        void load();
       }
     });
   };
@@ -300,6 +317,11 @@ export default function PhotoImportReviewScreen() {
         />
       )}
 
+      {saveFailed ? (
+        <Text testID="photo-import-save-error" style={styles.error}>
+          {strings.photoImportSaveFailed}
+        </Text>
+      ) : null}
       {imp && !closed ? (
         <View style={styles.footer}>
           {imp.status !== 'failed' && !empty ? (
@@ -376,6 +398,7 @@ const styles = StyleSheet.create({
   note: { fontSize: fontSizes.sm, color: colors.muted, writingDirection: 'rtl' },
   empty: { gap: spacing.sm, alignItems: 'center', paddingTop: spacing.xl },
   notice: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl', textAlign: 'center' },
+  error: { color: colors.wrong, fontSize: fontSizes.md, lineHeight: lineHeights.md, writingDirection: 'rtl' },
   footer: { gap: spacing.sm, paddingBottom: spacing.md },
   button: {
     backgroundColor: colors.primary,

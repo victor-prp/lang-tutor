@@ -99,6 +99,19 @@ export function afterFailedChange(error: unknown): 'revert' | 'adopt_server' {
   return error instanceof ApiError ? 'revert' : 'adopt_server';
 }
 
+/** What a save left saved, read back from the import: null unless it is saved.
+ *  Counted as the server's save counts it (spec D11), one word per chosen sense
+ *  of a ticked row, so a save whose answer was lost still ends with its count. */
+export function savedWordCount(imp: PhotoImport | null): number | null {
+  if (imp?.status !== 'saved') return null;
+  const senses = new Set(
+    imp.items
+      .filter((item) => item.status === 'ready' && item.ticked && chosenOption(item) !== null)
+      .map((item) => item.chosen_sense_id),
+  );
+  return senses.size;
+}
+
 export type StoredImports = { enrollmentId: string; imports: PhotoImportSummary[] };
 
 const NO_IMPORTS: PhotoImportSummary[] = [];

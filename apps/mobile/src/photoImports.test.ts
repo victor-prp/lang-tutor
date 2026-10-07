@@ -10,6 +10,7 @@ import {
   importsFor,
   mergePolled,
   rowNotes,
+  savedWordCount,
   shouldPollImport,
   statusLabel,
   tickedCount,
@@ -79,6 +80,26 @@ describe('afterFailedChange', () => {
     expect(afterFailedChange(new TypeError('Network request failed'))).toBe('adopt_server');
     expect(afterFailedChange(new Error('The operation was aborted'))).toBe('adopt_server');
     expect(afterFailedChange('anything else')).toBe('adopt_server');
+  });
+});
+
+describe('savedWordCount', () => {
+  // A save whose answer was lost: the import read back says it landed.
+  it('counts what a saved import saved, one word per chosen sense of a ticked row', () => {
+    const rows = [
+      item(0),
+      item(1, { chosen_sense_id: 's2' }),
+      item(2, { ticked: false }),
+      item(3), // the same sense as row 0: saved once
+      item(4, { status: 'failed', options: [], chosen_sense_id: null, ticked: false }),
+    ];
+    expect(savedWordCount(imp(rows, 'saved'))).toBe(2);
+  });
+
+  it('answers null for an import the save did not land on', () => {
+    expect(savedWordCount(null)).toBeNull();
+    expect(savedWordCount(imp([item(0)], 'ready'))).toBeNull();
+    expect(savedWordCount(imp([item(0)], 'discarded'))).toBeNull();
   });
 });
 
