@@ -104,5 +104,18 @@ test('leaving before the read finishes loses nothing: home shows the import, and
   await expect(page.getByTestId('photo-import-row')).toHaveCount(3);
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByTestId('photo-import-discard').click();
+  // Home itself first: the card is only worth looking for once home shows.
+  await expect(page.getByTestId('translate-entry')).toBeVisible();
+  await expect(page.getByTestId('home-photo-card')).toHaveCount(0);
+
+  // A fresh load reads the list from the server, so the discard was stored and
+  // not only drawn. The user lives in memory, so the load lands on the login
+  // screen, and logIn's page.goto is that load. Right after it the card is
+  // absent before the list has even arrived, so the list itself is checked.
+  const listed = page.waitForResponse(
+    (res) => /\/api\/enrollments\/[^/]+\/photo-imports$/.test(res.url()) && res.request().method() === 'GET',
+  );
+  await logIn(page, 'e2e_photo_leave');
+  expect(await (await listed).json()).toEqual([]);
   await expect(page.getByTestId('home-photo-card')).toHaveCount(0);
 });
