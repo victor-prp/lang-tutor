@@ -26,7 +26,6 @@ const importRow = (over: Partial<PhotoImportRow> = {}): PhotoImportRow => ({
   id: ID,
   enrollmentId: 'e1',
   status: 'read',
-  photo: null,
   createdAt: new Date(NOW - 60_000),
   ...over,
 });
@@ -86,7 +85,8 @@ describe('readPhoto', () => {
     const transitions: unknown[] = [];
     const inserted: unknown[] = [];
     const photoImport = stub<PhotoImportRepo>({
-      findImport: async () => importRow({ status: 'reading', photo: 'QUJD' }),
+      findImport: async () => importRow({ status: 'reading' }),
+      findPhoto: async () => 'QUJD',
       transition: async (...args) => {
         transitions.push(args);
         return true;
@@ -118,15 +118,29 @@ describe('readPhoto', () => {
     expect(JSON.stringify(logger.events)).not.toContain('חתול');
   });
 
-  it('does not read an import that is no longer reading', async () => {
+  it('does not read an import that is no longer reading, nor fetch its photo', async () => {
     const photoImport = stub<PhotoImportRepo>({ findImport: async () => importRow({ status: 'discarded' }) });
     const { service, visionCalls } = setup({ repos: { photoImport, enrollment } });
     await service.readPhoto({ import_id: ID });
     expect(visionCalls).toEqual([]);
   });
 
+  it('does not read an import whose photo was cleared under it', async () => {
+    const photoImport = stub<PhotoImportRepo>({
+      findImport: async () => importRow({ status: 'reading' }),
+      findPhoto: async () => null,
+    });
+    const { service, visionCalls, logger } = setup({ repos: { photoImport, enrollment } });
+    await service.readPhoto({ import_id: ID });
+    expect(visionCalls).toEqual([]);
+    expect(logger.events).toEqual([{ event: 'photo_read_dropped', import_id: ID, stage: 'read' }]);
+  });
+
   it('throws on an unreadable answer, so pg-boss retries, and writes nothing', async () => {
-    const photoImport = stub<PhotoImportRepo>({ findImport: async () => importRow({ status: 'reading', photo: 'QUJD' }) });
+    const photoImport = stub<PhotoImportRepo>({
+      findImport: async () => importRow({ status: 'reading' }),
+      findPhoto: async () => 'QUJD',
+    });
     const { service, logger } = setup({ repos: { photoImport, enrollment }, vision: async () => 'not json' });
     await expect(service.readPhoto({ import_id: ID })).rejects.toBeInstanceOf(PhotoUnreadable);
     expect(logger.events.map((event) => event.event)).toContain('photo_read_attempt_failed');
@@ -135,7 +149,8 @@ describe('readPhoto', () => {
   it('reads an empty answer as a photo with no words', async () => {
     const inserted: unknown[] = [];
     const photoImport = stub<PhotoImportRepo>({
-      findImport: async () => importRow({ status: 'reading', photo: 'QUJD' }),
+      findImport: async () => importRow({ status: 'reading' }),
+      findPhoto: async () => 'QUJD',
       transition: async () => true,
       insertItems: async (...args) => {
         inserted.push(args);

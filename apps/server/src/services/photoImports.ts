@@ -244,9 +244,11 @@ export function createPhotoImportService({
       const read = await transaction(async ({ photoImport, enrollment }) => {
         const row = await photoImport.findImport(importId);
         // Discarded, failed or gone: nothing to read, and not a failure.
-        if (!row || row.status !== 'reading' || row.photo === null) return undefined;
+        if (!row || row.status !== 'reading') return undefined;
+        const photo = await photoImport.findPhoto(importId);
+        if (photo === null) return undefined;
         const enrolled = await enrollment.findById(row.enrollmentId);
-        return enrolled ? { photo: row.photo, target: enrolled.target_language as LanguageCode } : undefined;
+        return enrolled ? { photo, target: enrolled.target_language as LanguageCode } : undefined;
       });
       if (!read) {
         logger.info({ event: 'photo_read_dropped', import_id: importId, stage: 'read' });

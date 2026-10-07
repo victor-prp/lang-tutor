@@ -24,11 +24,23 @@ const option = { sense_id: 's1', variant_id: 'v1', translation: 'חתול', part
 describe('photo import repository', () => {
   it('creates an import reading with its photo, and clears the photo on every transition', async () => {
     const { id } = await repo((r) => r.insertImport({ enrollmentId: E, photo: 'QUJD' }));
-    expect(await repo((r) => r.findImport(id))).toMatchObject({ id, enrollmentId: E, status: 'reading', photo: 'QUJD' });
+    expect(await repo((r) => r.findImport(id))).toMatchObject({ id, enrollmentId: E, status: 'reading' });
+    expect(await repo((r) => r.findPhoto(id))).toBe('QUJD');
 
     expect(await repo((r) => r.transition(id, ['reading'], 'read'))).toBe(true);
-    expect(await repo((r) => r.findImport(id))).toMatchObject({ status: 'read', photo: null });
+    expect(await repo((r) => r.findImport(id))).toMatchObject({ status: 'read' });
+    expect(await repo((r) => r.findPhoto(id))).toBeNull();
     expect(await repo((r) => r.transition(id, ['reading'], 'failed'))).toBe(false);
+  });
+
+  // Up to 2.8 MB, and an import is read on every 2 s poll and every change:
+  // only the read-photo job reads the photo.
+  it('leaves the photo out of every read of an import but findPhoto', async () => {
+    const { id } = await repo((r) => r.insertImport({ enrollmentId: E, photo: 'QUJD' }));
+    expect(await repo((r) => r.findImport(id))).not.toHaveProperty('photo');
+    expect(await repo((r) => r.findImportForUpdate(id))).not.toHaveProperty('photo');
+    expect(await repo((r) => r.findPhoto('nope'))).toBeNull();
+    expect(await repo((r) => r.findPhoto('11111111-1111-1111-1111-111111111111'))).toBeNull();
   });
 
   it('refuses a photo on an import that is no longer reading', async () => {

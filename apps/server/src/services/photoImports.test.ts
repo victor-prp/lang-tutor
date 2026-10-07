@@ -26,7 +26,6 @@ const importRow = (over: Partial<PhotoImportRow> = {}): PhotoImportRow => ({
   id: ID,
   enrollmentId: 'e1',
   status: 'read',
-  photo: null,
   createdAt: new Date(NOW - 60_000),
   ...over,
 });

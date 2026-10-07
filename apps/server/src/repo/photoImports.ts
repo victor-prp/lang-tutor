@@ -8,11 +8,12 @@ import type { StoredImportStatus, StoredItemStatus } from '../domain/photoImport
 // An id that is not a uuid is "no such import", not a Postgres type error.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** An import without its photo: that is up to 2.8 MB, and only the read-photo
+ *  job needs it (findPhoto). */
 export type PhotoImportRow = {
   id: string;
   enrollmentId: string;
   status: StoredImportStatus;
-  photo: string | null;
   createdAt: Date;
 };
 
@@ -49,6 +50,14 @@ export type ItemResult = {
   ticked: boolean;
   hebrewMismatch: boolean;
   reason: PhotoImportItemReason | null;
+};
+
+// Every column but the photo.
+const importColumns = {
+  id: photoImports.id,
+  enrollmentId: photoImports.enrollmentId,
+  status: photoImports.status,
+  createdAt: photoImports.createdAt,
 };
 
 const itemColumns = {
@@ -94,7 +103,7 @@ export function createPhotoImportRepo(tx: Tx) {
 
     findImport: async (id: string): Promise<PhotoImportRow | null> => {
       if (!UUID_RE.test(id)) return null;
-      const [row] = await tx.select().from(photoImports).where(eq(photoImports.id, id));
+      const [row] = await tx.select(importColumns).from(photoImports).where(eq(photoImports.id, id));
       return row ? { ...row, status: row.status as StoredImportStatus } : null;
     },
 
@@ -102,8 +111,16 @@ export function createPhotoImportRepo(tx: Tx) {
      *  learner's changes, save and discard on one import. */
     findImportForUpdate: async (id: string): Promise<PhotoImportRow | null> => {
       if (!UUID_RE.test(id)) return null;
-      const [row] = await tx.select().from(photoImports).where(eq(photoImports.id, id)).for('update');
+      const [row] = await tx.select(importColumns).from(photoImports).where(eq(photoImports.id, id)).for('update');
       return row ? { ...row, status: row.status as StoredImportStatus } : null;
+    },
+
+    /** The photo, while the import is reading; null once it is cleared, or for
+     *  no such import. The read-photo job's read, and no one else's. */
+    findPhoto: async (id: string): Promise<string | null> => {
+      if (!UUID_RE.test(id)) return null;
+      const [row] = await tx.select({ photo: photoImports.photo }).from(photoImports).where(eq(photoImports.id, id));
+      return row?.photo ?? null;
     },
 
     /** Open imports (not saved or discarded, made since `since`) with their row

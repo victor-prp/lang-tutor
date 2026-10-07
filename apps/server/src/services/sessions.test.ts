@@ -148,6 +148,7 @@ describe('repos', () => {
     deleteExpired: forbidden,
     findImport: forbidden,
     findImportForUpdate: forbidden,
+    findPhoto: forbidden,
     listOpen: forbidden,
     transition: forbidden,
     insertItems: forbidden,
