@@ -8,6 +8,26 @@
   He then asked for the rest of the design to be made without him ("I trust your decisions").
   Every later decision is in §1 with its reason. Those marked **(low confidence)** are the ones to
   read first.
+  Part A is implemented on branch `phase-27-deeper-question-types` from
+  `docs/superpowers/plans/2026-10-07-phase-27-part-a-meaning-recall.md`. Planning and building
+  found these deviations:
+  - `normaliseHebrew` lives in `packages/core`, not the server, because the server's rule (D3 step 2)
+    and the app's banner (D12, "when the answer differs from the stored meaning") must compare the
+    same way.
+  - D12's two-part banner ("right" plus the stored meaning) is one title, `נכון! הפירוש השמור:`,
+    with the meaning on the line below it, in the style of phase 23's `נכון! המילה שתרגלנו:`.
+  - The migration is `0018_typed_meaning.sql`, the next number after phase 25's `0017` (phase 26
+    also claims `0017`; whichever merges second renumbers, D1).
+  - The judge's answer schema is per type: `typed_meaning` answers `{ "verdict": "right" |
+    "other_sense" | "wrong" }`, so Gemini's response schema already refuses a verdict the type does not have; Part B adds the
+    translation one.
+  - The eval replaced `begin` -> `לפתוח` with `begin` -> `להחל`, because "open" is not "begin" in
+    the example sentence it was scored on.
+  - No thinking budget was needed beyond the request's `thinkingBudget: 0`: the judge's tier 2
+    scored 30/30 with thinking off.
+  - The planner's rotation shifts: with no voices a fourth card of a four-pick session is now a
+    meaning card (D9's fall-through), so the end-to-end specs that reached a second run were
+    updated; the new `meaning-recall.spec.ts` covers the card and its failed check.
 - **Date:** 2026-10-07
 - **Source:** the one-pager `drafts/2026-10-07-deeper-question-types-one-pager.md` (main
   checkout). `drafts/` is gitignored, so everything this spec depends on is restated below.
@@ -17,8 +37,8 @@
   `judgeTyped` with a target, and Part B's unbuilt design for the context cards, which this phase
   absorbs), phase 23 (typed cards, `judgeTyped`, the typed task's alternatives) and phase 20
   (five dimensions per saved sense and the evidence table).
-- **Branch:** `phase-27-deeper-question-types`, stacked on `phase-25-speaking`, which is not
-  merged yet. It is retargeted to `master` once phase 25 is.
+- **Branch:** `phase-27-deeper-question-types`. Phase 25 merged as PR #94, so this branch's PR
+  targets `master`.
 - **Touches:** the wire's `Question` union gains four members and the API one endpoint, both
   additive under ADR 0003. The judge's prompt and verdict mapping are pure domain functions
   (ADR 0001 R3), and its model call goes through the existing `LlmClient` contract (R11). No ADR
