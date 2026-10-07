@@ -469,6 +469,17 @@ export const CASES: EvalCase[] = [
     expectKind: 'phrase',
     acceptTop: ['בתאבון', 'בתיאבון'],
   },
+  // A third way to misfire the rule: not a loanword, but a plain English word
+  // that French spells the same. `pour` answered empty in every call, which a
+  // textbook import showed as "no meaning"; it was the only one of 58 such
+  // words scanned in English, Italian and Russian that did.
+  {
+    label: 'an English word that French spells the same is English (pour)',
+    text: 'pour',
+    expectKind: 'word',
+    acceptTop: ['למזוג', 'לשפוך', 'מזג', 'שפך'],
+    expectNoCorrection: true,
+  },
   {
     label: 'he → en: Hebrew slang of Arabic origin is Hebrew (סבבה)',
     text: 'סבבה',
