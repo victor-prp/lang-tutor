@@ -1,7 +1,7 @@
 # ADR 0002: Dependency injection via closures, constructed only at a composition root
 
 - **Status:** Accepted
-- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25); R1 widened 2026-10-07 (phase 25): `expo-file-system`; R1 widened 2026-10-07 (phase 26): `expo-image-picker` and `expo-image-manipulator`
+- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25); R1 widened 2026-10-07 (phase 25): `expo-file-system`; R1 widened 2026-10-07 (phase 26): `expo-image-picker` and `expo-image-manipulator`; R6's call-site note gains createGeminiVisionClient 2026-10-07 (phase 26)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md),
   *"Closure-based dependency injection is mandatory"*, and
   [phase 5 design](../superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md),
@@ -54,7 +54,7 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   `createHealthRepo`, `createUserRepo`, `createEnrollmentRepo`, `createDictRepo`, `createVocabularyRepo`, `createProgressRepo`, `createTransaction`, `createSessionService`,
   `createUserService`, `createEnrollmentService`, `createGeminiClient`, `createGeminiTranscriber`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
   `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`, `createSpeaker`, `createRecorder`, `createPhotoImportRepo`, `createPhotoImportService`, `createGeminiVisionClient`, `createPhotoPicker`) is short enough to spot-check.
-  `createGeminiClient` and `createGeminiTranscriber` are annotated at their call sites in `composition.ts` rather than at their
+  `createGeminiClient`, `createGeminiTranscriber` and `createGeminiVisionClient` are annotated at their call sites in `composition.ts` rather than at their
   definitions, because ADR 0001 R10 forbids `providers/` from importing the contracts they
   satisfy — the same arrangement as `createTransaction` and `Transaction`.
 - **R7 — Importing a composition root performs no I/O.** `apps/server/src/index.ts` guards
