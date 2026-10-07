@@ -218,6 +218,30 @@ function writingRules(source: Language, target: Language): string[] {
   return [...new Set([...source.writing, ...target.writing])];
 }
 
+/**
+ * Phase 26 follow-up. A slash list answered as one form writes that form as a
+ * dict_variants row under every lexeme in the answer: `decorate / decoration`
+ * became a form of both, and a saved sense showed it in sessions. Routing it
+ * through the correction keeps the list out of the dictionary and lets the
+ * app's "did you mean" offer the rest.
+ *
+ * Which slash is a list is the model's call, because no rule in code can make
+ * it: `9/11` and `twenty-four/seven` are already dictionary forms. Whether to
+ * send the rule at all is code's, and it goes only to an input with a slash.
+ * Sent with every lookup it was measured costing an unrelated case: `дякую`
+ * corrected to `спасибо` in 4 of 10 calls, against 0 of 10 without it.
+ *
+ * `decide`, `sing` and `24/7` are in no eval case or MockServer expectation, so
+ * they contaminate neither.
+ */
+const SLASH_LIST_RULE = [
+  'An input of several words joined by a slash is a list, not one form: "decide / decision"',
+  'names two words, and "sing / sang" two forms of one. Set `correction.corrected_form` to',
+  'the first of them, list the others in order in `correction.alternatives`, and let the',
+  'entries describe the first. A slash that belongs to a single expression, as in "24/7", is',
+  'not a list.',
+];
+
 export function buildPrompt(input: {
   text: string;
   from: LanguageCode;
@@ -396,6 +420,7 @@ export function buildPrompt(input: {
     'When `correction` is present, classify `corrected_form` rather than the input as typed:',
     '"breakaleg" is corrected to "break a leg", so its kind is "phrase" even though what was',
     'typed is a single token.',
+    ...(input.text.includes('/') ? SLASH_LIST_RULE : []),
   ].join(' ');
 
   // The learner's text is untrusted and stays in its own part, never
