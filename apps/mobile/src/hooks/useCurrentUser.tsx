@@ -1,4 +1,4 @@
-import type { CreateUserRequest, Enrollment, LanguageCode, User } from '@lang-tutor/core/api';
+import type { CreateUserRequest, Enrollment, Grant, GrantList, LanguageCode, User } from '@lang-tutor/core/api';
 import {
   createContext,
   useCallback,
@@ -12,6 +12,7 @@ import {
 import { ApiError, type ApiClient } from '@/api/client';
 import type { RememberedEnrollmentStore, RememberedUsernameStore } from '@/currentUser';
 import { chooseActive } from '@/enrollments';
+import { NO_GRANTS, normalizeUsername } from '@/grants';
 
 export type CurrentUserValue = {
   /** The identified learner, in memory only. Null between app launch and login. */
@@ -27,6 +28,14 @@ export type CurrentUserValue = {
   signOut: () => void;
   enroll: (target: LanguageCode) => Promise<void>;
   switchTo: (enrollmentId: string) => void;
+  /** Phase 28. Grants on this account's lists and grants it holds. NO_GRANTS until login. */
+  grants: GrantList;
+  /** Re-reads grants; a failed read keeps the last list (spec D15). */
+  reloadGrants: () => Promise<void>;
+  /** The current user invites a student; grants are re-read on success. Throws the ApiError. */
+  invite: (username: string, target: LanguageCode) => Promise<Grant>;
+  acceptInvite: (grantId: string) => Promise<void>;
+  endGrant: (grantId: string) => Promise<void>;
 };
 
 const CurrentUserContext = createContext<CurrentUserValue | null>(null);
@@ -44,6 +53,7 @@ export function CurrentUserProvider({
 }) {
   const [user, setUser] = useState<User | null>(null);
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [grants, setGrants] = useState<GrantList>(NO_GRANTS);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [rememberedUsername, setRememberedUsername] = useState('');
 
@@ -59,8 +69,9 @@ export function CurrentUserProvider({
   // `user` first, so setting it early would flash home before the enroll
   // screen for a learner with none.
   const adopt = useCallback(
-    async (next: User, list: Enrollment[], rememberedId: string | null) => {
+    async (next: User, list: Enrollment[], rememberedId: string | null, grantList: GrantList) => {
       setEnrollments(list);
+      setGrants(grantList);
       setActiveId(chooseActive(list, rememberedId)?.id ?? null);
       setUser(next);
       setRememberedUsername(next.username);
@@ -72,11 +83,12 @@ export function CurrentUserProvider({
   const login = useCallback(
     async (username: string) => {
       const next = await api.login({ username });
-      const [list, rememberedId] = await Promise.all([
+      const [list, grantList, rememberedId] = await Promise.all([
         api.listEnrollments(next.id),
+        api.listGrants(next.id),
         enrollmentStore.read(next.username),
       ]);
-      await adopt(next, list, rememberedId);
+      await adopt(next, list, rememberedId, grantList);
     },
     [api, enrollmentStore, adopt],
   );
@@ -87,7 +99,7 @@ export function CurrentUserProvider({
   // "username taken" rather than a hint to log in.
   const register = useCallback(
     async (input: CreateUserRequest) => {
-      await adopt(await api.createUser(input), [], null);
+      await adopt(await api.createUser(input), [], null, NO_GRANTS);
     },
     [api, adopt],
   );
@@ -97,6 +109,7 @@ export function CurrentUserProvider({
   const signOut = useCallback(() => {
     setUser(null);
     setEnrollments([]);
+    setGrants(NO_GRANTS);
     setActiveId(null);
   }, []);
 
@@ -134,14 +147,84 @@ export function CurrentUserProvider({
     [user, enrollmentStore],
   );
 
+  const reloadGrants = useCallback(async () => {
+    if (!user) return;
+    try {
+      setGrants(await api.listGrants(user.id));
+    } catch {
+      // Keep the last list: a failed read must not empty the screens (spec D15).
+    }
+  }, [api, user]);
+
+  const invite = useCallback(
+    async (username: string, target: LanguageCode) => {
+      if (!user) throw new Error('cannot invite with no current user');
+      const created = await api.createGrant(user.id, {
+        username: normalizeUsername(username),
+        target_language: target,
+      });
+      await reloadGrants();
+      return created;
+    },
+    [api, user, reloadGrants],
+  );
+
+  const acceptInvite = useCallback(
+    async (grantId: string) => {
+      if (!user) throw new Error('cannot accept an invite with no current user');
+      await api.acceptGrant(user.id, grantId);
+      await reloadGrants();
+    },
+    [api, user, reloadGrants],
+  );
+
+  const endGrant = useCallback(
+    async (grantId: string) => {
+      if (!user) throw new Error('cannot end a grant with no current user');
+      await api.endGrant(user.id, grantId);
+      await reloadGrants();
+    },
+    [api, user, reloadGrants],
+  );
+
   const active = useMemo(
     () => enrollments.find((enrollment) => enrollment.id === activeId) ?? null,
     [enrollments, activeId],
   );
 
   const value = useMemo(
-    () => ({ user, enrollments, active, rememberedUsername, login, register, signOut, enroll, switchTo }),
-    [user, enrollments, active, rememberedUsername, login, register, signOut, enroll, switchTo],
+    () => ({
+      user,
+      enrollments,
+      active,
+      rememberedUsername,
+      login,
+      register,
+      signOut,
+      enroll,
+      switchTo,
+      grants,
+      reloadGrants,
+      invite,
+      acceptInvite,
+      endGrant,
+    }),
+    [
+      user,
+      enrollments,
+      active,
+      rememberedUsername,
+      login,
+      register,
+      signOut,
+      enroll,
+      switchTo,
+      grants,
+      reloadGrants,
+      invite,
+      acceptInvite,
+      endGrant,
+    ],
   );
 
   return <CurrentUserContext.Provider value={value}>{children}</CurrentUserContext.Provider>;

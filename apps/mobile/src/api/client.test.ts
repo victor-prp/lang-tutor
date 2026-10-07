@@ -343,4 +343,49 @@ describe('api/client', () => {
       jest.useRealTimers();
     }
   });
+
+  describe('grants (phase 28)', () => {
+    const recorder = (status: number, body: string | null) => {
+      const calls: { url: string; init: RequestInit }[] = [];
+      const fetch = (async (url: string, init: RequestInit) => {
+        calls.push({ url, init });
+        return new Response(body, { status });
+      }) as unknown as typeof globalThis.fetch;
+      return { calls, api: createApiClient({ baseUrl: 'http://api', fetch }) };
+    };
+    const emptyList = JSON.stringify({ tutors: [], students: [] });
+
+    it('listGrants GETs /api/grants as the actor', async () => {
+      const { calls, api } = recorder(200, emptyList);
+      await api.listGrants('u_1');
+      expect(calls[0].url).toBe('http://api/api/grants');
+      expect(calls[0].init.method).toBe('GET');
+      expect(calls[0].init.headers).toEqual({ 'X-Acting-User-Id': 'u_1' });
+    });
+
+    it('createGrant POSTs the request as the actor', async () => {
+      const { calls, api } = recorder(201, '{}');
+      await api.createGrant('u_1', { username: 'victor', target_language: 'it' });
+      expect(calls[0].url).toBe('http://api/api/grants');
+      expect(calls[0].init.method).toBe('POST');
+      expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' });
+      expect(JSON.parse(String(calls[0].init.body))).toEqual({ username: 'victor', target_language: 'it' });
+    });
+
+    it('acceptGrant POSTs to the accept path as the actor', async () => {
+      const { calls, api } = recorder(200, '{}');
+      await api.acceptGrant('u_1', 'g 1');
+      expect(calls[0].url).toBe('http://api/api/grants/g%201/accept');
+      expect(calls[0].init.method).toBe('POST');
+      expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' });
+    });
+
+    it('endGrant DELETEs the grant as the actor', async () => {
+      const { calls, api } = recorder(204, null);
+      await api.endGrant('u_1', 'g1');
+      expect(calls[0].url).toBe('http://api/api/grants/g1');
+      expect(calls[0].init.method).toBe('DELETE');
+      expect(calls[0].init.headers).toEqual({ 'X-Acting-User-Id': 'u_1' });
+    });
+  });
 });

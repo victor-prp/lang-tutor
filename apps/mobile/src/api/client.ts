@@ -1,10 +1,13 @@
 import type {
   CreateEnrollmentRequest,
+  CreateGrantRequest,
   CreateSessionRequest,
   CreateSessionResponse,
   CreateUserRequest,
   CurrentSessionResponse,
   Enrollment,
+  Grant,
+  GrantList,
   LoginRequest,
   NextStepRequest,
   NextStepResponse,
@@ -145,6 +148,14 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
     },
     vocabularyWord: (enrollmentId: string, lemma: string) =>
       getJson<VocabularyWordDetail>(`${vocabularyPath(enrollmentId)}/word?lemma=${encodeURIComponent(lemma)}`),
+    // Phase 28. Grants: every call names the acting user (ADR 0008).
+    listGrants: (actorUserId: string) => getJson<GrantList>('/api/grants', actorUserId),
+    createGrant: (actorUserId: string, request: CreateGrantRequest) =>
+      postJson<Grant>('/api/grants', request, { actorUserId }),
+    acceptGrant: (actorUserId: string, grantId: string) =>
+      postJson<Grant>(`/api/grants/${encodeURIComponent(grantId)}/accept`, {}, { actorUserId }),
+    endGrant: (actorUserId: string, grantId: string) =>
+      deleteResource(`/api/grants/${encodeURIComponent(grantId)}`, actorUserId),
   };
 }
 
