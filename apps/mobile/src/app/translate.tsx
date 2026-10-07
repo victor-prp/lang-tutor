@@ -11,7 +11,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SpeakButton } from '@/components/SpeakButton';
 import { useTranslation } from '@/hooks/useTranslation';
+import { isVoiced } from '@/speech';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -27,6 +29,10 @@ export default function TranslateScreen() {
   // save one would promise the single behaviour that is not coming.
   const isSentence = t.result?.kind === 'sentence';
   const senses = t.result?.senses ?? [];
+  // Phase 23. The languages of the answer on screen, read from the response:
+  // a flip changes t.direction without a new lookup. '' is never voiced.
+  const answerFrom = t.result?.from ?? '';
+  const answerTo = t.result?.to ?? '';
   // Every sense the one response carried, together. The whole reason to look up
   // a polysemous word is to compare its meanings, and the server already sent
   // them all — hiding the tail behind a tap charged an interaction for
@@ -165,6 +171,24 @@ export default function TranslateScreen() {
             </View>
           ) : null}
 
+          {/* Phase 23 (spec §1 D4). What the senses describe, in the language being
+              learned: the corrected form when there is one. It follows the
+              response's languages, never t.direction, which a flip changes
+              without a new lookup. A Hebrew → target lookup has no headword:
+              its typed text is Hebrew, and each card's translation speaks. */}
+          {isVoiced(t.result.from) ? (
+            <View testID="translate-headword" style={styles.headword}>
+              <Text style={styles.headwordText}>
+                {t.result.correction?.corrected_form ?? t.result.text}
+              </Text>
+              <SpeakButton
+                text={t.result.correction?.corrected_form ?? t.result.text}
+                language={t.result.from}
+                testID="speak-headword"
+              />
+            </View>
+          ) : null}
+
           {showCount ? (
             <Text testID="translate-count" style={styles.senseCount}>
               {strings.translateSenseCount(senses.length)}
@@ -195,6 +219,8 @@ export default function TranslateScreen() {
               saveState={sense.sense_id ? t.saved[sense.sense_id] : undefined}
               pending={sense.sense_id ? Boolean(t.pending[sense.sense_id]) : false}
               onToggle={() => sense.sense_id && t.toggleSave(sense.sense_id)}
+              from={answerFrom}
+              to={answerTo}
             />
           ))}
 
@@ -218,12 +244,17 @@ function SenseCard({
   saveState,
   pending,
   onToggle,
+  from,
+  to,
 }: {
   sense: TranslationSense;
   isTop: boolean;
   saveState: boolean | undefined;
   pending: boolean;
   onToggle: () => void;
+  /** The response's languages: a translation is in `to`, an example in both. */
+  from: string;
+  to: string;
 }) {
   const partOfSpeech = sense.part_of_speech
     ? strings.partOfSpeech(sense.part_of_speech)
@@ -236,13 +267,30 @@ function SenseCard({
           {strings.translateTopSense}
         </Text>
       ) : null}
-      <Text style={styles.translation}>{sense.translation}</Text>
+      <View style={styles.spoken}>
+        <Text style={[styles.translation, styles.grow, { writingDirection: strings.textDirection(to) }]}>
+          {sense.translation}
+        </Text>
+        <SpeakButton text={sense.translation} language={to} testID="speak-translation" />
+      </View>
       {partOfSpeech ? <Text style={styles.partOfSpeech}>{partOfSpeech}</Text> : null}
 
       {sense.example ? (
         <View style={styles.example}>
-          <Text style={styles.exampleSource}>{sense.example.source}</Text>
-          <Text style={styles.exampleTarget}>{sense.example.target}</Text>
+          {/* An example is written in `from` then `to`; whichever half is in
+              the language being learned speaks. */}
+          <View style={styles.spoken}>
+            <Text style={[styles.exampleSource, styles.grow, { writingDirection: strings.textDirection(from) }]}>
+              {sense.example.source}
+            </Text>
+            <SpeakButton text={sense.example.source} language={from} testID="speak-example" />
+          </View>
+          <View style={styles.spoken}>
+            <Text style={[styles.exampleTarget, styles.grow, { writingDirection: strings.textDirection(to) }]}>
+              {sense.example.target}
+            </Text>
+            <SpeakButton text={sense.example.target} language={to} testID="speak-example" />
+          </View>
         </View>
       ) : null}
 
@@ -326,12 +374,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     writingDirection: 'rtl',
   },
+  // Direction comes from each line's language (strings.textDirection): a
+  // translation and an example's halves are Hebrew in one lookup direction and
+  // the target language in the other.
   translation: {
     fontSize: fontSizes.xl,
     lineHeight: lineHeights.xl,
     fontWeight: '700',
     color: colors.text,
-    writingDirection: 'rtl',
   },
   partOfSpeech: { color: colors.muted, fontSize: fontSizes.sm, writingDirection: 'rtl' },
   example: {
@@ -346,7 +396,6 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: fontSizes.sm,
     lineHeight: lineHeights.sm,
-    writingDirection: 'rtl',
   },
   chooseButton: {
     marginTop: spacing.md,
@@ -391,4 +440,14 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   alternativeLabel: { color: colors.primary, fontSize: fontSizes.sm, fontWeight: '700' },
+  headword: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  headwordText: {
+    flex: 1,
+    fontSize: fontSizes.xl,
+    lineHeight: lineHeights.xl,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  spoken: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  grow: { flex: 1 },
 });

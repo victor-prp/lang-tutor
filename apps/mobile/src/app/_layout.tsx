@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setAudioModeAsync } from 'expo-audio';
 import { Stack } from 'expo-router';
+import * as Speech from 'expo-speech';
 import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -9,8 +11,10 @@ import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
 import { SessionProvider } from '@/hooks/useSession';
+import { SpeechProvider } from '@/hooks/useSpeech';
 import { TranslationProvider } from '@/hooks/useTranslation';
 import { VocabularyProvider } from '@/hooks/useVocabulary';
+import { createSpeaker } from '@/speech';
 import { colors } from '@/theme';
 
 // Read directly off process.env.EXPO_PUBLIC_API_URL (not via an indirection)
@@ -25,6 +29,15 @@ const baseUrl = requireEnvValue(process.env.EXPO_PUBLIC_API_URL, 'EXPO_PUBLIC_AP
 const api = createApiClient({ baseUrl, fetch: globalThis.fetch });
 const usernameStore = createRememberedUsernameStore({ storage: AsyncStorage });
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
+
+// Phase 23. The device's own speech engine (spec §1 D1). The audio mode is what
+// lets a tap sound with an iPhone's ring switch on silent, with the learner's
+// music kept playing underneath (D8). The speaker applies it on iOS only.
+const speaker = createSpeaker({
+  engine: Speech,
+  platform: Platform.OS,
+  prepareAudio: () => setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'mixWithOthers' }),
+});
 
 // RTL is set two different ways because the platforms disagree about how.
 //
@@ -48,21 +61,23 @@ export default function RootLayout() {
     // fallback provider, but relying on that is relying on an internal detail —
     // and on web the insets are zero without an explicit provider.
     <SafeAreaProvider>
-      <CurrentUserProvider api={api} usernameStore={usernameStore}
-        enrollmentStore={enrollmentStore}
-      >
-        <NextSessionProvider api={api}>
-          <SessionProvider api={api}>
-            <TranslationProvider api={api}>
-              <VocabularyProvider api={api}>
-                <View style={styles.root} {...rtlProps}>
-                  <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-                </View>
-              </VocabularyProvider>
-            </TranslationProvider>
-          </SessionProvider>
-        </NextSessionProvider>
-      </CurrentUserProvider>
+      <SpeechProvider speaker={speaker}>
+        <CurrentUserProvider api={api} usernameStore={usernameStore}
+          enrollmentStore={enrollmentStore}
+        >
+          <NextSessionProvider api={api}>
+            <SessionProvider api={api}>
+              <TranslationProvider api={api}>
+                <VocabularyProvider api={api}>
+                  <View style={styles.root} {...rtlProps}>
+                    <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                  </View>
+                </VocabularyProvider>
+              </TranslationProvider>
+            </SessionProvider>
+          </NextSessionProvider>
+        </CurrentUserProvider>
+      </SpeechProvider>
     </SafeAreaProvider>
   );
 }

@@ -27,6 +27,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstruction}
+          language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}
         />
@@ -36,6 +37,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstructionReverse(language)}
+          language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}
         />

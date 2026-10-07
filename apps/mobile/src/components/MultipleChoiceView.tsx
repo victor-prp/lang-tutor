@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { OptionButton, type OptionVisualState } from '@/components/OptionButton';
+import { SpeakButton } from '@/components/SpeakButton';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
@@ -10,6 +11,9 @@ type Props = {
   question: ChoiceQuestion;
   /** What the card asks, in the learner's language. */
   instruction: string;
+  /** The enrollment's target language. Voice phase: today's card speaks its
+   *  prompt in it; a reversed card's prompt is Hebrew and has no speaker. */
+  language: string;
   selectedOption: number | null;
   onSelect: (optionIndex: number) => void;
 };
@@ -17,7 +21,7 @@ type Props = {
 // Phase 23. Today's card asks a target word and offers Hebrew meanings; the
 // reversed card asks a Hebrew meaning and offers target words. Only the text
 // directions differ (spec D10).
-export function MultipleChoiceView({ question, instruction, selectedOption, onSelect }: Props) {
+export function MultipleChoiceView({ question, instruction, language, selectedOption, onSelect }: Props) {
   const reversed = question.type === 'reverse_choice';
   const partOfSpeech = reversed ? strings.partOfSpeech(question.part_of_speech) : undefined;
   // All four buttons match the tallest, so a wrapped phrase does not leave the
@@ -40,9 +44,12 @@ export function MultipleChoiceView({ question, instruction, selectedOption, onSe
   return (
     <View style={styles.container}>
       <Text style={styles.instruction}>{instruction}</Text>
-      <Text style={[styles.prompt, { writingDirection: reversed ? 'rtl' : 'ltr' }]} testID="question-prompt">
-        {question.question}
-      </Text>
+      <View style={styles.promptRow}>
+        <Text style={[styles.prompt, { writingDirection: reversed ? 'rtl' : 'ltr' }]} testID="question-prompt">
+          {question.question}
+        </Text>
+        {reversed ? null : <SpeakButton text={question.question} language={language} testID="speak-prompt" />}
+      </View>
       {partOfSpeech ? (
         <Text style={styles.partOfSpeech} testID="question-part-of-speech">
           {partOfSpeech}
@@ -80,7 +87,9 @@ const styles = StyleSheet.create({
   // The prompt is centred, with an explicit direction (set per card) so a
   // target word reads correctly inside the mirrored screen, punctuation
   // included.
+  promptRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   prompt: {
+    flexShrink: 1,
     fontSize: fontSizes.xl,
     lineHeight: lineHeights.xl,
     color: colors.text,

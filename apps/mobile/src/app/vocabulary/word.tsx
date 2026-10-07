@@ -6,6 +6,8 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/LevelBadge';
+import { SpeakButton } from '@/components/SpeakButton';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useVocabulary } from '@/hooks/useVocabulary';
 import { dimensionRows } from '@/progress';
 import { strings } from '@/strings';
@@ -15,6 +17,10 @@ import { keepSenseOrder, toggleOptimistically } from '@/vocabulary';
 export default function VocabularyWordScreen() {
   const { lemma } = useLocalSearchParams<{ lemma: string }>();
   const { loadWord, save, unsave } = useVocabulary();
+  // Phase 23. Every lexeme here is in the active enrollment's target language,
+  // and so is each example's source (spec §1 D3).
+  const { active } = useCurrentUser();
+  const language = active?.target_language ?? null;
   const [word, setWord] = useState<VocabularyWordDetail | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -96,7 +102,10 @@ export default function VocabularyWordScreen() {
         loadFailed ? null : <ActivityIndicator />
       ) : (
         <ScrollView contentContainerStyle={styles.list}>
-          <Text style={styles.lemma}>{word.lemma}</Text>
+          <View style={styles.spoken}>
+            <Text style={[styles.lemma, styles.grow]}>{word.lemma}</Text>
+            {language ? <SpeakButton text={word.lemma} language={language} testID="speak-lemma" /> : null}
+          </View>
           {word.level !== null ? <LevelBadge level={word.level} testID="vocabulary-detail-level" /> : null}
           {word.senses.map((sense) => (
             <View key={sense.sense_id} testID="vocabulary-sense" style={styles.card}>
@@ -111,7 +120,12 @@ export default function VocabularyWordScreen() {
               ) : null}
               {sense.example ? (
                 <View style={styles.example}>
-                  <Text style={styles.exampleSource}>{sense.example.source}</Text>
+                  <View style={styles.spoken}>
+                    <Text style={[styles.exampleSource, styles.grow]}>{sense.example.source}</Text>
+                    {language ? (
+                      <SpeakButton text={sense.example.source} language={language} testID="speak-example" />
+                    ) : null}
+                  </View>
                   <Text style={styles.meta}>{sense.example.target}</Text>
                 </View>
               ) : null}
@@ -165,6 +179,8 @@ const styles = StyleSheet.create({
   progress: { gap: spacing.xs },
   dimensionRow: { flexDirection: 'row', justifyContent: 'space-between' },
   exampleSource: { fontSize: fontSizes.md, color: colors.text },
+  spoken: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  grow: { flex: 1 },
   // Same look as translate.tsx: unsaved is a filled primary button, saved is
   // outlined with a primary label (white on the near-white ground is unreadable).
   toggle: {
