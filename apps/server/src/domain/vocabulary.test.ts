@@ -235,13 +235,14 @@ describe('buildWordDetail', () => {
     expect(buildWordDetail(LEMMA, VERB, [], [], [])).toEqual({ lemma: LEMMA, level: null, senses: [] });
   });
 
-  // Phase 23: the three written dimensions are live, so a sense practised
-  // evenly has all three at `written`; the spoken two stay not practised.
-  const levels = (senseId: string, written: number): ProgressRow[] =>
+  // Phases 23-24: the live dimensions (written three, spoken_receptive) are
+  // the ones a sense is practised in, so a sense practised evenly has them all
+  // at `live`; spoken_productive stays not practised.
+  const levels = (senseId: string, live: number): ProgressRow[] =>
     DIMENSIONS.map((dimension) => ({
       senseId,
       dimension,
-      level: dimension.startsWith('spoken') ? 1 : written,
+      level: dimension === 'spoken_productive' ? 1 : live,
       lastStepOn: null,
       lastWrongOn: null,
     }));
@@ -258,7 +259,7 @@ describe('buildWordDetail', () => {
       sense_id: 's1',
       progress: {
         level: 3,
-        dimensions: { written_receptive: 3, written_productive: 3, spoken_receptive: 1, spoken_productive: 1, spelling: 3 },
+        dimensions: { written_receptive: 3, written_productive: 3, spoken_receptive: 3, spoken_productive: 1, spelling: 3 },
       },
     });
     expect(detail.senses[1]).not.toHaveProperty('progress');
