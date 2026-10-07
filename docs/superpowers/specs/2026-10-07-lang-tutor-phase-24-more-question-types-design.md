@@ -51,6 +51,7 @@ cards:
 - the planner that gives each position of a list session its type;
 - `spoken_receptive` going live;
 - one new generation task, `gap`, with eval cases;
+- a five-minute cap on the generation call, with the job's expiry raised to match (D16);
 - delivery as two PRs from this one spec (D1).
 
 **Out:**
@@ -320,6 +321,32 @@ other type stores it in `questions.prompt`, including `dictation` and `cloze_cho
 it only after the answer. `findSnapshot` reads it from there, so the results always show
 form → meaning.
 
+**D16. Generation gets a five-minute budget, and the job's expiry follows it.** Victor reports
+that preparing a session is already slow, and asked on 2026-10-07 for a longer timeout with the
+model capped at five minutes.
+
+- **The cap.** `SESSION_GENERATION_TIMEOUT_MS` defaults to 300 000 instead of 120 000. At the
+  budget the provider aborts, the attempt fails, and pg-boss retries it, as today. The
+  environment can still lower it, and the tests do.
+- **The expiry.** The prepare-session queue's `expireInSeconds` goes from 240 to 600, keeping
+  phase 19's rule that expiry is twice the budget. Expiry is what detects a worker that crashed
+  mid-call, and it must never cut off a healthy call. Today the two numbers agree only through a
+  comment. The default budget moves to `domain/jobs.ts`, where both `config.ts` and `db/jobs.ts`
+  read it, and a unit test asserts the rule.
+- **Retries stay at two. (low confidence)** They recover the common, fast failures: a 503, or an
+  answer that fails validation. In the worst case, three attempts each time out, so the session
+  shows "preparing" for about 15 minutes before it is marked failed. The learner can skip at any
+  time, and the app polls with no limit. With one retry the worst case is 10 minutes, but a
+  passing 503 would then fail a session twice as often.
+- **Each call does less work, not more.** A ten-word session sends the model ten items today.
+  Under D3 it sends at most seven: dictation and tiles need no item, and a board's four words
+  need one. The `gap` task's sentence lengthens the request, not the answer, and the model's
+  answer is what dominates a call's time.
+- **Measured, not felt.** The `session_prepared` log event gains `model_ms` and `item_count`, so
+  the slowness can be traced per session and by item count.
+
+Rejected: a budget above five minutes, which is Victor's cap.
+
 ---
 
 ## 2. Changes
@@ -379,7 +406,10 @@ form → meaning.
   script and none equal to the form or the lemma. `generatedContent` covers every type, and
   `boardContent` builds the four questions' shared options and the extra meaning (D10).
 - `domain/jobs.ts`: the prepare-session payload gains `listening` (default false) and `ordinal`
-  (default 0).
+  (default 0). `SESSION_GENERATION_BUDGET_MS = 300_000` and the expiry derived from it live here
+  (D16).
+- `config.ts`: `sessionGenerationTimeoutMs` defaults to the budget above.
+- `db/jobs.ts`: the prepare-session queue's `expireInSeconds` is the derived expiry, 600.
 - `repo/questions.ts`: `findGenerationContext` also reads `example_source` and `example_target`.
   `questionFrom` builds every shape. `withBoards` gives consecutive matching questions their
   `board`. `insertGeneratedQuestions` writes the new columns.
@@ -389,7 +419,11 @@ form → meaning.
   answer per type.
 - `services/sessions.ts`: `createNextSession(enrollmentId, { listening })` puts the flag and
   the ordinal in the payload. `prepareSession` plans, calls the model only when an item needs it,
-  builds the tiles with its rng, shuffles the board once and writes.
+  builds the tiles with its rng, shuffles the board once and writes. Its `session_prepared` event
+  gains `model_ms` and `item_count` (D16). The duration comes from a new collaborator, `now`,
+  which `index.ts` passes as `Date.now` through `createServerDeps`, exactly as it passes
+  `Math.random` as `rng`. ADR 0002 counts a clock among what is received rather than reached
+  for, and the test composition root passes a fake.
 - `routes/sessions.ts`: the create body's `listening`, and the new types in the published API.
 
 ### Mobile
@@ -446,8 +480,11 @@ form → meaning.
     refusal.
   - `gap` validation (Part B).
 - **server services (fakes):** `prepareSession` with listening on and off; no model call when no
-  item needs one; a board's four questions share one shuffle. `createNextSession` puts the
-  ordinal and the flag in the payload.
+  item needs one; a board's four questions share one shuffle; `session_prepared` logs
+  `model_ms` from the fake clock and `item_count`. `createNextSession` puts the ordinal and the
+  flag in the payload.
+- **generation budget (D16):** the config default is the budget, and the prepare-session queue's
+  expiry is at least twice it.
 - **mobile:** `feedbackFor` per type; the board's first-attempt bookkeeping, including a resume
   with words already matched; tile placement and removal.
 
@@ -493,6 +530,8 @@ the prompt, never the threshold.
 
 **Part A (PR 1):**
 
+0. The generation budget and expiry, with the log fields (D16). It is independent of the
+   cards, and it helps today's sessions as soon as it lands.
 1. Core: the union members, the judge's target, `judgeTiles`, `LIVE_DIMENSIONS`.
 2. Server domain: `planSession`, tiles, the evidence table, the board's content.
 3. Migration 0016, the repositories, the service, the route.
@@ -505,6 +544,10 @@ migration 0017; the two cloze cards; their tests.
 ## Risks
 
 - **Badges drop once** (D13), by at most one level. Announced in the PR.
+- **A long wait before a failure.** With a five-minute budget and two retries, a model that
+  keeps timing out leaves a session "preparing" for about 15 minutes (D16). If `model_ms` shows
+  calls near the cap, the remedy is a smaller or faster call, not a longer budget: fewer items
+  per call, or the model's thinking budget.
 - **Listening without headphones.** With no "can't listen now" (D6), a learner on a bus may skip
   sessions or guess, and a guess restarts a gap. The switch signal is in D6.
 - **Russian gets fewer gap cards** (D8): 17 of 24 examples today, against 35 of 42 for English and
