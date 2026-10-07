@@ -46,13 +46,15 @@ export const vocabularyQueries = {
    *  creates, in one statement. Named conflict target, not bare: only the PK
    *  may be swallowed, so an FK violation still raises. First form wins — a
    *  sense already saved keeps its variant, and RETURNING leaves it out, so its
-   *  progress is untouched. */
-  insertEntries: (input: { enrollmentId: string; entries: SaveableEntry[] }): SQL => sql`
+   *  progress is untouched. First adder wins, exactly as first form does: the
+   *  conflict keeps the row, its form and its adder (spec D5). */
+  insertEntries: (input: { enrollmentId: string; addedByUserId: string; entries: SaveableEntry[] }): SQL => sql`
     WITH inserted AS (
-      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id)
+      INSERT INTO vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, added_by_user_id)
       VALUES ${sql.join(
         input.entries.map(
-          (e) => sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.lemma}, ${e.variantId})`,
+          (e) =>
+            sql`(${input.enrollmentId}, ${e.senseId}, ${e.lexemeId}, ${e.lemma}, ${e.variantId}, ${input.addedByUserId})`,
         ),
         sql`, `,
       )}
@@ -259,7 +261,11 @@ export function createVocabularyRepo(tx: Tx) {
     },
 
     /** First form wins: a sense already saved keeps the variant it was saved from. */
-    insertEntries: async (input: { enrollmentId: string; entries: SaveableEntry[] }): Promise<void> => {
+    insertEntries: async (input: {
+      enrollmentId: string;
+      addedByUserId: string;
+      entries: SaveableEntry[];
+    }): Promise<void> => {
       if (input.entries.length === 0) return;
       await tx.execute(vocabularyQueries.insertEntries(input));
     },

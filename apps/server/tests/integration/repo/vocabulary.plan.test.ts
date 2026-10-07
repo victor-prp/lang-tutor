@@ -40,11 +40,11 @@ beforeAll(async () => {
        select 'pv' || g, 'pl' || g, 'ru', 'слово' || g, 'word', 0 from generate_series(1, 20000) g`,
     `insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
        select 'pv' || g, 'ps' || g, 'he', 'מילה' || g, 0 from generate_series(1, 20000) g`,
-    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at)
-       select 'pe' || e, 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval
+    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
+       select 'pe' || e, 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu' || e
        from generate_series(2, 1000) e, generate_series(1, 200) s`,
-    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at)
-       select '${HEAVY}', 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval
+    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
+       select '${HEAVY}', 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu1'
        from generate_series(1, 20000) s`,
     // Phase 20. Five progress rows per entry, levels spread over 1–5 so a level
     // filter has real work to do. `& 2147483647` keeps hashtext non-negative
@@ -179,6 +179,7 @@ describe('every vocabulary read at volume', () => {
   it.each([
     ['insertEntries', () => vocabularyQueries.insertEntries({
       enrollmentId: 'pe2',
+      addedByUserId: 'pu2',
       entries: [{ senseId: 'ps300', lexemeId: 'pl300', lemma: 'слово300', variantId: 'pv300' }],
     })],
     ['deleteEntry', () => vocabularyQueries.deleteEntry({ enrollmentId: HEAVY, senseId: 'ps5' })],

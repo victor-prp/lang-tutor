@@ -85,6 +85,49 @@ export const enrollments = pgTable(
   ],
 );
 
+/**
+ * Phase 28 (spec D1–D5). An access grant: someone other than an enrollment's
+ * owner may act on it, as far as the grant's role allows. domain/access.ts maps
+ * roles to permissions; services/access.ts is the one check (ADR 0008). The
+ * grant names its TARGET, which is what a role column on users could not do
+ * (phase 8, "Why `users` has no role column").
+ *
+ * accepted_at null is an invite. Declining, cancelling and ending all delete the
+ * row: nothing reads an ended grant, and words a tutor added keep their label
+ * through vocabulary_entries.added_by_user_id, not through this row.
+ *
+ * owner_user_id is the enrollment's user, held here only so the composite FK
+ * into enrollments_user_id_id_key can prove it and the CHECK can compare it.
+ * Read and written only by repo/grants.ts (ADR 0008 R1).
+ */
+export const enrollmentGrants = pgTable(
+  'enrollment_grants',
+  {
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    enrollmentId: text('enrollment_id').notNull(),
+    ownerUserId: text('owner_user_id').notNull(),
+    granteeUserId: text('grantee_user_id').notNull(),
+    role: text('role').notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'enrollment_grants_enrollment_fk',
+      columns: [t.ownerUserId, t.enrollmentId],
+      foreignColumns: [enrollments.userId, enrollments.id],
+    }),
+    foreignKey({ name: 'enrollment_grants_grantee_fk', columns: [t.granteeUserId], foreignColumns: [users.id] }),
+    unique('enrollment_grants_enrollment_grantee_key').on(t.enrollmentId, t.granteeUserId),
+    check('enrollment_grants_not_owner', sql`${t.granteeUserId} <> ${t.ownerUserId}`),
+    check('enrollment_grants_role_known', sql`${t.role} in ('tutor')`),
+    index('enrollment_grants_grantee_idx').on(t.granteeUserId),
+    index('enrollment_grants_owner_idx').on(t.ownerUserId),
+  ],
+);
+
 export const dictLexemes = pgTable(
   'dict_lexemes',
   {
@@ -360,6 +403,10 @@ export const vocabularyEntries = pgTable(
     // vocabulary_entries_lexeme_lemma_fk keeps it equal to the lexeme's.
     lemma: text('lemma').notNull(),
     variantId: text('variant_id').notNull(),
+    // Phase 28 (spec D5). Who put this sense in the list: the owner, or a
+    // grantee such as a tutor. NOT NULL so no reader has to know that null
+    // means "the owner"; the migration backfilled older rows to the owner.
+    addedByUserId: text('added_by_user_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -386,6 +433,11 @@ export const vocabularyEntries = pgTable(
       columns: [t.variantId],
       foreignColumns: [dictVariants.id],
     }).onDelete('cascade'),
+    foreignKey({
+      name: 'vocabulary_entries_added_by_fk',
+      columns: [t.addedByUserId],
+      foreignColumns: [users.id],
+    }),
     // Every read is scoped to one enrollment, which is what keeps the table's
     // total size irrelevant. Phase 21 reads by lemma: the list's GROUP BY lemma /
     // max(created_at), the summaries' counts, and the detail's saved entries.

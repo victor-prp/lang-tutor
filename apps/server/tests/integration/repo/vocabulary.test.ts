@@ -116,7 +116,7 @@ describe('insertEntries and deleteEntry', () => {
   const entry = (sense: number, variant: number) => ({ ...pair(sense, variant), lexemeId: kite.lexemeId, lemma: 'kite' });
 
   it("writes the lexeme's lemma onto the entry", async () => {
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITES)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(TOY, KITES)] }));
     const rows = await t.db.execute<{ lemma: string }>(
       sql`select lemma from vocabulary_entries where enrollment_id = ${E}`,
     );
@@ -124,25 +124,25 @@ describe('insertEntries and deleteEntry', () => {
   });
 
   it('keeps the first form when the same sense is saved again', async () => {
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITES)] }));
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(TOY, KITES)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(TOY, KITE)] }));
     expect(await repo((r) => r.findSavedInLemma({ enrollmentId: E, lemma: 'kite' }))).toEqual([pair(TOY, KITES)]);
   });
 
   it('gives a new entry its five level 1 progress rows, and a repeat adds none', async () => {
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITES)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(TOY, KITE)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(TOY, KITES)] }));
     const rows = await readProgress(t.db, E);
     expect(rows.map((row) => row.dimension).sort()).toEqual([...DIMENSIONS].sort());
     expect(rows.every((row) => row.senseId === kite.senseIds[TOY] && row.level === 1)).toBe(true);
   });
 
   it('takes the progress rows with the entry, and a re-save starts again at level 1', async () => {
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(TOY, KITE)] }));
     await t.db.execute(sql`update sense_progress set level = 3`);
     await repo((r) => r.deleteEntry({ enrollmentId: E, senseId: kite.senseIds[TOY] }));
     expect(await readProgress(t.db, E)).toEqual([]);
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(TOY, KITE)] }));
     // The count first: `every` is true of an empty array.
     const rows = await readProgress(t.db, E);
     expect(rows).toHaveLength(5);
@@ -150,14 +150,14 @@ describe('insertEntries and deleteEntry', () => {
   });
 
   it('deletes idempotently', async () => {
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(TOY, KITE)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(TOY, KITE)] }));
     await repo((r) => r.deleteEntry({ enrollmentId: E, senseId: kite.senseIds[TOY] }));
     await repo((r) => r.deleteEntry({ enrollmentId: E, senseId: kite.senseIds[TOY] }));
     expect(await repo((r) => r.findSavedSenseIds({ enrollmentId: E, senseIds: kite.senseIds }))).toEqual([]);
   });
 
   it('finds which of the asked senses are saved', async () => {
-    await repo((r) => r.insertEntries({ enrollmentId: E, entries: [entry(BIRD, KITE)] }));
+    await repo((r) => r.insertEntries({ enrollmentId: E, addedByUserId: 'u_1', entries: [entry(BIRD, KITE)] }));
     expect(
       await repo((r) => r.findSavedSenseIds({ enrollmentId: E, senseIds: kite.senseIds })),
     ).toEqual([kite.senseIds[BIRD]]);
@@ -169,9 +169,9 @@ describe('insertEntries and deleteEntry', () => {
 // a test chose, not against how fast two transactions happened to commit.
 async function saveAt(lexemeId: string, senseId: string, variantId: string, at: string) {
   await t.db.execute(sql`
-    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at)
+    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
     values (${E}, ${senseId}, ${lexemeId}, (select lemma from dict_lexemes where id = ${lexemeId}),
-            ${variantId}, ${at}::timestamptz)`);
+            ${variantId}, ${at}::timestamptz, 'u_1')`);
   // An entry with no progress rows has no level, and the list leaves it out.
   await insertProgressRows(t.db, E, [senseId]);
 }

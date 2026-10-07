@@ -15,6 +15,7 @@ import {
   sessions,
 } from '../../src/db/schema';
 import { createVocabularyRepo } from '../../src/repo/vocabulary';
+import { ownerOf } from './vocabularyRows';
 import { withTx } from './withTx';
 
 /**
@@ -121,9 +122,11 @@ export async function saveSessionSenses(
     .where(eq(sessionQuestions.sessionId, input.sessionId))
     .orderBy(asc(sessionQuestions.position));
   const picked = rows.filter((row) => input.positions.includes(row.position));
+  const addedByUserId = await ownerOf(db, input.enrollmentId);
   await withTx(db, (tx) =>
     createVocabularyRepo(tx).insertEntries({
       enrollmentId: input.enrollmentId,
+      addedByUserId,
       entries: picked.map(({ senseId, variantId, lexemeId, lemma }) => ({ senseId, variantId, lexemeId, lemma })),
     }),
   );

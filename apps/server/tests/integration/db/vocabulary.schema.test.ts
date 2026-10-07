@@ -36,9 +36,9 @@ afterEach(async () => {
 type Column = 'enrollment' | 'sense' | 'lexeme' | 'lemma' | 'variant';
 const insert = (over: Partial<Record<Column, string>> = {}) =>
   t.db.execute(sql`
-    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id)
+    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, added_by_user_id)
     values (${over.enrollment ?? enrollmentOf('u_1')}, ${over.sense ?? kite.senseIds[0]},
-            ${over.lexeme ?? kite.lexemeId}, ${over.lemma ?? 'kite'}, ${over.variant ?? kite.variantIds[0]})`);
+            ${over.lexeme ?? kite.lexemeId}, ${over.lemma ?? 'kite'}, ${over.variant ?? kite.variantIds[0]}, 'u_1')`);
 
 const violating = (constraint: string) =>
   expect.objectContaining({
@@ -91,8 +91,8 @@ describe('vocabulary_entries', () => {
   it('requires a lemma', async () => {
     await expect(
       t.db.execute(sql`
-        insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id)
-        values (${enrollmentOf('u_1')}, ${kite.senseIds[0]}, ${kite.lexemeId}, ${kite.variantIds[0]})`),
+        insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id, added_by_user_id)
+        values (${enrollmentOf('u_1')}, ${kite.senseIds[0]}, ${kite.lexemeId}, ${kite.variantIds[0]}, 'u_1')`),
     ).rejects.toThrow(expect.objectContaining({ cause: expect.objectContaining({ message: expect.stringContaining('lemma') }) }));
   });
 

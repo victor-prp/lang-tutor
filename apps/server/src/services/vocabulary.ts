@@ -74,7 +74,7 @@ export function createVocabularyService({
           });
           throw new InvalidVocabularyEntry(refused.sense_id);
         }
-        await repos.vocabulary.insertEntries({ enrollmentId, entries: saveable });
+        await repos.vocabulary.insertEntries({ enrollmentId, addedByUserId: enrolled.user_id, entries: saveable });
       });
       logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length });
       return { saved_sense_ids: asked.map((entry) => entry.sense_id) };
