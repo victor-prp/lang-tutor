@@ -5,6 +5,8 @@ import type {
   CreateUserRequest,
   CurrentSessionResponse,
   Enrollment,
+  JudgedAnswerRequest,
+  JudgedAnswerResponse,
   LoginRequest,
   NextStepRequest,
   NextStepResponse,
@@ -45,6 +47,10 @@ async function failureOf(res: Response): Promise<ApiError> {
 /** Phase 25. A hung upload would leave the speaking card "checking" with every
  *  button disabled; past this it becomes the "couldn't check" notice. */
 export const SPEECH_UPLOAD_TIMEOUT_MS = 15_000;
+
+/** Phase 27 (spec D13). The server's own judge gives up after 8 s; past this the
+ *  app does too, and the card offers "try again". */
+export const JUDGE_REQUEST_TIMEOUT_MS = 15_000;
 
 export type ApiClientDeps = {
   baseUrl: string;
@@ -94,6 +100,19 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       try {
         return await postJson<SpeechAnswerResponse>(
           `/api/sessions/${encodeURIComponent(sessionId)}/speech`,
+          request,
+          controller.signal,
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    judgeAnswer: async (sessionId: string, request: JudgedAnswerRequest) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), JUDGE_REQUEST_TIMEOUT_MS);
+      try {
+        return await postJson<JudgedAnswerResponse>(
+          `/api/sessions/${encodeURIComponent(sessionId)}/judged-answer`,
           request,
           controller.signal,
         );

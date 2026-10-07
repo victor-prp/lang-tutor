@@ -18,6 +18,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import type { CardAnswer } from '@/feedback';
 import type { Clip } from '@/recording';
 import { applyQueued, queuedFrom, type QuizState } from '@/quiz';
+import { canJudge, judgedAnswer, type JudgeAttempt } from '@/judging';
 import { IDLE_ATTEMPT, passesUnseen, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
 
@@ -60,6 +61,10 @@ export type SessionValue = {
   retrySpeech: () => void;
   /** "Can't speak now", or a refused microphone. */
   stopSpeaking: (reason: 'chosen' | 'no_mic') => void;
+  /** Phase 27 (spec D13). A judged card's check: idle, in flight, or failed. */
+  judging: JudgeAttempt;
+  /** Sends a meaning card's text to the server's judge. */
+  submitJudged: (text: string) => void;
   next: () => void;
 };
 
@@ -123,6 +128,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         advanceRequested: false,
         speech: IDLE_ATTEMPT,
         speakingOff: null,
+        judging: 'idle',
       });
       void (async () => {
         try {
@@ -257,6 +263,31 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
     [state, api],
   );
 
+  // Phase 27 (spec D13). The server judges, so the banner waits for it. A
+  // failed check keeps the card, and its text, for another try.
+  const submitJudged = useCallback(
+    (text: string) => {
+      if (!state || !state.question || !canJudge(state.judging, state.answer !== null)) return;
+      const { sessionId, userId, question } = state;
+      const mine = (latest: QuizState | null) =>
+        latest !== null && latest.sessionId === sessionId && latest.question?.id === question.id && latest.answer === null && latest.judging === 'checking';
+      setState((current) => (current ? { ...current, judging: 'checking' } : current));
+      void api
+        .judgeAnswer(sessionId, { user_id: userId, question_id: question.id, text })
+        .then((response) => {
+          setState((latest) =>
+            latest && mine(latest)
+              ? { ...latest, judging: 'idle', answer: judgedAnswer(text, response), queued: queuedFrom(response.next) }
+              : latest,
+          );
+        })
+        .catch(() => {
+          setState((latest) => (latest && mine(latest) ? { ...latest, judging: 'failed' } : latest));
+        });
+    },
+    [state, api],
+  );
+
   // A skip shows no banner: Continue is requested at once, so the next card
   // appears as soon as the server answers (spec D8).
   const pass = useCallback(
@@ -327,6 +358,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         retrySpeech,
         markSpeechFailed,
         stopSpeaking,
+        judging: 'idle',
+        submitJudged,
         next,
       };
     }
@@ -354,9 +387,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       retrySpeech,
       markSpeechFailed,
       stopSpeaking,
+      judging: state.judging,
+      submitJudged,
       next,
     };
-  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, retrySpeech, markSpeechFailed, stopSpeaking, next]);
+  }, [state, enter, select, submitText, submitBoard, submitSpeech, pass, retrySpeech, markSpeechFailed, stopSpeaking, submitJudged, next]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

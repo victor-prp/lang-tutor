@@ -21,3 +21,11 @@ describe('textDirection', () => {
     expect(strings.textDirection('ru')).toBe('ltr');
   });
 });
+
+describe('meaning-recall strings (phase 27 D12)', () => {
+  it('words the instruction and both banners exactly', () => {
+    expect(strings.questionInstructionMeaning).toBe('כתבו את הפירוש בעברית');
+    expect(strings.feedbackSavedMeaning).toBe('נכון! הפירוש השמור:');
+    expect(strings.feedbackOtherSense).toBe('נכון, אבל כאן תרגלנו:');
+  });
+});
