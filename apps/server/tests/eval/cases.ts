@@ -301,6 +301,46 @@ export const CASES: EvalCase[] = [
     acceptTop: ['צבע'],
     expectNoCorrection: true,
   },
+  // Phase 26 follow-up. A slash list typed whole is a correction to its first
+  // word, the rest offered as alternatives. Without one, the dictionary writes
+  // `decorate / decoration` as a form of both lexemes, and a saved sense shows
+  // it in every session. The prompt illustrates with `decide / decision` and
+  // `sing / sang`, so none of these four is in what the model reads.
+  {
+    label: 'a slash list of two words corrects to the first',
+    text: 'decorate / decoration',
+    expectKind: 'word',
+    acceptTop: ['לקשט', 'לעטר', 'לייפות'],
+    expectCorrection: 'decorate',
+    expectAlternative: 'decoration',
+  },
+  {
+    label: 'a slash between two forms of one word corrects to the first',
+    text: 'go / going',
+    expectKind: 'word',
+    acceptTop: ['ללכת', 'לנסוע'],
+    expectCorrection: 'go',
+    expectAlternative: 'going',
+  },
+  {
+    label: 'it: a gender ending after a slash corrects to the word as written first',
+    text: 'amico/a',
+    from: 'it',
+    to: 'he',
+    expectKind: 'word',
+    acceptTop: ['חבר', 'ידיד'],
+    expectCorrection: 'amico',
+    expectAlternative: 'amica',
+  },
+  // The trap: a slash inside one expression. `24/7` illustrates it in the
+  // prompt; this is the case that shows the model generalises past it.
+  {
+    label: 'a slash inside one expression is not a list',
+    text: 'and/or',
+    expectKind: 'word',
+    acceptTop: ['ו/או'],
+    expectNoCorrection: true,
+  },
   // THERE IS DELIBERATELY NO HEBREW CORRECTION CASE, and the reason is worth
   // keeping so nobody adds one back on the same reasoning that failed.
   //

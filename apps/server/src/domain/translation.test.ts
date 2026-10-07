@@ -132,6 +132,27 @@ describe('buildPrompt', () => {
     expect(system).toContain('breakaleg');
   });
 
+  // Phase 26 follow-up. A slash list is a correction to its first word, and the
+  // rule goes only to an input that has a slash: sent with every lookup, it
+  // made `дякую` correct to `спасибо` in 4 of 10 calls, against 0 of 10 without
+  // it. Which slash is a list stays the model's call (`24/7` is not one).
+  it('sends the slash-list rule to an input with a slash, and only to one', () => {
+    for (const [text, from] of [
+      ['decorate / decoration', 'en'],
+      ['amico/a', 'it'],
+      ['24/7', 'en'],
+    ] as const) {
+      expect(buildPrompt({ text, from, to: 'he' }).system).toContain('joined by a slash is a list');
+    }
+    for (const [text, from] of [
+      ['дякую', 'ru'],
+      ['book', 'en'],
+      ['break a leg', 'en'],
+    ] as const) {
+      expect(buildPrompt({ text, from, to: 'he' }).system).not.toContain('joined by a slash');
+    }
+  });
+
   // The wording lock that keeps an illustration word from silently capturing the
   // integration bucket's MockServer expectations. The system instruction is part
   // of the request body those expectations match a regex against, so naming
@@ -150,7 +171,7 @@ describe('buildPrompt', () => {
   // any illustration word in any rule. It grows every time a test registers an
   // UNQUOTED matchText.
   it('names neither saw nor see, the two unquoted MockServer expectations', () => {
-    for (const text of ['book', 'ספר', 'break a leg']) {
+    for (const text of ['book', 'ספר', 'break a leg', 'decorate / decoration']) {
       for (const [from, to] of [
         ['en', 'he'],
         ['he', 'en'],
