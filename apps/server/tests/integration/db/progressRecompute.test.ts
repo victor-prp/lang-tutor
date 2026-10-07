@@ -131,14 +131,14 @@ describe('recomputeProgress', () => {
 
     // Completed: three saved senses, answered right, wrong, right; the other
     // seven questions are about unsaved senses and must change nothing.
-    const { sessionId: completed } = await live.createNextSession(E, { listening: false });
+    const { sessionId: completed } = await live.createNextSession(E, { listening: false, speaking: false });
     const completedRecord = await live.getSession(completed);
     await saveSessionSenses(t.db, { sessionId: completed, enrollmentId: E, positions: [0, 1, 2] });
     for (const [i, q] of completedRecord.questions.entries()) await answer(completed, q, i !== 1);
     expect((await live.getSession(completed)).status).toBe('completed');
 
     // Skipped: two saved senses, one answered right and one wrong, then the skip.
-    const { sessionId: skipped } = await live.createNextSession(E2, { listening: false });
+    const { sessionId: skipped } = await live.createNextSession(E2, { listening: false, speaking: false });
     const skippedRecord = await live.getSession(skipped);
     await saveSessionSenses(t.db, { sessionId: skipped, enrollmentId: E2, positions: [0, 1] });
     await answer(skipped, skippedRecord.questions[0], true);
@@ -239,6 +239,40 @@ describe('recomputeProgress', () => {
     expect(level(words[2].senseId, 'spelling')).toBe(2);
     expect(level(words[3].senseId, 'written_receptive')).toBe(2);
     expect(level(words[4].senseId, 'written_receptive')).toBe(1);
+
+    expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });
+    expect(await written()).toEqual(before);
+  });
+  // Phase 25. A spoken answer, a give-up and a typed say-the-translation answer
+  // are replayed from their stored verdicts, as the live path judged them.
+  it('writes back exactly what the live path wrote for a session of speaking cards', async () => {
+    const { sessions: live } = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+    const words = [];
+    for (const [lemma, translation] of [
+      ['tome', 'ספר'], ['quill', 'נוצה'], ['lantern', 'פנס'],
+    ]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: words,
+      types: ['read_aloud', 'say_translation', 'say_translation'],
+    });
+
+    await live.submitAnswer(sessionId, questions[0].id, { heard: 'tome' });
+    await live.submitAnswer(sessionId, questions[1].id, { pass: 'show_answer' });
+    const done = await live.submitAnswer(sessionId, questions[2].id, { text: 'lantern' });
+    expect(done.status).toBe('completed');
+
+    const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });
+    const before = await written();
+    const level = (senseId: string, dimension: string) =>
+      before.progress.find((row) => row.senseId === senseId && row.dimension === dimension)!.level;
+    expect(level(words[0].senseId, 'spoken_productive')).toBe(2);
+    expect(level(words[2].senseId, 'written_productive')).toBe(2);
+    expect(before.snapshot.length).toBeGreaterThan(0);
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });
     expect(await written()).toEqual(before);

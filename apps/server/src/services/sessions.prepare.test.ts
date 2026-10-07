@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Enrollment, Question } from '@lang-tutor/core/api';
 
-import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
+import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { GenerationContext } from '../domain/distractors';
 import type { SessionState } from '../domain/session';
@@ -79,6 +79,10 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
           case 'multiple_choice':
           case 'listen_choice':
             return { ...base, type: q.type, question: q.form, ...choice() };
+          case 'read_aloud':
+            return { ...base, type: q.type, question: q.form, meaning: q.prompt! };
+          case 'say_translation':
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
         }
       });
     },
@@ -91,6 +95,7 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
     logger,
     now: createFakeClock(1_000, 1_250),
     llm,
+    transcriber: createFakeTranscriber(''),
   });
   return { service, calls, llm, logger };
 }
@@ -326,5 +331,25 @@ describe('failPreparation', () => {
     const { service, calls } = world({});
     await service.failPreparation({ session_id: SESSION });
     expect(calls.transitions).toEqual(['preparing→failed']);
+  });
+});
+
+describe('prepareSession, phase 25 (spec D4)', () => {
+  const types = (calls: { sessionQuestions: Question[][] }) => calls.sessionQuestions[0].map((question) => question.type);
+
+  it('plans a speaking card only when the payload says speaking', async () => {
+    const on = world({ reply: JSON.stringify({ items: [{ key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] }] }) });
+    await on.service.prepareSession({ ...PAYLOAD, ordinal: 2, speaking: true });
+    expect(types(on.calls)).toEqual(['read_aloud', 'reverse_choice']);
+
+    const off = world({});
+    await off.service.prepareSession({ ...PAYLOAD, ordinal: 2, speaking: false });
+    expect(types(off.calls)).not.toContain('read_aloud');
+  });
+
+  it('reads a payload from before phase 25 as speaking off', async () => {
+    const { service, calls } = world({});
+    await service.prepareSession({ ...PAYLOAD, ordinal: 2 });
+    expect(types(calls)).not.toContain('read_aloud');
   });
 });

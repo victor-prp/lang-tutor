@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { MultipleChoiceQuestion } from '@lang-tutor/core/api';
 import { DIMENSIONS } from '@lang-tutor/core/domain';
 
-import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, stub } from '../../tests/support/fakes';
+import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { ProgressRow, SnapshotRead } from '../domain/progress';
 import type { SessionRecord, SessionState } from '../domain/session';
@@ -104,6 +104,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     logger: createFakeLogger(),
     now: createFakeClock(0),
     llm: createFakeLlmClient(''),
+    transcriber: createFakeTranscriber(''),
   });
   return { service, calls };
 }

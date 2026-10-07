@@ -1,5 +1,14 @@
-import type { SessionSource, SessionStatus } from '@lang-tutor/core/api';
-import { LIVE_DIMENSIONS, shuffleSession, type AnswerInput } from '@lang-tutor/core/domain';
+import type { SessionSource, SessionStatus, SpeechVerdict } from '@lang-tutor/core/api';
+import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
+import {
+  LIVE_DIMENSIONS,
+  isSpeaking,
+  shuffleSession,
+  speakable,
+  spokenVerdict,
+  type AnswerInput,
+  type SpeakingQuestion,
+} from '@lang-tutor/core/domain';
 
 import {
   NOTHING_GENERATED,
@@ -20,6 +29,7 @@ import { evaluateSession, progressChanges, type ProgressChange } from '../domain
 import type { SessionRecord, SessionSummary } from '../domain/session';
 import {
   SESSION_LENGTH,
+  currentQuestion,
   isCurrent,
   isOpen,
   newSessionRecord,
@@ -28,12 +38,14 @@ import {
   sessionScore,
   step,
 } from '../domain/session';
+import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
   AnswerKindMismatch,
   EnrollmentNotFound,
   InsufficientQuestions,
   InvalidDistractors,
+  LlmUnavailable,
   NoSavedWords,
   OptionOutOfRange,
   QuestionDesynced,
@@ -44,6 +56,7 @@ import {
 } from '../errors';
 import type { Logger } from '../logger';
 import type { LlmClient } from './llm';
+import type { SpeechTranscriber } from './speech';
 import type { Repos, Transaction } from './transaction';
 
 export type { Transaction } from './transaction';
@@ -64,6 +77,10 @@ function logCompletedSession(logger: Logger, sessionId: string, record: SessionR
 /** A session as the routes answer it: the record, and what it did to the
  *  learner's saved words, which is empty until it is completed. */
 export type SessionResult = SessionRecord & { progress: ProgressChange[] };
+
+/** Phase 25. What one spoken attempt came to: the transcript, how it was
+ *  judged, and the session when the answer was recorded (null when not). */
+export type SpeechResult = { heard: string; verdict: SpeechVerdict; session: SessionResult | null };
 
 /**
  * Phase 20. Runs the progress rule over an ended session's answers, inside the
@@ -108,14 +125,16 @@ export function createSessionService({
   now,
   logger,
   llm,
+  transcriber,
 }: {
   transaction: Transaction;
   rng: () => number;
   now: () => number;
   logger: Logger;
   llm: LlmClient;
+  transcriber: SpeechTranscriber;
 }) {
-  return {
+  const service = {
     /**
      * The next session of an enrollment. The first is the seed, ready at once.
      * Every later one is built from the saved list: it is inserted as
@@ -126,7 +145,7 @@ export function createSessionService({
      */
     createNextSession: (
       enrollmentId: string,
-      options: { listening: boolean },
+      options: { listening: boolean; speaking: boolean },
     ): Promise<{ sessionId: string; status: SessionStatus; source: SessionSource }> =>
       transaction(async ({ session, question, enrollment, vocabulary, jobs }) => {
         const enrolled = await enrollment.findById(enrollmentId);
@@ -164,6 +183,7 @@ export function createSessionService({
           session_id: sessionId,
           picks: picks.map((pick) => ({ sense_id: pick.senseId, variant_id: pick.variantId })),
           listening: options.listening,
+          speaking: options.speaking,
           ordinal,
         });
         return { sessionId, status: 'preparing' as const, source: 'list' as const };
@@ -241,6 +261,8 @@ export function createSessionService({
         if (outcome.status === 'out_of_range') {
           throw new OptionOutOfRange('option_index' in answer ? answer.option_index : -1);
         }
+        // answerBySpeech judges before it gets here, with the same pure function.
+        if (outcome.status === 'unheard') throw new Error('an unheard transcript reached submitAnswer');
         // A replay reports justCompleted: false, so retrying a completed session
         // logs nothing and writes no progress.
         if (outcome.status === 'replayed') {
@@ -253,9 +275,9 @@ export function createSessionService({
           sessionId,
           loaded.answers.length,
           questionId,
-          'text' in answer
-            ? { text: answer.text, verdict: recorded.verdict! }
-            : { displayIndex: answer.option_index },
+          'option_index' in answer
+            ? { displayIndex: answer.option_index }
+            : { text: recorded.answer_string, verdict: recorded.verdict! },
         );
 
         if (outcome.justCompleted) {
@@ -272,6 +294,81 @@ export function createSessionService({
       }
 
       return result;
+    },
+
+    /**
+     * Phase 25 (spec D5). One spoken attempt at the current card. The card is
+     * checked first, so no model call is spent on a stale or wrong request; the
+     * clip is transcribed outside any transaction (ADR 0001 R8); and an
+     * understood answer is recorded through submitAnswer, exactly as a
+     * next-step is. A transcript that is not the word writes nothing.
+     */
+    answerBySpeech: async (
+      sessionId: string,
+      input: { userId: string; questionId: string; audio: string; mimeType: string },
+    ): Promise<SpeechResult> => {
+      type Checked = { replay: SpeechResult } | { current: SpeakingQuestion; language: LanguageCode };
+      const checked = await transaction(async (repos): Promise<Checked> => {
+        const loaded = await repos.session.loadSession(sessionId);
+        // Another learner's session is answered as an unknown one.
+        if (!loaded || loaded.user_id !== input.userId) throw new SessionNotFound(sessionId);
+        if (loaded.status !== 'ready' && loaded.status !== 'completed') {
+          throw new SessionNotReady(sessionId, loaded.status);
+        }
+        // A retry of an attempt already recorded: the stored answer, no call.
+        const last = loaded.answers[loaded.answers.length - 1];
+        if (last && last.question_id === input.questionId) {
+          // Ruling R1: only a recorded spoken answer is replayed; any other
+          // answer to this card means this upload is stale.
+          if (last.verdict !== 'understood' && last.verdict !== 'alternative') {
+            throw new QuestionDesynced(input.questionId);
+          }
+          const progress = await progressOf(repos, sessionId, loaded);
+          const replay: SpeechResult = {
+            heard: last.answer_string,
+            verdict: last.verdict === 'alternative' ? 'alternative' : 'understood',
+            session: { ...loaded, progress },
+          };
+          return { replay };
+        }
+        const current = currentQuestion(loaded);
+        if (!current || current.id !== input.questionId) throw new QuestionDesynced(input.questionId);
+        if (!isSpeaking(current)) throw new AnswerKindMismatch(input.questionId);
+        const state = await repos.session.findState(sessionId);
+        const enrolled = state ? await repos.enrollment.findById(state.enrollmentId) : undefined;
+        if (!enrolled) throw new SessionNotFound(sessionId);
+        return { current, language: enrolled.target_language as LanguageCode };
+      });
+      if ('replay' in checked) return checked.replay;
+
+      const started = now();
+      let heard = '';
+      if (input.audio.length >= MIN_AUDIO_CHARS) {
+        const raw = await transcriber({
+          system: transcriptionSystem(checked.language),
+          audio: input.audio,
+          mimeType: input.mimeType,
+          schema: LlmTranscriptSchema,
+        });
+        const parsed = parseTranscript(raw);
+        if (parsed === null) throw new LlmUnavailable('the transcript was unreadable');
+        heard = parsed;
+      }
+      const transcribeMs = now() - started;
+
+      const verdict = spokenVerdict(checked.current, heard);
+      const session = verdict === 'unheard' ? null : await service.submitAnswer(sessionId, input.questionId, { heard });
+      logger.info({
+        event: 'speech_judged',
+        session_id: sessionId,
+        question_type: checked.current.type,
+        verdict,
+        heard,
+        transcribe_ms: transcribeMs,
+        bytes: Math.floor((input.audio.length * 3) / 4),
+        mime_type: input.mimeType,
+      });
+      return { heard, verdict, session };
     },
 
     /**
@@ -312,8 +409,13 @@ export function createSessionService({
       // order of the picks, before the model is asked anything.
       const target = read.enrolled.target_language as LanguageCode;
       const plan = planSession(
-        read.context.map((row) => ({ form: row.form, translation: row.translation, tiles: tileEligible(row.form) })),
-        { listening: payload.listening, ordinal: payload.ordinal },
+        read.context.map((row) => ({
+          form: row.form,
+          translation: row.translation,
+          tiles: tileEligible(row.form),
+          speakable: speakable(row.form),
+        })),
+        { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
       );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor(plan);
@@ -423,6 +525,7 @@ export function createSessionService({
       logger.info({ event: 'session_preparation_failed', session_id: sessionId, marked });
     },
   };
+  return service;
 }
 
 export type SessionService = ReturnType<typeof createSessionService>;

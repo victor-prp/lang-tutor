@@ -4,7 +4,7 @@ import type { GeminiConfig } from './config';
 import type { Db } from './db/client';
 import { createTransaction } from './db/transaction';
 import type { Logger } from './logger';
-import { createGeminiClient } from './providers/gemini';
+import { createGeminiClient, createGeminiTranscriber } from './providers/gemini';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createJobRepo } from './repo/jobs';
 import { createProgressRepo } from './repo/progress';
@@ -17,6 +17,7 @@ import { createVocabularyRepo } from './repo/vocabulary';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
 import type { LlmClient } from './services/llm';
 import { createSessionService, type SessionService } from './services/sessions';
+import type { SpeechTranscriber } from './services/speech';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
 import { createVocabularyService, type VocabularyService } from './services/vocabulary';
@@ -63,6 +64,9 @@ export function createServerDeps(io: {
   // Phase 19. The budget of one distractor call: a session's whole batch is one
   // long answer, so it gets its own, longer than a lookup's.
   sessionGenerationTimeoutMs: number;
+  // Phase 25 (spec D13). One transcription's budget: short, because a learner
+  // is waiting on a card.
+  speechTimeoutMs: number;
   identity: ServerIdentity;
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
@@ -104,8 +108,25 @@ export function createServerDeps(io: {
     timeoutMs: io.sessionGenerationTimeoutMs,
   });
 
+  // Phase 25. The same provider over audio. Named here and nowhere else
+  // (ADR 0001 R11); the annotation checks it satisfies the contract.
+  const transcriber: SpeechTranscriber = createGeminiTranscriber({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.speechTimeoutMs,
+  });
+
   return {
-    sessions: createSessionService({ transaction, rng: io.rng, now: io.now, logger: io.logger, llm: sessionLlm }),
+    sessions: createSessionService({
+      transaction,
+      rng: io.rng,
+      now: io.now,
+      logger: io.logger,
+      llm: sessionLlm,
+      transcriber,
+    }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations: createTranslationService({ llm, transaction, logger: io.logger }),

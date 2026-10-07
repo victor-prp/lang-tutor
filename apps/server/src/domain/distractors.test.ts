@@ -368,8 +368,8 @@ describe('phase 24 generation (spec D2, D10)', () => {
     expect(taskFor('matching')).toBeNull();
     expect(taskFor('listen_choice')).toBe('meaning');
     const plan = planSession(
-      Array.from({ length: 10 }, (_, i) => ({ form: `w${i}`, translation: `מ${i}`, tiles: true })),
-      { listening: true, ordinal: 0 },
+      Array.from({ length: 10 }, (_, i) => ({ form: `w${i}`, translation: `מ${i}`, tiles: true, speakable: false })),
+      { listening: true, speaking: false, ordinal: 0 },
     );
     expect(tasksFor(plan)).toEqual(['meaning', 'word', 'typed', 'meaning', null, null, null, 'meaning', null, null]);
   });
