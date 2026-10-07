@@ -4,6 +4,7 @@ import type { PhotoImport, PhotoImportItem, PhotoImportSummary } from '@lang-tut
 import { ApiError } from './api/client';
 import {
   afterFailedChange,
+  afterReadBack,
   canSave,
   chosenOption,
   homePhotoCard,
@@ -80,6 +81,21 @@ describe('afterFailedChange', () => {
     expect(afterFailedChange(new TypeError('Network request failed'))).toBe('adopt_server');
     expect(afterFailedChange(new Error('The operation was aborted'))).toBe('adopt_server');
     expect(afterFailedChange('anything else')).toBe('adopt_server');
+  });
+});
+
+describe('afterReadBack', () => {
+  // The read that follows a change with no answer. Until it answers the row
+  // stays held, so Save cannot save a state the screen is unsure of.
+  it('releases the row to the server’s copy once the read lands, or a newer read already has', () => {
+    expect(afterReadBack('applied')).toBe('release');
+    expect(afterReadBack('superseded')).toBe('release');
+  });
+
+  // Offline: the change and the read both failed. The change almost certainly
+  // never arrived, so the row goes back to what it was rather than showing it done.
+  it('puts the row back when the read fails too', () => {
+    expect(afterReadBack('failed')).toBe('revert');
   });
 });
 

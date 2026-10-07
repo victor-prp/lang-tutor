@@ -10,6 +10,7 @@ import { usePhotoImports } from '@/hooks/usePhotoImports';
 import {
   IMPORT_POLL_INTERVAL_MS,
   afterFailedChange,
+  afterReadBack,
   canSave,
   chosenOption,
   mergePolled,
@@ -22,6 +23,10 @@ import {
 } from '@/photoImports';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+
+// How one read of the import ended (ReadOutcome in @/photoImports), with what it
+// read when it was shown.
+type Read = { outcome: 'applied'; read: PhotoImport } | { outcome: 'superseded' | 'failed' };
 
 const withRow = (imp: PhotoImport, row: PhotoImportItem): PhotoImport => ({
   ...imp,
@@ -63,23 +68,25 @@ export default function PhotoImportReviewScreen() {
   // landed may still have been read before it, so these rows keep their local
   // copy: once a row is ready, nothing but this screen changes it.
   const changed = useRef(new Set<number>());
-  // The newest read wins: an older poll answering late is dropped, as the
-  // provider's reload does.
-  const generation = useRef(0);
+  // Reads are numbered as they start. An answer is shown unless a newer one
+  // already has been, so an older poll answering late never overwrites a newer
+  // read, and a slow answer still lands while polls keep starting.
+  const started = useRef(0);
+  const applied = useRef(0);
 
-  // Answers the import it read, or null when the read failed or a newer one
-  // superseded it.
-  const load = useCallback(async (): Promise<PhotoImport | null> => {
-    const mine = ++generation.current;
+  const load = useCallback(async (): Promise<Read> => {
+    const mine = ++started.current;
     try {
       const polled = await fetchImport(id);
-      if (mine !== generation.current) return null;
+      if (mine < applied.current) return { outcome: 'superseded' };
+      applied.current = mine;
       setImp((local) => (local ? mergePolled(polled, local, changed.current) : polled));
       setLoadFailed(false);
-      return polled;
+      return { outcome: 'applied', read: polled };
     } catch {
-      if (mine === generation.current) setLoadFailed(true);
-      return null;
+      if (mine < applied.current) return { outcome: 'superseded' };
+      setLoadFailed(true);
+      return { outcome: 'failed' };
     }
   }, [fetchImport, id]);
 
@@ -109,8 +116,8 @@ export default function PhotoImportReviewScreen() {
 
   // Shown at once, sent at once, and put back if the server refuses it, as the
   // save toggles do. One change per row at a time. A change with no answer may
-  // have landed, so the row is read again instead: the screen must show what
-  // Save would save.
+  // have landed, so the row is read again instead, and stays held (Save with
+  // it) until that read answers: the screen must show what Save would save.
   const change = async (position: number, update: PhotoImportItemUpdate) => {
     const original = imp?.items.find((row) => row.position === position);
     if (!original || inFlight.current.has(position)) return;
@@ -125,7 +132,8 @@ export default function PhotoImportReviewScreen() {
         setImp((current) => current && withRow(current, original));
       } else {
         changed.current.delete(position);
-        void load();
+        const { outcome } = await load();
+        if (afterReadBack(outcome) === 'revert') setImp((current) => current && withRow(current, original));
       }
     } finally {
       mark(position, false);
@@ -159,7 +167,8 @@ export default function PhotoImportReviewScreen() {
         // says saved, and this ends as a save does. Otherwise it was refused
         // (discarded elsewhere, or a row changed under it), or never arrived,
         // and the import as it now is shows under the error.
-        const saved = savedWordCount(await load());
+        const reread = await load();
+        const saved = savedWordCount(reread.outcome === 'applied' ? reread.read : null);
         if (saved !== null) leaveSaved(saved);
         else setSaveFailed(true);
       }

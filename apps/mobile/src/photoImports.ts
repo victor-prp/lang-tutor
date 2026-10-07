@@ -99,6 +99,19 @@ export function afterFailedChange(error: unknown): 'revert' | 'adopt_server' {
   return error instanceof ApiError ? 'revert' : 'adopt_server';
 }
 
+/** How a read of the import ended: its answer shown, dropped because a newer
+ *  answer was already shown, or the read itself failed. */
+export type ReadOutcome = 'applied' | 'superseded' | 'failed';
+
+/** After a change with no answer, what its read-back decides for the row, which
+ *  is held until then. A read that landed (this one or a newer one) has put the
+ *  server's row on screen, so the row is released. A read that failed too means
+ *  no network: the change almost certainly never arrived, and the row goes
+ *  back to what it was. */
+export function afterReadBack(outcome: ReadOutcome): 'release' | 'revert' {
+  return outcome === 'failed' ? 'revert' : 'release';
+}
+
 /** What a save left saved, read back from the import: null unless it is saved.
  *  Counted as the server's save counts it (spec D11), one word per chosen sense
  *  of a ticked row, so a save whose answer was lost still ends with its count. */

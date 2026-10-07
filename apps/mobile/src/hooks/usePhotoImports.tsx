@@ -36,22 +36,26 @@ export function PhotoImportsProvider({ api, picker, children }: { api: ApiClient
   const [failedFor, setFailedFor] = useState<string | null>(null);
   const imports = importsFor(stored, active?.id);
   const loadFailed = active !== null && failedFor === active.id;
-  // The newest read wins: an older poll answering late is dropped.
-  const generation = useRef(0);
+  // Reads are numbered as they start. An answer is shown unless a newer one
+  // already has been, so an older poll answering late is dropped, and a slow
+  // answer still lands while polls keep starting.
+  const started = useRef(0);
+  const applied = useRef(0);
 
   const reload = useCallback(() => {
     if (!active) return;
     const enrollmentId = active.id;
-    const mine = ++generation.current;
+    const mine = ++started.current;
     api
       .listPhotoImports(enrollmentId)
       .then((list) => {
-        if (mine !== generation.current) return;
+        if (mine < applied.current) return;
+        applied.current = mine;
         setStored({ enrollmentId, imports: list });
         setFailedFor((failed) => (failed === enrollmentId ? null : failed));
       })
       .catch(() => {
-        if (mine === generation.current) setFailedFor(enrollmentId);
+        if (mine > applied.current) setFailedFor(enrollmentId);
       });
   }, [api, active]);
 
