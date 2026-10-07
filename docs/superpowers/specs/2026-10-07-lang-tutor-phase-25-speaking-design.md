@@ -37,7 +37,7 @@ After every attempt the card says whether the app understood the word, and shows
 
 **Done means:**
 
-1. With speaking available and eligible words, list sessions include both speaking cards, and
+1. With speaking available and eligible saved items, list sessions include both speaking cards, and
    four list sessions in a row show both (D3). Two cards in a row never share a type.
 2. A say-the-translation answer the app understands moves `spoken_productive` above "not
    practised". Read aloud alone takes it no higher than level 2 (D10).
@@ -55,7 +55,8 @@ After every attempt the card says whether the app understood the word, and shows
 ## Scope
 
 **In:**
-- `read_aloud` and `say_translation`, end to end, for every target language;
+- `read_aloud` and `say_translation`, end to end, for every target language, for saved words and
+  for saved phrases of up to four words (D3);
 - recording in the app with `expo-audio`, transcription on the server by Gemini, and
   `judgeSpoken` in `packages/core`;
 - a speaking flag from the app, and the two types in phase 24's planner;
@@ -65,7 +66,8 @@ After every attempt the card says whether the app understood the word, and shows
 
 **Out:**
 - scoring pronunciation quality, such as accent or stress: only whether the word was understood;
-- phrases and sentences: a saved form of more than one word gets no speaking card (D3);
+- sentences: a saved item of more than four words gets no speaking card (D3). The one-pager put
+  phrases Out too; Victor moved short phrases In on 2026-10-07, after the POC;
 - speaking outside a session, such as on a word's page or a lookup result;
 - Hebrew speech;
 - a setting to switch speaking cards off: "can't speak now" lasts one session (D8);
@@ -140,9 +142,14 @@ leaving Expo Go becomes acceptable.
   phase 24's order and only grows. The tiers now cycle three, three and four types, so four
   sessions in a row show every type of every tier, where phase 24 needed three.
 - **Eligibility** (phase 24 D4), for both: the session was created with speaking on (D4), and the
-  form, with stress marks removed, is a single word, with no space. An elision such as `l'acqua` is
-  one word. Phrases are Out. An ineligible pick falls through its tier as phase 24 says, ending at
-  the always-eligible type.
+  form, with stress marks removed, has at most four words. An elision such as `l'acqua` is one
+  word. An ineligible pick falls through its tier as phase 24 says, ending at the always-eligible
+  type.
+- **Phrases are in, sentences are out.** The one-pager put both Out. In the POC (2026-10-07) every
+  phrase Victor said came back exactly (`per favore`, `caffè con cornetto`), and he moved short
+  phrases In: a saved `per favore` is exactly what a learner wants to practise saying. Four words is
+  where a phrase ends. Beyond it, one slip turns the whole item into "not understood", and saying a
+  sentence is another exercise.
 - **Two cards in a row still never share a type,** since consecutive single cards sit in
   different tiers.
 - **A one-word session gets no speaking card.** Its only card sits in the recognise tier and could
@@ -202,11 +209,13 @@ trailing punctuation and one leading article. Then:
   (`й` is its own letter). A transcript's spelling is the model's, not the learner's: `perché`
   transcribed as `perche` was said right. Spelling evidence comes only from typed answers
   (phase 20).
-- **The target may be one word among several. (low confidence)** `um, gatto` and `il gatto` are
-  understood: the transcript, split into words, contains the target. Forms are single words (D3),
-  so this compares words, never substrings. The cost is that a learner who says two guesses is
-  understood, a little over-credit on recall. The alternative is a false "not understood" every
-  time a filler word or an article is transcribed, which would be far more common.
+- **The target is a run of words among the heard words. (low confidence)** The transcript and the
+  target are each split into words, and the target's words must appear in the transcript in
+  order, side by side: `um, gatto` and `il gatto` are understood, and so is `per favore` said as
+  two words. It compares words, never substrings, so `gatto` is not found in `gattone`. The cost is
+  that a learner who says two guesses is understood, a little over-credit on recall. The
+  alternative is a false "not understood" every time a filler word or an article is transcribed,
+  which would be far more common.
 - **Targets.** For `read_aloud`, the form only. A learner shown `parlo` who says `parlare` did not
   read what was shown. For `say_translation`, the form or its lemma gives `understood`, as typing
   either does (phase 23 D5), and one of the alternatives gives `alternative`: right, but not this
@@ -463,12 +472,14 @@ of at most 200 KB, base64's extra third costs nothing worth that.
 
 - **core:**
   - `judgeSpoken`: diacritics folded and the breve kept; an article or a filler word around the
-    target; read aloud refuses the lemma; say the translation takes the lemma, and an alternative
+    target; a phrase found as a run of words, and not found when its words are apart or out of
+    order; read aloud refuses the lemma; say the translation takes the lemma, and an alternative
     gives `alternative`; one letter off is `unheard`; empty is `unheard`.
   - `evaluate` and `answerFits` for `heard`, `pass` and `text` on each type; `score` and `missed`
     leave skipped cards out; the union parses both shapes.
 - **server domain:**
-  - the planner: speaking on and off; a phrase is never a speaking card; ordinals 0–3 show every
+  - the planner: speaking on and off; a four-word phrase can be a speaking card and a five-word
+    item never is; ordinals 0–3 show every
     type; two cards in a row never share a type, over sizes 1–10 with speaking on;
   - `evidenceFor`: every row of D10;
   - the cap: read aloud alone stops at 2; read aloud and say the translation on one day are
