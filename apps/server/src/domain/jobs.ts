@@ -28,6 +28,10 @@ export const PrepareSessionPayloadSchema = z.object({
     .array(z.object({ sense_id: z.string().min(1), variant_id: z.string().min(1) }))
     .min(1)
     .max(SESSION_LENGTH),
+  // Phase 24 (spec D5, D3). Absent in a job enqueued before the deploy: such a
+  // session gets no listening cards, and the rotation's first step.
+  listening: z.boolean().default(false),
+  ordinal: z.number().int().nonnegative().default(0),
 });
 export type PrepareSessionPayload = z.infer<typeof PrepareSessionPayloadSchema>;
 
