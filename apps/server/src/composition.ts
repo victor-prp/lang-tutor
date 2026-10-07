@@ -21,6 +21,7 @@ import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
+import { createGrantService, type GrantService } from './services/grants';
 import { createVocabularyService, type VocabularyService } from './services/vocabulary';
 
 /**
@@ -40,6 +41,7 @@ export type AppDeps = {
   enrollments: EnrollmentService;
   translations: TranslationService;
   vocabulary: VocabularyService;
+  grants: GrantService;
   health: HealthRepo;
   identity: ServerIdentity;
   logger: Logger;
@@ -133,6 +135,7 @@ export function createServerDeps(io: {
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations: createTranslationService({ llm, transaction, logger: io.logger }),
     vocabulary: createVocabularyService({ transaction, logger: io.logger }),
+    grants: createGrantService({ transaction, logger: io.logger }),
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,
     logger: io.logger,

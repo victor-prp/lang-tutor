@@ -6,6 +6,7 @@ import type { EnrollmentService } from './services/enrollments';
 import type { SessionService } from './services/sessions';
 import type { TranslationService } from './services/translations';
 import type { UserService } from './services/users';
+import type { GrantService } from './services/grants';
 import type { VocabularyService } from './services/vocabulary';
 import { createFakeLogger } from '../tests/support/fakes';
 
@@ -77,8 +78,24 @@ const unreachableVocabulary: VocabularyService = {
   },
 };
 
+const unreachableGrants: GrantService = {
+  invite: () => {
+    throw new Error('the health route must not reach the grant service');
+  },
+  list: () => {
+    throw new Error('the health route must not reach the grant service');
+  },
+  accept: () => {
+    throw new Error('the health route must not reach the grant service');
+  },
+  end: () => {
+    throw new Error('the health route must not reach the grant service');
+  },
+};
+
 function depsWithPing(ok: boolean): AppDeps {
   return {
+    grants: unreachableGrants,
     sessions: unreachableSessions,
     users: unreachableUsers,
     enrollments: unreachableEnrollments,

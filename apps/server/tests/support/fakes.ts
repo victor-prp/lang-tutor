@@ -19,6 +19,7 @@ import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/spee
 import type { SessionService } from '../../src/services/sessions';
 import type { Repos, Transaction } from '../../src/services/transaction';
 import type { TranslationService } from '../../src/services/translations';
+import type { GrantService } from '../../src/services/grants';
 import type { VocabularyService } from '../../src/services/vocabulary';
 import type { UserService } from '../../src/services/users';
 
@@ -76,12 +77,14 @@ export function createFakeAppDeps(): AppDeps {
     listWords: unreachable,
     wordDetail: unreachable,
   };
+  const grants: GrantService = { invite: unreachable, list: unreachable, accept: unreachable, end: unreachable };
   return {
     sessions,
     users,
     enrollments,
     translations,
     vocabulary,
+    grants,
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0 },
     logger: createFakeLogger(),

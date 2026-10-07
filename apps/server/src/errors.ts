@@ -229,3 +229,30 @@ export class InvalidDistractors extends Error {
     this.name = 'InvalidDistractors';
   }
 }
+
+/** Phase 28. No grant has this id. */
+export class GrantNotFound extends Error {
+  constructor(readonly grantId: string) {
+    super(`no grant ${grantId}`);
+    this.name = 'GrantNotFound';
+  }
+}
+
+/** Phase 28 (spec D3). An invite names a language the student is not learning. */
+export class NotLearning extends Error {
+  constructor(
+    readonly userId: string,
+    readonly targetLanguage: string,
+  ) {
+    super(`${userId} is not learning ${targetLanguage}`);
+    this.name = 'NotLearning';
+  }
+}
+
+/** Phase 28. Nobody holds a grant on their own list. */
+export class OwnList extends Error {
+  constructor(readonly userId: string) {
+    super(`${userId} cannot be granted their own list`);
+    this.name = 'OwnList';
+  }
+}

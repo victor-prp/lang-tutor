@@ -97,13 +97,16 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all fourteen paths and nothing else', async () => {
+  it('contains all seventeen paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
       '/api/enrollments/{id}/vocabulary/word',
+      '/api/grants',
+      '/api/grants/{id}',
+      '/api/grants/{id}/accept',
       '/api/login',
       '/api/sessions',
       '/api/sessions/{id}',
@@ -115,6 +118,21 @@ describe('the document as a whole', () => {
       '/api/users/{id}/enrollments',
       '/health',
     ]);
+  });
+});
+
+describe('the grant endpoints in the published document (phase 28)', () => {
+  it.each([
+    ['/api/grants', 'post', ['201', '400', '404', '409']],
+    ['/api/grants', 'get', ['200', '400']],
+    ['/api/grants/{id}/accept', 'post', ['200', '400', '403', '404']],
+    ['/api/grants/{id}', 'delete', ['204', '400', '403']],
+  ])('declares every status %s %s can return, and requires the actor header', async (path, method, statuses) => {
+    const doc = await openApiDocument();
+    const operation = doc.paths[path as string][method as string];
+    expect(Object.keys(operation.responses).sort()).toEqual(statuses);
+    const header = operation.parameters.find((p: { name: string }) => p.name === 'x-acting-user-id');
+    expect(header).toMatchObject({ in: 'header', required: true });
   });
 });
 
