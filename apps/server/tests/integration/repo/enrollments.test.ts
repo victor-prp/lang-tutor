@@ -57,6 +57,13 @@ describe('enrollments repository', () => {
     ).rejects.toBeInstanceOf(AlreadyEnrolled);
   });
 
+  it('finds an enrollment by its learner and target, and nothing for another target', async () => {
+    const ru = await repo((r) => r.insertEnrollment({ userId: 'u_1', sourceLanguage: 'he', targetLanguage: 'ru' }));
+    expect(await repo((r) => r.findByUserAndTarget('u_1', 'ru'))).toEqual(ru);
+    expect(await repo((r) => r.findByUserAndTarget('u_1', 'it'))).toBeUndefined();
+    expect(await repo((r) => r.findByUserAndTarget('u_2', 'ru'))).toBeUndefined();
+  });
+
   it('finds by id, and answers undefined for an unknown id', async () => {
     const [first] = await repo((r) => r.listByUser('u_2'));
     expect(await repo((r) => r.findById(first.id))).toEqual(first);

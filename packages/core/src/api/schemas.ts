@@ -418,6 +418,49 @@ export const EnrollmentSchema = z.object({
 
 export const EnrollmentListSchema = z.array(EnrollmentSchema);
 
+// Phase 28 (spec D9). An access grant: the grantee may act on the owner's
+// enrollment, as far as the role allows. `role` is a plain string for the reason
+// UserSchema's language fields are — a later role must not fail validation in a
+// client that shipped before it.
+export const GrantStatusSchema = z.enum(['pending', 'accepted']);
+
+const GrantPartySchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  display_name: z.string(),
+});
+
+export const GrantSchema = z.object({
+  id: z.string(),
+  role: z.string(),
+  status: GrantStatusSchema,
+  enrollment: z.object({
+    id: z.string(),
+    source_language: z.string(),
+    target_language: z.string(),
+  }),
+  // The student, whose list it is.
+  owner: GrantPartySchema,
+  // The tutor.
+  grantee: GrantPartySchema,
+  created_at: z.string(),
+  accepted_at: z.string().nullable(),
+});
+
+// Both sides of one account: grants ON its lists (its tutors, and invites to
+// answer) and grants it HOLDS (its students). Newest first in each.
+export const GrantListSchema = z.object({
+  tutors: z.array(GrantSchema),
+  students: z.array(GrantSchema),
+});
+
+// The tutor names the student and the language they teach. The grant goes on the
+// student's enrollment in that language, which must exist (spec D3).
+export const CreateGrantRequestSchema = z.object({
+  username: UsernameSchema,
+  target_language: LanguageCodeSchema,
+});
+
 export const CreateEnrollmentRequestSchema = z
   .object({
     source_language: EnrollmentSourceSchema,

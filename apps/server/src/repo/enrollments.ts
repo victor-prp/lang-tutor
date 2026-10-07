@@ -1,5 +1,5 @@
 import type { Enrollment } from '@lang-tutor/core/api';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { enrollments } from '../db/schema';
@@ -54,6 +54,15 @@ export function createEnrollmentRepo(tx: Tx) {
           .where(eq(enrollments.userId, userId))
           .orderBy(desc(enrollments.createdAt), desc(enrollments.id))
       ).map(toEnrollment),
+
+    /** Phase 28. The enrollment a tutor's invite names: UNIQUE(user_id, target_language). */
+    findByUserAndTarget: async (userId: string, targetLanguage: string): Promise<Enrollment | undefined> => {
+      const [row] = await tx
+        .select()
+        .from(enrollments)
+        .where(and(eq(enrollments.userId, userId), eq(enrollments.targetLanguage, targetLanguage)));
+      return row ? toEnrollment(row) : undefined;
+    },
 
     findById: async (id: string): Promise<Enrollment | undefined> => {
       const [row] = await tx.select().from(enrollments).where(eq(enrollments.id, id));

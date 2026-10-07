@@ -194,6 +194,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
   const bound: Repos = {
     user: repos.user ?? unreachableRepo('user repo'),
     enrollment: repos.enrollment ?? unreachableRepo('enrollment repo'),
+    grant: repos.grant ?? unreachableRepo('grant repo'),
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),

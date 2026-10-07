@@ -8,6 +8,7 @@ import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
 import type { VocabularyRepo } from '../repo/vocabulary';
@@ -73,9 +74,26 @@ describe('repos', () => {
     listByUser: () => {
       throw new Error('the session service must not list enrollments');
     },
+    findByUserAndTarget: () => {
+      throw new Error('the submit-answer use case must not look an enrollment up by target');
+    },
     findById: () => {
       throw new Error('the submit-answer use case must not read an enrollment');
     },
+  };
+
+  // Phase 28. Bound into the transaction, and never reached by these use cases.
+  const noGrants = () => {
+    throw new Error('the session service must not touch the grant tables');
+  };
+  const grantRepo: GrantRepo = {
+    insertGrant: noGrants,
+    findGrant: noGrants,
+    findGrantFor: noGrants,
+    acceptGrant: noGrants,
+    deleteGrant: noGrants,
+    listForOwner: noGrants,
+    listForGrantee: noGrants,
   };
 
   // Bound into the same transaction since phase 10, and untouched by these use
@@ -149,6 +167,7 @@ describe('repos', () => {
         question: questionRepo,
         user: userRepo,
         enrollment: enrollmentRepo,
+        grant: grantRepo,
         dict: dictRepo,
         vocabulary: vocabularyRepo,
         progress: progressRepo,

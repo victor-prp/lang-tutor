@@ -66,6 +66,17 @@ export class AlreadyEnrolled extends Error {
   }
 }
 
+/** Phase 28. This person already holds a grant on this list, pending or accepted. */
+export class GrantExists extends Error {
+  constructor(
+    readonly enrollmentId: string,
+    readonly granteeUserId: string,
+  ) {
+    super(`${granteeUserId} already holds a grant on ${enrollmentId}`);
+    this.name = 'GrantExists';
+  }
+}
+
 /** A session draws SESSION_LENGTH questions; a pool smaller than that cannot
  *  start one. Before phase 16 this surfaced as a plain Error from pickQuestions
  *  and a 500. */

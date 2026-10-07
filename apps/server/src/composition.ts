@@ -11,6 +11,7 @@ import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
 import { createEnrollmentRepo } from './repo/enrollments';
+import { createGrantRepo } from './repo/grants';
 import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
@@ -80,6 +81,7 @@ export function createServerDeps(io: {
     question: createQuestionRepo(tx),
     user: createUserRepo(tx),
     enrollment: createEnrollmentRepo(tx),
+    grant: createGrantRepo(tx),
     dict: createDictRepo(tx),
     vocabulary: createVocabularyRepo(tx),
     progress: createProgressRepo(tx),
