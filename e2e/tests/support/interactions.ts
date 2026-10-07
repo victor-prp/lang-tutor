@@ -1,6 +1,8 @@
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
-import { clearGemini, expectGemini } from './mockServer';
+import { API_URL } from '../../urls';
+import { generationStub } from './cards';
+import { clearGemini, expectGemini, expectGeminiPayload } from './mockServer';
 
 // Retried: a static export serves markup before React hydrates, so an early
 // click is a silent no-op (the pattern the specs share).
@@ -29,4 +31,15 @@ export async function tapAndWaitForWrite(page: Page, button: Locator) {
   );
   await button.click();
   expect((await written).ok()).toBe(true);
+}
+
+/** Phase 27 Part B. Makes one list session and skips it unplayed, so the next
+ *  is ordinal 1 (the rotation's step, D9). Past a skipped seed, with words saved. */
+export async function skipListSession(request: APIRequestContext, enrollmentId: string) {
+  await clearGemini(request);
+  await expectGeminiPayload(request, generationStub());
+  const made = await request.post(`${API_URL}/api/sessions`, { data: { enrollment_id: enrollmentId } });
+  expect(made.ok(), await made.text()).toBe(true);
+  const { session_id } = (await made.json()) as { session_id: string };
+  expect((await request.post(`${API_URL}/api/sessions/${session_id}/skip`)).ok()).toBe(true);
 }

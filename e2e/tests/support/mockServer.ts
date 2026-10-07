@@ -114,13 +114,13 @@ export async function expectTranscription(request: APIRequestContext, heard: str
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
 
-/** Phase 27. The meaning judge's answer, matched on the server's JUDGE_MARKER
+/** Phase 27. The meaning judge's answer (or, with `misspelled` or `other_word`, the translation judge's), matched on the server's JUDGE_MARKER
  *  (apps/server/src/domain/judge.ts) and ranked above the generation stub.
  *  Consumed once, in registration order. `status` makes it a failed call
  *  instead; `delayMs` holds the answer back so the "checking" state can be seen. */
 export async function expectJudge(
   request: APIRequestContext,
-  verdict: 'right' | 'other_sense' | 'wrong',
+  verdict: 'right' | 'other_sense' | 'wrong' | 'misspelled' | 'other_word',
   opts: { status?: number; delayMs?: number } = {},
 ): Promise<void> {
   const failed = opts.status !== undefined && opts.status !== 200;
