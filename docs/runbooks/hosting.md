@@ -112,7 +112,9 @@ the container log (below).
 ## Rolling back
 
 `gh workflow run release.yml --ref <earlier tag>`, or Actions → Release → Run workflow → pick
-the tag. The image exists, so this is one apply, one to two minutes. Rolling back past a
+the tag. The image exists, so this is one apply, one to two minutes. Only the image goes back:
+the workflow applies master's `infra/`, so the domain, the budget and every secret stay as they
+are now. Rolling back past a
 migration does not undo the migration; ADR 0010 says why additive migrations make that safe.
 
 ## Reading the container's log

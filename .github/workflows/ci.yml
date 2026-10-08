@@ -59,6 +59,8 @@ jobs:
       - run: ./scripts/test-infra.sh
       # Phase 30. The release guard's verdicts, against hand-written check runs.
       - run: ./scripts/test-release-guard.sh
+      # Phase 30. A rollback applies master's Terraform, never the old tag's.
+      - run: ./scripts/test-release-workflow.sh
 
   check-types:
     runs-on: ubuntu-latest
