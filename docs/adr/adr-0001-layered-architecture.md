@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19); R8 note 2026-10-07 (phase 26), no rule change; R12 and R13 added 2026-10-08 (phase 29)
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19); R8 note 2026-10-07 (phase 26), no rule change; R12 and R13 added 2026-10-08 (phase 29); R13's command tightened 2026-10-08 (phase 29 review): index imports, `routes/auth/`, and the flow test as a named exception
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -55,7 +55,7 @@ the server's holds the session state machine only a server has (`step`, `Session
 | R10 | `providers/` | `fetch`, its own transport types, `errors`, `logger` | `routes/`, `services/`, `domain/`, `repo/`, `db/`, `app.ts`, `composition.ts` |
 | R11 | `providers/` | — | **anything, from anywhere but `composition.ts`** — every consumer depends on a contract type declared in `services/` (`LlmClient` is the first), and only the composition root knows which provider satisfies it |
 | R12 | `auth/` | `better-auth`, `@better-auth/*`, `db/schema`, `db/client` (types), `domain/`, `repo/auth`, `errors`, `logger` | `routes/`, `services/`, `app.ts`, `composition.ts` |
-| R13 | `auth/` | — | **anything, from anywhere but `composition.ts`** (and `tests/support/`, the test composition root) — consumers depend on the `AuthModule` and `SessionReader` types `composition.ts` hands them ([ADR 0009](adr-0009-sign-in.md)) |
+| R13 | `auth/` | — | **anything, from anywhere but `composition.ts`** (and `tests/support/`, the test composition root, and `tests/integration/auth/flow.test.ts`, the upgrade gate, which builds `createAuth` over a test database) — consumers depend on the `AuthModule` and `SessionReader` types `composition.ts` hands them ([ADR 0009](adr-0009-sign-in.md)) |
 
 **Phase 19:** `src/worker.ts` is the second entry point beside `app.ts`, with the same obligation. It maps queue names to service calls and holds no logic. See [ADR 0007](adr-0007-background-jobs.md).
 
@@ -212,9 +212,11 @@ grep -rnE "(from|require\(|import\()[[:space:]]*'[^']*providers/" \
 grep -rnE "from '\.\./(routes|services)/|from '\.\./(app|composition)'" apps/server/src/auth/
 
 # R13 — auth is constructed only at the composition root
-grep -rnE "(from|require\(|import\()[[:space:]]*'[^']*/auth/" \
-  apps/server/src apps/server/tests --include='*.ts' --exclude-dir=auth \
-  | grep -vE "^[^:]*(composition\.ts|tests/support/)"
+grep -rnE "(from|require\(|import\()[[:space:]]*'([^']*src/|(\.\./)+)auth(/[^']*)?'" \
+  apps/server/src apps/server/tests --include='*.ts' \
+  | grep -vE "^apps/server/src/auth/|^[^:]*(composition\.ts|tests/support/)|^apps/server/tests/integration/auth/flow\.test\.ts:"
+grep -nHE "(from|require\(|import\()[[:space:]]*'\./auth(/[^']*)?'" apps/server/src/*.ts \
+  | grep -v '^apps/server/src/composition\.ts:'
 
 # R1 — route tests must not reach past composition
 grep -rnE "from '.*src/(db|repo)/|from 'drizzle-orm|from 'pg'" apps/server/tests/integration/routes/
@@ -257,6 +259,12 @@ commands above, that is enforced rather than asserted:
   claim above was simply untrue there. `tests/integration/routes/` and
   `tests/integration/services/` had both hand-wired the repositories they were
   forbidden to know about.
+- **R13 skips `auth/`'s own files by an anchored path, not `--exclude-dir=auth`.** That
+  flag skips every directory named `auth` — `tests/integration/auth/` and any
+  `routes/auth/` included — which is exactly where an importer would sit. It matches an
+  index import (`'../auth'`) as well as a file in it, and `'./auth'` only from a file
+  directly in `src/`, where it can mean nothing else (`domain/auth.test.ts`'s `'./auth'`
+  is `domain/auth`). The flow test is its one named test exception.
 - **`tests/support/` is deliberately unscanned.** It is the test composition root and
   may reach anywhere, exactly as `composition.ts` may. A layer test that needs the
   graph assembled calls `createServerDeps` — production's own assembly, handed a

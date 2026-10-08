@@ -74,15 +74,24 @@ r11() {
 }
 
 # auth/ is an outbound module like providers/ (phase 29, ADR 0009): it may reach
-# down to db/, repo/, domain/, errors and logger, never up. --exclude-dir keeps
-# the importer scan off auth/'s own files; tests/support/ is the test
-# composition root for it.
+# down to db/, repo/, domain/, errors and logger, never up.
 r12() { grep -rnE "from '\.\./(routes|services)/|from '\.\./(app|composition)'" apps/server/src/auth/; }
 
+# R13 matches an import of src/auth/ or of its index: `…src/auth`, or `auth`
+# reached through ../ alone, with or without a file after it — `../repo/auth`,
+# `../domain/auth` and `../support/auth` are other modules and do not match.
+# `./auth` names the module only from a file directly in src/, so the second
+# command scans those files alone. auth/'s own files are skipped by an anchored
+# path, NOT --exclude-dir=auth: that also skipped tests/integration/auth/ and
+# any routes/auth/, which is where an importer would hide. Exceptions:
+# composition.ts, tests/support/ (the test composition root) and the flow test,
+# which builds createAuth itself because it is the upgrade gate (ADR 0009 R9).
 r13() {
-  grep -rnE "(from|require\(|import\()[[:space:]]*'[^']*/auth/" \
-    apps/server/src apps/server/tests --include='*.ts' --exclude-dir=auth \
-    | grep -vE "^[^:]*(composition\.ts|tests/support/)"
+  grep -rnE "(from|require\(|import\()[[:space:]]*'([^']*src/|(\.\./)+)auth(/[^']*)?'" \
+    apps/server/src apps/server/tests --include='*.ts' \
+    | grep -vE "^apps/server/src/auth/|^[^:]*(composition\.ts|tests/support/)|^apps/server/tests/integration/auth/flow\.test\.ts:"
+  grep -nHE "(from|require\(|import\()[[:space:]]*'\./auth(/[^']*)?'" apps/server/src/*.ts \
+    | grep -v '^apps/server/src/composition\.ts:'
 }
 
 # The same rules over apps/server/tests/integration. Unit tests live inside the
