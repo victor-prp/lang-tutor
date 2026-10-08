@@ -1,4 +1,4 @@
-import type { SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
+import type { Enrollment, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
   LIVE_DIMENSIONS,
@@ -48,7 +48,6 @@ import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
   AnswerKindMismatch,
-  EnrollmentNotFound,
   InsufficientQuestions,
   InvalidDistractors,
   LlmUnavailable,
@@ -61,6 +60,7 @@ import {
   SessionOpen,
 } from '../errors';
 import type { Logger } from '../logger';
+import { authorizeEnrollment } from './access';
 import type { LlmClient } from './llm';
 import type { SpeechTranscriber } from './speech';
 import type { Repos, Transaction } from './transaction';
@@ -115,6 +115,23 @@ async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
   await repos.progress.insertSnapshot({ sessionId, rows: outcome.snapshot });
 }
 
+/**
+ * Phase 29 (spec D13, ADR 0009 R7). A use case addressed by a session id
+ * authorizes against the session's enrollment before it reads anything else.
+ * An unknown session is SessionNotFound, as before; another learner's is
+ * AccessDenied. Answers the enrollment, so a caller needs no second read.
+ */
+async function authorizeSession(
+  repos: Repos,
+  logger: Logger,
+  actorUserId: string,
+  sessionId: string,
+): Promise<Enrollment> {
+  const enrollmentId = await repos.session.findEnrollmentId(sessionId);
+  if (!enrollmentId) throw new SessionNotFound(sessionId);
+  return authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
+}
+
 /** What a completed session did, as badges. Empty for any other status. */
 async function progressOf(repos: Repos, sessionId: string, record: SessionRecord): Promise<ProgressChange[]> {
   if (record.status !== 'completed') return [];
@@ -155,13 +172,19 @@ export function createSessionService({
      * is what holds under a race.
      */
     createNextSession: (
+      actorUserId: string,
       enrollmentId: string,
       options: { listening: boolean; speaking: boolean },
     ): Promise<{ sessionId: string; status: SessionStatus; source: SessionSource }> =>
-      transaction(async ({ session, question, enrollment, vocabulary, jobs }) => {
-        const enrolled = await enrollment.findById(enrollmentId);
-        // No implicit creation. The route turns this into a 404.
-        if (!enrolled) throw new EnrollmentNotFound(enrollmentId);
+      transaction(async (repos) => {
+        const { session, question, vocabulary, jobs } = repos;
+        // No implicit creation: an unknown enrollment is a 404, another
+        // learner's a 403, both before anything is written.
+        const enrolled = await authorizeEnrollment(repos, logger, {
+          actorUserId,
+          enrollmentId,
+          permission: 'session.practice',
+        });
 
         const latest = await session.findLatest(enrollmentId);
         if (latest && isOpen(latest.status)) throw new SessionOpen(enrollmentId);
@@ -202,8 +225,9 @@ export function createSessionService({
 
     /** Resume and the poll both read through this. A completed session also
      *  carries what it did to the saved words. */
-    getSession: (sessionId: string): Promise<SessionResult> =>
+    getSession: (actorUserId: string, sessionId: string): Promise<SessionResult> =>
       transaction(async (repos) => {
+        await authorizeSession(repos, logger, actorUserId, sessionId);
         const record = await repos.session.loadSession(sessionId);
         if (!record) throw new SessionNotFound(sessionId);
         return { ...record, progress: await progressOf(repos, sessionId, record) };
@@ -211,15 +235,16 @@ export function createSessionService({
 
     /** What the home screen needs in one read. */
     currentSession: (
+      actorUserId: string,
       enrollmentId: string,
     ): Promise<{ current: SessionSummary | null; nextSource: SessionSource; savedCount: number }> =>
-      transaction(async ({ session, enrollment, vocabulary }) => {
-        if (!(await enrollment.findById(enrollmentId))) throw new EnrollmentNotFound(enrollmentId);
-        const latest = await session.findLatest(enrollmentId);
+      transaction(async (repos) => {
+        await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
+        const latest = await repos.session.findLatest(enrollmentId);
         return {
           current: latest && isCurrent(latest.status) ? latest : null,
           nextSource: nextSource(latest !== undefined),
-          savedCount: await vocabulary.countEntries(enrollmentId),
+          savedCount: await repos.vocabulary.countEntries(enrollmentId),
         };
       }),
 
@@ -229,8 +254,9 @@ export function createSessionService({
      * write and writes nothing. A skip counts the answers given before it toward
      * progress.
      */
-    skipSession: async (sessionId: string): Promise<void> => {
+    skipSession: async (actorUserId: string, sessionId: string): Promise<void> => {
       const skipped = await transaction(async (repos) => {
+        await authorizeSession(repos, logger, actorUserId, sessionId);
         const state = await repos.session.findState(sessionId);
         if (!state) throw new SessionNotFound(sessionId);
         if (state.status === 'skipped') return false;
@@ -247,6 +273,7 @@ export function createSessionService({
      *  typed card (phase 23). A typed answer is judged here, by the same
      *  judgeTyped the app ran for its feedback, and stored with its verdict. */
     submitAnswer: async (
+      actorUserId: string,
       sessionId: string,
       questionId: string,
       answer: AnswerInput,
@@ -255,6 +282,7 @@ export function createSessionService({
       // a commit that fails after completeSession must not leave a log claiming a
       // session the database never recorded.
       const { result, justCompleted } = await transaction(async (repos) => {
+        await authorizeSession(repos, logger, actorUserId, sessionId);
         const loaded = await repos.session.loadSession(sessionId);
         if (!loaded) throw new SessionNotFound(sessionId);
 
@@ -313,16 +341,18 @@ export function createSessionService({
      * clip is transcribed outside any transaction (ADR 0001 R8); and an
      * understood answer is recorded through submitAnswer, exactly as a
      * next-step is. A transcript that is not the word writes nothing.
+     * Another learner's session is refused before all of it (phase 29).
      */
     answerBySpeech: async (
+      actorUserId: string,
       sessionId: string,
-      input: { userId: string; questionId: string; audio: string; mimeType: string },
+      input: { questionId: string; audio: string; mimeType: string },
     ): Promise<SpeechResult> => {
       type Checked = { replay: SpeechResult } | { current: SpeakingQuestion; language: LanguageCode };
       const checked = await transaction(async (repos): Promise<Checked> => {
+        const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const loaded = await repos.session.loadSession(sessionId);
-        // Another learner's session is answered as an unknown one.
-        if (!loaded || loaded.user_id !== input.userId) throw new SessionNotFound(sessionId);
+        if (!loaded) throw new SessionNotFound(sessionId);
         if (loaded.status !== 'ready' && loaded.status !== 'completed') {
           throw new SessionNotReady(sessionId, loaded.status);
         }
@@ -345,9 +375,6 @@ export function createSessionService({
         const current = currentQuestion(loaded);
         if (!current || current.id !== input.questionId) throw new QuestionDesynced(input.questionId);
         if (!isSpeaking(current)) throw new AnswerKindMismatch(input.questionId);
-        const state = await repos.session.findState(sessionId);
-        const enrolled = state ? await repos.enrollment.findById(state.enrollmentId) : undefined;
-        if (!enrolled) throw new SessionNotFound(sessionId);
         return { current, language: enrolled.target_language as LanguageCode };
       });
       if ('replay' in checked) return checked.replay;
@@ -397,7 +424,8 @@ export function createSessionService({
         bytes: Math.floor((input.audio.length * 3) / 4),
         mime_type: input.mimeType,
       });
-      const session = verdict === 'unheard' ? null : await service.submitAnswer(sessionId, input.questionId, { heard });
+      const session =
+        verdict === 'unheard' ? null : await service.submitAnswer(actorUserId, sessionId, input.questionId, { heard });
       return { heard, verdict, session };
     },
 
@@ -406,18 +434,21 @@ export function createSessionService({
      * first, so no model call is spent on a stale or wrong request; a rule
      * decides an empty answer and the stored meaning; otherwise the judge is
      * called outside any transaction (ADR 0001 R8); and the verdict is recorded
-     * through submitAnswer, exactly as a next-step is.
+     * through submitAnswer, exactly as a next-step is. Another learner's
+     * session is refused before all of it (phase 29).
      */
     answerJudged: async (
+      actorUserId: string,
       sessionId: string,
-      input: { userId: string; questionId: string; text: string },
+      input: { questionId: string; text: string },
     ): Promise<JudgedResult> => {
       type Checked =
         | { replay: JudgedResult }
         | { current: JudgedQuestion; context: JudgeContext };
       const checked = await transaction(async (repos): Promise<Checked> => {
+        const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const loaded = await repos.session.loadSession(sessionId);
-        if (!loaded || loaded.user_id !== input.userId) throw new SessionNotFound(sessionId);
+        if (!loaded) throw new SessionNotFound(sessionId);
         if (loaded.status !== 'ready' && loaded.status !== 'completed') {
           throw new SessionNotReady(sessionId, loaded.status);
         }
@@ -432,10 +463,8 @@ export function createSessionService({
         const current = currentQuestion(loaded);
         if (!current || current.id !== input.questionId) throw new QuestionDesynced(input.questionId);
         if (!isJudged(current)) throw new AnswerKindMismatch(input.questionId);
-        const state = await repos.session.findState(sessionId);
-        const enrolled = state ? await repos.enrollment.findById(state.enrollmentId) : undefined;
         const found = await repos.question.findJudgeContext(current.id);
-        if (!enrolled || !found) throw new SessionNotFound(sessionId);
+        if (!found) throw new SessionNotFound(sessionId);
         return { current, context: { language: enrolled.target_language as LanguageCode, explanation: enrolled.source_language as LanguageCode, ...found } };
       });
       if ('replay' in checked) return checked.replay;
@@ -471,7 +500,7 @@ export function createSessionService({
         ...(judgedBy === 'model' ? { judge_ms: now() - started } : {}),
         chars: text.length,
       });
-      const session = await service.submitAnswer(sessionId, input.questionId, { text, judged: verdict });
+      const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, { text, judged: verdict });
       // Two overlapping requests may both have paid for a call; step replayed
       // the first, so report the verdict stored for this card, not our own.
       const stored = TypedVerdictSchema.safeParse(session.answers.find((a) => a.question_id === input.questionId)?.verdict);

@@ -125,7 +125,7 @@ describe('POST /api/sessions', () => {
     // is what this phase replaced.
     const { enrollmentId } = await seedLegacyLearner(t.db);
     const app = buildTestApp();
-    const res = await postJson(app, '/api/sessions', { enrollment_id: enrollmentId });
+    const res = await postJson(app, '/api/sessions', { enrollment_id: enrollmentId }, 'u_legacy');
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'not enough questions' });
   });
@@ -493,6 +493,33 @@ describe('phase 19 session routes', () => {
     const missing = await getJson(app, '/api/enrollments/e_nobody/sessions/current');
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({ error: 'enrollment not found' });
+  });
+});
+
+// Phase 29 (spec D13): practising is the owner's alone, whether the request
+// names the enrollment (in the body or the path) or the session.
+describe('another learner', () => {
+  const E = () => enrollmentOf('u_1');
+  const FORBIDDEN = { status: 403, body: { error: 'forbidden' } };
+  const answered = async (res: Response) => ({ status: res.status, body: await res.json() });
+
+  it("is answered 403 for a session on someone else's enrollment, and none is made", async () => {
+    const app = buildTestApp();
+    expect(await answered(await postJson(app, '/api/sessions', { enrollment_id: E() }, 'u_2'))).toEqual(FORBIDDEN);
+    expect(await answered(await getJson(app, `/api/enrollments/${E()}/sessions/current`, 'u_2'))).toEqual(FORBIDDEN);
+    const mine = await (await getJson(app, `/api/enrollments/${E()}/sessions/current`)).json();
+    expect(mine).toEqual({ current: null, next_source: 'seed', saved_count: 0 });
+  });
+
+  it("is answered 403 on someone else's session, which stays as it was", async () => {
+    const app = buildTestApp();
+    const view = await startSeed(app, E());
+    const id = view.session_id;
+    expect(await answered(await getJson(app, `/api/sessions/${id}`, 'u_2'))).toEqual(FORBIDDEN);
+    expect(await answered(await postJson(app, `/api/sessions/${id}/skip`, {}, 'u_2'))).toEqual(FORBIDDEN);
+    const step = { question_id: view.question.id, option_index: 0 };
+    expect(await answered(await postJson(app, `/api/sessions/${id}/next-step`, step, 'u_2'))).toEqual(FORBIDDEN);
+    expect(await (await getJson(app, `/api/sessions/${id}`)).json()).toEqual(view);
   });
 });
 

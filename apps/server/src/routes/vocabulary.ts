@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 import { AccessDenied, EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { VocabularyService } from '../services/vocabulary';
-import { learnerResponses, type ActorEnv } from './actor';
+import { forbidden, learnerResponses, type ActorEnv } from './actor';
 
 const BASE = '/enrollments/{id}/vocabulary';
 const enrollmentParams = z.object({ id: z.string() });
@@ -21,6 +21,8 @@ const json = <T extends z.ZodType>(schema: T, description: string) => ({
   description,
 });
 const NOT_ENROLLED = json(ErrorSchema, 'No enrollment has this id.');
+// Phase 29 (spec D13): reading the list is its owner's alone.
+const OWNER_READS = forbidden("the caller is not the list's owner, who alone may read it");
 
 const saveRoute = createRoute({
   method: 'post',
@@ -44,6 +46,7 @@ const saveRoute = createRoute({
     ),
     404: NOT_ENROLLED,
     ...learnerResponses,
+    403: forbidden("the caller is not the list's owner and holds no accepted grant that allows adding words"),
   },
 });
 
@@ -66,6 +69,7 @@ const listRoute = createRoute({
     ),
     404: NOT_ENROLLED,
     ...learnerResponses,
+    403: OWNER_READS,
   },
 });
 
@@ -80,6 +84,7 @@ const unsaveRoute = createRoute({
     204: { description: 'The sense is not saved.' },
     404: NOT_ENROLLED,
     ...learnerResponses,
+    403: forbidden("the caller is not the list's owner, who alone may remove a word"),
   },
 });
 
@@ -103,6 +108,7 @@ const detailRoute = createRoute({
       "No enrollment has this id, or no word with this lemma is in the enrollment's target language.",
     ),
     ...learnerResponses,
+    403: OWNER_READS,
   },
 });
 
@@ -132,8 +138,9 @@ export function createVocabularyRouter(vocabulary: VocabularyService) {
   router.openapi(listRoute, async (c) => {
     const { id } = c.req.valid('param');
     try {
-      return c.json(await vocabulary.listWords(id, c.req.valid('query')), 200);
+      return c.json(await vocabulary.listWords(c.var.actor, id, c.req.valid('query')), 200);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
       if (error instanceof InvalidCursor) return c.json({ error: 'invalid request' }, 400);
       throw error;
@@ -156,8 +163,9 @@ export function createVocabularyRouter(vocabulary: VocabularyService) {
     const { id } = c.req.valid('param');
     const { lemma } = c.req.valid('query');
     try {
-      return c.json(await vocabulary.wordDetail(id, lemma), 200);
+      return c.json(await vocabulary.wordDetail(c.var.actor, id, lemma), 200);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
       if (error instanceof WordNotFound) return c.json({ error: 'word not found' }, 404);
       throw error;

@@ -87,10 +87,12 @@ const unsave = (enrollmentId: string, senseId: string, actor = 'u_1') =>
     method: 'DELETE',
     headers: { [ACT_AS]: actor },
   });
-const list = (enrollmentId: string, query = '') =>
-  app().request(`/api/enrollments/${enrollmentId}/vocabulary${query}`);
-const detail = (enrollmentId: string, lemma: string) =>
-  app().request(`/api/enrollments/${enrollmentId}/vocabulary/word?lemma=${encodeURIComponent(lemma)}`);
+const list = (enrollmentId: string, query = '', actor = 'u_1') =>
+  app().request(`/api/enrollments/${enrollmentId}/vocabulary${query}`, { headers: { [ACT_AS]: actor } });
+const detail = (enrollmentId: string, lemma: string, actor = 'u_1') =>
+  app().request(`/api/enrollments/${enrollmentId}/vocabulary/word?lemma=${encodeURIComponent(lemma)}`, {
+    headers: { [ACT_AS]: actor },
+  });
 
 type Page = { items: { lemma: string; saved_count: number; sense_count: number; parts_of_speech: string[] }[]; next_cursor: string | null };
 
@@ -535,6 +537,17 @@ describe('access (phase 28)', () => {
     await seedUser(t.db, 'u_tutor');
     await seedGrant(t.db, { enrollmentId: RU, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
     expect((await save(RU, await asked(), 'u_tutor')).status).toBe(200);
+  });
+
+  // Phase 29 (spec D13): the list is read by its owner alone.
+  it.each(['u_2', 'u_tutor'])('answers 403 when %s reads the list or a word', async (actor) => {
+    await seedUser(t.db, 'u_2');
+    await seedUser(t.db, 'u_tutor');
+    await seedGrant(t.db, { enrollmentId: RU, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
+    for (const res of [await list(RU, '', actor), await detail(RU, 'рама', actor)]) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: 'forbidden' });
+    }
   });
 
   it('answers 403 when that tutor unsaves', async () => {

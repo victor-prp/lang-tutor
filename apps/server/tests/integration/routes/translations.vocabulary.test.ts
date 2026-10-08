@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
 import { createTranslationsRouter } from '../../../src/routes/translations';
-import { actAs } from '../../support/actAs';
+import { ACT_AS, actAs } from '../../support/actAs';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { createTestServerDeps } from '../../support/serverDeps';
@@ -26,14 +26,15 @@ function deps() {
   return createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
 }
 
-function translate(body: unknown) {
+// Acts as RU's owner unless a case says otherwise.
+function translate(body: unknown, actor = 'u_1') {
   const app = new Hono();
   const d = deps();
   app.use('*', actAs());
   app.route('/api', createTranslationsRouter(d.translations, d.logger));
   return app.request('/api/translations', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', [ACT_AS]: actor },
     body: JSON.stringify(body),
   });
 }
@@ -160,6 +161,16 @@ describe('POST /api/translations with an enrollment', () => {
     expect(await res.json()).toEqual({ error: 'enrollment not found' });
   });
 
+  // Phase 29 (spec D13). `saved` reads the list, so only its owner may name it.
+  // `окно` is in no seed and no lexeme here, and the default Gemini URL is
+  // unroutable: a check moved after the lookup would answer 502, not 403.
+  it("answers 403 for another learner's enrollment, before any lookup or model call", async () => {
+    await seedUser(t.db, 'u_2');
+    const res = await translate({ text: 'окно', from: 'ru', to: 'he', enrollment_id: RU }, 'u_2');
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'forbidden' });
+  });
+
   // `casement` is in no seed and no lexeme this test inserts, and no MockServer
   // expectation is registered (serverDeps' default Gemini URL is unroutable). A
   // check moved after the lookup would miss the cache, reach the model path and
@@ -195,7 +206,7 @@ describe('POST /api/translations with an enrollment', () => {
       { sense_id: sefer.senseIds[0], variant_id: sefer.variantIds[0] },
     ]);
     const { senses } = (await (
-      await translate({ text: 'ספר', from: 'he', to: 'en', enrollment_id: enrollmentId })
+      await translate({ text: 'ספר', from: 'he', to: 'en', enrollment_id: enrollmentId }, 'u_legacy')
     ).json()) as { senses: Sense[] };
     expect(senses[0].saved).toBe(true);
   });

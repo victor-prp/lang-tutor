@@ -17,7 +17,6 @@ let t: TestDb;
 beforeEach(async () => {
   t = await createTestDb();
   await seedUser(t.db, 'u_1');
-  await seedUser(t.db, 'u_2');
 });
 
 afterEach(async () => {
@@ -106,12 +105,15 @@ describe('POST /api/sessions/:id/judged-answer', () => {
     expect(await retried.json()).toMatchObject({ verdict: 'wrong' });
   });
 
-  it('404s another learner, 409s a card that is not current, 400s a card that is not judged', async () => {
+  it('403s another learner, 409s a card that is not current, 400s a card that is not judged', async () => {
     const app = buildTestApp(mockNamespace('judged-errors'));
     const { sessionId, questions } = await startMeaning();
     const at = (question_id: string, actor = 'u_1') =>
       postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id, text: 'ספר' }, actor);
-    expect((await at(questions[0].id, 'u_2')).status).toBe(404);
+    // Phase 29 (spec D13): refused, no longer hidden as an unknown session.
+    const stranger = await at(questions[0].id, 'someone_else');
+    expect(stranger.status).toBe(403);
+    expect(await stranger.json()).toEqual({ error: 'forbidden' });
     expect((await at(questions[1].id)).status).toBe(409);
     expect((await at(questions[0].id)).status).toBe(200);
     expect((await at(questions[1].id)).status).toBe(400);

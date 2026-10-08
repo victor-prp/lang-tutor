@@ -112,6 +112,18 @@ export function createSessionRepo(tx: Tx) {
       return row.count;
     },
 
+    /** Phase 29 (spec D13). Whose list a session belongs to, so a use case
+     *  addressed by a session id can authorize before it reads anything else.
+     *  A malformed id is an absent one, as everywhere in this module. */
+    findEnrollmentId: async (sessionId: string): Promise<string | undefined> => {
+      if (!UUID_RE.test(sessionId)) return undefined;
+      const [row] = await tx
+        .select({ enrollmentId: sessions.enrollmentId })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId));
+      return row?.enrollmentId;
+    },
+
     /** Locks the row, so a status read here and changed later in the same
      *  transaction cannot race a concurrent skip or job. */
     findState: async (sessionId: string): Promise<SessionState | undefined> => {

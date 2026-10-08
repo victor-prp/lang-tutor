@@ -49,3 +49,13 @@ export const learnerResponses = {
     description: 'Signed in without a profile, or not allowed to act on this resource.',
   },
 };
+
+/**
+ * Phase 29 (spec D13). A learner route's 403 that names its own rule. Placed
+ * after the `learnerResponses` spread, so the document says who may act; the
+ * gate still answers 403 to a session without a profile, so it says that too.
+ */
+export const forbidden = (rule: string) => ({
+  content: errorBody,
+  description: `Signed in without a profile (\`profile required\`), or ${rule} (\`forbidden\`).`,
+});

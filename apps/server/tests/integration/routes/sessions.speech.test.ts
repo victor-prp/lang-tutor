@@ -23,7 +23,6 @@ let t: TestDb;
 beforeEach(async () => {
   t = await createTestDb();
   await seedUser(t.db, 'u_1');
-  await seedUser(t.db, 'u_2');
 });
 
 afterEach(async () => {
@@ -120,13 +119,16 @@ describe('POST /api/sessions/:id/speech', () => {
     expect(stored[0].verdict).toBe('understood');
   });
 
-  it('400s a choice card, 404s another learner, 409s a card that is not current, and 502s a failing model', async () => {
+  it('400s a choice card, 403s another learner, 409s a card that is not current, and 502s a failing model', async () => {
     const ns = mockNamespace('speech-errors');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
     const at = (question_id: string, actor = 'u_1') =>
       postJson(app, `/api/sessions/${sessionId}/speech`, { question_id, mime_type: 'audio/aac', audio: AUDIO }, actor);
-    expect((await at(questions[0].id, 'u_2')).status).toBe(404);
+    // Phase 29 (spec D13): refused, no longer hidden as an unknown session.
+    const stranger = await at(questions[0].id, 'someone_else');
+    expect(stranger.status).toBe(403);
+    expect(await stranger.json()).toEqual({ error: 'forbidden' });
     expect((await at(questions[1].id)).status).toBe(409);
     await expectGeminiStatus(ns, 503);
     expect((await at(questions[0].id)).status).toBe(502);

@@ -55,16 +55,16 @@ const WORDS: Record<string, string> = { tome: 'ספר', sprint: 'ריצה', lant
 
 /** Past the seed (skipped), three saved words, and a list session requested. */
 async function requestListSession(): Promise<string> {
-  const seed = await deps.sessions.createNextSession(E, { listening: false, speaking: false });
-  await deps.sessions.skipSession(seed.sessionId);
+  const seed = await deps.sessions.createNextSession('u_1', E, { listening: false, speaking: false });
+  await deps.sessions.skipSession('u_1', seed.sessionId);
   for (const [lemma, translation] of Object.entries(WORDS)) {
     await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
   }
-  const { sessionId } = await deps.sessions.createNextSession(E, { listening: false, speaking: false });
+  const { sessionId } = await deps.sessions.createNextSession('u_1', E, { listening: false, speaking: false });
   return sessionId;
 }
 
-const statusOf = async (sessionId: string) => (await deps.sessions.getSession(sessionId)).status;
+const statusOf = async (sessionId: string) => (await deps.sessions.getSession('u_1', sessionId)).status;
 
 const TEN_WORDS: Record<string, string> = {
   tome: 'ספר', sprint: 'ריצה', lantern: 'פנס', kettle: 'קומקום', pillow: 'כרית',
@@ -75,15 +75,15 @@ it('prepares a ten-word session with listening on: a run, the board, a run (spec
   await expectDistractors(ns, {
     tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'sentence'],
   });
-  const seed = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
-  await deps.sessions.skipSession(seed.sessionId);
+  const seed = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
+  await deps.sessions.skipSession('u_1', seed.sessionId);
   for (const [lemma, translation] of Object.entries(TEN_WORDS)) {
     await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
   }
-  const { sessionId } = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
+  const { sessionId } = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
 
   await waitFor(async () => (await statusOf(sessionId)) === 'ready');
-  const { questions } = await deps.sessions.getSession(sessionId);
+  const { questions } = await deps.sessions.getSession('u_1', sessionId);
   expect(questions.map((q) => q.type)).toEqual([
     'multiple_choice', 'reverse_choice', 'typed_translation',
     'matching', 'matching', 'matching', 'matching',
@@ -121,13 +121,13 @@ describe('sentence cards through the queue', () => {
     await expectDistractors(ns, {
       tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'gap', 'sentence'],
     });
-    const seed = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
-    await deps.sessions.skipSession(seed.sessionId);
+    const seed = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
+    await deps.sessions.skipSession('u_1', seed.sessionId);
     await saveTen(true);
-    const { sessionId } = await deps.sessions.createNextSession(E, { listening: true, speaking: false });
+    const { sessionId } = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
-    const { questions } = await deps.sessions.getSession(sessionId);
+    const { questions } = await deps.sessions.getSession('u_1', sessionId);
     expect(questions.slice(7).map((q) => q.type)).toEqual(['listen_choice', 'cloze_choice', 'cloze_typed']);
 
     const choice = questions[8] as ClozeChoiceQuestion;
@@ -155,17 +155,17 @@ describe('sentence cards through the queue', () => {
     });
     const options = { listening: true, speaking: false };
     // The seed, then two list sessions skipped before the third (ordinal 2).
-    const seed = await deps.sessions.createNextSession(E, options);
-    await deps.sessions.skipSession(seed.sessionId);
+    const seed = await deps.sessions.createNextSession('u_1', E, options);
+    await deps.sessions.skipSession('u_1', seed.sessionId);
     await saveTen(false);
     for (let ordinal = 0; ordinal < 2; ordinal++) {
-      const early = await deps.sessions.createNextSession(E, options);
-      await deps.sessions.skipSession(early.sessionId);
+      const early = await deps.sessions.createNextSession('u_1', E, options);
+      await deps.sessions.skipSession('u_1', early.sessionId);
     }
-    const { sessionId } = await deps.sessions.createNextSession(E, options);
+    const { sessionId } = await deps.sessions.createNextSession('u_1', E, options);
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
-    const { questions } = await deps.sessions.getSession(sessionId);
+    const { questions } = await deps.sessions.getSession('u_1', sessionId);
     expect(questions[9].type).toBe('sentence_translation');
     const translate = questions[9] as SentenceTranslationQuestion;
     expect(translate.question).toBe(STUB_SENTENCE_HEBREW);
@@ -181,7 +181,7 @@ describe('prepare-session through the queue', () => {
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
-    const record = await deps.sessions.getSession(sessionId);
+    const record = await deps.sessions.getSession('u_1', sessionId);
     // Phase 23 (spec D2): the type cycle, in order.
     expect(record.questions.map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation']);
     const [choice, reversed, typed] = record.questions;
@@ -209,7 +209,7 @@ describe('prepare-session through the queue', () => {
     await waitFor(async () => (await statusOf(sessionId)) === 'failed', 25_000);
     // One attempt and two retries.
     expect(await countGeminiRequests(ns)).toBe(3);
-    expect((await deps.sessions.currentSession(E)).current).toMatchObject({ id: sessionId, status: 'failed' });
+    expect((await deps.sessions.currentSession('u_1', E)).current).toMatchObject({ id: sessionId, status: 'failed' });
   });
 
   // Review Focus 2: a skip lands while the model is still answering.
@@ -218,10 +218,10 @@ describe('prepare-session through the queue', () => {
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await countGeminiRequests(ns)) === 1);
-    await deps.sessions.skipSession(sessionId);
+    await deps.sessions.skipSession('u_1', sessionId);
     await waitFor(async () => logger.events.some((e) => e.event === 'session_preparation_dropped'), 15_000);
 
-    const record = await deps.sessions.getSession(sessionId);
+    const record = await deps.sessions.getSession('u_1', sessionId);
     expect(record.status).toBe('skipped');
     expect(record.questions).toEqual([]);
   });

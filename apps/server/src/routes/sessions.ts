@@ -24,6 +24,7 @@ import {
   sessionScore,
 } from '../domain/session';
 import {
+  AccessDenied,
   AnswerKindMismatch,
   EnrollmentNotFound,
   InsufficientQuestions,
@@ -37,12 +38,15 @@ import {
   SessionOpen,
 } from '../errors';
 import type { SessionResult, SessionService } from '../services/sessions';
-import { learnerResponses, type ActorEnv } from './actor';
+import { forbidden, learnerResponses, type ActorEnv } from './actor';
 
 const failure = (description: string) => ({
   content: { 'application/json': { schema: ErrorSchema } },
   description,
 });
+
+// Phase 29 (spec D13): practising is the list owner's alone.
+const NOT_YOURS = forbidden("the enrollment, or the session's, is another learner's");
 
 const progressItem = (change: ProgressChange) => ({
   sense_id: change.senseId,
@@ -112,6 +116,7 @@ const createSessionRoute = createRoute({
       'An open session exists (`session_open`), the saved list is empty (`no_saved_words`), or the seed has too few questions for this pair (`not enough questions`).',
     ),
     ...learnerResponses,
+    403: NOT_YOURS,
   },
 });
 
@@ -127,6 +132,7 @@ const getSessionRoute = createRoute({
     200: { content: { 'application/json': { schema: SessionViewSchema } }, description: 'The session.' },
     404: failure('No session has this id.'),
     ...learnerResponses,
+    403: NOT_YOURS,
   },
 });
 
@@ -143,6 +149,7 @@ const skipSessionRoute = createRoute({
     404: failure('No session has this id.'),
     409: failure('The session is completed or failed (`session_not_skippable`).'),
     ...learnerResponses,
+    403: NOT_YOURS,
   },
 });
 
@@ -171,6 +178,7 @@ const nextStepRoute = createRoute({
       "`question_id` is not the session's current question, or the session is not ready (`session_not_ready`).",
     ),
     ...learnerResponses,
+    403: NOT_YOURS,
   },
 });
 
@@ -191,11 +199,12 @@ const speechRoute = createRoute({
       description: 'The attempt was judged. `next` is present when the answer was recorded.',
     },
     400: failure('The request body did not validate, or the current card is not a speaking card.'),
-    404: failure('No session has this id, or it is not this learner’s.'),
+    404: failure('No session has this id.'),
     409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
     413: failure('The body is over 300 KB.'),
     502: failure('The transcription failed or timed out; the card may be tried again.'),
     ...learnerResponses,
+    403: NOT_YOURS,
   },
 });
 
@@ -216,10 +225,11 @@ const judgedAnswerRoute = createRoute({
       description: 'The answer was judged and recorded.',
     },
     400: failure('The request body did not validate, or the current card is not one the server judges.'),
-    404: failure('No session has this id, or it is not this learner’s.'),
+    404: failure('No session has this id.'),
     409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
     502: failure('The judge failed or timed out; nothing was recorded, and the answer may be sent again.'),
     ...learnerResponses,
+    403: NOT_YOURS,
   },
 });
 
@@ -238,6 +248,7 @@ const currentSessionRoute = createRoute({
     },
     404: failure('No enrollment has this id.'),
     ...learnerResponses,
+    403: NOT_YOURS,
   },
 });
 
@@ -254,7 +265,7 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(createSessionRoute, async (c) => {
     const { enrollment_id, listening, speaking } = c.req.valid('json');
     try {
-      const created = await sessions.createNextSession(enrollment_id, {
+      const created = await sessions.createNextSession(c.var.actor, enrollment_id, {
         listening: listening ?? false,
         speaking: speaking ?? false,
       });
@@ -263,6 +274,7 @@ export function createSessionsRouter(sessions: SessionService) {
         201,
       );
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
       if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
       if (error instanceof NoSavedWords) return c.json({ error: 'no_saved_words' }, 409);
@@ -274,8 +286,9 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(getSessionRoute, async (c) => {
     const { id } = c.req.valid('param');
     try {
-      return c.json(sessionView(id, await sessions.getSession(id)), 200);
+      return c.json(sessionView(id, await sessions.getSession(c.var.actor, id)), 200);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       throw error;
     }
@@ -284,9 +297,10 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(skipSessionRoute, async (c) => {
     const { id } = c.req.valid('param');
     try {
-      await sessions.skipSession(id);
+      await sessions.skipSession(c.var.actor, id);
       return c.json({ session_id: id, status: 'skipped' as const }, 200);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotSkippable) return c.json({ error: 'session_not_skippable' }, 409);
       throw error;
@@ -299,9 +313,10 @@ export function createSessionsRouter(sessions: SessionService) {
     const answer =
       'text' in body ? { text: body.text } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index };
     try {
-      const record = await sessions.submitAnswer(id, body.question_id, answer);
+      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer);
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
       if (error instanceof QuestionDesynced) {
@@ -327,8 +342,7 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
     try {
-      const result = await sessions.answerBySpeech(id, {
-        userId: c.var.actor,
+      const result = await sessions.answerBySpeech(c.var.actor, id, {
         questionId: body.question_id,
         audio: body.audio,
         mimeType: body.mime_type,
@@ -342,6 +356,7 @@ export function createSessionsRouter(sessions: SessionService) {
         200,
       );
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
       if (error instanceof QuestionDesynced) {
@@ -357,9 +372,10 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
     try {
-      const result = await sessions.answerJudged(id, { userId: c.var.actor, questionId: body.question_id, text: body.text });
+      const result = await sessions.answerJudged(c.var.actor, id, { questionId: body.question_id, text: body.text });
       return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
       if (error instanceof QuestionDesynced) {
@@ -374,7 +390,7 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(currentSessionRoute, async (c) => {
     const { id } = c.req.valid('param');
     try {
-      const { current, nextSource, savedCount } = await sessions.currentSession(id);
+      const { current, nextSource, savedCount } = await sessions.currentSession(c.var.actor, id);
       return c.json(
         {
           current: current
@@ -392,6 +408,7 @@ export function createSessionsRouter(sessions: SessionService) {
         200,
       );
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
       throw error;
     }

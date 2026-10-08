@@ -369,3 +369,34 @@ describe('POST /api/sessions/{id}/judged-answer in the published document', () =
     expect(op.description).toMatch(/costs money/);
   });
 });
+
+// Phase 29 (spec D13). Every route whose refusal has a rule of its own says it
+// in its 403, and still says the gate's own 403 (a session without a profile).
+describe('the 403 of an owner-only or granted route in the published document', () => {
+  const VOCABULARY = '/api/enrollments/{id}/vocabulary';
+  it.each([
+    [VOCABULARY, 'post', /accepted grant that allows adding words/],
+    [VOCABULARY, 'get', /owner, who alone may read it/],
+    [`${VOCABULARY}/senses/{sense_id}`, 'delete', /owner, who alone may remove a word/],
+    [`${VOCABULARY}/word`, 'get', /owner, who alone may read it/],
+    ['/api/sessions', 'post', /another learner's/],
+    ['/api/sessions/{id}', 'get', /another learner's/],
+    ['/api/sessions/{id}/skip', 'post', /another learner's/],
+    ['/api/sessions/{id}/next-step', 'post', /another learner's/],
+    ['/api/sessions/{id}/speech', 'post', /another learner's/],
+    ['/api/sessions/{id}/judged-answer', 'post', /another learner's/],
+    ['/api/enrollments/{id}/sessions/current', 'get', /another learner's/],
+    ['/api/enrollments/{id}/photo-imports', 'post', /another learner's/],
+    ['/api/enrollments/{id}/photo-imports', 'get', /another learner's/],
+    ['/api/photo-imports/{id}', 'get', /another learner's/],
+    ['/api/photo-imports/{id}/items/{position}', 'patch', /another learner's/],
+    ['/api/photo-imports/{id}/save', 'post', /another learner's/],
+    ['/api/photo-imports/{id}/discard', 'post', /another learner's/],
+    ['/api/translations', 'post', /another learner's enrollment/],
+  ])('%s %s names its rule and the missing profile', async (path, method, rule) => {
+    const doc = await openApiDocument();
+    const { description } = doc.paths[path][method].responses['403'];
+    expect(description).toMatch(rule);
+    expect(description).toMatch(/without a profile/);
+  });
+});

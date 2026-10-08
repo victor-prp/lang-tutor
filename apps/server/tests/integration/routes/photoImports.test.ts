@@ -5,7 +5,7 @@ import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
 import { createPhotoImportsRouter } from '../../../src/routes/photoImports';
-import { actAs } from '../../support/actAs';
+import { ACT_AS, actAs } from '../../support/actAs';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { addedByOf } from '../../support/grantRows';
@@ -39,10 +39,12 @@ function app() {
   hono.route('/api', createPhotoImportsRouter(deps.photoImports));
   return hono;
 }
-const send = (method: string, path: string, body?: unknown) =>
+// Acts as the list's owner unless a case says otherwise.
+const send = (method: string, path: string, body?: unknown, actor = 'u_1') =>
   app().request(`/api${path}`, {
     method,
-    ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    headers: { [ACT_AS]: actor, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
 /** An Italian word with two senses, each rendered in Hebrew by the lemma. */
@@ -158,7 +160,7 @@ describe('save and discard', () => {
     const res = await send('POST', `/photo-imports/${id}/save`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ saved_sense_ids: [casa[1].sense_id] });
-    const page = await deps.vocabulary.listWords(IT, {});
+    const page = await deps.vocabulary.listWords('u_1', IT, {});
     expect(page.items.map((item) => item.lemma)).toEqual(['casa']);
     // Phase 28. The list's owner photographed it, so the owner added it.
     expect(await addedByOf(t.db, IT)).toEqual(['u_1']);
@@ -196,5 +198,31 @@ describe('save and discard', () => {
     const savedFirst = await seedPhotoImport(t.db, { enrollmentId: IT, status: 'read', items: [{ text: 'casa', options: casa }] });
     expect((await send('POST', `/photo-imports/${savedFirst}/save`)).status).toBe(200);
     expect((await send('POST', `/photo-imports/${savedFirst}/discard`)).status).toBe(409);
+  });
+});
+
+// Phase 29 (spec D13): an import is its list owner's alone, by either id.
+describe('another learner', () => {
+  it('is answered 403 on every photo-import route, and nothing changes', async () => {
+    await seedUser(t.db, 'u_2');
+    const casa = await word('casa', ['בית', 'משפחה']);
+    const id = await seedPhotoImport(t.db, { enrollmentId: IT, status: 'read', items: [{ text: 'casa', options: casa }] });
+    const before = await (await send('GET', `/photo-imports/${id}`)).json();
+
+    for (const [method, path, body] of [
+      ['POST', `/enrollments/${IT}/photo-imports`, { mime_type: 'image/jpeg', image: 'QUJD' }],
+      ['GET', `/enrollments/${IT}/photo-imports`, undefined],
+      ['GET', `/photo-imports/${id}`, undefined],
+      ['PATCH', `/photo-imports/${id}/items/0`, { ticked: false }],
+      ['POST', `/photo-imports/${id}/save`, undefined],
+      ['POST', `/photo-imports/${id}/discard`, undefined],
+    ] as const) {
+      const res = await send(method, path, body, 'u_2');
+      expect({ method, path, status: res.status, body: await res.json() }).toEqual({ method, path, status: 403, body: { error: 'forbidden' } });
+    }
+
+    expect(await (await send('GET', `/photo-imports/${id}`)).json()).toEqual(before);
+    expect(await countJobs(t.db, 'read-photo')).toBe(0);
+    expect(await addedByOf(t.db, IT)).toEqual([]);
   });
 });

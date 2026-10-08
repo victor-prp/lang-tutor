@@ -1,11 +1,12 @@
 import { describe, expect, it } from '@jest/globals';
-import type { MultipleChoiceQuestion } from '@lang-tutor/core/api';
+import type { Enrollment, MultipleChoiceQuestion } from '@lang-tutor/core/api';
 import { DIMENSIONS } from '@lang-tutor/core/domain';
 
 import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { ProgressRow, SnapshotRead } from '../domain/progress';
 import type { SessionRecord, SessionState } from '../domain/session';
+import type { EnrollmentRepo } from '../repo/enrollments';
 import type { ProgressRepo, SessionEvidence } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
@@ -33,6 +34,7 @@ const record = (count: number): SessionRecord => ({
   source: 'list',
 });
 const READY: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'ready', source: 'list' };
+const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'en', created_at: '' };
 const EVIDENCE: SessionEvidence = {
   enrollmentId: 'e1',
   day: DAY,
@@ -80,6 +82,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     },
     findState: async () => READY,
     transition: async () => true,
+    findEnrollmentId: async () => 'e1',
   });
   const progress = stub<ProgressRepo>({
     findSessionEvidence: async () => {
@@ -99,7 +102,11 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     findSnapshot: async () => SNAPSHOT,
   });
   const service = createSessionService({
-    transaction: createFakeTransaction({ session, progress }),
+    transaction: createFakeTransaction({
+      session,
+      progress,
+      enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
+    }),
     rng: testRng(7),
     logger: createFakeLogger(),
     now: createFakeClock(0),
@@ -113,7 +120,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
 describe('progress when a session ends', () => {
   it('completing a session runs the rule over its answers and answers with the change', async () => {
     const { service, calls } = world({ record: record(9) });
-    const result = await service.submitAnswer(SESSION, 'q9', { option_index: 0 });
+    const result = await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
     expect(calls.completed).toBe(1);
     expect(calls.asked).toEqual([['s1', 'sX']]);
     expect(calls.updated).toEqual([
@@ -125,28 +132,28 @@ describe('progress when a session ends', () => {
 
   it('an answer that does not complete the session writes no progress', async () => {
     const { service, calls } = world({ record: record(8) });
-    const result = await service.submitAnswer(SESSION, 'q8', { option_index: 0 });
+    const result = await service.submitAnswer('u1', SESSION, 'q8', { option_index: 0 });
     expect(calls.evidence).toBe(0);
     expect(result.progress).toEqual([]);
   });
 
   it('a replayed final answer writes nothing and still answers with the change', async () => {
     const { service, calls } = world({ record: record(10) });
-    const result = await service.submitAnswer(SESSION, 'q9', { option_index: 0 });
+    const result = await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
     expect(calls.evidence).toBe(0);
     expect(result.progress).toEqual(CHANGE);
   });
 
   it('a skip runs the rule over the answers given so far', async () => {
     const { service, calls } = world({ record: record(3) });
-    await service.skipSession(SESSION);
+    await service.skipSession('u1', SESSION);
     expect(calls.evidence).toBe(1);
     expect(calls.updated).toHaveLength(1);
   });
 
   it('a skip with no answers writes nothing', async () => {
     const { service, calls } = world({ record: record(0), evidence: null });
-    await service.skipSession(SESSION);
+    await service.skipSession('u1', SESSION);
     expect(calls.asked).toEqual([]);
     expect(calls.updated).toEqual([]);
     expect(calls.snapshots).toEqual([]);
@@ -154,14 +161,14 @@ describe('progress when a session ends', () => {
 
   it('a session about senses that are not saved writes nothing', async () => {
     const { service, calls } = world({ record: record(9), rows: [] });
-    await service.submitAnswer(SESSION, 'q9', { option_index: 0 });
+    await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
     expect(calls.asked).toHaveLength(1);
     expect(calls.updated).toEqual([]);
     expect(calls.snapshots).toEqual([]);
   });
 
   it('getSession answers a completed session with its change, and any other with none', async () => {
-    expect((await world({ record: record(10) }).service.getSession(SESSION)).progress).toEqual(CHANGE);
-    expect((await world({ record: record(4) }).service.getSession(SESSION)).progress).toEqual([]);
+    expect((await world({ record: record(10) }).service.getSession('u1', SESSION)).progress).toEqual(CHANGE);
+    expect((await world({ record: record(4) }).service.getSession('u1', SESSION)).progress).toEqual([]);
   });
 });

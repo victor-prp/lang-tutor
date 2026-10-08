@@ -21,7 +21,7 @@ import type { Repos } from './transaction';
 
 const NOW = Date.parse('2026-10-07T12:00:00Z');
 const ID = '11111111-1111-1111-1111-111111111111';
-const ENROLLMENT = { id: 'e1', source_language: 'he', target_language: 'it' } as Enrollment;
+const ENROLLMENT = { id: 'e1', user_id: 'u_owner', source_language: 'he', target_language: 'it' } as Enrollment;
 const importRow = (over: Partial<PhotoImportRow> = {}): PhotoImportRow => ({
   id: ID,
   enrollmentId: 'e1',
@@ -50,11 +50,12 @@ function setup(opts: {
   repos: Partial<Repos>;
   vision?: (request: VisionJsonRequest) => Promise<string>;
   llmReplies?: (string | Error)[];
-  lookup?: (input: TranslationRequest) => Promise<TranslationResponse>;
+  lookup?: (actorUserId: string, input: TranslationRequest) => Promise<TranslationResponse>;
   clock?: number[];
 }) {
   const visionCalls: VisionJsonRequest[] = [];
   const lookups: TranslationRequest[] = [];
+  const lookupActors: string[] = [];
   const llm = createFakeLlmClient(...(opts.llmReplies ?? ['{"sense":0}']));
   const logger = createFakeLogger();
   const service = createPhotoImportService({
@@ -64,15 +65,16 @@ function setup(opts: {
       return (opts.vision ?? (async () => '{"items":[]}'))(request);
     },
     llm,
-    lookup: async (input) => {
+    lookup: async (actorUserId, input) => {
+      lookupActors.push(actorUserId);
       lookups.push(input);
       if (!opts.lookup) throw new Error('lookup was not expected');
-      return opts.lookup(input);
+      return opts.lookup(actorUserId, input);
     },
     now: createFakeClock(...(opts.clock ?? [NOW])),
     logger,
   });
-  return { service, visionCalls, lookups, llm, logger };
+  return { service, visionCalls, lookups, lookupActors, llm, logger };
 }
 
 const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
@@ -194,12 +196,14 @@ describe('lookUpItem', () => {
 
   it('looks the word up as typed, and starts a row with no Hebrew on its first sense, ticked', async () => {
     const { photoImport, written } = repoFor(pending({ text: 'casa' }));
-    const { service, lookups, llm } = setup({
+    const { service, lookups, lookupActors, llm } = setup({
       repos: { photoImport, enrollment },
       lookup: async () => response({ text: 'casa', senses: [sense(1, 'בית'), sense(2, 'משפחה')] }),
     });
     await service.lookUpItem({ import_id: ID, position: 0 });
     expect(lookups).toEqual([{ text: 'casa', from: 'it', to: 'he', enrollment_id: 'e1' }]);
+    // Phase 29: the job has no actor; it looks up for the list's owner.
+    expect(lookupActors).toEqual(['u_owner']);
     expect(llm.calls).toEqual([]);
     expect(written).toEqual([
       {
