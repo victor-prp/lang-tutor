@@ -12,6 +12,7 @@
   },
   "scripts": {
     "mobile": "bash scripts/lane-env.sh npm run start --workspace apps/mobile",
+    "mobile:prod": "bash scripts/lane-env.sh bash scripts/mobile-prod.sh",
     "server": "bash scripts/lane-env.sh npm run dev --workspace apps/server",
     "e2e": "bash scripts/lane-env.sh npm run e2e --workspace e2e",
     "test": "npm run test:unit && echo '' && echo 'Note: unit tests only. Run npm run test:all before pushing - database-backed tests did not run.'",

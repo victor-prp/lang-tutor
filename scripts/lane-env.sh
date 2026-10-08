@@ -145,13 +145,18 @@ d_metro_port=$((8081 + 1000 * LANE_SLOT))
 d_e2e_app_port=$((8082 + 1000 * LANE_SLOT))
 
 # The host a phone or simulator uses to reach this lane's server. Taken from the
-# main checkout's .env.local so a LAN IP set once serves every lane; the port is
-# always this lane's own.
+# main checkout's .env.development.local so a LAN IP set once serves every lane;
+# the port is always this lane's own. .env.local is that file's name before
+# phase 30, read only when the new one is absent.
 api_host() {
   [ -n "${LANE_API_HOST:-}" ] && { printf '%s' "$LANE_API_HOST"; return; }
-  local from_main
-  from_main=$(sed -n 's#^EXPO_PUBLIC_API_URL=http://\([^:/]*\).*#\1#p' \
-    "$MAIN/apps/mobile/.env.local" 2>/dev/null | head -1)
+  local file from_main=""
+  for file in .env.development.local .env.local; do
+    [ -f "$MAIN/apps/mobile/$file" ] || continue
+    from_main=$(sed -n 's#^EXPO_PUBLIC_API_URL=http://\([^:/]*\).*#\1#p' \
+      "$MAIN/apps/mobile/$file" 2>/dev/null | head -1)
+    break
+  done
   printf '%s' "${from_main:-localhost}"
 }
 HOST=$(api_host)

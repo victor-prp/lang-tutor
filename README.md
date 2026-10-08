@@ -189,13 +189,13 @@ migration.
 ## Running it
 
 Docker, then the database, then the server, then the app. The mobile app reads its
-server URL from `apps/mobile/.env.local`, which Expo auto-loads and git ignores (only
-`.env.example` is committed). In the main checkout, create it by hand; in a worktree,
+server URL from `apps/mobile/.env.development.local`, which Expo auto-loads and git ignores
+(only `.env.development.example` is committed). In the main checkout, create it by hand; in a worktree,
 `./scripts/setup-worktree.sh` generates it pointing at that lane's own server.
 
 ```bash
 npm install
-cp apps/mobile/.env.example apps/mobile/.env.local
+cp apps/mobile/.env.development.example apps/mobile/.env.development.local
 npm run db:up        # Postgres + MockServer + pg-boss dashboard  (requires Docker)
 npm run db:migrate   # schema + shared dictionary seed
 npm run server       # terminal 1
@@ -230,14 +230,22 @@ confirm layout on a real device.
 
 **Testing on a physical device:** the phone needs a real IP to reach the server —
 `localhost` only works for the web target and simulators, which share the dev machine's
-network namespace. Edit the `apps/mobile/.env.local` created above:
+network namespace. Edit the `apps/mobile/.env.development.local` created above:
 
 ```bash
-# edit apps/mobile/.env.local: set EXPO_PUBLIC_API_URL to your dev machine's LAN IP
+# edit apps/mobile/.env.development.local: set EXPO_PUBLIC_API_URL to your dev machine's LAN IP
 # (macOS: ipconfig getifaddr en0), then restart `npm run mobile`
 ```
 
 Phone and dev machine must be on the same Wi-Fi network.
+
+**Testing a phone against production:** `npm run mobile:prod` starts Expo in production
+mode, which reads the committed `apps/mobile/.env.production` and so reaches
+`https://app.wordspal.ai` instead of your lane. The bundle is a production one: minified,
+with no Fast Refresh. The script refuses to start if `apps/mobile/.env.local` or
+`.env.production.local` sets `EXPO_PUBLIC_API_URL`, because Expo ranks either above
+`.env.production`. A checkout from before phase 30 has its URL in `.env.local`; re-run
+`./scripts/setup-worktree.sh`, which moves it to `.env.development.local`.
 
 ### Working in lanes
 
@@ -257,7 +265,7 @@ from its slot and branch by `scripts/lane-env.sh`:
 ```bash
 git worktree add -b my-feature .claude/worktrees/my-feature master
 cd .claude/worktrees/my-feature
-./scripts/setup-worktree.sh   # slot, node_modules, .env.local, its own database
+./scripts/setup-worktree.sh   # slot, node_modules, .env.development.local, its own database
 npm run server                # on this lane's port
 npm run dict:restore          # optional: the checked-in dictionary, ~2 minutes
 ```
@@ -591,9 +599,9 @@ npm run e2e
 It needs no servers running first — Playwright starts both itself: `apps/server`, and a
 static web export of the app served on port 8082. It builds that export on every run
 (~9s), which is deliberate: **the Metro dev server ignores an injected
-`EXPO_PUBLIC_API_URL`** (Metro compiles the value in from `.env.local` instead), so a
+`EXPO_PUBLIC_API_URL`** (Metro compiles the value in from `.env.development.local` instead), so a
 static export is the only way to reliably point the app at the local test server. Your
-`apps/mobile/.env.local` is never read or modified by the suite, so the Expo Go device
+`apps/mobile/.env.development.local` is never read or modified by the suite, so the Expo Go device
 workflow above is unaffected.
 
 `npm test` and `npm run test:all` deliberately do **not** run this — the workspace's

@@ -48,6 +48,8 @@ jobs:
       - run: ./scripts/test-lane-env.sh
       - run: ./scripts/test-lane-clean.sh
       - run: ./scripts/test-lane-abandon.sh
+      # Phase 30. The prod-mode Expo guard is pure text too.
+      - run: ./scripts/test-mobile-prod.sh
 
   check-types:
     runs-on: ubuntu-latest

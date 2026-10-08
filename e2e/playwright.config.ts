@@ -64,7 +64,7 @@ export default defineConfig({
       // Build and serve chained in one entry so the bundle and the server
       // hosting it can never disagree. EXPO_PUBLIC_API_URL must be set HERE:
       // export-time inlining is the only thing that controls the app's API
-      // target, and it overrides apps/mobile/.env.local without touching it.
+      // target, and it overrides apps/mobile/.env.development.local without touching it.
       // Served on this lane's e2e app port, never Metro's: reuseExistingServer
       // must never let this entry silently attach to a `npm run mobile` dev
       // server a developer happens to have running.

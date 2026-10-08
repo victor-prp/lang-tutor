@@ -160,6 +160,18 @@ expect_eq "LANE_API_HOST reaches the app url"     "http://192.168.1.50:4001" \
   "$(cd "$FIXTURE/wt3" && LANE_API_HOST=192.168.1.50 bash ./scripts/lane-env.sh \
      | sed -n 's/^EXPO_PUBLIC_API_URL=//p')"
 
+# --- the host comes from the main checkout's mobile env file (phase 30) -------
+# .env.development.local is the name since phase 30; .env.local is read only
+# when the new file is absent, so a main checkout that has not re-run
+# setup-worktree.sh keeps its LAN IP.
+printf 'EXPO_PUBLIC_API_URL=http://192.168.7.7:9\n' > "$MAIN/apps/mobile/.env.local"
+expect_eq "an old .env.local in the main checkout still supplies the host" \
+  "http://192.168.7.7:4001" "$(value_of "$FIXTURE/wt3" EXPO_PUBLIC_API_URL)"
+printf 'EXPO_PUBLIC_API_URL=http://192.168.8.8:9\n' > "$MAIN/apps/mobile/.env.development.local"
+expect_eq ".env.development.local wins over the old name" \
+  "http://192.168.8.8:4001" "$(value_of "$FIXTURE/wt3" EXPO_PUBLIC_API_URL)"
+rm -f "$MAIN/apps/mobile/.env.local" "$MAIN/apps/mobile/.env.development.local"
+
 # --- exec and export modes ---------------------------------------------------
 expect_eq "it execs the command it wraps with the lane exported" "4001" \
   "$(cd "$FIXTURE/wt3" && bash ./scripts/lane-env.sh sh -c 'printf %s "$PORT"')"
