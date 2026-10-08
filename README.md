@@ -126,6 +126,7 @@ enforced.
 | [0006](docs/adr/adr-0006-lanes.md) | Every checkout is a self-contained lane — its ports, databases and namespaces all derive from one slot and branch name in `scripts/lane-env.sh` |
 | [0007](docs/adr/adr-0007-background-jobs.md) | Background jobs run on pg-boss, enqueued only inside a transaction — `repo/jobs.ts` is the only enqueue, `worker.ts` the only place handlers are registered |
 | [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, an asserted actor header; `repo/grants.ts` is the only reader of the table |
+| [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `infra/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 
 All eight are enforced by `npm run lint:arch` (17 + 7 + 6 + 7 + 3 + 6 + 4 + 3 = 53 checks, grep only, no deps,
 no database) — see *Checks* below.
