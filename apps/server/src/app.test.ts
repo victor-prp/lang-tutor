@@ -109,6 +109,9 @@ function depsWithPing(ok: boolean): AppDeps {
     health: { ping: async () => ok },
     identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001 },
     logger: createFakeLogger(),
+    auth: createFakeAppDeps().auth,
+    signedIn: createFakeAppDeps().signedIn,
+    webOrigins: createFakeAppDeps().webOrigins,
   };
 }
 

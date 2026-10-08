@@ -97,9 +97,13 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all twenty-three paths and nothing else', async () => {
+  it('contains all twenty-seven paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
+      '/api/auth/email-otp/send-verification-otp',
+      '/api/auth/get-session',
+      '/api/auth/sign-in/email-otp',
+      '/api/auth/sign-out',
       '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
@@ -124,6 +128,27 @@ describe('the document as a whole', () => {
       '/api/users/{id}/enrollments',
       '/health',
     ]);
+  });
+});
+
+describe('sign-in in the published document (phase 29)', () => {
+  it('publishes the four auth paths, open', async () => {
+    const doc = await openApiDocument();
+    for (const [path, method] of [
+      ['/api/auth/email-otp/send-verification-otp', 'post'],
+      ['/api/auth/sign-in/email-otp', 'post'],
+      ['/api/auth/get-session', 'get'],
+      ['/api/auth/sign-out', 'post'],
+    ] as const) {
+      expect(doc.paths[path]?.[method]?.security).toEqual([]);
+    }
+  });
+
+  it('declares the session cookie as the default scheme, and /health as open', async () => {
+    const doc = await openApiDocument();
+    expect(doc.components.securitySchemes.sessionCookie).toMatchObject({ type: 'apiKey', in: 'cookie' });
+    expect(doc.security).toEqual([{ sessionCookie: [] }]);
+    expect(doc.paths['/health'].get.security).toEqual([]);
   });
 });
 

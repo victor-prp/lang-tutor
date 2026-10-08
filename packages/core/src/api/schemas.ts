@@ -985,3 +985,29 @@ export const LlmPhotoReadingSchema = z.object({
 // Phase 26. The match call's answer: a sense number counted from 1, 0 for none
 // (spec D7).
 export const LlmSenseMatchSchema = z.object({ sense: z.number().int() });
+
+// Phase 29 (spec D14). The four Better Auth paths the server mounts, described
+// as Better Auth 1.7 answers them. The server registers them for the document
+// only; Better Auth parses its own requests.
+export const SendCodeRequestSchema = z.object({ email: z.string().email(), type: z.literal('sign-in') });
+export const SendCodeResponseSchema = z.object({ success: z.boolean() });
+export const SignInWithCodeRequestSchema = z.object({ email: z.string().email(), otp: z.string().regex(/^\d{8}$/) });
+const AuthUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  name: z.string(),
+  emailVerified: z.boolean(),
+  image: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export const SignInWithCodeResponseSchema = z.object({ token: z.string(), user: AuthUserSchema });
+export const GetSessionResponseSchema = z
+  .object({ session: z.object({ id: z.string(), userId: z.string(), expiresAt: z.string() }), user: AuthUserSchema })
+  .nullable();
+export const SignOutResponseSchema = z.object({ success: z.boolean() });
+/** Better Auth's own error body, unlike ours: `{ code, message }`. */
+export const AuthErrorSchema = z.object({ code: z.string().optional(), message: z.string() });
+
+// Phase 29 (spec D12). Who the session belongs to; `user` is null until onboarding.
+export const MeResponseSchema = z.object({ email: z.string(), user: UserSchema.nullable() });

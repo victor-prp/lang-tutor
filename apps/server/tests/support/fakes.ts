@@ -103,6 +103,9 @@ export function createFakeAppDeps(): AppDeps {
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0 },
     logger: createFakeLogger(),
+    auth: { handler: async () => new Response(null, { status: 500 }), paths: [] },
+    signedIn: { sessionOf: async () => null },
+    webOrigins: ['https://web.example.test'],
   };
 }
 

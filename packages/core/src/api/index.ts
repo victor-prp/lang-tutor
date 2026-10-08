@@ -1,4 +1,12 @@
 export type {
+  SendCodeRequest,
+  SendCodeResponse,
+  SignInWithCodeRequest,
+  SignInWithCodeResponse,
+  GetSessionResponse,
+  SignOutResponse,
+  AuthError,
+  MeResponse,
   AnswerRecord,
   AnswerVerdict,
   CreateEnrollmentRequest,

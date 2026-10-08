@@ -1,10 +1,13 @@
 import type { PgBoss } from 'pg-boss';
 
-import type { GeminiConfig } from './config';
+import { createAuth, type AuthModule, type SendCode, type SessionReader } from './auth/betterAuth';
+import type { AuthConfig, GeminiConfig } from './config';
 import type { Db } from './db/client';
 import { createTransaction } from './db/transaction';
 import type { Logger } from './logger';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from './providers/gemini';
+import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
+import { createAuthRepo } from './repo/auth';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createJobRepo } from './repo/jobs';
 import { createPhotoImportRepo } from './repo/photoImports';
@@ -48,6 +51,15 @@ export type AppDeps = {
   health: HealthRepo;
   identity: ServerIdentity;
   logger: Logger;
+  // Phase 29. The four mounted Better Auth paths and their handler (spec D3).
+  auth: {
+    handler: AuthModule['handler'];
+    paths: readonly { method: 'GET' | 'POST'; path: string }[];
+  };
+  // Phase 29. Reads the session behind a request (spec D11). Only routes/actor.ts uses it.
+  signedIn: SessionReader;
+  // Phase 29 (spec D15). The browser origins CORS admits, with credentials.
+  webOrigins: string[];
 };
 
 // Assembly only: no I/O, no logic, no conditionals beyond choosing an
@@ -62,6 +74,8 @@ export function createServerDeps(io: {
   now: () => number;
   fetch: typeof globalThis.fetch;
   gemini: GeminiConfig;
+  // Phase 29. Better Auth's secret and origins, and Resend's key.
+  auth: AuthConfig;
   // The provider's whole budget for one call. No retry: a learner who taps
   // retry *is* the retry. Received rather than a module constant so a test can
   // inject a short budget instead of paying a slow provider's delay in
@@ -152,6 +166,27 @@ export function createServerDeps(io: {
     thinkingBudget: 0,
   });
 
+  // Phase 29 (spec D16). The one place that names both the Resend provider and
+  // the SendCode contract it satisfies (ADR 0001 R11).
+  const mailer = createResendMailer({
+    fetch: io.fetch,
+    baseUrl: io.auth.resendBaseUrl,
+    apiKey: io.auth.resendApiKey,
+    from: io.auth.mailFrom,
+    timeoutMs: RESEND_TIMEOUT_MS,
+  });
+  const sendCode: SendCode = mailer.sendSignInCode;
+  const authModule = createAuth({
+    db: io.db,
+    authRepo: createAuthRepo(io.db),
+    secret: io.auth.secret,
+    baseUrl: io.auth.baseUrl,
+    webOrigins: io.auth.webOrigins,
+    sendCode,
+    now: io.now,
+    logger: io.logger,
+  });
+
   const translations = createTranslationService({ llm, transaction, logger: io.logger });
 
   return {
@@ -183,5 +218,8 @@ export function createServerDeps(io: {
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,
     logger: io.logger,
+    auth: { handler: authModule.handler, paths: authModule.paths },
+    signedIn: { sessionOf: authModule.sessionOf },
+    webOrigins: io.auth.webOrigins,
   };
 }

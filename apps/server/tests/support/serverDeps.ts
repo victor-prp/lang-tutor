@@ -25,6 +25,8 @@ export function createTestServerDeps(io: {
   logger: Logger;
   rng: () => number;
   geminiBaseUrl?: string;
+  /** Phase 29. Resend's base URL; defaults to an unroutable one, as Gemini's does. */
+  mailBaseUrl?: string;
   translationTimeoutMs?: number;
   identity?: { lane: string; database: string; port: number };
   /** A started boss for tests that enqueue (startTestBoss). By default an
@@ -49,6 +51,14 @@ export function createTestServerDeps(io: {
       apiKey: 'test-key',
       baseUrl: io.geminiBaseUrl ?? 'http://127.0.0.1:9/never-registered',
       model: 'test-model',
+    },
+    auth: {
+      secret: 'test-secret-that-is-at-least-32-chars',
+      baseUrl: 'http://localhost',
+      webOrigins: ['https://web.example.test'],
+      resendApiKey: 'test-key',
+      resendBaseUrl: io.mailBaseUrl ?? 'http://127.0.0.1:9/never-registered',
+      mailFrom: 'test@example.com',
     },
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
     sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? SESSION_GENERATION_BUDGET_MS,
