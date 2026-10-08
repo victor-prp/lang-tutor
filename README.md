@@ -128,7 +128,7 @@ enforced.
 | [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, an asserted actor header; `repo/grants.ts` is the only reader of the table |
 | [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `infra/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 
-All eight are enforced by `npm run lint:arch` (17 + 7 + 6 + 7 + 3 + 6 + 4 + 3 = 53 checks, grep only, no deps,
+All nine are enforced by `npm run lint:arch` (17 + 7 + 6 + 8 + 3 + 6 + 4 + 3 + 3 = 57 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
@@ -473,7 +473,7 @@ npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0005 identity, 0006 lanes, 0007 jobs, 0008 grants) — grep only, no deps, no database
+npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0005 identity, 0006 lanes, 0007 jobs, 0008 grants, 0010 single container) — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go
