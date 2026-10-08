@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import { AccessDenied, GrantExists, GrantNotFound, NotLearning, OwnList, UserNotFound } from '../errors';
 import type { GrantService } from '../services/grants';
-import { learnerResponses, type ActorEnv } from './actor';
+import { forbidden, learnerResponses, type ActorEnv } from './actor';
 
 const json = <T extends z.ZodType>(schema: T, description: string) => ({
   content: { 'application/json': { schema } },
@@ -58,6 +58,7 @@ const acceptRoute = createRoute({
     200: json(GrantSchema, 'The grant, accepted.'),
     404: json(ErrorSchema, 'No grant has this id.'),
     ...learnerResponses,
+    403: forbidden("the caller is not the list's owner, who alone may accept or decline an invite"),
   },
 });
 
@@ -73,6 +74,7 @@ const endRoute = createRoute({
   responses: {
     204: { description: 'The grant is gone.' },
     ...learnerResponses,
+    403: forbidden('the caller is neither party to this grant'),
   },
 });
 

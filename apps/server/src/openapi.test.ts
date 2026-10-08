@@ -393,6 +393,8 @@ describe('the 403 of an owner-only or granted route in the published document', 
     ['/api/photo-imports/{id}/save', 'post', /another learner's/],
     ['/api/photo-imports/{id}/discard', 'post', /another learner's/],
     ['/api/translations', 'post', /another learner's enrollment/],
+    ['/api/grants/{id}/accept', 'post', /owner, who alone may accept or decline an invite/],
+    ['/api/grants/{id}', 'delete', /neither party to this grant/],
   ])('%s %s names its rule and the missing profile', async (path, method, rule) => {
     const doc = await openApiDocument();
     const { description } = doc.paths[path][method].responses['403'];
