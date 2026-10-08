@@ -101,7 +101,8 @@ export function createFakeAppDeps(): AppDeps {
     grants,
     photoImports,
     health: { ping: unreachable },
-    identity: { lane: 'test', database: 'test_db', port: 0 },
+    identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
+    webDistDir: null,
     logger: createFakeLogger(),
   };
 }

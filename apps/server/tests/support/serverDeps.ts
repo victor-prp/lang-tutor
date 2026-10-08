@@ -26,7 +26,7 @@ export function createTestServerDeps(io: {
   rng: () => number;
   geminiBaseUrl?: string;
   translationTimeoutMs?: number;
-  identity?: { lane: string; database: string; port: number };
+  identity?: { lane: string; database: string; port: number; version: string };
   /** A started boss for tests that enqueue (startTestBoss). By default an
    *  unstarted one, so an unexpected enqueue fails loudly. */
   boss?: PgBoss;
@@ -55,7 +55,8 @@ export function createTestServerDeps(io: {
     speechTimeoutMs: io.speechTimeoutMs ?? 8_000,
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,
-    identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0 },
+    identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test' },
+    webDistDir: null,
     boss: io.boss ?? unstartedBoss(io.db),
   });
 }
