@@ -138,7 +138,7 @@ else
 fi
 
 # A thousand per lane: easy to hold in your head, and no slot can reach
-# nightly-qa's reserved 3101 and 8092.
+# nightly-qa's reserved 3101, 8092 and 8093.
 d_port=$((3001 + 1000 * LANE_SLOT))
 d_e2e_api_port=$((3002 + 1000 * LANE_SLOT))
 d_metro_port=$((8081 + 1000 * LANE_SLOT))
