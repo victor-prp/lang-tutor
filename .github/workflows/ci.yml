@@ -52,6 +52,8 @@ jobs:
       - run: ./scripts/test-mobile-prod.sh
       # Phase 30. The image must run the Node major the other jobs test.
       - run: ./scripts/check-dockerfile-node.sh
+      # Phase 30. infra.sh's tag resolution, against a stub terraform.
+      - run: ./scripts/test-infra.sh
 
   check-types:
     runs-on: ubuntu-latest
@@ -241,6 +243,52 @@ jobs:
           path: e2e/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # Phase 30 (spec D7). fmt and validate need no AWS and always run. The plan
+  # needs the plan role, which exists once infra/bootstrap has been applied: until
+  # the AWS_PLAN_ROLE_ARN variable is set, the step says so and passes. -lock=false
+  # keeps the job read-only, since a plan otherwise writes the state's lock file.
+  terraform-plan:
+    if: github.repository_owner == 'victor-prp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_gemini_model: ${{ vars.GEMINI_MODEL }}
+      TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.3
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive infra
+      - name: Validate both stacks
+        run: |
+          for stack in bootstrap prod; do
+            terraform -chdir="infra/$stack" init -backend=false -input=false
+            terraform -chdir="infra/$stack" validate
+          done
+      - name: Assume the plan role
+        if: vars.AWS_PLAN_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: eu-central-1
+      - name: Plan both stacks
+        env:
+          PLAN_ROLE: ${{ vars.AWS_PLAN_ROLE_ARN }}
+        run: |
+          if [ -z "$PLAN_ROLE" ]; then
+            echo "::notice::AWS_PLAN_ROLE_ARN is not set: infra/bootstrap has not been applied yet. fmt and validate ran; the plan was skipped."
+            exit 0
+          fi
+          ./scripts/infra.sh bootstrap plan -lock=false
+          ./scripts/infra.sh prod plan -lock=false
 
   # The prompt eval bucket, calling the real paid model. It lived in its own
   # workflow (nightly + workflow_dispatch) precisely so a vendor's model update

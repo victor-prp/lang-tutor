@@ -534,9 +534,9 @@ Design and plan for this layout:
 
 ## Continuous integration
 
-Every push, on every branch, runs seven parallel jobs on GitHub Actions
+Every push, on every branch, runs eight parallel jobs on GitHub Actions
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). `workflow_dispatch` runs the same
-seven by hand, which matters for the one job whose result can change without a commit.
+eight by hand, which matters for the one job whose result can change without a commit.
 
 | Job | Database | Runs | Roughly |
 |---|---|---|---|
@@ -546,6 +546,7 @@ seven by hand, which matters for the one job whose result can change without a c
 | `test-integration` | `npm run db:up` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
 | `test-e2e` | `npm run db:up` | `npm run e2e` — the Playwright suite described below | 4-5 min |
 | `build-image` | `npm run db:up` | `npm run e2e:image` — the production image, built for this job's own address, driven by the whole Playwright suite plus the two image-only specs | 10-15 min |
+| `terraform-plan` | none | `terraform fmt -check` and `validate` on both stacks under `infra/`; then, once the `AWS_PLAN_ROLE_ARN` variable exists, a read-only `plan` of both through the plan role | 1 min |
 | `test-eval` | **none, and no MockServer either** | `npm run eval` — the golden set against the real Gemini API, keyed by the `GEMINI_API_KEY` secret and the `GEMINI_MODEL` variable | 1 min |
 
 `test-unit` has no database available at all. That is the point: it *proves* the
