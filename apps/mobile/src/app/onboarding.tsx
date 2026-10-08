@@ -1,4 +1,4 @@
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -41,7 +41,7 @@ function LanguageChoice({
 }
 
 export default function OnboardingScreen() {
-  const { user, register } = useCurrentUser();
+  const { status, user, createProfile } = useCurrentUser();
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [age, setAge] = useState('');
@@ -49,8 +49,9 @@ export default function OnboardingScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // register() sets the user, and this is what turns that into navigation.
-  if (user) return <Redirect href="/" />;
+  // createProfile() sets the user, and this is what turns that into navigation.
+  if (status === 'signed_in' && user) return <Redirect href="/" />;
+  if (status === 'signed_out') return <Redirect href="/sign-in" />;
 
   async function onSubmit() {
     const parsedAge = Number.parseInt(age, 10);
@@ -67,14 +68,17 @@ export default function OnboardingScreen() {
     setBusy(true);
     setError(null);
     try {
-      await register({
+      await createProfile({
         username: username.trim(),
         display_name: displayName.trim(),
         age: parsedAge,
         native_language: nativeLanguage,
       });
     } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 409) {
+      if (failure instanceof ApiError && failure.status === 409 && failure.code === 'profile exists') {
+        // Another device made this account's profile first; home is where it leads.
+        router.replace('/');
+      } else if (failure instanceof ApiError && failure.status === 409) {
         setError(strings.onboardingUsernameTaken);
       } else if (failure instanceof ApiError && failure.status === 400) {
         setError(strings.onboardingRejected);
@@ -90,7 +94,7 @@ export default function OnboardingScreen() {
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <Text style={styles.title}>{strings.onboardingTitle}</Text>
 
-      <Text style={styles.label}>{strings.loginUsernameLabel}</Text>
+      <Text style={styles.label}>{strings.profileUsernameLabel}</Text>
       <TextInput
         testID="onboarding-username"
         value={username}

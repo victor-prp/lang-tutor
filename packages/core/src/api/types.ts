@@ -34,7 +34,6 @@ import type {
   LlmSenseMatchSchema,
   LlmSenseSchema,
   LlmTranslationSchema,
-  LoginRequestSchema,
   MissedQuestionSchema,
   MultipleChoiceQuestionSchema,
   NextStepRequestSchema,
@@ -133,7 +132,6 @@ export type ErrorResponse = z.infer<typeof ErrorSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type User = z.infer<typeof UserSchema>;
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
-export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export type TranslationGuardReason = z.infer<typeof TranslationGuardReasonSchema>;
 export type TranslationKind = z.infer<typeof TranslationKindSchema>;
 export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;

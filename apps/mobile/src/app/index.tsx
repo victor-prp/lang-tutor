@@ -12,7 +12,7 @@ import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 export default function HomeScreen() {
-  const { user, enrollments, active, grants, reloadGrants } = useCurrentUser();
+  const { status, user, enrollments, active, grants, reloadGrants, retry } = useCurrentUser();
 
   // Fresh on every focus: an invitation may have arrived, or been answered.
   useFocusEffect(
@@ -21,9 +21,25 @@ export default function HomeScreen() {
     }, [reloadGrants]),
   );
 
-  if (!user) return <Redirect href="/login" />;
-  // No enrollment and no student is a valid state (spec §5): sign-up, a login
-  // that finds none, or a sign-up whose second call never landed arrive here.
+  if (status === 'loading') return <SafeAreaView style={styles.screen} />;
+  if (status === 'offline')
+    return (
+      <SafeAreaView style={styles.offline} edges={['top', 'bottom']}>
+        <Text style={styles.title}>{strings.offlineTitle}</Text>
+        <Pressable
+          testID="offline-retry"
+          accessibilityRole="button"
+          onPress={() => void retry()}
+          style={styles.button}
+        >
+          <Text style={styles.buttonLabel}>{strings.offlineRetry}</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  if (status === 'signed_out') return <Redirect href="/sign-in" />;
+  if (status === 'needs_profile' || !user) return <Redirect href="/onboarding" />;
+  // No enrollment and no student is a valid state (spec §5): a new profile, or
+  // a profile whose enrollment never landed, arrives here.
   // A tutor with students has a home of their own.
   if (needsEnrollScreen(enrollments, grants)) return <Redirect href="/enroll" />;
 
@@ -70,6 +86,7 @@ function StartLearning() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  offline: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.md },
   content: {
     flexGrow: 1,
     paddingHorizontal: spacing.lg,

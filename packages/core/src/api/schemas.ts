@@ -545,10 +545,6 @@ export const CreateEnrollmentRequestSchema = z
     message: 'source and target language must differ',
   });
 
-export const LoginRequestSchema = z.object({
-  username: UsernameSchema,
-});
-
 // Phase 16. Why an input came back empty without a model call: the script
 // guard (apps/server/src/domain/languages.ts) found its letters in `to`'s
 // script, or in neither language's.

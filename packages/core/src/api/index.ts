@@ -44,7 +44,6 @@ export type {
   LlmSenseMatch,
   LlmTranscript,
   LlmTranslation,
-  LoginRequest,
   MatchingBoard,
   MatchingQuestion,
   MissedQuestion,

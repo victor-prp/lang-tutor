@@ -18,7 +18,7 @@ export default function InviteStudentScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <Redirect href="/" />;
 
   async function onSubmit() {
     setBusy(true);

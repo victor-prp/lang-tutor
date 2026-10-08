@@ -10,7 +10,6 @@ import type {
   GrantList,
   JudgedAnswerRequest,
   JudgedAnswerResponse,
-  LoginRequest,
   MeResponse,
   NextStepRequest,
   NextStepResponse,
@@ -132,9 +131,6 @@ export function createApiClient({ baseUrl, fetch, sessionHeaders, credentials, o
     `/api/enrollments/${encodeURIComponent(enrollmentId)}/vocabulary`;
 
   return {
-    // Phase 29: the server no longer answers this (spec D12). The login screen
-    // still calls it until sign-in replaces that screen.
-    login: (request: LoginRequest) => postJson<User>('/api/login', request),
     me: () => getJson<MeResponse>('/api/me'),
     createProfile: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>

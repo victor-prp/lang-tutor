@@ -1,40 +1,31 @@
 import { Redirect, router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ApiError } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { signInProblem } from '@/signIn';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
-export default function LoginScreen() {
-  const { user, rememberedUsername, login } = useCurrentUser();
-  const [username, setUsername] = useState('');
-  const [edited, setEdited] = useState(false);
+export default function SignInScreen() {
+  const { status, sendCode } = useCurrentUser();
+  const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // rememberedUsername arrives after a storage read, so it cannot be the
-  // initial state. Adopt it until the learner types — after that, their text wins.
-  useEffect(() => {
-    if (!edited) setUsername(rememberedUsername);
-  }, [rememberedUsername, edited]);
+  // Also covers landing here while already signed in, e.g. via back navigation.
+  if (status === 'signed_in' || status === 'needs_profile') return <Redirect href="/" />;
 
-  // Also covers landing here while already identified, e.g. via back navigation.
-  if (user) return <Redirect href="/" />;
-
-  async function onLogin() {
+  async function onSend() {
+    const address = email.trim();
     setBusy(true);
     setError(null);
     try {
-      await login(username.trim());
+      await sendCode(address);
+      router.push({ pathname: '/sign-in-code', params: { email: address } });
     } catch (failure) {
-      setError(
-        failure instanceof ApiError && failure.status === 404
-          ? strings.loginUnknownUser
-          : strings.loginFailed,
-      );
+      setError(strings.signInProblem[signInProblem(failure)]);
     } finally {
       setBusy(false);
     }
@@ -42,47 +33,39 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <Text style={styles.title}>{strings.loginTitle}</Text>
+      <Text style={styles.title}>{strings.signInTitle}</Text>
 
-      <Text style={styles.label}>{strings.loginUsernameLabel}</Text>
+      <Text style={styles.label}>{strings.signInEmailLabel}</Text>
       <TextInput
-        testID="login-username"
-        value={username}
-        onChangeText={(text) => {
-          setEdited(true);
-          setUsername(text);
-        }}
+        testID="sign-in-email"
+        value={email}
+        onChangeText={setEmail}
+        keyboardType="email-address"
         autoCapitalize="none"
+        autoComplete="email"
         autoCorrect={false}
-        // The app is force-RTL but a username is lowercase ASCII: without this
-        // the text and the caret render on the wrong side.
+        // The app is force-RTL but an address is Latin: without this the text
+        // and the caret render on the wrong side.
         style={[styles.input, styles.ltr]}
       />
-      <Text style={styles.hint}>{strings.usernameHint}</Text>
+      <Text testID="sign-in-new-here" style={styles.hint}>
+        {strings.signInNewHere}
+      </Text>
 
       {error ? (
-        <Text testID="login-error" style={styles.error}>
+        <Text testID="sign-in-error" style={styles.error}>
           {error}
         </Text>
       ) : null}
 
       <Pressable
         accessibilityRole="button"
-        testID="login-button"
-        onPress={onLogin}
-        disabled={busy || username.trim().length === 0}
-        style={styles.button}
+        testID="sign-in-send"
+        onPress={onSend}
+        disabled={busy || email.trim().length === 0}
+        style={[styles.button, (busy || email.trim().length === 0) && styles.disabled]}
       >
-        <Text style={styles.buttonLabel}>{strings.loginAction}</Text>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        testID="new-user-button"
-        onPress={() => router.push('/onboarding')}
-        style={styles.secondaryButton}
-      >
-        <Text style={styles.secondaryLabel}>{strings.newUserAction}</Text>
+        <Text style={styles.buttonLabel}>{strings.signInSend}</Text>
       </Pressable>
 
       <View style={styles.spacer} />
@@ -126,13 +109,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
+  disabled: { opacity: 0.5 },
   buttonLabel: {
     color: colors.onPrimary,
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
     fontWeight: '700',
   },
-  secondaryButton: { paddingVertical: spacing.md, alignItems: 'center' },
-  secondaryLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
   spacer: { flex: 1 },
 });

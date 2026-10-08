@@ -132,7 +132,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       void (async () => {
         try {
           const currentUser = userRef.current;
-          // Unreachable in practice (home redirects to /login when logged out),
+          // Unreachable in practice (home redirects to /sign-in when signed out),
           // but a session with no learner must fail loudly. The server knows who
           // is answering from the session (phase 29), so no id is sent.
           if (!currentUser) throw new Error('cannot enter a session with no learner');

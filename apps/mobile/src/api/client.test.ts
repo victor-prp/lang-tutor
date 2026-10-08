@@ -144,38 +144,6 @@ describe('api/client', () => {
     expect((failure as ApiError).code).toBeUndefined();
   });
 
-  it('login posts the username to /api/login', async () => {
-    const user = {
-      id: 'u1',
-      username: 'dana',
-      display_name: 'דנה',
-      age: 34,
-      native_language: 'he',
-    };
-    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => user }));
-    const client = buildClient(mockFetch);
-
-    const result = await client.login({ username: 'dana' });
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://test.local/api/login',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ username: 'dana' }),
-      }),
-    );
-    expect(result).toEqual(user);
-  });
-
-  it('login throws ApiError with the status when the username is unknown', async () => {
-    const mockFetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }));
-    const client = buildClient(mockFetch);
-
-    await expect(client.login({ username: 'nobody' })).rejects.toMatchObject({ status: 404 });
-    await expect(client.login({ username: 'nobody' })).rejects.toBeInstanceOf(ApiError);
-  });
-
   it('createProfile posts the profile to /api/users', async () => {
     const request = {
       username: 'dana',

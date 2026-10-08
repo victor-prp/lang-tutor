@@ -24,7 +24,6 @@ import {
   PhotoImportItemUpdateSchema,
   PhotoImportSchema,
   PhotoImportStatusSchema,
-  LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
   SpeechAnswerRequestSchema,
@@ -284,16 +283,6 @@ describe('CreateUserRequestSchema', () => {
     ['a malformed username', { username: 'Dana' }],
   ])('rejects %s', (_label, override) => {
     expect(CreateUserRequestSchema.safeParse({ ...valid, ...override }).success).toBe(false);
-  });
-});
-
-describe('LoginRequestSchema', () => {
-  it('accepts a well-formed username', () => {
-    expect(LoginRequestSchema.safeParse({ username: 'dana' }).success).toBe(true);
-  });
-
-  it('rejects a malformed username', () => {
-    expect(LoginRequestSchema.safeParse({ username: 'D' }).success).toBe(false);
   });
 });
 

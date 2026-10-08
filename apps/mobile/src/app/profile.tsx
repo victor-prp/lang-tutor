@@ -23,7 +23,7 @@ function Row({ label, value, testID }: { label: string; value: string; testID: s
 export default function ProfileScreen() {
   const { user, enrollments, grants, endGrant, signOut } = useCurrentUser();
 
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <Redirect href="/" />;
 
   const tutors = myTutors(grants);
 
@@ -42,9 +42,9 @@ export default function ProfileScreen() {
     }
   }
 
-  function onSwitchUser() {
-    signOut();
-    router.replace('/login');
+  async function onSignOut() {
+    await signOut();
+    router.replace('/sign-in');
   }
 
   return (
@@ -52,7 +52,7 @@ export default function ProfileScreen() {
       <Text style={styles.title}>{strings.profileTitle}</Text>
 
       <View style={styles.card}>
-        <Row label={strings.loginUsernameLabel} value={user.username} testID="profile-username" />
+        <Row label={strings.profileUsernameLabel} value={user.username} testID="profile-username" />
         <Row label={strings.profileNameLabel} value={user.display_name} testID="profile-name" />
         <Row label={strings.profileAgeLabel} value={String(user.age)} testID="profile-age" />
         <Row
@@ -105,11 +105,11 @@ export default function ProfileScreen() {
 
       <Pressable
         accessibilityRole="button"
-        testID="switch-user-button"
-        onPress={onSwitchUser}
+        testID="sign-out-button"
+        onPress={onSignOut}
         style={styles.button}
       >
-        <Text style={styles.buttonLabel}>{strings.switchUser}</Text>
+        <Text style={styles.buttonLabel}>{strings.signOut}</Text>
       </Pressable>
 
       <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}>

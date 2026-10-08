@@ -18,7 +18,7 @@ import { createApiClient } from '@/api/client';
 import { createAppAuthClient } from '@/auth/client';
 import { createAuthEvents } from '@/authEvents';
 import { requireEnvValue } from '@/config/requireEnvValue';
-import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '@/currentUser';
+import { createRememberedEnrollmentStore } from '@/currentUser';
 import { ApiProvider } from '@/hooks/useApi';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
@@ -52,7 +52,6 @@ const api = createApiClient({
   credentials: auth.credentials,
   onUnauthorized: authEvents.unauthorized,
 });
-const usernameStore = createRememberedUsernameStore({ storage: AsyncStorage });
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
 
 const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
@@ -173,8 +172,7 @@ export default function RootLayout() {
       <ApiProvider api={api}>
         <SpeechProvider speaker={speaker}>
           <RecordingProvider recorder={recorder}>
-            <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} usernameStore={usernameStore}
-              enrollmentStore={enrollmentStore}
+            <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore}
             >
               <NextSessionProvider api={api}>
                 <SessionProvider api={api}>
