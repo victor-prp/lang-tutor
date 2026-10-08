@@ -15,7 +15,7 @@ import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { skipListSession, tapUntil } from './support/interactions';
 import { clearGemini, expectGemini, expectGeminiPayload, expectJudge } from './support/mockServer';
 import { stripIsolates } from './support/text';
-import { createLearner } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
 test.setTimeout(240_000);
@@ -46,8 +46,8 @@ const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.m
 const FORMS = WORDS.map((w) => w.form);
 
 /** Past a skipped seed, the six words looked up and saved through the API. */
-async function saveSixWords(request: APIRequestContext, userId: string): Promise<string> {
-  const enrollments = (await (await request.get(`${API_URL}/api/users/${userId}/enrollments`)).json()) as { id: string }[];
+async function saveSixWords(request: APIRequestContext): Promise<string> {
+  const enrollments = (await (await request.get(`${API_URL}/api/enrollments`)).json()) as { id: string }[];
   const enrollmentId = enrollments[0].id;
   const seed = (await (await request.post(`${API_URL}/api/sessions`, { data: { enrollment_id: enrollmentId } })).json()) as {
     session_id: string;
@@ -62,7 +62,6 @@ async function saveSixWords(request: APIRequestContext, userId: string): Promise
     expect(lookup.ok(), await lookup.text()).toBe(true);
     const { senses } = (await lookup.json()) as { senses: { sense_id?: string; variant_id?: string }[] };
     const saved = await request.post(`${API_URL}/api/enrollments/${enrollmentId}/vocabulary`, {
-      headers: { 'X-Acting-User-Id': userId },
       data: { entries: senses.map((sense) => ({ sense_id: sense.sense_id!, variant_id: sense.variant_id! })) },
     });
     expect(saved.ok(), await saved.text()).toBe(true);
@@ -103,20 +102,15 @@ async function buildWord(page: Page, letters: string) {
 async function reachSentenceSession(page: Page, request: APIRequestContext, username: string) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
-  const user = await createLearner(request, username, 'ru');
-  const enrollmentId = await saveSixWords(request, user.id);
+  await signUpLearner(page, username, 'ru');
+  const enrollmentId = await saveSixWords(page.request);
 
-  await skipListSession(request, enrollmentId);
+  await skipListSession(page.request, enrollmentId);
 
   await clearGemini(request);
   await expectGeminiPayload(request, generationStubFor({ 2: 'gap', 3: 'sentence', 6: 'translate' }));
-  // Past a skipped seed the home screen offers create, not start, so logIn's wait does not fit.
-  await page.goto('/');
-  await page.getByTestId('login-username').fill(username);
-  await expect(async () => {
-    if ((await page.getByTestId('login-button').count()) > 0) await page.getByTestId('login-button').click({ timeout: 2_000 });
-    await expect(page.getByTestId('create-button')).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
+  // Past a skipped seed the home screen offers create, not start, so openApp's default landing does not fit.
+  await openApp(page, 'create-button');
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button')).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');

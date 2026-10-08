@@ -48,6 +48,14 @@ export default defineConfig({
         GEMINI_BASE_URL: `${MOCKSERVER_URL}/${E2E_MOCK_NAMESPACE}`,
         GEMINI_API_KEY: 'e2e',
         GEMINI_MODEL: 'e2e-model',
+        // Phase 29. Sign-in: a fixed test secret, this run's origins, and Resend
+        // faked by the lane's MockServer namespace, as Gemini is.
+        BETTER_AUTH_SECRET: 'e2e-secret-that-is-at-least-32-characters',
+        AUTH_BASE_URL: API_URL,
+        WEB_ORIGINS: APP_URL,
+        RESEND_API_KEY: 'e2e',
+        RESEND_BASE_URL: `${MOCKSERVER_URL}/${E2E_MOCK_NAMESPACE}`,
+        MAIL_FROM: 'e2e@example.com',
       },
       url: `${API_URL}/health`,
       // Never reuse, not even locally. Until phase 15 this was `!process.env.CI`,

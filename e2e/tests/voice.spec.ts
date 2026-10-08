@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { clearGemini } from './support/mockServer';
-import { createLearner, logIn } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 import { spoken, withVoices, type Utterance } from './support/voices';
 
 test.setTimeout(120_000);
@@ -49,8 +49,8 @@ async function tapAndHear(page: Page, button: Locator, utterance: Utterance) {
 
 test('a lookup speaks the Italian in both directions, and never the Hebrew', async ({ page, request }) => {
   await withVoices(page, ['it-IT', 'en-US']);
-  await createLearner(request, 'e2e_voice_lookup', 'it');
-  await logIn(page, 'e2e_voice_lookup');
+  await signUpLearner(page, 'e2e_voice_lookup', 'it');
+  await openApp(page);
   await tapUntil(page, 'translate-entry', 'translate-input');
 
   // it → he: the headword and the Italian half of the example speak.
@@ -74,8 +74,8 @@ test('a lookup speaks the Italian in both directions, and never the Hebrew', asy
 
 test('a session prompt speaks', async ({ page, request }) => {
   await withVoices(page, ['it-IT']);
-  await createLearner(request, 'e2e_voice_session', 'it');
-  await logIn(page, 'e2e_voice_session');
+  await signUpLearner(page, 'e2e_voice_session', 'it');
+  await openApp(page);
   await tapUntil(page, 'start-button', 'progress-label');
 
   const prompt = (await page.getByTestId('question-prompt').textContent()) ?? '';
@@ -85,8 +85,8 @@ test('a session prompt speaks', async ({ page, request }) => {
 
 test('a saved word speaks from the list without opening, and from its page', async ({ page, request }) => {
   await withVoices(page, ['it-IT']);
-  await createLearner(request, 'e2e_voice_saved', 'it');
-  await logIn(page, 'e2e_voice_saved');
+  await signUpLearner(page, 'e2e_voice_saved', 'it');
+  await openApp(page);
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'gatto', GATTO);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save').first());
@@ -105,8 +105,8 @@ test('a saved word speaks from the list without opening, and from its page', asy
 
 test('without an Italian voice, an Italian learner sees no speaker', async ({ page, request }) => {
   await withVoices(page, ['en-US']);
-  await createLearner(request, 'e2e_voice_none', 'it');
-  await logIn(page, 'e2e_voice_none');
+  await signUpLearner(page, 'e2e_voice_none', 'it');
+  await openApp(page);
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'gatto', GATTO);
 

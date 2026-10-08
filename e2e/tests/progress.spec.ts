@@ -6,7 +6,7 @@ import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
 import { answerChoice, answerMeaning, answerTyped, generationStub, readCard, rightOption, type CardKind } from './support/cards';
 import { clearGemini, expectGeminiPayload, expectJudge } from './support/mockServer';
-import { createLearner, logIn } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
 test.setTimeout(180_000);
@@ -36,8 +36,8 @@ test('a session moves the words it practised up the ladder, and the list filters
   page.on('dialog', (dialog) => void dialog.accept());
 
   await withVoices(page, []);
-  await createLearner(request, 'e2e_progress_ru', 'ru');
-  await logIn(page, 'e2e_progress_ru');
+  await signUpLearner(page, 'e2e_progress_ru', 'ru');
+  await openApp(page);
 
   // 1. Past the seed, with four saved senses of two words.
   await tapUntil(page, 'start-button', 'progress-label');

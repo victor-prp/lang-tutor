@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { lookUp, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA, ZNAT } from './support/lexemes';
 import { clearGemini } from './support/mockServer';
-import { createLearner, logIn } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 
 test.setTimeout(180_000);
 
@@ -36,8 +36,8 @@ test('a Russian learner saves senses, browses the list, and changes it from the 
   page,
   request,
 }) => {
-  await createLearner(request, 'e2e_vocab_ru', 'ru');
-  await logIn(page, 'e2e_vocab_ru');
+  await signUpLearner(page, 'e2e_vocab_ru', 'ru');
+  await openApp(page);
   await tapUntil(page, 'translate-entry', 'translate-input');
 
   // One sense of прочитала.
@@ -101,8 +101,8 @@ test('a word saved in two parts of speech is one row, and its detail labels each
   page,
   request,
 }) => {
-  await createLearner(request, 'e2e_vocab_merge_ru', 'ru');
-  await logIn(page, 'e2e_vocab_merge_ru');
+  await signUpLearner(page, 'e2e_vocab_merge_ru', 'ru');
+  await openApp(page);
   await tapUntil(page, 'translate-entry', 'translate-input');
 
   // Both lexemes of знать, in one tap.

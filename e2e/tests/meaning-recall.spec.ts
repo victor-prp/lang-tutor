@@ -7,7 +7,7 @@ import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
 import { clearGemini, expectGeminiPayload, expectJudge } from './support/mockServer';
 import { stripIsolates } from './support/text';
-import { createLearner, logIn } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
 test.setTimeout(180_000);
@@ -25,8 +25,8 @@ const SYNONYM = 'מילה';
 async function reachMeaningCard(page: Page, request: APIRequestContext, username: string, report: () => string) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
-  await createLearner(request, username, 'ru');
-  await logIn(page, username);
+  await signUpLearner(page, username, 'ru');
+  await openApp(page);
 
   await tapUntil(page, 'start-button', 'progress-label');
   await page.getByTestId('session-skip').click();
