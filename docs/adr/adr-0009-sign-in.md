@@ -41,6 +41,11 @@ A session lasts 90 days and is extended by use at most once a day. Better Auth e
 only through the app's call to `GET /api/auth/get-session`, which re-issues the cookie; the server
 middleware reads sessions with refresh disabled, so the row and the cookie always move together.
 
+Better Auth logs through our `Logger`, level and the first line of the message only: its extra
+arguments are driver errors whose text holds query parameters (tokens, addresses). Its origin
+check is switched on explicitly (`advanced.disableOriginCheck: false`), because by default it is
+off whenever `NODE_ENV=test`, and the flow test then ran without the check production runs.
+
 ## Rules
 
 | # | Subject | May | Must not |
@@ -60,8 +65,10 @@ middleware reads sessions with refresh disabled, so the row and the cookie alway
   stranger is 403 everywhere, a tutor only adds words) and by review, like
   [ADR 0001](adr-0001-layered-architecture.md) R9. It widens ADR 0008's former R4.
 - **R8 — Better Auth mounts only the `emailOTP` and `expo` plugins, with password sign-in off,
-  and only the four paths above.** Enforced by the whole-flow integration test, which asserts
-  that `update-user`, `sign-up/email`, `email-otp/reset-password` and the rest are 404.
+  and only the four paths above.** Enforced by the mount test
+  (`apps/server/tests/integration/auth/mount.test.ts`), which asserts that `update-user`,
+  `sign-up/email`, `email-otp/reset-password` and the rest answer 404 without reaching Better
+  Auth.
 - **R9 — Upgrade policy and switch signals.** `better-auth` and `@better-auth/expo` are pinned
   to an exact version (R4). Advisories touching the core, email codes or Expo are patched
   within days, minors are taken deliberately, and the whole-flow integration test gates every
@@ -136,9 +143,11 @@ grep -rn "insert(users)" apps/server/src --include='*.ts' | grep -v 'repo/users.
 - **A nuisance wait.** Our own limit is 5 sent codes per email per hour, and a new code
   cancels the old one, so someone requesting codes for your address can make you wait for the
   next one. They still cannot sign in, and each new code reaches you. A burst of concurrent
-  requests may also exceed 5 by a few. A failed send still replaces the stored code (Better
-  Auth resolves the code before calling the sender), so an email outage cancels a code the
-  learner already received; the failed send is not counted against the hour.
+  requests may also exceed 5 by a few. A failed send cancels the previous code and leaves
+  none: Better Auth stores a new code before calling the sender, and our after-hook deletes it
+  before answering 503, so no code that never arrived can be guessed at. An email outage
+  therefore also cancels a code the learner already received, and the learner asks again; the
+  failed send is not counted against the hour.
 - **Session tokens are stored in plain form.** Better Auth does not hash them at rest (still a
   draft upstream, PR #11444), so a database leak would expose live sessions. A database backup
   is as sensitive as a password file.

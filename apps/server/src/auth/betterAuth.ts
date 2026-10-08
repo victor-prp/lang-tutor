@@ -39,6 +39,31 @@ const SEND_PATH = '/email-otp/send-verification-otp';
 const SESSION_TTL_S = 90 * 24 * 60 * 60;
 const SESSION_RENEW_S = 24 * 60 * 60;
 
+/**
+ * The key Better Auth stores a sign-in code under: its email-otp plugin's
+ * `toOTPIdentifier('sign-in', email)`, which the plugin does not export. With
+ * `storeOTP: 'hashed'` only the value is hashed; the identifier is stored as
+ * is. The flow test's failed-send case fails if an upgrade changes the format.
+ */
+const signInCodeIdentifier = (email: string): string => `sign-in-otp-${email}`;
+
+/**
+ * Better Auth's log lines, through ours (ADR 0009, spec: no log line carries
+ * an email, a code, a token or a cookie). Its extra arguments are dropped: on
+ * a database failure they are the driver's error, whose text holds the query's
+ * parameters. Of the message only the first line is kept, for the same reason
+ * (a query error's message ends in a `params:` line), and a non-string message
+ * (Better Auth passes a bare Error in places) is reduced to its name.
+ */
+function betterAuthLog(logger: Logger) {
+  return (level: 'debug' | 'info' | 'warn' | 'error', message: unknown): void => {
+    const text =
+      typeof message === 'string' ? (message.split('\n')[0] ?? '') : message instanceof Error ? message.name : typeof message;
+    if (level === 'error') logger.error(`better-auth: ${text}`);
+    else logger.info({ event: 'better_auth', level, message: text });
+  };
+}
+
 export type SendCode = (email: string, code: string) => Promise<void>;
 export type SignedInUser = { userId: string; email: string };
 export type SessionReader = { sessionOf: (headers: Headers) => Promise<SignedInUser | null> };
@@ -55,15 +80,16 @@ export function createAuth(deps: {
 }) {
   const { authRepo, logger, now } = deps;
   // Better Auth awaits the sender but swallows whatever it throws and still
-  // answers 200. So a failed send is remembered per request and turned into a
-  // 503 by the after-hook below.
-  const unsent = new WeakSet<Request>();
+  // answers 200. So a failed send is remembered per request, with the address
+  // Better Auth stored the code under, and turned into a 503 by the after-hook.
+  const unsent = new WeakMap<Request, string>();
 
   const auth = betterAuth({
     secret: deps.secret,
     baseURL: deps.baseUrl,
     basePath: AUTH_BASE_PATH,
     trustedOrigins: [...deps.webOrigins, ...NATIVE_ORIGINS],
+    logger: { log: betterAuthLog(logger) },
     database: drizzleAdapter(deps.db, {
       provider: 'pg',
       schema: {
@@ -82,7 +108,11 @@ export function createAuth(deps: {
     },
     account: { modelName: 'auth_accounts' },
     verification: { modelName: 'auth_verifications' },
-    advanced: { database: { generateId: false } },
+    // Ruling 8: Better Auth skips its origin check when NODE_ENV=test unless
+    // told otherwise, so every integration test ran without it. An explicit
+    // false wins over that default (context: `disableOriginCheck !== undefined
+    // ? disableOriginCheck : isTest()`), so tests run the check production runs.
+    advanced: { database: { generateId: false }, disableOriginCheck: false },
     // Spec D5: with no trusted client IP, Better Auth puts everyone in one
     // bucket per path. The hosting phase turns it on with trustedProxies.
     rateLimit: { enabled: false },
@@ -109,9 +139,15 @@ export function createAuth(deps: {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
-        if (ctx.path === SEND_PATH && ctx.request && unsent.has(ctx.request)) {
-          throw new APIError('SERVICE_UNAVAILABLE', { message: 'email not sent' });
-        }
+        if (ctx.path !== SEND_PATH || !ctx.request) return;
+        const email = unsent.get(ctx.request);
+        if (email === undefined) return;
+        // Ruling 7: Better Auth stored the code (0 tries used) before calling
+        // the sender. Left there, an outage would leave a live code nobody
+        // received and no send counted, so guessing would be unlimited. A
+        // failed send therefore cancels the code, and the learner asks again.
+        await ctx.context.internalAdapter.deleteVerificationByIdentifier(signInCodeIdentifier(email));
+        throw new APIError('SERVICE_UNAVAILABLE', { message: 'email not sent' });
       }),
     },
     databaseHooks: {
@@ -124,7 +160,10 @@ export function createAuth(deps: {
         expiresIn: 600,
         allowedAttempts: 3,
         storeOTP: 'hashed',
-        sendVerificationOTP: async ({ email, otp }, ctx) => {
+        sendVerificationOTP: async ({ email, otp, type }, ctx) => {
+          // The before-hook refuses every other type; this keeps a code of
+          // another type from ever being mailed should that change.
+          if (type !== 'sign-in') return;
           try {
             await deps.sendCode(email, otp);
           } catch (error) {
@@ -132,10 +171,16 @@ export function createAuth(deps: {
               event: 'email_not_sent',
               status: error instanceof EmailNotSent ? error.status : 'unknown',
             });
-            if (ctx?.request) unsent.add(ctx.request);
+            if (ctx?.request) unsent.set(ctx.request, email);
             return;
           }
-          await authRepo.recordSend(email);
+          // Sent, so the learner has the code whatever happens here. A failed
+          // count is logged through ours, without the address or the error.
+          try {
+            await authRepo.recordSend(email);
+          } catch {
+            logger.error('auth code sent but not counted');
+          }
           logger.info({ event: 'auth_code_sent' });
         },
       }),
