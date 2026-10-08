@@ -41,7 +41,7 @@ function LanguageChoice({
 }
 
 export default function OnboardingScreen() {
-  const { status, user, createProfile } = useCurrentUser();
+  const { status, user, createProfile, retry } = useCurrentUser();
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [age, setAge] = useState('');
@@ -76,7 +76,9 @@ export default function OnboardingScreen() {
       });
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 409 && failure.code === 'profile exists') {
-        // Another device made this account's profile first; home is where it leads.
+        // The profile exists (a lost response, or another device): re-read the state
+        // so index sees it, or it would send us straight back to this form.
+        await retry();
         router.replace('/');
       } else if (failure instanceof ApiError && failure.status === 409) {
         setError(strings.onboardingUsernameTaken);
