@@ -28,6 +28,7 @@ module.exports = {
       // all of node_modules, so without this override anything importing
       // app.ts fails with "Cannot use import statement outside a module".
       transformIgnorePatterns: ['/node_modules/(?!@scalar)/'],
+      transform: { '\\.[jt]sx?$': 'babel-jest', '\\.mjs$': 'babel-jest' },
       // No globalSetup: nothing here may touch Postgres. That is the whole point,
       // and CI's test-unit job (which has no database at all) enforces it.
     },
@@ -53,6 +54,7 @@ module.exports = {
       // `testTimeout` above, which is only valid at the top level. Which
       // options inherit is per-option; check the validation warnings.
       transformIgnorePatterns: ['/node_modules/(?!@scalar)/'],
+      transform: { '\\.[jt]sx?$': 'babel-jest', '\\.mjs$': 'babel-jest' },
     },
     {
       // Integration tests that DROP DATABASE, run by `test:integration` only
@@ -68,6 +70,7 @@ module.exports = {
       restoreMocks: true,
       resetMocks: true,
       transformIgnorePatterns: ['/node_modules/(?!@scalar)/'],
+      transform: { '\\.[jt]sx?$': 'babel-jest', '\\.mjs$': 'babel-jest' },
     },
   ],
 };

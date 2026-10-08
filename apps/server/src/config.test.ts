@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   assertDatabaseIdentifier,
   databaseNameFrom,
+  loadAuthConfig,
   loadConfig,
   loadGeminiConfig,
   maintenanceUrlFor,
@@ -196,5 +197,49 @@ describe('assertDatabaseIdentifier', () => {
     for (const bad of ['', 'Lang', '1lane', 'a-b', 'a b', 'a";drop', 'a'.repeat(64)]) {
       expect(() => assertDatabaseIdentifier(bad)).toThrow('database identifier');
     }
+  });
+});
+
+const authEnv = {
+  BETTER_AUTH_SECRET: 'x'.repeat(32),
+  AUTH_BASE_URL: 'http://192.168.1.10:3001',
+  WEB_ORIGINS: 'http://localhost:8081, http://192.168.1.10:8081',
+  RESEND_API_KEY: 're_test',
+  MAIL_FROM: 'WordsPal <code@mail.wordspal.ai>',
+};
+
+describe('loadAuthConfig', () => {
+  it('reads every value and splits the origins', () => {
+    expect(loadAuthConfig(authEnv)).toEqual({
+      secret: 'x'.repeat(32),
+      baseUrl: 'http://192.168.1.10:3001',
+      webOrigins: ['http://localhost:8081', 'http://192.168.1.10:8081'],
+      resendApiKey: 're_test',
+      resendBaseUrl: 'https://api.resend.com',
+      mailFrom: 'WordsPal <code@mail.wordspal.ai>',
+    });
+  });
+
+  it('takes RESEND_BASE_URL when set', () => {
+    expect(loadAuthConfig({ ...authEnv, RESEND_BASE_URL: 'http://localhost:1080/ns' }).resendBaseUrl).toBe(
+      'http://localhost:1080/ns',
+    );
+  });
+
+  it.each(['BETTER_AUTH_SECRET', 'AUTH_BASE_URL', 'WEB_ORIGINS', 'RESEND_API_KEY', 'MAIL_FROM'])(
+    'throws when %s is missing',
+    (name) => {
+      const env: Record<string, string> = { ...authEnv };
+      delete env[name];
+      expect(() => loadAuthConfig(env)).toThrow(name);
+    },
+  );
+
+  it('throws on a secret shorter than 32 characters', () => {
+    expect(() => loadAuthConfig({ ...authEnv, BETTER_AUTH_SECRET: 'short' })).toThrow('BETTER_AUTH_SECRET');
+  });
+
+  it('throws when WEB_ORIGINS holds no origin', () => {
+    expect(() => loadAuthConfig({ ...authEnv, WEB_ORIGINS: ' , ' })).toThrow('WEB_ORIGINS');
   });
 });
