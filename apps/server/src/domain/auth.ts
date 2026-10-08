@@ -1,6 +1,6 @@
 /**
  * Phase 29 (spec D4). The rules around sending a sign-in code, pure (ADR 0001
- * R3). The count comes from auth_code_sends; the window is the caller's
+ * R3). The count comes from the send log; the window is the caller's
  * clock minus SEND_WINDOW_MS.
  */
 export const CODE_SENDS_PER_HOUR = 5;

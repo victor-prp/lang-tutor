@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19); R8 note 2026-10-07 (phase 26), no rule change
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19); R8 note 2026-10-07 (phase 26), no rule change; R12 and R13 added 2026-10-08 (phase 29)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -32,6 +32,8 @@ service depends on a *contract type* declared in `services/` — `LlmClient` —
 the module that satisfies it; the composition root is the only place the two meet. That is
 the same shape `Transaction` already gives the database, and R11 is what keeps it true.
 
+`auth/` is drawn beside `providers/`: an outbound module (Better Auth, over our database) that only `composition.ts` imports.
+
 `errors.ts` and `logger.ts` are leaf modules: any layer may import them, they import
 nothing from the server.
 
@@ -52,6 +54,8 @@ the server's holds the session state machine only a server has (`step`, `Session
 | R7 | anywhere | — | `console` outside `logger.ts` and `index.ts`/`db/cli.ts` |
 | R10 | `providers/` | `fetch`, its own transport types, `errors`, `logger` | `routes/`, `services/`, `domain/`, `repo/`, `db/`, `app.ts`, `composition.ts` |
 | R11 | `providers/` | — | **anything, from anywhere but `composition.ts`** — every consumer depends on a contract type declared in `services/` (`LlmClient` is the first), and only the composition root knows which provider satisfies it |
+| R12 | `auth/` | `better-auth`, `@better-auth/*`, `db/schema`, `db/client` (types), `domain/`, `repo/auth`, `errors`, `logger` | `routes/`, `services/`, `app.ts`, `composition.ts` |
+| R13 | `auth/` | — | **anything, from anywhere but `composition.ts`** (and `tests/support/`, the test composition root) — consumers depend on the `AuthModule` and `SessionReader` types `composition.ts` hands them ([ADR 0009](adr-0009-sign-in.md)) |
 
 **Phase 19:** `src/worker.ts` is the second entry point beside `app.ts`, with the same obligation. It maps queue names to service calls and holds no logic. See [ADR 0007](adr-0007-background-jobs.md).
 
@@ -203,6 +207,14 @@ grep -rnE "from '\.\./(routes|services|domain|repo|db)/|from '\.\./(app|composit
 grep -rnE "(from|require\(|import\()[[:space:]]*'[^']*providers/" \
   apps/server/src apps/server/tests --include='*.ts' --exclude-dir=providers \
   | grep -vE "^[^:]*(composition\.ts|tests/support/|tests/eval/)"
+
+# R12 — auth must not reach upward
+grep -rnE "from '\.\./(routes|services)/|from '\.\./(app|composition)'" apps/server/src/auth/
+
+# R13 — auth is constructed only at the composition root
+grep -rnE "(from|require\(|import\()[[:space:]]*'[^']*/auth/" \
+  apps/server/src apps/server/tests --include='*.ts' --exclude-dir=auth \
+  | grep -vE "^[^:]*(composition\.ts|tests/support/)"
 
 # R1 — route tests must not reach past composition
 grep -rnE "from '.*src/(db|repo)/|from 'drizzle-orm|from 'pg'" apps/server/tests/integration/routes/
