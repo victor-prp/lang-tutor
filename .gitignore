@@ -17,3 +17,10 @@ scripts/translation-backfills/en-he/logs/
 nightly-qa/.out/
 nightly-qa/.work/
 .nightly-qa-canary.txt
+
+# Terraform (phase 30): provider caches and any state or plan written locally.
+# State lives in S3; a local copy would hold the database password.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
