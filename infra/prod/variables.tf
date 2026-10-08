@@ -60,7 +60,7 @@ variable "attach_domain" {
 }
 
 variable "image_tag" {
-  description = "Set by scripts/infra.sh: the release's tag, or the live one from state. Empty means no deployment."
+  description = "Set by scripts/infra.sh: the release's tag, or the one Lightsail is serving. Empty means no deployment."
   type        = string
   default     = ""
 

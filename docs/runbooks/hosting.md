@@ -106,7 +106,9 @@ Merge, test master locally, then push a tag: `git tag v2026.10.08 && git push or
 (a second release that day is `v2026.10.08.2`). Merging alone deploys nothing.
 
 A red Release run leaves the previous deployment serving: Lightsail switches only to a
-container whose `/health` passes. Read the failing step first; a migration failure shows in
+container whose `/health` passes. The next `./scripts/infra.sh prod apply` from the laptop
+keeps that one too, because the script asks Lightsail which tag it serves rather than trusting
+the state; `IMAGE_TAG=<tag>` in front of it overrides that. Read the failing step first; a migration failure shows in
 the container log (below).
 
 ## Rolling back

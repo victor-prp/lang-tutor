@@ -1,8 +1,3 @@
-output "image_tag" {
-  description = "The tag of the last apply. scripts/infra.sh reads it back so a laptop apply keeps what is live."
-  value       = var.image_tag
-}
-
 output "service_url" {
   value = aws_lightsail_container_service.app.url
 }
