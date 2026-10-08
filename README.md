@@ -441,10 +441,13 @@ identifies a learner, it does not authenticate one, and nothing may treat it as 
 anything. See [ADR 0005](docs/adr/adr-0005-identity-without-authentication.md).
 
 `POST /api/translations` reaches a paid third-party model **on a miss** — a string already
-in the dictionary is answered from Postgres in milliseconds and costs nothing. Since phase
-10 that is most repeat traffic, but there is still no authentication and no rate limit in
-front of the endpoint, and every *new* string is a paid call. That is acceptable for a
-play-test on a local network and **must not** reach a public host in this state.
+in the dictionary is answered from Postgres in milliseconds and costs nothing. Production
+is public at `https://app.wordspal.ai` since phase 30, and until phase 29's sign-in merges
+there is no authentication and no rate limit in front of this endpoint: anyone who finds the
+site can open a learner's data by username and spend the production Gemini key on new words.
+The key is production's own and revocable in one place, and a budget alert watches the bill.
+Phase 29 merging, then a release, closes that window
+([hosting runbook](docs/runbooks/hosting.md#when-phase-29-merges)).
 
 Neither is hand-written. Every endpoint is one `createRoute` definition in
 `apps/server/src/` — routing, request validation, response typing and documentation at
@@ -607,6 +610,15 @@ And `test-eval` is a third party's uptime and release schedule on the merge path
 it means an outage or a model update can block a merge that has nothing to do with either.
 That is a defensible trade — it is the reason the job exists here rather than in a nightly
 — but make it knowingly, and leave `test-eval` off the required list if it is not.
+
+### Releasing
+
+A release is a pushed `v*` tag on a commit already on `master`, after testing master locally:
+`git tag v2026.10.08 && git push origin v2026.10.08`. The Release workflow waits for that
+commit's CI (every job but `test-eval`), builds the image into ECR, runs `terraform apply`
+through `scripts/infra.sh`, and goes green only when `/health` names the tag. Rolling back is
+the same workflow run from an earlier tag. Everything else, from the first apply to reading
+the container's log, is in the [hosting runbook](docs/runbooks/hosting.md).
 
 ## End-to-end test
 
