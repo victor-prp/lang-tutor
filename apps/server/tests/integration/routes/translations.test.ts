@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 
 import { LlmUnavailable, TranslationUnreadable } from '../../../src/errors';
 import { createTranslationsRouter } from '../../../src/routes/translations';
+import { actAs } from '../../support/actAs';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import {
   clearNamespace,
@@ -55,6 +56,7 @@ function buildTestApp(opts: { translationTimeoutMs?: number } = {}): {
     translationTimeoutMs: opts.translationTimeoutMs,
   });
   const app = new Hono();
+  app.use('*', actAs());
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   return { app, logger };
 }

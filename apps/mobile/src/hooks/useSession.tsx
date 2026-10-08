@@ -115,7 +115,6 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       // inert meanwhile.
       setState({
         sessionId,
-        userId: '',
         question: undefined,
         position: 0,
         total: SESSION_LENGTH,
@@ -134,7 +133,8 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         try {
           const currentUser = userRef.current;
           // Unreachable in practice (home redirects to /login when logged out),
-          // but a session with no learner must fail loudly, not invent an id.
+          // but a session with no learner must fail loudly. The server knows who
+          // is answering from the session (phase 29), so no id is sent.
           if (!currentUser) throw new Error('cannot enter a session with no learner');
           const view = await api.getSession(sessionId);
           if (view.status !== 'ready' || !view.question) {
@@ -144,7 +144,6 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
             latest?.sessionId === sessionId
               ? {
                   ...latest,
-                  userId: currentUser.id,
                   question: view.question!,
                   position: view.position.position,
                   total: view.position.total,
@@ -189,7 +188,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   const answerWith = useCallback(
     (input: Exclude<AnswerInput, { heard: string }>) => {
       if (!state || state.answer !== null || !state.question) return;
-      const { sessionId, userId, question } = state;
+      const { sessionId, question } = state;
 
       setState((current) => (current ? { ...current, answer: input } : current));
 
@@ -197,7 +196,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       // the moment this returns (feedbackFor runs the server's own evaluate),
       // so this call only has to register the answer server-side and fetch
       // what's next before Continue is tapped.
-      queueResponse(sessionId, api.nextStep(sessionId, { user_id: userId, question_id: question.id, ...input }));
+      queueResponse(sessionId, api.nextStep(sessionId, { question_id: question.id, ...input }));
     },
     [state, api, queueResponse],
   );
@@ -211,7 +210,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   const submitBoard = useCallback(
     (firstAttempts: number[]) => {
       if (!state || state.answer !== null || state.question?.type !== 'matching') return;
-      const { sessionId, userId, question } = state;
+      const { sessionId, question } = state;
       const ids = question.board.question_ids.slice(question.board.question_ids.indexOf(question.id));
       setState((current) => (current ? { ...current, answer: { board: firstAttempts } } : current));
       queueResponse(
@@ -219,7 +218,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         (async () => {
           let response: NextStepResponse | undefined;
           for (const [index, id] of ids.entries()) {
-            response = await api.nextStep(sessionId, { user_id: userId, question_id: id, option_index: firstAttempts[index] });
+            response = await api.nextStep(sessionId, { question_id: id, option_index: firstAttempts[index] });
           }
           if (!response) throw new Error('a board with no words to answer');
           return response;
@@ -235,7 +234,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   const submitSpeech = useCallback(
     (clip: Clip) => {
       if (!state || state.answer !== null || !state.question || state.speech.phase === 'checking') return;
-      const { sessionId, userId, question } = state;
+      const { sessionId, question } = state;
       // Only an attempt still being checked on this card may land: a card
       // answered meanwhile (show the answer, can't speak now) keeps its answer.
       const mine = (latest: QuizState | null) =>
@@ -246,7 +245,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         latest.speech.phase === 'checking';
       setState((current) => (current ? { ...current, speech: { phase: 'checking' } } : current));
       void api
-        .answerBySpeech(sessionId, { user_id: userId, question_id: question.id, mime_type: clip.mimeType, audio: clip.audio })
+        .answerBySpeech(sessionId, { question_id: question.id, mime_type: clip.mimeType, audio: clip.audio })
         .then((response) => {
           setState((latest) => {
             if (!latest || !mine(latest)) return latest;
@@ -268,12 +267,12 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   const submitJudged = useCallback(
     (text: string) => {
       if (!state || !state.question || !canJudge(state.judging, state.answer !== null)) return;
-      const { sessionId, userId, question } = state;
+      const { sessionId, question } = state;
       const mine = (latest: QuizState | null) =>
         latest !== null && latest.sessionId === sessionId && latest.question?.id === question.id && latest.answer === null && latest.judging === 'checking';
       setState((current) => (current ? { ...current, judging: 'checking' } : current));
       void api
-        .judgeAnswer(sessionId, { user_id: userId, question_id: question.id, text })
+        .judgeAnswer(sessionId, { question_id: question.id, text })
         .then((response) => {
           setState((latest) =>
             latest && mine(latest)
@@ -293,11 +292,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   const pass = useCallback(
     (kind: 'skip' | 'show_answer') => {
       if (!state || state.answer !== null || !state.question || state.speech.phase === 'checking') return;
-      const { sessionId, userId, question } = state;
+      const { sessionId, question } = state;
       setState((current) =>
         current ? { ...current, answer: { pass: kind }, speech: IDLE_ATTEMPT, advanceRequested: kind === 'skip' } : current,
       );
-      queueResponse(sessionId, api.nextStep(sessionId, { user_id: userId, question_id: question.id, pass: kind }));
+      queueResponse(sessionId, api.nextStep(sessionId, { question_id: question.id, pass: kind }));
     },
     [state, api, queueResponse],
   );

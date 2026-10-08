@@ -13,6 +13,7 @@ import {
 } from '../errors';
 import type { Logger } from '../logger';
 import type { TranslationService } from '../services/translations';
+import { learnerResponses, type ActorEnv } from './actor';
 
 const translateRoute = createRoute({
   method: 'post',
@@ -61,6 +62,7 @@ const translateRoute = createRoute({
         'The language model could not be reached, refused the request, ran out of time, or ' +
         'answered with something that did not match the expected shape.',
     },
+    ...learnerResponses,
   },
 });
 
@@ -69,7 +71,7 @@ const translateRoute = createRoute({
 export function createTranslationsRouter(translations: TranslationService, logger: Logger) {
   // Without this hook the adapter's own 400 carries a Zod issue payload; the
   // contract says { error: 'invalid request' } (ADR 0003 R7).
-  const router = new OpenAPIHono({
+  const router = new OpenAPIHono<ActorEnv>({
     defaultHook: (result, c) => {
       if (!result.success) return c.json({ error: 'invalid request' }, 400);
     },

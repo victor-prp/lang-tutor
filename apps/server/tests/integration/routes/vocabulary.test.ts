@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
 import { createVocabularyRouter } from '../../../src/routes/vocabulary';
+import { ACT_AS, actAs } from '../../support/actAs';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { seedGrant } from '../../support/grantRows';
@@ -70,6 +71,7 @@ afterEach(async () => {
 function app() {
   const deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7) });
   const hono = new Hono();
+  hono.use('*', actAs());
   hono.route('/api', createVocabularyRouter(deps.vocabulary));
   return hono;
 }
@@ -77,13 +79,13 @@ function app() {
 const save = (enrollmentId: string, entries: unknown, actor = 'u_1') =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Acting-User-Id': actor },
+    headers: { 'Content-Type': 'application/json', [ACT_AS]: actor },
     body: JSON.stringify({ entries }),
   });
 const unsave = (enrollmentId: string, senseId: string, actor = 'u_1') =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary/senses/${senseId}`, {
     method: 'DELETE',
-    headers: { 'X-Acting-User-Id': actor },
+    headers: { [ACT_AS]: actor },
   });
 const list = (enrollmentId: string, query = '') =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary${query}`);
@@ -521,16 +523,6 @@ describe('access (phase 28)', () => {
     const rama = await russianWord('рама');
     return [{ sense_id: rama.senseIds[0], variant_id: rama.variantIds[0] }];
   };
-
-  it('answers 400 for a save without the acting-user header', async () => {
-    const res = await app().request(`/api/enrollments/${RU}/vocabulary`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entries: await asked() }),
-    });
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: 'invalid request' });
-  });
 
   it('answers 403 for a save by someone who holds no grant', async () => {
     await seedUser(t.db, 'u_2');

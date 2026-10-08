@@ -12,3 +12,17 @@ export function isUniqueViolation(error: unknown): boolean {
   }
   return false;
 }
+
+/**
+ * Phase 29. The name of the constraint a driver error violated, walking the
+ * chain as isUniqueViolation does. Tells two unique violations on one table
+ * apart: `users_pkey` (a second profile) from the username's.
+ */
+export function constraintOf(error: unknown): string | undefined {
+  for (let current: unknown = error; current != null; ) {
+    const constraint = typeof current === 'object' ? (current as { constraint?: unknown }).constraint : undefined;
+    if (typeof constraint === 'string') return constraint;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}

@@ -84,8 +84,8 @@ export function CurrentUserProvider({
     async (username: string) => {
       const next = await api.login({ username });
       const [list, grantList, rememberedId] = await Promise.all([
-        api.listEnrollments(next.id),
-        api.listGrants(next.id),
+        api.listEnrollments(),
+        api.listGrants(),
         enrollmentStore.read(next.username),
       ]);
       await adopt(next, list, rememberedId, grantList);
@@ -121,11 +121,11 @@ export function CurrentUserProvider({
       if (!user) throw new Error('cannot enroll with no current user');
       let created: Enrollment | undefined;
       try {
-        created = await api.createEnrollment(user.id, { source_language: 'he', target_language: target });
+        created = await api.createEnrollment({ source_language: 'he', target_language: target });
       } catch (error) {
         if (!(error instanceof ApiError && error.status === 409)) throw error;
       }
-      const list = await api.listEnrollments(user.id);
+      const list = await api.listEnrollments();
       const chosen = created ?? list.find((enrollment) => enrollment.target_language === target) ?? null;
       setEnrollments(list);
       if (chosen) {
@@ -150,7 +150,7 @@ export function CurrentUserProvider({
   const reloadGrants = useCallback(async () => {
     if (!user) return;
     try {
-      setGrants(await api.listGrants(user.id));
+      setGrants(await api.listGrants());
     } catch {
       // Keep the last list: a failed read must not empty the screens (spec D15).
     }
@@ -159,7 +159,7 @@ export function CurrentUserProvider({
   const invite = useCallback(
     async (username: string, target: LanguageCode) => {
       if (!user) throw new Error('cannot invite with no current user');
-      const created = await api.createGrant(user.id, {
+      const created = await api.createGrant({
         username: normalizeUsername(username),
         target_language: target,
       });
@@ -172,7 +172,7 @@ export function CurrentUserProvider({
   const acceptInvite = useCallback(
     async (grantId: string) => {
       if (!user) throw new Error('cannot accept an invite with no current user');
-      await api.acceptGrant(user.id, grantId);
+      await api.acceptGrant(grantId);
       await reloadGrants();
     },
     [api, user, reloadGrants],
@@ -181,7 +181,7 @@ export function CurrentUserProvider({
   const endGrant = useCallback(
     async (grantId: string) => {
       if (!user) throw new Error('cannot end a grant with no current user');
-      await api.endGrant(user.id, grantId);
+      await api.endGrant(grantId);
       await reloadGrants();
     },
     [api, user, reloadGrants],

@@ -43,10 +43,13 @@ const unreachableSessions: SessionService = {
 };
 
 const unreachableUsers: UserService = {
-  register: () => {
+  createProfile: () => {
     throw new Error('the health route must not reach the user service');
   },
-  login: () => {
+  me: () => {
+    throw new Error('the health route must not reach the user service');
+  },
+  hasProfile: () => {
     throw new Error('the health route must not reach the user service');
   },
 };
@@ -172,5 +175,28 @@ describe('the /health route definition', () => {
     const res = await createApp(depsWithPing(true)).request('/openapi.json');
     const doc = await res.json();
     expect(Object.keys(doc.paths['/health'].get.responses).sort()).toEqual(['200', '503']);
+  });
+});
+
+// Phase 29 (spec D11). The gate's order in createApp: open paths answer first,
+// everything else under /api meets the session middleware before any service.
+describe('the session gate in createApp', () => {
+  it('answers 401 to an /api route with no session, before any service is reached', async () => {
+    const res = await createApp(depsWithPing(true)).request('/api/enrollments');
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'not signed in' });
+  });
+
+  it('answers 404, not 401, to an auth path Better Auth is not mounted on', async () => {
+    const res = await createApp(depsWithPing(true)).request('/api/auth/update-user', { method: 'POST' });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not found' });
+  });
+
+  it('leaves /health and the documents open', async () => {
+    const app = createApp(depsWithPing(true));
+    for (const path of ['/health', '/openapi.json', '/docs']) {
+      expect((await app.request(path)).status).toBe(200);
+    }
   });
 });

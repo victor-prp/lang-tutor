@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
 import { createTranslationsRouter } from '../../../src/routes/translations';
+import { actAs } from '../../support/actAs';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { createTestServerDeps } from '../../support/serverDeps';
@@ -28,6 +29,7 @@ function deps() {
 function translate(body: unknown) {
   const app = new Hono();
   const d = deps();
+  app.use('*', actAs());
   app.route('/api', createTranslationsRouter(d.translations, d.logger));
   return app.request('/api/translations', {
     method: 'POST',

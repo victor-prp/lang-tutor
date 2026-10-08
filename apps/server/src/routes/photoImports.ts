@@ -20,6 +20,7 @@ import {
   PhotoImportNotFound,
 } from '../errors';
 import type { PhotoImportService } from '../services/photoImports';
+import { learnerResponses, type ActorEnv } from './actor';
 
 /** Spec D6: the upload has a body limit, the second, after the speech upload's. A 2 MB
  *  JPEG is about 2.7 MB of base64 inside its JSON. */
@@ -52,6 +53,7 @@ const createImportRoute = createRoute({
     400: json(ErrorSchema, 'The body did not validate: a JPEG as base64, at most 2 800 000 characters.'),
     404: json(ErrorSchema, 'No enrollment has this id.'),
     413: json(ErrorSchema, 'The body is over 3 MB.'),
+    ...learnerResponses,
   },
 });
 
@@ -65,6 +67,7 @@ const listImportsRoute = createRoute({
   responses: {
     200: json(PhotoImportListSchema, 'The open imports, possibly none.'),
     404: json(ErrorSchema, 'No enrollment has this id.'),
+    ...learnerResponses,
   },
 });
 
@@ -74,7 +77,11 @@ const getImportRoute = createRoute({
   tags: ['photo-imports'],
   summary: 'One photo import with its rows',
   request: { params: importParams },
-  responses: { 200: json(PhotoImportSchema, 'The import and its rows, in page order.'), 404: NO_IMPORT },
+  responses: {
+    200: json(PhotoImportSchema, 'The import and its rows, in page order.'),
+    404: NO_IMPORT,
+    ...learnerResponses,
+  },
 });
 
 const updateItemRoute = createRoute({
@@ -91,6 +98,7 @@ const updateItemRoute = createRoute({
     400: json(ErrorSchema, "The body did not validate, the sense is not one of the row's options, or the row has none to tick."),
     404: json(ErrorSchema, 'No photo import has this id, or it has no such row.'),
     409: CONFLICT,
+    ...learnerResponses,
   },
 });
 
@@ -107,6 +115,7 @@ const saveImportRoute = createRoute({
     400: json(ErrorSchema, 'A sense cannot be saved in this enrollment.'),
     404: NO_IMPORT,
     409: json(ErrorSchema, 'The import is not ready: still reading or looking up, failed, or discarded.'),
+    ...learnerResponses,
   },
 });
 
@@ -121,12 +130,13 @@ const discardImportRoute = createRoute({
     204: { description: 'The import is discarded.' },
     404: NO_IMPORT,
     409: json(ErrorSchema, 'The import was already saved.'),
+    ...learnerResponses,
   },
 });
 
 // Transport only (ADR 0001 R1). Mounted at /api.
 export function createPhotoImportsRouter(photoImports: PhotoImportService) {
-  const router = new OpenAPIHono({
+  const router = new OpenAPIHono<ActorEnv>({
     defaultHook: (result, c) => {
       if (!result.success) return c.json({ error: 'invalid request' }, 400);
     },

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
 import { createGrantsRouter } from '../../../src/routes/grants';
+import { ACT_AS, actAs } from '../../support/actAs';
 import { createFakeLogger } from '../../support/fakes';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { seedEnrollment, seedUser } from '../../support/seedUser';
@@ -24,21 +25,23 @@ afterEach(async () => {
 function app() {
   const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
   const hono = new Hono();
+  hono.use('*', actAs());
   hono.route('/api', createGrantsRouter(deps.grants));
   return hono;
 }
 
-const headers = (actor?: string): Record<string, string> => ({
+// Who is acting comes from the session in production; here, from ACT_AS.
+const headers = (actor: string): Record<string, string> => ({
   'Content-Type': 'application/json',
-  ...(actor ? { 'X-Acting-User-Id': actor } : {}),
+  [ACT_AS]: actor,
 });
-const invite = (body: unknown, actor?: string) =>
+const invite = (body: unknown, actor: string) =>
   app().request('/api/grants', { method: 'POST', headers: headers(actor), body: JSON.stringify(body) });
 const inviteRussian = (actor = 'u_tutor') => invite({ username: 'u_student', target_language: 'ru' }, actor);
-const listGrants = (actor?: string) => app().request('/api/grants', { headers: headers(actor) });
-const accept = (id: string, actor?: string) =>
+const listGrants = (actor: string) => app().request('/api/grants', { headers: headers(actor) });
+const accept = (id: string, actor: string) =>
   app().request(`/api/grants/${id}/accept`, { method: 'POST', headers: headers(actor) });
-const end = (id: string, actor?: string) =>
+const end = (id: string, actor: string) =>
   app().request(`/api/grants/${id}`, { method: 'DELETE', headers: headers(actor) });
 
 async function pendingGrant() {
@@ -59,12 +62,6 @@ describe('POST /api/grants', () => {
       owner: { id: 'u_student' },
       grantee: { id: 'u_tutor' },
     });
-  });
-
-  it('answers 400 with no actor header', async () => {
-    const res = await invite({ username: 'u_student', target_language: 'ru' });
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual(INVALID);
   });
 
   it('answers 400 for a username with capitals', async () => {
@@ -122,12 +119,6 @@ describe('GET /api/grants', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ tutors: [], students: [] });
   });
-
-  it('answers 400 with no actor header', async () => {
-    const res = await listGrants();
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual(INVALID);
-  });
 });
 
 describe('POST /api/grants/{id}/accept', () => {
@@ -149,13 +140,6 @@ describe('POST /api/grants/{id}/accept', () => {
     const res = await accept('g_missing', 'u_student');
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'grant not found' });
-  });
-
-  it('answers 400 with no actor header', async () => {
-    const grant = await pendingGrant();
-    const res = await accept(grant.id);
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual(INVALID);
   });
 });
 
@@ -185,12 +169,5 @@ describe('DELETE /api/grants/{id}', () => {
     const res = await end(grant.id, 'u_stranger');
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({ error: 'forbidden' });
-  });
-
-  it('answers 400 with no actor header', async () => {
-    const grant = await pendingGrant();
-    const res = await end(grant.id);
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual(INVALID);
   });
 });

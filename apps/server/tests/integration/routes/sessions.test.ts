@@ -16,6 +16,7 @@ import { createFakeLogger } from '../../support/fakes';
 import { testRng } from '../../support/testRng';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createSessionsRouter } from '../../../src/routes/sessions';
+import { ACT_AS, actAs } from '../../support/actAs';
 
 let t: TestDb;
 
@@ -36,20 +37,22 @@ afterEach(async () => {
 function buildTestApp() {
   const app = new Hono();
   const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+  app.use('*', actAs());
   app.route('/api', createSessionsRouter(deps.sessions));
   return app;
 }
 
-function postJson(app: Hono, path: string, body: unknown) {
+// The learner acting comes from the session in production; here, from ACT_AS.
+function postJson(app: Hono, path: string, body: unknown, actor = 'u_1') {
   return app.request(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', [ACT_AS]: actor },
     body: JSON.stringify(body),
   });
 }
 
-function getJson(app: Hono, path: string) {
-  return app.request(path, { method: 'GET' });
+function getJson(app: Hono, path: string, actor = 'u_1') {
+  return app.request(path, { method: 'GET', headers: { [ACT_AS]: actor } });
 }
 
 // Loose on purpose: a walk reassigns it from next-step responses, which share
@@ -142,7 +145,6 @@ describe('POST /api/sessions', () => {
         expect(current.question.question).toMatch(script);
         current = await (
           await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
-            user_id: 'u_1',
             question_id: current.question.id,
             option_index: current.question.correct_option,
           })
@@ -181,7 +183,6 @@ describe('POST /api/sessions', () => {
         expect(ITALIAN.has(current.question.question)).toBe(isItalian);
         current = await (
           await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
-            user_id: 'u_1',
             question_id: current.question.id,
             option_index: current.question.correct_option,
           })
@@ -214,7 +215,7 @@ describe('POST /api/sessions/:id/next-step, phase 23', () => {
     const app = buildTestApp();
     const { sessionId, questions } = await startMixed();
     const step = (question_id: string, answer: object) =>
-      postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id, ...answer });
+      postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id, ...answer });
 
     const first = await (await step(questions[0].id, { option_index: 0 })).json();
     expect(first.question).toMatchObject({ type: 'reverse_choice', question: 'נוצה', part_of_speech: 'noun' });
@@ -245,17 +246,15 @@ describe('POST /api/sessions/:id/next-step, phase 23', () => {
     const app = buildTestApp();
     const { sessionId, questions } = await startMixed();
     const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, {
-      user_id: 'u_1',
       question_id: questions[0].id,
       text: 'tome',
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'the answer is not the kind this question takes' });
 
-    await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[0].id, option_index: 0 });
-    await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[1].id, option_index: 0 });
+    await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[0].id, option_index: 0 });
+    await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[1].id, option_index: 0 });
     const typed = await postJson(app, `/api/sessions/${sessionId}/next-step`, {
-      user_id: 'u_1',
       question_id: questions[2].id,
       option_index: 0,
     });
@@ -266,7 +265,6 @@ describe('POST /api/sessions/:id/next-step, phase 23', () => {
     const app = buildTestApp();
     const { sessionId, questions } = await startMixed();
     const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, {
-      user_id: 'u_1',
       question_id: questions[0].id,
       text: 'x'.repeat(101),
     });
@@ -279,7 +277,6 @@ describe('POST /api/sessions/:id/next-step', () => {
   it('404s for an unknown session id', async () => {
     const app = buildTestApp();
     const res = await postJson(app, '/api/sessions/00000000-0000-0000-0000-000000000000/next-step', {
-      user_id: 'u_1',
       question_id: 'q0',
       option_index: 0,
     });
@@ -293,7 +290,6 @@ describe('POST /api/sessions/:id/next-step', () => {
   it('404s for a malformed (non-UUID) session id, not 500', async () => {
     const app = buildTestApp();
     const res = await postJson(app, '/api/sessions/not-a-uuid/next-step', {
-      user_id: 'u_1',
       question_id: 'q0',
       option_index: 0,
     });
@@ -305,7 +301,6 @@ describe('POST /api/sessions/:id/next-step', () => {
     const created = await startSeed(app, enrollmentOf('u_1'));
 
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
-      user_id: 'u_1',
       question_id: created.question.id,
       option_index: created.question.correct_option,
     });
@@ -320,7 +315,6 @@ describe('POST /api/sessions/:id/next-step', () => {
     const app = buildTestApp();
     const created = await startSeed(app, enrollmentOf('u_1'));
     const stepBody = {
-      user_id: 'u_1',
       question_id: created.question.id,
       option_index: created.question.correct_option,
     };
@@ -339,7 +333,6 @@ describe('POST /api/sessions/:id/next-step', () => {
     const created = await startSeed(app, enrollmentOf('u_1'));
 
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
-      user_id: 'u_1',
       question_id: 'not-the-current-question',
       option_index: 0,
     });
@@ -354,7 +347,6 @@ describe('POST /api/sessions/:id/next-step', () => {
     for (let i = 0; i < 10; i++) {
       last = await (
         await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
-          user_id: 'u_1',
           question_id: current.question.id,
           option_index: current.question.correct_option,
         })
@@ -376,7 +368,6 @@ describe('POST /api/sessions/:id/next-step', () => {
 
     let last = await (
       await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
-        user_id: 'u_1',
         question_id: current.question.id,
         option_index: wrongIndex,
       })
@@ -386,7 +377,6 @@ describe('POST /api/sessions/:id/next-step', () => {
     for (let i = 1; i < 10; i++) {
       last = await (
         await postJson(app, `/api/sessions/${current.session_id}/next-step`, {
-          user_id: 'u_1',
           question_id: current.question.id,
           option_index: current.question.correct_option,
         })
@@ -407,7 +397,6 @@ describe('POST /api/sessions/:id/next-step', () => {
     const app = buildTestApp();
     const created = await startSeed(app, enrollmentOf('u_1'));
     const res = await postJson(app, `/api/sessions/${created.session_id}/next-step`, {
-      user_id: 'u_1',
       question_id: created.question.id,
       option_index: 99,
     });
@@ -465,7 +454,6 @@ describe('phase 19 session routes', () => {
     const view = await startSeed(app, E());
     await postJson(app, `/api/sessions/${view.session_id}/skip`, {});
     const res = await postJson(app, `/api/sessions/${view.session_id}/next-step`, {
-      user_id: 'u_1',
       question_id: view.question.id,
       option_index: 0,
     });
@@ -479,7 +467,6 @@ describe('phase 19 session routes', () => {
     const sessionId = current.session_id;
     while (current.question) {
       const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, {
-        user_id: 'u_1',
         question_id: current.question.id,
         option_index: 0,
       });
@@ -522,7 +509,6 @@ describe('the progress block (phase 20)', () => {
       asked.push(current);
       last = (await (
         await postJson(app, `/api/sessions/${first.session_id}/next-step`, {
-          user_id: 'u_1',
           question_id: current.id,
           option_index: current.correct_option,
         })

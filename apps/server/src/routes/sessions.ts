@@ -37,6 +37,7 @@ import {
   SessionOpen,
 } from '../errors';
 import type { SessionResult, SessionService } from '../services/sessions';
+import { learnerResponses, type ActorEnv } from './actor';
 
 const failure = (description: string) => ({
   content: { 'application/json': { schema: ErrorSchema } },
@@ -110,6 +111,7 @@ const createSessionRoute = createRoute({
     409: failure(
       'An open session exists (`session_open`), the saved list is empty (`no_saved_words`), or the seed has too few questions for this pair (`not enough questions`).',
     ),
+    ...learnerResponses,
   },
 });
 
@@ -124,6 +126,7 @@ const getSessionRoute = createRoute({
   responses: {
     200: { content: { 'application/json': { schema: SessionViewSchema } }, description: 'The session.' },
     404: failure('No session has this id.'),
+    ...learnerResponses,
   },
 });
 
@@ -139,6 +142,7 @@ const skipSessionRoute = createRoute({
     200: { content: { 'application/json': { schema: SkipSessionResponseSchema } }, description: 'The session is skipped.' },
     404: failure('No session has this id.'),
     409: failure('The session is completed or failed (`session_not_skippable`).'),
+    ...learnerResponses,
   },
 });
 
@@ -166,6 +170,7 @@ const nextStepRoute = createRoute({
     409: failure(
       "`question_id` is not the session's current question, or the session is not ready (`session_not_ready`).",
     ),
+    ...learnerResponses,
   },
 });
 
@@ -190,6 +195,7 @@ const speechRoute = createRoute({
     409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
     413: failure('The body is over 300 KB.'),
     502: failure('The transcription failed or timed out; the card may be tried again.'),
+    ...learnerResponses,
   },
 });
 
@@ -213,6 +219,7 @@ const judgedAnswerRoute = createRoute({
     404: failure('No session has this id, or it is not this learner’s.'),
     409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
     502: failure('The judge failed or timed out; nothing was recorded, and the answer may be sent again.'),
+    ...learnerResponses,
   },
 });
 
@@ -230,6 +237,7 @@ const currentSessionRoute = createRoute({
       description: 'The home screen state.',
     },
     404: failure('No enrollment has this id.'),
+    ...learnerResponses,
   },
 });
 
@@ -237,7 +245,7 @@ const currentSessionRoute = createRoute({
 export function createSessionsRouter(sessions: SessionService) {
   // Without this hook the adapter's own 400 carries a Zod issue payload. The
   // contract says `{ error: 'invalid request' }`.
-  const router = new OpenAPIHono({
+  const router = new OpenAPIHono<ActorEnv>({
     defaultHook: (result, c) => {
       if (!result.success) return c.json({ error: 'invalid request' }, 400);
     },
@@ -320,7 +328,7 @@ export function createSessionsRouter(sessions: SessionService) {
     const body = c.req.valid('json');
     try {
       const result = await sessions.answerBySpeech(id, {
-        userId: body.user_id,
+        userId: c.var.actor,
         questionId: body.question_id,
         audio: body.audio,
         mimeType: body.mime_type,
@@ -349,7 +357,7 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
     try {
-      const result = await sessions.answerJudged(id, { userId: body.user_id, questionId: body.question_id, text: body.text });
+      const result = await sessions.answerJudged(id, { userId: c.var.actor, questionId: body.question_id, text: body.text });
       return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
     } catch (error) {
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);

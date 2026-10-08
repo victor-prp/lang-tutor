@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
 import { users } from '../../../src/db/schema';
-import { UsernameTaken } from '../../../src/errors';
+import { ProfileExists, UsernameTaken } from '../../../src/errors';
 import { createUserRepo } from '../../../src/repo/users';
+import { seedIdentity } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 
@@ -11,6 +12,9 @@ let t: TestDb;
 
 beforeEach(async () => {
   t = await createTestDb();
+  // Phase 29: a profile's id is its sign-in identity's (migration 0023).
+  await seedIdentity(t.db, 'u_dana');
+  await seedIdentity(t.db, 'u_other');
 });
 
 afterEach(async () => {
@@ -18,6 +22,7 @@ afterEach(async () => {
 });
 
 const DANA = {
+  id: 'u_dana',
   username: 'dana',
   displayName: 'דנה',
   age: 34,
@@ -25,16 +30,10 @@ const DANA = {
 };
 
 describe('the users table', () => {
-  it('generates an id when the caller supplies none', async () => {
-    const [row] = await withTx(t.db, (tx) => tx.insert(users).values(DANA).returning());
-    // A UUID, not something a client picked: 36 characters with four hyphens.
-    expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
-  });
-
   it('rejects a second row with the same username', async () => {
     await withTx(t.db, (tx) => tx.insert(users).values(DANA));
     await expect(
-      withTx(t.db, (tx) => tx.insert(users).values({ ...DANA, displayName: 'אחר' })),
+      withTx(t.db, (tx) => tx.insert(users).values({ ...DANA, id: 'u_other', displayName: 'אחר' })),
     ).rejects.toThrow();
   });
 
@@ -54,6 +53,7 @@ describe('the users table', () => {
   // refuse this. The point is that the database refuses it too, for anything
   // that reaches the table without passing through them.
   it('refuses a row with no profile', async () => {
+    await seedIdentity(t.db, 'bare');
     await expect(
       withTx(t.db, (tx) => tx.execute(sql`insert into users (id) values ('bare')`)),
     ).rejects.toThrow();
@@ -68,29 +68,46 @@ const REQUEST = {
 };
 
 describe('createUserRepo', () => {
-  it('inserts a user and returns it with a generated id', async () => {
-    const user = await withTx(t.db, (tx) => createUserRepo(tx).insertUser(REQUEST));
+  it('inserts a profile under the id it is given', async () => {
+    const user = await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
 
     expect(user).toEqual({
-      id: expect.any(String),
+      id: 'u_dana',
       username: 'dana',
       display_name: 'דנה',
       age: 34,
       native_language: 'he',
     });
-    expect(user.id.length).toBeGreaterThan(0);
   });
 
-  it('throws UsernameTaken rather than a raw driver error on a duplicate', async () => {
-    await withTx(t.db, (tx) => createUserRepo(tx).insertUser(REQUEST));
+  it('throws UsernameTaken rather than a raw driver error when another user holds the username', async () => {
+    await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
 
     await expect(
-      withTx(t.db, (tx) => createUserRepo(tx).insertUser({ ...REQUEST, display_name: 'אחרת' })),
+      withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_other', { ...REQUEST, display_name: 'אחרת' })),
     ).rejects.toBeInstanceOf(UsernameTaken);
   });
 
+  it('throws ProfileExists for a second profile under one id', async () => {
+    await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
+
+    await expect(
+      withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', { ...REQUEST, username: 'dana_two' })),
+    ).rejects.toBeInstanceOf(ProfileExists);
+  });
+
+  // What a double tap sends: the same id AND the same username. The primary key
+  // is checked first, so the answer is the true one — the profile exists.
+  it('throws ProfileExists, not UsernameTaken, for the same request twice', async () => {
+    await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
+
+    await expect(
+      withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST)),
+    ).rejects.toBeInstanceOf(ProfileExists);
+  });
+
   it('finds a user by username', async () => {
-    const created = await withTx(t.db, (tx) => createUserRepo(tx).insertUser(REQUEST));
+    const created = await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
     const found = await withTx(t.db, (tx) => createUserRepo(tx).findByUsername('dana'));
     expect(found).toEqual(created);
   });
@@ -100,8 +117,8 @@ describe('createUserRepo', () => {
   });
 
   it('finds a user by id', async () => {
-    const created = await withTx(t.db, (tx) => createUserRepo(tx).insertUser(REQUEST));
-    expect(await withTx(t.db, (tx) => createUserRepo(tx).findById(created.id))).toEqual(created);
+    const created = await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findById('u_dana'))).toEqual(created);
   });
 
   it('returns undefined for an id nobody has', async () => {

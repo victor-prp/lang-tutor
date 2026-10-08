@@ -5,12 +5,12 @@ import {
   createFakeTransaction,
   createInMemoryUserRepo,
 } from '../../tests/support/fakes';
-import { UsernameTaken, UserNotFound } from '../errors';
+import { ProfileExists, UsernameTaken } from '../errors';
 import { createUserService } from './users';
 
 // The other half of this file's tests is
 // tests/integration/services/users.test.ts, which covers what only real
-// Postgres can decide — the unique constraint, above all.
+// Postgres can decide — the constraints, above all.
 
 const REQUEST = {
   username: 'dana',
@@ -26,42 +26,50 @@ function build() {
   return { repo, logger, service };
 }
 
-describe('register', () => {
-  it('returns the created user', async () => {
+describe('createProfile', () => {
+  it("creates the profile under the signed-in user's own id", async () => {
     const { service } = build();
-    const user = await service.register(REQUEST);
-    expect(user.username).toBe('dana');
-    expect(user.display_name).toBe('דנה');
-    expect(user.id).toEqual(expect.any(String));
+    expect(await service.createProfile('u_dana', REQUEST)).toEqual({ id: 'u_dana', ...REQUEST });
   });
 
-  it('logs the registration once the write has resolved', async () => {
+  it('logs the new profile once the write has resolved', async () => {
     const { service, logger } = build();
-    const user = await service.register(REQUEST);
-    expect(logger.events).toEqual([
-      { event: 'user_registered', user_id: user.id, username: 'dana' },
-    ]);
+    await service.createProfile('u_dana', REQUEST);
+    expect(logger.events).toEqual([{ event: 'profile_created', user_id: 'u_dana', username: 'dana' }]);
   });
 
-  it('propagates UsernameTaken and logs nothing', async () => {
+  it('propagates ProfileExists for a second profile, and logs nothing', async () => {
     const { service, logger } = build();
-    await service.register(REQUEST);
+    await service.createProfile('u_dana', REQUEST);
     logger.events.length = 0;
 
-    await expect(service.register(REQUEST)).rejects.toBeInstanceOf(UsernameTaken);
+    await expect(service.createProfile('u_dana', { ...REQUEST, username: 'dana_two' })).rejects.toBeInstanceOf(
+      ProfileExists,
+    );
+    expect(logger.events).toEqual([]);
+  });
+
+  it('propagates UsernameTaken for a handle another user holds, and logs nothing', async () => {
+    const { service, logger } = build();
+    await service.createProfile('u_dana', REQUEST);
+    logger.events.length = 0;
+
+    await expect(service.createProfile('u_other', REQUEST)).rejects.toBeInstanceOf(UsernameTaken);
     expect(logger.events).toEqual([]);
   });
 });
 
-describe('login', () => {
-  it('returns the user registered under that username', async () => {
+describe('me and hasProfile', () => {
+  it('answers null and false before onboarding', async () => {
     const { service } = build();
-    const created = await service.register(REQUEST);
-    expect(await service.login('dana')).toEqual(created);
+    expect(await service.me('u_dana')).toBeNull();
+    expect(await service.hasProfile('u_dana')).toBe(false);
   });
 
-  it('throws UserNotFound for a username nobody has', async () => {
+  it('answers the profile and true after it', async () => {
     const { service } = build();
-    await expect(service.login('nobody')).rejects.toBeInstanceOf(UserNotFound);
+    const created = await service.createProfile('u_dana', REQUEST);
+    expect(await service.me('u_dana')).toEqual(created);
+    expect(await service.hasProfile('u_dana')).toBe(true);
   });
 });

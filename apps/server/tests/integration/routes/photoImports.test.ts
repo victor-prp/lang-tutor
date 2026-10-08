@@ -5,6 +5,7 @@ import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
 import { createPhotoImportsRouter } from '../../../src/routes/photoImports';
+import { actAs } from '../../support/actAs';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { addedByOf } from '../../support/grantRows';
@@ -34,6 +35,7 @@ afterEach(async () => {
 
 function app() {
   const hono = new Hono();
+  hono.use('*', actAs());
   hono.route('/api', createPhotoImportsRouter(deps.photoImports));
   return hono;
 }

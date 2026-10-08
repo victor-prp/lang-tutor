@@ -10,6 +10,7 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createSessionsRouter } from '../../../src/routes/sessions';
+import { ACT_AS, actAs } from '../../support/actAs';
 
 let t: TestDb;
 
@@ -23,10 +24,11 @@ afterEach(async () => {
   await t.close();
 });
 
-function postJson(app: Hono, path: string, body: unknown) {
+// The learner acting comes from the session in production; here, from ACT_AS.
+function postJson(app: Hono, path: string, body: unknown, actor = 'u_1') {
   return app.request(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', [ACT_AS]: actor },
     body: JSON.stringify(body),
   });
 }
@@ -34,6 +36,7 @@ function postJson(app: Hono, path: string, body: unknown) {
 function buildTestApp(ns: string) {
   const app = new Hono();
   const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7), geminiBaseUrl: geminiBaseUrlFor(ns) });
+  app.use('*', actAs());
   app.route('/api', createSessionsRouter(deps.sessions));
   return app;
 }
@@ -65,7 +68,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   it('rules the stored meaning exact, with points, without a model call', async () => {
     const app = buildTestApp(mockNamespace('judged-rule'));
     const { sessionId, questions } = await startMeaning();
-    const res = await postJson(app, `/api/sessions/${sessionId}/judged-answer`, { user_id: 'u_1', question_id: questions[0].id, text: 'סֵפֶר.' });
+    const res = await postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id: questions[0].id, text: 'סֵפֶר.' });
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ verdict: 'exact', next: { complete: false } });
     const stored = await readStoredAnswers(t.db, sessionId);
@@ -78,7 +81,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
     await expectJudge(ns, 'right');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startMeaning();
-    const send = () => postJson(app, `/api/sessions/${sessionId}/judged-answer`, { user_id: 'u_1', question_id: questions[0].id, text: 'כרך' });
+    const send = () => postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id: questions[0].id, text: 'כרך' });
     const first = await send();
     expect(first.status).toBe(200);
     expect(await first.json()).toMatchObject({ verdict: 'exact', next: { question: { id: questions[1].id } } });
@@ -92,7 +95,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
     const ns = mockNamespace('judged-failure');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startMeaning();
-    const send = () => postJson(app, `/api/sessions/${sessionId}/judged-answer`, { user_id: 'u_1', question_id: questions[0].id, text: 'כרך' });
+    const send = () => postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id: questions[0].id, text: 'כרך' });
     await expectGeminiStatus(ns, 500);
     expect((await send()).status).toBe(502);
     expect(await readStoredAnswers(t.db, sessionId)).toHaveLength(0);
@@ -106,8 +109,8 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   it('404s another learner, 409s a card that is not current, 400s a card that is not judged', async () => {
     const app = buildTestApp(mockNamespace('judged-errors'));
     const { sessionId, questions } = await startMeaning();
-    const at = (question_id: string, user_id = 'u_1') =>
-      postJson(app, `/api/sessions/${sessionId}/judged-answer`, { user_id, question_id, text: 'ספר' });
+    const at = (question_id: string, actor = 'u_1') =>
+      postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id, text: 'ספר' }, actor);
     expect((await at(questions[0].id, 'u_2')).status).toBe(404);
     expect((await at(questions[1].id)).status).toBe(409);
     expect((await at(questions[0].id)).status).toBe(200);
@@ -117,7 +120,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   it('refuses a next-step text for a meaning card, and records nothing', async () => {
     const app = buildTestApp(mockNamespace('judged-next-step'));
     const { sessionId, questions } = await startMeaning();
-    const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[0].id, text: 'ספר' });
+    const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[0].id, text: 'ספר' });
     expect(res.status).toBe(400);
     expect(await readStoredAnswers(t.db, sessionId)).toHaveLength(0);
   });
@@ -125,7 +128,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   it('400s a text over 300 characters', async () => {
     const app = buildTestApp(mockNamespace('judged-long'));
     const { sessionId, questions } = await startMeaning();
-    const res = await postJson(app, `/api/sessions/${sessionId}/judged-answer`, { user_id: 'u_1', question_id: questions[0].id, text: 'א'.repeat(301) });
+    const res = await postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id: questions[0].id, text: 'א'.repeat(301) });
     expect(res.status).toBe(400);
   });
 });

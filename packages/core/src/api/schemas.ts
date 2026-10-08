@@ -329,19 +329,16 @@ export const SessionViewSchema = z.object({
 // text is "show me the answer", which is wrong.
 export const NextStepRequestSchema = z.union([
   z.object({
-    user_id: z.string().min(1),
     question_id: z.string().min(1),
     option_index: z.number().int().nonnegative(),
   }),
   z.object({
-    user_id: z.string().min(1),
     question_id: z.string().min(1),
     text: z.string().max(100),
   }),
   // Phase 25 (spec D5). A speaking card answered without audio: passed, or
   // "show me the answer".
   z.object({
-    user_id: z.string().min(1),
     question_id: z.string().min(1),
     pass: z.enum(['skip', 'show_answer']),
   }),
@@ -376,7 +373,6 @@ export const SpeechMimeTypeSchema = z.enum(['audio/aac', 'audio/mp4', 'audio/web
 // Phase 25 (spec D14). One spoken attempt at the current card. At most 200 KB of
 // audio, as base64 (spec D13).
 export const SpeechAnswerRequestSchema = z.object({
-  user_id: z.string().min(1),
   question_id: z.string().min(1),
   mime_type: SpeechMimeTypeSchema,
   audio: z.string().min(1).max(270_000),
@@ -398,7 +394,6 @@ export const SpeechAnswerResponseSchema = z.object({
 // Phase 27 (spec D3, D11). An answer to a card the server judges, with a model
 // call when no rule decides it. At most 300 characters.
 export const JudgedAnswerRequestSchema = z.object({
-  user_id: z.string().min(1),
   question_id: z.string().min(1),
   text: z.string().max(300),
 });
