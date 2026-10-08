@@ -21,6 +21,87 @@ import {
 /** One element of `questions.options`. snake_case: it is stored data, not a TS-only shape. */
 export type QuestionOption = { position: number; text: string; is_correct: boolean };
 
+const tz = { withTimezone: true } as const;
+
+/**
+ * Phase 29 (spec D8). Better Auth's four models, renamed to this repo's
+ * convention, plus our send log. Better Auth writes the first four through its
+ * Drizzle adapter (auth/betterAuth.ts); our code writes only auth_code_sends
+ * and the claim command's email update (repo/auth.ts). ADR 0009 R2.
+ */
+export const authUsers = pgTable('auth_users', {
+  id: text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  emailVerified: boolean('email_verified').notNull().default(false),
+  image: text('image'),
+  createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', tz).notNull().defaultNow(),
+});
+
+export const authSessions = pgTable(
+  'auth_sessions',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+    expiresAt: timestamp('expires_at', tz).notNull(),
+    token: text('token').notNull().unique(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', tz).notNull().defaultNow(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => authUsers.id, { onDelete: 'cascade' }),
+  },
+  (t) => [index('auth_sessions_user_id_idx').on(t.userId)],
+);
+
+export const authAccounts = pgTable(
+  'auth_accounts',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', tz),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', tz),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', tz).notNull().defaultNow(),
+  },
+  (t) => [index('auth_accounts_user_id_idx').on(t.userId)],
+);
+
+export const authVerifications = pgTable(
+  'auth_verifications',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: timestamp('expires_at', tz).notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', tz).notNull().defaultNow(),
+  },
+  (t) => [index('auth_verifications_identifier_idx').on(t.identifier)],
+);
+
+/** Phase 29 (spec D4). One row per code the provider accepted. */
+export const authCodeSends = pgTable(
+  'auth_code_sends',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+    email: text('email').notNull(),
+    sentAt: timestamp('sent_at', tz).notNull().defaultNow(),
+  },
+  (t) => [index('auth_code_sends_email_sent_at_idx').on(t.email, t.sentAt)],
+);
+
 export const users = pgTable(
   'users',
   {

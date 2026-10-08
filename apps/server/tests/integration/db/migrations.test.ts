@@ -698,3 +698,30 @@ describe('0021_enrollment_grants', () => {
     ]);
   });
 });
+
+// Phase 29: every profile that exists before 0022 gets a sign-in identity with
+// its own id. (The users.id foreign key to auth_users arrives in 0023.)
+describe('0022_auth', () => {
+  it('gives every existing user an unclaimed identity with the same id', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_a', 'alice', 'Alice', 30, 'he'), ('u_b', 'bob', 'Bob', 40, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_a', 'u_a', 'he', 'en');
+    `);
+
+    await runMigrations(db);
+
+    const rows = await db.execute(
+      sql`select id, name, email, email_verified from auth_users order by id`,
+    );
+    expect(rows.rows).toEqual([
+      { id: 'u_a', name: 'Alice', email: 'u_a@unclaimed.invalid', email_verified: false },
+      { id: 'u_b', name: 'Bob', email: 'u_b@unclaimed.invalid', email_verified: false },
+    ]);
+    const kept = await db.execute(sql`select count(*)::int as n from enrollments where user_id = 'u_a'`);
+    expect(kept.rows[0]).toEqual({ n: 1 });
+  });
+});

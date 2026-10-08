@@ -6,6 +6,7 @@ import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, listLaneDatabases } from './lanes';
 import { runMigrations } from './migrate';
+import { createAuthRepo } from '../repo/auth';
 import { recomputeProgress } from './progressRecompute';
 import { reseedContent } from './reseed';
 import { seedContent } from './seed';
@@ -35,6 +36,14 @@ function pathAfter(flag: string): string | undefined {
   if (index === -1) return undefined;
   const value = process.argv[index + 1];
   return value && !value.startsWith('--') ? resolve(value) : DEFAULT_DATASET;
+}
+
+/** `--flag value`, or undefined when the flag or its value is missing. */
+function argValue(flag: string): string | undefined {
+  const index = process.argv.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = process.argv[index + 1];
+  return value && !value.startsWith('--') ? value : undefined;
 }
 
 /** The corrections file sits beside whichever dictionary path was actually used,
@@ -175,6 +184,27 @@ async function main(): Promise<void> {
     }
 
     await runMigrations(db);
+
+    // Phase 29 (spec D10). Gives an existing account its real email, once.
+    // After migrating, so the auth tables exist.
+    if (process.argv.includes('--claim-account')) {
+      const username = argValue('--username');
+      const email = argValue('--email');
+      if (!username || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+        console.error('usage: npm run db:claim-account -- --username <username> --email <address>');
+        process.exitCode = 1;
+        return;
+      }
+      const outcome = await createAuthRepo(db).claimAccount({ username, email });
+      const messages = {
+        claimed: `claimed: ${username} now signs in with ${email.trim().toLowerCase()}`,
+        no_such_user: `no account has the username ${username}; nothing changed`,
+        email_taken: `${email} already belongs to another account (signed up before claiming?); nothing changed`,
+      } as const;
+      (outcome === 'claimed' ? console.log : console.error)(messages[outcome]);
+      if (outcome !== 'claimed') process.exitCode = 1;
+      return;
+    }
 
     // Phase 20. After migrating, so the progress tables exist; before the seed,
     // which a recompute has no reason to touch.

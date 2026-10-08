@@ -30,6 +30,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "test": "jest --selectProjects unit",
+    "db:claim-account": "tsx src/db/cli.ts --claim-account",
     "test:integration": "jest --selectProjects integration && jest --selectProjects integration-serial",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
