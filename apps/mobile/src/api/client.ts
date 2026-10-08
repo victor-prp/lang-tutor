@@ -11,6 +11,7 @@ import type {
   JudgedAnswerRequest,
   JudgedAnswerResponse,
   LoginRequest,
+  MeResponse,
   NextStepRequest,
   NextStepResponse,
   PhotoImport,
@@ -67,55 +68,64 @@ export const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
 export type ApiClientDeps = {
   baseUrl: string;
   fetch: typeof globalThis.fetch;
+  /** Phase 29: the signed-in session as request headers (a Cookie on a phone, none on web). */
+  sessionHeaders: () => Promise<Record<string, string>>;
+  /** 'include' on web, where the browser keeps the cookie; 'omit' on a phone. */
+  credentials: RequestCredentials;
+  /** Told of every 401, before the call throws it. */
+  onUnauthorized: () => void;
 };
 
-// `baseUrl` and `fetch` are received, not read from the environment or the
-// global object. The literal process.env.EXPO_PUBLIC_API_URL now lives in
-// app/_layout.tsx, which is where Metro's build-time inlining still sees it.
-export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
+// Everything is received, not read from the environment or the global object.
+// The literal process.env.EXPO_PUBLIC_API_URL lives in app/_layout.tsx, which
+// is where Metro's build-time inlining still sees it. No call names its actor
+// (spec D12): the session, sent by sessionHeaders, says who is asking.
+export function createApiClient({ baseUrl, fetch, sessionHeaders, credentials, onUnauthorized }: ApiClientDeps) {
+  async function send(
+    method: string,
+    path: string,
+    init: { body?: unknown; signal?: AbortSignal } = {},
+  ): Promise<Response> {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method,
+      credentials,
+      headers: {
+        ...(await sessionHeaders()),
+        ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      ...(init.signal ? { signal: init.signal } : {}),
+    });
+    if (res.status === 401) onUnauthorized();
+    if (!res.ok) throw await failureOf(res);
+    return res;
+  }
+
   async function postJson<TResponse>(
     path: string,
     body: unknown,
     options: { signal?: AbortSignal } = {},
   ): Promise<TResponse> {
-    const res = await fetch(`${baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-    if (!res.ok) throw await failureOf(res);
+    const res = await send('POST', path, { body, ...(options.signal ? { signal: options.signal } : {}) });
     return (await res.json()) as TResponse;
   }
 
   async function patchJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
-    const res = await fetch(`${baseUrl}${path}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw await failureOf(res);
+    const res = await send('PATCH', path, { body });
     return (await res.json()) as TResponse;
   }
 
   async function postNoContent(path: string): Promise<void> {
-    const res = await fetch(`${baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    if (!res.ok) throw await failureOf(res);
+    await send('POST', path, { body: {} });
   }
 
   async function getJson<TResponse>(path: string): Promise<TResponse> {
-    const res = await fetch(`${baseUrl}${path}`, { method: 'GET' });
-    if (!res.ok) throw await failureOf(res);
+    const res = await send('GET', path);
     return (await res.json()) as TResponse;
   }
 
   async function deleteResource(path: string): Promise<void> {
-    const res = await fetch(`${baseUrl}${path}`, { method: 'DELETE' });
-    if (!res.ok) throw await failureOf(res);
+    await send('DELETE', path);
   }
 
   const vocabularyPath = (enrollmentId: string) =>
@@ -125,7 +135,8 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
     // Phase 29: the server no longer answers this (spec D12). The login screen
     // still calls it until sign-in replaces that screen.
     login: (request: LoginRequest) => postJson<User>('/api/login', request),
-    createUser: (request: CreateUserRequest) => postJson<User>('/api/users', request),
+    me: () => getJson<MeResponse>('/api/me'),
+    createProfile: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>
       postJson<CreateSessionResponse>('/api/sessions', request),
     nextStep: (sessionId: string, request: NextStepRequest) =>

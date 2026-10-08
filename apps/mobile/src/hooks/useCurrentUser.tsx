@@ -10,6 +10,8 @@ import {
 } from 'react';
 
 import { ApiError, type ApiClient } from '@/api/client';
+import type { AppAuthClient } from '@/auth/client';
+import type { AuthEvents } from '@/authEvents';
 import type { RememberedEnrollmentStore, RememberedUsernameStore } from '@/currentUser';
 import { chooseActive } from '@/enrollments';
 import { NO_GRANTS, normalizeUsername } from '@/grants';
@@ -42,11 +44,16 @@ const CurrentUserContext = createContext<CurrentUserValue | null>(null);
 
 export function CurrentUserProvider({
   api,
+  auth: _auth,
+  authEvents: _authEvents,
   usernameStore,
   enrollmentStore,
   children,
 }: {
   api: ApiClient;
+  /** Used from Task 10, when the provider holds the signed-in state. */
+  auth: AppAuthClient;
+  authEvents: AuthEvents;
   usernameStore: RememberedUsernameStore;
   enrollmentStore: RememberedEnrollmentStore;
   children: ReactNode;
@@ -99,7 +106,7 @@ export function CurrentUserProvider({
   // "username taken" rather than a hint to log in.
   const register = useCallback(
     async (input: CreateUserRequest) => {
-      await adopt(await api.createUser(input), [], null, NO_GRANTS);
+      await adopt(await api.createProfile(input), [], null, NO_GRANTS);
     },
     [api, adopt],
   );

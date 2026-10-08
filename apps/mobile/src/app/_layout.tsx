@@ -9,11 +9,14 @@ import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { createApiClient } from '@/api/client';
+import { createAppAuthClient } from '@/auth/client';
+import { createAuthEvents } from '@/authEvents';
 import { requireEnvValue } from '@/config/requireEnvValue';
 import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '@/currentUser';
 import { ApiProvider } from '@/hooks/useApi';
@@ -39,7 +42,16 @@ import { colors } from '@/theme';
 // inliner, which matches on the literal text at this call site.
 const baseUrl = requireEnvValue(process.env.EXPO_PUBLIC_API_URL, 'EXPO_PUBLIC_API_URL');
 
-const api = createApiClient({ baseUrl, fetch: globalThis.fetch });
+// Phase 29 (spec D18). The only file that names expo-secure-store (ADR 0002 R1).
+const auth = createAppAuthClient({ baseUrl, platform: Platform.OS, storage: SecureStore });
+const authEvents = createAuthEvents();
+const api = createApiClient({
+  baseUrl,
+  fetch: globalThis.fetch,
+  sessionHeaders: auth.sessionHeaders,
+  credentials: auth.credentials,
+  onUnauthorized: authEvents.unauthorized,
+});
 const usernameStore = createRememberedUsernameStore({ storage: AsyncStorage });
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
 
@@ -161,7 +173,7 @@ export default function RootLayout() {
       <ApiProvider api={api}>
         <SpeechProvider speaker={speaker}>
           <RecordingProvider recorder={recorder}>
-            <CurrentUserProvider api={api} usernameStore={usernameStore}
+            <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} usernameStore={usernameStore}
               enrollmentStore={enrollmentStore}
             >
               <NextSessionProvider api={api}>
