@@ -41,17 +41,30 @@ function LanguageChoice({
 }
 
 export default function OnboardingScreen() {
-  const { status, user, createProfile, retry } = useCurrentUser();
+  const { status, user, createProfile, retry, signOut } = useCurrentUser();
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [age, setAge] = useState('');
   const [nativeLanguage, setNativeLanguage] = useState<LanguageCode>('he');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   // createProfile() sets the user, and this is what turns that into navigation.
   if (status === 'signed_in' && user) return <Redirect href="/" />;
-  if (status === 'signed_out') return <Redirect href="/sign-in" />;
+  // A 401 lands here; a deliberate sign-out below navigates for itself.
+  if (status === 'signed_out' && !leaving) return <Redirect href="/sign-in" />;
+
+  // A learner who signed in with the wrong address has a way back: sign out,
+  // which forgets this identity, then back to the sign-in screen they came
+  // from. dismissTo pops to it, or replaces this screen when there is none
+  // (the app opened here); a redirect would stack a second sign-in on the first.
+  async function onOtherAddress() {
+    setBusy(true);
+    setLeaving(true);
+    await signOut();
+    router.dismissTo('/sign-in');
+  }
 
   async function onSubmit() {
     const parsedAge = Number.parseInt(age, 10);
@@ -143,6 +156,16 @@ export default function OnboardingScreen() {
       >
         <Text style={styles.buttonLabel}>{strings.onboardingSubmit}</Text>
       </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
+        testID="onboarding-sign-out"
+        onPress={onOtherAddress}
+        disabled={busy}
+        style={styles.secondary}
+      >
+        <Text style={styles.secondaryLabel}>{strings.signInOtherEmail}</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -202,4 +225,6 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.md,
     fontWeight: '700',
   },
+  secondary: { paddingVertical: spacing.sm, alignItems: 'center' },
+  secondaryLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
 });

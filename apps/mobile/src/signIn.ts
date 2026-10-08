@@ -15,6 +15,7 @@ export type SignInProblem =
   | 'too_many_codes'
   | 'email_not_sent'
   | 'invalid_email'
+  | 'server_error'
   | 'network';
 
 /** "Send a new code" unlocks this long after the last one. */
@@ -29,5 +30,9 @@ export function signInProblem(error: unknown): SignInProblem {
   if (error.code === 'OTP_EXPIRED' || error.code === 'TOO_MANY_ATTEMPTS') return 'new_code_needed';
   if (error.status === 429) return 'too_many_codes';
   if (error.status === 503) return 'email_not_sent';
-  return 'invalid_email';
+  // A 400 the codes above do not explain is the address (malformed, or one
+  // nothing is sent to). Anything else unexplained — another 5xx, a 403 with
+  // no code we know — is not the learner's doing, so they are told to retry.
+  if (error.status === 400) return 'invalid_email';
+  return 'server_error';
 }

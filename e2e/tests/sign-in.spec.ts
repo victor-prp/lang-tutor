@@ -81,6 +81,20 @@ test('with no session the app opens on sign-in', async ({ page }) => {
   await expect(page.getByTestId('sign-in-email')).toBeVisible({ timeout: 30_000 });
 });
 
+test('onboarding offers another address: it signs out and returns to sign-in', async ({ page, request }) => {
+  await expectEmails(request);
+  const email = emailFor('e2e_other_address');
+  await enterEmail(page, email);
+  await page.getByTestId('sign-in-code').fill(await codeFor(request, email));
+  await page.getByTestId('sign-in-submit').click();
+
+  await expect(page.getByTestId('onboarding-sign-out')).toHaveText('כתובת מייל אחרת', { timeout: 30_000 });
+  await page.getByTestId('onboarding-sign-out').click();
+  await expect(page.getByTestId('sign-in-email')).toBeVisible({ timeout: 30_000 });
+  // Signed out on the server too, not only on the screen.
+  expect((await page.request.get(`${API_URL}/api/me`)).status()).toBe(401);
+});
+
 test('the profile shows what onboarding collected', async ({ page }) => {
   await signUpLearner(page, 'e2e_profile');
   await openApp(page);

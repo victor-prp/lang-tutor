@@ -10,7 +10,14 @@ describe('signInProblem', () => {
     [new AuthError(429), 'too_many_codes'],
     [new AuthError(503), 'email_not_sent'],
     [new AuthError(400), 'invalid_email'],
+    [new AuthError(400, 'INVALID_EMAIL'), 'invalid_email'],
     [new TypeError('Network request failed'), 'network'],
+    // Not the address's fault: the learner is told to try again.
+    [new AuthError(500), 'server_error'],
+    [new AuthError(502), 'server_error'],
+    [new AuthError(403), 'server_error'],
+    [new AuthError(403, 'INVALID_ORIGIN'), 'server_error'],
+    [new AuthError(404), 'server_error'],
   ])('maps %p to %s', (error, problem) => {
     expect(signInProblem(error)).toBe(problem);
   });
