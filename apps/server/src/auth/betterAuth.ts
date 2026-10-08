@@ -147,7 +147,10 @@ export function createAuth(deps: {
     paths: AUTH_PATHS,
     handler: (request: Request): Promise<Response> => auth.handler(request),
     sessionOf: async (headers: Headers): Promise<SignedInUser | null> => {
-      const found = await auth.api.getSession({ headers });
+      // Read only. Better Auth slides a session (row and cookie together) in its
+      // get-session endpoint; here there is no response to carry a new cookie,
+      // so extending the row alone would let the two drift (ruling 4, spec D6).
+      const found = await auth.api.getSession({ headers, query: { disableRefresh: true } });
       return found ? { userId: found.user.id, email: found.user.email } : null;
     },
   };

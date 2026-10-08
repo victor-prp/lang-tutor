@@ -107,6 +107,35 @@ describe('signing in with an emailed code', () => {
   });
 });
 
+describe('the session slides only through get-session', () => {
+  const expiresAtOf = async (): Promise<Date> => {
+    const rows = await t.db.execute(sql`select expires_at from auth_sessions`);
+    return new Date((rows.rows[0] as { expires_at: string | Date }).expires_at);
+  };
+
+  it('is read by sessionOf without extending it; get-session extends it and re-issues the cookie', async () => {
+    await sendCode('a@example.com');
+    const res = await signIn('a@example.com', codes.get('a@example.com')!);
+    const cookie = cookieOf(res);
+    const day = 24 * 60 * 60 * 1000;
+    await t.db.execute(
+      sql`update auth_sessions set expires_at = now() + interval '80 days', updated_at = now() - interval '10 days'`,
+    );
+    const before = await expiresAtOf();
+
+    expect(await auth.sessionOf(new Headers({ cookie }))).toEqual({ userId: expect.any(String), email: 'a@example.com' });
+    expect((await expiresAtOf()).getTime()).toBe(before.getTime());
+
+    const got = await auth.handler(
+      new Request(`${BASE}${AUTH_BASE_PATH}/get-session`, { method: 'GET', headers: { cookie } }),
+    );
+    expect(got.status).toBe(200);
+    expect(got.headers.get('set-cookie')).toContain('session_token=');
+    const after = await expiresAtOf();
+    expect(after.getTime() - Date.now()).toBeGreaterThan(89 * day);
+  });
+});
+
 describe('our limits on sending', () => {
   it('sends five codes an hour to one address, counted case-blind, and refuses the sixth with 429', async () => {
     for (let i = 0; i < 5; i += 1) expect((await sendCode(i % 2 ? 'A@example.com' : 'a@example.com')).status).toBe(200);
