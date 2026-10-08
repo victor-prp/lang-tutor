@@ -166,7 +166,9 @@ account keeps its words, enrollments and progress, and nobody can sign into it y
 flag in `db/cli.ts`, beside `--reseed`, that sets the real email (lower-cased) on that user's
 `auth_users` row. It fails with a clear message when the username is unknown, the email is not an
 address, or the email already belongs to another `auth_users` row (Victor signed up before
-claiming). The claim leaves `email_verified` false; the first sign-in by code verifies it, and
+claiming). (Final review, ruling 10: the claim claims only an account whose identity is still
+`.invalid`, and an address held by an identity with no `users` profile is taken over — that
+identity is deleted in the same transaction; only a holder with a profile is refused.) The claim leaves `email_verified` false; the first sign-in by code verifies it, and
 Better Auth's `revokeUnprovenAccountAccess` (in the sign-in handler) first clears any session or
 password an unverified account held. His email is not in the migration: migrations run in every lane, in CI and in every test
 database, and the repo would carry his address.

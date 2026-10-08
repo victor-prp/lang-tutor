@@ -1,7 +1,7 @@
 # ADR 0002: Dependency injection via closures, constructed only at a composition root
 
 - **Status:** Accepted
-- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25); R1 widened 2026-10-07 (phase 25): `expo-file-system`; R1 widened 2026-10-07 (phase 26): `expo-image-picker` and `expo-image-manipulator`; R1 widened 2026-10-08 (phase 29): `expo-secure-store`; R6's list gains the phase 29 factories 2026-10-08; R6's call-site note gains createGeminiVisionClient 2026-10-07 (phase 26)
+- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25); R1 widened 2026-10-07 (phase 25): `expo-file-system`; R1 widened 2026-10-07 (phase 26): `expo-image-picker` and `expo-image-manipulator`; R1 widened 2026-10-08 (phase 29): `expo-secure-store`; R6's list gains the phase 29 factories 2026-10-08, and drops `createRememberedUsernameStore`, which phase 29 removed; R6's call-site note gains createGeminiVisionClient 2026-10-07 (phase 26)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md),
   *"Closure-based dependency injection is mandatory"*, and
   [phase 5 design](../superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md),
@@ -53,7 +53,7 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
   `createHealthRepo`, `createUserRepo`, `createEnrollmentRepo`, `createDictRepo`, `createVocabularyRepo`, `createProgressRepo`, `createTransaction`, `createSessionService`,
   `createUserService`, `createEnrollmentService`, `createGrantRepo`, `createGrantService`, `createGeminiClient`, `createGeminiTranscriber`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
-  `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`, `createSpeaker`, `createRecorder`, `createPhotoImportRepo`, `createPhotoImportService`, `createGeminiVisionClient`, `createPhotoPicker`, `createAuth`, `createAuthRepo`, `createResendMailer`, `createSessionMiddleware`, `createMeRouter`, `createAppAuthClient`, `createAuthEvents`) is short enough to spot-check.
+  `createApiClient`, `createRememberedEnrollmentStore`, `createSpeaker`, `createRecorder`, `createPhotoImportRepo`, `createPhotoImportService`, `createGeminiVisionClient`, `createPhotoPicker`, `createAuth`, `createAuthRepo`, `createResendMailer`, `createSessionMiddleware`, `createMeRouter`, `createAppAuthClient`, `createAuthEvents`) is short enough to spot-check.
   `createGeminiClient`, `createGeminiTranscriber` and `createGeminiVisionClient` are annotated at their call sites in `composition.ts` rather than at their
   definitions, because ADR 0001 R10 forbids `providers/` from importing the contracts they
   satisfy — the same arrangement as `createTransaction` and `Transaction`.

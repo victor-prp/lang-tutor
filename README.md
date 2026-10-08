@@ -131,11 +131,17 @@ no database) — see *Checks* below.
 
 ## Data model
 
-Nine tables, all in `apps/server/src/db/schema.ts`:
+Twenty-three tables, all in `apps/server/src/db/schema.ts`, whose comments describe every
+one. These are the ones the rest of this README leans on:
 
 | Table | Holds |
 |---|---|
-| `users` | One row per learner: a unique `username` (a handle, not a login), a `display_name`, an `age`, and their native/target language pair. The id is issued by the database, never by a client. |
+| `auth_users` | One sign-in identity per email address (phase 29), written by Better Auth. A profile in `users` has the same id; an identity with no profile is a learner who signed in and has not onboarded. Placeholder identities from migration 0022 end in `.invalid` until claimed. |
+| `auth_sessions` | A signed-in device: the session token, its expiry (90 days, extended by use at most once a day) and the identity it belongs to. Deleted on sign-out. |
+| `auth_accounts` | Better Auth's link between an identity and a way of signing in. Email codes need none of it; it is here for Better Auth and for later Google/Apple sign-in. |
+| `auth_verifications` | The current sign-in code per address, hashed, with its expiry and the tries used. |
+| `auth_code_sends` | Our own log of codes the email provider accepted, behind the five-an-hour limit. Rows older than a day are pruned on each send. |
+| `users` | One row per learner: a unique `username` (a handle, not a login), a `display_name`, an `age`, and their native/target language pair. The id is the learner's `auth_users` id, taken from the session, never from a client. |
 | `dict_lexemes` | A **lexeme**: a lemma in a language together with its part of speech, unique per `(language_code, lemma, part_of_speech)`. `book` is therefore two rows — the noun and the verb — which is what lets `booked` attach to the verb alone. The id is issued by the database. |
 | `dict_variants` | A surface form somebody actually queried — `run`, `running`, `saw` — with the language it is in and `entry_rank`, this lexeme's position among the readings the model returned *for that form*. `UNIQUE(language_code, lower(form), entry_rank)` is both the lookup index and the guarantee that no two lexemes claim one reading. |
 | `dict_senses` | A distinct meaning of a lexeme, and nothing else: `UNIQUE(lexeme_id, sense_code)` is the whole row's purpose, because that code is how a later form's translations attach to senses the lexeme already has. A sense has no part of speech (that is on the lexeme), no rank and no example (those are on the translation, because they belong to the form that was typed). |
@@ -398,14 +404,14 @@ deliberately and is not part of any phase's build.
 ### Sign-in (phase 29)
 
 A learner signs in with an 8-digit code emailed to them (valid 10 minutes, 3 tries, at most
-5 codes per address per hour). The server needs five more variables, all required except the
-last, and refuses to start without them:
+5 codes per address per hour). The server needs six more variables: five required, which it
+refuses to start without, and one optional:
 
 | Variable | Where it comes from |
 |---|---|
 | `BETTER_AUTH_SECRET` | Yours: `openssl rand -base64 32` (at least 32 characters). Set it once in your shell, like `GEMINI_API_KEY`. |
 | `RESEND_API_KEY` | A send-only key from Resend (setup below). |
-| `MAIL_FROM` | The sender address on the domain you verified, for example `Wordspal <login@mail.wordspal.ai>`. |
+| `MAIL_FROM` | The sender address on the domain you verified: `WordsPal <code@mail.wordspal.ai>`. |
 | `AUTH_BASE_URL` | Derived by `scripts/lane-env.sh`: this lane's server as a phone reaches it. |
 | `WEB_ORIGINS` | Derived by `scripts/lane-env.sh`: this lane's Metro origins, by name and by LAN address, comma-separated. |
 | `RESEND_BASE_URL` | Optional; defaults to `https://api.resend.com`. Tests point it at a MockServer namespace. |
@@ -414,9 +420,25 @@ last, and refuses to start without them:
 SPF and DKIM DNS records it shows; optionally add a `_dmarc.wordspal.ai` TXT record with
 `p=none`. Create an API key restricted to sending and put it in `RESEND_API_KEY`.
 
+**In a lane, without sending real email.** A real key sends real email, so use it only with
+addresses you own. Otherwise point the server at MockServer, which answers Resend's one
+call and keeps the message, code in the subject:
+
+```bash
+export RESEND_BASE_URL=http://localhost:1080/dev RESEND_API_KEY=dev MAIL_FROM='WordsPal <code@mail.wordspal.ai>'
+curl -s -X PUT http://localhost:1080/mockserver/expectation -d \
+  '{"httpRequest":{"method":"POST","path":"/dev/emails"},"httpResponse":{"statusCode":200,"body":"{\"id\":\"dev\"}"}}'
+# after asking for a code, the subjects of every message sent so far:
+curl -s -X PUT 'http://localhost:1080/mockserver/retrieve?type=REQUESTS&format=JSON' -d '{"path":"/dev/emails"}' | grep -o '"subject" : "[^"]*"'
+```
+
+Without the expectation MockServer answers 404 and the app says the email was not sent. The
+server never logs a code, so MockServer is the only place to read one.
+
 **Claiming an account that predates sign-in.** Migration 0022 gave every existing profile
 an unclaimed placeholder identity (an address ending in `.invalid`, which nothing is ever
-sent to). To give one its real address:
+sent to). To give one its real address — run the claim **before** signing in on the new
+build with that address:
 
 ```bash
 npm run db:claim-account -- --username <name> --email <address>
@@ -426,7 +448,14 @@ npm run db:claim-account -- --username <name> --email <address>
 |---|---|
 | `claimed: <name> now signs in with <address>` | Done. Signing in with that address now opens the existing profile and its data. |
 | `no account has the username <name>; nothing changed` | No profile has that username. Exit code 1. |
-| `<address> already belongs to another account (signed up before claiming?); nothing changed` | Someone signed in with that address first and has their own identity. Exit code 1. |
+| `<name> already signs in with its own address; nothing changed` | The account was claimed before; a claim only ever claims an unclaimed account. Exit code 1. |
+| `<address> already has its own profile; nothing changed. Claim with another address, or ask for help.` | Someone signed in with that address and created a new profile. Exit code 1. |
+
+If you already signed in with that address on the new build but did not create a profile
+(you stopped at the onboarding form), the claim still works: it removes that empty sign-in
+identity, and its sessions, and gives the address to the old account. Sign in again
+afterwards. If you did create a new profile, the claim refuses, and the address stays with
+the new profile; claim the old account with another address you own.
 
 The address is lower-cased, so `Victor@Gmail.com` and `victor@gmail.com` are one account.
 

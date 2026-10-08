@@ -74,6 +74,17 @@ else
   echo "  ok         GEMINI_API_KEY set"
 fi
 
+# Phase 29: the sign-in variables the lane does not derive, reported the same
+# way. A real Resend key sends real email, so MockServer is the local default.
+if [ -z "${BETTER_AUTH_SECRET:-}" ] || [ -z "${RESEND_API_KEY:-}" ] || [ -z "${MAIL_FROM:-}" ]; then
+  echo "  note       BETTER_AUTH_SECRET, RESEND_API_KEY or MAIL_FROM is not set — 'npm run server' will refuse to start."
+  echo "             A real Resend key sends real email (use only addresses you own). For local work, use MockServer:"
+  echo "               export BETTER_AUTH_SECRET=\$(openssl rand -base64 32) RESEND_BASE_URL=http://localhost:1080/dev RESEND_API_KEY=dev MAIL_FROM='WordsPal <code@mail.wordspal.ai>'"
+  echo "             then register its emails expectation and read codes there (README: Sign-in, \"In a lane\")."
+else
+  echo "  ok         sign-in variables set"
+fi
+
 # --- 2. dependencies ---------------------------------------------------------
 # A worktree gets its own node_modules; there is no sharing with the main
 # checkout. Roughly 700MB per worktree.

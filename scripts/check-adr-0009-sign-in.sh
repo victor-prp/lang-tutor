@@ -25,8 +25,7 @@ check() {
   fi
 }
 
-# Exceptions the ADR names: one better-auth import per app. The mobile file is
-# created by a later task; the rule holds while it does not exist.
+# Exceptions the ADR names: one better-auth import per app.
 r1() {
   grep -rnE "(from|import|require)[[:space:]]*\(?[[:space:]]*'(better-auth|@better-auth/[a-z-]+)(/[^']*)?'" apps/server/src apps/mobile/src --include='*.ts' --include='*.tsx' \
     | grep -vE '^apps/server/src/auth/betterAuth\.ts:|^apps/mobile/src/auth/client\.ts:'
