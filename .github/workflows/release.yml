@@ -1,0 +1,134 @@
+name: Release
+
+# Phase 30 (spec D6–D9). A release is a pushed v* tag on a master commit, after
+# Victor has merged and tested master locally.
+#
+# Rollback is this workflow run by hand FROM an earlier tag: Actions → Release →
+# Run workflow → pick the tag, or `gh workflow run release.yml --ref v2026.10.08`.
+# The release role trusts tag refs only, so the tag is the ref, not an input.
+# Tags are immutable in ECR, so that image already exists: a rollback skips the
+# build and is one Terraform apply.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Releases queue; one never cancels another mid-apply.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+  ECR_REPOSITORY: wordspal
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  guard:
+    if: github.repository_owner == 'victor-prp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - name: Only a v* tag releases
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "::error::Run this from a v* tag, not $GITHUB_REF"; exit 1 ;;
+          esac
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: The tag is on master
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master ||
+            { echo "::error::$TAG ($GITHUB_SHA) is not on master"; exit 1; }
+      # Waits for CI to finish on this commit: a tag pushed right after the merge
+      # would otherwise race the checks it depends on.
+      - name: CI passed for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          verdict=pending
+          for _ in $(seq 1 80); do
+            verdict=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?filter=latest&per_page=100" \
+              --jq '[.check_runs[] | {name, status, conclusion}]' | ./scripts/release-guard.sh) && break
+            [ "$verdict" = pending ] || exit 1
+            sleep 30
+          done
+          [ "$verdict" = ok ] || { echo "::error::CI for $GITHUB_SHA did not finish within 40 minutes"; exit 1; }
+
+  build-push:
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push, unless this tag's image exists
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.TAG }}
+        run: |
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$TAG" > /dev/null 2>&1; then
+            echo "::notice::$IMAGE already exists (a rollback or a rerun); deploying it as it is."
+            exit 0
+          fi
+          # No EXPO_PUBLIC_API_URL argument: the web export reads
+          # apps/mobile/.env.production, which is the point of a release build.
+          docker build --build-arg "APP_VERSION=$TAG" -t "$IMAGE" .
+          docker push "$IMAGE"
+
+  apply:
+    needs: build-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_gemini_model: ${{ vars.GEMINI_MODEL }}
+      TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+      IMAGE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.3
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: ./scripts/infra.sh prod apply -auto-approve
+      # A green run means the tag is what answers, not only that Terraform
+      # finished.
+      - name: The released tag is what answers
+        run: |
+          url=$(./scripts/infra.sh prod output -raw public_url)
+          for _ in $(seq 1 40); do
+            body=$(curl -fsS "$url/health" || true)
+            version=$(printf '%s' "$body" | jq -r '.version // empty' 2> /dev/null || true)
+            ok=$(printf '%s' "$body" | jq -r '.ok // empty' 2> /dev/null || true)
+            if [ "$version" = "$TAG" ] && [ "$ok" = true ]; then
+              echo "$url answers $TAG"
+              exit 0
+            fi
+            echo "waiting: $url/health says version=${version:-?} ok=${ok:-?}"
+            sleep 15
+          done
+          echo "::error::$url never reported $TAG with ok: true"
+          exit 1

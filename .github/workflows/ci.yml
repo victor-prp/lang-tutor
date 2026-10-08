@@ -10,6 +10,9 @@ name: CI
 # so re-running the suite by hand against an unchanged tree has to stay possible.
 on:
   push:
+    # Branches only: a v* tag starts the release workflow, which reads this
+    # commit's results instead of running the suite a second time.
+    branches: ['**']
   workflow_dispatch:
 
 # npm ci runs install lifecycle scripts from the whole dependency tree on every
@@ -54,6 +57,8 @@ jobs:
       - run: ./scripts/check-dockerfile-node.sh
       # Phase 30. infra.sh's tag resolution, against a stub terraform.
       - run: ./scripts/test-infra.sh
+      # Phase 30. The release guard's verdicts, against hand-written check runs.
+      - run: ./scripts/test-release-guard.sh
 
   check-types:
     runs-on: ubuntu-latest
