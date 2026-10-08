@@ -247,6 +247,23 @@ with no Fast Refresh. The script refuses to start if `apps/mobile/.env.local` or
 `.env.production`. A checkout from before phase 30 has its URL in `.env.local`; re-run
 `./scripts/setup-worktree.sh`, which moves it to `.env.development.local`.
 
+### The production image
+
+Production runs one container: the server, its background jobs and the web export, from
+one process on one origin ([phase 30 design](docs/superpowers/specs/2026-10-08-lang-tutor-phase-30-hosting-design.md)).
+To build and run that image against your lane:
+
+```bash
+npm run image:build   # tags lang-tutor:<lane>; the web export calls this lane's server
+GEMINI_BASE_URL=http://localhost:1080/dev GEMINI_API_KEY=dev GEMINI_MODEL=dev npm run image:run
+```
+
+Then open the lane's server address in a browser: `/` is the app, `/api/...` the API and
+`/health` names the version (`dev` for a local build). The container migrates the
+database before it listens ([ADR 0010](docs/adr/adr-0010-single-container-migrations.md)).
+A release builds the same Dockerfile without the API URL argument, so its export calls
+`https://app.wordspal.ai`.
+
 ### Working in lanes
 
 Several checkouts can run at once. The main checkout is **lane 0** and keeps the values
@@ -294,6 +311,8 @@ Since phase 9 the server calls a third-party model, so it needs credentials to s
 | `GEMINI_API_KEY` | none — the server refuses to start | Never logged. |
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Pointed at a MockServer namespace by every test bucket. |
 | `GEMINI_MODEL` | none — the server refuses to start | `gemini-2.5-flash` is the id phase 9 was scored against. |
+| `APP_VERSION` | `dev` | Phase 30. The release tag, published on `/health`. The image sets it from its build argument. |
+| `WEB_DIST_DIR` | unset — the server answers the API only | Phase 30. The web export the server serves. Set only inside the image, to `/app/web`. |
 
 `npm run db:migrate` needs none of these: migrations read `loadConfig` only.
 

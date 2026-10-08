@@ -50,6 +50,8 @@ jobs:
       - run: ./scripts/test-lane-abandon.sh
       # Phase 30. The prod-mode Expo guard is pure text too.
       - run: ./scripts/test-mobile-prod.sh
+      # Phase 30. The image must run the Node major the other jobs test.
+      - run: ./scripts/check-dockerfile-node.sh
 
   check-types:
     runs-on: ubuntu-latest
