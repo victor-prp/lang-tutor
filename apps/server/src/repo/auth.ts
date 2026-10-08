@@ -2,6 +2,7 @@ import { and, count, eq, gte, lt, ne } from 'drizzle-orm';
 
 import type { Db } from '../db/client';
 import { authCodeSends, authUsers, users } from '../db/schema';
+import { createTransaction } from '../db/transaction';
 import { isUniqueViolation } from './pgErrors';
 
 // ADR 0001 R4: repo/ may import domain TYPES only, so the one-line rule from
@@ -15,6 +16,8 @@ const normalizeEmail = (email: string): string => email.trim().toLowerCase();
  * repo/health.ts: Better Auth's hook and the CLI call it outside any use case.
  */
 export function createAuthRepo(db: Db) {
+  // ADR 0001 R8: db.transaction is called only inside db/transaction.ts.
+  const inTransaction = createTransaction(db, (tx) => tx);
   return {
     countSendsSince: async (email: string, since: Date): Promise<number> => {
       const [row] = await db
@@ -38,7 +41,7 @@ export function createAuthRepo(db: Db) {
     }): Promise<'claimed' | 'no_such_user' | 'email_taken'> => {
       const email = normalizeEmail(input.email);
       try {
-        return await db.transaction(async (tx) => {
+        return await inTransaction(async (tx) => {
           const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.username, input.username));
           if (!user) return 'no_such_user' as const;
           const [holder] = await tx
