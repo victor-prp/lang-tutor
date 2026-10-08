@@ -5,9 +5,13 @@ import { authCodeSends, authUsers, users } from '../db/schema';
 import { createTransaction } from '../db/transaction';
 import { isUniqueViolation } from './pgErrors';
 
-// ADR 0001 R4: repo/ may import domain TYPES only, so the one-line rule from
-// domain/auth.ts is restated here rather than imported.
+// ADR 0001 R4: repo/ may import domain TYPES only, so the one-line rules from
+// domain/auth.ts are restated here rather than imported.
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
+/** Migration 0022's placeholder identities end in `.invalid`; a claimed one does not. */
+const isUnclaimed = (email: string): boolean => normalizeEmail(email).endsWith('.invalid');
+
+export type ClaimOutcome = 'claimed' | 'no_such_user' | 'already_claimed' | 'email_taken';
 
 /**
  * Phase 29. The one place our own code writes auth_* tables (ADR 0009 R2):
@@ -35,22 +39,31 @@ export function createAuthRepo(db: Db) {
       await db.delete(authCodeSends).where(lt(authCodeSends.sentAt, before));
     },
 
-    claimAccount: async (input: {
-      username: string;
-      email: string;
-    }): Promise<'claimed' | 'no_such_user' | 'email_taken'> => {
+    /**
+     * Ruling 10. Only an unclaimed account is claimed. An address already held
+     * by an identity with no profile (someone signed in on the new build
+     * before the claim and never onboarded) is taken over: that identity goes,
+     * its sessions and accounts by cascade. An address whose identity has a
+     * profile is refused. `email_verified` stays false; the first code sign-in
+     * verifies it.
+     */
+    claimAccount: async (input: { username: string; email: string }): Promise<ClaimOutcome> => {
       const email = normalizeEmail(input.email);
       try {
-        return await inTransaction(async (tx) => {
+        return await inTransaction(async (tx): Promise<ClaimOutcome> => {
           const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.username, input.username));
-          if (!user) return 'no_such_user' as const;
+          if (!user) return 'no_such_user';
+          const [identity] = await tx.select({ email: authUsers.email }).from(authUsers).where(eq(authUsers.id, user.id));
+          if (!identity || !isUnclaimed(identity.email)) return 'already_claimed';
           const [holder] = await tx
-            .select({ id: authUsers.id })
+            .select({ id: authUsers.id, profile: users.id })
             .from(authUsers)
+            .leftJoin(users, eq(users.id, authUsers.id))
             .where(and(eq(authUsers.email, email), ne(authUsers.id, user.id)));
-          if (holder) return 'email_taken' as const;
+          if (holder?.profile) return 'email_taken';
+          if (holder) await tx.delete(authUsers).where(eq(authUsers.id, holder.id));
           await tx.update(authUsers).set({ email, updatedAt: new Date() }).where(eq(authUsers.id, user.id));
-          return 'claimed' as const;
+          return 'claimed';
         });
       } catch (error) {
         if (isUniqueViolation(error)) return 'email_taken';

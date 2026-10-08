@@ -196,10 +196,13 @@ async function main(): Promise<void> {
         return;
       }
       const outcome = await createAuthRepo(db).claimAccount({ username, email });
+      // The address as stored: claimAccount lower-cases and trims it.
+      const address = email.trim().toLowerCase();
       const messages = {
-        claimed: `claimed: ${username} now signs in with ${email.trim().toLowerCase()}`,
+        claimed: `claimed: ${username} now signs in with ${address}`,
         no_such_user: `no account has the username ${username}; nothing changed`,
-        email_taken: `${email} already belongs to another account (signed up before claiming?); nothing changed`,
+        already_claimed: `${username} already signs in with its own address; nothing changed`,
+        email_taken: `${address} already has its own profile; nothing changed. Claim with another address, or ask for help.`,
       } as const;
       (outcome === 'claimed' ? console.log : console.error)(messages[outcome]);
       if (outcome !== 'claimed') process.exitCode = 1;
