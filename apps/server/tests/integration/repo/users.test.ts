@@ -30,6 +30,12 @@ const DANA = {
 };
 
 describe('the users table', () => {
+  it('refuses a profile whose id has no sign-in identity', async () => {
+    await expect(
+      withTx(t.db, (tx) => tx.insert(users).values({ ...DANA, id: 'u_ghost' })),
+    ).rejects.toMatchObject({ cause: { code: '23503', constraint: 'users_id_auth_users_id_fk' } });
+  });
+
   it('rejects a second row with the same username', async () => {
     await withTx(t.db, (tx) => tx.insert(users).values(DANA));
     await expect(

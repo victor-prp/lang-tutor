@@ -62,6 +62,6 @@ CREATE INDEX "auth_verifications_identifier_idx" ON "auth_verifications" USING b
 -- Phase 29 (spec D10). Every existing profile gets a sign-in identity with the
 -- same id and a placeholder address in the reserved .invalid domain, which never
 -- receives mail and which the send hook refuses. Victor claims his account with
--- `npm run db:claim-account`. Task 5's migration then ties users.id to this table.
+-- `npm run db:claim-account`. Migration 0023 then ties users.id to this table.
 INSERT INTO "auth_users" ("id", "name", "email", "email_verified")
 SELECT "id", "display_name", "id" || '@unclaimed.invalid', false FROM "users";

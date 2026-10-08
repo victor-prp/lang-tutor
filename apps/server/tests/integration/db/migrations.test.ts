@@ -725,3 +725,27 @@ describe('0022_auth', () => {
     expect(kept.rows[0]).toEqual({ n: 1 });
   });
 });
+
+// Phase 29 (spec D9, Ruling 1): a profile cannot exist without a sign-in
+// identity. 0022 gave every existing user one, so 0023's key adds cleanly.
+describe('0023_users_auth_fk', () => {
+  it('keeps every existing user, and refuses a profile with no identity', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_a', 'alice', 'Alice', 30, 'he'), ('u_b', 'bob', 'Bob', 40, 'he');
+    `);
+
+    await runMigrations(db);
+
+    const kept = await db.execute(sql`select id from users order by id`);
+    expect(kept.rows).toEqual([{ id: 'u_a' }, { id: 'u_b' }]);
+    await expect(
+      db.execute(sql`
+        insert into users (id, username, display_name, age, native_language)
+          values ('u_orphan', 'orphan', 'Orphan', 30, 'he')
+      `),
+    ).rejects.toMatchObject({ cause: { code: '23503', constraint: 'users_id_auth_users_id_fk' } });
+  });
+});
