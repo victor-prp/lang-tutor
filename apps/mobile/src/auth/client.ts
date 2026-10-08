@@ -49,8 +49,9 @@ export function createAppAuthClient({
       const result = await client.signIn.emailOtp({ email: email.trim().toLowerCase(), otp: code });
       fail(result.error);
     },
-    signOut: async (): Promise<void> => {
-      await client.signOut();
+    /** `signal` aborts a revoke that has run past its budget (startState's signOutWithin). */
+    signOut: async (signal: AbortSignal): Promise<void> => {
+      await client.signOut({ fetchOptions: { signal } });
     },
     /**
      * Ruling 4 (spec D6). Better Auth slides a session, and re-issues its

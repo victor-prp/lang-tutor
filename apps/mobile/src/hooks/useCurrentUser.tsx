@@ -16,7 +16,7 @@ import type { RememberedEnrollmentStore } from '@/currentUser';
 import { chooseActive } from '@/enrollments';
 import { NO_GRANTS, normalizeUsername } from '@/grants';
 import { cleanCode } from '@/signIn';
-import { startStateOf, startUp, type StartState } from '@/startState';
+import { signOutWithin, startStateOf, startUp, type StartState } from '@/startState';
 
 export type CurrentUserValue = {
   /** Phase 29 (spec D19). Where start-up and sign-in have got to. */
@@ -159,8 +159,9 @@ export function CurrentUserProvider({
     [api, adopt],
   );
 
+  // Waits for the revoke, within a budget, then forgets locally regardless.
   const signOut = useCallback(async () => {
-    await auth.signOut().catch(() => {});
+    await signOutWithin(auth.signOut);
     clear('signed_out');
   }, [auth, clear]);
 

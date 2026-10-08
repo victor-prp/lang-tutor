@@ -1,6 +1,6 @@
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { InvitesSection } from '@/components/InvitesSection';
@@ -21,7 +21,12 @@ export default function HomeScreen() {
     }, [reloadGrants]),
   );
 
-  if (status === 'loading') return <SafeAreaView style={styles.screen} />;
+  if (status === 'loading')
+    return (
+      <SafeAreaView style={styles.loading} edges={['top', 'bottom']}>
+        <ActivityIndicator testID="start-loading" size="large" color={colors.primary} />
+      </SafeAreaView>
+    );
   if (status === 'offline')
     return (
       <SafeAreaView style={styles.offline} edges={['top', 'bottom']}>
@@ -86,6 +91,7 @@ function StartLearning() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   offline: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.md },
   content: {
     flexGrow: 1,
