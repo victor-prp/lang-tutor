@@ -534,9 +534,9 @@ Design and plan for this layout:
 
 ## Continuous integration
 
-Every push, on every branch, runs six parallel jobs on GitHub Actions
+Every push, on every branch, runs seven parallel jobs on GitHub Actions
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). `workflow_dispatch` runs the same
-six by hand, which matters for the one job whose result can change without a commit.
+seven by hand, which matters for the one job whose result can change without a commit.
 
 | Job | Database | Runs | Roughly |
 |---|---|---|---|
@@ -545,6 +545,7 @@ six by hand, which matters for the one job whose result can change without a com
 | `test-unit` | **none, deliberately** | `npm test` | 1 min |
 | `test-integration` | `npm run db:up` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
 | `test-e2e` | `npm run db:up` | `npm run e2e` — the Playwright suite described below | 4-5 min |
+| `build-image` | `npm run db:up` | `npm run e2e:image` — the production image, built for this job's own address, driven by the whole Playwright suite plus the two image-only specs | 10-15 min |
 | `test-eval` | **none, and no MockServer either** | `npm run eval` — the golden set against the real Gemini API, keyed by the `GEMINI_API_KEY` secret and the `GEMINI_MODEL` variable | 1 min |
 
 `test-unit` has no database available at all. That is the point: it *proves* the
@@ -622,6 +623,11 @@ static web export of the app served on port 8082. It builds that export on every
 static export is the only way to reliably point the app at the local test server. Your
 `apps/mobile/.env.development.local` is never read or modified by the suite, so the Expo Go device
 workflow above is unaffected.
+
+`npm run e2e:image` runs the same suite against the production image instead: it builds
+the image for this lane's e2e address, runs one container serving both the app and the
+API, and adds two specs only that target can pass (a reload on a deep link, and a 404 for
+a missing bundle). CI runs both targets on every push.
 
 `npm test` and `npm run test:all` deliberately do **not** run this — the workspace's
 script is named `e2e`, not `test`, so neither the root fan-out nor `--if-present` picks

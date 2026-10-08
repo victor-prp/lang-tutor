@@ -28,8 +28,12 @@ export function requireEnv(name: string): string {
  */
 export const API_URL = requireEnv('E2E_API_URL');
 
-/** The static web export served by the second webServer entry. */
-export const APP_URL = requireEnv('E2E_APP_URL');
+/**
+ * The web export. Under the image target (phase 30), the container serves the
+ * export and the API from one origin, as production does, so the app's address
+ * is the API's.
+ */
+export const APP_URL = process.env.E2E_TARGET === 'image' ? API_URL : requireEnv('E2E_APP_URL');
 
 /** The shared MockServer compose service, standing in for the Gemini API. */
 export const MOCKSERVER_URL = requireEnv('MOCKSERVER_URL');

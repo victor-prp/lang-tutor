@@ -201,6 +201,47 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Phase 30. The production image, built and then driven by the whole e2e
+  # suite: one container serving the export and the API from one origin, as
+  # Lightsail runs it. The test-e2e run above stays, being faster and pointed at
+  # the tsx server. The image is built for this job's own API address, so the one
+  # difference from a release build is the URL inlined into the web bundle.
+  build-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:up
+      - name: Resolve Playwright version
+        id: playwright
+        working-directory: e2e
+        run: |
+          version=$(node -p 'require("@playwright/test/package.json").version')
+          [ -n "$version" ] || { echo "could not resolve @playwright/test version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - run: npm run e2e:image
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces-image
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # The prompt eval bucket, calling the real paid model. It lived in its own
   # workflow (nightly + workflow_dispatch) precisely so a vendor's model update
   # could not turn a branch red with no commit of ours; moving it here accepts
