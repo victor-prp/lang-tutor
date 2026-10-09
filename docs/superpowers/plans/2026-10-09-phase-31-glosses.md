@@ -32,6 +32,8 @@ Each of these departs from the spec's letter for a reason found in the code. Tas
 6. **`normaliseGloss` maps a hyphen as well as a maqaf to a space.** The spec's own example, "בית-ספר", uses U+002D.
 7. **A photo import's stored options are rewritten to gloss cards by `0023`, and merges leave photo rows alone.** Options are a snapshot; a stale id resolves through `merged_into` when the import is saved.
 8. **The results name a practised gloss by its key.** The spec's mobile section says "practised glosses by key", and D11 makes the key a saved word's headline everywhere. A practised row keeps the form the session asked, which its speak button says and `meaning-recall.spec.ts` matches on, and shows the gloss key beside it (Task 7). The missed list still shows each card as it was asked.
+9. **The list's headline is the earliest saved gloss.** D11 fixes what the headline shows, the key. Which saved gloss heads a word used to follow the saved rendering's rank, but the new headline reads no rendering, so there is no rank to sort by: the earliest save heads it (Task 7).
+10. **ADR 0001's R4 lets `db/cli.ts` import the composition root.** The merge tool's model tier needs a Gemini client, R11 lets only `composition.ts` construct one, and R4 forbids `src/db/` from importing it. The CLI is an entry point, as R7 already says, so R4 gains that one exception (Task 14). A second entry point beside `index.ts` would have needed R7's console exception instead.
 
 ## Global Constraints
 
@@ -371,9 +373,10 @@ git commit -m "feat(core): normaliseGloss and splitTranslation, the two text rul
 - Create: `apps/server/src/db/migrations/0022_glosses.sql` (+ `meta/0022_snapshot.json`, `meta/_journal.json`)
 - Modify: `apps/server/src/domain/dictionary.ts` (`SenseToWrite`, `entriesToRows`, `toResponseSense`) and `dictionary.test.ts`
 - Modify: `apps/server/src/repo/dictionary.ts` (`RepairedRendering`, step 5 of `persistEntries`, the insert in `repairVariantRenderings`)
-- Modify: `apps/server/src/services/translations.ts` (`repairForm` builds its renderings with `senseToWrite`)
+- Modify: `apps/server/src/services/translations.ts` (`repairForm` builds its renderings with `renderingOf`)
 - Modify: `apps/server/tests/support/dictRows.ts` (`SeedTranslation.gloss`, `.alternatives`)
 - Modify: `apps/server/tests/integration/db/migrations.test.ts`, `tests/integration/db/schema.test.ts`, `tests/integration/repo/vocabulary.plan.test.ts`
+- Modify: `apps/server/tests/integration/repo/dictionary.stale.test.ts`, `tests/integration/repo/dictionary.renderings.test.ts`, `tests/integration/repo/vocabulary.test.ts` (their `repairVariantRenderings` senses carry the new fields)
 
 **Interfaces:**
 - Consumes: `normaliseGloss` (core), `splitTranslation` (Task 1).
@@ -794,7 +797,7 @@ Then `npm run db:check -w apps/server` (expected: no errors), `npm run db:genera
 
 - [ ] **Step 7: Make every writer of renderings write `gloss` and `alternatives`.**
 
-In `apps/server/src/domain/dictionary.ts`, import `{ splitTranslation } from './glosses'`, replace `SenseToWrite` and `entriesToRows`, and add `senseToWrite`:
+In `apps/server/src/domain/dictionary.ts`, import `{ splitTranslation } from './glosses'`, replace `SenseToWrite` and `entriesToRows`, and add `Rendering` and `renderingOf`:
 
 ```ts
 export type SenseToWrite = {
@@ -859,6 +862,8 @@ In `apps/server/src/repo/dictionary.ts`, import `type Rendering` from `../domain
 /** One rendering a repair produces: what the lookup writes, by sense id. */
 export type RepairedRendering = Rendering & { senseId: string };
 ```
+
+The three test files that call `repairVariantRenderings` directly (`tests/integration/repo/dictionary.stale.test.ts`, `dictionary.renderings.test.ts` and `vocabulary.test.ts`) build its senses as literals: give each the four new fields, `alternatives: []`, `gloss` equal to its `translation`, `glossAlternatives: []` and `definition: null`.
 
 In `persistEntries` step 5 and in `repairVariantRenderings`' insert, add to each row:
 
@@ -944,6 +949,7 @@ git commit -m "feat(server): glosses beside senses — one gloss per target word
 - Modify: `apps/server/src/services/translations.ts` (`repairForm`'s write)
 - Modify: `apps/server/tests/support/dictRows.ts` (`insertLexeme` writes glosses), `apps/server/tests/support/fakes.ts`
 - Create: `apps/server/tests/integration/repo/dictionary.glosses.test.ts`
+- Modify: `apps/server/tests/integration/repo/dictionary.stale.test.ts`, `tests/integration/repo/dictionary.renderings.test.ts`, `tests/integration/repo/vocabulary.test.ts` (their repairs pass the new input and hold the lock)
 
 **Interfaces:**
 - Consumes: `normaliseGloss`, `tidyGlossList`, the tables of Task 2.
@@ -1479,6 +1485,8 @@ Then, in `persistEntries`:
 
 and end with `return { needsMerge };`. Add `lockLexemes` to the returned object.
 
+Every direct caller now passes `lexemeId` and `lemmaForm` and holds the lock first. In `tests/integration/repo/dictionary.stale.test.ts`, `dictionary.renderings.test.ts` and `vocabulary.test.ts`, each `repairVariantRenderings` call gains `lexemeId` (the repaired lexeme's id) and `lemmaForm` (whether the repaired form equals the lemma, ignoring case), and is preceded, on the same transaction's dictionary repository, by `await dict.lockLexemes([lexemeId])`.
+
 - [ ] **Step 8: Lock in the repair's write.** In `apps/server/src/services/translations.ts`, `repairForm`'s last transaction becomes:
 
 ```ts
@@ -1683,7 +1691,7 @@ Append to `describe('persistEntries writes glosses (spec D6, D8)')` in `tests/in
   });
 ```
 
-- [ ] **Step 2: Run them and see them fail.** `npm exec -w packages/core -- jest --runTestsByPath src/api/schemas.test.ts`; `npm exec -w apps/server -- jest --selectProjects=unit --runTestsByPath src/domain/dictionary.test.ts src/domain/translation.test.ts`; `bash scripts/lane-env.sh npm exec -w apps/server -- jest --selectProjects=integration --runTestsByPath tests/integration/repo/dictionary.glosses.test.ts`. Expected: FAIL. The strict object refuses the new keys, `gloss` is ignored, the prompt lacks the rules, and no definition is stored.
+- [ ] **Step 2: Run them and see them fail.** `npm exec -w packages/core -- jest --runTestsByPath src/api/schemas.test.ts`; `npm exec -w apps/server -- jest --selectProjects=unit --runTestsByPath src/domain/dictionary.test.ts src/domain/translation.test.ts`; `bash scripts/lane-env.sh npm exec -w apps/server -- jest --selectProjects=integration --runTestsByPath tests/integration/repo/dictionary.glosses.test.ts`. Expected: the core schema test already passes, since zod strips unknown keys and no LLM schema is strict; it guards Step 3's explicit schema. The server tests FAIL: `gloss` is ignored, the prompt lacks the rules, and no definition is stored.
 
 - [ ] **Step 3: The schemas.** In `packages/core/src/api/schemas.ts`, replace `LlmSenseSchema` (and the comment above it, which explained the `.omit`):
 
@@ -1725,7 +1733,7 @@ export const LlmSenseSchema = z.object({
   definition: z.string().min(1).nullable().optional(),
 ```
 
-- [ ] **Step 4: The prompt.** In `apps/server/src/domain/translation.ts`, `buildPrompt`'s rule list gains four lines right after `` `Write every sense's translation in ${to}.` ``:
+- [ ] **Step 4: The prompt.** In `apps/server/src/domain/translation.ts`, `buildPrompt`'s rule list gains the new rules right after `` `Write every sense's translation in ${to}.` ``:
 
 ```ts
     // Phase 31 (spec D4-D6, D9). A card shows one target word, so the
@@ -1734,10 +1742,22 @@ export const LlmSenseSchema = z.object({
     // glosses; the definition is what a learner language with no renderings yet
     // reconciles against. Before changing a word here, check it against every
     // registered MockServer expectation (see the illustration note below).
+    ...glossRules(to),
+    `Define the sense in "definition": one short phrase in ${from}.`,
+```
+
+with the three rules both calls share in a helper beside `formRules` and `writingRules` (Task 5 gives the second call the same three):
+
+```ts
+/** Phase 31 (spec D4-D6). How each sense's target words are written: both
+ *  calls ask for them in these words. */
+function glossRules(to: string): string[] {
+  return [
     `Give each sense one main ${to} translation: never a list of words, and never a note in brackets; a note that tells one sense from another belongs in "definition". A translation may be several words where ${to} needs them for one meaning.`,
     `List other ${to} words that render the sense equally well in "alternatives", in the same grammatical form as the translation.`,
     `Give the translation's dictionary citation form in "gloss", uninflected, and the alternatives' in "gloss_alternatives".`,
-    `Define the sense in "definition": one short phrase in ${from}.`,
+  ];
+}
 ```
 
 Then run `grep -rn "matchText\|expectGeminiMatching" apps/server/tests e2e/tests` and check that none of the registered patterns occurs in the four new lines. None should: they hold no headword. If one does, reword the line, not the expectation.
@@ -1940,7 +1960,7 @@ git commit -m "feat(server): the lookup asks for one translation, its alternativ
 - Modify: `apps/server/src/domain/translation.ts` (`StoredSense`, `buildRenderingPrompt`), `translation.test.ts`
 - Modify: `apps/server/src/repo/dictionary.ts` (`findSensesByLexeme`)
 - Modify: `apps/server/src/services/translations.ts` (`reconcile` carries the four fields)
-- Modify: `apps/server/tests/support/dictRows.ts` (`readSenseDefinitions`), `apps/server/tests/support/fakes.ts`
+- Modify: `apps/server/tests/support/dictRows.ts` (`readSenseDefinitions`), `apps/server/tests/support/fakes.ts`, `apps/server/tests/support/mockServer.ts` (`expectReconciliation` takes the new fields)
 - Create: `apps/server/tests/integration/services/translations.definitions.test.ts`
 - Modify: `apps/server/tests/eval/cases.ts` (one rendering case)
 
@@ -2140,13 +2160,11 @@ The sentence introducing the list becomes:
     `is recorded, and the gloss recorded for it, in ${to} unless another language is named:`,
 ```
 
-and after `` `Write every sense's translation in ${to}.` `` add the first call's four rules (same wording as Task 4 Step 4), with the definition rule worded for this call:
+and after `` `Write every sense's translation in ${to}.` `` add Task 4's `glossRules` and a definition rule worded for this call:
 
 ```ts
     // Phase 31 (spec D4-D6, D9): the first call's rules, for the same reasons.
-    `Give each sense one main ${to} translation: never a list of words, and never a note in brackets; a note that tells one sense from another belongs in "definition". A translation may be several words where ${to} needs them for one meaning.`,
-    `List other ${to} words that render the sense equally well in "alternatives", in the same grammatical form as the translation.`,
-    `Give the translation's dictionary citation form in "gloss", uninflected, and the alternatives' in "gloss_alternatives".`,
+    ...glossRules(to),
     `Give "definition", one short phrase in ${from}, for every sense whose line above has no definition, and for every new sense_code.`,
 ```
 
@@ -2768,7 +2786,7 @@ export function optionsFrom(senses: readonly TranslationSense[]): PhotoImportOpt
 }
 ```
 
-- [ ] **Step 8: Server repositories.** Run `sed -i '' -f <scratchpad>/gloss-renames.sed apps/server/src/repo/vocabulary.ts`, then replace by hand the three queries whose sense ids are dictionary senses:
+- [ ] **Step 8: Server repositories.** Run `sed -i '' -f <scratchpad>/gloss-renames.sed apps/server/src/repo/vocabulary.ts`. Then put back the one line the sed breaks outside the queries below: `wordSummaries`' `sense_count` subquery counts dictionary senses until Task 7 replaces it, so its `WHERE r.gloss_id = s.id` returns to `WHERE r.sense_id = s.id` (`dict_var_translations` has no `gloss_id`). Then replace by hand the three queries whose sense ids are dictionary senses:
 
 `SaveableEntry` becomes `{ glossId: string; variantId: string; lexemeId: string; lemma: string }`, and `vocabularyQueries.saveable`:
 
@@ -2992,7 +3010,7 @@ For each file listed, apply `sed -i '' -f <scratchpad>/gloss-renames.sed <file>`
 ```
 
   and the `vacuum analyze` list names `gloss_progress`, `dict_glosses` and `dict_sense_glosses`. Its cases that name sense ids (`saveable`, `savedSenseIds`) take `pg` gloss ids.
-- `tests/integration/db/schema.test.ts`: `TABLES` names `gloss_progress`, not `sense_progress`.
+- `tests/integration/db/schema.test.ts`: add `gloss_progress` to `TABLES` (the list never named `sense_progress`).
 - `tests/eval/run.ts`: check its two mentions by hand; neither is a learner's.
 
 Run `npm run typecheck -w apps/server` until it is clean, then `npm test` and `npm run test:integration`. Expected: PASS. A test that counted two saved senses of one target word now counts one: that is D3, so update its expectation and say which tests did so in the task report.
@@ -3042,7 +3060,7 @@ git commit -m "feat: the learner's unit is the gloss — every learner table key
 - Modify: `apps/server/src/domain/photoImports.ts` (`optionsFrom`), `apps/server/src/repo/progress.ts` (`findSnapshot` reads the key)
 - Modify: `apps/server/tests/eval/run.ts` (tier 1 reads `examples`), `apps/server/tests/support/fakes.ts`
 - Modify: `apps/server/tests/integration/repo/dictionary.test.ts`, `tests/integration/services/translations.test.ts`, `tests/integration/routes/vocabulary.test.ts`, `tests/integration/repo/vocabulary.test.ts`, `tests/integration/repo/progress.test.ts`, and the unit tests that build `SenseRow` fixtures
-- Modify: `apps/mobile/src/components/LookupPanel.tsx`, `app/vocabulary/word.tsx`, `app/vocabulary/index.tsx`, `src/vocabulary.ts` (they compile against the new cards; Task 8 finishes them)
+- Modify: `apps/mobile/src/components/LookupPanel.tsx`, `app/vocabulary/word.tsx`, `app/vocabulary/index.tsx`, `src/vocabulary.ts` (they compile against the new cards; Task 8 finishes them), and `src/vocabulary.test.ts` (its fixtures say `gloss_count`)
 
 **Interfaces:**
 - Produces, on the wire:
@@ -3304,21 +3322,43 @@ function finish({ card, alternatives }: PendingCard): TranslationSense {
  * `key` is the gloss's, sent only when it differs from the translation.
  */
 export function rowsToCards(rows: SenseRow[]): TranslationSense[] {
+  return groupCards(
+    rows.map((row) => ({
+      id: row.glossId,
+      card: {
+        translation: row.translation,
+        gloss_id: row.glossId,
+        variant_id: row.variantId,
+        ...(row.partOfSpeech ? { part_of_speech: row.partOfSpeech } : {}),
+      },
+      key: row.glossKey,
+      example: exampleOf(row.exampleSource, row.exampleTarget),
+      alternatives: row.alternatives,
+    })),
+  );
+}
+
+/** One rendering as card grouping reads it: the group it joins, the card it
+ *  starts when it is the group's first, and what every member adds. */
+type CardRow = { id: string; card: TranslationSense; key: string; example: Example | null; alternatives: readonly string[] };
+
+/** Renderings to cards by group id, in first-seen order, at most
+ *  RESPONSE_CARD_CAP cards. A group's first row names its card; every row adds
+ *  its example and its alternatives, so a capped card still gathers them. */
+function groupCards(rows: readonly CardRow[]): TranslationSense[] {
   const cards = new Map<string, PendingCard>();
   for (const row of rows) {
-    const example = exampleOf(row.exampleSource, row.exampleTarget);
-    const seen = cards.get(row.glossId);
+    const seen = cards.get(row.id);
     if (seen) {
-      if (example) seen.card.examples = [...(seen.card.examples ?? []), example];
+      if (row.example) seen.card.examples = [...(seen.card.examples ?? []), row.example];
       seen.alternatives.push(...row.alternatives);
       continue;
     }
     if (cards.size === RESPONSE_CARD_CAP) continue;
-    const card: TranslationSense = { translation: row.translation, gloss_id: row.glossId, variant_id: row.variantId };
-    if (row.partOfSpeech) card.part_of_speech = row.partOfSpeech;
-    if (example) card.examples = [example];
-    if (normaliseGloss(row.glossKey) !== normaliseGloss(row.translation)) card.key = row.glossKey;
-    cards.set(row.glossId, { card, alternatives: [...row.alternatives] });
+    const card: TranslationSense = { ...row.card };
+    if (row.example) card.examples = [row.example];
+    if (normaliseGloss(row.key) !== normaliseGloss(card.translation)) card.key = row.key;
+    cards.set(row.id, { card, alternatives: [...row.alternatives] });
   }
   return [...cards.values()].map(finish);
 }
@@ -3328,29 +3368,23 @@ export function rowsToCards(rows: SenseRow[]): TranslationSense[] {
 
 ```ts
 export function flattenEntries(entries: LlmEntry[]): TranslationSense[] {
-  const cards = new Map<string, PendingCard>();
+  const rows: CardRow[] = [];
   const deepest = Math.max(0, ...entries.map((entry) => entry.senses.length));
   for (let rank = 0; rank < deepest; rank++) {
     entries.forEach((entry, index) => {
       const sense = entry.senses[rank];
       if (!sense) return;
       const written = renderingOf(sense, rank);
-      const id = `${index} ${normaliseGloss(written.gloss)}`;
-      const example = exampleOf(written.exampleSource, written.exampleTarget);
-      const seen = cards.get(id);
-      if (seen) {
-        if (example) seen.card.examples = [...(seen.card.examples ?? []), example];
-        seen.alternatives.push(...written.alternatives);
-        return;
-      }
-      if (cards.size === RESPONSE_CARD_CAP) return;
-      const card: TranslationSense = { translation: written.translation, part_of_speech: entry.part_of_speech };
-      if (example) card.examples = [example];
-      if (normaliseGloss(written.gloss) !== normaliseGloss(written.translation)) card.key = written.gloss;
-      cards.set(id, { card, alternatives: [...written.alternatives] });
+      rows.push({
+        id: `${index} ${normaliseGloss(written.gloss)}`,
+        card: { translation: written.translation, part_of_speech: entry.part_of_speech },
+        key: written.gloss,
+        example: exampleOf(written.exampleSource, written.exampleTarget),
+        alternatives: written.alternatives,
+      });
     });
   }
-  return [...cards.values()].map(finish);
+  return groupCards(rows);
 }
 ```
 
@@ -3588,7 +3622,7 @@ Remove the `canonicalOptions` import if nothing else in the file reads it. The m
 
 The app compiles against the new cards, with Task 8 finishing the design:
 - `apps/mobile/src/components/LookupPanel.tsx` and `app/vocabulary/word.tsx`: where a card rendered `sense.example`, render each of `sense.examples ?? []` / `sense.examples` with the same markup, keyed by `example.source`.
-- `apps/mobile/src/app/vocabulary/index.tsx`: `item.sense_count` → `item.gloss_count`; `apps/mobile/src/vocabulary.ts`: `showsMark` reads `word.gloss_count`.
+- `apps/mobile/src/app/vocabulary/index.tsx`: `item.sense_count` → `item.gloss_count`; `apps/mobile/src/vocabulary.ts`: `showsMark` reads `word.gloss_count`; `apps/mobile/src/vocabulary.test.ts`: its `VocabularyWord` fixtures say `gloss_count` for `sense_count`.
 
 - [ ] **Step 8: Integration tests.** Update the tests the new behaviour changes: `sense_count` becomes `gloss_count` in `tests/integration/routes/vocabulary.test.ts`'s `Page` type and expectations, and every fixture there renders its senses with distinct words, so its counts keep their values. Then:
 
@@ -3849,6 +3883,7 @@ git commit -m "feat(mobile): gloss cards — also, the key beneath, saved from, 
 - Modify: `apps/server/src/services/transaction.ts`, `composition.ts`, `worker.ts`, `domain/jobs.ts`, `db/jobs.ts`, `errors.ts`
 - Modify: `apps/server/src/services/translations.ts` (enqueue the merge; log `dict_glosses_assigned`), `services/vocabulary.ts`, `services/photoImports.ts`, `services/sessions.ts` (resolve, D14)
 - Modify: `apps/server/tests/support/fakes.ts`; Create: `apps/server/tests/support/locks.ts`
+- Modify: `apps/server/tests/support/dictRows.ts` (`insertDriftedFinger`, `insertRendering`, shared by Tasks 9 and 14)
 - Create: `apps/server/tests/integration/repo/glosses.merge.test.ts`, `tests/integration/services/glosses.race.test.ts`, `tests/integration/jobs/mergeGlosses.test.ts`
 
 **Interfaces:**
@@ -4057,6 +4092,37 @@ export async function readSavedGlossIds(db: Db, enrollmentId: string): Promise<s
 }
 ```
 
+Add to `apps/server/tests/support/dictRows.ts` (import `dictVarTranslations` from the schema if the file does not already) the two fixtures the merge, race and tool tests share:
+
+```ts
+/** Phase 31. `finger` with two glosses of one word, the drift D6 could not
+ *  rename: body_part keyed אצבעות from `fingers`, digit keyed אצבע from `finger`. */
+export async function insertDriftedFinger(db: Db) {
+  const word = await insertLexeme(db, {
+    lemma: 'finger',
+    languageCode: 'en',
+    partOfSpeech: 'noun',
+    userLanguageCode: 'he',
+    senses: [{ senseCode: 'body_part' }, { senseCode: 'digit' }],
+    variants: [
+      { form: 'fingers', kind: 'word', entryRank: 0, translations: [{ senseCode: 'body_part', rank: 0, translation: 'אצבעות', exampleSource: null, exampleTarget: null }] },
+      { form: 'finger', kind: 'word', entryRank: 0, translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null }] },
+    ],
+  });
+  return { ...word, other: word.glossIds[0], survivor: word.glossIds[1], fingers: word.variantIds[0], finger: word.variantIds[1] };
+}
+
+/** Phase 31. One rendering written past insertLexeme's gloss rule: a form
+ *  rendered after its senses' memberships were decided, which is how drift
+ *  arrives. */
+export async function insertRendering(
+  db: Db,
+  row: { variantId: string; senseId: string; userLanguageCode: string; translation: string; gloss: string; rank: number },
+): Promise<void> {
+  await db.insert(dictVarTranslations).values(row);
+}
+```
+
 Create `apps/server/tests/integration/repo/glosses.merge.test.ts`:
 
 ```ts
@@ -4065,7 +4131,7 @@ import { sql } from 'drizzle-orm';
 
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createGlossRepo } from '../../../src/repo/glosses';
-import { insertLexeme } from '../../support/dictRows';
+import { insertDriftedFinger, insertLexeme, insertRendering } from '../../support/dictRows';
 import { insertAnsweredSession, insertProgressRows, setLevel } from '../../support/progressRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -4082,22 +4148,7 @@ afterEach(async () => {
   await t.close();
 });
 
-/** `finger` with two glosses of one word, the drift D6 could not rename:
- *  body_part keyed אצבעות from `fingers`, digit keyed אצבע from `finger`. */
-async function twoGlosses() {
-  const word = await insertLexeme(t.db, {
-    lemma: 'finger',
-    languageCode: 'en',
-    partOfSpeech: 'noun',
-    userLanguageCode: 'he',
-    senses: [{ senseCode: 'body_part' }, { senseCode: 'digit' }],
-    variants: [
-      { form: 'fingers', kind: 'word', entryRank: 0, translations: [{ senseCode: 'body_part', rank: 0, translation: 'אצבעות', exampleSource: null, exampleTarget: null }] },
-      { form: 'finger', kind: 'word', entryRank: 0, translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null }] },
-    ],
-  });
-  return { ...word, other: word.glossIds[0], survivor: word.glossIds[1], fingers: word.variantIds[0], finger: word.variantIds[1] };
-}
+const twoGlosses = () => insertDriftedFinger(t.db);
 
 const save = (enrollmentId: string, glossId: string, variantId: string, lexemeId: string, at: string) =>
   t.db.execute(sql`
@@ -4170,9 +4221,7 @@ describe('mergeGlosses (spec D7)', () => {
   it('names a blocked rename as a candidate, and leaves two glosses that only name each other alone', async () => {
     const w = await twoGlosses();
     // The lemma form renders body_part as אצבע: the drift D6 could not rename.
-    await t.db.execute(sql`
-      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, gloss, rank)
-      values (${w.finger}, ${w.senseIds[0]}, 'he', 'אצבע', 'אצבע', 1)`);
+    await insertRendering(t.db, { variantId: w.finger, senseId: w.senseIds[0], userLanguageCode: 'he', translation: 'אצבע', gloss: 'אצבע', rank: 1 });
     const candidates = await withTx(t.db, (tx) => createGlossRepo(tx).findMergeCandidates({ lexemeId: w.lexemeId, userLanguageCode: 'he' }));
     expect(candidates).toEqual([{ otherId: w.other, survivorId: w.survivor }]);
 
@@ -4205,7 +4254,7 @@ Create `apps/server/tests/integration/services/glosses.race.test.ts`. It may not
 ```ts
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
-import { insertLexeme } from '../../support/dictRows';
+import { insertDriftedFinger } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { holdMergeOpen, waitForBlockedQuery } from '../../support/locks';
 import { insertAnsweredSession, readProgress, readSnapshot } from '../../support/progressRows';
@@ -4226,20 +4275,7 @@ afterEach(async () => {
 
 const deps = () => createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(3) });
 
-async function twoGlosses() {
-  const word = await insertLexeme(t.db, {
-    lemma: 'finger',
-    languageCode: 'en',
-    partOfSpeech: 'noun',
-    userLanguageCode: 'he',
-    senses: [{ senseCode: 'body_part' }, { senseCode: 'digit' }],
-    variants: [
-      { form: 'fingers', kind: 'word', entryRank: 0, translations: [{ senseCode: 'body_part', rank: 0, translation: 'אצבעות', exampleSource: null, exampleTarget: null }] },
-      { form: 'finger', kind: 'word', entryRank: 0, translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null }] },
-    ],
-  });
-  return { lexemeId: word.lexemeId, other: word.glossIds[0], survivor: word.glossIds[1], fingers: word.variantIds[0] };
-}
+const twoGlosses = () => insertDriftedFinger(t.db);
 
 describe('a learner write racing a merge (spec D14)', () => {
   it('lands a save on the survivor, as one row, when the merge commits first', async () => {
@@ -4568,7 +4604,24 @@ export function createFakeGlossRepo(userLanguageCode = 'he') {
 ```ts
 import { MergeGlossesPayloadSchema } from '../domain/jobs';
 import type { Logger } from '../logger';
+import type { MergeCounts } from '../repo/glosses';
 import type { Transaction } from './transaction';
+
+/** The `gloss_merged` log line (spec D19): one shape for the job and the tool. */
+function glossMerged(input: { lexemeId: string; userLanguageCode: string; survivorId: string; otherId: string; counts: MergeCounts }) {
+  return {
+    event: 'gloss_merged',
+    lexeme_id: input.lexemeId,
+    user_language_code: input.userLanguageCode,
+    survivor_id: input.survivorId,
+    merged_id: input.otherId,
+    entries_moved: input.counts.entriesMoved,
+    entries_folded: input.counts.entriesFolded,
+    snapshots: input.counts.snapshots,
+    questions: input.counts.questions,
+    memberships: input.counts.memberships,
+  };
+}
 
 /**
  * Phase 31 (spec D7). The gloss use cases that are not a lookup: the merge job.
@@ -4591,18 +4644,7 @@ export function createGlossService({ transaction, logger }: { transaction: Trans
         return done;
       });
       for (const { otherId, survivorId, counts } of merged) {
-        logger.info({
-          event: 'gloss_merged',
-          lexeme_id: lexemeId,
-          user_language_code: userLanguageCode,
-          survivor_id: survivorId,
-          merged_id: otherId,
-          entries_moved: counts.entriesMoved,
-          entries_folded: counts.entriesFolded,
-          snapshots: counts.snapshots,
-          questions: counts.questions,
-          memberships: counts.memberships,
-        });
+        logger.info(glossMerged({ lexemeId, userLanguageCode, survivorId, otherId, counts }));
       }
     },
   };
@@ -5087,15 +5129,21 @@ export async function withJobQueue<T>(db: Db, run: (boss: PgBoss) => Promise<T>)
     return row;
   };
 
-  /** Phase 31 (spec D12). Whether this lexeme's lemma form renders it in a language. */
-  const hasLemmaRendering = async (input: LexemeLanguage): Promise<boolean> => {
-    const rows = await tx.execute(sql`
+  /** Phase 31 (spec D12). Whether a lexeme's lemma form renders it in a language:
+   *  the condition the read and both claims below share. */
+  const LEMMA_RENDERED = (lexeme: SQL, language: SQL) => sql`
+    EXISTS (
       SELECT 1 FROM dict_variants v
       JOIN dict_lexemes l           ON l.id = v.lexeme_id
-      JOIN dict_var_translations tr ON tr.variant_id = v.id AND tr.user_language_code = ${input.userLanguageCode}
-      WHERE v.lexeme_id = ${input.lexemeId} AND lower(v.form) = lower(l.lemma)
-      LIMIT 1`);
-    return rows.rows.length > 0;
+      JOIN dict_var_translations tr ON tr.variant_id = v.id AND tr.user_language_code = ${language}
+      WHERE v.lexeme_id = ${lexeme} AND lower(v.form) = lower(l.lemma))`;
+
+  /** Phase 31 (spec D12). Whether this lexeme's lemma form renders it in a language. */
+  const hasLemmaRendering = async (input: LexemeLanguage): Promise<boolean> => {
+    const rows = await tx.execute<{ rendered: boolean }>(
+      sql`SELECT ${LEMMA_RENDERED(sql`${input.lexemeId}`, sql`${input.userLanguageCode}`)} AS rendered`,
+    );
+    return rows.rows[0].rendered;
   };
 
   /** Phase 31 (spec D12). The next free entry rank of a form, for a headword added
@@ -5108,13 +5156,6 @@ export async function withJobQueue<T>(db: Db, run: (boss: PgBoss) => Promise<T>)
     return rows.rows[0].next;
   };
 
-  const UNRENDERED = (lexeme: SQL, language: SQL) => sql`
-    NOT EXISTS (
-      SELECT 1 FROM dict_variants v
-      JOIN dict_lexemes l           ON l.id = v.lexeme_id
-      JOIN dict_var_translations tr ON tr.variant_id = v.id AND tr.user_language_code = ${language}
-      WHERE v.lexeme_id = ${lexeme} AND lower(v.form) = lower(l.lemma))`;
-
   /** Phase 31 (plan item 3). Records a render request for each pair whose lemma
    *  form is unrendered and that was never requested, and returns those: the
    *  ones to enqueue. */
@@ -5125,7 +5166,7 @@ export async function withJobQueue<T>(db: Db, run: (boss: PgBoss) => Promise<T>)
       SELECT DISTINCT asked.lexeme_id, asked.user_language_code
       FROM (VALUES ${sql.join(pairs.map((p) => sql`(${p.lexemeId}::text, ${p.userLanguageCode}::text)`), sql`, `)})
            AS asked(lexeme_id, user_language_code)
-      WHERE ${UNRENDERED(sql`asked.lexeme_id`, sql`asked.user_language_code`)}
+      WHERE NOT ${LEMMA_RENDERED(sql`asked.lexeme_id`, sql`asked.user_language_code`)}
       ON CONFLICT DO NOTHING
       RETURNING lexeme_id, user_language_code`);
     return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, userLanguageCode: row.user_language_code }));
@@ -5138,7 +5179,7 @@ export async function withJobQueue<T>(db: Db, run: (boss: PgBoss) => Promise<T>)
       SELECT DISTINCT ve.lexeme_id, e.source_language
       FROM vocabulary_entries ve
       JOIN enrollments e ON e.id = ve.enrollment_id
-      WHERE ${UNRENDERED(sql`ve.lexeme_id`, sql`e.source_language`)}
+      WHERE NOT ${LEMMA_RENDERED(sql`ve.lexeme_id`, sql`e.source_language`)}
       ON CONFLICT DO NOTHING
       RETURNING lexeme_id, user_language_code`);
     return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, userLanguageCode: row.user_language_code }));
@@ -5401,7 +5442,7 @@ git commit -m "feat(server): render-lemma — a saved word's lemma form is rende
 - Modify: `apps/server/src/domain/session.ts` (`SavedGloss`, `GlossRendering`, `pickGlosses`, `askableRenderings`, `pickRendering`), `session.test.ts`
 - Modify: `apps/server/src/domain/distractors.ts` (`withSiblingAlternatives`), `distractors.test.ts`
 - Modify: `apps/server/src/repo/vocabulary.ts` (`listSavedGlosses` carries the key), `apps/server/src/repo/dictionary.ts` (`findGlossRenderings`, `findSiblings`)
-- Modify: `apps/server/src/services/sessions.ts` (`createNextSession`, `prepareSession`), `sessions.prepare.test.ts`
+- Modify: `apps/server/src/services/sessions.ts` (`createNextSession`, `prepareSession`), `sessions.prepare.test.ts`, `sessions.test.ts`
 - Create: `apps/server/tests/integration/repo/dictionary.sessions.test.ts`, `apps/server/tests/integration/services/sessions.glosses.test.ts`
 - Modify: `apps/server/tests/support/jobs.ts` (`jobPayloads`)
 
@@ -5547,17 +5588,37 @@ export function withSiblingAlternatives(input: {
   siblings: readonly string[];
   alternatives: readonly string[];
 }): string[] {
-  const seen = new Set([input.form, input.lemma].map(comparable));
+  return keepAlternatives(input.form, input.lemma, [...input.siblings, ...input.alternatives]);
+}
+```
+
+It shares its loop with `cleanAlternatives`, so the two cannot drift apart. Add above both, and make `cleanAlternatives` (keeping its comment) call it with its own extra refusal:
+
+```ts
+/** Alternatives for a typed card: trimmed, never empty, never the card's own
+ *  form or lemma, no two alike under `comparable`, at most MAX_ALTERNATIVES, in
+ *  the order given. `accept` adds a caller's own refusal. */
+function keepAlternatives(
+  form: string,
+  lemma: string,
+  candidates: readonly string[],
+  accept: (text: string) => boolean = () => true,
+): string[] {
+  const seen = new Set([form, lemma].map(comparable));
   const kept: string[] = [];
-  for (const raw of [...input.siblings, ...input.alternatives]) {
+  for (const raw of candidates) {
     const text = raw.trim();
     const key = comparable(text);
-    if (text === '' || seen.has(key)) continue;
+    if (text === '' || !accept(text) || seen.has(key)) continue;
     seen.add(key);
     kept.push(text);
     if (kept.length === MAX_ALTERNATIVES) break;
   }
   return kept;
+}
+
+function cleanAlternatives(item: DistractorItem, found: string[] | undefined, explanationLetters: RegExp): string[] {
+  return keepAlternatives(item.form, item.lemma, found ?? [], (text) => !explanationLetters.test(text));
 }
 ```
 
@@ -5647,7 +5708,7 @@ both added to the returned object. Create `apps/server/tests/integration/repo/di
         if (picks.length === 0) throw new NoSavedWords(enrollmentId);
 ```
 
-and the job's payload takes `picks` as built. Add to `tests/support/jobs.ts`:
+and the job's payload takes `picks` as built. `services/sessions.test.ts` fakes this use case too: its `listSavedGlosses` stubs return `SavedGloss` rows (`{ glossId, key, variantId }`), and its fake transaction gains `dict: stub<DictRepo>({ findGlossRenderings: async () => [...] })`, returning for each saved row one `GlossRendering` on its saved variant whose `gloss` is its `key`. Add to `tests/support/jobs.ts`:
 
 ```ts
 /** Phase 31. The payloads of every job of one queue, oldest first. */
@@ -5948,8 +6009,11 @@ git commit -m "feat(server): the photo import matches a printed word to a gloss 
 - Modify: `apps/server/src/db/cli.ts` (`--merge-glosses`), `apps/server/package.json`, `package.json`
 - Create: `apps/server/tests/integration/services/glosses.tools.test.ts`
 - Modify: `packages/core/src/api/schemas.ts` (`LlmGlossMergeSchema`)
+- Modify: `docs/adr/adr-0001-layered-architecture.md`, `scripts/check-adr-0001-layered-architecture.sh` (R4 lets `db/cli.ts` import the composition root)
+- Modify: `apps/server/tests/support/fakes.ts` (`createFakeAppDeps`' `glosses`, `createFakeGlossRepo`)
 
 **Interfaces:**
+- Consumes: `insertDriftedFinger` and `insertRendering` from `tests/support/dictRows.ts` (Task 9).
 - Produces: an exported sense carries `alternatives`, `gloss`, `gloss_alternatives` and `definition`, and a restore writes them through `persistEntries`.
 - Produces, in `domain/glossMerge.ts`: `GLOSS_MERGE_MARKER = 'forms of one word'`; `buildGlossMergePrompt(input: { lemma: string; partOfSpeech: string; from: LanguageCode; to: LanguageCode; glosses: { key: string; alternatives: string[] }[]; senses: { senseCode: string; gloss: string; definition: string | null }[] }): GlossMergePrompt`; `parseGlossMerge(raw: string): { groups: string[][]; definitions: { senseCode: string; definition: string }[] } | null`; `mutualPairs(glosses: { id: string; key: string; alternatives: string[] }[]): [string, string][]`.
 - Produces, in `services/glosses.ts`: `planMerges(input: { model: boolean }): Promise<MergePlan>`; `applyMerges(plan: MergePlan): Promise<{ merged: number; definitions: number }>`, where `MergePlan = { merges: { lexemeId: string; userLanguageCode: string; lemma: string; survivorId: string; survivorKey: string; otherId: string; otherKey: string; tier: 1 | 2 }[]; definitions: { senseId: string; definition: string }[]; suggestions: { lemma: string; keys: [string, string] }[] }`.
@@ -6173,7 +6237,7 @@ export type MergeWork = {
   };
 ```
 
-both added to the returned object (and `createFakeGlossRepo` in `fakes.ts` gains `findMergeWork: async () => []` and `setDefinitions: async () => 0`).
+both added to the returned object (and `createFakeGlossRepo` in `fakes.ts` gains `findMergeWork: async () => []` and `setDefinitions: async () => 0`; `createFakeAppDeps`' `glosses` gains `planMerges: unreachable` and `applyMerges: unreachable`, because `AppDeps.glosses` is the whole `GlossService`).
 
 In `apps/server/src/services/glosses.ts`, the factory takes an optional `llm?: LlmClient` and gains two use cases (import `buildGlossMergePrompt`, `parseGlossMerge`, `mutualPairs`, `normaliseGloss`, `type LanguageCode`):
 
@@ -6268,7 +6332,7 @@ export type MergePlan = {
         });
         if (!counts) continue;
         merged += 1;
-        logger.info({ event: 'gloss_merged', lexeme_id: merge.lexemeId, user_language_code: merge.userLanguageCode, survivor_id: merge.survivorId, merged_id: merge.otherId, tier: merge.tier, ...counts });
+        logger.info({ ...glossMerged({ lexemeId: merge.lexemeId, userLanguageCode: merge.userLanguageCode, survivorId: merge.survivorId, otherId: merge.otherId, counts }), tier: merge.tier });
       }
       const definitions = plan.definitions.length === 0 ? 0 : await transaction(({ gloss }) => gloss.setDefinitions(plan.definitions));
       return { merged, definitions };
@@ -6328,7 +6392,9 @@ export function createGlossTools(io: {
 
 `createServerDeps` binds with `createTransaction(io.db, (tx) => bindRepos(tx, io.boss))` (import `type Tx` from `./db/client`, `type Repos` from `./services/transaction`, `type JobRepo` from `./repo/jobs`).
 
-- [ ] **Step 5: The command.** In `apps/server/src/db/cli.ts` (import `loadGeminiConfig` from `../config`, `createGlossTools` from `../composition` and `createConsoleLogger` from `../logger`), after the `--render-lemmas` block:
+- [ ] **Step 5: The command.** ADR 0001 needs one amendment first (decided while planning, item 10). R4 forbids `src/db/` from importing `composition.ts`, and R11 lets only `composition.ts` construct the Gemini client, so the CLI, which R7 already treats as an entry point, may import the composition root, and nothing else under `db/` may. In `docs/adr/adr-0001-layered-architecture.md`, add that one exception to R4's row and text, and append `R4 amended 2026-10-09 (phase 31): db/cli.ts may import composition.ts` to the Date line. In `scripts/check-adr-0001-layered-architecture.sh`, end `r4()`'s pipeline with `| grep -v '^apps/server/src/db/cli.ts:'`. Plant a violation before trusting the change: add `import { createServerDeps } from '../composition';` to `apps/server/src/db/seed.ts`, run `bash scripts/check-adr-0001-layered-architecture.sh`, and expect a VIOLATION under R4 naming `seed.ts`; then remove the plant and expect R4 ok. Paste both outputs into the report.
+
+Then, in `apps/server/src/db/cli.ts` (import `loadGeminiConfig` from `../config`, `createGlossTools` from `../composition` and `createConsoleLogger` from `../logger`), after the `--render-lemmas` block:
 
 ```ts
     // Phase 31 (spec D7). `npm run dict:glosses:merge [-- --model] [-- --yes]`:
@@ -6363,7 +6429,7 @@ Scripts: `apps/server/package.json`, `"dict:glosses:merge": "tsx src/db/cli.ts -
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { createGlossTools } from '../../../src/composition';
-import { insertLexeme } from '../../support/dictRows';
+import { insertDriftedFinger, insertRendering } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { geminiResponse } from '../../support/geminiResponse';
 import { clearNamespace, expectGeminiRawBody, geminiBaseUrlFor, mockNamespace } from '../../support/mockServer';
@@ -6390,27 +6456,12 @@ const tools = () =>
   });
 
 /** `finger` whose lemma form renders body_part as אצבע while body_part's gloss is
- *  keyed אצבעות: the blocked rename tier 1 finds. */
+ *  keyed אצבעות: the blocked rename tier 1 finds. insertLexeme alone cannot
+ *  build it, since its rule keys body_part from the lemma form. */
 async function blockedRename() {
-  return insertLexeme(t.db, {
-    lemma: 'finger',
-    languageCode: 'en',
-    partOfSpeech: 'noun',
-    userLanguageCode: 'he',
-    senses: [{ senseCode: 'body_part' }, { senseCode: 'digit' }],
-    variants: [
-      { form: 'fingers', kind: 'word', entryRank: 0, translations: [{ senseCode: 'body_part', rank: 0, translation: 'אצבעות', exampleSource: null, exampleTarget: null }] },
-      {
-        form: 'finger',
-        kind: 'word',
-        entryRank: 0,
-        translations: [
-          { senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null },
-          { senseCode: 'body_part', rank: 1, translation: 'אצבע', exampleSource: null, exampleTarget: null },
-        ],
-      },
-    ],
-  });
+  const w = await insertDriftedFinger(t.db);
+  await insertRendering(t.db, { variantId: w.finger, senseId: w.senseIds[0], userLanguageCode: 'he', translation: 'אצבע', gloss: 'אצבע', rank: 1 });
+  return w;
 }
 
 describe('dict:glosses:merge (spec D7)', () => {
@@ -6426,17 +6477,7 @@ describe('dict:glosses:merge (spec D7)', () => {
   });
 
   it("plans tier 2 from the model's groups, the citation form surviving", async () => {
-    await insertLexeme(t.db, {
-      lemma: 'finger',
-      languageCode: 'en',
-      partOfSpeech: 'noun',
-      userLanguageCode: 'he',
-      senses: [{ senseCode: 'body_part' }, { senseCode: 'digit' }],
-      variants: [
-        { form: 'fingers', kind: 'word', entryRank: 0, translations: [{ senseCode: 'body_part', rank: 0, translation: 'אצבעות', exampleSource: null, exampleTarget: null }] },
-        { form: 'finger', kind: 'word', entryRank: 0, translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null }] },
-      ],
-    });
+    await insertDriftedFinger(t.db);
     await expectGeminiRawBody(ns, JSON.stringify(geminiResponse({ groups: [['אצבע', 'אצבעות']], definitions: [] })));
     const plan = await tools().planMerges({ model: true });
     expect(plan.merges.map(({ otherKey, survivorKey, tier }) => ({ otherKey, survivorKey, tier }))).toEqual([
@@ -6449,7 +6490,7 @@ describe('dict:glosses:merge (spec D7)', () => {
 - [ ] **Step 7: Run and commit.** `npm run typecheck && npm test && npm run test:integration && npm run lint:arch`. Expected: PASS. Then, on the lane, `npm run dict:glosses:merge` (expected: a plan and "Nothing changed").
 
 ```bash
-git add apps/server packages/core package.json
+git add apps/server packages/core package.json docs/adr scripts
 git commit -m "feat(server): export and restore the new fields, and dict:glosses:merge in two tiers with a plan step"
 ```
 
@@ -6844,7 +6885,9 @@ Start `npm run server` for a minute and watch for `lemma_rendered` and `lemma_re
 - [ ] **Step 3: The spec as built.** In the spec, add a `- **Built:**` line under its Status naming the PR, and a short section `## As built` after `## Risks` listing the eight items of this plan's "Decided while planning", each in one sentence with its reason, plus:
   - the lookup card's and the word page's exact shapes (Task 7);
   - the list headline is the earliest saved gloss (Task 7), not the lowest-ranked;
-  - the merge tool runs only in a lane: production's database is reachable only from the container's start command (ADR 0010), so in production the automatic job is the only merge.
+  - the merge tool runs only in a lane: production's database is reachable only from the container's start command (ADR 0010), so in production the automatic job is the only merge;
+  - Task 10's failed-render case checks the word page on the saved form, not session preparation: preparation never reads lemma renders, so it cannot wait on one;
+  - `also` and `savedFrom` are Hebrew only: the app's strings have one language, so the spec's "both languages" had nothing to fill.
   Replace every "ADR 0009" in the spec with "ADR 0011": Done means, Scope, D17, Testing and Build order name it, five places in all (`grep -n "ADR 0009" docs/superpowers/specs/2026-10-09-lang-tutor-phase-31-glosses-design.md`).
 
 - [ ] **Step 4: Finish the branch.** Follow CLAUDE.md "Finishing a branch": `superpowers:finishing-a-development-branch`, taking "Push and create a Pull Request" through the `git-create-pr` skill, then `ci-green`. Never merge locally, and keep the worktree. One PR for the whole phase. The PR description says, beside the summary:
