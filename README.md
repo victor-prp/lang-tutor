@@ -444,6 +444,10 @@ refuses to start without, and one optional:
 | `WEB_ORIGINS` | Derived by `scripts/lane-env.sh`: this lane's Metro origins, by name and by LAN address, comma-separated. |
 | `RESEND_BASE_URL` | Optional; defaults to `https://api.resend.com`. Tests point it at a MockServer namespace. |
 
+Production sets all five in `terraform/prod`: the two secrets from Secrets Manager, the
+rest as plain entries. The [hosting runbook](docs/runbooks/hosting.md#when-phase-29-merges)
+says in which order.
+
 **One-time Resend setup** (Victor): in Resend add the domain `mail.wordspal.ai`, then add the
 SPF and DKIM DNS records it shows; optionally add a `_dmarc.wordspal.ai` TXT record with
 `p=none`. Create an API key restricted to sending and put it in `RESEND_API_KEY`.

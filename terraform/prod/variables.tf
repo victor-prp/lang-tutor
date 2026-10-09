@@ -96,7 +96,13 @@ variable "secret_prefix" {
 }
 
 variable "secret_env_names" {
-  description = "Secrets Manager entries under secret_prefix, each passed to the container under its own name. Phase 29 appends BETTER_AUTH_SECRET and RESEND_API_KEY."
+  description = "Secrets Manager entries under secret_prefix, each passed to the container under its own name. Each must exist before a plan: write it first (runbook)."
   type        = list(string)
-  default     = ["GEMINI_API_KEY"]
+  default     = ["GEMINI_API_KEY", "BETTER_AUTH_SECRET", "RESEND_API_KEY"]
+}
+
+variable "mail_from" {
+  description = "The sign-in email's sender, on the domain verified in Resend (phase 29)."
+  type        = string
+  default     = "WordsPal <code@mail.wordspal.ai>"
 }

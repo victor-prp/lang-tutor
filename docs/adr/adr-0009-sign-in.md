@@ -163,6 +163,12 @@ Before the app is public: switch on Better Auth's rate limiter with `storage: 'd
 serve the API over HTTPS (Better Auth then marks the cookie `Secure`); move `BETTER_AUTH_SECRET` and
 `RESEND_API_KEY` into the host's secret store.
 
+Phase 30 went public before this ADR merged, by choice ([hosting runbook](../runbooks/hosting.md#when-phase-29-merges)).
+HTTPS is phase 30's: Lightsail terminates TLS on `app.wordspal.ai`. The secrets are this
+merge's: both are Secrets Manager entries under `wordspal/prod/`, which `terraform/prod` reads.
+The rate limiter and the per-IP send limit are still open, and are the next change after the
+release that carries this ADR.
+
 ## Switch signals
 
 **The switch target is hand-rolled on the same tables, not another product.** Switch when
