@@ -26,6 +26,8 @@
     "test:lanes": "bash scripts/test-lane-env.sh && bash scripts/test-lane-clean.sh && bash scripts/test-lane-abandon.sh",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint:arch": "bash scripts/check-adrs.sh",
+    "release": "bash scripts/release.sh",
+    "rollback": "bash scripts/release.sh --rollback",
     "lane:list": "bash scripts/lane-env.sh npm run lane:list --workspace apps/server",
     "lane:down": "bash scripts/lane-env.sh npm run lane:down --workspace apps/server --",
     "lane:clean": "bash scripts/lane-clean.sh",
