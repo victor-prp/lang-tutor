@@ -181,4 +181,49 @@ describe('assignGlosses (spec D6, D7)', () => {
     expect(plan.rename).toEqual([{ glossId: 'g1', key: 'אצבע' }]);
     expect(plan.join).toEqual([{ senseId: 's3', glossId: 'g1' }]);
   });
+
+  // D7: one answer never leaves the merge job a pair to fold. The rename lands
+  // first even when the new sense ranks above the member that makes it.
+  it('joins a new sense to the gloss a lower-ranked member renames, and asks for no merge', () => {
+    const plan = assignGlosses({
+      senses: [sense('s3', 'אצבע'), sense('s1', 'אצבע')],
+      lemmaForm: true,
+      glosses: [{ id: 'g1', key: 'אצבעות', alternatives: [] }],
+      memberships: new Map([['s1', 'g1']]),
+    });
+    expect(plan).toEqual({
+      create: [],
+      join: [{ senseId: 's3', glossId: 'g1' }],
+      alternatives: [],
+      rename: [{ glossId: 'g1', key: 'אצבע' }],
+      needsMerge: false,
+    });
+  });
+
+  // D6's own case: `difficult`'s second sense is קשה today and מסובך on another
+  // day. Only the gloss's first member in the write decides its key; a later
+  // member keeps its other word on its own rendering, whatever that word is.
+  it("lets only a gloss's first member rename it: a later member's other word renames nothing and merges nothing", () => {
+    const write = (glosses: { id: string; key: string; alternatives: string[] }[]) =>
+      assignGlosses({
+        senses: [sense('s1', 'קשה'), sense('s2', 'מסובך')],
+        lemmaForm: true,
+        glosses,
+        memberships: new Map([['s1', 'g1'], ['s2', 'g1']]),
+      });
+    const unchanged = { create: [], join: [], alternatives: [], rename: [], needsMerge: false };
+    expect(write([{ id: 'g1', key: 'קשה', alternatives: [] }])).toEqual(unchanged);
+    // Not even when another gloss of the lexeme holds the later member's word.
+    expect(write([{ id: 'g1', key: 'קשה', alternatives: [] }, { id: 'g2', key: 'מסובך', alternatives: [] }])).toEqual(unchanged);
+  });
+
+  it('counts a sense the answer names twice once, as its first occurrence', () => {
+    const plan = assignGlosses({
+      senses: [sense('s1', 'עכבר'), sense('s1', 'חולדה', ['מכרסם'])],
+      lemmaForm: true,
+      glosses: [],
+      memberships: none,
+    });
+    expect(plan.create).toEqual([{ key: 'עכבר', alternatives: [], senseIds: ['s1'] }]);
+  });
 });

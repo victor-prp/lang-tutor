@@ -78,9 +78,19 @@ export type GlossPlan = {
  * spelled as the lowest-ranked wrote it. Only equal keys group: two senses that
  * name each other among their alternatives are a synonym merge, which is out.
  *
- * The lemma form may rename its sense's gloss to its own citation form, once per
- * gloss per write, when no other live gloss holds that key; when one does, that
- * is a merge, which this never does (D7) and only asks for.
+ * The senses with a membership go first and the new ones after, each group in
+ * rank order, so every rename lands before a new sense looks for a gloss by
+ * key: one answer never leaves the merge job a pair to fold (D7). A sense the
+ * answer names twice counts once, as its first occurrence, so no gloss is
+ * created that no membership points to.
+ *
+ * The lemma form may rename a gloss to its own citation form, and the gloss's
+ * first member in this write, by rank, decides that alone. If its citation form
+ * normalises differently from the key, the gloss is renamed when no other live
+ * gloss holds that key; when one does, that is a merge, which this never does
+ * (D7) and only asks for. If it agrees, the key stands. A later member never
+ * renames the gloss, whatever it says: like any later form, it keeps its other
+ * word on its own rendering (D6).
  */
 export function assignGlosses(input: {
   senses: readonly AnswerSense[];
@@ -93,7 +103,8 @@ export function assignGlosses(input: {
   const byKey = new Map([...byId.values()].map((gloss) => [normaliseGloss(gloss.key), gloss.id]));
   const created = new Map<string, { key: string; alternatives: string[]; senseIds: string[] }>();
   const plan: GlossPlan = { create: [], join: [], alternatives: [], rename: [], needsMerge: false };
-  const renamed = new Set<string>();
+  // Glosses whose first member in this write has been seen: it alone decides.
+  const decided = new Set<string>();
   const widened = new Set<string>();
 
   const widen = (glossId: string, extra: readonly string[]) => {
@@ -105,28 +116,34 @@ export function assignGlosses(input: {
     }
   };
 
-  for (const sense of input.senses) {
-    const key = normaliseGloss(sense.gloss);
-    const current = input.memberships.get(sense.senseId);
-    if (current !== undefined) {
-      const gloss = byId.get(current);
-      if (gloss) {
-        if (input.lemmaForm && !renamed.has(current) && key !== normaliseGloss(gloss.key)) {
-          const holder = byKey.get(key);
-          if (holder === undefined && !created.has(key)) {
-            byKey.delete(normaliseGloss(gloss.key));
-            byKey.set(key, current);
-            gloss.key = sense.gloss;
-            renamed.add(current);
-            plan.rename.push({ glossId: current, key: sense.gloss });
-          } else if (holder !== current) {
-            plan.needsMerge = true;
-          }
+  const firsts = new Map<string, AnswerSense>();
+  for (const sense of input.senses) if (!firsts.has(sense.senseId)) firsts.set(sense.senseId, sense);
+  const senses = [...firsts.values()];
+
+  for (const sense of senses.filter(({ senseId }) => input.memberships.has(senseId))) {
+    const glossId = input.memberships.get(sense.senseId)!;
+    const gloss = byId.get(glossId);
+    if (!gloss) continue;
+    if (input.lemmaForm && !decided.has(glossId)) {
+      decided.add(glossId);
+      const key = normaliseGloss(sense.gloss);
+      if (key !== normaliseGloss(gloss.key)) {
+        const holder = byKey.get(key);
+        if (holder === undefined) {
+          byKey.delete(normaliseGloss(gloss.key));
+          byKey.set(key, glossId);
+          gloss.key = sense.gloss;
+          plan.rename.push({ glossId, key: sense.gloss });
+        } else {
+          plan.needsMerge = true;
         }
-        widen(current, sense.glossAlternatives);
       }
-      continue;
     }
+    widen(glossId, sense.glossAlternatives);
+  }
+
+  for (const sense of senses.filter(({ senseId }) => !input.memberships.has(senseId))) {
+    const key = normaliseGloss(sense.gloss);
     const existing = byKey.get(key);
     if (existing !== undefined) {
       plan.join.push({ senseId: sense.senseId, glossId: existing });
