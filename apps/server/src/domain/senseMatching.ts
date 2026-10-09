@@ -1,6 +1,6 @@
 import { LlmSenseMatchSchema } from '@lang-tutor/core/api/schemas';
+import { normaliseGloss } from '@lang-tutor/core/domain';
 
-import { comparable } from './distractors';
 import { LANGUAGES, type LanguageCode } from './languages';
 import { dropNulls, unfence } from './translation';
 
@@ -8,12 +8,16 @@ import { dropNulls, unfence } from './translation';
  * Phase 26 (spec D7). Which of a word's senses the Hebrew printed beside it
  * names. A free check first: any printed gloss equal to a sense's translation.
  * Only when that finds nothing is the model asked, through LlmClient.
+ *
+ * Phase 31. A sense is a gloss card now, so the free check reads the card's
+ * alternatives as well as its translation, and "equal" is the gloss key's rule
+ * (normaliseGloss), bar a sentence mark at the end of a word.
  */
 
 /** In the instruction verbatim, so MockServer can tell this call apart. */
 export const SENSE_MATCH_MARKER = 'which numbered sense';
 
-export type MatchOption = { translation: string; part_of_speech?: string };
+export type MatchOption = { translation: string; alternatives?: readonly string[]; part_of_speech?: string };
 export type MatchedBy = 'exact' | 'model' | 'none' | 'no_hebrew';
 export type SenseChoice = { index: number; mismatch: boolean; matchedBy: MatchedBy };
 
@@ -23,19 +27,35 @@ export type SenseMatchPrompt = {
   schema: typeof LlmSenseMatchSchema;
 };
 
-/** A printed translation's glosses: `בנק, גדה / שפה` is three. Folded with
- *  `comparable`, the session's own idea of "the same Hebrew". */
+// A list prints "מכונית." as readily as "מכונית". normaliseGloss keeps a mark at
+// the end of a word, and `comparable` (the session's idea of "the same Hebrew")
+// drops it, so folding with normaliseGloss alone would turn a full stop into a
+// model call. This is `comparable`'s class, white space included.
+const TRAILING_MARKS = /[\s.,;:!?…،؛؟]+$/u;
+
+/** One word of a printed translation or of a card, as the free check compares
+ *  it: a mark at its end dropped, then folded with normaliseGloss, the rule
+ *  that makes two target words one gloss. */
+const wordKey = (word: string): string => normaliseGloss(word.replace(TRAILING_MARKS, ''));
+
+/** A printed translation's words: `בנק, גדה / שפה` is three. Notes in brackets go
+ *  first, as splitTranslation drops them, so a comma inside one never splits;
+ *  each word is then folded by wordKey. */
 export function glossesOf(hebrew: string): string[] {
   return hebrew
+    .replace(/\([^)]*\)/gu, '')
     .split(/[,/;]/u)
-    .map(comparable)
+    .map(wordKey)
     .filter((gloss) => gloss.length > 0);
 }
 
 export function firstChoice(hebrew: string | null, options: readonly MatchOption[]): SenseChoice | 'ask_model' {
   if (hebrew === null) return { index: 0, mismatch: false, matchedBy: 'no_hebrew' };
-  const glosses = new Set(glossesOf(hebrew));
-  const index = options.findIndex((option) => glosses.has(comparable(option.translation)));
+  const printed = new Set(glossesOf(hebrew));
+  // Phase 31: a card's other words name it too, so a printed רכב finds מכונית.
+  const index = options.findIndex((option) =>
+    [option.translation, ...(option.alternatives ?? [])].some((word) => printed.has(wordKey(word))),
+  );
   return index === -1 ? 'ask_model' : { index, mismatch: false, matchedBy: 'exact' };
 }
 
@@ -58,6 +78,7 @@ export function buildSenseMatchPrompt(input: {
     senses: input.options.map((option, index) => ({
       number: index + 1,
       hebrew: option.translation,
+      ...(option.alternatives?.length ? { also: option.alternatives } : {}),
       ...(option.part_of_speech ? { part_of_speech: option.part_of_speech } : {}),
     })),
   });
