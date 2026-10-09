@@ -12,7 +12,7 @@ import { useVocabulary } from '@/hooks/useVocabulary';
 import { dimensionRows } from '@/progress';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
-import { keepGlossOrder, toggleOptimistically } from '@/vocabulary';
+import { alsoLine, keepGlossOrder, savedFromLine, toggleOptimistically } from '@/vocabulary';
 
 export default function VocabularyWordScreen() {
   const { lemma } = useLocalSearchParams<{ lemma: string }>();
@@ -116,18 +116,25 @@ export default function VocabularyWordScreen() {
                 </Text>
               ) : null}
               <Text style={styles.translation}>{sense.translation}</Text>
+              {alsoLine(sense.alternatives) ? (
+                <Text testID="vocabulary-sense-also" style={styles.meta}>
+                  {alsoLine(sense.alternatives)}
+                </Text>
+              ) : null}
               {sense.added_by ? (
                 <Text testID="vocabulary-sense-added-by" style={styles.addedBy}>
                   {strings.addedBy([sense.added_by])}
                 </Text>
               ) : null}
-              {sense.form.toLowerCase() !== word.lemma.toLowerCase() ? (
-                <Text style={styles.meta}>{strings.vocabularyFromForm(sense.form)}</Text>
+              {savedFromLine(sense) ? (
+                <Text testID="vocabulary-sense-saved-from" style={styles.meta}>
+                  {savedFromLine(sense)}
+                </Text>
               ) : null}
               {/* One example per member sense. Two members may share a sentence,
-                  so the key adds the place. */}
+                  so the React key adds the place. */}
               {sense.examples.map((example, index) => (
-                <View key={`${index}:${example.source}`} style={styles.example}>
+                <View key={`${index}:${example.source}`} testID="vocabulary-sense-example" style={styles.example}>
                   <View style={styles.spoken}>
                     <Text style={[styles.exampleSource, styles.grow]}>{example.source}</Text>
                     {language ? (

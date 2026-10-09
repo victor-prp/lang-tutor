@@ -3,12 +3,14 @@ import type { TranslationSense, VocabularySense, VocabularyWord, VocabularyWordD
 
 import {
   addableStateOf,
+  alsoLine,
   appendPage,
   canSaveAll,
   keepGlossOrder,
   lookupEnrollmentId,
   toggleIntent,
   partsOfSpeechLabel,
+  savedFromLine,
   savedStateOf,
   showsMark,
   toggleOptimistically,
@@ -231,5 +233,22 @@ describe('toggleIntent', () => {
   it('unsaves for a learner and never for a tutor', () => {
     expect(toggleIntent('learner', true)).toBe('unsave');
     expect(toggleIntent('tutor', true)).toBe('none');
+  });
+});
+
+describe('gloss card lines (phase 31)', () => {
+  it('says "also …" only when there are alternatives', () => {
+    expect(alsoLine(['רכב', 'אוטו'])).toBe('גם: רכב, אוטו');
+    expect(alsoLine([])).toBeNull();
+    expect(alsoLine(undefined)).toBeNull();
+  });
+
+  it('names the form a gloss was saved from, with its rendering', () => {
+    const card = {
+      gloss_id: 'g1', variant_id: 'v1', form: 'fingers', translation: 'אצבע', alternatives: [], part_of_speech: 'noun',
+      examples: [], saved: true, saved_from: { form: 'fingers', translation: 'אצבעות' },
+    };
+    expect(savedFromLine(card)).toBe('נשמר מתוך ⁨fingers⁩: אצבעות');
+    expect(savedFromLine({ ...card, saved_from: undefined })).toBeNull();
   });
 });

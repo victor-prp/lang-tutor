@@ -23,6 +23,7 @@ import {
 } from '@/photoImports';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { alsoLine } from '@/vocabulary';
 
 // How one read of the import ended (ReadOutcome in @/photoImports), with what it
 // read when it was shown.
@@ -35,9 +36,14 @@ const withRow = (imp: PhotoImport, row: PhotoImportItem): PhotoImport => ({
 
 function Meaning({ option }: { option: PhotoImportOption }) {
   const partOfSpeech = option.part_of_speech ? strings.partOfSpeech(option.part_of_speech) : undefined;
+  const also = alsoLine(option.alternatives);
   return (
     <>
       <Text style={styles.translation}>{option.translation}</Text>
+      {/* Phase 31. The lookup card's lines, in its order: the gloss's key when it says
+          something else, the rendering's other words, then the part of speech. */}
+      {option.key ? <Text style={styles.meta}>{option.key}</Text> : null}
+      {also ? <Text style={styles.meta}>{also}</Text> : null}
       {partOfSpeech ? <Text style={styles.meta}>{partOfSpeech}</Text> : null}
     </>
   );
@@ -302,7 +308,7 @@ export default function PhotoImportReviewScreen() {
                           style={[styles.option, selected && styles.optionSelected]}
                         >
                           <Meaning option={option} />
-                          {/* Two members may share a sentence, so the key adds the place. */}
+                          {/* Two members may share a sentence, so the React key adds the place. */}
                           {(option.examples ?? []).map((example, index) => (
                             <View key={`${index}:${example.source}`}>
                               <Text style={[styles.exampleSource, { writingDirection: wordDirection }]}>{example.source}</Text>

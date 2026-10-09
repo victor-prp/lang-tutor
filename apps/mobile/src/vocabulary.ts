@@ -1,6 +1,7 @@
 import type {
   TranslationSense,
   VocabularyEntryInput,
+  VocabularySense,
   VocabularyWord,
   VocabularyWordDetail,
 } from '@lang-tutor/core/api';
@@ -125,4 +126,14 @@ export function keepGlossOrder(shown: VocabularyWordDetail, fresh: VocabularyWor
 
 export function showsMark(word: VocabularyWord): boolean {
   return word.gloss_count > 1;
+}
+
+/** Phase 31 (spec D5). The line under a gloss card's headline, or nothing. */
+export function alsoLine(alternatives: readonly string[] | undefined): string | null {
+  return alternatives && alternatives.length > 0 ? strings.also(alternatives) : null;
+}
+
+/** Phase 31 (spec D11). "Saved from fingers: אצבעות", for a word saved inflected. */
+export function savedFromLine(card: VocabularySense): string | null {
+  return card.saved_from ? strings.savedFrom(card.saved_from.form, card.saved_from.translation) : null;
 }
