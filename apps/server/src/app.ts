@@ -12,6 +12,7 @@ import { createSessionsRouter } from './routes/sessions';
 import { createTranslationsRouter } from './routes/translations';
 import { createUsersRouter } from './routes/users';
 import { createVocabularyRouter } from './routes/vocabulary';
+import { createWebHandler } from './web';
 
 // Readiness, not just liveness: the e2e suite waits on this before starting the
 // app, and a 503 here is what distinguishes "server booting" from "broken".
@@ -71,6 +72,10 @@ export function createApp(deps: AppDeps) {
     },
   });
   app.get('/docs', Scalar({ url: '/openapi.json', pageTitle: 'lang-tutor API' }));
+
+  // Phase 30 (spec D1). Last, so it only sees what no route answered. Unset in
+  // every lane and every test, where Metro or `expo serve` serves the app.
+  if (deps.webDistDir) app.use('*', createWebHandler(deps.webDistDir));
 
   app.onError((error, c) => {
     if (error instanceof HTTPException) return c.json({ error: 'invalid request' }, error.status);

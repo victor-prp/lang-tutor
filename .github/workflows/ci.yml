@@ -10,6 +10,9 @@ name: CI
 # so re-running the suite by hand against an unchanged tree has to stay possible.
 on:
   push:
+    # Branches only: a v* tag starts the release workflow, which reads this
+    # commit's results instead of running the suite a second time.
+    branches: ['**']
   workflow_dispatch:
 
 # npm ci runs install lifecycle scripts from the whole dependency tree on every
@@ -48,6 +51,16 @@ jobs:
       - run: ./scripts/test-lane-env.sh
       - run: ./scripts/test-lane-clean.sh
       - run: ./scripts/test-lane-abandon.sh
+      # Phase 30. The prod-mode Expo guard is pure text too.
+      - run: ./scripts/test-mobile-prod.sh
+      # Phase 30. The image must run the Node major the other jobs test.
+      - run: ./scripts/check-dockerfile-node.sh
+      # Phase 30. infra.sh's tag resolution, against a stub terraform.
+      - run: ./scripts/test-infra.sh
+      # Phase 30. The release guard's verdicts, against hand-written check runs.
+      - run: ./scripts/test-release-guard.sh
+      # Phase 30. A rollback applies master's Terraform, never the old tag's.
+      - run: ./scripts/test-release-workflow.sh
 
   check-types:
     runs-on: ubuntu-latest
@@ -196,6 +209,93 @@ jobs:
           path: e2e/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  # Phase 30. The production image, built and then driven by the whole e2e
+  # suite: one container serving the export and the API from one origin, as
+  # Lightsail runs it. The test-e2e run above stays, being faster and pointed at
+  # the tsx server. The image is built for this job's own API address, so the one
+  # difference from a release build is the URL inlined into the web bundle.
+  build-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:up
+      - name: Resolve Playwright version
+        id: playwright
+        working-directory: e2e
+        run: |
+          version=$(node -p 'require("@playwright/test/package.json").version')
+          [ -n "$version" ] || { echo "could not resolve @playwright/test version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - run: npm run e2e:image
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces-image
+          path: e2e/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Phase 30 (spec D7). fmt and validate need no AWS and always run. The plan
+  # needs the plan role, which exists once terraform/bootstrap has been applied: until
+  # the AWS_PLAN_ROLE_ARN variable is set, the step says so and passes. -lock=false
+  # keeps the job read-only, since a plan otherwise writes the state's lock file.
+  terraform-plan:
+    if: github.repository_owner == 'victor-prp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_gemini_model: ${{ vars.GEMINI_MODEL }}
+      TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.3
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive terraform
+      - name: Validate both stacks
+        run: |
+          for stack in bootstrap prod; do
+            terraform -chdir="terraform/$stack" init -backend=false -input=false
+            terraform -chdir="terraform/$stack" validate
+          done
+      - name: Assume the plan role
+        if: vars.AWS_PLAN_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: eu-central-1
+      - name: Plan both stacks
+        env:
+          PLAN_ROLE: ${{ vars.AWS_PLAN_ROLE_ARN }}
+        run: |
+          if [ -z "$PLAN_ROLE" ]; then
+            echo "::notice::AWS_PLAN_ROLE_ARN is not set: terraform/bootstrap has not been applied yet. fmt and validate ran; the plan was skipped."
+            exit 0
+          fi
+          ./scripts/infra.sh bootstrap plan -lock=false
+          ./scripts/infra.sh prod plan -lock=false
 
   # The prompt eval bucket, calling the real paid model. It lived in its own
   # workflow (nightly + workflow_dispatch) precisely so a vendor's model update

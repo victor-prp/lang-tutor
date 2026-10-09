@@ -50,7 +50,7 @@ branch, and `scripts/lane-env.sh` derives everything else — see
 
 Run `./scripts/setup-worktree.sh` in a new worktree before anything else. `git worktree
 add` brings tracked files and nothing else, so a new worktree is missing exactly what
-`.gitignore` covers — `apps/mobile/.env.local`, `node_modules` and `.lane` — and it has no
+`.gitignore` covers — `apps/mobile/.env.development.local`, `node_modules` and `.lane` — and it has no
 database yet. The script is idempotent, and a SessionStart hook says so when it has not
 run. Skipping it makes the app throw `EXPO_PUBLIC_API_URL is not set` at module scope,
 which surfaces as three misleading expo-router errors about a missing default export.

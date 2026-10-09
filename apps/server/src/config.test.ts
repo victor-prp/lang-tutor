@@ -23,6 +23,19 @@ describe('loadConfig', () => {
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
+      version: 'dev',
+      webDistDir: null,
+    });
+  });
+
+  it('reads the release version and the web export directory (phase 30)', () => {
+    expect(loadConfig({ APP_VERSION: ' v2026.10.08 ', WEB_DIST_DIR: ' /app/web ' })).toMatchObject({
+      version: 'v2026.10.08',
+      webDistDir: '/app/web',
+    });
+    expect(loadConfig({ APP_VERSION: '', WEB_DIST_DIR: '   ' })).toMatchObject({
+      version: 'dev',
+      webDistDir: null,
     });
   });
 
@@ -56,6 +69,8 @@ describe('loadConfig', () => {
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
+      version: 'dev',
+      webDistDir: null,
     });
   });
 

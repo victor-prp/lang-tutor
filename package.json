@@ -12,8 +12,12 @@
   },
   "scripts": {
     "mobile": "bash scripts/lane-env.sh npm run start --workspace apps/mobile",
+    "mobile:prod": "bash scripts/lane-env.sh bash scripts/mobile-prod.sh",
+    "image:build": "bash scripts/lane-env.sh bash scripts/image-build.sh",
+    "image:run": "bash scripts/lane-env.sh bash scripts/image-run.sh",
     "server": "bash scripts/lane-env.sh npm run dev --workspace apps/server",
     "e2e": "bash scripts/lane-env.sh npm run e2e --workspace e2e",
+    "e2e:image": "E2E_TARGET=image bash scripts/lane-env.sh npm run e2e --workspace e2e",
     "test": "npm run test:unit && echo '' && echo 'Note: unit tests only. Run npm run test:all before pushing - database-backed tests did not run.'",
     "test:unit": "npm test --workspaces --if-present",
     "test:integration": "bash scripts/lane-env.sh npm run test:integration --workspaces --if-present",

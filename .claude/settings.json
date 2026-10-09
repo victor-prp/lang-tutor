@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f apps/mobile/.env.local ] || [ ! -d node_modules ] || { [ \"$(cd \"$(git rev-parse --git-common-dir)/..\" && pwd -P)\" != \"$(pwd -P)\" ] && [ ! -f .lane ]; }; then jq -n '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:\"This worktree is not set up: apps/mobile/.env.local, node_modules or .lane is missing, because git worktree add brings only tracked files. Run ./scripts/setup-worktree.sh before running the app, the tests or the e2e suite. Without .env.local the app throws EXPO_PUBLIC_API_URL is not set at module scope, which surfaces as three misleading expo-router errors. Without .lane every lane-derived command refuses to run.\"}}'; fi",
+            "command": "if [ ! -f apps/mobile/.env.development.local ] || [ ! -d node_modules ] || { [ \"$(cd \"$(git rev-parse --git-common-dir)/..\" && pwd -P)\" != \"$(pwd -P)\" ] && [ ! -f .lane ]; }; then jq -n '{hookSpecificOutput:{hookEventName:\"SessionStart\",additionalContext:\"This worktree is not set up: apps/mobile/.env.development.local, node_modules or .lane is missing, because git worktree add brings only tracked files. Run ./scripts/setup-worktree.sh before running the app, the tests or the e2e suite. Without .env.development.local the app throws EXPO_PUBLIC_API_URL is not set at module scope, which surfaces as three misleading expo-router errors. Without .lane every lane-derived command refuses to run.\"}}'; fi",
             "statusMessage": "Checking worktree setup..."
           },
           {

@@ -1,4 +1,7 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { createApp } from './app';
 import type { AppDeps } from './composition';
@@ -107,7 +110,8 @@ function depsWithPing(ok: boolean): AppDeps {
     vocabulary: unreachableVocabulary,
     photoImports: unreachablePhotoImports,
     health: { ping: async () => ok },
-    identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001 },
+    identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001, version: 'v-test' },
+    webDistDir: null,
     logger: createFakeLogger(),
   };
 }
@@ -123,6 +127,7 @@ describe('GET /health', () => {
       lane: 'phase_15',
       database: 'lang_tutor_phase_15',
       port: 4001,
+      version: 'v-test',
     });
   });
 
@@ -137,6 +142,7 @@ describe('GET /health', () => {
       lane: 'phase_15',
       database: 'lang_tutor_phase_15',
       port: 4001,
+      version: 'v-test',
     });
   });
 });
@@ -169,5 +175,77 @@ describe('the /health route definition', () => {
     const res = await createApp(depsWithPing(true)).request('/openapi.json');
     const doc = await res.json();
     expect(Object.keys(doc.paths['/health'].get.responses).sort()).toEqual(['200', '503']);
+  });
+});
+
+// Phase 30 (spec D1, D15). The web export is served only when webDistDir is set,
+// which happens only inside the image. A temp directory stands in for the export.
+describe('serving the web export (phase 30)', () => {
+  let dir: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'web-export-'));
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><div id="root"></div>');
+    mkdirSync(join(dir, '_expo', 'static', 'js', 'web'), { recursive: true });
+    writeFileSync(join(dir, '_expo', 'static', 'js', 'web', 'entry-3f9a.js'), 'globalThis.loaded = true;');
+    writeFileSync(join(dir, 'favicon.ico'), 'icon');
+  });
+
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const app = () => createApp({ ...depsWithPing(true), webDistDir: dir });
+
+  it('serves index.html at / and makes the browser revalidate it', async () => {
+    const res = await app().request('/');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    expect(res.headers.get('cache-control')).toBe('no-cache');
+    expect(await res.text()).toContain('id="root"');
+  });
+
+  it('serves a hashed bundle with a year-long immutable cache', async () => {
+    const res = await app().request('/_expo/static/js/web/entry-3f9a.js');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('javascript');
+    expect(res.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('answers an app route with index.html, so a reload on a screen works', async () => {
+    for (const path of ['/session', '/vocabulary/42']) {
+      const res = await app().request(path);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('no-cache');
+      expect(await res.text()).toContain('id="root"');
+    }
+  });
+
+  it('answers a missing bundle file with 404, never with the page', async () => {
+    const res = await app().request('/_expo/static/js/web/entry-old.js');
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type') ?? '').not.toContain('text/html');
+  });
+
+  it('leaves an unknown /api path to the 404 it had before', async () => {
+    const res = await app().request('/api/nothing-here');
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain('id="root"');
+  });
+
+  it('still answers /health with its JSON body', async () => {
+    const res = await app().request('/health');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, version: 'v-test' });
+  });
+
+  it('does not answer a POST to an app route with the page', async () => {
+    const res = await app().request('/session', { method: 'POST' });
+    expect(res.status).toBe(404);
+  });
+
+  it('serves nothing at / when webDistDir is null, as in every lane', async () => {
+    const res = await createApp(depsWithPing(true)).request('/');
+    expect(res.status).toBe(404);
   });
 });

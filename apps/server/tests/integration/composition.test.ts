@@ -42,7 +42,8 @@ describe('createServerDeps', () => {
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
-      identity: { lane: 'test', database: 'test_db', port: 0 },
+      identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
+      webDistDir: null,
       boss: unstartedBoss(t.db),
     });
     expect(deps.logger).toBe(logger);
