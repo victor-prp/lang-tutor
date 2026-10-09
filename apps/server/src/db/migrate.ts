@@ -51,7 +51,16 @@ const CORRECTION_ALTERNATIVES_FUNCTION = sql`
 // Phase 31 (spec §2). The SQL twin of normaliseGloss in packages/core, which the
 // unique index on live glosses and the migrations run on. Here for the reason the
 // two above give. String.raw keeps the regex backslashes for Postgres: a template
-// literal would turn ־ into the character and \s into a bare s.
+// literal would turn \( into a bare (, so '([^)]*)' would match the whole string,
+// and would write the space class's escapes as invisible characters.
+//
+// The space class is JavaScript's \s spelled out, because Postgres's own \s
+// follows the database's ctype, which leaves out the no-break spaces and U+FEFF:
+// TAB, LF, VT, FF, CR, SPACE, U+00A0, U+1680, U+2000-U+200A, U+2028, U+2029,
+// U+202F, U+205F, U+3000 and U+FEFF. Each run of them becomes one space, so the
+// spaces btrim then removes are exactly what trim() removes. lower() and
+// toLowerCase() part ways on the dotted capital I and the Greek final sigma,
+// which none of the app's languages (en, ru, it, he) uses.
 //
 // It must stay character for character the same as normaliseGloss: the schema
 // integration test runs both over one list. Changing it needs a migration that
@@ -64,7 +73,7 @@ const GLOSS_KEY_FUNCTION = sql.raw(String.raw`
              '[־-]', ' ', 'g'),
              '[֑-ׇ́]', '', 'g'),
              '\([^)]*\)', '', 'g'),
-             '\s+', ' ', 'g')))
+             '[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+', ' ', 'g')))
   $$;
 `);
 

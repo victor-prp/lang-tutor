@@ -307,9 +307,12 @@ describe('the migrated schema', () => {
 
   // Phase 31. The SQL twin of normaliseGloss is what the unique index runs on,
   // so a disagreement would let the database and the domain call two keys equal
-  // differently. The list is the core test's, plus a tab.
+  // differently. The list is the core test's, plus a tab and three spaces that
+  // JavaScript's \s matches and Postgres's own \s does not: a no-break space, a
+  // byte-order mark and a figure space.
   it('runs gloss_key exactly as normaliseGloss', async () => {
-    const cases = ['סֵפֶר', 'בְּרֵאשִׁ֖ית', 'молоко́', 'בסיס (צבאי)', 'בית   קפה', 'Città', 'ДОМ', 'בית־ספר', 'בית-ספר', '  עכבר ', 'café', 'עַכְבָּר', 'Tab\there'];
+    const cases = ['סֵפֶר', 'בְּרֵאשִׁ֖ית', 'молоко́', 'בסיס (צבאי)', 'בית   קפה', 'Città', 'ДОМ', 'בית־ספר', 'בית-ספר', '  עכבר ', 'café', 'עַכְבָּר', 'Tab\there',
+      'בית\u00a0קפה', '\ufeffבית', 'בית\u2007קפה'];
     for (const text of cases) {
       const rows = await db.execute<{ key: string }>(sql`select gloss_key(${text}) as key`);
       expect({ text, key: rows.rows[0].key }).toEqual({ text, key: normaliseGloss(text) });

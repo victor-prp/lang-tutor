@@ -711,6 +711,8 @@ const TRANSLATION_SHAPES = [
   'להנמיך, להפחית', 'טוב, בסדר', 'בסיס (צבאי)', 'בסיס (כימיה)', 'אח (במסדר דתי)', 'להנחית (כדור בווֹליבול)',
   'כבד, עשיר (בטעמים)', 'עמוק, עשיר (בגוון/צליל)', 'לסמם (משקה), להוסיף חומר (למשקה)', 'אח (חבר, רע)',
   'בית קפה', 'בלתי אפשרי', 'to deposit', 'ha scritto', 'א, ב / ג', 'רם, רָם, חזק, חזק', '(הערה)',
+  // Not lane 0's: a no-break space after the comma, which JavaScript's \s trims and Postgres's does not.
+  'א,\u00a0ב',
 ];
 
 describe('0022_glosses', () => {
@@ -732,7 +734,7 @@ describe('0022_glosses', () => {
         ('v_window', 'l_window', 'he', 'חלון', 'word', 0);
       insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank) values
         ('v_mouse', 's_rodent', 'he', 'עכבר', 0), ('v_mouse', 's_device', 'he', 'עַכְבָּר', 1),
-        ('v_car', 's_vehicle', 'he', 'מכונית, רכב', 0), ('v_cars', 's_vehicle', 'he', 'מכוניות, רכבים', 0),
+        ('v_car', 's_vehicle', 'he', 'מכונית, רכב, אוטו', 1), ('v_cars', 's_vehicle', 'he', 'מכוניות, רכבים', 0),
         ('v_fingers', 's_body', 'he', 'אצבעות', 0),
         ('v_base', 's_military', 'he', 'בסיס (צבאי)', 0), ('v_base', 's_chemistry', 'he', 'בסיס (כימיה)', 1),
         ('v_comb', 's_lock', 'he', 'קומבינציה, צירוף', 0), ('v_comb', 's_mix', 'he', 'שילוב, צירוף', 1),
@@ -747,7 +749,7 @@ describe('0022_glosses', () => {
     expect(renderings.rows).toEqual([
       { variant_id: 'v_base', sense_id: 's_chemistry', translation: 'בסיס', gloss: 'בסיס', alternatives: [] },
       { variant_id: 'v_base', sense_id: 's_military', translation: 'בסיס', gloss: 'בסיס', alternatives: [] },
-      { variant_id: 'v_car', sense_id: 's_vehicle', translation: 'מכונית', gloss: 'מכונית', alternatives: ['רכב'] },
+      { variant_id: 'v_car', sense_id: 's_vehicle', translation: 'מכונית', gloss: 'מכונית', alternatives: ['רכב', 'אוטו'] },
       { variant_id: 'v_cars', sense_id: 's_vehicle', translation: 'מכוניות', gloss: 'מכוניות', alternatives: ['רכבים'] },
     ]);
 
@@ -761,8 +763,9 @@ describe('0022_glosses', () => {
     expect(glosses.rows).toEqual([
       // The parenthetical was the only difference: one target word, one gloss (D3).
       { lemma: 'base', lang: 'he', key: 'בסיס', alternatives: [], members: ['s_chemistry', 's_military'] },
-      // Keyed from the lemma form, whose alternative it keeps; `cars`' plural is not a citation form.
-      { lemma: 'car', lang: 'he', key: 'מכונית', alternatives: ['רכב'], members: ['s_vehicle'] },
+      // Keyed from the lemma form, though `car` ranks the sense below `cars` does, and its
+      // alternatives kept in the rendering's order; `cars`' plural is not a citation form.
+      { lemma: 'car', lang: 'he', key: 'מכונית', alternatives: ['רכב', 'אוטו'], members: ['s_vehicle'] },
       { lemma: 'combination', lang: 'he', key: 'קומבינציה', alternatives: ['צירוף'], members: ['s_lock'] },
       { lemma: 'combination', lang: 'he', key: 'שילוב', alternatives: ['צירוף'], members: ['s_mix'] },
       // Only an inflected form was ever rendered: the key is inflected until D6 renames it.

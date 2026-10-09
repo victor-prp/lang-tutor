@@ -38,7 +38,9 @@ CREATE INDEX "dict_sense_glosses_lexeme_idx" ON "dict_sense_glosses" USING btree
 -- Step 2. One translation per rendering. Parentheticals go first, then the list
 -- marks split; the first item is the translation and the gloss, the next five
 -- distinct by gloss_key the alternatives. The SQL twin of splitTranslation in
--- domain/glosses.ts; the migration test runs lane 0's shapes through both.
+-- domain/glosses.ts; the migration test runs lane 0's shapes through both. The
+-- space class is JavaScript's \s spelled out, as in gloss_key (db/migrate.ts):
+-- Postgres's own \s leaves out the no-break spaces and U+FEFF.
 UPDATE "dict_var_translations" tr
 SET "translation" = c."items"[1],
     "gloss" = c."items"[1],
@@ -55,10 +57,10 @@ SET "translation" = c."items"[1],
 FROM (
   SELECT t."variant_id", t."sense_id", t."user_language_code",
          ARRAY(
-           SELECT btrim(regexp_replace(u."item", '\s+', ' ', 'g'))
+           SELECT btrim(regexp_replace(u."item", '[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+', ' ', 'g'))
            FROM unnest(regexp_split_to_array(regexp_replace(t."translation", '\([^)]*\)', '', 'g'), '[,/;]'))
                 WITH ORDINALITY AS u("item", "n")
-           WHERE btrim(regexp_replace(u."item", '\s+', ' ', 'g')) <> ''
+           WHERE btrim(regexp_replace(u."item", '[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+', ' ', 'g')) <> ''
            ORDER BY u."n"
          ) AS "items"
   FROM "dict_var_translations" t
@@ -67,8 +69,8 @@ WHERE tr."variant_id" = c."variant_id" AND tr."sense_id" = c."sense_id"
   AND tr."user_language_code" = c."user_language_code" AND cardinality(c."items") > 0;--> statement-breakpoint
 -- A translation that was nothing but a parenthetical stays, tidied.
 UPDATE "dict_var_translations"
-SET "translation" = btrim(regexp_replace("translation", '\s+', ' ', 'g')),
-    "gloss" = btrim(regexp_replace("translation", '\s+', ' ', 'g'))
+SET "translation" = btrim(regexp_replace("translation", '[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+', ' ', 'g')),
+    "gloss" = btrim(regexp_replace("translation", '[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+', ' ', 'g'))
 WHERE "gloss" IS NULL;--> statement-breakpoint
 ALTER TABLE "dict_var_translations" ALTER COLUMN "gloss" SET NOT NULL;--> statement-breakpoint
 -- Step 3. One gloss per (lexeme, learner language, key). A sense's key is the
@@ -101,23 +103,26 @@ FROM (
 JOIN "dict_glosses" g ON g."lexeme_id" = k."lexeme_id" AND g."user_language_code" = k."user_language_code"
                      AND gloss_key(g."key") = gloss_key(k."key");--> statement-breakpoint
 -- A gloss's alternatives: its members' lemma-form alternatives, distinct by
--- gloss_key, never its key, at most five (spec §2, step 3).
+-- gloss_key, never its key, at most five (spec §2, step 3). In the order the
+-- write keeps: by the member's rank, then by place in its rendering, the first
+-- spelling kept. The variant id only breaks a tie between two lemma-form
+-- variants of one lexeme that differ by case.
 UPDATE "dict_glosses" g
 SET "alternatives" = ARRAY(
   SELECT d."alt" FROM (
-    SELECT DISTINCT ON (gloss_key(a."alt")) a."alt", a."rank"
+    SELECT DISTINCT ON (gloss_key(a."alt")) a."alt", a."rank", a."variant_id", a."pos"
     FROM (
-      SELECT x."alt", tr."rank"
+      SELECT x."alt", x."pos", tr."rank", tr."variant_id"
       FROM "dict_sense_glosses" m
       JOIN "dict_var_translations" tr ON tr."sense_id" = m."sense_id" AND tr."user_language_code" = m."user_language_code"
       JOIN "dict_variants" v ON v."id" = tr."variant_id"
       JOIN "dict_lexemes" l ON l."id" = v."lexeme_id" AND lower(v."form") = lower(l."lemma")
-      CROSS JOIN LATERAL unnest(tr."alternatives") AS x("alt")
+      CROSS JOIN LATERAL unnest(tr."alternatives") WITH ORDINALITY AS x("alt", "pos")
       WHERE m."gloss_id" = g."id"
     ) a
     WHERE gloss_key(a."alt") <> gloss_key(g."key")
-    ORDER BY gloss_key(a."alt"), a."rank"
+    ORDER BY gloss_key(a."alt"), a."rank", a."variant_id", a."pos"
   ) d
-  ORDER BY d."rank"
+  ORDER BY d."rank", d."variant_id", d."pos"
   LIMIT 5
 );
