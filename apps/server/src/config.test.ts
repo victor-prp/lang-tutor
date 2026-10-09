@@ -243,7 +243,7 @@ const authEnv = {
   AUTH_BASE_URL: 'http://192.168.1.10:3001',
   WEB_ORIGINS: 'http://localhost:8081, http://192.168.1.10:8081',
   RESEND_API_KEY: 're_test',
-  MAIL_FROM: 'WordsPal <code@mail.wordspal.ai>',
+  MAIL_FROM: 'WordsPal <code@wordspal.ai>',
 };
 
 describe('loadAuthConfig', () => {
@@ -254,7 +254,7 @@ describe('loadAuthConfig', () => {
       webOrigins: ['http://localhost:8081', 'http://192.168.1.10:8081'],
       resendApiKey: 're_test',
       resendBaseUrl: 'https://api.resend.com',
-      mailFrom: 'WordsPal <code@mail.wordspal.ai>',
+      mailFrom: 'WordsPal <code@wordspal.ai>',
     });
   });
 

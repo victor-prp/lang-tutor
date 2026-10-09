@@ -150,7 +150,7 @@ and `MAIL_FROM` in the environment map. A plan reads every secret it names, so i
 `terraform-plan` job stays red until both secrets exist, and the release guard refuses a
 commit whose `terraform-plan` is red. The secrets therefore come before the merge:
 
-1. **Resend.** Add the domain `mail.wordspal.ai` and put the SPF and DKIM records it shows
+1. **Resend.** Add the domain `wordspal.ai` and put the SPF and DKIM records it shows
    into GoDaddy's DNS; optionally a `_dmarc` TXT record with `p=none`. Create an API key
    restricted to sending on that domain.
 2. **Both secrets**, as in go-live step 4:

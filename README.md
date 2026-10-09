@@ -439,7 +439,7 @@ refuses to start without, and one optional:
 |---|---|
 | `BETTER_AUTH_SECRET` | Yours: `openssl rand -base64 32` (at least 32 characters). Set it once in your shell, like `GEMINI_API_KEY`. |
 | `RESEND_API_KEY` | A send-only key from Resend (setup below). |
-| `MAIL_FROM` | The sender address on the domain you verified: `WordsPal <code@mail.wordspal.ai>`. |
+| `MAIL_FROM` | The sender address on the domain you verified: `WordsPal <code@wordspal.ai>`. |
 | `AUTH_BASE_URL` | Derived by `scripts/lane-env.sh`: this lane's server as a phone reaches it. |
 | `WEB_ORIGINS` | Derived by `scripts/lane-env.sh`: this lane's Metro origins, by name and by LAN address, comma-separated. |
 | `RESEND_BASE_URL` | Optional; defaults to `https://api.resend.com`. Tests point it at a MockServer namespace. |
@@ -448,7 +448,7 @@ Production sets all five in `terraform/prod`: the two secrets from Secrets Manag
 rest as plain entries. The [hosting runbook](docs/runbooks/hosting.md#when-phase-29-merges)
 says in which order.
 
-**One-time Resend setup** (Victor): in Resend add the domain `mail.wordspal.ai`, then add the
+**One-time Resend setup** (Victor): in Resend add the domain `wordspal.ai`, then add the
 SPF and DKIM DNS records it shows; optionally add a `_dmarc.wordspal.ai` TXT record with
 `p=none`. Create an API key restricted to sending and put it in `RESEND_API_KEY`.
 
@@ -457,7 +457,7 @@ addresses you own. Otherwise point the server at MockServer, which answers Resen
 call and keeps the message, code in the subject:
 
 ```bash
-export RESEND_BASE_URL=http://localhost:1080/dev RESEND_API_KEY=dev MAIL_FROM='WordsPal <code@mail.wordspal.ai>'
+export RESEND_BASE_URL=http://localhost:1080/dev RESEND_API_KEY=dev MAIL_FROM='WordsPal <code@wordspal.ai>'
 curl -s -X PUT http://localhost:1080/mockserver/expectation -d \
   '{"httpRequest":{"method":"POST","path":"/dev/emails"},"httpResponse":{"statusCode":200,"body":"{\"id\":\"dev\"}"}}'
 # after asking for a code, the subjects of every message sent so far:

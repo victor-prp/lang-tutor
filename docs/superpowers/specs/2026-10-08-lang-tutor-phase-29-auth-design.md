@@ -255,7 +255,9 @@ review), free up to 100 a day and 3,000 a month, and sessions last 90 days, so m
 code only on a new phone. `providers/resend.ts` is a plain `fetch` POST to `/emails`, injected like
 Gemini's. Resend recommends a sending subdomain, so the domain verified in Resend is
 `mail.wordspal.ai` and `MAIL_FROM` starts as `WordsPal <code@mail.wordspal.ai>` (config, changeable
-any time). The email is Hebrew, plain text plus simple HTML, and names no app (the app is still
+any time). (Amended 2026-10-09: Victor chose the root domain, so the domain verified in Resend is
+`wordspal.ai` and `MAIL_FROM` is `WordsPal <code@wordspal.ai>`. Resend's own records still sit on
+subdomains, and the codes share the root's sending reputation.) The email is Hebrew, plain text plus simple HTML, and names no app (the app is still
 called "lang tutor"):
 
 - subject: `קוד הכניסה שלך: 1234 5678`

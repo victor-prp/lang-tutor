@@ -25,7 +25,7 @@ describe('createResendMailer', () => {
       fetch: fetch as unknown as typeof globalThis.fetch,
       baseUrl: 'http://mock/ns',
       apiKey: 'key-1',
-      from: 'WordsPal <code@mail.wordspal.ai>',
+      from: 'WordsPal <code@wordspal.ai>',
       timeoutMs: 10_000,
     });
 
@@ -38,7 +38,7 @@ describe('createResendMailer', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer key-1');
     const body = JSON.parse(init.body as string);
     expect(body).toMatchObject({
-      from: 'WordsPal <code@mail.wordspal.ai>',
+      from: 'WordsPal <code@wordspal.ai>',
       to: ['learner@example.com'],
       subject: 'קוד הכניסה שלך: 1234 5678',
     });

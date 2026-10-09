@@ -147,7 +147,7 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv): AuthConfig {
       'Use a send-only Resend key, or point RESEND_BASE_URL at MockServer with any dummy value.',
     ),
     resendBaseUrl: env.RESEND_BASE_URL?.trim() || DEFAULT_RESEND_BASE_URL,
-    mailFrom: required(env, 'MAIL_FROM', 'For example: WordsPal <code@mail.wordspal.ai>'),
+    mailFrom: required(env, 'MAIL_FROM', 'For example: WordsPal <code@wordspal.ai>'),
   };
 }
 

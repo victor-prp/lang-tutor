@@ -93,7 +93,7 @@ fi
 if [ -z "${BETTER_AUTH_SECRET:-}" ] || [ -z "${RESEND_API_KEY:-}" ] || [ -z "${MAIL_FROM:-}" ]; then
   echo "  note       BETTER_AUTH_SECRET, RESEND_API_KEY or MAIL_FROM is not set — 'npm run server' will refuse to start."
   echo "             A real Resend key sends real email (use only addresses you own). For local work, use MockServer:"
-  echo "               export BETTER_AUTH_SECRET=\$(openssl rand -base64 32) RESEND_BASE_URL=http://localhost:1080/dev RESEND_API_KEY=dev MAIL_FROM='WordsPal <code@mail.wordspal.ai>'"
+  echo "               export BETTER_AUTH_SECRET=\$(openssl rand -base64 32) RESEND_BASE_URL=http://localhost:1080/dev RESEND_API_KEY=dev MAIL_FROM='WordsPal <code@wordspal.ai>'"
   echo "             then register its emails expectation and read codes there (README: Sign-in, \"In a lane\")."
 else
   echo "  ok         sign-in variables set"

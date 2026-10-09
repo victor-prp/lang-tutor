@@ -104,5 +104,5 @@ variable "secret_env_names" {
 variable "mail_from" {
   description = "The sign-in email's sender, on the domain verified in Resend (phase 29)."
   type        = string
-  default     = "WordsPal <code@mail.wordspal.ai>"
+  default     = "WordsPal <code@wordspal.ai>"
 }
