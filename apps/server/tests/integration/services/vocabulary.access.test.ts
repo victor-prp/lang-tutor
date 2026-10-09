@@ -102,3 +102,38 @@ describe('unsave', () => {
     expect(await addedByOf(t.db, E)).toEqual([]);
   });
 });
+
+// Phase 29 (spec D13). Reading the list is the owner's alone: phase 28's tutor
+// adds words, and the tutor screen never reads the list it adds to.
+describe('the reads', () => {
+  const refused: [string, string, boolean][] = [
+    ['a stranger', 'u_stranger', false],
+    ['an accepted tutor', 'u_tutor', true],
+  ];
+
+  it.each(refused)('listWords refuses %s with AccessDenied, and the list is unchanged', async (_who, actor, granted) => {
+    if (granted) await seedGrant(t.db, { enrollmentId: E, ownerUserId: 'u_student', granteeUserId: 'u_tutor', accepted: true });
+    await vocabulary.save('u_student', E, entry());
+    await expect(vocabulary.listWords(actor, E, {})).rejects.toBeInstanceOf(AccessDenied);
+    expect(await addedByOf(t.db, E)).toEqual(['u_student']);
+    expect(logger.events).toContainEqual(
+      expect.objectContaining({ event: 'access_denied', actor_user_id: actor, enrollment_id: E, permission: 'vocabulary.read' }),
+    );
+  });
+
+  it.each(refused)('wordDetail refuses %s with AccessDenied, and the list is unchanged', async (_who, actor, granted) => {
+    if (granted) await seedGrant(t.db, { enrollmentId: E, ownerUserId: 'u_student', granteeUserId: 'u_tutor', accepted: true });
+    await vocabulary.save('u_student', E, entry());
+    await expect(vocabulary.wordDetail(actor, E, 'kite')).rejects.toBeInstanceOf(AccessDenied);
+    expect(await addedByOf(t.db, E)).toEqual(['u_student']);
+    expect(logger.events).toContainEqual(
+      expect.objectContaining({ event: 'access_denied', actor_user_id: actor, enrollment_id: E, permission: 'vocabulary.read' }),
+    );
+  });
+
+  it('lets the owner read their own list', async () => {
+    await vocabulary.save('u_student', E, entry());
+    expect((await vocabulary.listWords('u_student', E, {})).items).toHaveLength(1);
+    expect((await vocabulary.wordDetail('u_student', E, 'kite')).senses).toHaveLength(1);
+  });
+});

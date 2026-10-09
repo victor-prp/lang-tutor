@@ -107,6 +107,51 @@ export function loadGeminiConfig(env: NodeJS.ProcessEnv): GeminiConfig {
 }
 
 /**
+ * Phase 29 (spec D17). Sign-in settings, read separately from Config for the
+ * reason GeminiConfig is: db/cli.ts calls loadConfig, and a migration needs
+ * none of these. Throws rather than defaulting, so a server that cannot send
+ * a code fails at start-up, not when a learner taps "send code".
+ */
+export type AuthConfig = {
+  secret: string;
+  baseUrl: string;
+  webOrigins: string[];
+  resendApiKey: string;
+  resendBaseUrl: string;
+  mailFrom: string;
+};
+
+const DEFAULT_RESEND_BASE_URL = 'https://api.resend.com';
+
+function required(env: NodeJS.ProcessEnv, name: string, hint: string): string {
+  const value = env[name]?.trim();
+  if (!value) throw new Error(`${name} is not set. ${hint}`);
+  return value;
+}
+
+export function loadAuthConfig(env: NodeJS.ProcessEnv): AuthConfig {
+  const secret = required(env, 'BETTER_AUTH_SECRET', 'Generate one with: openssl rand -base64 32');
+  if (secret.length < 32) throw new Error('BETTER_AUTH_SECRET must be at least 32 characters.');
+  const webOrigins = required(env, 'WEB_ORIGINS', 'scripts/lane-env.sh derives it for a lane.')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (webOrigins.length === 0) throw new Error('WEB_ORIGINS holds no origin.');
+  return {
+    secret,
+    baseUrl: required(env, 'AUTH_BASE_URL', 'scripts/lane-env.sh derives it for a lane.'),
+    webOrigins,
+    resendApiKey: required(
+      env,
+      'RESEND_API_KEY',
+      'Use a send-only Resend key, or point RESEND_BASE_URL at MockServer with any dummy value.',
+    ),
+    resendBaseUrl: env.RESEND_BASE_URL?.trim() || DEFAULT_RESEND_BASE_URL,
+    mailFrom: required(env, 'MAIL_FROM', 'For example: WordsPal <code@wordspal.ai>'),
+  };
+}
+
+/**
  * The database name inside a connection string. `/health` publishes it and the
  * lane tooling drops by it, so it is parsed once, here, rather than with a
  * regex at each call site.

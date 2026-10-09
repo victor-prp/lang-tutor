@@ -2,56 +2,52 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import type { CreateUserRequest, User } from '@lang-tutor/core/api';
 
 import { API_URL } from '../../urls';
+import { codeFor, expectEmails } from './mockServer';
 
 export function learnerFor(username: string): CreateUserRequest {
-  return {
-    username,
-    display_name: 'דנה',
-    age: 34,
-    native_language: 'he',
-  };
+  return { username, display_name: 'דנה', age: 34, native_language: 'he' };
 }
 
-/** Phase 28. An account with no enrollment, under its own display name: a tutor
- *  who learns nothing, whose name the student will see on a label. */
-export async function createUser(request: APIRequestContext, username: string, displayName: string): Promise<User> {
-  const res = await request.post(`${API_URL}/api/users`, {
-    data: { ...learnerFor(username), display_name: displayName },
+/** One address per username: the e2e database is fresh each run. */
+export const emailFor = (username: string): string => `${username}@e2e.example.com`;
+
+/**
+ * Signs `request` in through the real flow (code from MockServer) and creates
+ * the profile. `page.request` shares the page's cookies, so the app then opens
+ * signed in; a standalone request context is a second user.
+ */
+export async function signIn(request: APIRequestContext, username: string): Promise<void> {
+  await expectEmails(request);
+  const email = emailFor(username);
+  const sent = await request.post(`${API_URL}/api/auth/email-otp/send-verification-otp`, { data: { email, type: 'sign-in' } });
+  if (!sent.ok()) throw new Error(`send code for ${username}: ${sent.status()} ${await sent.text()}`);
+  const signedIn = await request.post(`${API_URL}/api/auth/sign-in/email-otp`, {
+    data: { email, otp: await codeFor(request, email) },
   });
-  if (!res.ok()) throw new Error(`could not create ${username}: ${res.status()} ${await res.text()}`);
+  if (!signedIn.ok()) throw new Error(`sign in ${username}: ${signedIn.status()} ${await signedIn.text()}`);
+}
+
+export async function signUpUser(request: APIRequestContext, username: string, displayName = 'דנה'): Promise<User> {
+  await signIn(request, username);
+  const res = await request.post(`${API_URL}/api/users`, { data: { ...learnerFor(username), display_name: displayName } });
+  if (!res.ok()) throw new Error(`profile ${username}: ${res.status()} ${await res.text()}`);
   return (await res.json()) as User;
 }
 
-/** Creates a learner AND their enrollment over the endpoints the app uses. No
- *  fixture seed and no test-only route: this is the production path. */
-export async function createLearner(
-  request: APIRequestContext,
-  username: string,
-  targetLanguage: 'en' | 'ru' | 'it' = 'en',
-): Promise<User> {
-  const res = await request.post(`${API_URL}/api/users`, { data: learnerFor(username) });
-  if (!res.ok()) {
-    throw new Error(`could not create ${username}: ${res.status()} ${await res.text()}`);
-  }
-  const user = (await res.json()) as User;
-  const enrolled = await request.post(`${API_URL}/api/users/${user.id}/enrollments`, {
+/** A signed-in learner with one enrollment, in this page's browser context. */
+export async function signUpLearner(page: Page, username: string, targetLanguage: 'en' | 'ru' | 'it' = 'en'): Promise<User> {
+  const user = await signUpUser(page.request, username);
+  const enrolled = await page.request.post(`${API_URL}/api/enrollments`, {
     data: { source_language: 'he', target_language: targetLanguage },
   });
-  if (!enrolled.ok()) {
-    throw new Error(`could not enroll ${username}: ${enrolled.status()} ${await enrolled.text()}`);
-  }
+  if (!enrolled.ok()) throw new Error(`enroll ${username}: ${enrolled.status()} ${await enrolled.text()}`);
   return user;
 }
 
-/** Drives the real login screen. The click is retried because a static export
- *  serves pre-rendered markup: a click before hydration is a silent no-op. */
-export async function logIn(page: Page, username: string, landing = 'start-button'): Promise<void> {
-  await page.goto('/');
-  await expect(page.getByTestId('login-username')).toBeVisible();
-  await page.getByTestId('login-username').fill(username);
-
+/** Opens the app signed in. Retried: a static export serves markup before React hydrates. */
+export async function openApp(page: Page, landing = 'start-button'): Promise<void> {
   await expect(async () => {
-    await page.getByTestId('login-button').click();
-    await expect(page.getByTestId(landing)).toBeVisible({ timeout: 2_000 });
+    await page.goto('/');
+    await expect(page.getByTestId(landing)).toBeVisible({ timeout: 5_000 });
   }).toPass({ timeout: 30_000 });
 }

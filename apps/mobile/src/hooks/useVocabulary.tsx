@@ -115,14 +115,14 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
   const save = useCallback(
     async (entries: VocabularyEntryInput[]) => {
       if (!active || !user) return;
-      await api.saveVocabulary(user.id, active.id, { entries });
+      await api.saveVocabulary(active.id, { entries });
     },
     [api, active, user],
   );
   const unsave = useCallback(
     async (glossId: string) => {
       if (!active || !user) return;
-      await api.unsaveVocabulary(user.id, active.id, glossId);
+      await api.unsaveVocabulary(active.id, glossId);
     },
     [api, active, user],
   );

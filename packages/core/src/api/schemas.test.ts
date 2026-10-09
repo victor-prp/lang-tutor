@@ -25,7 +25,6 @@ import {
   PhotoImportItemUpdateSchema,
   PhotoImportSchema,
   PhotoImportStatusSchema,
-  LoginRequestSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
   SpeechAnswerRequestSchema,
@@ -77,14 +76,19 @@ describe('CreateSessionRequestSchema', () => {
 });
 
 describe('NextStepRequestSchema', () => {
-  const valid = { user_id: 'u1', question_id: 'q1', option_index: 0 };
+  const valid = { question_id: 'q1', option_index: 0 };
 
   it('accepts a well-formed step', () => {
     expect(NextStepRequestSchema.safeParse(valid).success).toBe(true);
   });
 
+  // Phase 29 (spec D12). The actor comes from the session; a body cannot name one.
+  it('carries no user id: one sent is dropped', () => {
+    expect(NextStepRequestSchema.parse({ ...valid, user_id: 'someone' })).not.toHaveProperty('user_id');
+  });
+
   it('rejects a missing question_id', () => {
-    expect(NextStepRequestSchema.safeParse({ user_id: 'u1', option_index: 0 }).success).toBe(false);
+    expect(NextStepRequestSchema.safeParse({ option_index: 0 }).success).toBe(false);
   });
 
   it('rejects a negative option_index', () => {
@@ -97,15 +101,15 @@ describe('NextStepRequestSchema', () => {
 
   // Phase 23. A typed card is answered by its text.
   it('accepts a typed answer, empty included ("show me the answer")', () => {
-    expect(NextStepRequestSchema.safeParse({ user_id: 'u1', question_id: 'q1', text: 'casa' }).success).toBe(true);
-    expect(NextStepRequestSchema.safeParse({ user_id: 'u1', question_id: 'q1', text: '' }).success).toBe(true);
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'casa' }).success).toBe(true);
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: '' }).success).toBe(true);
   });
 
   it('rejects typed text over 100 characters, and a body with neither answer', () => {
     expect(
-      NextStepRequestSchema.safeParse({ user_id: 'u1', question_id: 'q1', text: 'x'.repeat(101) }).success,
+      NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'x'.repeat(101) }).success,
     ).toBe(false);
-    expect(NextStepRequestSchema.safeParse({ user_id: 'u1', question_id: 'q1' }).success).toBe(false);
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1' }).success).toBe(false);
   });
 });
 
@@ -280,16 +284,6 @@ describe('CreateUserRequestSchema', () => {
     ['a malformed username', { username: 'Dana' }],
   ])('rejects %s', (_label, override) => {
     expect(CreateUserRequestSchema.safeParse({ ...valid, ...override }).success).toBe(false);
-  });
-});
-
-describe('LoginRequestSchema', () => {
-  it('accepts a well-formed username', () => {
-    expect(LoginRequestSchema.safeParse({ username: 'dana' }).success).toBe(true);
-  });
-
-  it('rejects a malformed username', () => {
-    expect(LoginRequestSchema.safeParse({ username: 'D' }).success).toBe(false);
   });
 });
 
@@ -812,13 +806,14 @@ describe('phase 25 wire shapes', () => {
   });
 
   it('takes a pass on next-step, and refuses an unknown one', () => {
-    expect(NextStepRequestSchema.safeParse({ user_id: 'u', question_id: 'q', pass: 'skip' }).success).toBe(true);
-    expect(NextStepRequestSchema.safeParse({ user_id: 'u', question_id: 'q', pass: 'later' }).success).toBe(false);
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q', pass: 'skip' }).success).toBe(true);
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q', pass: 'later' }).success).toBe(false);
   });
 
   it('bounds the audio and names the formats', () => {
-    const base = { user_id: 'u', question_id: 'q', mime_type: 'audio/aac' };
+    const base = { question_id: 'q', mime_type: 'audio/aac' };
     expect(SpeechAnswerRequestSchema.safeParse({ ...base, audio: 'AAAA' }).success).toBe(true);
+    expect(SpeechAnswerRequestSchema.parse({ ...base, audio: 'AAAA', user_id: 'u' })).not.toHaveProperty('user_id');
     expect(SpeechAnswerRequestSchema.safeParse({ ...base, audio: '' }).success).toBe(false);
     expect(SpeechAnswerRequestSchema.safeParse({ ...base, audio: 'A'.repeat(270_001) }).success).toBe(false);
     expect(SpeechAnswerRequestSchema.safeParse({ ...base, mime_type: 'audio/wav', audio: 'AAAA' }).success).toBe(false);
@@ -902,12 +897,13 @@ describe('phase 27 Part A schemas', () => {
     expect(QuestionSchema.parse(q)).toEqual(q);
   });
   it('bounds a judged answer at 300 characters and needs ids', () => {
-    expect(JudgedAnswerRequestSchema.safeParse({ user_id: 'u', question_id: 'q', text: 'א'.repeat(300) }).success).toBe(true);
-    expect(JudgedAnswerRequestSchema.safeParse({ user_id: 'u', question_id: 'q', text: 'א'.repeat(301) }).success).toBe(false);
-    expect(JudgedAnswerRequestSchema.safeParse({ user_id: '', question_id: 'q', text: 'x' }).success).toBe(false);
+    expect(JudgedAnswerRequestSchema.safeParse({ question_id: 'q', text: 'א'.repeat(300) }).success).toBe(true);
+    expect(JudgedAnswerRequestSchema.safeParse({ question_id: 'q', text: 'א'.repeat(301) }).success).toBe(false);
+    expect(JudgedAnswerRequestSchema.safeParse({ question_id: '', text: 'x' }).success).toBe(false);
+    expect(JudgedAnswerRequestSchema.parse({ question_id: 'q', text: 'x', user_id: 'u' })).not.toHaveProperty('user_id');
   });
   it('a next-step body cannot carry a verdict', () => {
-    const parsed = NextStepRequestSchema.parse({ user_id: 'u', question_id: 'q', text: 'x', judged: 'exact' });
+    const parsed = NextStepRequestSchema.parse({ question_id: 'q', text: 'x', judged: 'exact' });
     expect(parsed).not.toHaveProperty('judged');
   });
   it('the meaning judge answers one of three verdicts', () => {

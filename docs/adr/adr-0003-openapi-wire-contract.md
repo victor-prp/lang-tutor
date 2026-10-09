@@ -1,7 +1,7 @@
 # ADR 0003: OpenAPI generated from the wire contract
 
 - **Status:** Accepted
-- **Date:** 2026-09-06
+- **Date:** 2026-09-06; R1's exception widened 2026-10-08 (phase 29)
 - **Source:** [phase 7 design](../superpowers/specs/2026-09-05-lang-tutor-phase-7-openapi-design.md)
 
 ## Decision
@@ -30,7 +30,7 @@ apps/server/src/
 
 | # | Subject | May do | Must not do |
 |---|---|---|---|
-| R1 | `apps/server/src/routes/`, `app.ts` | Declare an endpoint via `createRoute` + `router.openapi(...)` / `app.openapi(...)` | Register an API endpoint with a raw Hono verb (`.get(`, `.post(`, `.put(`, `.patch(`, `.delete(`) — the `/docs` UI mount is the sole exception, since it is not part of the published API |
+| R1 | `apps/server/src/routes/`, `app.ts` | Declare an endpoint via `createRoute` + `router.openapi(...)` / `app.openapi(...)` | Register an API endpoint with a raw Hono verb (`.get(`, `.post(`, `.put(`, `.patch(`, `.delete(`) — the exceptions are the `/docs` UI mount and the four `/api/auth/*` Better Auth mounts plus the `/api/auth/*` 404 in `app.ts` ([ADR 0009](adr-0009-sign-in.md)), whose paths are published through `routes/authDocs.ts`; test files (`*.test.ts`) are not scanned |
 | R2 | `apps/server/src/routes/` | Import request/response schemas from `@lang-tutor/core/api/schemas` | Define its own schema file (`schemas.ts` or similar) — the wire contract has exactly one home |
 | R3 | `packages/core/src/api/types.ts` | Export `z.infer<typeof XSchema>` | Export a hand-written type |
 | R4 | `packages/core/src/api/index.ts` | `export type { ... }` | Export a value (a schema, a runtime helper) |
@@ -63,7 +63,7 @@ command must print nothing.
 
 ```bash
 # R1 — every route uses createRoute + .openapi(), not a raw Hono verb
-grep -rnE "\.(get|post|put|patch|delete)\(" apps/server/src/routes/ apps/server/src/app.ts \
+grep -rnE "\.(get|post|put|patch|delete)\(" apps/server/src/routes/ apps/server/src/app.ts --exclude='*.test.ts' \
   | grep -v "app.get('/docs'"
 
 # R2 — no route-local schema file; the wire contract lives in packages/core only
@@ -86,6 +86,12 @@ grep -n "'/doc'" apps/server/src/app.ts
 
 - Scans `apps/server/src/routes/`, `apps/server/src/app.ts` and all of `packages/core/src`
   — the whole surface phase 7 touched.
+- R1 excludes `*.test.ts` explicitly (`--exclude='*.test.ts'`): a unit test of a middleware
+  stubs a throwaway app with `app.get`/`app.post`, which publishes nothing. Before phase 29
+  such a test had to use `app.on(...)` to dodge the grep.
+- The Better Auth mounts in `app.ts` use `app.on(...)` and `app.all(...)`, which R1's verb
+  list does not match, so no script change was needed for them; the exception above records
+  that they are deliberate.
 - `apps/mobile` is deliberately unscanned: phase 7 states no mobile change as a success
   criterion, and it imports only types from `@lang-tutor/core/api`, never `./api/schemas`.
 - No composition-root exclusions apply — `createRoute` definitions and their handlers are

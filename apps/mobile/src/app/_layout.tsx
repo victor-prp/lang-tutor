@@ -9,13 +9,16 @@ import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { createApiClient } from '@/api/client';
+import { createAppAuthClient } from '@/auth/client';
+import { createAuthEvents } from '@/authEvents';
 import { requireEnvValue } from '@/config/requireEnvValue';
-import { createRememberedEnrollmentStore, createRememberedUsernameStore } from '@/currentUser';
+import { createRememberedEnrollmentStore } from '@/currentUser';
 import { ApiProvider } from '@/hooks/useApi';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
@@ -39,8 +42,16 @@ import { colors } from '@/theme';
 // inliner, which matches on the literal text at this call site.
 const baseUrl = requireEnvValue(process.env.EXPO_PUBLIC_API_URL, 'EXPO_PUBLIC_API_URL');
 
-const api = createApiClient({ baseUrl, fetch: globalThis.fetch });
-const usernameStore = createRememberedUsernameStore({ storage: AsyncStorage });
+// Phase 29 (spec D18). The only file that names expo-secure-store (ADR 0002 R1).
+const auth = createAppAuthClient({ baseUrl, platform: Platform.OS, storage: SecureStore });
+const authEvents = createAuthEvents();
+const api = createApiClient({
+  baseUrl,
+  fetch: globalThis.fetch,
+  sessionHeaders: auth.sessionHeaders,
+  credentials: auth.credentials,
+  onUnauthorized: authEvents.unauthorized,
+});
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
 
 const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
@@ -161,8 +172,7 @@ export default function RootLayout() {
       <ApiProvider api={api}>
         <SpeechProvider speaker={speaker}>
           <RecordingProvider recorder={recorder}>
-            <CurrentUserProvider api={api} usernameStore={usernameStore}
-              enrollmentStore={enrollmentStore}
+            <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore}
             >
               <NextSessionProvider api={api}>
                 <SessionProvider api={api}>

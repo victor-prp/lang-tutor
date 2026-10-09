@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { createRememberedEnrollmentStore, createRememberedUsernameStore } from './currentUser';
+import { createRememberedEnrollmentStore } from './currentUser';
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const values = { ...initial };
@@ -12,32 +12,6 @@ function fakeStorage(initial: Record<string, string> = {}) {
     },
   };
 }
-
-describe('createRememberedUsernameStore', () => {
-  it('reads an empty string when nothing has been remembered', async () => {
-    const store = createRememberedUsernameStore({ storage: fakeStorage() });
-    expect(await store.read()).toBe('');
-  });
-
-  it('reads back what was written', async () => {
-    const storage = fakeStorage();
-    const store = createRememberedUsernameStore({ storage });
-
-    await store.write('dana');
-
-    expect(await store.read()).toBe('dana');
-    expect(storage.values['lang-tutor:username']).toBe('dana');
-  });
-
-  it('overwrites the previous username rather than accumulating', async () => {
-    const storage = fakeStorage({ 'lang-tutor:username': 'dana' });
-    const store = createRememberedUsernameStore({ storage });
-
-    await store.write('yoni');
-
-    expect(await store.read()).toBe('yoni');
-  });
-});
 
 describe('createRememberedEnrollmentStore', () => {
   it('remembers one enrollment per username, so two learners on one device never share one', async () => {

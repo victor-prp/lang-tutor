@@ -144,9 +144,36 @@ limiter needs exactly that fact when it is switched on.
 
 ## When phase 29 merges
 
-1. Write `wordspal/prod/BETTER_AUTH_SECRET` (`openssl rand -base64 32`) and
-   `wordspal/prod/RESEND_API_KEY` as in go-live step 4.
-2. In `terraform/prod`: append both names to `secret_env_names`, and add `AUTH_BASE_URL` and
-   `WEB_ORIGINS` (both `https://app.wordspal.ai`) and `MAIL_FROM` to the environment map.
-3. Release. Phase 29's migrations run on that container's start (ADR 0010). That release
-   closes the exposure window the phase 30 design describes.
+Phase 29's PR carries its `terraform/prod` entries: `BETTER_AUTH_SECRET` and `RESEND_API_KEY`
+in `secret_env_names`, and `AUTH_BASE_URL`, `WEB_ORIGINS` (both `https://app.wordspal.ai`)
+and `MAIL_FROM` in the environment map. A plan reads every secret it names, so its
+`terraform-plan` job stays red until both secrets exist, and the release guard refuses a
+commit whose `terraform-plan` is red. The secrets therefore come before the merge:
+
+1. **Resend.** Add the domain `wordspal.ai` and put the SPF and DKIM records it shows
+   into GoDaddy's DNS; optionally a `_dmarc` TXT record with `p=none`. Create an API key
+   restricted to sending on that domain.
+2. **Both secrets**, as in go-live step 4:
+
+   ```bash
+   KEY="$(openssl rand -base64 32)" && aws secretsmanager create-secret --region eu-central-1 \
+     --name wordspal/prod/BETTER_AUTH_SECRET --secret-string "$KEY"; unset KEY
+   read -rs KEY && aws secretsmanager create-secret --region eu-central-1 \
+     --name wordspal/prod/RESEND_API_KEY --secret-string "$KEY"; unset KEY
+   ```
+
+   Then re-run the PR's `terraform-plan` job; it goes green once it can read both.
+3. **Merge, then release.** Phase 29's migrations run on that container's start (ADR 0010),
+   and every learner already in production gets an unclaimed placeholder identity. That
+   release closes the exposure window the phase 30 design describes.
+4. **Claim the accounts that predate sign-in**, each before anyone signs in with its address
+   on production, with `PROD_DB` from go-live step 9:
+
+   ```bash
+   DATABASE_URL="$PROD_DB" npm run db:claim-account -- --username <name> --email <address>
+   ```
+
+Still open after that release: Better Auth's rate limiter (`storage: 'database'`,
+`trustedProxies` for the proxy above) and a per-IP limit on sending codes, which ADR 0009
+lists as its remaining obligations. Until they land, the limits are 3 tries per code and 5
+codes per address per hour.

@@ -329,19 +329,16 @@ export const SessionViewSchema = z.object({
 // text is "show me the answer", which is wrong.
 export const NextStepRequestSchema = z.union([
   z.object({
-    user_id: z.string().min(1),
     question_id: z.string().min(1),
     option_index: z.number().int().nonnegative(),
   }),
   z.object({
-    user_id: z.string().min(1),
     question_id: z.string().min(1),
     text: z.string().max(100),
   }),
   // Phase 25 (spec D5). A speaking card answered without audio: passed, or
   // "show me the answer".
   z.object({
-    user_id: z.string().min(1),
     question_id: z.string().min(1),
     pass: z.enum(['skip', 'show_answer']),
   }),
@@ -376,7 +373,6 @@ export const SpeechMimeTypeSchema = z.enum(['audio/aac', 'audio/mp4', 'audio/web
 // Phase 25 (spec D14). One spoken attempt at the current card. At most 200 KB of
 // audio, as base64 (spec D13).
 export const SpeechAnswerRequestSchema = z.object({
-  user_id: z.string().min(1),
   question_id: z.string().min(1),
   mime_type: SpeechMimeTypeSchema,
   audio: z.string().min(1).max(270_000),
@@ -398,7 +394,6 @@ export const SpeechAnswerResponseSchema = z.object({
 // Phase 27 (spec D3, D11). An answer to a card the server judges, with a model
 // call when no rule decides it. At most 300 characters.
 export const JudgedAnswerRequestSchema = z.object({
-  user_id: z.string().min(1),
   question_id: z.string().min(1),
   text: z.string().max(300),
 });
@@ -551,10 +546,6 @@ export const CreateEnrollmentRequestSchema = z
   .refine((request) => request.source_language !== request.target_language, {
     message: 'source and target language must differ',
   });
-
-export const LoginRequestSchema = z.object({
-  username: UsernameSchema,
-});
 
 // Phase 16. Why an input came back empty without a model call: the script
 // guard (apps/server/src/domain/languages.ts) found its letters in `to`'s
@@ -1032,3 +1023,29 @@ export const LlmPhotoReadingSchema = z.object({
 // Phase 26. The match call's answer: a sense number counted from 1, 0 for none
 // (spec D7).
 export const LlmSenseMatchSchema = z.object({ sense: z.number().int() });
+
+// Phase 29 (spec D14). The four Better Auth paths the server mounts, described
+// as Better Auth 1.7 answers them. The server registers them for the document
+// only; Better Auth parses its own requests.
+export const SendCodeRequestSchema = z.object({ email: z.string().email(), type: z.literal('sign-in') });
+export const SendCodeResponseSchema = z.object({ success: z.boolean() });
+export const SignInWithCodeRequestSchema = z.object({ email: z.string().email(), otp: z.string().regex(/^\d{8}$/) });
+const AuthUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  name: z.string(),
+  emailVerified: z.boolean(),
+  image: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export const SignInWithCodeResponseSchema = z.object({ token: z.string(), user: AuthUserSchema });
+export const GetSessionResponseSchema = z
+  .object({ session: z.object({ id: z.string(), userId: z.string(), expiresAt: z.string() }), user: AuthUserSchema })
+  .nullable();
+export const SignOutResponseSchema = z.object({ success: z.boolean() });
+/** Better Auth's own error body, unlike ours: `{ code, message }`. */
+export const AuthErrorSchema = z.object({ code: z.string().optional(), message: z.string() });
+
+// Phase 29 (spec D12). Who the session belongs to; `user` is null until onboarding.
+export const MeResponseSchema = z.object({ email: z.string(), user: UserSchema.nullable() });

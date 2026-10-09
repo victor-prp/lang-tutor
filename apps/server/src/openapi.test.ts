@@ -19,11 +19,13 @@ describe('POST /api/sessions in the published document', () => {
     expect(doc.paths['/api/sessions'].post).toBeDefined();
   });
 
-  it('declares its 201, 400, 404 and 409', async () => {
+  it('declares its 201, 400, 404 and 409, and the gate\'s 401 and 403', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths['/api/sessions'].post.responses).sort()).toEqual([
       '201',
       '400',
+      '401',
+      '403',
       '404',
       '409',
     ]);
@@ -56,6 +58,8 @@ describe(`POST ${NEXT_STEP} in the published document`, () => {
     expect(Object.keys(doc.paths[NEXT_STEP].post.responses).sort()).toEqual([
       '200',
       '400',
+      '401',
+      '403',
       '404',
       '409',
     ]);
@@ -78,7 +82,7 @@ describe(`POST ${NEXT_STEP} in the published document`, () => {
 
   it('describes each failure with the error body it actually returns', async () => {
     const doc = await openApiDocument();
-    for (const status of ['400', '404', '409']) {
+    for (const status of ['400', '401', '403', '404', '409']) {
       const schema =
         doc.paths[NEXT_STEP].post.responses[status].content['application/json'].schema;
       expect(schema.required).toEqual(['error']);
@@ -106,9 +110,14 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all twenty-three paths and nothing else', async () => {
+  it('contains all twenty-seven paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
+      '/api/auth/email-otp/send-verification-otp',
+      '/api/auth/get-session',
+      '/api/auth/sign-in/email-otp',
+      '/api/auth/sign-out',
+      '/api/enrollments',
       '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
@@ -117,7 +126,7 @@ describe('the document as a whole', () => {
       '/api/grants',
       '/api/grants/{id}',
       '/api/grants/{id}/accept',
-      '/api/login',
+      '/api/me',
       '/api/photo-imports/{id}',
       '/api/photo-imports/{id}/discard',
       '/api/photo-imports/{id}/items/{position}',
@@ -130,56 +139,106 @@ describe('the document as a whole', () => {
       '/api/sessions/{id}/speech',
       '/api/translations',
       '/api/users',
-      '/api/users/{id}/enrollments',
       '/health',
     ]);
   });
 });
 
+describe('sign-in in the published document (phase 29)', () => {
+  it('publishes the four auth paths, open', async () => {
+    const doc = await openApiDocument();
+    for (const [path, method] of [
+      ['/api/auth/email-otp/send-verification-otp', 'post'],
+      ['/api/auth/sign-in/email-otp', 'post'],
+      ['/api/auth/get-session', 'get'],
+      ['/api/auth/sign-out', 'post'],
+    ] as const) {
+      expect(doc.paths[path]?.[method]?.security).toEqual([]);
+    }
+  });
+
+  it('declares the session cookie as the default scheme, and /health as open', async () => {
+    const doc = await openApiDocument();
+    expect(doc.components.securitySchemes.sessionCookie).toMatchObject({ type: 'apiKey', in: 'cookie' });
+    expect(doc.security).toEqual([{ sessionCookie: [] }]);
+    expect(doc.paths['/health'].get.security).toEqual([]);
+  });
+
+  it('declares 401 on every operation that needs a session, and nothing open but sign-in and /health', async () => {
+    const doc = await openApiDocument();
+    const open = new Set(['/health', '/api/auth/email-otp/send-verification-otp', '/api/auth/sign-in/email-otp', '/api/auth/get-session', '/api/auth/sign-out']);
+    for (const [path, ops] of Object.entries(doc.paths)) {
+      for (const [method, op] of Object.entries(ops as Record<string, { responses: Record<string, unknown> }>)) {
+        if (open.has(path)) continue;
+        expect([`${method} ${path}`, Object.keys(op.responses)]).toEqual([`${method} ${path}`, expect.arrayContaining(['401'])]);
+      }
+    }
+  });
+
+  // Spec D12: the session is the only way to say who you are.
+  it('lets no operation name its actor: no header, no user_id in a body, no user id in a path', async () => {
+    const doc = await openApiDocument();
+    for (const [path, ops] of Object.entries(doc.paths)) {
+      expect(path).not.toMatch(/\/users\/\{/);
+      for (const op of Object.values(ops as Record<string, { parameters?: { name: string }[]; requestBody?: unknown }>)) {
+        expect((op.parameters ?? []).map((p) => p.name.toLowerCase())).not.toContain('x-acting-user-id');
+        expect(JSON.stringify(op.requestBody ?? {})).not.toContain('"user_id"');
+      }
+    }
+  });
+
+  it('publishes GET /api/me: signed in is enough, and the profile may be null', async () => {
+    const doc = await openApiDocument();
+    const op = doc.paths['/api/me'].get;
+    expect(Object.keys(op.responses).sort()).toEqual(['200', '401']);
+    const schema = op.responses['200'].content['application/json'].schema;
+    expect(schema.required.sort()).toEqual(['email', 'user']);
+  });
+});
+
 describe('the grant endpoints in the published document (phase 28)', () => {
   it.each([
-    ['/api/grants', 'post', ['201', '400', '403', '404', '409']],
-    ['/api/grants', 'get', ['200', '400']],
-    ['/api/grants/{id}/accept', 'post', ['200', '400', '403', '404']],
-    ['/api/grants/{id}', 'delete', ['204', '400', '403']],
-  ])('declares every status %s %s can return, and requires the actor header', async (path, method, statuses) => {
+    ['/api/grants', 'post', ['201', '400', '401', '403', '404', '409']],
+    ['/api/grants', 'get', ['200', '401', '403']],
+    ['/api/grants/{id}/accept', 'post', ['200', '401', '403', '404']],
+    ['/api/grants/{id}', 'delete', ['204', '401', '403']],
+  ])('declares every status %s %s can return', async (path, method, statuses) => {
     const doc = await openApiDocument();
     const operation = doc.paths[path as string][method as string];
     expect(Object.keys(operation.responses).sort()).toEqual(statuses);
-    const header = operation.parameters.find((p: { name: string }) => p.name === 'x-acting-user-id');
-    expect(header).toMatchObject({ in: 'header', required: true });
   });
 });
 
 describe('the enrollment endpoints in the published document', () => {
   it('declares the photo upload as 202 with 400, 404 and 413', async () => {
     const doc = await openApiDocument();
-    expect(Object.keys(doc.paths['/api/enrollments/{id}/photo-imports'].post.responses).sort()).toEqual(['202', '400', '404', '413']);
-    expect(Object.keys(doc.paths['/api/photo-imports/{id}/items/{position}'].patch.responses).sort()).toEqual(['200', '400', '404', '409']);
+    expect(Object.keys(doc.paths['/api/enrollments/{id}/photo-imports'].post.responses).sort()).toEqual(['202', '400', '401', '403', '404', '413']);
+    expect(Object.keys(doc.paths['/api/photo-imports/{id}/items/{position}'].patch.responses).sort()).toEqual(['200', '400', '401', '403', '404', '409']);
   });
 
-  it('declares every status POST /api/users/{id}/enrollments can return', async () => {
+  it('declares every status POST /api/enrollments can return', async () => {
     const doc = await openApiDocument();
-    expect(
-      Object.keys(doc.paths['/api/users/{id}/enrollments'].post.responses).sort(),
-    ).toEqual(['201', '400', '404', '409']);
-  });
-
-  it('declares every status GET /api/users/{id}/enrollments can return', async () => {
-    const doc = await openApiDocument();
-    expect(Object.keys(doc.paths['/api/users/{id}/enrollments'].get.responses).sort()).toEqual([
-      '200',
-      '404',
+    expect(Object.keys(doc.paths['/api/enrollments'].post.responses).sort()).toEqual([
+      '201',
+      '400',
+      '401',
+      '403',
+      '409',
     ]);
+  });
+
+  it('declares every status GET /api/enrollments can return', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths['/api/enrollments'].get.responses).sort()).toEqual(['200', '401', '403']);
   });
 });
 
 describe('the translation endpoint in the published document', () => {
-  it('publishes the translation endpoint with all four statuses', async () => {
+  it('publishes the translation endpoint with all its statuses', async () => {
     const doc = await openApiDocument();
     const path = doc.paths['/api/translations']?.post;
     expect(path).toBeDefined();
-    expect(Object.keys(path.responses).sort()).toEqual(['200', '400', '404', '502']);
+    expect(Object.keys(path.responses).sort()).toEqual(['200', '400', '401', '403', '404', '502']);
   });
 
   it('says the endpoint learns the enrollment, and uses it only for `saved`', async () => {
@@ -244,9 +303,10 @@ describe('the user endpoints in the published document', () => {
     expect(Object.keys(doc.paths)).not.toContain('/users');
   });
 
-  it('publishes /api/login, not /login', async () => {
+  // Phase 29 (spec D12): sign-in replaced it.
+  it('no longer publishes /api/login', async () => {
     const doc = await openApiDocument();
-    expect(Object.keys(doc.paths)).toContain('/api/login');
+    expect(Object.keys(doc.paths)).not.toContain('/api/login');
     expect(Object.keys(doc.paths)).not.toContain('/login');
   });
 
@@ -255,16 +315,8 @@ describe('the user endpoints in the published document', () => {
     expect(Object.keys(doc.paths['/api/users'].post.responses).sort()).toEqual([
       '201',
       '400',
+      '401',
       '409',
-    ]);
-  });
-
-  it('declares every status POST /api/login can return', async () => {
-    const doc = await openApiDocument();
-    expect(Object.keys(doc.paths['/api/login'].post.responses).sort()).toEqual([
-      '200',
-      '400',
-      '404',
     ]);
   });
 
@@ -274,12 +326,6 @@ describe('the user endpoints in the published document', () => {
       doc.paths['/api/users'].post.responses['409'].content['application/json'].schema;
     expect(schema.required).toEqual(['error']);
     expect(schema.properties.error.type).toBe('string');
-  });
-
-  // The one place a reader is most likely to assume otherwise.
-  it('says in the document that login authenticates nothing', async () => {
-    const doc = await openApiDocument();
-    expect(doc.paths['/api/login'].post.description).toMatch(/NO authentication/);
   });
 });
 
@@ -295,10 +341,10 @@ describe('the vocabulary endpoints in the published document', () => {
   const BASE = '/api/enrollments/{id}/vocabulary';
 
   it.each([
-    [BASE, 'post', ['200', '400', '403', '404']],
-    [BASE, 'get', ['200', '400', '404']],
-    [`${BASE}/glosses/{gloss_id}`, 'delete', ['204', '400', '403', '404']],
-    [`${BASE}/word`, 'get', ['200', '400', '404']],
+    [BASE, 'post', ['200', '400', '401', '403', '404']],
+    [BASE, 'get', ['200', '400', '401', '403', '404']],
+    [`${BASE}/glosses/{gloss_id}`, 'delete', ['204', '401', '403', '404']],
+    [`${BASE}/word`, 'get', ['200', '400', '401', '403', '404']],
   ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths[path][method].responses).sort()).toEqual(statuses);
@@ -309,8 +355,8 @@ describe('phase 19 paths in the published document', () => {
   it('publishes read, skip and current', async () => {
     const doc = await openApiDocument();
     expect(doc.paths['/api/sessions/{id}'].get).toBeDefined();
-    expect(Object.keys(doc.paths['/api/sessions/{id}/skip'].post.responses).sort()).toEqual(['200', '404', '409']);
-    expect(Object.keys(doc.paths['/api/enrollments/{id}/sessions/current'].get.responses).sort()).toEqual(['200', '404']);
+    expect(Object.keys(doc.paths['/api/sessions/{id}/skip'].post.responses).sort()).toEqual(['200', '401', '403', '404', '409']);
+    expect(Object.keys(doc.paths['/api/enrollments/{id}/sessions/current'].get.responses).sort()).toEqual(['200', '401', '403', '404']);
     expect(Object.keys(doc.paths[NEXT_STEP].post.responses)).toContain('409');
   });
 });
@@ -319,23 +365,8 @@ describe('POST /api/sessions/{id}/speech in the published document', () => {
   it('declares every status it can return, and says it costs money', async () => {
     const doc = await openApiDocument();
     const op = doc.paths['/api/sessions/{id}/speech'].post;
-    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '404', '409', '413', '502']);
+    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '401', '403', '404', '409', '413', '502']);
     expect(op.description).toMatch(/costs money/);
-  });
-});
-
-describe('the actor header in the published document (phase 28)', () => {
-  it('is required on both vocabulary writes, and says it authenticates nothing', async () => {
-    const doc = await openApiDocument();
-    for (const operation of [
-      doc.paths['/api/enrollments/{id}/vocabulary'].post,
-      doc.paths['/api/enrollments/{id}/vocabulary/glosses/{gloss_id}'].delete,
-    ]) {
-      const header = operation.parameters.find((p: { name: string }) => p.name === 'x-acting-user-id');
-      expect(header).toMatchObject({ in: 'header', required: true });
-      expect(header.description).toMatch(/NOT AUTHENTICATED/);
-      expect(Object.keys(operation.responses)).toContain('403');
-    }
   });
 });
 
@@ -343,7 +374,40 @@ describe('POST /api/sessions/{id}/judged-answer in the published document', () =
   it('declares every status it can return, and says it costs money', async () => {
     const doc = await openApiDocument();
     const op = doc.paths['/api/sessions/{id}/judged-answer'].post;
-    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '404', '409', '502']);
+    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '401', '403', '404', '409', '502']);
     expect(op.description).toMatch(/costs money/);
+  });
+});
+
+// Phase 29 (spec D13). Every route whose refusal has a rule of its own says it
+// in its 403, and still says the gate's own 403 (a session without a profile).
+describe('the 403 of an owner-only or granted route in the published document', () => {
+  const VOCABULARY = '/api/enrollments/{id}/vocabulary';
+  it.each([
+    [VOCABULARY, 'post', /accepted grant that allows adding words/],
+    [VOCABULARY, 'get', /owner, who alone may read it/],
+    [`${VOCABULARY}/senses/{sense_id}`, 'delete', /owner, who alone may remove a word/],
+    [`${VOCABULARY}/word`, 'get', /owner, who alone may read it/],
+    ['/api/sessions', 'post', /another learner's/],
+    ['/api/sessions/{id}', 'get', /another learner's/],
+    ['/api/sessions/{id}/skip', 'post', /another learner's/],
+    ['/api/sessions/{id}/next-step', 'post', /another learner's/],
+    ['/api/sessions/{id}/speech', 'post', /another learner's/],
+    ['/api/sessions/{id}/judged-answer', 'post', /another learner's/],
+    ['/api/enrollments/{id}/sessions/current', 'get', /another learner's/],
+    ['/api/enrollments/{id}/photo-imports', 'post', /another learner's/],
+    ['/api/enrollments/{id}/photo-imports', 'get', /another learner's/],
+    ['/api/photo-imports/{id}', 'get', /another learner's/],
+    ['/api/photo-imports/{id}/items/{position}', 'patch', /another learner's/],
+    ['/api/photo-imports/{id}/save', 'post', /another learner's/],
+    ['/api/photo-imports/{id}/discard', 'post', /another learner's/],
+    ['/api/translations', 'post', /another learner's enrollment/],
+    ['/api/grants/{id}/accept', 'post', /owner, who alone may accept or decline an invite/],
+    ['/api/grants/{id}', 'delete', /neither party to this grant/],
+  ])('%s %s names its rule and the missing profile', async (path, method, rule) => {
+    const doc = await openApiDocument();
+    const { description } = doc.paths[path][method].responses['403'];
+    expect(description).toMatch(rule);
+    expect(description).toMatch(/without a profile/);
   });
 });

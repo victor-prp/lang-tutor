@@ -29,6 +29,9 @@ WORK_RAW="${NIGHTLY_QA_WORK:-${TMPDIR:-/tmp}/lang-tutor-nightly-qa}"
 HEADLESS="--headless"
 QA_API_PORT="${QA_API_PORT:-3101}"
 QA_APP_PORT="${QA_APP_PORT:-8092}"
+QA_MAIL_PORT="${QA_MAIL_PORT:-8093}"
+# Where the agent reads its sign-in codes; the brief appends the address.
+INBOX_URL="http://localhost:$QA_MAIL_PORT/inbox?email="
 
 PERSONA="careful-adult"
 FOCUS="polysemy"
@@ -60,6 +63,7 @@ sed -e "s|__WORK__|${WORK#/}|g" -e "s|__REPO__|${REPO#/}|g" \
 
 sed -e "s|__WORK__|$WORK|g" -e "s|__HEADLESS__|$HEADLESS|g" \
     -e "s|__API_PORT__|$QA_API_PORT|g" -e "s|__APP_PORT__|$QA_APP_PORT|g" \
+    -e "s|__MAIL_PORT__|$QA_MAIL_PORT|g" \
   nightly-qa/fence/mcp.template.json > "$WORK/mcp.json"
 
 PERSONA_FILE="nightly-qa/charters/personas/$PERSONA.md"
@@ -71,7 +75,7 @@ FOCUS_FILE="nightly-qa/charters/focus/$FOCUS.md"
 [ -f "$FOCUS_FILE" ] || { echo "no such focus: $FOCUS_FILE" >&2; exit 1; }
 
 cat nightly-qa/brief/mission.md "$PERSONA_FILE" "$FOCUS_FILE" \
-  | sed -e "s|__APP_URL__|http://localhost:$QA_APP_PORT|g" > "$WORK/brief.md"
+  | sed -e "s|__APP_URL__|http://localhost:$QA_APP_PORT|g" -e "s|__INBOX_URL__|$INBOX_URL|g" > "$WORK/brief.md"
 
 echo "  ok         charter: $PERSONA / $FOCUS" >&2
 

@@ -23,7 +23,7 @@ export default function StudentWordsScreen() {
   // Redirect while router.back() also runs (enroll.tsx guards the same hazard).
   const leaving = useRef(false);
   const [stopFailed, setStopFailed] = useState(false);
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <Redirect href="/" />;
   const grant = grantId ? studentGrant(grants, grantId) : undefined;
   if (!grant) return leaving.current ? null : <Redirect href="/" />;
 

@@ -138,7 +138,7 @@ else
 fi
 
 # A thousand per lane: easy to hold in your head, and no slot can reach
-# nightly-qa's reserved 3101 and 8092.
+# nightly-qa's reserved 3101, 8092 and 8093.
 d_port=$((3001 + 1000 * LANE_SLOT))
 d_e2e_api_port=$((3002 + 1000 * LANE_SLOT))
 d_metro_port=$((8081 + 1000 * LANE_SLOT))
@@ -172,6 +172,11 @@ E2E_APP_URL="${E2E_APP_URL:-http://localhost:$E2E_APP_PORT}"
 E2E_MOCK_NAMESPACE="${E2E_MOCK_NAMESPACE:-$d_ns}"
 TEST_DB_PREFIX="${TEST_DB_PREFIX:-$d_prefix}"
 EXPO_PUBLIC_API_URL="${EXPO_PUBLIC_API_URL:-http://$HOST:$PORT}"
+# Phase 29 (spec D15, D17). The server's own URL as a phone reaches it, and the
+# browser origins it admits with credentials: this lane's Metro, by name and by
+# LAN address. Derived, never written down (ADR 0006).
+AUTH_BASE_URL="${AUTH_BASE_URL:-http://$HOST:$PORT}"
+WEB_ORIGINS="${WEB_ORIGINS:-http://localhost:$METRO_PORT,http://$HOST:$METRO_PORT}"
 # Shared by every lane and not derived from the slot — one container, namespaced
 # per caller. It is here because this file is where an address is allowed to be
 # written down, not because it varies.
@@ -179,7 +184,7 @@ MOCKSERVER_URL="${MOCKSERVER_URL:-http://localhost:1080}"
 
 KEYS="LANE LANE_SLOT LANE_ROOT LANE_BRANCH PORT METRO_PORT DATABASE_URL \
 E2E_API_URL E2E_APP_URL E2E_APP_PORT E2E_DATABASE_URL E2E_MOCK_NAMESPACE \
-MOCKSERVER_URL TEST_DB_PREFIX EXPO_PUBLIC_API_URL"
+MOCKSERVER_URL TEST_DB_PREFIX EXPO_PUBLIC_API_URL AUTH_BASE_URL WEB_ORIGINS"
 
 case "${1:-}" in
   '')

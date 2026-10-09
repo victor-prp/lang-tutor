@@ -99,6 +99,11 @@ locals {
       LANE         = "prod"
       PG_POOL_MAX  = tostring(var.pg_pool_max)
       GEMINI_MODEL = var.gemini_model
+      # Phase 29 (ADR 0009). The page and the API share the domain's one origin,
+      # which is both Better Auth's base URL and the only web origin.
+      AUTH_BASE_URL = "https://${var.domain}"
+      WEB_ORIGINS   = "https://${var.domain}"
+      MAIL_FROM     = var.mail_from
     },
     { for name, secret in data.aws_secretsmanager_secret_version.env : name => secret.secret_string },
   )

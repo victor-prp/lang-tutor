@@ -141,6 +141,30 @@ export async function expectGeminiMatching(
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
 
+/** Phase 29. Resend, answered 200 for this lane's namespace. `clearGemini` wipes it, so every sign-in registers it again. */
+export async function expectEmails(request: APIRequestContext): Promise<void> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      httpRequest: { method: 'POST', path: `/${E2E_MOCK_NAMESPACE}/emails` },
+      httpResponse: { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: '{"id":"e2e"}' },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
+
+/** The 8 digits of the latest code "emailed" to `email` in this lane's namespace. */
+export async function codeFor(request: APIRequestContext, email: string): Promise<string> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/retrieve?type=REQUESTS&format=JSON`, {
+    data: { method: 'POST', path: `/${E2E_MOCK_NAMESPACE}/emails` },
+  });
+  if (!res.ok()) throw new Error(`MockServer retrieve failed: ${res.status()}`);
+  const requests = (await res.json()) as { body: { json: { to: string[]; subject: string } } }[];
+  const mine = requests.map((r) => r.body.json).filter((b) => b.to.includes(email.toLowerCase()));
+  const digits = (mine[mine.length - 1]?.subject ?? '').replace(/\D/g, '');
+  if (digits.length !== 8) throw new Error(`no code was emailed to ${email}`);
+  return digits;
+}
+
 /** Phase 27. The meaning judge's answer (or, with `misspelled` or `other_word`, the translation judge's), matched on the server's JUDGE_MARKER
  *  (apps/server/src/domain/judge.ts) and ranked above the generation stub.
  *  Consumed once, in registration order. `status` makes it a failed call

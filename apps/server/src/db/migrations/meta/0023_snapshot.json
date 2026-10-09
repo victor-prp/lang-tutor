@@ -1,6 +1,6 @@
 {
-  "id": "dec5a50c-2ae0-485a-8e34-a7c7fd1e9efa",
-  "prevId": "87bdd149-b5e0-49de-a826-541c2538691b",
+  "id": "9682e381-81b1-4d9d-b090-67a58bc0290d",
+  "prevId": "e79374ef-0675-4b8f-a6ec-11e0d0e14cd1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -103,6 +103,422 @@
       },
       "isRLSEnabled": false
     },
+    "public.auth_accounts": {
+      "name": "auth_accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "access_token": {
+          "name": "access_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token": {
+          "name": "refresh_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "id_token": {
+          "name": "id_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_token_expires_at": {
+          "name": "access_token_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token_expires_at": {
+          "name": "refresh_token_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "password": {
+          "name": "password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "auth_accounts_user_id_idx": {
+          "name": "auth_accounts_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "auth_accounts_user_id_auth_users_id_fk": {
+          "name": "auth_accounts_user_id_auth_users_id_fk",
+          "tableFrom": "auth_accounts",
+          "tableTo": "auth_users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_code_sends": {
+      "name": "auth_code_sends",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "auth_code_sends_email_sent_at_idx": {
+          "name": "auth_code_sends_email_sent_at_idx",
+          "columns": [
+            {
+              "expression": "email",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sent_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_sessions": {
+      "name": "auth_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "ip_address": {
+          "name": "ip_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "auth_sessions_user_id_idx": {
+          "name": "auth_sessions_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "auth_sessions_user_id_auth_users_id_fk": {
+          "name": "auth_sessions_user_id_auth_users_id_fk",
+          "tableFrom": "auth_sessions",
+          "tableTo": "auth_users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "auth_sessions_token_unique": {
+          "name": "auth_sessions_token_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_users": {
+      "name": "auth_users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_verified": {
+          "name": "email_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "image": {
+          "name": "image",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "auth_users_email_unique": {
+          "name": "auth_users_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_verifications": {
+      "name": "auth_verifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
+        "identifier": {
+          "name": "identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "auth_verifications_identifier_idx": {
+          "name": "auth_verifications_identifier_idx",
+          "columns": [
+            {
+              "expression": "identifier",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.dict_corrections": {
       "name": "dict_corrections",
       "schema": "",
@@ -183,156 +599,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.dict_glosses": {
-      "name": "dict_glosses",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()::text"
-        },
-        "lexeme_id": {
-          "name": "lexeme_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_language_code": {
-          "name": "user_language_code",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "key": {
-          "name": "key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "alternatives": {
-          "name": "alternatives",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "merged_into": {
-          "name": "merged_into",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "dict_glosses_live_key": {
-          "name": "dict_glosses_live_key",
-          "columns": [
-            {
-              "expression": "lexeme_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_language_code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "gloss_key(\"key\")",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"dict_glosses\".\"merged_into\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "dict_glosses_language_key_idx": {
-          "name": "dict_glosses_language_key_idx",
-          "columns": [
-            {
-              "expression": "user_language_code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "gloss_key(\"key\")",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"dict_glosses\".\"merged_into\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "dict_glosses_lexeme_fk": {
-          "name": "dict_glosses_lexeme_fk",
-          "tableFrom": "dict_glosses",
-          "tableTo": "dict_lexemes",
-          "columnsFrom": [
-            "lexeme_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "dict_glosses_merged_into_fk": {
-          "name": "dict_glosses_merged_into_fk",
-          "tableFrom": "dict_glosses",
-          "tableTo": "dict_glosses",
-          "columnsFrom": [
-            "merged_into"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "dict_glosses_id_lexeme_key": {
-          "name": "dict_glosses_id_lexeme_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "lexeme_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "dict_glosses_not_self": {
-          "name": "dict_glosses_not_self",
-          "value": "\"dict_glosses\".\"merged_into\" is null or \"dict_glosses\".\"merged_into\" <> \"dict_glosses\".\"id\""
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.dict_lexemes": {
       "name": "dict_lexemes",
       "schema": "",
@@ -403,119 +669,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.dict_sense_glosses": {
-      "name": "dict_sense_glosses",
-      "schema": "",
-      "columns": {
-        "sense_id": {
-          "name": "sense_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "lexeme_id": {
-          "name": "lexeme_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_language_code": {
-          "name": "user_language_code",
-          "type": "varchar(10)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "gloss_id": {
-          "name": "gloss_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "dict_sense_glosses_gloss_idx": {
-          "name": "dict_sense_glosses_gloss_idx",
-          "columns": [
-            {
-              "expression": "gloss_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "dict_sense_glosses_lexeme_idx": {
-          "name": "dict_sense_glosses_lexeme_idx",
-          "columns": [
-            {
-              "expression": "lexeme_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_language_code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "dict_sense_glosses_sense_fk": {
-          "name": "dict_sense_glosses_sense_fk",
-          "tableFrom": "dict_sense_glosses",
-          "tableTo": "dict_senses",
-          "columnsFrom": [
-            "sense_id",
-            "lexeme_id"
-          ],
-          "columnsTo": [
-            "id",
-            "lexeme_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "dict_sense_glosses_gloss_fk": {
-          "name": "dict_sense_glosses_gloss_fk",
-          "tableFrom": "dict_sense_glosses",
-          "tableTo": "dict_glosses",
-          "columnsFrom": [
-            "gloss_id",
-            "lexeme_id"
-          ],
-          "columnsTo": [
-            "id",
-            "lexeme_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "dict_sense_glosses_pkey": {
-          "name": "dict_sense_glosses_pkey",
-          "columns": [
-            "sense_id",
-            "user_language_code"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.dict_senses": {
       "name": "dict_senses",
       "schema": "",
@@ -538,12 +691,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "definition": {
-          "name": "definition",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -577,14 +724,6 @@
           "columns": [
             "lexeme_id",
             "sense_code"
-          ]
-        },
-        "dict_senses_id_lexeme_key": {
-          "name": "dict_senses_id_lexeme_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "lexeme_id"
           ]
         }
       },
@@ -620,18 +759,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "gloss": {
-          "name": "gloss",
+        "definition_notes": {
+          "name": "definition_notes",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
-        },
-        "alternatives": {
-          "name": "alternatives",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
+          "notNull": false
         },
         "example_source": {
           "name": "example_source",
@@ -1116,124 +1248,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.gloss_progress": {
-      "name": "gloss_progress",
-      "schema": "",
-      "columns": {
-        "enrollment_id": {
-          "name": "enrollment_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "gloss_id": {
-          "name": "gloss_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dimension": {
-          "name": "dimension",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "level": {
-          "name": "level",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "last_step_on": {
-          "name": "last_step_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_wrong_on": {
-          "name": "last_wrong_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "gloss_progress_enrollment_dimension_idx": {
-          "name": "gloss_progress_enrollment_dimension_idx",
-          "columns": [
-            {
-              "expression": "enrollment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "dimension",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "gloss_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "level",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "gloss_progress_entry_fk": {
-          "name": "gloss_progress_entry_fk",
-          "tableFrom": "gloss_progress",
-          "tableTo": "vocabulary_entries",
-          "columnsFrom": [
-            "enrollment_id",
-            "gloss_id"
-          ],
-          "columnsTo": [
-            "enrollment_id",
-            "gloss_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "gloss_progress_pkey": {
-          "name": "gloss_progress_pkey",
-          "columns": [
-            "enrollment_id",
-            "gloss_id",
-            "dimension"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "gloss_progress_dimension_known": {
-          "name": "gloss_progress_dimension_known",
-          "value": "\"gloss_progress\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
-        },
-        "gloss_progress_level_range": {
-          "name": "gloss_progress_level_range",
-          "value": "\"gloss_progress\".\"level\" between 1 and 5"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.photo_import_items": {
       "name": "photo_import_items",
       "schema": "",
@@ -1281,14 +1295,14 @@
           "notNull": true,
           "default": "'[]'::jsonb"
         },
-        "suggested_gloss_id": {
-          "name": "suggested_gloss_id",
+        "suggested_sense_id": {
+          "name": "suggested_sense_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "chosen_gloss_id": {
-          "name": "chosen_gloss_id",
+        "chosen_sense_id": {
+          "name": "chosen_sense_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1350,9 +1364,9 @@
           "name": "photo_import_items_reason_known",
           "value": "\"photo_import_items\".\"reason\" is null or \"photo_import_items\".\"reason\" in ('sentence', 'no_meaning', 'not_in_language')"
         },
-        "photo_import_items_tick_needs_gloss": {
-          "name": "photo_import_items_tick_needs_gloss",
-          "value": "not \"photo_import_items\".\"ticked\" or \"photo_import_items\".\"chosen_gloss_id\" is not null"
+        "photo_import_items_tick_needs_sense": {
+          "name": "photo_import_items_tick_needs_sense",
+          "value": "not \"photo_import_items\".\"ticked\" or \"photo_import_items\".\"chosen_sense_id\" is not null"
         }
       },
       "isRLSEnabled": false
@@ -1469,8 +1483,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "gloss_id": {
-          "name": "gloss_id",
+        "sense_id": {
+          "name": "sense_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1570,6 +1584,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
+        "questions_sense_id_dict_senses_id_fk": {
+          "name": "questions_sense_id_dict_senses_id_fk",
+          "tableFrom": "questions",
+          "tableTo": "dict_senses",
+          "columnsFrom": [
+            "sense_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "questions_prompt_variant_id_dict_variants_id_fk": {
           "name": "questions_prompt_variant_id_dict_variants_id_fk",
           "tableFrom": "questions",
@@ -1593,19 +1620,6 @@
           ],
           "columnsTo": [
             "user_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "questions_gloss_fk": {
-          "name": "questions_gloss_fk",
-          "tableFrom": "questions",
-          "tableTo": "dict_glosses",
-          "columnsFrom": [
-            "gloss_id"
-          ],
-          "columnsTo": [
             "id"
           ],
           "onDelete": "no action",
@@ -1639,6 +1653,124 @@
       },
       "isRLSEnabled": false
     },
+    "public.sense_progress": {
+      "name": "sense_progress",
+      "schema": "",
+      "columns": {
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sense_id": {
+          "name": "sense_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dimension": {
+          "name": "dimension",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "level": {
+          "name": "level",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "last_step_on": {
+          "name": "last_step_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_wrong_on": {
+          "name": "last_wrong_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "sense_progress_enrollment_dimension_idx": {
+          "name": "sense_progress_enrollment_dimension_idx",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dimension",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sense_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "level",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sense_progress_entry_fk": {
+          "name": "sense_progress_entry_fk",
+          "tableFrom": "sense_progress",
+          "tableTo": "vocabulary_entries",
+          "columnsFrom": [
+            "enrollment_id",
+            "sense_id"
+          ],
+          "columnsTo": [
+            "enrollment_id",
+            "sense_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sense_progress_pkey": {
+          "name": "sense_progress_pkey",
+          "columns": [
+            "enrollment_id",
+            "sense_id",
+            "dimension"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sense_progress_dimension_known": {
+          "name": "sense_progress_dimension_known",
+          "value": "\"sense_progress\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
+        },
+        "sense_progress_level_range": {
+          "name": "sense_progress_level_range",
+          "value": "\"sense_progress\".\"level\" between 1 and 5"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.session_progress": {
       "name": "session_progress",
       "schema": "",
@@ -1649,8 +1781,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "gloss_id": {
-          "name": "gloss_id",
+        "sense_id": {
+          "name": "sense_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1695,7 +1827,7 @@
           "name": "session_progress_pkey",
           "columns": [
             "session_id",
-            "gloss_id",
+            "sense_id",
             "dimension"
           ]
         }
@@ -1977,7 +2109,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "users_id_auth_users_id_fk": {
+          "name": "users_id_auth_users_id_fk",
+          "tableFrom": "users",
+          "tableTo": "auth_users",
+          "columnsFrom": [
+            "id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "users_username_unique": {
@@ -2015,8 +2161,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "gloss_id": {
-          "name": "gloss_id",
+        "sense_id": {
+          "name": "sense_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -2096,17 +2242,15 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "vocabulary_entries_gloss_fk": {
-          "name": "vocabulary_entries_gloss_fk",
+        "vocabulary_entries_sense_fk": {
+          "name": "vocabulary_entries_sense_fk",
           "tableFrom": "vocabulary_entries",
-          "tableTo": "dict_glosses",
+          "tableTo": "dict_senses",
           "columnsFrom": [
-            "gloss_id",
-            "lexeme_id"
+            "sense_id"
           ],
           "columnsTo": [
-            "id",
-            "lexeme_id"
+            "id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -2158,7 +2302,7 @@
           "name": "vocabulary_entries_pkey",
           "columns": [
             "enrollment_id",
-            "gloss_id"
+            "sense_id"
           ]
         }
       },

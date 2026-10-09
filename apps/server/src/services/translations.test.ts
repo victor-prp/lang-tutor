@@ -56,7 +56,7 @@ describe('translate', () => {
       }),
     );
 
-    const result = await service.translate({ text: '  book  ', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: '  book  ', from: 'en', to: 'he' });
 
     expect(result.text).toBe('book');
     expect(result.from).toBe('en');
@@ -66,7 +66,7 @@ describe('translate', () => {
   it('asks the model for the pair it was given', async () => {
     const { service, llm } = serviceWith(reply({ kind: 'word', entries: [] }));
 
-    const result = await service.translate({ text: 'ספר', from: 'he', to: 'en' });
+    const result = await service.translate('u1', { text: 'ספר', from: 'he', to: 'en' });
 
     expect(result.from).toBe('he');
     expect(result.to).toBe('en');
@@ -76,7 +76,7 @@ describe('translate', () => {
   it('passes the prompt straight through to the client', async () => {
     const { service, llm } = serviceWith(reply({ kind: 'word', entries: [] }));
 
-    await service.translate({ text: 'book', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'book', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(1);
     expect(llm.calls[0].user).toBe('book');
@@ -91,7 +91,7 @@ describe('translate', () => {
       }),
     );
 
-    const result = await service.translate({ text: 'book', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'book', from: 'en', to: 'he' });
 
     expect(result.kind).toBe('word');
   });
@@ -111,7 +111,7 @@ describe('translate', () => {
       }),
     );
 
-    const result = await service.translate({ text: 'I read a book', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'I read a book', from: 'en', to: 'he' });
 
     expect(result.kind).toBe('sentence');
     expect(result.senses).toEqual([{ translation: 'קראתי ספר.' }]);
@@ -136,7 +136,7 @@ describe('translate', () => {
   it('treats no content as an empty result rather than a failure', async () => {
     const { service, logger } = serviceWith('');
 
-    const result = await service.translate({ text: 'asdkjhasd', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'asdkjhasd', from: 'en', to: 'he' });
 
     expect(result.senses).toEqual([]);
     expect(logger.events.map((event) => event.event)).toContain('translation_no_content');
@@ -144,26 +144,26 @@ describe('translate', () => {
 
   it('treats an empty sense list from the model as an empty result', async () => {
     const { service } = serviceWith(reply({ kind: 'word', entries: [] }));
-    await expect(service.translate({ text: 'asdkjhasd', from: 'en', to: 'he' })).resolves.toMatchObject({ senses: [] });
+    await expect(service.translate('u1', { text: 'asdkjhasd', from: 'en', to: 'he' })).resolves.toMatchObject({ senses: [] });
   });
 
   it('raises TranslationUnreadable for output that does not match the schema', async () => {
     const { service } = serviceWith('I cannot help with that.');
-    await expect(service.translate({ text: 'book', from: 'en', to: 'he' })).rejects.toBeInstanceOf(
+    await expect(service.translate('u1', { text: 'book', from: 'en', to: 'he' })).rejects.toBeInstanceOf(
       TranslationUnreadable,
     );
   });
 
   it('truncates the excerpt it carries, so a log line cannot be flooded', async () => {
     const { service } = serviceWith('x'.repeat(5000));
-    await expect(service.translate({ text: 'book', from: 'en', to: 'he' })).rejects.toMatchObject({
+    await expect(service.translate('u1', { text: 'book', from: 'en', to: 'he' })).rejects.toMatchObject({
       rawExcerpt: expect.stringMatching(/^x{200}$/),
     });
   });
 
   it('lets LlmUnavailable through untouched', async () => {
     const { service } = serviceWith(new LlmUnavailable('responded 500'));
-    await expect(service.translate({ text: 'book', from: 'en', to: 'he' })).rejects.toBeInstanceOf(LlmUnavailable);
+    await expect(service.translate('u1', { text: 'book', from: 'en', to: 'he' })).rejects.toBeInstanceOf(LlmUnavailable);
   });
 
   it('flattens two entries into one ranked list, round-robin by rank', async () => {
@@ -188,7 +188,7 @@ describe('translate', () => {
       }),
     );
 
-    const result = await service.translate({ text: 'saw', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'saw', from: 'en', to: 'he' });
 
     expect(result.senses.map((sense) => sense.translation)).toEqual(['לראות', 'מסור', 'להבין']);
     expect(result.senses[0]).not.toHaveProperty('sense_code');
@@ -198,7 +198,7 @@ describe('translate', () => {
     const { service, llm, dict, logger } = serviceWith(reply({ kind: 'word', entries: [] }));
     dict.hit = { ladder: [row('סולם')] };
 
-    const result = await service.translate({ text: 'ladder', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'ladder', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(0);
     expect(result.senses).toEqual([{ translation: 'סולם', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
@@ -220,7 +220,7 @@ describe('translate', () => {
     const { service, dict } = serviceWith(reply({ kind: 'word', entries: [] }));
     dict.hit = { 'to remember': [row('לזכור', { kind: 'word' })] };
 
-    const result = await service.translate({ text: 'to remember', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'to remember', from: 'en', to: 'he' });
 
     expect(result.kind).toBe('word');
   });
@@ -228,7 +228,7 @@ describe('translate', () => {
   it('reads with the normalized form and the request\'s language pair', async () => {
     const { service, dict } = serviceWith(reply({ kind: 'word', entries: [] }));
 
-    await service.translate({ text: '  good   morning ', from: 'en', to: 'he' });
+    await service.translate('u1', { text: '  good   morning ', from: 'en', to: 'he' });
 
     expect(dict.reads[0]).toEqual({
       form: 'good morning',
@@ -256,7 +256,7 @@ describe('translate', () => {
       }),
     );
 
-    await service.translate({ text: 'saw', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'saw', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(1);
     expect(dict.persisted).toHaveLength(1);
@@ -286,7 +286,7 @@ describe('translate', () => {
     );
     dict.reread = [row('לראות'), row('מסור', { senseId: 's-2' })];
 
-    const result = await service.translate({ text: 'saw', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'saw', from: 'en', to: 'he' });
 
     expect(result.senses.map((sense) => sense.translation)).toEqual(['לראות', 'מסור']);
   });
@@ -310,7 +310,7 @@ describe('translate', () => {
       }),
     );
 
-    await service.translate({ text: 'book', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'book', from: 'en', to: 'he' });
 
     expect(dict.persisted[0].entries).toHaveLength(1);
     expect(dict.persisted[0].entries[0].senses).toHaveLength(2);
@@ -331,7 +331,7 @@ describe('translate', () => {
     );
     dict.persistError = new Error('deadlock detected');
 
-    const result = await service.translate({ text: 'saw', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'saw', from: 'en', to: 'he' });
 
     expect(result.senses).toEqual([{ translation: 'מסור', part_of_speech: 'noun' }]);
     expect(logger.errors.map((entry) => entry.message)).toContain('dict_persist_failed');
@@ -350,19 +350,19 @@ describe('translate', () => {
         ],
       }),
     );
-    await sentence.service.translate({ text: 'I read a book', from: 'en', to: 'he' });
+    await sentence.service.translate('u1', { text: 'I read a book', from: 'en', to: 'he' });
     expect(sentence.dict.persisted).toHaveLength(0);
 
     const empty = serviceWith(reply({ kind: 'word', entries: [] }));
-    await empty.service.translate({ text: 'asdkjhasd', from: 'en', to: 'he' });
+    await empty.service.translate('u1', { text: 'asdkjhasd', from: 'en', to: 'he' });
     expect(empty.dict.persisted).toHaveLength(0);
 
     const blocked = serviceWith('');
-    await blocked.service.translate({ text: 'asdkjhasd', from: 'en', to: 'he' });
+    await blocked.service.translate('u1', { text: 'asdkjhasd', from: 'en', to: 'he' });
     expect(blocked.dict.persisted).toHaveLength(0);
 
     const down = serviceWith(new LlmUnavailable('responded 500'));
-    await expect(down.service.translate({ text: 'saw', from: 'en', to: 'he' })).rejects.toBeInstanceOf(LlmUnavailable);
+    await expect(down.service.translate('u1', { text: 'saw', from: 'en', to: 'he' })).rejects.toBeInstanceOf(LlmUnavailable);
     expect(down.dict.persisted).toHaveLength(0);
   });
 
@@ -380,7 +380,7 @@ describe('translate', () => {
       }),
     );
 
-    await service.translate({ text: 'saw', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'saw', from: 'en', to: 'he' });
 
     expect(logger.events).toEqual([
       { event: 'dict_persisted', entry_count: 1, lexemes_created: 1 },
@@ -412,7 +412,7 @@ describe('translate', () => {
       { senseCode: 'rung', translation: 'שלב-ישן', exampleSource: null, exampleTarget: null },
     ];
 
-    await service.translate({ text: 'ladder', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'ladder', from: 'en', to: 'he' });
 
     const events = logger.events.map((event) => event.event);
     expect(events).toContain('dict_repaired');
@@ -449,7 +449,7 @@ describe('reconciliation', () => {
   it('makes one client call when the lexeme is new', async () => {
     const { service, llm, dict } = serviceWith(oneVerb);
 
-    await service.translate({ text: 'cook', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'cook', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(1);
     // It still asked — "no stored senses" is an answer, not a skipped read.
@@ -463,7 +463,7 @@ describe('reconciliation', () => {
     );
     dict.stored['cook:verb'] = storedReserve;
 
-    const result = await service.translate({ text: 'cooked', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'cooked', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(2);
     // The stored code won, not the one call 1 invented.
@@ -488,7 +488,7 @@ describe('reconciliation', () => {
       }),
     );
 
-    await service.translate({ text: 'I cooked dinner', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'I cooked dinner', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(1);
     expect(dict.lexemeReads).toEqual([]);
@@ -501,7 +501,7 @@ describe('reconciliation', () => {
     // Deliberately unlike the failed-WRITE path below, which still answers 200:
     // that one protects a correct answer whose storage failed, this one prevents
     // storing an answer known to be wrong into a dictionary with no TTL.
-    await expect(service.translate({ text: 'cooked', from: 'en', to: 'he' })).rejects.toBeInstanceOf(LlmUnavailable);
+    await expect(service.translate('u1', { text: 'cooked', from: 'en', to: 'he' })).rejects.toBeInstanceOf(LlmUnavailable);
     expect(dict.persisted).toHaveLength(0);
   });
 
@@ -517,7 +517,7 @@ describe('reconciliation', () => {
     );
     dict.stored['cook:verb'] = storedReserve;
 
-    const result = await service.translate({ text: 'cooked', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'cooked', from: 'en', to: 'he' });
 
     const senses = dict.persisted[0].entries[0].senses;
     expect(senses.map((s) => s.sense_code)).toEqual(['fabricate_accounts']);
@@ -541,7 +541,7 @@ describe('reconciliation', () => {
     );
     dict.stored['cook:verb'] = storedReserve;
 
-    await service.translate({ text: 'cooked', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'cooked', from: 'en', to: 'he' });
 
     expect(dict.persisted[0].entries[0].senses).toHaveLength(1);
     expect(dict.persisted[0].entries[0].senses[0].translation).toBe('FIRST');
@@ -559,7 +559,7 @@ describe('reconciliation', () => {
     );
     dict.stored['cook:verb'] = storedReserve;
 
-    await service.translate({ text: 'cooked', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'cooked', from: 'en', to: 'he' });
 
     // Drift is visible from the log alone, without reading rows: a lexeme whose
     // senses keep growing is a prompt that keeps renaming them.
@@ -629,7 +629,7 @@ describe('the stored redirect', () => {
     dict.corrections = { thruot: redirect() };
     dict.hit = { throat: [row('גרון', { kind: 'word' })] };
 
-    const result = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'thruot', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(0);
     expect(result.senses).toEqual([{ translation: 'גרון', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
@@ -654,7 +654,7 @@ describe('the stored redirect', () => {
     dict.corrections = { throat: redirect({ typedForm: 'throat', correctedForm: 'throughout' }) };
     dict.hit = { throat: [row('גרון', { kind: 'word' })] };
 
-    const result = await service.translate({ text: 'throat', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'throat', from: 'en', to: 'he' });
 
     expect(result.correction).toBeUndefined();
     expect(result.senses).toEqual([{ translation: 'גרון', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
@@ -671,7 +671,7 @@ describe('the stored redirect', () => {
     dict.corrections = { thruot: redirect() };
     dict.hit = {};
 
-    await service.translate({ text: 'thruot', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'thruot', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(1);
   });
@@ -700,7 +700,7 @@ describe('the stored redirect', () => {
       { senseCode: 'body_part', translation: 'גרון', exampleSource: null, exampleTarget: null },
     ];
 
-    const result = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'thruot', from: 'en', to: 'he' });
 
     // The repair call, and only it — a redirect hit pays no call 1.
     expect(llm.calls).toHaveLength(1);
@@ -717,7 +717,7 @@ describe('the stored redirect', () => {
     dict.corrections = { thruot: redirect() };
     dict.hit = { throat: [row('גרון', { kind: 'word' })] };
 
-    await service.translate({ text: 'thruot', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'thruot', from: 'en', to: 'he' });
 
     const serialized = JSON.stringify(logger.events);
     expect(serialized).not.toContain('thruot');
@@ -745,7 +745,7 @@ describe('a correction on the miss path', () => {
   it('hands persistEntries the corrected form, never the typed one', async () => {
     const { service, dict } = serviceWith(corrected());
 
-    const result = await service.translate({ text: 'bokked', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'bokked', from: 'en', to: 'he' });
 
     expect(dict.persisted).toHaveLength(1);
     expect(dict.persisted[0].form).toBe('booked');
@@ -764,7 +764,7 @@ describe('a correction on the miss path', () => {
       { senseCode: 'make_reservation', translation: 'להזמין', exampleSource: null, exampleTarget: null },
     ];
 
-    await service.translate({ text: 'bokked', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'bokked', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(2);
     expect(llm.calls[1].user).toBe('booked');
@@ -775,7 +775,7 @@ describe('a correction on the miss path', () => {
   it('writes the redirect beside the entries, and logs dict_corrected', async () => {
     const { service, dict, logger } = serviceWith(corrected());
 
-    await service.translate({ text: 'bokked', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'bokked', from: 'en', to: 'he' });
 
     expect(dict.correctionsWritten).toEqual([
       expect.objectContaining({
@@ -796,7 +796,7 @@ describe('a correction on the miss path', () => {
       corrected({ correction: { corrected_form: 'שלום' } }),
     );
 
-    await expect(service.translate({ text: 'shalom', from: 'en', to: 'he' })).rejects.toBeInstanceOf(
+    await expect(service.translate('u1', { text: 'shalom', from: 'en', to: 'he' })).rejects.toBeInstanceOf(
       TranslationUnreadable,
     );
     expect(llm.calls).toHaveLength(1);
@@ -811,7 +811,7 @@ describe('a correction on the miss path', () => {
       reply({ kind: 'phrase', entries: [], correction: { corrected_form: 'zxq wbtl' } }),
     );
 
-    const result = await service.translate({ text: 'zxqwbtl', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'zxqwbtl', from: 'en', to: 'he' });
 
     expect(result.correction).toBeUndefined();
     expect(result.kind).toBe('word');
@@ -841,7 +841,7 @@ describe('a correction on the miss path', () => {
     };
     dict.hit = {};
 
-    const result = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'thruot', from: 'en', to: 'he' });
 
     expect(dict.persisted[0].form).toBe('thruot');
     expect(result.correction).toBeUndefined();
@@ -862,7 +862,7 @@ describe('a correction on the miss path', () => {
       { senseCode: 'make_reservation', translation: 'להזמין', exampleSource: null, exampleTarget: null },
     ];
 
-    await expect(service.translate({ text: 'bokked', from: 'en', to: 'he' })).rejects.toBeInstanceOf(
+    await expect(service.translate('u1', { text: 'bokked', from: 'en', to: 'he' })).rejects.toBeInstanceOf(
       TranslationUnreadable,
     );
     expect(dict.persisted).toHaveLength(0);
@@ -883,7 +883,7 @@ describe('a correction on the miss path', () => {
       }),
     );
 
-    const result = await service.translate({ text: 'I have a sore thruot', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'I have a sore thruot', from: 'en', to: 'he' });
 
     expect(result.kind).toBe('sentence');
     expect(result.senses).toEqual([{ translation: 'יש לי כאב גרון.' }]);
@@ -911,7 +911,7 @@ describe('the corrected-form probe', () => {
     const { service, llm, dict, logger } = serviceWith(correctingReply);
     dict.hit = { booked: [row('הזמין', { kind: 'word', lexemeId: 't-verb' })] };
 
-    const result = await service.translate({ text: 'bokked', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'bokked', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(1);
     expect(dict.persisted).toHaveLength(0);
@@ -945,7 +945,7 @@ describe('the corrected-form probe', () => {
       { senseCode: 'make_reservation', translation: 'להזמין', exampleSource: null, exampleTarget: null },
     ];
 
-    const result = await service.translate({ text: 'bokked', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'bokked', from: 'en', to: 'he' });
 
     // Call 1 and the repair. NOT a reconciliation for the miss pipeline — that
     // pipeline never runs.
@@ -962,7 +962,7 @@ describe('the corrected-form probe', () => {
     const { service, dict } = serviceWith(correctingReply);
     dict.hit = {};
 
-    await service.translate({ text: 'bokked', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'bokked', from: 'en', to: 'he' });
 
     expect(dict.persisted).toHaveLength(1);
     expect(dict.persisted[0].form).toBe('booked');
@@ -984,7 +984,7 @@ describe('the corrected-form probe', () => {
     };
     dict.hit = { throat: [row('גרון', { kind: 'word' })] };
 
-    const result = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text: 'thruot', from: 'en', to: 'he' });
 
     expect(dict.persisted).toHaveLength(0);
     expect(dict.correctionsWritten).toEqual([
@@ -1012,7 +1012,7 @@ describe('the corrected-form probe', () => {
     };
     dict.hit = {};
 
-    await expect(service.translate({ text: 'thruot', from: 'en', to: 'he' })).rejects.toBeInstanceOf(
+    await expect(service.translate('u1', { text: 'thruot', from: 'en', to: 'he' })).rejects.toBeInstanceOf(
       TranslationUnreadable,
     );
     expect(dict.persisted).toHaveLength(0);
@@ -1026,7 +1026,7 @@ describe('the corrected-form probe', () => {
       reply({ kind: 'word', ...oneEntry('kite', [{ translation: 'עפיפון', sense_code: 'toy' }]) }),
     );
 
-    await service.translate({ text: 'kite', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'kite', from: 'en', to: 'he' });
 
     expect(dict.persisted[0].form).toBe('kite');
     expect(dict.correctionsWritten).toHaveLength(0);
@@ -1042,7 +1042,7 @@ describe('the script guard', () => {
   it('answers Hebrew typed under ru → he as a wrong direction, with no read and no call', async () => {
     const { service, llm, dict, logger } = serviceWith('must not be called');
 
-    const answer = await service.translate({ text: 'חלון', from: 'ru', to: 'he' });
+    const answer = await service.translate('u1', { text: 'חלון', from: 'ru', to: 'he' });
 
     expect(answer).toEqual({
       text: 'חלון',
@@ -1065,7 +1065,7 @@ describe('the script guard', () => {
   it('answers Latin typed under ru → he as out of pair', async () => {
     const { service, llm, dict } = serviceWith('must not be called');
 
-    const answer = await service.translate({ text: 'window', from: 'ru', to: 'he' });
+    const answer = await service.translate('u1', { text: 'window', from: 'ru', to: 'he' });
 
     expect(answer.reason).toBe('out_of_pair');
     expect(answer.senses).toEqual([]);
@@ -1076,7 +1076,7 @@ describe('the script guard', () => {
   it('lets letterless input through to the normal path', async () => {
     const { service, dict } = serviceWith('must not be called');
 
-    await service.translate({ text: '100%', from: 'en', to: 'he' }).catch(() => undefined);
+    await service.translate('u1', { text: '100%', from: 'en', to: 'he' }).catch(() => undefined);
 
     expect(dict.reads.length).toBeGreaterThan(0);
   });

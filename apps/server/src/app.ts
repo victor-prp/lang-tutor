@@ -5,8 +5,11 @@ import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 
 import type { AppDeps } from './composition';
+import { PROFILE_EXEMPT, createSessionMiddleware, type ActorEnv } from './routes/actor';
+import { registerAuthDocs } from './routes/authDocs';
 import { createEnrollmentsRouter } from './routes/enrollments';
 import { createGrantsRouter } from './routes/grants';
+import { createMeRouter } from './routes/me';
 import { createPhotoImportsRouter } from './routes/photoImports';
 import { createSessionsRouter } from './routes/sessions';
 import { createTranslationsRouter } from './routes/translations';
@@ -22,6 +25,7 @@ const healthRoute = createRoute({
   path: '/health',
   tags: ['health'],
   summary: 'Readiness check',
+  security: [],
   responses: {
     200: {
       content: { 'application/json': { schema: HealthResponseSchema } },
@@ -39,8 +43,11 @@ const healthRoute = createRoute({
 // collaborator arrives in `deps`. An OpenAPIHono rather than a Hono because the
 // route definitions below *are* the published description of this API.
 export function createApp(deps: AppDeps) {
-  const app = new OpenAPIHono();
-  app.use('*', cors());
+  const app = new OpenAPIHono<ActorEnv>();
+  // Phase 29 (spec D15). The lane's own web origins, with credentials: the
+  // browser sends the session cookie only to an origin CORS names. The phone
+  // sends no Origin and is unaffected.
+  app.use('*', cors({ origin: deps.webOrigins, credentials: true }));
 
   app.openapi(healthRoute, async (c) => {
     const ok = await deps.health.ping();
@@ -50,6 +57,27 @@ export function createApp(deps: AppDeps) {
     return ok ? c.json(body, 200) : c.json(body, 503);
   });
 
+  // Phase 29 (spec D3; ADR 0003's second exception). Better Auth answers these
+  // four paths and nothing else under /api/auth.
+  for (const { method, path } of deps.auth.paths) {
+    app.on(method, `/api/auth${path}`, (c) => deps.auth.handler(c.req.raw));
+  }
+  app.all('/api/auth/*', (c) => c.json({ error: 'not found' }, 404));
+  registerAuthDocs(app);
+
+  // Phase 29 (spec D11). Everything under /api past this point needs a
+  // session; all but PROFILE_EXEMPT also need a profile. Registered after the
+  // auth mount and its 404, so those answer first and an unknown auth path
+  // stays a 404 rather than a 401.
+  app.use(
+    '/api/*',
+    createSessionMiddleware({
+      sessionOf: deps.signedIn.sessionOf,
+      hasProfile: deps.users.hasProfile,
+      profileExempt: PROFILE_EXEMPT,
+    }),
+  );
+  app.route('/api', createMeRouter(deps.users));
   app.route('/api', createUsersRouter(deps.users));
   app.route('/api', createEnrollmentsRouter(deps.enrollments));
   app.route('/api', createGrantsRouter(deps.grants));
@@ -64,6 +92,7 @@ export function createApp(deps: AppDeps) {
   // configuration and removes no risk.
   app.doc31('/openapi.json', {
     openapi: '3.1.0',
+    security: [{ sessionCookie: [] }],
     info: {
       title: 'lang-tutor API',
       version: '0.1.0',

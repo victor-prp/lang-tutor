@@ -301,3 +301,19 @@ export class SenseMatchUnreadable extends Error {
     this.name = 'SenseMatchUnreadable';
   }
 }
+
+/** Phase 29 (spec D16). The email provider did not take a sign-in code. */
+export class EmailNotSent extends Error {
+  constructor(readonly status: number | 'timeout' | 'network') {
+    super(`sign-in email not sent (${status})`);
+    this.name = 'EmailNotSent';
+  }
+}
+
+/** Phase 29 (spec D12). The signed-in user already has a profile. */
+export class ProfileExists extends Error {
+  constructor(readonly userId: string) {
+    super(`user ${userId} already has a profile`);
+    this.name = 'ProfileExists';
+  }
+}

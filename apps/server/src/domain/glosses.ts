@@ -21,7 +21,7 @@ const tidy = (text: string): string => text.replace(/\s+/gu, ' ').trim();
  * first, so a comma or a slash inside one never splits: "אח (חבר, רע)" is אח.
  * What is left splits on the list marks; the first item is the translation and
  * the rest are its alternatives. Text that is nothing but a parenthetical stays
- * as it was, so a translation is never empty. 0022_glosses.sql holds the same
+ * as it was, so a translation is never empty. 0024_glosses.sql holds the same
  * rule in SQL, and the migration test runs lane 0's shapes through both.
  */
 export function splitTranslation(text: string): { translation: string; alternatives: string[] } {

@@ -32,11 +32,10 @@ r1() {
     | grep -vE '^apps/server/src/(repo/grants|db/schema)\.ts:'
 }
 
-# Exceptions: each app's one header site. Test files are excluded by the command.
+# No exceptions since ADR 0009: the actor comes from the session. Test files are
+# excluded by the command.
 r2() {
-  grep -rniE "x-acting-user-id" apps/server/src apps/mobile/src --include='*.ts' --include='*.tsx' \
-    --exclude='*.test.ts' --exclude='*.test.tsx' \
-    | grep -vE '^apps/server/src/routes/actor\.ts:|^apps/mobile/src/api/client\.ts:'
+  grep -rniE "x-acting-user-id" apps/server/src apps/mobile/src --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx'
 }
 
 # Exceptions: the role map and the schema's role enum. Test files are excluded.
@@ -49,7 +48,7 @@ echo "Checking the repo against ADR 0008 (access grants)"
 echo
 
 check "R1  enrollment_grants is read and written only by repo/grants.ts" r1
-check "R2  the actor header is named once per app"                       r2
+check "R2  the acting user comes from the session, no header"            r2
 check "R3  roles are named once"                                         r3
 
 echo

@@ -122,28 +122,29 @@ describe('recomputeProgress', () => {
     const E2 = enrollmentOf('u_2');
     const { sessions: live } = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
 
-    const answer = (sessionId: string, question: Question, right: boolean) => {
+    // Each session is answered by its own learner.
+    const answer = (learner: string, sessionId: string, question: Question, right: boolean) => {
       const q = asChoice(question);
-      return live.submitAnswer(sessionId, q.id, {
+      return live.submitAnswer(learner, sessionId, q.id, {
         option_index: right ? q.correct_option : (q.correct_option + 1) % q.options.length,
       });
     };
 
     // Completed: three saved senses, answered right, wrong, right; the other
     // seven questions are about unsaved senses and must change nothing.
-    const { sessionId: completed } = await live.createNextSession(E, { listening: false, speaking: false });
-    const completedRecord = await live.getSession(completed);
+    const { sessionId: completed } = await live.createNextSession('u_1', E, { listening: false, speaking: false });
+    const completedRecord = await live.getSession('u_1', completed);
     await saveSessionGlosses(t.db, { sessionId: completed, enrollmentId: E, positions: [0, 1, 2] });
-    for (const [i, q] of completedRecord.questions.entries()) await answer(completed, q, i !== 1);
-    expect((await live.getSession(completed)).status).toBe('completed');
+    for (const [i, q] of completedRecord.questions.entries()) await answer('u_1', completed, q, i !== 1);
+    expect((await live.getSession('u_1', completed)).status).toBe('completed');
 
     // Skipped: two saved senses, one answered right and one wrong, then the skip.
-    const { sessionId: skipped } = await live.createNextSession(E2, { listening: false, speaking: false });
-    const skippedRecord = await live.getSession(skipped);
+    const { sessionId: skipped } = await live.createNextSession('u_2', E2, { listening: false, speaking: false });
+    const skippedRecord = await live.getSession('u_2', skipped);
     await saveSessionGlosses(t.db, { sessionId: skipped, enrollmentId: E2, positions: [0, 1] });
-    await answer(skipped, skippedRecord.questions[0], true);
-    await answer(skipped, skippedRecord.questions[1], false);
-    await live.skipSession(skipped);
+    await answer('u_2', skipped, skippedRecord.questions[0], true);
+    await answer('u_2', skipped, skippedRecord.questions[1], false);
+    await live.skipSession('u_2', skipped);
 
     const written = async () => ({
       first: await readProgress(t.db, E),
@@ -180,10 +181,10 @@ describe('recomputeProgress', () => {
     const { sessionId, questions } = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: words });
     expect(questions.map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation']);
 
-    await live.submitAnswer(sessionId, questions[0].id, { option_index: 0 });
-    await live.submitAnswer(sessionId, questions[1].id, { option_index: 0 });
+    await live.submitAnswer('u_1', sessionId, questions[0].id, { option_index: 0 });
+    await live.submitAnswer('u_1', sessionId, questions[1].id, { option_index: 0 });
     // One letter swapped in a seven-letter word: a near miss.
-    const done = await live.submitAnswer(sessionId, questions[2].id, { text: 'lantren' });
+    const done = await live.submitAnswer('u_1', sessionId, questions[2].id, { text: 'lantren' });
     expect(done.status).toBe('completed');
 
     const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });
@@ -218,14 +219,14 @@ describe('recomputeProgress', () => {
       types: ['listen_choice', 'letter_tiles', 'dictation', 'matching', 'matching', 'matching', 'matching'],
     });
 
-    await live.submitAnswer(sessionId, questions[0].id, { option_index: 0 });
-    await live.submitAnswer(sessionId, questions[1].id, { text: 'quill' });
-    await live.submitAnswer(sessionId, questions[2].id, { text: 'lantern' });
+    await live.submitAnswer('u_1', sessionId, questions[0].id, { option_index: 0 });
+    await live.submitAnswer('u_1', sessionId, questions[1].id, { text: 'quill' });
+    await live.submitAnswer('u_1', sessionId, questions[2].id, { text: 'lantern' });
     // Board words: right except the second, which first tried the fifth meaning.
-    await live.submitAnswer(sessionId, questions[3].id, { option_index: 0 });
-    await live.submitAnswer(sessionId, questions[4].id, { option_index: 4 });
-    await live.submitAnswer(sessionId, questions[5].id, { option_index: 2 });
-    const done = await live.submitAnswer(sessionId, questions[6].id, { option_index: 3 });
+    await live.submitAnswer('u_1', sessionId, questions[3].id, { option_index: 0 });
+    await live.submitAnswer('u_1', sessionId, questions[4].id, { option_index: 4 });
+    await live.submitAnswer('u_1', sessionId, questions[5].id, { option_index: 2 });
+    const done = await live.submitAnswer('u_1', sessionId, questions[6].id, { option_index: 3 });
     expect(done.status).toBe('completed');
 
     const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });
@@ -261,9 +262,9 @@ describe('recomputeProgress', () => {
       types: ['read_aloud', 'say_translation', 'say_translation'],
     });
 
-    await live.submitAnswer(sessionId, questions[0].id, { heard: 'tome' });
-    await live.submitAnswer(sessionId, questions[1].id, { pass: 'show_answer' });
-    const done = await live.submitAnswer(sessionId, questions[2].id, { text: 'lantern' });
+    await live.submitAnswer('u_1', sessionId, questions[0].id, { heard: 'tome' });
+    await live.submitAnswer('u_1', sessionId, questions[1].id, { pass: 'show_answer' });
+    const done = await live.submitAnswer('u_1', sessionId, questions[2].id, { text: 'lantern' });
     expect(done.status).toBe('completed');
 
     const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });

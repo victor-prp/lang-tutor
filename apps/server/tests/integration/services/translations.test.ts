@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { PartOfSpeech } from '@lang-tutor/core/api';
 
+import { AccessDenied } from '../../../src/errors';
 import { createFakeLogger } from '../../support/fakes';
 import {
   clearNamespace,
@@ -11,6 +12,8 @@ import {
   geminiBaseUrlFor,
   mockNamespace,
 } from '../../support/mockServer';
+import { countRows } from '../../support/rowCounts';
+import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -61,8 +64,8 @@ describe('translate, against a real database', () => {
     await expectGeminiJson(ns, { kind: 'word', entries: [entry('ladder', ['סולם', 'דירוג'])] });
     const service = translations();
 
-    const first = await service.translate({ text: 'ladder', from: 'en', to: 'he' });
-    const second = await service.translate({ text: 'ladder', from: 'en', to: 'he' });
+    const first = await service.translate('u_1', { text: 'ladder', from: 'en', to: 'he' });
+    const second = await service.translate('u_1', { text: 'ladder', from: 'en', to: 'he' });
 
     expect(second).toEqual(first);
     expect(await countGeminiRequests(ns, 'ladder')).toBe(1);
@@ -72,8 +75,8 @@ describe('translate, against a real database', () => {
     await expectGeminiJson(ns, { kind: 'word', entries: [entry('ladder', ['סולם'])] });
     const service = translations();
 
-    await service.translate({ text: 'ladder', from: 'en', to: 'he' });
-    const again = await service.translate({ text: '  LADDER  ', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'ladder', from: 'en', to: 'he' });
+    const again = await service.translate('u_1', { text: '  LADDER  ', from: 'en', to: 'he' });
 
     expect(again.senses).toEqual([
       {
@@ -106,8 +109,8 @@ describe('translate, against a real database', () => {
     await expectGeminiJson(ns, { kind: 'word', entries: [entry('ladder', ['סולם'])] });
     const service = translations();
 
-    await service.translate({ text: 'ladder', from: 'en', to: 'he' });
-    const again = await service.translate({ text: 'ladder?', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'ladder', from: 'en', to: 'he' });
+    const again = await service.translate('u_1', { text: 'ladder?', from: 'en', to: 'he' });
 
     expect(again.senses).toEqual([
       {
@@ -171,11 +174,11 @@ describe('translate, against a real database', () => {
     const service = translations();
 
     // 1 — `see` on an empty dictionary: its own three.
-    const see = await service.translate({ text: 'see', from: 'en', to: 'he' });
+    const see = await service.translate('u_1', { text: 'see', from: 'en', to: 'he' });
     expect(see.senses.map((sense) => sense.translation)).toEqual(['לראות', 'להבין', 'לפגוש']);
 
     // 2 — `saw`: both headwords answered and both written, in one call.
-    const saw = await service.translate({ text: 'saw', from: 'en', to: 'he' });
+    const saw = await service.translate('u_1', { text: 'saw', from: 'en', to: 'he' });
     expect(saw.senses.map((sense) => sense.translation)).toEqual([
       'לראות',
       'מסור',
@@ -185,19 +188,19 @@ describe('translate, against a real database', () => {
     ]);
 
     // 3 — the same lookup again is free and identical.
-    expect(await service.translate({ text: 'saw', from: 'en', to: 'he' })).toEqual(saw);
+    expect(await service.translate('u_1', { text: 'saw', from: 'en', to: 'he' })).toEqual(saw);
     // Two, not one: step 2 cost a first call AND a reconciliation call, because
     // the `see` lexeme it named already had senses from step 1. The point of the
     // assertion is unchanged — this third lookup added neither.
     expect(await countGeminiRequests(ns, '"saw"')).toBe(2);
 
     // 4 — `saws` is a second call, because no lemma alias was synthesized.
-    const saws = await service.translate({ text: 'saws', from: 'en', to: 'he' });
+    const saws = await service.translate('u_1', { text: 'saws', from: 'en', to: 'he' });
     expect(saws.senses.map((sense) => sense.translation)).toEqual(['מסור', 'לנסר']);
 
     // 5 — `see` still answers with its own three. Correctly no מסור: `see` is
     // not ambiguous, even though `saw` is.
-    expect(await service.translate({ text: 'see', from: 'en', to: 'he' })).toEqual(see);
+    expect(await service.translate('u_1', { text: 'see', from: 'en', to: 'he' })).toEqual(see);
   });
 
   it('keeps costing for a sentence, because a sentence is not a vocabulary item', async () => {
@@ -213,8 +216,8 @@ describe('translate, against a real database', () => {
     });
     const service = translations();
 
-    await service.translate({ text: 'I climbed the ladder', from: 'en', to: 'he' });
-    await service.translate({ text: 'I climbed the ladder', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'I climbed the ladder', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'I climbed the ladder', from: 'en', to: 'he' });
 
     expect(await countGeminiRequests(ns, 'climbed')).toBe(2);
   });
@@ -223,8 +226,8 @@ describe('translate, against a real database', () => {
     await expectGeminiJson(ns, { kind: 'word', entries: [] });
     const service = translations();
 
-    await service.translate({ text: 'asdkjhasd', from: 'en', to: 'he' });
-    await service.translate({ text: 'asdkjhasd', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'asdkjhasd', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'asdkjhasd', from: 'en', to: 'he' });
 
     expect(await countGeminiRequests(ns, 'asdkjhasd')).toBe(2);
   });
@@ -285,9 +288,9 @@ describe('translate, against a real database', () => {
     });
 
     const service = translations();
-    await service.translate({ text: 'bank', from: 'en', to: 'he' });
-    const answer = await service.translate({ text: 'banks', from: 'en', to: 'he' });
-    await service.translate({ text: 'banked', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'bank', from: 'en', to: 'he' });
+    const answer = await service.translate('u_1', { text: 'banks', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'banked', from: 'en', to: 'he' });
 
     expect(answer.senses.map((x) => x.translation)).toEqual(['BANKS-FIN', 'BANKS-RIVER']);
 
@@ -353,16 +356,16 @@ describe('translate, against a real database', () => {
 
     const service = translations();
 
-    const first = await service.translate({ text: 'scan', from: 'en', to: 'he' });
+    const first = await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });
     expect(first.senses.map((s) => s.translation)).toEqual(['SCAN-READ', 'SCAN-EXAMINE']);
 
-    await service.translate({ text: 'scans', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'scans', from: 'en', to: 'he' });
 
     // The repair: three senses, and re-RANKED by the repair call rather than
     // appended at the end. digitize_image comes second because that is where
     // this form ranked it, which is the whole reason rank lives on the
     // translation.
-    const healed = await service.translate({ text: 'scan', from: 'en', to: 'he' });
+    const healed = await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });
     expect(healed.senses.map((s) => s.translation)).toEqual([
       'SCAN-READ',
       'SCAN-DIGITIZE',
@@ -371,7 +374,7 @@ describe('translate, against a real database', () => {
 
     // And the repair is paid once. A fourth lookup is a plain hit.
     const afterRepair = await countGeminiRequests(ns);
-    expect(await service.translate({ text: 'scan', from: 'en', to: 'he' })).toEqual(healed);
+    expect(await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' })).toEqual(healed);
     expect(await countGeminiRequests(ns)).toBe(afterRepair);
   });
 
@@ -412,8 +415,8 @@ describe('translate, against a real database', () => {
     });
 
     const service = translations();
-    await service.translate({ text: 'scan', from: 'en', to: 'he' }); // two senses, rendered at version 2
-    await service.translate({ text: 'scans', from: 'en', to: 'he' }); // the lexeme learns a third
+    await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' }); // two senses, rendered at version 2
+    await service.translate('u_1', { text: 'scans', from: 'en', to: 'he' }); // the lexeme learns a third
 
     await clearNamespace(ns);
 
@@ -451,12 +454,12 @@ describe('translate, against a real database', () => {
       matchText: '"scanned"',
     });
 
-    const repairing = service.translate({ text: 'scan', from: 'en', to: 'he' });
+    const repairing = service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });
     // Inside the repair's model call, not before it: half a second is long
     // enough for the read transaction to have happened and short enough to be
     // well clear of the three-second answer.
     await new Promise((resolve) => setTimeout(resolve, 500));
-    await service.translate({ text: 'scanned', from: 'en', to: 'he' }); // teaches the lexeme a fourth
+    await service.translate('u_1', { text: 'scanned', from: 'en', to: 'he' }); // teaches the lexeme a fourth
 
     const repaired = await repairing;
     // The repair rendered the three senses it was given. Nothing wrong with
@@ -484,7 +487,7 @@ describe('translate, against a real database', () => {
     // would have been marked level at four while rendering three, this lookup
     // would be a plain hit, and the fourth sense would be lost to this form for
     // good.
-    const healed = await service.translate({ text: 'scan', from: 'en', to: 'he' });
+    const healed = await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });
     expect(healed.senses.map((s) => s.translation)).toEqual([
       'SCAN-READ',
       'SCAN-EXAMINE',
@@ -529,14 +532,14 @@ describe('translate, against a real database', () => {
       db: t.db, logger, rng: testRng(7), geminiBaseUrl: geminiBaseUrlFor(ns),
     }).translations;
 
-    await service.translate({ text: 'scan', from: 'en', to: 'he' });   // two senses
-    await service.translate({ text: 'scans', from: 'en', to: 'he' });  // the lexeme learns a third
+    await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });   // two senses
+    await service.translate('u_1', { text: 'scans', from: 'en', to: 'he' });  // the lexeme learns a third
 
     // Now the repair is due — and the provider is down for it.
     await clearNamespace(ns);
     await expectGeminiStatus(ns, 503);
 
-    const answer = await service.translate({ text: 'scan', from: 'en', to: 'he' });
+    const answer = await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });
 
     // 200, with the stored answer. Nothing was written, so nothing was lost.
     expect(answer.senses.map((s) => s.translation)).toEqual(['SCAN-READ', 'SCAN-EXAMINE']);
@@ -560,7 +563,7 @@ describe('translate, against a real database', () => {
       matchText: '"scan"',
     });
 
-    const healed = await service.translate({ text: 'scan', from: 'en', to: 'he' });
+    const healed = await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });
     expect(healed.senses.map((s) => s.translation)).toEqual([
       'SCAN-READ',
       'SCAN-DIGITIZE',
@@ -605,8 +608,8 @@ describe('translate, against a real database', () => {
       db: t.db, logger, rng: testRng(7), geminiBaseUrl: geminiBaseUrlFor(ns),
     }).translations;
 
-    await service.translate({ text: 'scan', from: 'en', to: 'he' });   // two senses, both served
-    await service.translate({ text: 'scans', from: 'en', to: 'he' });  // the lexeme learns a third
+    await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });   // two senses, both served
+    await service.translate('u_1', { text: 'scans', from: 'en', to: 'he' });  // the lexeme learns a third
 
     // The flaky repair: `examine_closely` comes back as `translation: null` —
     // the model saying this form does not admit a sense it has been serving all
@@ -621,7 +624,7 @@ describe('translate, against a real database', () => {
       matchText: '"scan"',
     });
 
-    const answer = await service.translate({ text: 'scan', from: 'en', to: 'he' });
+    const answer = await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });
 
     // The stored answer, whole. Not the two senses the repair offered.
     expect(answer.senses.map((s) => s.translation)).toEqual(['SCAN-READ', 'SCAN-EXAMINE']);
@@ -640,7 +643,7 @@ describe('translate, against a real database', () => {
       ],
       matchText: '"scan"',
     });
-    const healed = await service.translate({ text: 'scan', from: 'en', to: 'he' });
+    const healed = await service.translate('u_1', { text: 'scan', from: 'en', to: 'he' });
     expect(healed.senses.map((s) => s.translation)).toEqual([
       'SCAN-READ',
       'SCAN-EXAMINE',
@@ -662,6 +665,38 @@ describe('translate, against a real database', () => {
 
     expect(first.senses).toHaveLength(5);
     expect(again.senses.map((card) => card.translation)).toEqual(first.senses.map((card) => card.translation));
+    expect(await countGeminiRequests(ns)).toBe(1);
+  });
+});
+
+// Phase 29 (spec D13). A lookup that names an enrollment answers which senses it
+// has saved, so it is the owner's: the check comes before the model is asked.
+describe('translate with an enrollment (phase 29)', () => {
+  const DICTIONARY = ['dict_lexemes', 'dict_senses', 'dict_variants', 'dict_var_translations', 'dict_corrections'];
+
+  beforeEach(async () => {
+    await seedUser(t.db, 'u_owner');
+    await seedUser(t.db, 'u_other');
+    await expectGeminiJson(ns, { kind: 'word', entries: [entry('ladder', ['סולם'])] });
+  });
+
+  it('refuses another learner with AccessDenied, before any model call, and writes nothing', async () => {
+    const before = await countRows(t.db, DICTIONARY);
+    await expect(
+      translations().translate('u_other', { text: 'ladder', from: 'en', to: 'he', enrollment_id: enrollmentOf('u_owner') }),
+    ).rejects.toBeInstanceOf(AccessDenied);
+    expect(await countGeminiRequests(ns)).toBe(0);
+    expect(await countRows(t.db, DICTIONARY)).toEqual(before);
+  });
+
+  it('lets the owner look up with their own enrollment', async () => {
+    const answer = await translations().translate('u_owner', {
+      text: 'ladder',
+      from: 'en',
+      to: 'he',
+      enrollment_id: enrollmentOf('u_owner'),
+    });
+    expect(answer.senses).toEqual([expect.objectContaining({ translation: 'סולם', saved: false })]);
     expect(await countGeminiRequests(ns)).toBe(1);
   });
 });

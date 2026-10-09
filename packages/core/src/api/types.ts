@@ -1,6 +1,14 @@
 import type { z } from 'zod';
 
 import type {
+  SendCodeRequestSchema,
+  SendCodeResponseSchema,
+  SignInWithCodeRequestSchema,
+  SignInWithCodeResponseSchema,
+  GetSessionResponseSchema,
+  SignOutResponseSchema,
+  AuthErrorSchema,
+  MeResponseSchema,
   AnswerRecordSchema,
   CreateEnrollmentRequestSchema,
   CreateGrantRequestSchema,
@@ -26,7 +34,6 @@ import type {
   LlmSenseMatchSchema,
   LlmSenseSchema,
   LlmTranslationSchema,
-  LoginRequestSchema,
   MissedQuestionSchema,
   MultipleChoiceQuestionSchema,
   NextStepRequestSchema,
@@ -125,7 +132,6 @@ export type ErrorResponse = z.infer<typeof ErrorSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type User = z.infer<typeof UserSchema>;
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
-export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export type TranslationGuardReason = z.infer<typeof TranslationGuardReasonSchema>;
 export type TranslationKind = z.infer<typeof TranslationKindSchema>;
 export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;
@@ -193,3 +199,12 @@ export type PhotoImport = z.infer<typeof PhotoImportSchema>;
 export type PhotoImportItemUpdate = z.infer<typeof PhotoImportItemUpdateSchema>;
 export type LlmPhotoReading = z.infer<typeof LlmPhotoReadingSchema>;
 export type LlmSenseMatch = z.infer<typeof LlmSenseMatchSchema>;
+
+export type SendCodeRequest = z.infer<typeof SendCodeRequestSchema>;
+export type SendCodeResponse = z.infer<typeof SendCodeResponseSchema>;
+export type SignInWithCodeRequest = z.infer<typeof SignInWithCodeRequestSchema>;
+export type SignInWithCodeResponse = z.infer<typeof SignInWithCodeResponseSchema>;
+export type GetSessionResponse = z.infer<typeof GetSessionResponseSchema>;
+export type SignOutResponse = z.infer<typeof SignOutResponseSchema>;
+export type AuthError = z.infer<typeof AuthErrorSchema>;
+export type MeResponse = z.infer<typeof MeResponseSchema>;

@@ -5,7 +5,6 @@ import { IDLE_ATTEMPT } from './speaking';
 
 const BASE: QuizState = {
   sessionId: 's',
-  userId: 'u',
   question: undefined,
   position: 10,
   total: 10,

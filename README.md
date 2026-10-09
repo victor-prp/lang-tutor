@@ -15,13 +15,11 @@ serves as routing, validation, response typing and OpenAPI generation at once, a
 wire contract lives in `packages/core` as Zod schemas that every API type is inferred
 from. The HTTP contract itself is untouched.
 
-Phase 8 gives the learner a name. The anonymous UUID the app used to generate on the
-device is replaced by a username they choose, a display name, an age and a language pair,
-collected once at onboarding and stored server-side. The app opens on a login screen that
-remembers the last username, and a session can only be started by a learner who exists —
-the server no longer creates one on first sight. None of this is authentication: there is
-no password, and a username proves nothing. See
-[ADR 0005](docs/adr/adr-0005-identity-without-authentication.md).
+Phase 8 gave the learner a profile: a display name, an age and a language pair, collected
+once at onboarding and stored server-side. Since phase 29 a learner signs in with an
+emailed 8-digit code, and the profile belongs to that sign-in. The server takes the acting
+user from the session and from nothing a client sends. See
+[ADR 0009](docs/adr/adr-0009-sign-in.md) and *Sign-in (phase 29)* below.
 
 Phase 9 gives the learner a dictionary. Typing a word, a phrase or a sentence returns its
 meanings from a language model, ranked with the most common first, each with an example
@@ -61,7 +59,7 @@ An npm-workspace monorepo.
 | Path | What it is |
 |---|---|
 | `packages/core` | `@lang-tutor/core` — the API contract (`api/`), quiz rules (`domain/`), internal helpers (`utils/`). One runtime dependency, `zod`: since phase 7 the wire contract *is* a set of Zod schemas, and every type in `api/types.ts` is inferred from one. Consumed as TypeScript source, so there is no build step. |
-| `apps/mobile` | The Expo app. Screens — login, onboarding, home, session, results and profile — plus components, theme, Hebrew copy, and the API client. |
+| `apps/mobile` | The Expo app. Screens — sign-in, onboarding, home, session, results and profile — plus components, theme, Hebrew copy, and the API client. |
 | `apps/server` | A Hono server on `@hono/node-server`. Session state and the question pool live in Postgres, reached only through Drizzle: `routes/` (Hono handlers) call `services/` (use cases, each owning its transaction boundaries), which call `repo/` (query functions) and the server's own `domain/` (the session state machine), backed by `db/` (schema, migrations, the connection). The app talks to the server over HTTP; the server never lets SQL leak above `repo/`. Also consumed as TypeScript source via `tsx`, no build step. |
 
 `utils/` is not in core's `exports` map, so it is unreachable from either app by
@@ -122,22 +120,29 @@ enforced.
 | [0002](docs/adr/adr-0002-di-with-closures.md) | Dependency injection via closures, constructed only at a composition root |
 | [0003](docs/adr/adr-0003-openapi-wire-contract.md) | OpenAPI generated from the wire contract — one `createRoute` definition per endpoint, schemas live in `packages/core` |
 | [0004](docs/adr/adr-0004-test-topology.md) | Test topology — which folder a test file is in decides whether it may touch infrastructure |
-| [0005](docs/adr/adr-0005-identity-without-authentication.md) | Identity without authentication — a username identifies, it authorizes nothing |
+| [0005](docs/adr/adr-0005-identity-without-authentication.md) | Identity without authentication — superseded by 0009 |
 | [0006](docs/adr/adr-0006-lanes.md) | Every checkout is a self-contained lane — its ports, databases and namespaces all derive from one slot and branch name in `scripts/lane-env.sh` |
 | [0007](docs/adr/adr-0007-background-jobs.md) | Background jobs run on pg-boss, enqueued only inside a transaction — `repo/jobs.ts` is the only enqueue, `worker.ts` the only place handlers are registered |
-| [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, an asserted actor header; `repo/grants.ts` is the only reader of the table |
+| [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, the signed-in user as actor; `repo/grants.ts` is the only reader of the table |
+| [0009](docs/adr/adr-0009-sign-in.md) | Sign-in with Better Auth, behind one seam — one import site per app, the session becomes an actor in `routes/actor.ts` only, exact version pins |
 | [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 
-All nine are enforced by `npm run lint:arch` (17 + 7 + 6 + 8 + 3 + 6 + 4 + 3 + 3 = 57 checks, grep only, no deps,
+All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 = 62 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
 
-Nine tables, all in `apps/server/src/db/schema.ts`:
+Twenty-three tables, all in `apps/server/src/db/schema.ts`, whose comments describe every
+one. These are the ones the rest of this README leans on:
 
 | Table | Holds |
 |---|---|
-| `users` | One row per learner: a unique `username` they log in with, a `display_name`, an `age`, and their native/target language pair. The id is issued by the database, never by a client. |
+| `auth_users` | One sign-in identity per email address (phase 29), written by Better Auth. A profile in `users` has the same id; an identity with no profile is a learner who signed in and has not onboarded. Placeholder identities from migration 0022 end in `.invalid` until claimed. |
+| `auth_sessions` | A signed-in device: the session token, its expiry (90 days, extended by use at most once a day) and the identity it belongs to. Deleted on sign-out. |
+| `auth_accounts` | Better Auth's link between an identity and a way of signing in. Email codes need none of it; it is here for Better Auth and for later Google/Apple sign-in. |
+| `auth_verifications` | The current sign-in code per address, hashed, with its expiry and the tries used. |
+| `auth_code_sends` | Our own log of codes the email provider accepted, behind the five-an-hour limit. Rows older than a day are pruned on each send. |
+| `users` | One row per learner: a unique `username` (a handle, not a login), a `display_name`, an `age`, and their native/target language pair. The id is the learner's `auth_users` id, taken from the session, never from a client. |
 | `dict_lexemes` | A **lexeme**: a lemma in a language together with its part of speech, unique per `(language_code, lemma, part_of_speech)`. `book` is therefore two rows — the noun and the verb — which is what lets `booked` attach to the verb alone. The id is issued by the database. |
 | `dict_variants` | A surface form somebody actually queried — `run`, `running`, `saw` — with the language it is in and `entry_rank`, this lexeme's position among the readings the model returned *for that form*. `UNIQUE(language_code, lower(form), entry_rank)` is both the lookup index and the guarantee that no two lexemes claim one reading. |
 | `dict_senses` | A distinct meaning of a lexeme, and nothing else: `UNIQUE(lexeme_id, sense_code)` is the whole row's purpose, because that code is how a later form's translations attach to senses the lexeme already has. A sense has no part of speech (that is on the lexeme), no rank and no example (those are on the translation, because they belong to the form that was typed). |
@@ -424,6 +429,68 @@ phase 12 it starts over from the full CSVs rather than from a `-remaining-` file
 Gemini's 10K/day quota the ~89K set takes roughly nine days of gradual runs, so it is run
 deliberately and is not part of any phase's build.
 
+### Sign-in (phase 29)
+
+A learner signs in with an 8-digit code emailed to them (valid 10 minutes, 3 tries, at most
+5 codes per address per hour). The server needs six more variables: five required, which it
+refuses to start without, and one optional:
+
+| Variable | Where it comes from |
+|---|---|
+| `BETTER_AUTH_SECRET` | Yours: `openssl rand -base64 32` (at least 32 characters). Set it once in your shell, like `GEMINI_API_KEY`. |
+| `RESEND_API_KEY` | A send-only key from Resend (setup below). |
+| `MAIL_FROM` | The sender address on the domain you verified: `WordsPal <code@wordspal.ai>`. |
+| `AUTH_BASE_URL` | Derived by `scripts/lane-env.sh`: this lane's server as a phone reaches it. |
+| `WEB_ORIGINS` | Derived by `scripts/lane-env.sh`: this lane's Metro origins, by name and by LAN address, comma-separated. |
+| `RESEND_BASE_URL` | Optional; defaults to `https://api.resend.com`. Tests point it at a MockServer namespace. |
+
+Production sets all five in `terraform/prod`: the two secrets from Secrets Manager, the
+rest as plain entries. The [hosting runbook](docs/runbooks/hosting.md#when-phase-29-merges)
+says in which order.
+
+**One-time Resend setup** (Victor): in Resend add the domain `wordspal.ai`, then add the
+SPF and DKIM DNS records it shows; optionally add a `_dmarc.wordspal.ai` TXT record with
+`p=none`. Create an API key restricted to sending and put it in `RESEND_API_KEY`.
+
+**In a lane, without sending real email.** A real key sends real email, so use it only with
+addresses you own. Otherwise point the server at MockServer, which answers Resend's one
+call and keeps the message, code in the subject:
+
+```bash
+export RESEND_BASE_URL=http://localhost:1080/dev RESEND_API_KEY=dev MAIL_FROM='WordsPal <code@wordspal.ai>'
+curl -s -X PUT http://localhost:1080/mockserver/expectation -d \
+  '{"httpRequest":{"method":"POST","path":"/dev/emails"},"httpResponse":{"statusCode":200,"body":"{\"id\":\"dev\"}"}}'
+# after asking for a code, the subjects of every message sent so far:
+curl -s -X PUT 'http://localhost:1080/mockserver/retrieve?type=REQUESTS&format=JSON' -d '{"path":"/dev/emails"}' | grep -o '"subject" : "[^"]*"'
+```
+
+Without the expectation MockServer answers 404 and the app says the email was not sent. The
+server never logs a code, so MockServer is the only place to read one.
+
+**Claiming an account that predates sign-in.** Migration 0022 gave every existing profile
+an unclaimed placeholder identity (an address ending in `.invalid`, which nothing is ever
+sent to). To give one its real address — run the claim **before** signing in on the new
+build with that address:
+
+```bash
+npm run db:claim-account -- --username <name> --email <address>
+```
+
+| Output | Meaning |
+|---|---|
+| `claimed: <name> now signs in with <address>` | Done. Signing in with that address now opens the existing profile and its data. |
+| `no account has the username <name>; nothing changed` | No profile has that username. Exit code 1. |
+| `<name> already signs in with its own address; nothing changed` | The account was claimed before; a claim only ever claims an unclaimed account. Exit code 1. |
+| `<address> already has its own profile; nothing changed. Claim with another address, or ask for help.` | Someone signed in with that address and created a new profile. Exit code 1. |
+
+If you already signed in with that address on the new build but did not create a profile
+(you stopped at the onboarding form), the claim still works: it removes that empty sign-in
+identity, and its sessions, and gives the address to the old account. Sign in again
+afterwards. If you did create a new profile, the claim refuses, and the address stays with
+the new profile; claim the old account with another address you own.
+
+The address is lower-cased, so `Victor@Gmail.com` and `victor@gmail.com` are one account.
+
 ## Reading the API
 
 The server describes itself. With `npm run server` running:
@@ -433,20 +500,21 @@ The server describes itself. With `npm run server` running:
 | <http://localhost:3001/openapi.json> | The generated OpenAPI 3.1 document |
 | <http://localhost:3001/docs> | [Scalar](https://github.com/scalar/scalar) — reads the document and sends real requests from the page |
 
-Both are always on. There is no auth here, and the API surface is already fully described
+Both are always on. They hold no secrets, and the API surface is already fully described
 by an open-source client that calls it, so gating the documentation would add configuration
 and remove no risk. What *has* changed since phase 8 is that this API now carries personal
-data: a display name and an age. `POST /api/login` takes a username and no password — it
-identifies a learner, it does not authenticate one, and nothing may treat it as proof of
-anything. See [ADR 0005](docs/adr/adr-0005-identity-without-authentication.md).
+data: a display name and an age. Since phase 29 every learner route needs a session, and
+the signed-in user is the only identity the server believes. See
+[ADR 0009](docs/adr/adr-0009-sign-in.md).
 
 `POST /api/translations` reaches a paid third-party model **on a miss** — a string already
 in the dictionary is answered from Postgres in milliseconds and costs nothing. Production
-is public at `https://app.wordspal.ai` since phase 30, and until phase 29's sign-in merges
-there is no authentication and no rate limit in front of this endpoint: anyone who finds the
-site can open a learner's data by username and spend the production Gemini key on new words.
-The key is production's own and revocable in one place, and a budget alert watches the bill.
-Phase 29 merging, then a release, closes that window
+is public at `https://app.wordspal.ai` since phase 30. Since phase 29 the endpoint needs a
+session, but sign-up is open, and nothing yet limits how many new words one account looks
+up or how many codes one client requests across different email addresses: the per-IP
+limits are a follow-up ([ADR 0009](docs/adr/adr-0009-sign-in.md)). The key is
+production's own and revocable in one place, and a budget alert watches the bill. Until a
+release carries phase 29, production still runs the code before it, with no sign-in at all
 ([hosting runbook](docs/runbooks/hosting.md#when-phase-29-merges)).
 
 Neither is hand-written. Every endpoint is one `createRoute` definition in
@@ -476,7 +544,7 @@ npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0005 identity, 0006 lanes, 0007 jobs, 0008 grants, 0010 single container) — grep only, no deps, no database
+npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container) — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go

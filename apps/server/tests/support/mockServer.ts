@@ -380,3 +380,31 @@ export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' |
     },
   });
 }
+
+/** Phase 29. Resend, faked per test namespace exactly as Gemini is. */
+export function mailBaseUrlFor(ns: string): string {
+  return `${ADMIN_URL}/${ns}`;
+}
+
+export async function expectEmails(ns: string): Promise<void> {
+  await admin(
+    'expectation',
+    {
+      httpRequest: { method: 'POST', path: `/${ns}/emails` },
+      httpResponse: { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: '{"id":"mock"}' },
+    },
+    [200, 201],
+  );
+}
+
+/** The 8 digits of the latest code this namespace "emailed" to `email`. */
+export async function codeSentTo(ns: string, email: string): Promise<string> {
+  const res = await admin('retrieve?type=REQUESTS&format=JSON', { method: 'POST', path: `/${ns}/emails` }, [200]);
+  // MockServer returns a JSON request body as { type: 'JSON', json: {...}, rawBytes }.
+  const requests = (await res.json()) as { body: { json: { to: string[]; subject: string } } }[];
+  const mine = requests.map((r) => r.body.json).filter((b) => b.to.includes(email.trim().toLowerCase()));
+  const subject = mine[mine.length - 1]?.subject;
+  const digits = subject?.replace(/\D/g, '');
+  if (!digits || digits.length !== 8) throw new Error(`no code was emailed to ${email} in ${ns}`);
+  return digits;
+}

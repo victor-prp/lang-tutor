@@ -16,23 +16,24 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createSessionsRouter } from '../../../src/routes/sessions';
+import { ACT_AS, actAs } from '../../support/actAs';
 
 let t: TestDb;
 
 beforeEach(async () => {
   t = await createTestDb();
   await seedUser(t.db, 'u_1');
-  await seedUser(t.db, 'u_2');
 });
 
 afterEach(async () => {
   await t.close();
 });
 
-function postJson(app: Hono, path: string, body: unknown) {
+// The learner acting comes from the session in production; here, from ACT_AS.
+function postJson(app: Hono, path: string, body: unknown, actor = 'u_1') {
   return app.request(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', [ACT_AS]: actor },
     body: JSON.stringify(body),
   });
 }
@@ -40,6 +41,7 @@ function postJson(app: Hono, path: string, body: unknown) {
 function buildTestApp(ns: string) {
   const app = new Hono();
   const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7), geminiBaseUrl: geminiBaseUrlFor(ns) });
+  app.use('*', actAs());
   app.route('/api', createSessionsRouter(deps.sessions));
   return app;
 }
@@ -74,7 +76,7 @@ describe('POST /api/sessions/:id/speech', () => {
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
     const speak = () =>
-      postJson(app, `/api/sessions/${sessionId}/speech`, { user_id: 'u_1', question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO });
+      postJson(app, `/api/sessions/${sessionId}/speech`, { question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO });
 
     const missed = await speak();
     expect(missed.status).toBe(200);
@@ -90,13 +92,13 @@ describe('POST /api/sessions/:id/speech', () => {
     await expectTranscription(ns, 'lamp');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
-    expect((await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[0].id, pass: 'skip' })).status).toBe(200);
+    expect((await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[0].id, pass: 'skip' })).status).toBe(200);
     const said = await (
-      await postJson(app, `/api/sessions/${sessionId}/speech`, { user_id: 'u_1', question_id: questions[1].id, mime_type: 'audio/aac', audio: AUDIO })
+      await postJson(app, `/api/sessions/${sessionId}/speech`, { question_id: questions[1].id, mime_type: 'audio/aac', audio: AUDIO })
     ).json();
     expect(said).toMatchObject({ verdict: 'alternative' });
     const done = await (
-      await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[2].id, option_index: 0 })
+      await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[2].id, option_index: 0 })
     ).json();
     expect(done.score.total).toBe(2);
     expect(done.missed_questions.map((m: { question: { id: string } }) => m.question.id)).not.toContain(questions[0].id);
@@ -107,7 +109,7 @@ describe('POST /api/sessions/:id/speech', () => {
     await expectTranscription(ns, `tome ${'a'.repeat(150)}`);
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
-    const res = await postJson(app, `/api/sessions/${sessionId}/speech`, { user_id: 'u_1', question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO });
+    const res = await postJson(app, `/api/sessions/${sessionId}/speech`, { question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.heard).toHaveLength(100);
@@ -117,19 +119,22 @@ describe('POST /api/sessions/:id/speech', () => {
     expect(stored[0].verdict).toBe('understood');
   });
 
-  it('400s a choice card, 404s another learner, 409s a card that is not current, and 502s a failing model', async () => {
+  it('400s a choice card, 403s another learner, 409s a card that is not current, and 502s a failing model', async () => {
     const ns = mockNamespace('speech-errors');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
-    const at = (question_id: string, user_id = 'u_1') =>
-      postJson(app, `/api/sessions/${sessionId}/speech`, { user_id, question_id, mime_type: 'audio/aac', audio: AUDIO });
-    expect((await at(questions[0].id, 'u_2')).status).toBe(404);
+    const at = (question_id: string, actor = 'u_1') =>
+      postJson(app, `/api/sessions/${sessionId}/speech`, { question_id, mime_type: 'audio/aac', audio: AUDIO }, actor);
+    // Phase 29 (spec D13): refused, no longer hidden as an unknown session.
+    const stranger = await at(questions[0].id, 'someone_else');
+    expect(stranger.status).toBe(403);
+    expect(await stranger.json()).toEqual({ error: 'forbidden' });
     expect((await at(questions[1].id)).status).toBe(409);
     await expectGeminiStatus(ns, 503);
     expect((await at(questions[0].id)).status).toBe(502);
-    expect((await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[0].id, pass: 'skip' })).status).toBe(200);
+    expect((await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[0].id, pass: 'skip' })).status).toBe(200);
     await clearNamespace(ns);
-    expect((await postJson(app, `/api/sessions/${sessionId}/next-step`, { user_id: 'u_1', question_id: questions[1].id, text: 'lantern' })).status).toBe(200);
+    expect((await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[1].id, text: 'lantern' })).status).toBe(200);
     expect((await at(questions[2].id)).status).toBe(400);
   });
 
@@ -138,8 +143,8 @@ describe('POST /api/sessions/:id/speech', () => {
     const { sessionId, questions } = await startSpeaking();
     const res = await app.request(`/api/sessions/${sessionId}/speech`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': String(400 * 1024) },
-      body: JSON.stringify({ user_id: 'u_1', question_id: questions[0].id, mime_type: 'audio/aac', audio: 'A'.repeat(400 * 1024) }),
+      headers: { 'Content-Type': 'application/json', 'Content-Length': String(400 * 1024), [ACT_AS]: 'u_1' },
+      body: JSON.stringify({ question_id: questions[0].id, mime_type: 'audio/aac', audio: 'A'.repeat(400 * 1024) }),
     });
     expect(res.status).toBe(413);
   });

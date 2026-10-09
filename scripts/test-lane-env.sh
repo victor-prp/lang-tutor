@@ -98,6 +98,10 @@ expect_eq "slot 1 test prefix"                    "t_feature_" "$(value_of "$FIX
 expect_eq "slot 1 mock namespace"                 "e2e_feature" "$(value_of "$FIXTURE/wt1" E2E_MOCK_NAMESPACE)"
 expect_eq "the app targets this lane's server" \
   "http://localhost:4001"                                      "$(value_of "$FIXTURE/wt1" EXPO_PUBLIC_API_URL)"
+expect_eq "auth base url is this lane's server" \
+  "http://localhost:4001"                                      "$(value_of "$FIXTURE/wt1" AUTH_BASE_URL)"
+expect_eq "web origins are this lane's Metro, by name and by address" \
+  "http://localhost:9081,http://localhost:9081"                "$(value_of "$FIXTURE/wt1" WEB_ORIGINS)"
 
 # --- allocation --------------------------------------------------------------
 worktree wt2 second

@@ -6,16 +6,48 @@ import {
   PHOTO_UPLOAD_TIMEOUT_MS,
   SPEECH_UPLOAD_TIMEOUT_MS,
   createApiClient,
+  type ApiClientDeps,
 } from './client';
 
-function buildClient(mockFetch: jest.Mock) {
+function buildClient(mockFetch: jest.Mock, extra: Partial<ApiClientDeps> = {}) {
   return createApiClient({
     baseUrl: 'http://test.local',
     fetch: mockFetch as unknown as typeof globalThis.fetch,
+    sessionHeaders: async () => ({ cookie: 'better-auth.session_token=abc' }),
+    credentials: 'omit',
+    onUnauthorized: () => {},
+    ...extra,
   });
 }
 
 describe('api/client', () => {
+  it('sends the session on every call, with the configured credentials', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => [] }));
+    await buildClient(mockFetch, { credentials: 'include' }).listEnrollments();
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/enrollments',
+      expect.objectContaining({
+        method: 'GET',
+        credentials: 'include',
+        headers: expect.objectContaining({ cookie: 'better-auth.session_token=abc' }),
+      }),
+    );
+  });
+
+  it('reports a 401 and still throws it', async () => {
+    const onUnauthorized = jest.fn();
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: 'not signed in' }) }));
+    await expect(buildClient(mockFetch, { onUnauthorized }).me()).rejects.toEqual(new ApiError(401, 'not signed in'));
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report other failures as signed out', async () => {
+    const onUnauthorized = jest.fn();
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 403, json: async () => ({ error: 'forbidden' }) }));
+    await expect(buildClient(mockFetch, { onUnauthorized }).me()).rejects.toBeInstanceOf(ApiError);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
   it('createSession posts to /api/sessions with the request body', async () => {
     const mockFetch = jest.fn(async () => ({
       ok: true,
@@ -30,7 +62,7 @@ describe('api/client', () => {
       'http://test.local/api/sessions',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ enrollment_id: 'e1' }),
       }),
     );
@@ -50,14 +82,14 @@ describe('api/client', () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => responseBody }));
     const client = buildClient(mockFetch);
 
-    const result = await client.nextStep('s1', { user_id: 'u1', question_id: 'q1', option_index: 0 });
+    const result = await client.nextStep('s1', { question_id: 'q1', option_index: 0 });
 
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/sessions/s1/next-step',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 'u1', question_id: 'q1', option_index: 0 }),
+        headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ question_id: 'q1', option_index: 0 }),
       }),
     );
     expect(result).toEqual(responseBody);
@@ -68,11 +100,11 @@ describe('api/client', () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) }));
     const client = buildClient(mockFetch);
 
-    await client.nextStep('s1', { user_id: 'u1', question_id: 't1', text: 'finestra' });
+    await client.nextStep('s1', { question_id: 't1', text: 'finestra' });
 
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/sessions/s1/next-step',
-      expect.objectContaining({ body: JSON.stringify({ user_id: 'u1', question_id: 't1', text: 'finestra' }) }),
+      expect.objectContaining({ body: JSON.stringify({ question_id: 't1', text: 'finestra' }) }),
     );
   });
 
@@ -112,39 +144,7 @@ describe('api/client', () => {
     expect((failure as ApiError).code).toBeUndefined();
   });
 
-  it('login posts the username to /api/login', async () => {
-    const user = {
-      id: 'u1',
-      username: 'dana',
-      display_name: 'דנה',
-      age: 34,
-      native_language: 'he',
-    };
-    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => user }));
-    const client = buildClient(mockFetch);
-
-    const result = await client.login({ username: 'dana' });
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://test.local/api/login',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'dana' }),
-      }),
-    );
-    expect(result).toEqual(user);
-  });
-
-  it('login throws ApiError with the status when the username is unknown', async () => {
-    const mockFetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }));
-    const client = buildClient(mockFetch);
-
-    await expect(client.login({ username: 'nobody' })).rejects.toMatchObject({ status: 404 });
-    await expect(client.login({ username: 'nobody' })).rejects.toBeInstanceOf(ApiError);
-  });
-
-  it('createUser posts the profile to /api/users', async () => {
+  it('createProfile posts the profile to /api/users', async () => {
     const request = {
       username: 'dana',
       display_name: 'דנה',
@@ -158,7 +158,7 @@ describe('api/client', () => {
     }));
     const client = buildClient(mockFetch);
 
-    const result = await client.createUser(request);
+    const result = await client.createProfile(request);
 
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/users',
@@ -167,12 +167,12 @@ describe('api/client', () => {
     expect(result.id).toBe('u1');
   });
 
-  it('createUser throws ApiError with 409 when the username is taken', async () => {
+  it('createProfile throws ApiError with 409 when the username is taken', async () => {
     const mockFetch = jest.fn(async () => ({ ok: false, status: 409, json: async () => ({}) }));
     const client = buildClient(mockFetch);
 
     await expect(
-      client.createUser({
+      client.createProfile({
         username: 'dana',
         display_name: 'דנה',
         age: 34,
@@ -201,7 +201,7 @@ describe('api/client', () => {
         'http://test.local/api/translations',
         expect.objectContaining({
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ text: 'book', from: 'en', to: 'he' }),
         }),
       );
@@ -227,23 +227,21 @@ describe('api/client', () => {
     });
   });
 
-  it("listEnrollments GETs the user's enrollments", async () => {
+  // Phase 29 (spec D12): the signed-in learner's own; no user id in the path.
+  it("listEnrollments GETs the signed-in learner's enrollments", async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => [] }));
     const client = buildClient(mockFetch);
-    expect(await client.listEnrollments('u1')).toEqual([]);
-    expect(mockFetch).toHaveBeenCalledWith(
-      'http://test.local/api/users/u1/enrollments',
-      expect.objectContaining({ method: 'GET' }),
-    );
+    expect(await client.listEnrollments()).toEqual([]);
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments', expect.objectContaining({ method: 'GET' }));
   });
 
   it('createEnrollment POSTs the request body', async () => {
     const created = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'ru', created_at: 'x' };
     const mockFetch = jest.fn(async () => ({ ok: true, status: 201, json: async () => created }));
     const client = buildClient(mockFetch);
-    expect(await client.createEnrollment('u1', { source_language: 'he', target_language: 'ru' })).toEqual(created);
+    expect(await client.createEnrollment({ source_language: 'he', target_language: 'ru' })).toEqual(created);
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://test.local/api/users/u1/enrollments',
+      'http://test.local/api/enrollments',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ source_language: 'he', target_language: 'ru' }),
@@ -254,14 +252,14 @@ describe('api/client', () => {
   it('throws ApiError(409) when already enrolled', async () => {
     const mockFetch = jest.fn(async () => ({ ok: false, status: 409, json: async () => ({}) }));
     await expect(
-      buildClient(mockFetch).createEnrollment('u1', { source_language: 'he', target_language: 'ru' }),
+      buildClient(mockFetch).createEnrollment({ source_language: 'he', target_language: 'ru' }),
     ).rejects.toEqual(new ApiError(409));
   });
 
   it('saveVocabulary posts the entries to the enrollment', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_gloss_ids: ['s1'] }) }));
     const client = buildClient(mockFetch);
-    await client.saveVocabulary('u_1', 'e 1', { entries: [{ gloss_id: 's1', variant_id: 'v1' }] });
+    await client.saveVocabulary('e 1', { entries: [{ gloss_id: 's1', variant_id: 'v1' }] });
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/enrollments/e%201/vocabulary',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ entries: [{ gloss_id: 's1', variant_id: 'v1' }] }) }),
@@ -271,20 +269,21 @@ describe('api/client', () => {
   it('unsaveVocabulary sends DELETE and reads no body', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 204 }));
     const client = buildClient(mockFetch);
-    await client.unsaveVocabulary('u_1', 'e1', 's1');
-    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary/glosses/s1', {
-      method: 'DELETE',
-      headers: { 'X-Acting-User-Id': 'u_1' },
-    });
+    await client.unsaveVocabulary('e1', 's1');
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/enrollments/e1/vocabulary/glosses/s1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
   });
 
-  it('sends the acting user on a save, and only there', async () => {
+  // Phase 29 (spec D12): the session says who is acting; no header can.
+  it('names no acting user on a save', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_gloss_ids: ['s1'] }) }));
     const client = buildClient(mockFetch);
-    await client.saveVocabulary('u_1', 'e1', { entries: [{ gloss_id: 's1', variant_id: 'v1' }] });
+    await client.saveVocabulary('e1', { entries: [{ gloss_id: 's1', variant_id: 'v1' }] });
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/enrollments/e1/vocabulary',
-      expect.objectContaining({ headers: { 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' } }),
+      expect.objectContaining({ headers: expect.objectContaining({ 'Content-Type': 'application/json' }) }),
     );
   });
 
@@ -293,15 +292,15 @@ describe('api/client', () => {
     const client = buildClient(mockFetch);
     await client.listVocabulary('e1', { cursor: 'a+b', limit: 50 });
     await client.listVocabulary('e1', {});
-    expect(mockFetch).toHaveBeenNthCalledWith(1, 'http://test.local/api/enrollments/e1/vocabulary?cursor=a%2Bb&limit=50', { method: 'GET' });
-    expect(mockFetch).toHaveBeenNthCalledWith(2, 'http://test.local/api/enrollments/e1/vocabulary', { method: 'GET' });
+    expect(mockFetch).toHaveBeenNthCalledWith(1, 'http://test.local/api/enrollments/e1/vocabulary?cursor=a%2Bb&limit=50', expect.objectContaining({ method: 'GET' }));
+    expect(mockFetch).toHaveBeenNthCalledWith(2, 'http://test.local/api/enrollments/e1/vocabulary', expect.objectContaining({ method: 'GET' }));
   });
 
   it('listVocabulary passes a level when given, and never a sort', async () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ items: [], next_cursor: null }) }));
     const client = buildClient(mockFetch);
     await client.listVocabulary('e1', { level: 2 });
-    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary?level=2', { method: 'GET' });
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary?level=2', expect.objectContaining({ method: 'GET' }));
   });
 
   // Review Focus 1: a lemma travels as an encoded query parameter.
@@ -311,13 +310,13 @@ describe('api/client', () => {
     await client.vocabularyWord('e1', lemma);
     expect(mockFetch).toHaveBeenCalledWith(
       `http://test.local/api/enrollments/e1/vocabulary/word?lemma=${encodeURIComponent(lemma)}`,
-      { method: 'GET' },
+      expect.objectContaining({ method: 'GET' }),
     );
   });
 
   it('unsaveVocabulary throws ApiError on failure', async () => {
     const client = buildClient(jest.fn(async () => ({ ok: false, status: 404 })));
-    await expect(client.unsaveVocabulary('u_1', 'e1', 's1')).rejects.toBeInstanceOf(ApiError);
+    await expect(client.unsaveVocabulary('e1', 's1')).rejects.toBeInstanceOf(ApiError);
   });
 
   it('posts a spoken attempt to the speech endpoint (phase 25)', async () => {
@@ -326,8 +325,14 @@ describe('api/client', () => {
       calls.push({ url, init });
       return new Response(JSON.stringify({ heard: 'gatto', verdict: 'unheard' }), { status: 200 });
     }) as unknown as typeof globalThis.fetch;
-    const api = createApiClient({ baseUrl: 'http://api', fetch });
-    const request = { user_id: 'u', question_id: 'q', mime_type: 'audio/aac' as const, audio: 'QUJD' };
+    const api = createApiClient({
+          baseUrl: 'http://api',
+          fetch,
+          sessionHeaders: async () => ({}),
+          credentials: 'omit',
+          onUnauthorized: () => {},
+        });
+    const request = { question_id: 'q', mime_type: 'audio/aac' as const, audio: 'QUJD' };
     expect(await api.answerBySpeech('s 1', request)).toEqual({ heard: 'gatto', verdict: 'unheard' });
     expect(calls[0].url).toBe('http://api/api/sessions/s%201/speech');
     expect(JSON.parse(String(calls[0].init.body))).toEqual(request);
@@ -340,10 +345,16 @@ describe('api/client', () => {
         new Promise((_resolve, reject) => {
           init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
         })) as unknown as typeof globalThis.fetch;
-      const api = createApiClient({ baseUrl: 'http://api', fetch });
-      const pending = api.answerBySpeech('s1', { user_id: 'u', question_id: 'q', mime_type: 'audio/aac', audio: 'QUJD' });
+      const api = createApiClient({
+          baseUrl: 'http://api',
+          fetch,
+          sessionHeaders: async () => ({}),
+          credentials: 'omit',
+          onUnauthorized: () => {},
+        });
+      const pending = api.answerBySpeech('s1', { question_id: 'q', mime_type: 'audio/aac', audio: 'QUJD' });
       const outcome = expect(pending).rejects.toThrow('aborted');
-      jest.advanceTimersByTime(SPEECH_UPLOAD_TIMEOUT_MS);
+      await jest.advanceTimersByTimeAsync(SPEECH_UPLOAD_TIMEOUT_MS);
       await outcome;
     } finally {
       jest.useRealTimers();
@@ -357,41 +368,48 @@ describe('api/client', () => {
         calls.push({ url, init });
         return new Response(body, { status });
       }) as unknown as typeof globalThis.fetch;
-      return { calls, api: createApiClient({ baseUrl: 'http://api', fetch }) };
+      return { calls, api: createApiClient({
+          baseUrl: 'http://api',
+          fetch,
+          sessionHeaders: async () => ({}),
+          credentials: 'omit',
+          onUnauthorized: () => {},
+        }) };
     };
     const emptyList = JSON.stringify({ tutors: [], students: [] });
 
-    it('listGrants GETs /api/grants as the actor', async () => {
+    // Phase 29: no call names its actor; the session does (spec D12).
+    it('listGrants GETs /api/grants', async () => {
       const { calls, api } = recorder(200, emptyList);
-      await api.listGrants('u_1');
+      await api.listGrants();
       expect(calls[0].url).toBe('http://api/api/grants');
       expect(calls[0].init.method).toBe('GET');
-      expect(calls[0].init.headers).toEqual({ 'X-Acting-User-Id': 'u_1' });
+      expect(calls[0].init.headers).toEqual({});
     });
 
-    it('createGrant POSTs the request as the actor', async () => {
+    it('createGrant POSTs the request', async () => {
       const { calls, api } = recorder(201, '{}');
-      await api.createGrant('u_1', { username: 'victor', target_language: 'it' });
+      await api.createGrant({ username: 'victor', target_language: 'it' });
       expect(calls[0].url).toBe('http://api/api/grants');
       expect(calls[0].init.method).toBe('POST');
-      expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' });
+      expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json' });
       expect(JSON.parse(String(calls[0].init.body))).toEqual({ username: 'victor', target_language: 'it' });
     });
 
-    it('acceptGrant POSTs to the accept path as the actor', async () => {
+    it('acceptGrant POSTs to the accept path', async () => {
       const { calls, api } = recorder(200, '{}');
-      await api.acceptGrant('u_1', 'g 1');
+      await api.acceptGrant('g 1');
       expect(calls[0].url).toBe('http://api/api/grants/g%201/accept');
       expect(calls[0].init.method).toBe('POST');
-      expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' });
+      expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json' });
     });
 
-    it('endGrant DELETEs the grant as the actor', async () => {
+    it('endGrant DELETEs the grant', async () => {
       const { calls, api } = recorder(204, null);
-      await api.endGrant('u_1', 'g1');
+      await api.endGrant('g1');
       expect(calls[0].url).toBe('http://api/api/grants/g1');
       expect(calls[0].init.method).toBe('DELETE');
-      expect(calls[0].init.headers).toEqual({ 'X-Acting-User-Id': 'u_1' });
+      expect(calls[0].init.headers).toEqual({});
     });
   });
 
@@ -402,8 +420,14 @@ describe('api/client', () => {
       calls.push({ url, init });
       return new Response(JSON.stringify(body), { status: 200 });
     }) as unknown as typeof globalThis.fetch;
-    const api = createApiClient({ baseUrl: 'http://api', fetch });
-    const request = { user_id: 'u', question_id: 'q', text: 'להזמין' };
+    const api = createApiClient({
+          baseUrl: 'http://api',
+          fetch,
+          sessionHeaders: async () => ({}),
+          credentials: 'omit',
+          onUnauthorized: () => {},
+        });
+    const request = { question_id: 'q', text: 'להזמין' };
     expect(await api.judgeAnswer('s 1', request)).toEqual(body);
     expect(calls[0].url).toBe('http://api/api/sessions/s%201/judged-answer');
     expect(JSON.parse(String(calls[0].init.body))).toEqual(request);
@@ -416,10 +440,16 @@ describe('api/client', () => {
         new Promise((_resolve, reject) => {
           init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
         })) as unknown as typeof globalThis.fetch;
-      const api = createApiClient({ baseUrl: 'http://api', fetch });
-      const pending = api.judgeAnswer('s1', { user_id: 'u', question_id: 'q', text: 'x' });
+      const api = createApiClient({
+          baseUrl: 'http://api',
+          fetch,
+          sessionHeaders: async () => ({}),
+          credentials: 'omit',
+          onUnauthorized: () => {},
+        });
+      const pending = api.judgeAnswer('s1', { question_id: 'q', text: 'x' });
       const outcome = expect(pending).rejects.toThrow('aborted');
-      jest.advanceTimersByTime(JUDGE_REQUEST_TIMEOUT_MS);
+      await jest.advanceTimersByTimeAsync(JUDGE_REQUEST_TIMEOUT_MS);
       await outcome;
     } finally {
       jest.useRealTimers();
@@ -460,10 +490,16 @@ describe('photo imports', () => {
         new Promise((_resolve, reject) => {
           init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
         })) as unknown as typeof globalThis.fetch;
-      const api = createApiClient({ baseUrl: 'http://api', fetch });
+      const api = createApiClient({
+          baseUrl: 'http://api',
+          fetch,
+          sessionHeaders: async () => ({}),
+          credentials: 'omit',
+          onUnauthorized: () => {},
+        });
       const pending = api.createPhotoImport('e1', { mime_type: 'image/jpeg', image: 'QUJD' });
       const outcome = expect(pending).rejects.toThrow('aborted');
-      jest.advanceTimersByTime(PHOTO_UPLOAD_TIMEOUT_MS);
+      await jest.advanceTimersByTimeAsync(PHOTO_UPLOAD_TIMEOUT_MS);
       await outcome;
     } finally {
       jest.useRealTimers();

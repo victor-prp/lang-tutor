@@ -38,7 +38,7 @@ async function emptyDatabase() {
 }
 
 /** Phase 31. Once every migration has run, a learner row names its sense's
- *  gloss (0023): these fixtures render each sense in one learner language. */
+ *  gloss (0025): these fixtures render each sense in one learner language. */
 async function glossOfSense(db: Db, senseId: string): Promise<string> {
   const rows = await db.execute<{ gloss_id: string }>(sql`select gloss_id from dict_sense_glosses where sense_id = ${senseId}`);
   return rows.rows[0].gloss_id;
@@ -384,7 +384,7 @@ describe('0017_speaking_cards', () => {
         values ('v1', 's1', 'he', 'עפיפון', 0);
     `);
     // One question of each phase 24 type.
-    // What a question names: its sense, then (0023) its gloss once every migration has run.
+    // What a question names: its sense, then (0025) its gloss once every migration has run.
     let practised = { column: sql.raw('sense_id'), id: 's1' };
     const insertQuestion = (id: string, type: string, columns: { options?: string; prompt?: string; alternatives?: string; tiles?: string }) =>
       db.execute(sql`
@@ -511,7 +511,7 @@ describe('0019_typed_meaning', () => {
       insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
         values ('v1', 's1', 'he', 'עפיפון', 0);
     `);
-    // What a question names: its sense, then (0023) its gloss once every migration has run.
+    // What a question names: its sense, then (0025) its gloss once every migration has run.
     let practised = { column: sql.raw('sense_id'), id: 's1' };
     const insertQuestion = (id: string, type: string, columns: { options?: string; prompt?: string; alternatives?: string; tiles?: string }) =>
       db.execute(sql`
@@ -618,7 +618,7 @@ describe('0020_sentence_cards', () => {
       gapStart?: number;
       gapEnd?: number;
     };
-    // Used once every migration has run, when a question names its gloss (0023).
+    // Used once every migration has run, when a question names its gloss (0025).
     let gloss = '';
     const insertQuestion = (id: string, type: string, c: Columns) =>
       db.execute(sql`
@@ -720,6 +720,57 @@ describe('0021_enrollment_grants', () => {
   });
 });
 
+// Phase 29: every profile that exists before 0022 gets a sign-in identity with
+// its own id. (The users.id foreign key to auth_users arrives in 0023.)
+describe('0022_auth', () => {
+  it('gives every existing user an unclaimed identity with the same id', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_a', 'alice', 'Alice', 30, 'he'), ('u_b', 'bob', 'Bob', 40, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_a', 'u_a', 'he', 'en');
+    `);
+
+    await runMigrations(db);
+
+    const rows = await db.execute(
+      sql`select id, name, email, email_verified from auth_users order by id`,
+    );
+    expect(rows.rows).toEqual([
+      { id: 'u_a', name: 'Alice', email: 'u_a@unclaimed.invalid', email_verified: false },
+      { id: 'u_b', name: 'Bob', email: 'u_b@unclaimed.invalid', email_verified: false },
+    ]);
+    const kept = await db.execute(sql`select count(*)::int as n from enrollments where user_id = 'u_a'`);
+    expect(kept.rows[0]).toEqual({ n: 1 });
+  });
+});
+
+// Phase 29 (spec D9, Ruling 1): a profile cannot exist without a sign-in
+// identity. 0022 gave every existing user one, so 0023's key adds cleanly.
+describe('0023_users_auth_fk', () => {
+  it('keeps every existing user, and refuses a profile with no identity', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await db.execute(sql`
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_a', 'alice', 'Alice', 30, 'he'), ('u_b', 'bob', 'Bob', 40, 'he');
+    `);
+
+    await runMigrations(db);
+
+    const kept = await db.execute(sql`select id from users order by id`);
+    expect(kept.rows).toEqual([{ id: 'u_a' }, { id: 'u_b' }]);
+    await expect(
+      db.execute(sql`
+        insert into users (id, username, display_name, age, native_language)
+          values ('u_orphan', 'orphan', 'Orphan', 30, 'he')
+      `),
+    ).rejects.toMatchObject({ cause: { code: '23503', constraint: 'users_id_auth_users_id_fk' } });
+  });
+});
+
 // Lane 0's shapes (Task 1's unit test holds their expected values): every comma
 // list, every parenthetical, a sample of compounds, and the edge cases.
 const TRANSLATION_SHAPES = [
@@ -735,10 +786,10 @@ const TRANSLATION_SHAPES = [
   'א,\u00a0ב',
 ];
 
-describe('0022_glosses', () => {
+describe('0024_glosses', () => {
   it('cleans every rendering and gives every rendered sense one gloss per learner language', async () => {
     const db = await emptyDatabase();
-    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await runMigrationsFrom(db, migrationsUpTo('0023_users_auth_fk'));
     await db.execute(sql`
       insert into dict_lexemes (id, language_code, lemma, part_of_speech) values
         ('l_mouse', 'en', 'mouse', 'noun'), ('l_car', 'en', 'car', 'noun'), ('l_finger', 'en', 'finger', 'noun'),
@@ -805,7 +856,7 @@ describe('0022_glosses', () => {
 
   it("cleans lane 0's translation shapes exactly as splitTranslation does", async () => {
     const db = await emptyDatabase();
-    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await runMigrationsFrom(db, migrationsUpTo('0023_users_auth_fk'));
     await db.execute(sql`
       insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l_shapes', 'en', 'shapes', 'noun');
       insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
@@ -829,12 +880,14 @@ describe('0022_glosses', () => {
   });
 });
 
-describe('0023_glosses_rekey', () => {
+describe('0025_glosses_rekey', () => {
   it("folds two saves of one gloss into one, keeping the earliest save and each dimension's best, and folds the sessions that asked both", async () => {
     const db = await emptyDatabase();
-    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await runMigrationsFrom(db, migrationsUpTo('0023_users_auth_fk'));
     const DIMS = sql.raw(`array['written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling']`);
     await db.execute(sql`
+      insert into auth_users (id, name, email)
+        values ('u_1', 'one', 'u_1@test.invalid'), ('u_2', 'two', 'u_2@test.invalid');
       insert into users (id, username, display_name, age, native_language)
         values ('u_1', 'u_1', 'one', 30, 'he'), ('u_2', 'u_2', 'two', 30, 'he');
       insert into enrollments (id, user_id, source_language, target_language)

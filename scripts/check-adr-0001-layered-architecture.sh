@@ -73,6 +73,27 @@ r11() {
     | grep -vE "^[^:]*(composition\.ts|tests/support/|tests/eval/)"
 }
 
+# auth/ is an outbound module like providers/ (phase 29, ADR 0009): it may reach
+# down to db/, repo/, domain/, errors and logger, never up.
+r12() { grep -rnE "from '\.\./(routes|services)/|from '\.\./(app|composition)'" apps/server/src/auth/; }
+
+# R13 matches an import of src/auth/ or of its index: `…src/auth`, or `auth`
+# reached through ../ alone, with or without a file after it — `../repo/auth`,
+# `../domain/auth` and `../support/auth` are other modules and do not match.
+# `./auth` names the module only from a file directly in src/, so the second
+# command scans those files alone. auth/'s own files are skipped by an anchored
+# path, NOT --exclude-dir=auth: that also skipped tests/integration/auth/ and
+# any routes/auth/, which is where an importer would hide. Exceptions:
+# composition.ts, tests/support/ (the test composition root) and the flow test,
+# which builds createAuth itself because it is the upgrade gate (ADR 0009 R9).
+r13() {
+  grep -rnE "(from|require\(|import\()[[:space:]]*'([^']*src/|(\.\./)+)auth(/[^']*)?'" \
+    apps/server/src apps/server/tests --include='*.ts' \
+    | grep -vE "^apps/server/src/auth/|^[^:]*(composition\.ts|tests/support/)|^apps/server/tests/integration/auth/flow\.test\.ts:"
+  grep -nHE "(from|require\(|import\()[[:space:]]*'\./auth(/[^']*)?'" apps/server/src/*.ts \
+    | grep -v '^apps/server/src/composition\.ts:'
+}
+
 # The same rules over apps/server/tests/integration. Unit tests live inside the
 # directories scanned above and are already covered; the integration tree was
 # not, which is what made "R1-R6 apply to test files too" untrue for two years'
@@ -112,6 +133,8 @@ check "R7  console outside the logger"                             r7
 check "R8  the transaction primitive has exactly one call site"    r8
 check "R10 providers must not reach upward"                        r10
 check "R11 providers are constructed only at the composition root" r11
+check "R12 auth must not reach upward"                             r12
+check "R13 auth is constructed only at the composition root"       r13
 check "R1  route tests must not reach past composition"            r1_tests
 check "R2  service tests must not touch transport or a database"   r2_tests
 check "R2  service tests may reference repo modules only as types" r2_tests_repo
@@ -122,7 +145,7 @@ if [ "$status" -ne 0 ]; then
   echo "Architecture check FAILED. See docs/adr/adr-0001-layered-architecture.md" >&2
   echo "for what each rule protects and why." >&2
 else
-  echo "Architecture check passed: 17 rules, no violations."
+  echo "Architecture check passed: 19 rules, no violations."
 fi
 
 exit "$status"

@@ -28,6 +28,9 @@ beforeAll(async () => {
   // One statement per execute and no bind parameters: node-postgres refuses a
   // multi-statement string once it carries parameters.
   const LOAD = [
+    // Phase 29: a profile needs a sign-in identity under its id (migration 0023).
+    `insert into auth_users (id, name, email)
+       select 'pu' || g, 'p', 'pu' || g || '@test.invalid' from generate_series(1, 1000) g`,
     `insert into users (id, username, display_name, age, native_language)
        select 'pu' || g, 'pu' || g, 'p', 30, 'he' from generate_series(1, 1000) g`,
     `insert into enrollments (id, user_id, source_language, target_language)

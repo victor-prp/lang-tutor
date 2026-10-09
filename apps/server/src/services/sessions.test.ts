@@ -36,6 +36,8 @@ describe('repos', () => {
       transition: notStubbed,
       findLatest: notStubbed,
       countListSessions: notStubbed,
+      // Phase 29: every session use case authorizes against this enrollment.
+      findEnrollmentId: async () => 'e1',
       ...overrides,
     };
   }
@@ -72,8 +74,8 @@ describe('repos', () => {
     },
   };
 
-  // The submit-answer cases never reach it; createNextSession is the one use case
-  // that does, and it is covered against real Postgres.
+  // Phase 29: read by the authorization of every use case, and for nothing else
+  // here. The learner's own: the owner needs no grant read.
   const enrollmentRepo: EnrollmentRepo = {
     insertEnrollment: () => {
       throw new Error('the session service must not create an enrollment');
@@ -84,9 +86,7 @@ describe('repos', () => {
     findByUserAndTarget: () => {
       throw new Error('the submit-answer use case must not look an enrollment up by target');
     },
-    findById: () => {
-      throw new Error('the submit-answer use case must not read an enrollment');
-    },
+    findById: async () => ({ id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'en', created_at: '' }),
   };
 
   // Phase 28. Bound into the transaction, and never reached by these use cases.
@@ -208,7 +208,9 @@ describe('repos', () => {
 
   it('throws SessionNotFound when the repository reports no such session', async () => {
     const service = createSessionService({
-      transaction: fakeTransaction(sessionRepoWith({ loadSession: async () => undefined })),
+      transaction: fakeTransaction(
+        sessionRepoWith({ findEnrollmentId: async () => undefined, loadSession: async () => undefined }),
+      ),
       rng: testRng(7),
       logger: createFakeLogger(),
       now: createFakeClock(0),
@@ -218,7 +220,7 @@ describe('repos', () => {
     });
 
     await expect(
-      service.submitAnswer('00000000-0000-0000-0000-000000000000', 'q-window', { option_index: 0 }),
+      service.submitAnswer('u1', '00000000-0000-0000-0000-000000000000', 'q-window', { option_index: 0 }),
     ).rejects.toBeInstanceOf(SessionNotFound);
   });
 
@@ -264,7 +266,7 @@ describe('repos', () => {
       judge: createFakeLlmClient(''),
     });
 
-    const result = await service.submitAnswer('s1', 't1', { text: 'finestar' });
+    const result = await service.submitAnswer('u1', 's1', 't1', { text: 'finestar' });
     expect(inserted).toEqual([['s1', 0, 't1', { text: 'finestar', verdict: 'near_miss' }]]);
     expect(result.answers[0]).toMatchObject({ is_correct: true, verdict: 'near_miss' });
   });
@@ -280,7 +282,7 @@ describe('repos', () => {
       judge: createFakeLlmClient(''),
     });
 
-    await expect(service.submitAnswer('s1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
+    await expect(service.submitAnswer('u1', 's1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
   });
 });
 
@@ -311,7 +313,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       judge: createFakeLlmClient(''),
     });
 
-    await service.createNextSession(E, { listening: true, speaking });
+    await service.createNextSession('u1', E, { listening: true, speaking });
     expect(jobs.enqueued[0].data).toMatchObject({ listening: true, speaking, ordinal: 2 });
   });
 });

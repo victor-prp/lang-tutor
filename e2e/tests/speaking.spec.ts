@@ -7,7 +7,7 @@ import { skipListSession, tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
 import { clearGemini, expectGemini, expectGeminiPayload, expectTranscription } from './support/mockServer';
 import { stripIsolates } from './support/text';
-import { createLearner } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
 test.setTimeout(300_000);
@@ -22,8 +22,8 @@ const MEANING_OF: Record<string, string> = Object.fromEntries(BOARD_WORDS.map((w
 const FORM_OF: Record<string, string> = Object.fromEntries(BOARD_WORDS.map((w) => [w.translation, w.form]));
 
 /** Past a skipped seed, with the ten words looked up and saved through the API. */
-async function saveTenWords(request: APIRequestContext, userId: string): Promise<string> {
-  const enrollments = (await (await request.get(`${API_URL}/api/users/${userId}/enrollments`)).json()) as { id: string }[];
+async function saveTenWords(request: APIRequestContext): Promise<string> {
+  const enrollments = (await (await request.get(`${API_URL}/api/enrollments`)).json()) as { id: string }[];
   const enrollmentId = enrollments[0].id;
   const seed = (await (await request.post(`${API_URL}/api/sessions`, { data: { enrollment_id: enrollmentId } })).json()) as {
     session_id: string;
@@ -38,7 +38,6 @@ async function saveTenWords(request: APIRequestContext, userId: string): Promise
     expect(lookup.ok(), await lookup.text()).toBe(true);
     const { senses } = (await lookup.json()) as { senses: { gloss_id?: string; variant_id?: string }[] };
     const saved = await request.post(`${API_URL}/api/enrollments/${enrollmentId}/vocabulary`, {
-      headers: { 'X-Acting-User-Id': userId },
       data: { entries: senses.map((sense) => ({ gloss_id: sense.gloss_id!, variant_id: sense.variant_id! })) },
     });
     expect(saved.ok(), await saved.text()).toBe(true);
@@ -65,10 +64,10 @@ test("speaking: read aloud, say the translation, and can't speak now", async ({ 
   const report = () => diagnosticReport(diagnostics);
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
-  const user = await createLearner(request, 'e2e_speak_ru', 'ru');
-  const enrollmentId = await saveTenWords(request, user.id);
+  await signUpLearner(page, 'e2e_speak_ru', 'ru');
+  const enrollmentId = await saveTenWords(page.request);
   // A list session made and skipped first, so the one played is ordinal 1.
-  await skipListSession(request, enrollmentId);
+  await skipListSession(page.request, enrollmentId);
 
   // Session 1, ordinal 1, speaking on and listening off. Tiers [multiple_choice,
   // read_aloud, typed_meaning], [reverse_choice, cloze_choice, letter_tiles],
@@ -81,12 +80,7 @@ test("speaking: read aloud, say the translation, and can't speak now", async ({ 
   //   10 (s5) prefers index 2, dictation ineligible -> say the translation.
   await clearGemini(request);
   await expectGeminiPayload(request, generationStubFor({ 3: 'typed', 4: 'meaning', 10: 'typed' }));
-  await page.goto('/');
-  await page.getByTestId('login-username').fill('e2e_speak_ru');
-  await expect(async () => {
-    if ((await page.getByTestId('login-button').count()) > 0) await page.getByTestId('login-button').click({ timeout: 2_000 });
-    await expect(page.getByTestId('create-button')).toBeVisible({ timeout: 2_000 });
-  }).toPass({ timeout: 30_000 });
+  await openApp(page, 'create-button');
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');

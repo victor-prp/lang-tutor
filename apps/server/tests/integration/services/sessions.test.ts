@@ -13,6 +13,7 @@ import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { asChoice } from '../../support/questions';
 import { testRng } from '../../support/testRng';
 import {
+  AccessDenied,
   EnrollmentNotFound,
   NoSavedWords,
   OptionOutOfRange,
@@ -22,6 +23,7 @@ import {
   SessionNotSkippable,
   SessionOpen,
 } from '../../../src/errors';
+import { countRows } from '../../support/rowCounts';
 import { createTestServerDeps } from '../../support/serverDeps';
 import type { SessionRecord } from '../../../src/domain/session';
 import type { SessionService } from '../../../src/services/sessions';
@@ -63,17 +65,17 @@ afterEach(async () => {
 
 /** The seed session every learner starts with, read back whole. */
 async function startSeed(enrollmentId: string) {
-  const { sessionId } = await service.createNextSession(enrollmentId, { listening: false, speaking: false });
-  return { sessionId, record: await service.getSession(sessionId) };
+  const { sessionId } = await service.createNextSession('u_1', enrollmentId, { listening: false, speaking: false });
+  return { sessionId, record: await service.getSession('u_1', sessionId) };
 }
 
 describe('createNextSession', () => {
   const E = enrollmentOf('u_1');
 
   it('starts with a ready ten-question seed session', async () => {
-    const created = await service.createNextSession(E, { listening: false, speaking: false });
+    const created = await service.createNextSession('u_1', E, { listening: false, speaking: false });
     expect(created).toMatchObject({ status: 'ready', source: 'seed' });
-    const record = await service.getSession(created.sessionId);
+    const record = await service.getSession('u_1', created.sessionId);
     expect(record.questions).toHaveLength(SESSION_LENGTH);
     expect(record.answers).toEqual([]);
   });
@@ -81,38 +83,38 @@ describe('createNextSession', () => {
   // The regression test for deleting upsertUser. Before phase 8 a session for
   // an unknown id silently created the user; it must not create an enrollment.
   it('refuses an enrollment that does not exist', async () => {
-    await expect(service.createNextSession('e_nobody', { listening: false, speaking: false })).rejects.toBeInstanceOf(EnrollmentNotFound);
+    await expect(service.createNextSession('u_1', 'e_nobody', { listening: false, speaking: false })).rejects.toBeInstanceOf(EnrollmentNotFound);
   });
 
   it('refuses a second session while one is open', async () => {
-    await service.createNextSession(E, { listening: false, speaking: false });
-    await expect(service.createNextSession(E, { listening: false, speaking: false })).rejects.toBeInstanceOf(SessionOpen);
+    await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    await expect(service.createNextSession('u_1', E, { listening: false, speaking: false })).rejects.toBeInstanceOf(SessionOpen);
   });
 
   // Review Focus 1: a double tap.
   it('lets exactly one of two concurrent creates through', async () => {
-    const results = await Promise.allSettled([service.createNextSession(E, { listening: false, speaking: false }), service.createNextSession(E, { listening: false, speaking: false })]);
+    const results = await Promise.allSettled([service.createNextSession('u_1', E, { listening: false, speaking: false }), service.createNextSession('u_1', E, { listening: false, speaking: false })]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
     expect(rejected.reason).toBeInstanceOf(SessionOpen);
   });
 
   it('after the seed, asks for saved words when the list is empty', async () => {
-    const { sessionId } = await service.createNextSession(E, { listening: false, speaking: false });
-    await service.skipSession(sessionId);
-    await expect(service.createNextSession(E, { listening: false, speaking: false })).rejects.toBeInstanceOf(NoSavedWords);
+    const { sessionId } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    await service.skipSession('u_1', sessionId);
+    await expect(service.createNextSession('u_1', E, { listening: false, speaking: false })).rejects.toBeInstanceOf(NoSavedWords);
   });
 
   it('after the seed, prepares a list session from at most ten saved senses', async () => {
-    const { sessionId: seed } = await service.createNextSession(E, { listening: false, speaking: false });
-    await service.skipSession(seed);
+    const { sessionId: seed } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    await service.skipSession('u_1', seed);
     const saved = await seedSavedSenses(t.db, {
       enrollmentId: E,
       lemma: 'tome',
       translations: ['ספר', 'כרך', 'חיבור', 'מחברת', 'דף', 'עמוד', 'פרק', 'שער', 'כותר', 'ספרון', 'קובץ', 'גליון'],
     });
 
-    const created = await service.createNextSession(E, { listening: true, speaking: false });
+    const created = await service.createNextSession('u_1', E, { listening: true, speaking: false });
     expect(created).toMatchObject({ status: 'preparing', source: 'list' });
 
     const jobs = await boss.findJobs<PrepareSessionPayload>(PREPARE_SESSION);
@@ -129,8 +131,8 @@ describe('createNextSession', () => {
   // Phase 28, done-means 2: the planner draws a tutor's words like the owner's.
   it('after the seed, plans a list session from words a tutor added', async () => {
     await seedUser(t.db, 'u_tutor');
-    const { sessionId: seed } = await service.createNextSession(E, { listening: false, speaking: false });
-    await service.skipSession(seed);
+    const { sessionId: seed } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    await service.skipSession('u_1', seed);
     const added = await seedSavedSenses(t.db, {
       enrollmentId: E,
       lemma: 'tome',
@@ -138,7 +140,7 @@ describe('createNextSession', () => {
       addedByUserId: 'u_tutor',
     });
 
-    const created = await service.createNextSession(E, { listening: false, speaking: false });
+    const created = await service.createNextSession('u_1', E, { listening: false, speaking: false });
 
     const jobs = await boss.findJobs<PrepareSessionPayload>(PREPARE_SESSION);
     expect(
@@ -153,13 +155,13 @@ describe('currentSession', () => {
   const E = enrollmentOf('u_1');
 
   it('is empty before any session, and points at the seed', async () => {
-    expect(await service.currentSession(E)).toEqual({ current: null, nextSource: 'seed', savedCount: 0 });
+    expect(await service.currentSession('u_1', E)).toEqual({ current: null, nextSource: 'seed', savedCount: 0 });
   });
 
   it('shows the open session with its progress', async () => {
     const { sessionId, record } = await startSeed(E);
-    await service.submitAnswer(sessionId, record.questions[0].id, { option_index: 0 });
-    expect(await service.currentSession(E)).toEqual({
+    await service.submitAnswer('u_1', sessionId, record.questions[0].id, { option_index: 0 });
+    expect(await service.currentSession('u_1', E)).toEqual({
       current: { id: sessionId, status: 'ready', source: 'seed', answered: 1, total: SESSION_LENGTH },
       nextSource: 'list',
       savedCount: 0,
@@ -167,20 +169,20 @@ describe('currentSession', () => {
   });
 
   it('shows nothing once the session is skipped', async () => {
-    const { sessionId } = await service.createNextSession(E, { listening: false, speaking: false });
-    await service.skipSession(sessionId);
-    expect((await service.currentSession(E)).current).toBeNull();
+    const { sessionId } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    await service.skipSession('u_1', sessionId);
+    expect((await service.currentSession('u_1', E)).current).toBeNull();
   });
 
   // Review Focus 5: another enrollment's session is not this one's.
   it("keeps one enrollment's session out of another's", async () => {
     await seedEnrollment(t.db, { id: 'e_ru', userId: 'u_1', targetLanguage: 'ru' });
-    await service.createNextSession(E, { listening: false, speaking: false });
-    expect(await service.currentSession('e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0 });
+    await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    expect(await service.currentSession('u_1', 'e_ru')).toEqual({ current: null, nextSource: 'seed', savedCount: 0 });
   });
 
   it('refuses an enrollment that does not exist', async () => {
-    await expect(service.currentSession('e_nobody')).rejects.toBeInstanceOf(EnrollmentNotFound);
+    await expect(service.currentSession('u_1', 'e_nobody')).rejects.toBeInstanceOf(EnrollmentNotFound);
   });
 });
 
@@ -188,32 +190,32 @@ describe('skipSession', () => {
   const E = enrollmentOf('u_1');
 
   it('skips a ready session, and a second skip is a no-op', async () => {
-    const { sessionId } = await service.createNextSession(E, { listening: false, speaking: false });
-    await service.skipSession(sessionId);
-    await service.skipSession(sessionId);
-    expect((await service.getSession(sessionId)).status).toBe('skipped');
+    const { sessionId } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    await service.skipSession('u_1', sessionId);
+    await service.skipSession('u_1', sessionId);
+    expect((await service.getSession('u_1', sessionId)).status).toBe('skipped');
   });
 
   it('refuses a completed session', async () => {
     const { sessionId, record } = await startSeed(E);
-    for (const question of record.questions) await service.submitAnswer(sessionId, question.id, { option_index: 0 });
-    await expect(service.skipSession(sessionId)).rejects.toBeInstanceOf(SessionNotSkippable);
+    for (const question of record.questions) await service.submitAnswer('u_1', sessionId, question.id, { option_index: 0 });
+    await expect(service.skipSession('u_1', sessionId)).rejects.toBeInstanceOf(SessionNotSkippable);
   });
 
   it('refuses an unknown session', async () => {
-    await expect(service.skipSession('00000000-0000-0000-0000-000000000000')).rejects.toBeInstanceOf(SessionNotFound);
+    await expect(service.skipSession('u_1', '00000000-0000-0000-0000-000000000000')).rejects.toBeInstanceOf(SessionNotFound);
   });
 
   it('a skipped session takes no more answers', async () => {
     const { sessionId, record } = await startSeed(E);
-    await service.skipSession(sessionId);
-    await expect(service.submitAnswer(sessionId, record.questions[0].id, { option_index: 0 })).rejects.toBeInstanceOf(SessionNotReady);
+    await service.skipSession('u_1', sessionId);
+    await expect(service.submitAnswer('u_1', sessionId, record.questions[0].id, { option_index: 0 })).rejects.toBeInstanceOf(SessionNotReady);
   });
 });
 
 describe('getSession', () => {
   it('refuses an unknown or malformed id', async () => {
-    await expect(service.getSession('nope')).rejects.toBeInstanceOf(SessionNotFound);
+    await expect(service.getSession('u_1', 'nope')).rejects.toBeInstanceOf(SessionNotFound);
   });
 });
 
@@ -221,7 +223,7 @@ describe('submitAnswer', () => {
   it('advances on a fresh answer', async () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
     const question = asChoice(record.questions[0]);
-    const after = await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
+    const after = await service.submitAnswer('u_1', sessionId, question.id, { option_index: question.correct_option });
     expect(after.answers).toHaveLength(1);
     expect(after.answers[0]).toEqual({
       question_id: question.id,
@@ -234,28 +236,28 @@ describe('submitAnswer', () => {
   it('replays a retried answer without double-counting it', async () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
     const question = asChoice(record.questions[0]);
-    await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
-    const retry = await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
+    await service.submitAnswer('u_1', sessionId, question.id, { option_index: question.correct_option });
+    const retry = await service.submitAnswer('u_1', sessionId, question.id, { option_index: question.correct_option });
     expect(retry.answers).toHaveLength(1);
   });
 
   it('throws SessionNotFound for an unknown session', async () => {
     await expect(
-      service.submitAnswer('00000000-0000-0000-0000-000000000000', 'q-window', { option_index: 0 }),
+      service.submitAnswer('u_1', '00000000-0000-0000-0000-000000000000', 'q-window', { option_index: 0 }),
     ).rejects.toBeInstanceOf(SessionNotFound);
   });
 
   it('throws QuestionDesynced for a question that is not current', async () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
     await expect(
-      service.submitAnswer(sessionId, record.questions[3].id, { option_index: 0 }),
+      service.submitAnswer('u_1', sessionId, record.questions[3].id, { option_index: 0 }),
     ).rejects.toBeInstanceOf(QuestionDesynced);
   });
 
   it('throws OptionOutOfRange for an option index past the last option', async () => {
     const { sessionId, record } = await startSeed(enrollmentOf('u_1'));
     await expect(
-      service.submitAnswer(sessionId, record.questions[0].id, { option_index: 99 }),
+      service.submitAnswer('u_1', sessionId, record.questions[0].id, { option_index: 99 }),
     ).rejects.toBeInstanceOf(OptionOutOfRange);
   });
 
@@ -265,7 +267,7 @@ describe('submitAnswer', () => {
     let current = record;
     for (let i = 0; i < SESSION_LENGTH; i++) {
       const question = asChoice(current.questions[i]);
-      current = await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
+      current = await service.submitAnswer('u_1', sessionId, question.id, { option_index: question.correct_option });
     }
 
     expect(current.complete).toBe(true);
@@ -283,12 +285,12 @@ describe('submitAnswer', () => {
     let current = record;
     for (let i = 0; i < SESSION_LENGTH; i++) {
       const question = asChoice(current.questions[i]);
-      current = await service.submitAnswer(sessionId, question.id, { option_index: question.correct_option });
+      current = await service.submitAnswer('u_1', sessionId, question.id, { option_index: question.correct_option });
     }
     expect(logger.events).toHaveLength(1);
 
     const last = asChoice(record.questions[SESSION_LENGTH - 1]);
-    await service.submitAnswer(sessionId, last.id, { option_index: last.correct_option });
+    await service.submitAnswer('u_1', sessionId, last.id, { option_index: last.correct_option });
     expect(logger.events).toHaveLength(1);
   });
 });
@@ -300,8 +302,8 @@ describe('rng', () => {
     const second = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) })
       .sessions;
 
-    const a = await first.getSession((await first.createNextSession(enrollmentOf('u_1'), { listening: false, speaking: false })).sessionId);
-    const b = await second.getSession((await second.createNextSession(enrollmentOf('u_2'), { listening: false, speaking: false })).sessionId);
+    const a = await first.getSession('u_1', (await first.createNextSession('u_1', enrollmentOf('u_1'), { listening: false, speaking: false })).sessionId);
+    const b = await second.getSession('u_2', (await second.createNextSession('u_2', enrollmentOf('u_2'), { listening: false, speaking: false })).sessionId);
 
     expect(b.questions.map((question) => question.id)).toEqual(
       a.questions.map((question) => question.id),
@@ -321,7 +323,7 @@ describe('progress (phase 20)', () => {
 
   async function answer(sessionId: string, question: SessionRecord['questions'][number], right: boolean) {
     const q = asChoice(question);
-    return service.submitAnswer(sessionId, q.id, {
+    return service.submitAnswer('u_1', sessionId, q.id, {
       option_index: right ? q.correct_option : (q.correct_option + 1) % q.options.length,
     });
   }
@@ -371,7 +373,7 @@ describe('progress (phase 20)', () => {
   it('a skip counts the answers given before it', async () => {
     const { sessionId, record, saved } = await seedWithSavedSenses();
     await answer(sessionId, record.questions[0], true);
-    await service.skipSession(sessionId);
+    await service.skipSession('u_1', sessionId);
     const rows = await readProgress(t.db, E);
     expect(receptive(rows, saved[0])).toMatchObject({ level: 2 });
     expect(rows.filter((row) => row.glossId !== saved[0]).every((row) => row.level === 1)).toBe(true);
@@ -380,7 +382,7 @@ describe('progress (phase 20)', () => {
 
   it('a skip with no answers writes nothing', async () => {
     const { sessionId } = await seedWithSavedSenses();
-    await service.skipSession(sessionId);
+    await service.skipSession('u_1', sessionId);
     expect((await readProgress(t.db, E)).every((row) => row.level === 1 && row.lastWrongOn === null)).toBe(true);
     expect(await readSnapshot(t.db, sessionId)).toEqual([]);
   });
@@ -400,7 +402,7 @@ describe('progress (phase 20)', () => {
     await vocabulary.unsave('u_1', E, saved[0]);
     for (const q of record.questions.slice(1)) await answer(sessionId, q, true);
 
-    const finished = await service.getSession(sessionId);
+    const finished = await service.getSession('u_1', sessionId);
     expect(finished.status).toBe('completed');
     const rows = await readProgress(t.db, E);
     expect(rows.some((row) => row.glossId === saved[0])).toBe(false);
@@ -413,7 +415,7 @@ describe('progress (phase 20)', () => {
     for (const q of record.questions.slice(0, 9)) await answer(sessionId, q, true);
     await failInsertsInto(t.db, 'session_progress');
     await expect(answer(sessionId, record.questions[9], true)).rejects.toThrow();
-    const after = await service.getSession(sessionId);
+    const after = await service.getSession('u_1', sessionId);
     expect(after).toMatchObject({ status: 'ready', complete: false });
     expect(after.answers).toHaveLength(9);
     expect((await readProgress(t.db, E)).every((row) => row.level === 1)).toBe(true);
@@ -423,8 +425,8 @@ describe('progress (phase 20)', () => {
     const { sessionId, record } = await seedWithSavedSenses();
     await answer(sessionId, record.questions[0], true);
     await failInsertsInto(t.db, 'session_progress');
-    await expect(service.skipSession(sessionId)).rejects.toThrow();
-    expect((await service.getSession(sessionId)).status).toBe('ready');
+    await expect(service.skipSession('u_1', sessionId)).rejects.toThrow();
+    expect((await service.getSession('u_1', sessionId)).status).toBe('ready');
     expect((await readProgress(t.db, E)).every((row) => row.level === 1)).toBe(true);
   });
 
@@ -432,6 +434,68 @@ describe('progress (phase 20)', () => {
     const { sessionId, record, saved } = await seedWithSavedSenses();
     const finished = await answerAll(sessionId, record);
     expect(finished.progress.map((p) => p.glossId)).toEqual(saved);
-    expect((await service.getSession(sessionId)).progress).toEqual(finished.progress);
+    expect((await service.getSession('u_1', sessionId)).progress).toEqual(finished.progress);
+  });
+});
+
+// Phase 29 (spec D13). Practising is the owner's alone: another learner reaches
+// no session of theirs, by enrollment id or by session id, and the refusal comes
+// before anything is read or written.
+describe('authorization (phase 29)', () => {
+  const OWNER = 'u_owner';
+  const OTHER = 'u_other';
+  const E = enrollmentOf(OWNER);
+  const OPTIONS = { listening: false, speaking: false };
+  // Everything these use cases write: the session, its answers, and the progress a completion or skip records.
+  const TABLES = ['sessions', 'session_questions', 'answers', 'gloss_progress', 'session_progress'];
+
+  beforeEach(async () => {
+    await seedUser(t.db, OWNER);
+    await seedUser(t.db, OTHER);
+  });
+
+  const deniedFor = (permission: string) =>
+    expect.objectContaining({ event: 'access_denied', actor_user_id: OTHER, enrollment_id: E, permission });
+
+  it('createNextSession refuses another learner with AccessDenied and writes nothing', async () => {
+    const before = await countRows(t.db, TABLES);
+    await expect(service.createNextSession(OTHER, E, OPTIONS)).rejects.toBeInstanceOf(AccessDenied);
+    expect(await countRows(t.db, TABLES)).toEqual(before);
+    expect(await boss.findJobs(PREPARE_SESSION)).toEqual([]);
+    expect(logger.events).toContainEqual(deniedFor('session.practice'));
+  });
+
+  it('currentSession refuses another learner with AccessDenied and writes nothing', async () => {
+    await service.createNextSession(OWNER, E, OPTIONS);
+    const before = await countRows(t.db, TABLES);
+    await expect(service.currentSession(OTHER, E)).rejects.toBeInstanceOf(AccessDenied);
+    expect(await countRows(t.db, TABLES)).toEqual(before);
+  });
+
+  type Owned = { sessionId: string; questionId: string };
+  it.each<[string, (owned: Owned) => Promise<unknown>]>([
+    ['getSession', ({ sessionId }) => service.getSession(OTHER, sessionId)],
+    ['skipSession', ({ sessionId }) => service.skipSession(OTHER, sessionId)],
+    ['submitAnswer', ({ sessionId, questionId }) => service.submitAnswer(OTHER, sessionId, questionId, { option_index: 0 })],
+    [
+      'answerBySpeech',
+      ({ sessionId, questionId }) =>
+        service.answerBySpeech(OTHER, sessionId, { questionId, audio: 'A'.repeat(2_000), mimeType: 'audio/aac' }),
+    ],
+    ['answerJudged', ({ sessionId, questionId }) => service.answerJudged(OTHER, sessionId, { questionId, text: 'x' })],
+  ])('%s refuses another learner with AccessDenied and writes nothing', async (_useCase, call) => {
+    const { sessionId } = await service.createNextSession(OWNER, E, OPTIONS);
+    const owned = { sessionId, questionId: (await service.getSession(OWNER, sessionId)).questions[0].id };
+    const before = await countRows(t.db, TABLES);
+
+    await expect(call(owned)).rejects.toBeInstanceOf(AccessDenied);
+
+    expect(await countRows(t.db, TABLES)).toEqual(before);
+    expect(await service.getSession(OWNER, sessionId)).toMatchObject({ status: 'ready', answers: [] });
+    expect(logger.events).toContainEqual(deniedFor('session.practice'));
+  });
+
+  it('still answers an unknown session as not found, before any check', async () => {
+    await expect(service.getSession(OTHER, '00000000-0000-0000-0000-000000000000')).rejects.toBeInstanceOf(SessionNotFound);
   });
 });

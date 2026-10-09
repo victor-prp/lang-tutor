@@ -6,6 +6,11 @@ built for Hebrew speakers who are learning English.
 
 You have never used it before and you have no account. Start there.
 
+The app signs you in with a code it sends to your email. In this test environment no real
+email goes out: your inbox is at **__INBOX_URL__** followed by your address — for example
+`__INBOX_URL__qa-1@example.com`. Use any address you like, ask the app for a code, then open
+that page (reload it if the code has not arrived yet).
+
 What the app offers, as far as a new user is told:
 
 - A **dictionary**: type an English word, a phrase or a whole sentence and get its meanings

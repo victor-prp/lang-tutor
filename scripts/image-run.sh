@@ -29,8 +29,16 @@ args=(--rm --name "$NAME" --add-host host.docker.internal:host-gateway
   -e "PORT=$PORT" -e "LANE=$LANE"
   -e "DATABASE_URL=$(to_container "$DATABASE_URL")")
 
-# Forwarded only when set. The last five are phase 29's; until it merges they
-# are never set and nothing is forwarded.
+# Phase 29. The page in the image calls the address image-build.sh built it
+# for, so that origin must be one Better Auth and CORS trust. The lane's own
+# WEB_ORIGINS name Metro, which does not serve this page.
+IMAGE_API_URL="${IMAGE_API_URL:-http://localhost:$PORT}"
+case ",${WEB_ORIGINS:-}," in
+  *",$IMAGE_API_URL,"*) ;;
+  *) WEB_ORIGINS="${WEB_ORIGINS:+$WEB_ORIGINS,}$IMAGE_API_URL" ;;
+esac
+
+# Forwarded only when set. The last five are phase 29's.
 for key in GEMINI_API_KEY GEMINI_MODEL BETTER_AUTH_SECRET AUTH_BASE_URL WEB_ORIGINS RESEND_API_KEY MAIL_FROM; do
   if [ -n "${!key:-}" ]; then args+=(-e "$key=${!key}"); fi
 done

@@ -1,7 +1,7 @@
 import type { Enrollment } from '@lang-tutor/core/api';
 
 import { may, type Permission } from '../domain/access';
-import { AccessDenied } from '../errors';
+import { AccessDenied, EnrollmentNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { Repos } from './transaction';
 
@@ -29,4 +29,19 @@ export async function authorize(
     permission,
   });
   throw new AccessDenied(actorUserId, enrollment.id, permission);
+}
+
+/**
+ * Phase 29 (ADR 0009 R7). The enrollment by id, or EnrollmentNotFound; then
+ * the one check. For use cases addressed by an enrollment id.
+ */
+export async function authorizeEnrollment(
+  repos: Repos,
+  logger: Logger,
+  input: { actorUserId: string; enrollmentId: string; permission: Permission },
+): Promise<Enrollment> {
+  const enrollment = await repos.enrollment.findById(input.enrollmentId);
+  if (!enrollment) throw new EnrollmentNotFound(input.enrollmentId);
+  await authorize(repos, logger, { actorUserId: input.actorUserId, enrollment, permission: input.permission });
+  return enrollment;
 }

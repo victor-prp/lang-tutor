@@ -8,7 +8,7 @@ import {
   type StaleLexeme,
 } from '../../src/domain/dictionary';
 import type { StoredSense } from '../../src/domain/translation';
-import { UsernameTaken } from '../../src/errors';
+import { ProfileExists, UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
 import type { JobRepo } from '../../src/repo/jobs';
@@ -66,8 +66,9 @@ export function createFakeAppDeps(): AppDeps {
     failPreparation: unreachable,
   };
   const users: UserService = {
-    register: unreachable,
-    login: unreachable,
+    createProfile: unreachable,
+    me: unreachable,
+    hasProfile: unreachable,
   };
   const enrollments: EnrollmentService = { enroll: unreachable, list: unreachable };
   const translations: TranslationService = {
@@ -104,6 +105,9 @@ export function createFakeAppDeps(): AppDeps {
     identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
     webDistDir: null,
     logger: createFakeLogger(),
+    auth: { handler: async () => new Response(null, { status: 500 }), paths: [] },
+    signedIn: { sessionOf: async () => null },
+    webOrigins: ['https://web.example.test'],
   };
 }
 
@@ -156,20 +160,21 @@ export function createFakeJobRepo(): FakeJobRepo {
 }
 
 // A repository a unit test can hold in its head: the same contract, backed by
-// an array. It reproduces the one behaviour a caller depends on — a duplicate
-// username raises UsernameTaken — because that is a contract of the interface,
-// not an accident of Postgres.
+// an array. It reproduces the two behaviours a caller depends on — a second
+// profile for one id raises ProfileExists, a duplicate username raises
+// UsernameTaken — because those are contracts of the interface, not accidents
+// of Postgres.
 export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
   const rows: User[] = [];
-  let n = 0;
   return {
     rows,
-    insertUser: async (input) => {
+    insertUser: async (id, input) => {
+      if (rows.some((row) => row.id === id)) throw new ProfileExists(id);
       if (rows.some((row) => row.username === input.username)) {
         throw new UsernameTaken(input.username);
       }
       const user: User = {
-        id: `fake-user-${++n}`,
+        id,
         username: input.username,
         display_name: input.display_name,
         age: input.age,

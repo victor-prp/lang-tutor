@@ -14,6 +14,7 @@ REPO=$(pwd -P)
 OUT="$REPO/nightly-qa/.out"
 QA_API_PORT="${QA_API_PORT:-3101}"
 QA_APP_PORT="${QA_APP_PORT:-8092}"
+QA_MAIL_PORT="${QA_MAIL_PORT:-8093}"
 # Measured, not guessed: the first full session used 142 of a 150 cap, which is
 # close enough to truncation that a slightly chattier night would be cut off
 # mid-report. 200 leaves room without inviting a session to wander.
@@ -39,6 +40,8 @@ fail() { echo "$1" >&2; exit 1; }
 
 curl -sf -o /dev/null "http://localhost:$QA_API_PORT/health" || fail "No server on :$QA_API_PORT. Run ./nightly-qa/up.sh first."
 curl -sf -o /dev/null "http://localhost:$QA_APP_PORT" || fail "No app on :$QA_APP_PORT. Run ./nightly-qa/up.sh first."
+curl -sf -o /dev/null "http://localhost:$QA_MAIL_PORT/inbox?email=qa@example.com" \
+  || fail "No inbox on :$QA_MAIL_PORT. Run ./nightly-qa/up.sh first; without it nobody can sign in."
 
 # --- the fence, before anything else -----------------------------------------
 ./nightly-qa/guard.sh "${WORKDIR_ARGS[@]+"${WORKDIR_ARGS[@]}"}" || fail "Fence guard failed. Not starting a session."

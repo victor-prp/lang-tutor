@@ -30,9 +30,10 @@ import {
   type StaleLexeme,
 } from '../domain/dictionary';
 import { coversPair, markSaved } from '../domain/vocabulary';
-import { EnrollmentNotFound, PairNotEnrolled, TranslationUnreadable } from '../errors';
+import { PairNotEnrolled, TranslationUnreadable } from '../errors';
 import type { Logger } from '../logger';
 import type { RepairedRendering } from '../repo/dictionary';
+import { authorizeEnrollment } from './access';
 import type { LlmClient } from './llm';
 import type { Transaction } from './transaction';
 
@@ -721,26 +722,27 @@ export function createTranslationService({
      * Phase 18. The lookup above is unchanged; this wraps it.
      *
      * Before it, the enrollment is read and checked, so an unknown enrollment
-     * (404) or a pair it does not cover (400) costs no model call. After it, ONE
-     * read marks which senses this enrollment has saved, on a target-language
-     * lookup only: the senses of a reverse lookup belong to the source-language
-     * lexeme, which this enrollment does not learn (spec §1). Both are reads, each
-     * its own transaction — R8 permits them; neither writes.
+     * (404), another learner's (403, phase 29: `saved` reads their list) or a
+     * pair it does not cover (400) costs no model call. After it, ONE read marks
+     * which senses this enrollment has saved, on a target-language lookup only:
+     * the senses of a reverse lookup belong to the source-language lexeme, which
+     * this enrollment does not learn (spec §1). Both are reads, each its own
+     * transaction — R8 permits them; neither writes. With no `enrollment_id`
+     * nothing of anyone's is read, and there is nothing to authorize.
      *
      * `enrollment_id` is used for `saved` and nothing else. Any other use of it on
      * this path is a new decision, not an extension of this one.
      */
-    translate: async (input: TranslationRequest): Promise<TranslationResponse> => {
+    translate: async (actorUserId: string, input: TranslationRequest): Promise<TranslationResponse> => {
       const enrollmentId = input.enrollment_id;
       const enrollment =
         enrollmentId === undefined
           ? null
-          : await transaction((repos) => repos.enrollment.findById(enrollmentId));
-      if (enrollmentId !== undefined) {
-        if (!enrollment) throw new EnrollmentNotFound(enrollmentId);
-        if (!coversPair(enrollment, input.from, input.to)) {
-          throw new PairNotEnrolled(enrollmentId, input.from, input.to);
-        }
+          : await transaction((repos) =>
+              authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'vocabulary.read' }),
+            );
+      if (enrollment && !coversPair(enrollment, input.from, input.to)) {
+        throw new PairNotEnrolled(enrollment.id, input.from, input.to);
       }
 
       const response = await lookup(input);

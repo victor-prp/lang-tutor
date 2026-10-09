@@ -1,7 +1,7 @@
 # ADR 0002: Dependency injection via closures, constructed only at a composition root
 
 - **Status:** Accepted
-- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25); R1 widened 2026-10-07 (phase 25): `expo-file-system`; R1 widened 2026-10-07 (phase 26): `expo-image-picker` and `expo-image-manipulator`; R6's call-site note gains createGeminiVisionClient 2026-10-07 (phase 26)
+- **Date:** 2026-09-06; R1 widened 2026-10-06 (phase 23): `expo-speech` and `expo-audio`; R6's list gains createGeminiTranscriber 2026-10-07 (phase 25); R1 widened 2026-10-07 (phase 25): `expo-file-system`; R1 widened 2026-10-07 (phase 26): `expo-image-picker` and `expo-image-manipulator`; R1 widened 2026-10-08 (phase 29): `expo-secure-store`; R6's list gains the phase 29 factories 2026-10-08, and drops `createRememberedUsernameStore`, which phase 29 removed; R6's call-site note gains createGeminiVisionClient 2026-10-07 (phase 26)
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md),
   *"Closure-based dependency injection is mandatory"*, and
   [phase 5 design](../superpowers/specs/2026-09-05-lang-tutor-phase-5-di-corrections-design.md),
@@ -34,7 +34,7 @@ other file receives what it needs as a parameter and stays swappable for a test'
 
 | # | Subject | Must not appear outside a composition root |
 |---|---|---|
-| R1 | Concrete I/O/randomness implementations | `Math.random` (server); `@react-native-async-storage/async-storage`, `expo-crypto`, `expo-speech`, `expo-audio`, `expo-file-system`, `expo-image-picker`, `expo-image-manipulator` imports (mobile) |
+| R1 | Concrete I/O/randomness implementations | `Math.random` (server); `@react-native-async-storage/async-storage`, `expo-crypto`, `expo-speech`, `expo-audio`, `expo-file-system`, `expo-image-picker`, `expo-image-manipulator`, `expo-secure-store` imports (mobile) |
 | R2 | `process.env` | any read of `process.env`, in either app |
 | R3 | Module-level exported singletons | `export const x = createX(...)` / `export const x = new X(...)` at module scope |
 | R4 | `jest.mock` | anywhere in `apps/server` or `apps/mobile` |
@@ -53,7 +53,7 @@ Composition roots: `apps/server/src/index.ts`, `apps/server/src/db/cli.ts`,
   factories (`createDb`, `createConsoleLogger`, `createSessionRepo`, `createQuestionRepo`,
   `createHealthRepo`, `createUserRepo`, `createEnrollmentRepo`, `createDictRepo`, `createVocabularyRepo`, `createProgressRepo`, `createTransaction`, `createSessionService`,
   `createUserService`, `createEnrollmentService`, `createGrantRepo`, `createGrantService`, `createGeminiClient`, `createGeminiTranscriber`, `createTranslationService`, `createVocabularyService`, `createServerDeps`,
-  `createApiClient`, `createRememberedUsernameStore`, `createRememberedEnrollmentStore`, `createSpeaker`, `createRecorder`, `createPhotoImportRepo`, `createPhotoImportService`, `createGeminiVisionClient`, `createPhotoPicker`) is short enough to spot-check.
+  `createApiClient`, `createRememberedEnrollmentStore`, `createSpeaker`, `createRecorder`, `createPhotoImportRepo`, `createPhotoImportService`, `createGeminiVisionClient`, `createPhotoPicker`, `createAuth`, `createAuthRepo`, `createResendMailer`, `createSessionMiddleware`, `createMeRouter`, `createAppAuthClient`, `createAuthEvents`) is short enough to spot-check.
   `createGeminiClient`, `createGeminiTranscriber` and `createGeminiVisionClient` are annotated at their call sites in `composition.ts` rather than at their
   definitions, because ADR 0001 R10 forbids `providers/` from importing the contracts they
   satisfy — the same arrangement as `createTransaction` and `Transaction`.
@@ -71,7 +71,7 @@ mirrors this block verbatim. Each command must print nothing.
 ```bash
 # R1 — concrete I/O/randomness implementations named only at a composition root
 grep -rn "Math\.random" apps/server/src --include='*.ts' | grep -v -e '/index\.ts:' -e '\.test\.ts:'
-grep -rln "from '@react-native-async-storage/async-storage'\|from 'expo-crypto'\|from 'expo-speech'\|from 'expo-audio'\|from 'expo-file-system'\|from 'expo-image-picker'\|from 'expo-image-manipulator'" apps/mobile/src --include='*.ts' --include='*.tsx' | grep -v '_layout\.tsx'
+grep -rln "from '@react-native-async-storage/async-storage'\|from 'expo-crypto'\|from 'expo-speech'\|from 'expo-audio'\|from 'expo-file-system'\|from 'expo-image-picker'\|from 'expo-image-manipulator'\|from 'expo-secure-store'" apps/mobile/src --include='*.ts' --include='*.tsx' | grep -v '_layout\.tsx'
 
 # R2 — process.env read only at a composition root
 grep -rn "process\.env" apps/server/src apps/mobile/src --include='*.ts' --include='*.tsx' \
@@ -123,6 +123,7 @@ grep -rnE "(rng|onError|randomUUID|logger|storage|fetch)\s*=\s*[^,}]+[,}]" apps/
   `src/speech.ts` be tested with a fake engine. It is also what keeps a later move to
   server-generated audio a change to one file.
 - `expo-image-picker` and `expo-image-manipulator` joined R1 in phase 26. A camera and a photo library are I/O exactly as a speech engine is, and keeping them at the root is what lets `src/photos.ts` be tested with a fake engine.
+- `expo-secure-store` joined R1 in phase 29. The device keychain holding the session cookie is I/O as AsyncStorage is, and keeping it at `_layout.tsx` is what lets `auth/client.ts` be tested with a fake store ([ADR 0009](adr-0009-sign-in.md)).
 
 ## Related
 
