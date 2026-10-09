@@ -125,8 +125,9 @@ enforced.
 | [0007](docs/adr/adr-0007-background-jobs.md) | Background jobs run on pg-boss, enqueued only inside a transaction — `repo/jobs.ts` is the only enqueue, `worker.ts` the only place handlers are registered |
 | [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, the signed-in user as actor; `repo/grants.ts` is the only reader of the table |
 | [0009](docs/adr/adr-0009-sign-in.md) | Sign-in with Better Auth, behind one seam — one import site per app, the session becomes an actor in `routes/actor.ts` only, exact version pins |
+| [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 
-All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 = 59 checks, grep only, no deps,
+All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 = 62 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
@@ -194,13 +195,13 @@ migration.
 ## Running it
 
 Docker, then the database, then the server, then the app. The mobile app reads its
-server URL from `apps/mobile/.env.local`, which Expo auto-loads and git ignores (only
-`.env.example` is committed). In the main checkout, create it by hand; in a worktree,
+server URL from `apps/mobile/.env.development.local`, which Expo auto-loads and git ignores
+(only `.env.development.example` is committed). In the main checkout, create it by hand; in a worktree,
 `./scripts/setup-worktree.sh` generates it pointing at that lane's own server.
 
 ```bash
 npm install
-cp apps/mobile/.env.example apps/mobile/.env.local
+cp apps/mobile/.env.development.example apps/mobile/.env.development.local
 npm run db:up        # Postgres + MockServer + pg-boss dashboard  (requires Docker)
 npm run db:migrate   # schema + shared dictionary seed
 npm run server       # terminal 1
@@ -235,14 +236,39 @@ confirm layout on a real device.
 
 **Testing on a physical device:** the phone needs a real IP to reach the server —
 `localhost` only works for the web target and simulators, which share the dev machine's
-network namespace. Edit the `apps/mobile/.env.local` created above:
+network namespace. Edit the `apps/mobile/.env.development.local` created above:
 
 ```bash
-# edit apps/mobile/.env.local: set EXPO_PUBLIC_API_URL to your dev machine's LAN IP
+# edit apps/mobile/.env.development.local: set EXPO_PUBLIC_API_URL to your dev machine's LAN IP
 # (macOS: ipconfig getifaddr en0), then restart `npm run mobile`
 ```
 
 Phone and dev machine must be on the same Wi-Fi network.
+
+**Testing a phone against production:** `npm run mobile:prod` starts Expo in production
+mode, which reads the committed `apps/mobile/.env.production` and so reaches
+`https://app.wordspal.ai` instead of your lane. The bundle is a production one: minified,
+with no Fast Refresh. The script refuses to start if `apps/mobile/.env.local` or
+`.env.production.local` sets `EXPO_PUBLIC_API_URL`, because Expo ranks either above
+`.env.production`. A checkout from before phase 30 has its URL in `.env.local`; re-run
+`./scripts/setup-worktree.sh`, which moves it to `.env.development.local`.
+
+### The production image
+
+Production runs one container: the server, its background jobs and the web export, from
+one process on one origin ([phase 30 design](docs/superpowers/specs/2026-10-08-lang-tutor-phase-30-hosting-design.md)).
+To build and run that image against your lane:
+
+```bash
+npm run image:build   # tags lang-tutor:<lane>; the web export calls this lane's server
+GEMINI_BASE_URL=http://localhost:1080/dev GEMINI_API_KEY=dev GEMINI_MODEL=dev npm run image:run
+```
+
+Then open the lane's server address in a browser: `/` is the app, `/api/...` the API and
+`/health` names the version (`dev` for a local build). The container migrates the
+database before it listens ([ADR 0010](docs/adr/adr-0010-single-container-migrations.md)).
+A release builds the same Dockerfile without the API URL argument, so its export calls
+`https://app.wordspal.ai`.
 
 ### Working in lanes
 
@@ -262,7 +288,7 @@ from its slot and branch by `scripts/lane-env.sh`:
 ```bash
 git worktree add -b my-feature .claude/worktrees/my-feature master
 cd .claude/worktrees/my-feature
-./scripts/setup-worktree.sh   # slot, node_modules, .env.local, its own database
+./scripts/setup-worktree.sh   # slot, node_modules, .env.development.local, its own database
 npm run server                # on this lane's port
 npm run dict:restore          # optional: the checked-in dictionary, ~2 minutes
 ```
@@ -291,6 +317,8 @@ Since phase 9 the server calls a third-party model, so it needs credentials to s
 | `GEMINI_API_KEY` | none — the server refuses to start | Never logged. |
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com` | Pointed at a MockServer namespace by every test bucket. |
 | `GEMINI_MODEL` | none — the server refuses to start | `gemini-2.5-flash` is the id phase 9 was scored against. |
+| `APP_VERSION` | `dev` | Phase 30. The release tag, published on `/health`. The image sets it from its build argument. |
+| `WEB_DIST_DIR` | unset — the server answers the API only | Phase 30. The web export the server serves. Set only inside the image, to `/app/web`. |
 
 `npm run db:migrate` needs none of these: migrations read `loadConfig` only.
 
@@ -476,10 +504,14 @@ the signed-in user is the only identity the server believes. See
 [ADR 0009](docs/adr/adr-0009-sign-in.md).
 
 `POST /api/translations` reaches a paid third-party model **on a miss** — a string already
-in the dictionary is answered from Postgres in milliseconds and costs nothing. Since phase
-10 that is most repeat traffic, but there is still no authentication and no rate limit in
-front of the endpoint, and every *new* string is a paid call. That is acceptable for a
-play-test on a local network and **must not** reach a public host in this state.
+in the dictionary is answered from Postgres in milliseconds and costs nothing. Production
+is public at `https://app.wordspal.ai` since phase 30. Since phase 29 the endpoint needs a
+session, but sign-up is open, and nothing yet limits how many new words one account looks
+up or how many codes one client requests across different email addresses: the per-IP
+limits are a follow-up ([ADR 0009](docs/adr/adr-0009-sign-in.md)). The key is
+production's own and revocable in one place, and a budget alert watches the bill. Until a
+release carries phase 29, production still runs the code before it, with no sign-in at all
+([hosting runbook](docs/runbooks/hosting.md#when-phase-29-merges)).
 
 Neither is hand-written. Every endpoint is one `createRoute` definition in
 `apps/server/src/` — routing, request validation, response typing and documentation at
@@ -508,7 +540,7 @@ npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in) — grep only, no deps, no database
+npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container) — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go
@@ -570,9 +602,9 @@ Design and plan for this layout:
 
 ## Continuous integration
 
-Every push, on every branch, runs six parallel jobs on GitHub Actions
+Every push, on every branch, runs eight parallel jobs on GitHub Actions
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). `workflow_dispatch` runs the same
-six by hand, which matters for the one job whose result can change without a commit.
+eight by hand, which matters for the one job whose result can change without a commit.
 
 | Job | Database | Runs | Roughly |
 |---|---|---|---|
@@ -581,6 +613,8 @@ six by hand, which matters for the one job whose result can change without a com
 | `test-unit` | **none, deliberately** | `npm test` | 1 min |
 | `test-integration` | `npm run db:up` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
 | `test-e2e` | `npm run db:up` | `npm run e2e` — the Playwright suite described below | 4-5 min |
+| `build-image` | `npm run db:up` | `npm run e2e:image` — the production image, built for this job's own address, driven by the whole Playwright suite plus the two image-only specs | 10-15 min |
+| `terraform-plan` | none | `terraform fmt -check` and `validate` on both stacks under `terraform/`; then, once the `AWS_PLAN_ROLE_ARN` variable exists, a read-only `plan` of both through the plan role | 1 min |
 | `test-eval` | **none, and no MockServer either** | `npm run eval` — the golden set against the real Gemini API, keyed by the `GEMINI_API_KEY` secret and the `GEMINI_MODEL` variable | 1 min |
 
 `test-unit` has no database available at all. That is the point: it *proves* the
@@ -641,6 +675,15 @@ it means an outage or a model update can block a merge that has nothing to do wi
 That is a defensible trade — it is the reason the job exists here rather than in a nightly
 — but make it knowingly, and leave `test-eval` off the required list if it is not.
 
+### Releasing
+
+A release is a pushed `v*` tag on a commit already on `master`, after testing master locally:
+`git tag v2026.10.08 && git push origin v2026.10.08`. The Release workflow waits for that
+commit's CI (every job but `test-eval`), builds the image into ECR, runs `terraform apply`
+through `scripts/infra.sh`, and goes green only when `/health` names the tag. Rolling back is
+the same workflow run from an earlier tag. Everything else, from the first apply to reading
+the container's log, is in the [hosting runbook](docs/runbooks/hosting.md).
+
 ## End-to-end test
 
 One Playwright test drives a real Chromium through a complete ten-question session against
@@ -654,10 +697,15 @@ npm run e2e
 It needs no servers running first — Playwright starts both itself: `apps/server`, and a
 static web export of the app served on port 8082. It builds that export on every run
 (~9s), which is deliberate: **the Metro dev server ignores an injected
-`EXPO_PUBLIC_API_URL`** (Metro compiles the value in from `.env.local` instead), so a
+`EXPO_PUBLIC_API_URL`** (Metro compiles the value in from `.env.development.local` instead), so a
 static export is the only way to reliably point the app at the local test server. Your
-`apps/mobile/.env.local` is never read or modified by the suite, so the Expo Go device
+`apps/mobile/.env.development.local` is never read or modified by the suite, so the Expo Go device
 workflow above is unaffected.
+
+`npm run e2e:image` runs the same suite against the production image instead: it builds
+the image for this lane's e2e address, runs one container serving both the app and the
+API, and adds two specs only that target can pass (a reload on a deep link, and a 404 for
+a missing bundle). CI runs both targets on every push.
 
 `npm test` and `npm run test:all` deliberately do **not** run this — the workspace's
 script is named `e2e`, not `test`, so neither the root fan-out nor `--if-present` picks

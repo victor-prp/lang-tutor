@@ -12,6 +12,13 @@ export type Config = {
   speechTimeoutMs: number;
   judgeTimeoutMs: number;
   photoReadTimeoutMs: number;
+  // Phase 30 (spec D2). The release tag the image was built from, published on
+  // /health so a release can prove which image answers. `dev` everywhere else.
+  version: string;
+  // Phase 30 (spec D1). Where the web export sits inside the image. Unset, the
+  // server answers the API only, which is every lane and every test: there,
+  // Metro or `expo serve` serves the app.
+  webDistDir: string | null;
 };
 
 // The one place this default lives. Both composition roots read it from here.
@@ -56,6 +63,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       Number(env.PHOTO_READ_TIMEOUT_MS) || PHOTO_READ_BUDGET_MS,
       PHOTO_READ_BUDGET_MS,
     ),
+    version: env.APP_VERSION?.trim() || 'dev',
+    webDistDir: env.WEB_DIST_DIR?.trim() || null,
   };
 }
 
@@ -158,6 +167,21 @@ export function databaseNameFrom(databaseUrl: string): string {
 export function maintenanceUrlFor(databaseUrl: string): string {
   const url = new URL(databaseUrl);
   url.pathname = '/postgres';
+  return url.toString();
+}
+
+/**
+ * The URL with its password replaced, for anything that prints it. Production's
+ * container log keeps every line, so a printed password outlives the process.
+ */
+export function redactDatabaseUrl(databaseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(databaseUrl);
+  } catch {
+    return '<unparseable database URL>';
+  }
+  if (url.password) url.password = '***';
   return url.toString();
 }
 

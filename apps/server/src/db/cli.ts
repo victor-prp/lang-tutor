@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
-import { loadConfig, maintenanceUrlFor } from '../config';
+import { loadConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, listLaneDatabases } from './lanes';
@@ -130,6 +130,8 @@ async function dropLane(databaseUrl: string, lane: string): Promise<void> {
 // same config as the first rather than a copy-pasted connection string.
 async function main(): Promise<void> {
   const { databaseUrl, poolMax, lane } = loadConfig(process.env);
+  // Every line below may land in production's container log: never the password.
+  const shownUrl = redactDatabaseUrl(databaseUrl);
 
   // Both of these run against the maintenance database and must not create or
   // migrate anything — `--lane-down` in particular is about to drop the very
@@ -148,7 +150,7 @@ async function main(): Promise<void> {
   // pool against a database that does not exist fails with a driver error that
   // reads like a configuration mistake.
   if (await ensureDatabase(databaseUrl, laneStampFrom(process.env))) {
-    console.log(`created ${databaseUrl}`);
+    console.log(`created ${shownUrl}`);
   }
   const { db, close } = createDb(databaseUrl, {
     max: poolMax,
@@ -172,7 +174,7 @@ async function main(): Promise<void> {
       });
       mkdirSync(dirname(exportTo), { recursive: true });
       writeFileSync(exportTo, toJsonl(records));
-      console.log(`exported ${records.length} forms from ${databaseUrl}`);
+      console.log(`exported ${records.length} forms from ${shownUrl}`);
       console.log(`written to ${exportTo}`);
 
       const corrections = await exportCorrections(db, { languageCode: TARGET_LANGUAGE });
@@ -213,7 +215,7 @@ async function main(): Promise<void> {
     // which a recompute has no reason to touch.
     if (process.argv.includes('--recompute-progress')) {
       const { sessions } = await recomputeProgress(db);
-      console.log(`recomputed progress in ${databaseUrl} from ${sessions} ended sessions`);
+      console.log(`recomputed progress in ${shownUrl} from ${sessions} ended sessions`);
       return;
     }
 
@@ -228,7 +230,7 @@ async function main(): Promise<void> {
         onProgress: (done, total) => console.log(`  ${done}/${total} forms`),
       });
       console.log(
-        `restored ${result.records} forms into ${databaseUrl} — ` +
+        `restored ${result.records} forms into ${shownUrl} — ` +
           `${result.lexemesCreated} lexemes written, the rest were already there ` +
           '(persistEntries is first-writer-wins, so nothing was overwritten).',
       );
@@ -253,11 +255,11 @@ async function main(): Promise<void> {
 
     if (reseed) {
       await reseedContent(db);
-      console.log(`migrated and RESEEDED ${databaseUrl} — the dictionary was cleared first,`);
+      console.log(`migrated and RESEEDED ${shownUrl} — the dictionary was cleared first,`);
       console.log('so every looked-up word is gone as well as every recorded one.');
     } else {
       await seedContent(db);
-      console.log(`migrated and seeded ${databaseUrl}`);
+      console.log(`migrated and seeded ${shownUrl}`);
     }
   } finally {
     await close();

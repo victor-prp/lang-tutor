@@ -7,6 +7,7 @@ import {
   loadConfig,
   loadGeminiConfig,
   maintenanceUrlFor,
+  redactDatabaseUrl,
 } from './config';
 import { PREPARE_SESSION_EXPIRY_SECONDS } from './domain/jobs';
 
@@ -24,6 +25,19 @@ describe('loadConfig', () => {
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
+      version: 'dev',
+      webDistDir: null,
+    });
+  });
+
+  it('reads the release version and the web export directory (phase 30)', () => {
+    expect(loadConfig({ APP_VERSION: ' v2026.10.08 ', WEB_DIST_DIR: ' /app/web ' })).toMatchObject({
+      version: 'v2026.10.08',
+      webDistDir: '/app/web',
+    });
+    expect(loadConfig({ APP_VERSION: '', WEB_DIST_DIR: '   ' })).toMatchObject({
+      version: 'dev',
+      webDistDir: null,
     });
   });
 
@@ -57,6 +71,8 @@ describe('loadConfig', () => {
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
+      version: 'dev',
+      webDistDir: null,
     });
   });
 
@@ -182,6 +198,28 @@ describe('maintenanceUrlFor', () => {
     expect(maintenanceUrlFor('postgres://postgres:postgres@localhost:5432/lang_tutor_x')).toBe(
       'postgres://postgres:postgres@localhost:5432/postgres',
     );
+  });
+});
+
+// Production's container log kept every line the migrate step printed, and the
+// URL it printed carried the database password.
+describe('redactDatabaseUrl', () => {
+  it('hides the password and keeps everything else', () => {
+    expect(
+      redactDatabaseUrl(
+        'postgres://wordspal:s3cr%2Bt@db.example.com:5432/wordspal?sslmode=verify-full',
+      ),
+    ).toBe('postgres://wordspal:***@db.example.com:5432/wordspal?sslmode=verify-full');
+  });
+
+  it('leaves a URL without a password as it is', () => {
+    expect(redactDatabaseUrl('postgres://localhost:5432/lang_tutor')).toBe(
+      'postgres://localhost:5432/lang_tutor',
+    );
+  });
+
+  it('prints nothing of a string it cannot parse, which may itself be a secret', () => {
+    expect(redactDatabaseUrl('not a url with hunter2 in it')).toBe('<unparseable database URL>');
   });
 });
 

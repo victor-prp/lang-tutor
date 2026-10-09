@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
+import { tmpdir } from 'node:os';
 
 import { createApp } from './app';
 import { createFakeAppDeps } from '../tests/support/fakes';
@@ -93,6 +94,14 @@ describe(`POST ${NEXT_STEP} in the published document`, () => {
 // from the route definitions the server actually serves, so it cannot describe
 // an endpoint the server does not have, or miss one it does.
 describe('the document as a whole', () => {
+  it('publishes the same paths when the web export is served (phase 30)', async () => {
+    const plain = await (await createApp(createFakeAppDeps()).request('/openapi.json')).json();
+    const withWeb = await (
+      await createApp({ ...createFakeAppDeps(), webDistDir: tmpdir() }).request('/openapi.json')
+    ).json();
+    expect(Object.keys(withWeb.paths)).toEqual(Object.keys(plain.paths));
+  });
+
   it('is an OpenAPI 3.1 document', async () => {
     const doc = await openApiDocument();
     expect(doc.openapi).toBe('3.1.0');
@@ -324,7 +333,7 @@ describe('GET /health in the published document', () => {
   it('publishes the identity fields a caller needs to tell two lanes apart', async () => {
     const doc = await openApiDocument();
     const schema = doc.paths['/health'].get.responses['200'].content['application/json'].schema;
-    expect(schema.required.sort()).toEqual(['database', 'lane', 'ok', 'port']);
+    expect(schema.required.sort()).toEqual(['database', 'lane', 'ok', 'port', 'version']);
   });
 });
 

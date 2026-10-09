@@ -38,6 +38,8 @@ export type ServerIdentity = {
   lane: string;
   database: string;
   port: number;
+  // Phase 30. The release tag; `dev` outside the image.
+  version: string;
 };
 
 export type AppDeps = {
@@ -50,6 +52,8 @@ export type AppDeps = {
   photoImports: PhotoImportService;
   health: HealthRepo;
   identity: ServerIdentity;
+  // Phase 30 (spec D1). Set only inside the image; app.ts serves the export from it.
+  webDistDir: string | null;
   logger: Logger;
   // Phase 29. The four mounted Better Auth paths and their handler (spec D3).
   auth: {
@@ -93,6 +97,7 @@ export function createServerDeps(io: {
   // Phase 27 (spec D4). One judged answer's budget: a learner is waiting on it.
   judgeTimeoutMs: number;
   identity: ServerIdentity;
+  webDistDir: string | null;
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
   boss: PgBoss;
@@ -217,6 +222,7 @@ export function createServerDeps(io: {
     }),
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,
+    webDistDir: io.webDistDir,
     logger: io.logger,
     auth: { handler: authModule.handler, paths: authModule.paths },
     signedIn: { sessionOf: authModule.sessionOf },

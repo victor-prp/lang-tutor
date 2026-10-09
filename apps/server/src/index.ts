@@ -61,7 +61,9 @@ export async function main(): Promise<void> {
       lane: config.lane,
       database: databaseNameFrom(config.databaseUrl),
       port: config.port,
+      version: config.version,
     },
+    webDistDir: config.webDistDir,
     boss,
   });
 
