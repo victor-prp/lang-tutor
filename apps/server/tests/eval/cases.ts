@@ -819,6 +819,28 @@ export const RENDERING_CASES: RenderingCase[] = [
     ],
     expectReused: ['financial_institution', 'river_bank'],
   },
+  // Phase 31 (spec D9). The first learner of a new language: the stored sense
+  // has no gloss in Russian, only its Hebrew definition and its English gloss,
+  // and its code must still come back reused.
+  {
+    label: 'a sense with no gloss in this language is reused by its definition (phase 31)',
+    form: 'חלונות',
+    from: 'he',
+    to: 'ru',
+    lemma: 'חלון',
+    partOfSpeech: 'noun',
+    stored: [
+      {
+        senseCode: 'wall_opening',
+        definition: 'פתח בקיר שמכניס אור ואוויר',
+        translation: 'window',
+        glossLanguage: 'en',
+        exampleSource: 'פתחתי את החלון כדי להכניס אוויר.',
+        exampleTarget: 'I opened the window to let air in.',
+      },
+    ],
+    expectReused: ['wall_opening'],
+  },
 ];
 
 /**

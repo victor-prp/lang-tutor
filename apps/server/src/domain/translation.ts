@@ -519,11 +519,15 @@ export function normalizeSenses(
   return senses.slice(0, 1).map((sense) => ({ translation: sense.translation }));
 }
 
-/** One stored sense as the reconciliation prompt needs it: a code and the gloss
- *  that names what it means. */
+/** One stored sense as the reconciliation prompt needs it: its code, its
+ *  definition, and the gloss that names what it means. Phase 31 (spec D9): the
+ *  gloss may be in another learner language when the learner's has none yet;
+ *  `glossLanguage` says which, and an absent one is the learner's. */
 export type StoredSense = {
   senseCode: string;
+  definition?: string | null;
   translation: string;
+  glossLanguage?: LanguageCode;
   exampleSource: string | null;
   exampleTarget: string | null;
 };
@@ -551,13 +555,16 @@ export function buildRenderingPrompt(input: {
   const from = source.name;
   const to = target.name;
 
-  // Each stored sense as `code — gloss — example`, one per line. The gloss is
-  // what the model matches on; the code is what it must give back unchanged
-  // when it decides the meaning is the same one.
+  // Each stored sense as `code — definition — gloss — example`, one per line.
+  // The definition, in the headword's language, is the handle every learner
+  // language shares (spec D9); a gloss in another learner language says so.
   const stored = input.storedSenses
     .map((sense) => {
+      const definition = sense.definition ? ` — ${sense.definition}` : '';
+      const other =
+        sense.glossLanguage && sense.glossLanguage !== input.to ? ` (in ${LANGUAGES[sense.glossLanguage].name})` : '';
       const example = sense.exampleSource ? ` — e.g. "${sense.exampleSource}"` : '';
-      return `- ${sense.senseCode} — ${sense.translation}${example}`;
+      return `- ${sense.senseCode}${definition} — ${sense.translation}${other}${example}`;
     })
     .join('\n');
 
@@ -565,8 +572,8 @@ export function buildRenderingPrompt(input: {
     learnerLine(source, target),
     'Return JSON only, matching the supplied schema.',
     `The ${from} headword "${input.lemma}" (${input.partOfSpeech}) is already in this`,
-    `dictionary with the senses below, each a sense_code and the ${to} gloss recorded for`,
-    'it:',
+    `dictionary with the senses below, each a sense_code, its definition in ${from} where one`,
+    `is recorded, and the gloss recorded for it, in ${to} unless another language is named:`,
     '',
     stored,
     '',
@@ -591,6 +598,9 @@ export function buildRenderingPrompt(input: {
     'translation: null rather than forcing a translation.',
     // Same rule as the first call — see buildPrompt.
     `Write every sense's translation in ${to}.`,
+    // Phase 31 (spec D4-D6, D9): the first call's rules, for the same reasons.
+    ...glossRules(to),
+    `Give "definition", one short phrase in ${from}, for every sense whose line above has no definition, and for every new sense_code.`,
     // The same rule as the first call, for the same reason — see buildPrompt.
     // It belongs here too: this call writes examples for a form the first call
     // never saw, so without it a reconciled form reintroduces exactly the

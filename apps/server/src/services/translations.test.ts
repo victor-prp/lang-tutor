@@ -549,6 +549,50 @@ describe('reconciliation', () => {
       newly_named: 1,
     });
   });
+
+  // Phase 31. The rendering call answers the first call's four fields too, and
+  // the write reads them off the entry reconcile builds (renderingOf). A null is
+  // how a provider spells "none" in this answer, so its key is left off.
+  it("carries the rendering call's alternatives, citation forms and definition into the write", async () => {
+    const { service, dict } = serviceWith(
+      oneVerb,
+      reply({
+        senses: [
+          {
+            sense_code: 'prepare_food',
+            translation: 'PAST-PREPARE',
+            alternatives: ['PAST-ALT'],
+            gloss: 'INF-PREPARE',
+            gloss_alternatives: ['INF-ALT'],
+            definition: 'DEF-PREPARE',
+          },
+          {
+            sense_code: 'fabricate_accounts',
+            translation: 'PAST-FABRICATE',
+            alternatives: null,
+            gloss: null,
+            gloss_alternatives: null,
+            definition: null,
+          },
+        ],
+      }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    await service.translate({ text: 'cooked', from: 'en', to: 'he' });
+
+    expect(dict.persisted[0].entries[0].senses).toEqual([
+      {
+        sense_code: 'prepare_food',
+        translation: 'PAST-PREPARE',
+        alternatives: ['PAST-ALT'],
+        gloss: 'INF-PREPARE',
+        gloss_alternatives: ['INF-ALT'],
+        definition: 'DEF-PREPARE',
+      },
+      { sense_code: 'fabricate_accounts', translation: 'PAST-FABRICATE' },
+    ]);
+  });
 });
 
 describe('the stored redirect', () => {

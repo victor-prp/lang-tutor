@@ -1,5 +1,5 @@
 import { normaliseGloss } from '@lang-tutor/core/domain';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
 import {
@@ -213,4 +213,13 @@ export async function insertCorrection(
   input: { languageCode: string; typedForm: string; correctedForm: string; alternatives: string[] },
 ): Promise<void> {
   await withTx(db, (tx) => createDictRepo(tx).persistCorrection(input));
+}
+
+/** Phase 31. One lemma's senses with their definitions, by code. For service
+ *  tests, which may not reach the database themselves (ADR 0001 R2). */
+export async function readSenseDefinitions(db: Db, lemma: string): Promise<{ senseCode: string; definition: string | null }[]> {
+  const rows = await db.execute<{ sense_code: string; definition: string | null }>(sql`
+    select s.sense_code, s.definition from dict_senses s join dict_lexemes l on l.id = s.lexeme_id
+    where l.lemma = ${lemma} order by s.sense_code`);
+  return rows.rows.map((row) => ({ senseCode: row.sense_code, definition: row.definition }));
 }

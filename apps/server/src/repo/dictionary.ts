@@ -23,7 +23,8 @@ import {
   type StaleLexeme,
 } from '../domain/dictionary';
 import { assignGlosses, type AnswerSense } from '../domain/glosses';
-import { tidyAlternatives } from '../domain/translation';
+import type { LanguageCode } from '../domain/languages';
+import { tidyAlternatives, type StoredSense } from '../domain/translation';
 
 // The response cap. The database has no five limit — `see` keeps all its
 // senses and `saw` all of its — so this truncates the merge and nothing else,
@@ -279,52 +280,61 @@ export function createDictRepo(tx: Tx) {
    * `DISTINCT ON (s.id)` with `ORDER BY s.id, tr.rank, v.id` is what makes the
    * pick deterministic: the gloss from whichever form ranked that sense highest,
    * ties broken by variant id. The outer query then re-orders for the prompt.
+   *
+   * Phase 31 (spec D9). No longer INNER-joined to the learner's language: a
+   * language with no renderings yet still lists every sense, with its
+   * definition and a gloss in some other language, so the second call runs and
+   * reuses codes instead of the lexeme growing a second set of senses. The
+   * learner's own rendering is preferred where there is one.
    */
   const findSensesByLexeme = async (input: {
     lemma: string;
     partOfSpeech: string;
     languageCode: string;
     userLanguageCode: string;
-  }): Promise<
-    { senseId: string; senseCode: string; translation: string; exampleSource: string | null;
-      exampleTarget: string | null }[]
-  > => {
+  }): Promise<(StoredSense & { senseId: string })[]> => {
     // Drizzle has no first-class DISTINCT ON, so this is written as `sql`. The
     // shape is the invariant, not the spelling: one row per sense, chosen
     // deterministically, over ALL variants of the lexeme.
     const rows = await tx.execute<{
       sense_id: string;
       sense_code: string;
+      definition: string | null;
       translation: string;
+      gloss_language: string;
       example_source: string | null;
       example_target: string | null;
     }>(sql`
-      SELECT sense_id, sense_code, translation, example_source, example_target
+      SELECT sense_id, sense_code, definition, translation, gloss_language, example_source, example_target
       FROM (
         SELECT DISTINCT ON (s.id)
-               s.id          AS sense_id,
-               s.sense_code  AS sense_code,
+               s.id                   AS sense_id,
+               s.sense_code           AS sense_code,
+               s.definition           AS definition,
                tr.translation,
+               tr.user_language_code  AS gloss_language,
                tr.example_source,
                tr.example_target,
-               tr.rank       AS rank
+               tr.rank                AS rank,
+               (tr.user_language_code = ${input.userLanguageCode}) AS own
         FROM dict_lexemes l
         JOIN dict_senses s            ON s.lexeme_id = l.id
         JOIN dict_var_translations tr ON tr.sense_id = s.id
-                                     AND tr.user_language_code = ${input.userLanguageCode}
         JOIN dict_variants v          ON v.id = tr.variant_id
         WHERE l.language_code = ${input.languageCode}
           AND l.lemma = ${input.lemma}
           AND l.part_of_speech = ${input.partOfSpeech}
-        ORDER BY s.id, tr.rank, v.id
+        ORDER BY s.id, (tr.user_language_code = ${input.userLanguageCode}) DESC, tr.rank, tr.user_language_code, v.id
       ) picked
-      ORDER BY rank, sense_code
+      ORDER BY own DESC, rank, sense_code
     `);
 
     return rows.rows.map((row) => ({
       senseId: row.sense_id,
       senseCode: row.sense_code,
+      definition: row.definition,
       translation: row.translation,
+      glossLanguage: row.gloss_language as LanguageCode,
       exampleSource: row.example_source,
       exampleTarget: row.example_target,
     }));

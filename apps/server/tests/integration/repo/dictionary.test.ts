@@ -640,7 +640,7 @@ describe('findSensesByLexeme', () => {
     expect(senses).toHaveLength(2);
   });
 
-  it('carries the gloss and both example halves the prompt is built from', async () => {
+  it('carries the definition, the gloss and its language, and both example halves the prompt is built from', async () => {
     await persist('cook', [
       {
         lemma: 'cook',
@@ -649,6 +649,7 @@ describe('findSensesByLexeme', () => {
           {
             sense_code: 'prepare_food',
             translation: 'לבשל',
+            definition: 'make a meal by heating food',
             example: { source: 'I cook dinner.', target: 'אני מבשל ארוחת ערב.' },
           },
         ],
@@ -661,10 +662,76 @@ describe('findSensesByLexeme', () => {
       {
         senseId: expect.any(String),
         senseCode: 'prepare_food',
+        definition: 'make a meal by heating food',
         translation: 'לבשל',
+        glossLanguage: 'he',
         exampleSource: 'I cook dinner.',
         exampleTarget: 'אני מבשל ארוחת ערב.',
       },
+    ]);
+  });
+
+  // Phase 31 (spec D9). The first Russian learner of a Hebrew headword finds it
+  // rendered for English learners only. Every sense is still listed, with its
+  // definition and its English gloss, so the second call runs; and once a sense
+  // has a rendering in the learner's language, that one is preferred over a
+  // better-ranked one in another language, and listed first.
+  it("lists a sense rendered only in another language, and prefers the learner's own rendering", async () => {
+    const write = (form: string, userLanguageCode: string, senses: LlmEntry['senses']) =>
+      withTx(t.db, (tx) =>
+        createDictRepo(tx).persistEntries({
+          form,
+          languageCode: 'he',
+          userLanguageCode,
+          kind: 'word',
+          entries: [{ lemma: 'חלון', part_of_speech: 'noun', senses }],
+        }),
+      );
+    const read = (userLanguageCode: string) =>
+      withTx(t.db, (tx) =>
+        createDictRepo(tx).findSensesByLexeme({ lemma: 'חלון', partOfSpeech: 'noun', languageCode: 'he', userLanguageCode }),
+      );
+    const glosses = async (userLanguageCode: string) =>
+      (await read(userLanguageCode)).map(({ senseCode, translation, glossLanguage }) => [senseCode, translation, glossLanguage]);
+
+    await write('חלון', 'en', [
+      { sense_code: 'wall_opening', translation: 'window', definition: 'פתח בקיר' },
+      { sense_code: 'window_of_time', translation: 'time slot' },
+    ]);
+
+    expect(await read('ru')).toEqual([
+      {
+        senseId: expect.any(String),
+        senseCode: 'wall_opening',
+        definition: 'פתח בקיר',
+        translation: 'window',
+        glossLanguage: 'en',
+        exampleSource: null,
+        exampleTarget: null,
+      },
+      {
+        senseId: expect.any(String),
+        senseCode: 'window_of_time',
+        definition: null,
+        translation: 'time slot',
+        glossLanguage: 'en',
+        exampleSource: null,
+        exampleTarget: null,
+      },
+    ]);
+
+    // The Russian form ranks window_of_time first, where the English one ranked
+    // it second. For Russian it now leads, though wall_opening ties it on rank
+    // and sorts before it by code; for English its English gloss still stands.
+    await write('חלונות', 'ru', [{ sense_code: 'window_of_time', translation: 'окна' }]);
+
+    expect(await glosses('ru')).toEqual([
+      ['window_of_time', 'окна', 'ru'],
+      ['wall_opening', 'window', 'en'],
+    ]);
+    expect(await glosses('en')).toEqual([
+      ['wall_opening', 'window', 'en'],
+      ['window_of_time', 'time slot', 'en'],
     ]);
   });
 

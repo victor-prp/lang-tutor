@@ -899,3 +899,30 @@ describe('resolveCorrection guard 4 reads the language table', () => {
     ).toBe('ёлка');
   });
 });
+
+describe('buildRenderingPrompt (phase 31, spec D9)', () => {
+  const prompt = buildRenderingPrompt({
+    form: 'חלונות',
+    from: 'he',
+    to: 'ru',
+    lemma: 'חלון',
+    partOfSpeech: 'noun',
+    storedSenses: [
+      { senseCode: 'wall_opening', definition: 'פתח בקיר', translation: 'window', glossLanguage: 'en', exampleSource: 'פתחתי את החלון.', exampleTarget: 'I opened the window.' },
+      { senseCode: 'time_slot', definition: null, translation: 'окно', exampleSource: null, exampleTarget: null },
+    ],
+  });
+
+  it('lists each stored sense as code — definition — gloss, and names a gloss in another language', () => {
+    expect(prompt.system).toContain('- wall_opening — פתח בקיר — window (in English) — e.g. "פתחתי את החלון."');
+    expect(prompt.system).toContain('- time_slot — окно');
+  });
+
+  it('keeps the marker MockServer matches the reconciliation on', () => {
+    expect(prompt.system).toContain('reusing its sense_code EXACTLY');
+  });
+
+  it('asks for a definition where a sense has none, and for every new code', () => {
+    expect(prompt.system).toContain('for every sense whose line above has no definition, and for every new sense_code');
+  });
+});

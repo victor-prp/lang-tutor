@@ -238,7 +238,9 @@ export type FakeDictRepo = DictRepo & {
   hit: Record<string, SenseRow[]>;
   /** What `findSensesByLexeme` answers with, keyed `lemma:partOfSpeech`. A
    *  lexeme absent from this map has no stored senses, which is how a test says
-   *  "this is a new lexeme, so no second model call". */
+   *  "this is a new lexeme, so no second model call". Not keyed by the learner's
+   *  language: since phase 31 the real read lists a sense rendered in any
+   *  language, and `glossLanguage` on an entry says which (spec D9). */
   stored: Record<string, StoredSense[]>;
   lexemeReads: { lemma: string; partOfSpeech: string }[];
   /** What the write's re-read answers with. Left empty, the fake answers with

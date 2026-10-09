@@ -115,6 +115,11 @@ async function reconcile(input: {
           sense_code: rendering.sense_code,
           translation: rendering.translation,
           ...(rendering.example ? { example: rendering.example } : {}),
+          // Phase 31: the rendering call's fields, for the write (renderingOf).
+          ...(rendering.alternatives ? { alternatives: rendering.alternatives } : {}),
+          ...(rendering.gloss ? { gloss: rendering.gloss } : {}),
+          ...(rendering.gloss_alternatives ? { gloss_alternatives: rendering.gloss_alternatives } : {}),
+          ...(rendering.definition ? { definition: rendering.definition } : {}),
         });
       }
 
