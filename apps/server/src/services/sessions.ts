@@ -454,10 +454,11 @@ export function createSessionService({
     /**
      * Phase 27 (spec D3). A text answer the server judges. The card is checked
      * first, so no model call is spent on a stale or wrong request; a rule
-     * decides an empty answer and the stored meaning; otherwise the judge is
-     * called outside any transaction (ADR 0001 R8); and the verdict is recorded
-     * through submitAnswer, exactly as a next-step is. Another learner's
-     * session is refused before all of it (phase 29).
+     * decides an empty answer, the stored meaning and (phase 31, spec D13) its
+     * stored alternatives; otherwise the judge is called outside any
+     * transaction (ADR 0001 R8); and the verdict is recorded through
+     * submitAnswer, exactly as a next-step is. Another learner's session is
+     * refused before all of it (phase 29).
      */
     answerJudged: async (
       actorUserId: string,
@@ -492,7 +493,7 @@ export function createSessionService({
       if ('replay' in checked) return checked.replay;
 
       const text = input.text.slice(0, MAX_JUDGED_TEXT);
-      let verdict = ruleVerdict(checked.current, text);
+      let verdict = ruleVerdict(checked.current, text, checked.context.alternatives);
       const judgedBy = verdict === null ? 'model' : 'rule';
       const started = now();
       if (verdict === null) {

@@ -321,8 +321,10 @@ export function createQuestionRepo(tx: Tx) {
      * Phase 27 (spec D15). What the meaning judge is shown: the asked form, its
      * lexeme, the stored meaning, and the learner's saved example for that
      * form and, since phase 31, the lowest-ranked member of the card's gloss
-     * that form renders. questions.id is text, so an id that matches nothing
-     * is simply no row.
+     * that form renders. `alternatives` (spec D13) are the other words the
+     * meaning card's rule takes as right: that rendering's, in the form's
+     * inflection, then the gloss's, in citation form. questions.id is text, so
+     * an id that matches nothing is simply no row.
      */
     findJudgeContext: async (
       questionId: string,
@@ -334,6 +336,7 @@ export function createQuestionRepo(tx: Tx) {
           meaning: string;
           example: string | null;
           exampleTranslation: string | null;
+          alternatives: string[];
         }
       | undefined
     > => {
@@ -344,13 +347,18 @@ export function createQuestionRepo(tx: Tx) {
         prompt: string;
         example_source: string | null;
         example_target: string | null;
+        rendering_alternatives: string[];
+        gloss_alternatives: string[];
       }>(sql`
-        SELECT v.form, l.lemma, l.part_of_speech, q.prompt, tr.example_source, tr.example_target
+        SELECT v.form, l.lemma, l.part_of_speech, q.prompt, tr.example_source, tr.example_target,
+               coalesce(tr.alternatives, '{}'::text[]) AS rendering_alternatives,
+               g.alternatives AS gloss_alternatives
         FROM questions q
+        JOIN dict_glosses g   ON g.id = q.gloss_id
         JOIN dict_variants v  ON v.id = q.prompt_variant_id
         JOIN dict_lexemes l   ON l.id = v.lexeme_id
         LEFT JOIN LATERAL (
-          SELECT tr.example_source, tr.example_target
+          SELECT tr.example_source, tr.example_target, tr.alternatives
           FROM dict_sense_glosses m
           JOIN dict_var_translations tr ON tr.sense_id = m.sense_id
                                        AND tr.user_language_code = m.user_language_code
@@ -369,6 +377,7 @@ export function createQuestionRepo(tx: Tx) {
             meaning: row.prompt,
             example: row.example_source,
             exampleTranslation: row.example_target,
+            alternatives: [...row.rendering_alternatives, ...row.gloss_alternatives],
           }
         : undefined;
     },

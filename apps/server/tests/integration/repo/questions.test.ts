@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { QuestionType } from '@lang-tutor/core/domain';
+import { eq } from 'drizzle-orm';
 
+import { insertLexeme } from '../../support/dictRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 import { content, optionsFor } from '../../../src/db/content';
-import { dictGlosses, dictVariants } from '../../../src/db/schema';
+import { dictGlosses, dictSenseGlosses, dictVariants } from '../../../src/db/schema';
 import { optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
 import { asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -313,6 +315,7 @@ describe('phase 27: meaning recall', () => {
         meaning: 'להזמין',
         example: 'Vorrei prenotare un tavolo.',
         exampleTranslation: 'הייתי רוצה להזמין שולחן.',
+        alternatives: [],
       });
       expect(await repo.findJudgeContext('00000000-0000-0000-0000-000000000000')).toBeUndefined();
       expect(await repo.findJudgeContext('not-a-uuid')).toBeUndefined();
@@ -325,6 +328,63 @@ describe('phase 27: meaning recall', () => {
       expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
         example: null,
         exampleTranslation: null,
+      });
+    });
+  });
+});
+
+// The words the meaning judge's rule accepts besides the stored meaning (spec D13):
+// the asked form's rendering lists its sense's other words in its own inflection,
+// and the gloss lists them in citation form.
+describe('phase 31: findJudgeContext reads the stored alternatives (spec D13)', () => {
+  /** A meaning card for `cars`, which renders מכוניות under the gloss מכונית. */
+  async function carsSession() {
+    const car = await insertLexeme(t.db, {
+      lemma: 'car',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'vehicle' }],
+      variants: [
+        {
+          form: 'cars',
+          kind: 'word',
+          entryRank: 0,
+          translations: [
+            { senseCode: 'vehicle', rank: 0, translation: 'מכוניות', gloss: 'מכונית', alternatives: ['רכבים'], exampleSource: null, exampleTarget: null },
+          ],
+        },
+      ],
+    });
+    await t.db.update(dictGlosses).set({ alternatives: ['רכב'] }).where(eq(dictGlosses.id, car.glossIds[0]));
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked: [{ glossId: car.glossIds[0], variantId: car.variantIds[0], lexemeId: car.lexemeId, form: 'cars', lemma: 'car', translation: 'מכוניות' }],
+      types: ['typed_meaning'],
+    });
+    return { questions, car };
+  }
+
+  it("gets the rendering's other words, then the gloss's", async () => {
+    const { questions } = await carsSession();
+    await withTx(t.db, async (tx) => {
+      expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
+        form: 'cars',
+        meaning: 'מכוניות',
+        alternatives: ['רכבים', 'רכב'],
+      });
+    });
+  });
+
+  it("gets the gloss's alone when no rendering is found for the form", async () => {
+    // The rendering is a left join: a card whose gloss has no member rendered by its form still has its gloss's words.
+    const { questions, car } = await carsSession();
+    await t.db.delete(dictSenseGlosses).where(eq(dictSenseGlosses.glossId, car.glossIds[0]));
+    await withTx(t.db, async (tx) => {
+      expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
+        example: null,
+        alternatives: ['רכב'],
       });
     });
   });
