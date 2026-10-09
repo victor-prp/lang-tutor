@@ -264,6 +264,10 @@ called "lang tutor"):
 - body: `קוד הכניסה שלך הוא 1234 5678.` / `הקוד בתוקף ל-10 דקות.` / `אם לא ביקשת אותו, אפשר
   להתעלם מהמייל הזה.`
 
+(Amended 2026-10-09: the code is one unbroken run of digits, `12345678`. Split in two, the
+right-to-left lines drew the two halves in swapped order, so Victor read `2750 8997` as
+`8997 2750` and his code was refused.)
+
 If Resend refuses or does not answer within 10 seconds, the provider throws `EmailNotSent`; the
 auth module turns it into 503 `email not sent`, and no `auth_code_sends` row is written. Moving to
 SES later is one file in `providers/`.
