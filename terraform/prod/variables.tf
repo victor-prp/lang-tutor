@@ -38,7 +38,7 @@ variable "power" {
 variable "db_blueprint_id" {
   description = "Check with: aws lightsail get-relational-database-blueprints (runbook step 3)."
   type        = string
-  default     = "postgres_16"
+  default     = "postgres_17"
 }
 
 variable "db_bundle_id" {

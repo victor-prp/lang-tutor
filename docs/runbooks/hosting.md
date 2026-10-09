@@ -28,7 +28,7 @@ proves before the next one starts.
 
    S3 encrypts every new object by default. The state holds the database password.
 3. **What Lightsail offers today.** If either answer differs from `terraform/prod/variables.tf`
-   (`postgres_16`, `micro_2_0`), change the default in a commit before step 6:
+   (`postgres_17`, `micro_2_0`), change the default in a commit before step 6:
 
    ```bash
    aws lightsail get-relational-database-blueprints --region eu-central-1 \
@@ -37,7 +37,8 @@ proves before the next one starts.
      --query "bundles[?isActive].[bundleId,price,ramSizeInGb]" --output table
    ```
 
-   Take the newest Postgres (17 if offered), and the 15-dollar bundle.
+   Take the Postgres major that `docker-compose.yml` and CI run (17), not simply the newest
+   one, and the 15-dollar bundle.
 4. **The production Gemini key**, a new one, not your laptop's:
 
    ```bash
