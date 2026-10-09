@@ -499,10 +499,13 @@ describe('a repaired variant', () => {
 
     await withTx(t.db, async (tx) => {
       const dict = createDictRepo(tx);
+      await dict.lockLexemes([kite.lexemeId]);
       await dict.repairVariantRenderings({
         variantId: kite.variantIds[KITES],
+        lexemeId: kite.lexemeId,
         userLanguageCode: 'he',
         senseVersion: await dict.findSenseVersion({ lexemeId: kite.lexemeId }),
+        lemmaForm: false,
         senses: [
           {
             senseId: kite.senseIds[TOY],

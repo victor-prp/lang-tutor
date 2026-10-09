@@ -1,10 +1,12 @@
 import type { LlmEntry, TranslationKind, TranslationSense } from '@lang-tutor/core/api';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { RepairWouldDropSense } from '../errors';
 import {
   dictCorrections,
+  dictGlosses,
+  dictSenseGlosses,
   dictVarTranslations,
   dictVariantRenderings,
   dictVariants,
@@ -20,6 +22,7 @@ import {
   type SenseRow,
   type StaleLexeme,
 } from '../domain/dictionary';
+import { assignGlosses, type AnswerSense } from '../domain/glosses';
 import { tidyAlternatives } from '../domain/translation';
 
 // The response cap. The database has no five limit — `see` keeps all its
@@ -46,8 +49,12 @@ export type PersistedEntry = {
   lexemeId: string;
   variantId: string;
   senseIds: string[];
+  /** Phase 31. Each sense's gloss in this write's language, aligned with senseIds. */
+  glossIds: string[];
   created: boolean;
 };
+
+export type MergePair = { lexemeId: string; userLanguageCode: string };
 
 /** One stored redirect. `typedForm` comes back as it was written, so a caller
  *  that echoes it shows the learner what the dictionary actually holds. */
@@ -323,6 +330,79 @@ export function createDictRepo(tx: Tx) {
     }));
   };
 
+  /** Phase 31. FOR UPDATE on these lexemes, in id order, in one statement. The
+   *  lock step 1b of persistEntries takes, for the repair and the merge too, so a
+   *  lookup, a repair and a merge of one lexeme run one after the other (spec D7).
+   *  One ordered statement, for the deadlock reason step 1b gives. */
+  const lockLexemes = async (lexemeIds: string[]): Promise<void> => {
+    const ids = [...new Set(lexemeIds)];
+    if (ids.length === 0) return;
+    await tx
+      .select({ id: dictLexemes.id })
+      .from(dictLexemes)
+      .where(inArray(dictLexemes.id, ids))
+      .orderBy(asc(dictLexemes.id))
+      .for('update');
+  };
+
+  /**
+   * Phase 31 (spec D6, D8). The lexeme's live glosses and memberships in one
+   * language, the plan assignGlosses makes from them, and that plan written. Each
+   * sense's gloss id comes back in the order given. The caller holds
+   * lockLexemes, so no other writer of this lexeme is between the read and the
+   * writes.
+   */
+  const writeGlosses = async (input: {
+    lexemeId: string;
+    userLanguageCode: string;
+    lemmaForm: boolean;
+    senses: AnswerSense[];
+  }): Promise<{ glossIds: string[]; needsMerge: boolean }> => {
+    const glosses = await tx
+      .select({ id: dictGlosses.id, key: dictGlosses.key, alternatives: dictGlosses.alternatives })
+      .from(dictGlosses)
+      .where(
+        and(
+          eq(dictGlosses.lexemeId, input.lexemeId),
+          eq(dictGlosses.userLanguageCode, input.userLanguageCode),
+          isNull(dictGlosses.mergedInto),
+        ),
+      );
+    const members = await tx
+      .select({ senseId: dictSenseGlosses.senseId, glossId: dictSenseGlosses.glossId })
+      .from(dictSenseGlosses)
+      .where(
+        and(eq(dictSenseGlosses.lexemeId, input.lexemeId), eq(dictSenseGlosses.userLanguageCode, input.userLanguageCode)),
+      );
+    const memberships = new Map(members.map((member) => [member.senseId, member.glossId]));
+    const plan = assignGlosses({ senses: input.senses, lemmaForm: input.lemmaForm, glosses, memberships });
+
+    // Renames first, so a key a rename frees is free for a new gloss of this write.
+    for (const rename of plan.rename) {
+      await tx.update(dictGlosses).set({ key: rename.key }).where(eq(dictGlosses.id, rename.glossId));
+    }
+    for (const widened of plan.alternatives) {
+      await tx.update(dictGlosses).set({ alternatives: widened.alternatives }).where(eq(dictGlosses.id, widened.glossId));
+    }
+    const glossBySense = new Map(memberships);
+    const added: { senseId: string; glossId: string }[] = [...plan.join];
+    for (const fresh of plan.create) {
+      const [row] = await tx
+        .insert(dictGlosses)
+        .values({ lexemeId: input.lexemeId, userLanguageCode: input.userLanguageCode, key: fresh.key, alternatives: fresh.alternatives })
+        .returning({ id: dictGlosses.id });
+      for (const senseId of fresh.senseIds) added.push({ senseId, glossId: row.id });
+    }
+    for (const { senseId, glossId } of added) glossBySense.set(senseId, glossId);
+    if (added.length > 0) {
+      await tx
+        .insert(dictSenseGlosses)
+        .values(added.map(({ senseId, glossId }) => ({ senseId, glossId, lexemeId: input.lexemeId, userLanguageCode: input.userLanguageCode })))
+        .onConflictDoNothing({ target: [dictSenseGlosses.senseId, dictSenseGlosses.userLanguageCode] });
+    }
+    return { glossIds: input.senses.map((sense) => glossBySense.get(sense.senseId)!), needsMerge: plan.needsMerge };
+  };
+
   /**
    * One write, ending in a re-read.
    *
@@ -348,8 +428,9 @@ export function createDictRepo(tx: Tx) {
    */
   const persistEntries = async (
     input: PersistEntriesInput,
-  ): Promise<{ written: PersistedEntry[]; senses: TranslationSense[] }> => {
+  ): Promise<{ written: PersistedEntry[]; senses: TranslationSense[]; mergePairs: MergePair[] }> => {
     const written: PersistedEntry[] = [];
+    const mergePairs: MergePair[] = [];
     const rows = entriesToRows(input.entries);
 
     // 1 — every lexeme of this answer, which is the PAIR of a lemma and a part
@@ -435,19 +516,7 @@ export function createDictRepo(tx: Tx) {
     // See `dictionary.stale.test.ts` for the tests that fail on the wrong
     // sense_version if this lock is removed, and with a 40P01 abort if it moves
     // back inside the loop.
-    if (resolved.length > 0) {
-      await tx
-        .select({ id: dictLexemes.id })
-        .from(dictLexemes)
-        .where(
-          inArray(
-            dictLexemes.id,
-            resolved.map((row) => row.lexemeId),
-          ),
-        )
-        .orderBy(asc(dictLexemes.id))
-        .for('update');
-    }
+    await lockLexemes(resolved.map((row) => row.lexemeId));
 
     for (const { entry, lexemeId, created } of resolved) {
       // 2 — the variant, for the queried form only. The conflict target is
@@ -527,6 +596,22 @@ export function createDictRepo(tx: Tx) {
         .from(dictLexemes)
         .where(eq(dictLexemes.id, lexemeId));
 
+      // 4c — Phase 31 (spec D6, D8). Every sense this form renders has a gloss in
+      // this language before its rendering is written: kept, joined by key, or
+      // new. Under 1b's lock, so two writers of one lexeme cannot both create a
+      // gloss for one key.
+      const { glossIds, needsMerge } = await writeGlosses({
+        lexemeId,
+        userLanguageCode: input.userLanguageCode,
+        lemmaForm: input.form.toLowerCase() === entry.lemma.toLowerCase(),
+        senses: entry.senses.map((sense, i) => ({
+          senseId: senseIds[i],
+          gloss: sense.gloss,
+          glossAlternatives: sense.glossAlternatives,
+        })),
+      });
+      if (needsMerge) mergePairs.push({ lexemeId, userLanguageCode: input.userLanguageCode });
+
       // 5 — this variant's own renderings. DO NOTHING because a form written
       // twice keeps the answer it already gave: phase 10's guarantee, now held
       // at the level that actually decides an answer.
@@ -579,6 +664,7 @@ export function createDictRepo(tx: Tx) {
         lexemeId,
         variantId: variant.id,
         senseIds,
+        glossIds,
         created,
       });
     }
@@ -596,7 +682,7 @@ export function createDictRepo(tx: Tx) {
       }),
     );
 
-    return { written, senses };
+    return { written, senses, mergePairs };
   };
 
   /**
@@ -651,10 +737,12 @@ export function createDictRepo(tx: Tx) {
    */
   const repairVariantRenderings = async (input: {
     variantId: string;
+    lexemeId: string;
     userLanguageCode: string;
     senseVersion: number;
+    lemmaForm: boolean;
     senses: RepairedRendering[];
-  }): Promise<void> => {
+  }): Promise<{ needsMerge: boolean }> => {
     const current = await tx
       .select({ senseId: dictVarTranslations.senseId })
       .from(dictVarTranslations)
@@ -668,6 +756,20 @@ export function createDictRepo(tx: Tx) {
     const keeping = new Set(input.senses.map((sense) => sense.senseId));
     const dropped = current.filter((row) => !keeping.has(row.senseId)).map((row) => row.senseId);
     if (dropped.length > 0) throw new RepairWouldDropSense(input.variantId, dropped);
+
+    // Phase 31 (spec D6, D8). The repair is the second writer of renderings: a
+    // sense it renders in this language for the first time gets its gloss here,
+    // and a repair of the lemma form may rename. The caller holds lockLexemes.
+    const { needsMerge } = await writeGlosses({
+      lexemeId: input.lexemeId,
+      userLanguageCode: input.userLanguageCode,
+      lemmaForm: input.lemmaForm,
+      senses: input.senses.map((sense) => ({
+        senseId: sense.senseId,
+        gloss: sense.gloss,
+        glossAlternatives: sense.glossAlternatives,
+      })),
+    });
 
     await tx
       .delete(dictVarTranslations)
@@ -703,6 +805,8 @@ export function createDictRepo(tx: Tx) {
         target: [dictVariantRenderings.variantId, dictVariantRenderings.userLanguageCode],
         set: { renderedSenseVersion: input.senseVersion },
       });
+
+    return { needsMerge };
   };
 
   return {
@@ -711,6 +815,7 @@ export function createDictRepo(tx: Tx) {
     findSensesByForm,
     findSensesByLexeme,
     findStaleLexemesByForm,
+    lockLexemes,
     persistCorrection,
     persistEntries,
     repairVariantRenderings,

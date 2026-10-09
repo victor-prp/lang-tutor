@@ -1,9 +1,12 @@
+import { normaliseGloss } from '@lang-tutor/core/domain';
 import { eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
 import {
   dictCorrections,
+  dictGlosses,
   dictLexemes,
+  dictSenseGlosses,
   dictSenses,
   dictVarTranslations,
   dictVariants,
@@ -67,7 +70,7 @@ export type SeedLexeme = {
 export async function insertLexeme(
   db: Db,
   spec: SeedLexeme,
-): Promise<{ lexemeId: string; variantIds: string[]; senseIds: string[] }> {
+): Promise<{ lexemeId: string; variantIds: string[]; senseIds: string[]; glossIds: string[] }> {
   const [lexeme] = await db
     .insert(dictLexemes)
     .values({
@@ -122,7 +125,38 @@ export async function insertLexeme(
     }
   }
 
-  return { lexemeId: lexeme.id, variantIds, senseIds };
+  // Phase 31 (spec D8). Every rendered sense has a gloss, by the migration's
+  // rule: the lemma form's rendering names it, else the lowest-ranked one, and
+  // senses with one normalised key share it.
+  const chosen = new Map<string, { key: string; lemmaForm: boolean; rank: number }>();
+  for (const variant of spec.variants) {
+    const lemmaForm = variant.form.toLowerCase() === spec.lemma.toLowerCase();
+    for (const translation of variant.translations) {
+      const senseId = idByCode.get(translation.senseCode)!;
+      const key = translation.gloss ?? translation.translation;
+      const current = chosen.get(senseId);
+      const better =
+        !current || (lemmaForm && !current.lemmaForm) || (lemmaForm === current.lemmaForm && translation.rank < current.rank);
+      if (better) chosen.set(senseId, { key, lemmaForm, rank: translation.rank });
+    }
+  }
+  const glossByKey = new Map<string, string>();
+  const glossBySense = new Map<string, string>();
+  for (const [senseId, { key }] of chosen) {
+    let glossId = glossByKey.get(normaliseGloss(key));
+    if (glossId === undefined) {
+      const [row] = await db
+        .insert(dictGlosses)
+        .values({ lexemeId: lexeme.id, userLanguageCode: spec.userLanguageCode, key })
+        .returning({ id: dictGlosses.id });
+      glossId = row.id;
+      glossByKey.set(normaliseGloss(key), glossId);
+    }
+    await db.insert(dictSenseGlosses).values({ senseId, lexemeId: lexeme.id, userLanguageCode: spec.userLanguageCode, glossId });
+    glossBySense.set(senseId, glossId);
+  }
+
+  return { lexemeId: lexeme.id, variantIds, senseIds, glossIds: senseIds.map((id) => glossBySense.get(id) ?? '') };
 }
 
 // Phase 13. Small read/write helpers for the service-level correction suite

@@ -12,7 +12,7 @@ import { UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
 import type { JobRepo } from '../../src/repo/jobs';
-import type { CorrectionRow, PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
+import type { CorrectionRow, PersistEntriesInput, DictRepo, MergePair } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { PhotoImportService } from '../../src/services/photoImports';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
@@ -264,6 +264,8 @@ export type FakeDictRepo = DictRepo & {
   /** Set to make the write throw. */
   persistError: Error | null;
   persisted: PersistEntriesInput[];
+  /** Phase 31. What the write reports as needing D7's merge job. */
+  mergePairs: MergePair[];
   reads: { form: string; languageCode: string; userLanguageCode: string }[];
 };
 
@@ -285,6 +287,7 @@ export function createFakeDictRepo(): FakeDictRepo {
     repaired: [],
     persistError: null,
     persisted: [],
+    mergePairs: [],
     reads: [],
     findSensesByForm: async (input) => {
       repo.reads.push(input);
@@ -314,8 +317,10 @@ export function createFakeDictRepo(): FakeDictRepo {
       }
     },
     findSenseVersion: async () => 0,
+    lockLexemes: async () => {},
     repairVariantRenderings: async (input) => {
       repo.repaired.push({ variantId: input.variantId, senseVersion: input.senseVersion });
+      return { needsMerge: false };
     },
     persistEntries: async (input) => {
       repo.persisted.push(input);
@@ -326,9 +331,11 @@ export function createFakeDictRepo(): FakeDictRepo {
           lexemeId: `t-${index}`,
           variantId: `v-${index}`,
           senseIds: entry.senses.map((_, rank) => `s-${index}-${rank}`),
+          glossIds: entry.senses.map((_, rank) => `g-${index}-${rank}`),
           created: true,
         })),
         senses: repo.reread.length > 0 ? rowsToSenses(repo.reread) : flattenEntries(input.entries),
+        mergePairs: repo.mergePairs,
       };
     },
   };

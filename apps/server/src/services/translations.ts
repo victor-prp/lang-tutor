@@ -250,20 +250,22 @@ async function repairForm({
   // re-read — the same shape `persistEntries` uses, and what keeps the answer
   // identical to what the next lookup would produce.
   return transaction(async (repos) => {
+    // Phase 31. The lexemes' FOR UPDATE lock, in id order, before any gloss is
+    // written: the lock persistEntries takes, so a repair and a lookup of one
+    // lexeme cannot both create a gloss for one key (spec D7).
+    await repos.dict.lockLexemes(rendered.map(({ lexeme }) => lexeme.lexemeId));
     for (const { lexeme, senseVersion, senses } of rendered) {
       await repos.dict.repairVariantRenderings({
         variantId: lexeme.variantId,
+        lexemeId: lexeme.lexemeId,
         userLanguageCode: to,
         // The version read above, before the model call — never re-read here.
         senseVersion,
+        lemmaForm: form.toLowerCase() === lexeme.lemma.toLowerCase(),
         senses,
       });
     }
-    return repos.dict.findSensesByForm({
-      form,
-      languageCode: from,
-      userLanguageCode: to,
-    });
+    return repos.dict.findSensesByForm({ form, languageCode: from, userLanguageCode: to });
   });
 }
 

@@ -121,6 +121,9 @@ describe('repos', () => {
     findStaleLexemesByForm: () => {
       throw new Error('the session service must not read the dictionary tables');
     },
+    lockLexemes: () => {
+      throw new Error('the session service must not lock the dictionary tables');
+    },
     persistCorrection: () => {
       throw new Error('the session service must not write the dictionary tables');
     },
