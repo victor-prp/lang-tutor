@@ -126,6 +126,21 @@ export function maintenanceUrlFor(databaseUrl: string): string {
 }
 
 /**
+ * The URL with its password replaced, for anything that prints it. Production's
+ * container log keeps every line, so a printed password outlives the process.
+ */
+export function redactDatabaseUrl(databaseUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(databaseUrl);
+  } catch {
+    return '<unparseable database URL>';
+  }
+  if (url.password) url.password = '***';
+  return url.toString();
+}
+
+/**
  * Throws unless `name` is a bare lowercase Postgres identifier.
  *
  * An identifier cannot be a bound parameter, so any CREATE/DROP DATABASE has to
