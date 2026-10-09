@@ -12,7 +12,7 @@ import { ProfileExists, UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
 import type { JobRepo } from '../../src/repo/jobs';
-import type { CorrectionRow, PersistEntriesInput, DictRepo, MergePair } from '../../src/repo/dictionary';
+import type { CorrectionRow, PersistEntriesInput, DictRepo, GlossCounts, MergePair } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { PhotoImportService } from '../../src/services/photoImports';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
@@ -101,6 +101,7 @@ export function createFakeAppDeps(): AppDeps {
     vocabulary,
     grants,
     photoImports,
+    glosses: { mergeLexeme: unreachable },
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
     webDistDir: null,
@@ -143,6 +144,21 @@ export function createFakeTranscriber(...replies: (string | Error)[]) {
     return next;
   };
   return Object.assign(transcriber, { calls });
+}
+
+/** Phase 31. resolveGlosses as the identity, in one learner language: no merge
+ *  happened. Records every id it was asked about. */
+export function createFakeGlossRepo(userLanguageCode = 'he') {
+  const asked: string[][] = [];
+  return {
+    asked,
+    resolveGlosses: async (ids: string[]) => {
+      asked.push(ids);
+      return new Map(ids.map((id) => [id, { id, lexemeId: `lexeme-of-${id}`, userLanguageCode }]));
+    },
+    findMergeCandidates: async () => [],
+    mergeGlosses: async () => null,
+  };
 }
 
 export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown }[] };
@@ -222,6 +238,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),
+    gloss: repos.gloss ?? unreachableRepo('gloss repo'),
     vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
     progress: repos.progress ?? unreachableRepo('progress repo'),
     jobs: repos.jobs ?? unreachableRepo('jobs repo'),
@@ -273,6 +290,8 @@ export type FakeDictRepo = DictRepo & {
   persisted: PersistEntriesInput[];
   /** Phase 31. What the write reports as needing D7's merge job. */
   mergePairs: MergePair[];
+  /** Phase 31. What the write reports its gloss step did (spec D19). */
+  glossCounts: GlossCounts;
   reads: { form: string; languageCode: string; userLanguageCode: string }[];
 };
 
@@ -295,6 +314,7 @@ export function createFakeDictRepo(): FakeDictRepo {
     persistError: null,
     persisted: [],
     mergePairs: [],
+    glossCounts: { created: 0, joined: 0, members: 0 },
     reads: [],
     findSensesByForm: async (input) => {
       repo.reads.push(input);
@@ -343,6 +363,7 @@ export function createFakeDictRepo(): FakeDictRepo {
         })),
         senses: repo.reread.length > 0 ? rowsToCards(repo.reread) : flattenEntries(input.entries, input.kind),
         mergePairs: repo.mergePairs,
+        glosses: repo.glossCounts,
       };
     },
   };

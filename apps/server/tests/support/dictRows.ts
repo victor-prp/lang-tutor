@@ -159,6 +159,33 @@ export async function insertLexeme(
   return { lexemeId: lexeme.id, variantIds, senseIds, glossIds: senseIds.map((id) => glossBySense.get(id) ?? '') };
 }
 
+/** Phase 31. `finger` with two glosses of one word, the drift D6 could not
+ *  rename: body_part keyed אצבעות from `fingers`, digit keyed אצבע from `finger`. */
+export async function insertDriftedFinger(db: Db) {
+  const word = await insertLexeme(db, {
+    lemma: 'finger',
+    languageCode: 'en',
+    partOfSpeech: 'noun',
+    userLanguageCode: 'he',
+    senses: [{ senseCode: 'body_part' }, { senseCode: 'digit' }],
+    variants: [
+      { form: 'fingers', kind: 'word', entryRank: 0, translations: [{ senseCode: 'body_part', rank: 0, translation: 'אצבעות', exampleSource: null, exampleTarget: null }] },
+      { form: 'finger', kind: 'word', entryRank: 0, translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null }] },
+    ],
+  });
+  return { ...word, other: word.glossIds[0], survivor: word.glossIds[1], fingers: word.variantIds[0], finger: word.variantIds[1] };
+}
+
+/** Phase 31. One rendering written past insertLexeme's gloss rule: a form
+ *  rendered after its senses' memberships were decided, which is how drift
+ *  arrives. */
+export async function insertRendering(
+  db: Db,
+  row: { variantId: string; senseId: string; userLanguageCode: string; translation: string; gloss: string; rank: number },
+): Promise<void> {
+  await db.insert(dictVarTranslations).values(row);
+}
+
 // Phase 13. Small read/write helpers for the service-level correction suite
 // (tests/integration/services/translations.correction.test.ts), which must
 // stay black-box at the DATABASE too — ADR 0001 R2 forbids a service-layer

@@ -8,6 +8,7 @@ import type { Logger } from './logger';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from './providers/gemini';
 import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
 import { createAuthRepo } from './repo/auth';
+import { createGlossRepo } from './repo/glosses';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createJobRepo } from './repo/jobs';
 import { createPhotoImportRepo } from './repo/photoImports';
@@ -20,6 +21,7 @@ import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
+import { createGlossService, type GlossService } from './services/glosses';
 import type { LlmClient, VisionClient } from './services/llm';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
 import { createSessionService, type SessionService } from './services/sessions';
@@ -50,6 +52,8 @@ export type AppDeps = {
   vocabulary: VocabularyService;
   grants: GrantService;
   photoImports: PhotoImportService;
+  // Phase 31 (spec D7). The merge job's use case; no route reaches it.
+  glosses: GlossService;
   health: HealthRepo;
   identity: ServerIdentity;
   // Phase 30 (spec D1). Set only inside the image; app.ts serves the export from it.
@@ -112,6 +116,7 @@ export function createServerDeps(io: {
     enrollment: createEnrollmentRepo(tx),
     grant: createGrantRepo(tx),
     dict: createDictRepo(tx),
+    gloss: createGlossRepo(tx),
     vocabulary: createVocabularyRepo(tx),
     progress: createProgressRepo(tx),
     jobs: createJobRepo(tx, io.boss),
@@ -220,6 +225,7 @@ export function createServerDeps(io: {
       now: io.now,
       logger: io.logger,
     }),
+    glosses: createGlossService({ transaction, logger: io.logger }),
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,
     webDistDir: io.webDistDir,

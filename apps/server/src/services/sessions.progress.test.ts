@@ -73,6 +73,8 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     asked: [] as string[][],
     updated: [] as ProgressRow[][],
     snapshots: [] as unknown[][],
+    // Phase 31. The order of the share lock and the evidence read.
+    steps: [] as string[],
   };
   const session = stub<SessionRepo>({
     loadSession: async () => opts.record,
@@ -85,7 +87,11 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     findEnrollmentId: async () => 'e1',
   });
   const progress = stub<ProgressRepo>({
+    lockSessionGlosses: async () => {
+      calls.steps.push('lock');
+    },
     findSessionEvidence: async () => {
+      calls.steps.push('evidence');
       calls.evidence += 1;
       return opts.evidence === null ? undefined : (opts.evidence ?? EVIDENCE);
     },
@@ -128,6 +134,14 @@ describe('progress when a session ends', () => {
     ]);
     expect(calls.snapshots[0]).toHaveLength(5);
     expect(result.progress).toEqual(CHANGE);
+  });
+
+  // Phase 31 (spec D14). A merge of a practised gloss lands wholly before the
+  // evidence is read or wholly after the progress is written.
+  it('share-locks the practised glosses before it reads the evidence', async () => {
+    const { service, calls } = world({ record: record(9) });
+    await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
+    expect(calls.steps).toEqual(['lock', 'evidence']);
   });
 
   it('an answer that does not complete the session writes no progress', async () => {

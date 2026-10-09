@@ -97,6 +97,8 @@ export function assignGlosses(input: {
   lemmaForm: boolean;
   glosses: readonly LiveGloss[];
   memberships: ReadonlyMap<string, string>;
+  /** A merged gloss's normalised key → its survivor's id: a sense that names a merged key joins the survivor (spec D7). */
+  aliases?: ReadonlyMap<string, string>;
 }): GlossPlan {
   // Working copies, so a rename made for one sense is what the next one joins.
   const byId = new Map(input.glosses.map((gloss) => [gloss.id, { ...gloss, alternatives: [...gloss.alternatives] }]));
@@ -144,7 +146,7 @@ export function assignGlosses(input: {
 
   for (const sense of senses.filter(({ senseId }) => !input.memberships.has(senseId))) {
     const key = normaliseGloss(sense.gloss);
-    const existing = byKey.get(key);
+    const existing = byKey.get(key) ?? input.aliases?.get(key);
     if (existing !== undefined) {
       plan.join.push({ senseId: sense.senseId, glossId: existing });
       widen(existing, sense.glossAlternatives);
@@ -166,4 +168,39 @@ export function assignGlosses(input: {
   plan.create = [...created.values()];
   plan.alternatives = [...widened].map((glossId) => ({ glossId, alternatives: byId.get(glossId)!.alternatives }));
   return plan;
+}
+
+/** One progress row's state, as a merge folds it. Dates are `YYYY-MM-DD`. */
+export type LevelState = { level: number; lastStepOn: string | null; lastWrongOn: string | null };
+
+const later = (a: string | null, b: string | null): string | null =>
+  a === null ? b : b === null ? a : a > b ? a : b;
+
+/** Spec D3, done-means 4: two rows of one dimension folded into one, the higher
+ *  level with the later of each date. 0025_glosses_rekey.sql holds the same rule. */
+export function mergeLevels(a: LevelState, b: LevelState): LevelState {
+  return {
+    level: Math.max(a.level, b.level),
+    lastStepOn: later(a.lastStepOn, b.lastStepOn),
+    lastWrongOn: later(a.lastWrongOn, b.lastWrongOn),
+  };
+}
+
+/** One session's snapshot of one dimension. */
+export type SnapshotLevels = { levelBefore: number; levelAfter: number };
+
+/** Two snapshot rows of one session and dimension folded: the lowest level before
+ *  and the highest after, which keeps session_progress_levels_valid true. */
+export function mergeSnapshots(a: SnapshotLevels, b: SnapshotLevels): SnapshotLevels {
+  return { levelBefore: Math.min(a.levelBefore, b.levelBefore), levelAfter: Math.max(a.levelAfter, b.levelAfter) };
+}
+
+/** One saved entry, as a merge compares it. `savedAt` is a fixed-width UTC
+ *  timestamp, `YYYY-MM-DDTHH:MI:SS.US`, so text order is time order. */
+export type SavedState = { variantId: string; addedByUserId: string; savedAt: string };
+
+/** Spec §3, the merge's entry rule: of two saves of one gloss, the earlier stays,
+ *  with its form and its adder. */
+export function keptEntry(a: SavedState, b: SavedState): SavedState {
+  return b.savedAt < a.savedAt ? b : a;
 }

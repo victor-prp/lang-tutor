@@ -72,6 +72,18 @@ export const LookUpImportItemPayloadSchema = z.object({
 });
 export type LookUpImportItemPayload = z.infer<typeof LookUpImportItemPayloadSchema>;
 
+/** Phase 31 (spec D7). Merges the glosses of one lexeme and language whose
+ *  lemma-form rendering names another live gloss's key. */
+export const MERGE_GLOSSES = 'merge-glosses';
+/** One transaction of a few statements: a minute is generous. */
+export const MERGE_GLOSSES_EXPIRY_SECONDS = 60;
+
+export const MergeGlossesPayloadSchema = z.object({
+  lexeme_id: z.string().min(1),
+  user_language_code: z.string().min(1),
+});
+export type MergeGlossesPayload = z.infer<typeof MergeGlossesPayloadSchema>;
+
 export type JobPayloads = {
   [PREPARE_SESSION]: PrepareSessionPayload;
   [PREPARE_SESSION_FAILED]: PrepareSessionPayload;
@@ -79,5 +91,6 @@ export type JobPayloads = {
   [READ_PHOTO_FAILED]: ReadPhotoPayload;
   [LOOK_UP_IMPORT_ITEM]: LookUpImportItemPayload;
   [LOOK_UP_IMPORT_ITEM_FAILED]: LookUpImportItemPayload;
+  [MERGE_GLOSSES]: MergeGlossesPayload;
 };
 export type JobName = keyof JobPayloads;

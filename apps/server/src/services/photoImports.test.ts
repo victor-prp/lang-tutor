@@ -6,6 +6,7 @@ import { READ_PHOTO } from '../domain/jobs';
 import {
   AccessDenied,
   EnrollmentNotFound,
+  GlossLanguageMismatch,
   InvalidPhotoImportItem,
   InvalidVocabularyEntry,
   PhotoImportConflict,
@@ -17,6 +18,7 @@ import type { PhotoImportItemRow, PhotoImportRepo, PhotoImportRow } from '../rep
 import type { VocabularyRepo } from '../repo/vocabulary';
 import {
   createFakeClock,
+  createFakeGlossRepo,
   createFakeJobRepo,
   createFakeLlmClient,
   createFakeLogger,
@@ -60,7 +62,8 @@ function setup(repos: Partial<Repos>) {
   const logger = createFakeLogger();
   const service = createPhotoImportService({
     // Phase 29: every use case reads the import's enrollment to authorize.
-    transaction: createFakeTransaction({ enrollment: enrollmentRepo(ENROLLMENT), ...repos }),
+    // Phase 31: a save resolves its glosses; by default no merge happened.
+    transaction: createFakeTransaction({ enrollment: enrollmentRepo(ENROLLMENT), gloss: createFakeGlossRepo(), ...repos }),
     vision: async () => {
       throw new Error('vision is not called by these use cases');
     },
@@ -253,6 +256,39 @@ describe('save', () => {
     const vocabulary = stub<VocabularyRepo>({ findSaveable: async () => [saveable(1)], insertEntries: async () => undefined });
     const { service } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT) });
     await expect(service.save(OWNER, ID)).rejects.toBeInstanceOf(PhotoImportConflict);
+  });
+
+  // Phase 31 (spec D14). The rows' options are a snapshot: a gloss merged since
+  // the photo was read is saved as its survivor, and the response keeps the ids
+  // the review shows.
+  it('saves a choice made before a merge as its survivor', async () => {
+    const asked: unknown[] = [];
+    const photoImport = stub<PhotoImportRepo>({
+      findImportForUpdate: async () => importRow(),
+      listItems: async () => [itemRow()],
+      transition: async () => true,
+    });
+    const vocabulary = stub<VocabularyRepo>({
+      findSaveable: async (input) => {
+        asked.push(input.entries);
+        return [{ ...saveable(1), glossId: 'g_survivor' }];
+      },
+      insertEntries: async () => undefined,
+    });
+    const gloss = {
+      ...createFakeGlossRepo(),
+      resolveGlosses: async (ids: string[]) => new Map(ids.map((id) => [id, { id: 'g_survivor', lexemeId: 'l1', userLanguageCode: 'he' }])),
+    };
+    const { service } = setup({ photoImport, vocabulary, gloss });
+    expect(await service.save(OWNER, ID)).toEqual({ saved_gloss_ids: ['s1'] });
+    expect(asked).toEqual([[{ glossId: 'g_survivor', variantId: 'v1' }]]);
+  });
+
+  it('refuses a choice in another learner language before anything is checked or written', async () => {
+    const photoImport = stub<PhotoImportRepo>({ findImportForUpdate: async () => importRow(), listItems: async () => [itemRow()] });
+    const { service, logger } = setup({ photoImport, vocabulary: stub<VocabularyRepo>({}), gloss: createFakeGlossRepo('ru') });
+    await expect(service.save(OWNER, ID)).rejects.toBeInstanceOf(GlossLanguageMismatch);
+    expect(logger.events).toEqual([{ event: 'photo_import_entry_refused', import_id: ID, gloss_id: 's1', reason: 'language' }]);
   });
 });
 

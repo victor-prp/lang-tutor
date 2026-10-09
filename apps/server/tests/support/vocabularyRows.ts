@@ -68,3 +68,11 @@ export async function ownerOf(db: Db, enrollmentId: string): Promise<string> {
   if (rows.rows.length === 0) throw new Error(`no enrollment ${enrollmentId}`);
   return rows.rows[0].user_id;
 }
+
+/** Phase 31. One enrollment's saved gloss ids, ordered. */
+export async function readSavedGlossIds(db: Db, enrollmentId: string): Promise<string[]> {
+  const rows = await db.execute<{ gloss_id: string }>(
+    sql`select gloss_id from vocabulary_entries where enrollment_id = ${enrollmentId} order by gloss_id`,
+  );
+  return rows.rows.map((row) => row.gloss_id);
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  createFakeJobRepo,
   createFakeLlmClient,
   createFakeLogger,
   createFakeTransaction,
@@ -367,7 +368,7 @@ describe('translate', () => {
   });
 
   it('logs what it persisted', async () => {
-    const { service, logger } = serviceWith(
+    const { service, logger, dict } = serviceWith(
       reply({
         kind: 'word',
         entries: [
@@ -379,13 +380,48 @@ describe('translate', () => {
         ],
       }),
     );
+    dict.glossCounts = { created: 1, joined: 0, members: 1 };
 
     await service.translate('u1', { text: 'saw', from: 'en', to: 'he' });
 
     expect(logger.events).toEqual([
       { event: 'dict_persisted', entry_count: 1, lexemes_created: 1 },
+      { event: 'dict_glosses_assigned', from: 'en', to: 'he', created: 1, joined: 0, members: 1 },
       { event: 'translated', from: 'en', to: 'he', kind: 'word', sense_count: 1 },
     ]);
+  });
+
+  // Phase 31 (spec D7). A write whose lemma form names another gloss's key asks
+  // for the merge job, in the write's own transaction (ADR 0007).
+  it('enqueues the merge job for a lexeme the write could not rename', async () => {
+    const llm = createFakeLlmClient(
+      reply({ kind: 'word', ...oneEntry('finger', [{ translation: 'אצבע', sense_code: 'digit' }]) }),
+    );
+    const dict = createFakeDictRepo();
+    dict.mergePairs = [{ lexemeId: 't-0', userLanguageCode: 'he' }];
+    const jobs = createFakeJobRepo();
+    const service = createTranslationService({ llm, transaction: createFakeTransaction({ dict, jobs }), logger: createFakeLogger() });
+
+    await service.translate('u1', { text: 'finger', from: 'en', to: 'he' });
+
+    expect(jobs.enqueued).toEqual([{ name: 'merge-glosses', data: { lexeme_id: 't-0', user_language_code: 'he' } }]);
+  });
+
+  it('enqueues the merge job for a lexeme a repair of the lemma form could not rename', async () => {
+    const llm = createFakeLlmClient(reply({ senses: [{ sense_code: 'digit', translation: 'אצבע' }] }));
+    const dict = createFakeDictRepo();
+    dict.hit = { finger: [row('אצבע', { lexemeId: 't-1' })] };
+    dict.stale = { finger: [{ lexemeId: 't-1', variantId: 'v-1', lemma: 'finger', partOfSpeech: 'noun' }] };
+    dict.stored['finger:noun'] = [{ senseCode: 'digit', translation: 'אצבע', exampleSource: null, exampleTarget: null }];
+    dict.repairVariantRenderings = async () => ({ needsMerge: true });
+    const jobs = createFakeJobRepo();
+    const logger = createFakeLogger();
+    const service = createTranslationService({ llm, transaction: createFakeTransaction({ dict, jobs }), logger });
+
+    await service.translate('u1', { text: 'finger', from: 'en', to: 'he' });
+
+    expect(logger.events.map((event) => event.event)).toContain('dict_repaired');
+    expect(jobs.enqueued).toEqual([{ name: 'merge-glosses', data: { lexeme_id: 't-1', user_language_code: 'he' } }]);
   });
 
   // After the extraction the hit log lives in `translate` and fires for every

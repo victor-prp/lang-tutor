@@ -163,6 +163,16 @@ export class InvalidVocabularyEntry extends Error {
   }
 }
 
+/** Phase 31 (spec D14). A gloss whose learner language is not the enrollment's:
+ *  the one invariant the explicit key brings. A kind of InvalidVocabularyEntry,
+ *  so every route that answers that one with a 400 answers this one too. */
+export class GlossLanguageMismatch extends InvalidVocabularyEntry {
+  constructor(glossId: string) {
+    super(glossId);
+    this.name = 'GlossLanguageMismatch';
+  }
+}
+
 /** Phase 21. No lexeme with this lemma in the enrollment's target language. */
 export class WordNotFound extends Error {
   constructor(readonly lemma: string) {

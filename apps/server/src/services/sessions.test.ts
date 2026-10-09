@@ -11,6 +11,7 @@ import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
+import type { GlossRepo } from '../repo/glosses';
 import type { PhotoImportRepo } from '../repo/photoImports';
 import type { VocabularyRepo } from '../repo/vocabulary';
 import { createSessionService, type Transaction } from './sessions';
@@ -135,6 +136,20 @@ describe('repos', () => {
     },
   };
 
+  // Phase 31. Bound into the same transaction, and untouched by these cases:
+  // none of them ends a session or prepares one, the two that resolve glosses.
+  const glossRepo: GlossRepo = {
+    resolveGlosses: () => {
+      throw new Error('these cases must not resolve a gloss');
+    },
+    findMergeCandidates: () => {
+      throw new Error('the session service must not merge glosses');
+    },
+    mergeGlosses: () => {
+      throw new Error('the session service must not merge glosses');
+    },
+  };
+
   // Bound into the same transaction since phase 18, and untouched by these use
   // cases: reaching it here would mean the session service grew a second job.
   const forbidden = () => {
@@ -160,6 +175,7 @@ describe('repos', () => {
     throw new Error('this case must not touch the progress tables');
   };
   const progressRepo: ProgressRepo = {
+    lockSessionGlosses: unreachableProgress,
     findSessionEvidence: unreachableProgress,
     findRows: unreachableProgress,
     updateRows: unreachableProgress,
@@ -195,6 +211,7 @@ describe('repos', () => {
         enrollment: enrollmentRepo,
         grant: grantRepo,
         dict: dictRepo,
+        gloss: glossRepo,
         vocabulary: vocabularyRepo,
         progress: progressRepo,
         photoImport: photoImportRepo,

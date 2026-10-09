@@ -5,6 +5,8 @@ import {
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
   LOOK_UP_IMPORT_ITEM_FAILED,
+  MERGE_GLOSSES,
+  MERGE_GLOSSES_EXPIRY_SECONDS,
   PREPARE_SESSION,
   PREPARE_SESSION_EXPIRY_SECONDS,
   PREPARE_SESSION_FAILED,
@@ -75,6 +77,12 @@ export const JOB_QUEUES: QueueDefinition[] = [
       deleteAfterSeconds: 86_400,
       deadLetter: LOOK_UP_IMPORT_ITEM_FAILED,
     },
+  },
+  // Phase 31 (spec D7). No dead letter: a merge that keeps failing leaves two
+  // glosses, which the by-hand tool (dict:glosses:merge) also finds.
+  {
+    name: MERGE_GLOSSES,
+    options: { retryLimit: 2, retryBackoff: true, expireInSeconds: MERGE_GLOSSES_EXPIRY_SECONDS, deleteAfterSeconds: 86_400 },
   },
 ];
 

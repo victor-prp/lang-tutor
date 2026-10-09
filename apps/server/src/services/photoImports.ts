@@ -25,6 +25,7 @@ import {
 import { buildSenseMatchPrompt, choiceFromModel, firstChoice, parseSenseMatch, type MatchedBy } from '../domain/senseMatching';
 import { firstPerGloss } from '../domain/vocabulary';
 import {
+  GlossLanguageMismatch,
   InvalidPhotoImportItem,
   InvalidVocabularyEntry,
   PhotoImportConflict,
@@ -184,7 +185,7 @@ export function createPhotoImportService({
      */
     save: async (actorUserId: string, importId: string): Promise<SaveVocabularyResponse> => {
       const outcome = await transaction(async (repos) => {
-        const { photoImport, vocabulary } = repos;
+        const { photoImport, vocabulary, gloss } = repos;
         const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
         const enrolled = await authorizeImport(repos, actorUserId, row);
@@ -197,13 +198,28 @@ export function createPhotoImportService({
           !items.some((item) => item.status === 'pending');
         if (!ready) throw new PhotoImportConflict(importId, 'not ready to save');
 
+        // Phase 31 (spec D14). Share-lock and resolve before anything is checked or
+        // written. The rows' options are a snapshot, so a choice made before a
+        // merge names a forwarded gloss: it is saved as its survivor.
+        const resolved = await gloss.resolveGlosses(entries.map((entry) => entry.gloss_id));
+        const foreign = entries.find((entry) => {
+          const found = resolved.get(entry.gloss_id);
+          return found !== undefined && found.userLanguageCode !== enrolled.source_language;
+        });
+        if (foreign) {
+          logger.info({ event: 'photo_import_entry_refused', import_id: importId, gloss_id: foreign.gloss_id, reason: 'language' });
+          throw new GlossLanguageMismatch(foreign.gloss_id);
+        }
+        const toSave = firstPerGloss(
+          entries.map((entry) => ({ gloss_id: resolved.get(entry.gloss_id)?.id ?? entry.gloss_id, variant_id: entry.variant_id })),
+        );
         const saveable = await vocabulary.findSaveable({
-          entries: entries.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
+          entries: toSave.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
           targetLanguage: enrolled.target_language,
           sourceLanguage: enrolled.source_language,
         });
         const passed = new Set(saveable.map((entry) => `${entry.glossId} ${entry.variantId}`));
-        const refused = entries.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
+        const refused = toSave.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
         if (refused) {
           // As today's save logs it: the 400 body is fixed, and an import that
           // can never be saved is diagnosed only from here.

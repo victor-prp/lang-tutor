@@ -48,6 +48,7 @@ import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
   AnswerKindMismatch,
+  GlossLanguageMismatch,
   InsufficientQuestions,
   InvalidDistractors,
   LlmUnavailable,
@@ -100,8 +101,13 @@ export type JudgedResult = { verdict: TypedVerdict; session: SessionResult };
  * A gloss with no rows is not saved, so it is skipped: that is the whole of
  * "only answers given while saved count". A session with no answers has no
  * evidence and writes nothing.
+ *
+ * Phase 31 (spec D14). The practised glosses' lexemes are share-locked before
+ * anything is read, so a merge of one of them lands wholly before the evidence
+ * is read or wholly after the progress is written: never between.
  */
 async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
+  await repos.progress.lockSessionGlosses(sessionId);
   const evidence = await repos.progress.findSessionEvidence(sessionId);
   if (!evidence) return;
   const rows = await repos.progress.findRows({
@@ -521,14 +527,25 @@ export function createSessionService({
       const payload = PrepareSessionPayloadSchema.parse(data);
       const sessionId = payload.session_id;
 
-      const read = await transaction(async ({ session, enrollment, question }) => {
+      const read = await transaction(async ({ session, enrollment, question, gloss }) => {
         const state = await session.findState(sessionId);
         // Skipped, or gone (a reseed): nothing to prepare, and not a failure.
         if (!state || state.status !== 'preparing') return undefined;
         const enrolled = await enrollment.findById(state.enrollmentId);
         if (!enrolled) return undefined;
+        // Phase 31 (spec D14). A pick made before a merge names the survivor now,
+        // and a gloss of another learner language is refused.
+        const resolved = await gloss.resolveGlosses(payload.picks.map((pick) => pick.gloss_id));
+        const foreign = payload.picks.find(
+          (pick) => (resolved.get(pick.gloss_id)?.userLanguageCode ?? enrolled.source_language) !== enrolled.source_language,
+        );
+        if (foreign) throw new GlossLanguageMismatch(foreign.gloss_id);
         const context = await question.findGenerationContext({
-          picks: payload.picks.map((pick) => ({ glossId: pick.gloss_id, senseId: pick.sense_id, variantId: pick.variant_id })),
+          picks: payload.picks.map((pick) => ({
+            glossId: resolved.get(pick.gloss_id)?.id ?? pick.gloss_id,
+            senseId: pick.sense_id,
+            variantId: pick.variant_id,
+          })),
           sourceLanguage: enrolled.source_language,
         });
         // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
@@ -617,11 +634,14 @@ export function createSessionService({
 
       // Logged once the session is written, not on an attempt a failed insert or a retry repeats.
       let degradedEvents: Record<string, unknown>[] = [];
-      const written = await transaction(async ({ session, question }) => {
+      const written = await transaction(async ({ session, question, gloss }) => {
         degradedEvents = [];
         // Conditional: a skip that landed during the model call wins, and this
         // transaction then writes nothing at all.
         if (!(await session.transition(sessionId, ['preparing'], 'ready'))) return false;
+        // Phase 31 (spec D14). Again, under this write's own share lock: a merge
+        // may have landed during the model call.
+        const survivors = await gloss.resolveGlosses(ordered.map((row) => row.glossId));
         const generated = await question.insertGeneratedQuestions({
           userId: read.state.userId,
           enrollmentId: read.state.enrollmentId,
@@ -646,7 +666,7 @@ export function createSessionService({
             const type = degraded ? 'typed_translation' : planned;
             const content = degraded ? NOTHING_GENERATED : made;
             return {
-              glossId: row.glossId,
+              glossId: survivors.get(row.glossId)?.id ?? row.glossId,
               variantId: row.variantId,
               form: row.form,
               lemma: row.lemma,

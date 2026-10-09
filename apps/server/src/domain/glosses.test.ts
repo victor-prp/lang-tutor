@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { assignGlosses, splitTranslation, tidyGlossList } from './glosses';
+import { assignGlosses, keptEntry, mergeLevels, mergeSnapshots, splitTranslation, tidyGlossList } from './glosses';
 
 // [stored translation, translation, alternatives]
 const COMMA_LISTS: [string, string, string[]][] = [
@@ -225,5 +225,41 @@ describe('assignGlosses (spec D6, D7)', () => {
       memberships: none,
     });
     expect(plan.create).toEqual([{ key: 'עכבר', alternatives: [], senseIds: ['s1'] }]);
+  });
+});
+
+describe('folding two glosses (spec D3, D7)', () => {
+  it('keeps the higher level and the later of each date', () => {
+    expect(
+      mergeLevels(
+        { level: 3, lastStepOn: '2026-03-01', lastWrongOn: null },
+        { level: 2, lastStepOn: '2026-03-05', lastWrongOn: '2026-03-04' },
+      ),
+    ).toEqual({ level: 3, lastStepOn: '2026-03-05', lastWrongOn: '2026-03-04' });
+  });
+
+  it('keeps the lowest level before and the highest after, so the snapshot check still holds', () => {
+    expect(mergeSnapshots({ levelBefore: 2, levelAfter: 3 }, { levelBefore: 1, levelAfter: 2 })).toEqual({ levelBefore: 1, levelAfter: 3 });
+  });
+
+  it('keeps the earlier save, with its form and its adder', () => {
+    const early = { variantId: 'v_fingers', addedByUserId: 'u_tutor', savedAt: '2026-01-01T00:00:00.000000' };
+    const late = { variantId: 'v_finger', addedByUserId: 'u_1', savedAt: '2026-02-01T00:00:00.000000' };
+    expect(keptEntry(late, early)).toBe(early);
+    expect(keptEntry(early, late)).toBe(early);
+  });
+});
+
+describe('assignGlosses after a merge (spec D7)', () => {
+  it("joins a new sense whose key a merged gloss had to that gloss's survivor", () => {
+    const plan = assignGlosses({
+      senses: [sense('s9', 'אצבעות')],
+      lemmaForm: false,
+      glosses: [{ id: 'g_survivor', key: 'אצבע', alternatives: ['אצבעות'] }],
+      memberships: new Map(),
+      aliases: new Map([['אצבעות', 'g_survivor']]),
+    });
+    expect(plan.join).toEqual([{ senseId: 's9', glossId: 'g_survivor' }]);
+    expect(plan.create).toEqual([]);
   });
 });

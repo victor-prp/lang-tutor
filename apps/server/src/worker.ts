@@ -3,11 +3,13 @@ import type { PgBoss } from 'pg-boss';
 import {
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_FAILED,
+  MERGE_GLOSSES,
   PREPARE_SESSION,
   PREPARE_SESSION_FAILED,
   READ_PHOTO,
   READ_PHOTO_FAILED,
 } from './domain/jobs';
+import type { GlossService } from './services/glosses';
 import type { PhotoImportService } from './services/photoImports';
 import type { SessionService } from './services/sessions';
 
@@ -21,10 +23,10 @@ import type { SessionService } from './services/sessions';
  */
 export async function registerWorkers(
   boss: PgBoss,
-  services: { sessions: SessionService; photoImports: PhotoImportService },
+  services: { sessions: SessionService; photoImports: PhotoImportService; glosses: GlossService },
   options: { pollingIntervalSeconds: number },
 ): Promise<void> {
-  const { sessions, photoImports } = services;
+  const { sessions, photoImports, glosses } = services;
   await boss.work(
     PREPARE_SESSION,
     // Four at once per process: one model call each, kept under the quota.
@@ -62,5 +64,10 @@ export async function registerWorkers(
   );
   await boss.work(LOOK_UP_IMPORT_ITEM_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
     for (const job of jobs) await photoImports.failItem(job.data);
+  });
+
+  // Phase 31 (spec D7). One merge at a time per process: each locks a lexeme.
+  await boss.work(MERGE_GLOSSES, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
+    for (const job of jobs) await glosses.mergeLexeme(job.data);
   });
 }

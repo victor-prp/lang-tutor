@@ -45,13 +45,32 @@ const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}
  * one session or to one enrollment's handful of glosses, on a primary key; the
  * list's level aggregate lives in repo/vocabulary.ts.
  *
- * No row locks: an enrollment's progress is written only when one of its
- * sessions ends, its sessions end one at a time (the session row is locked by
- * loadSession and findState, and at most one is open), and the recompute holds
- * a table lock on sessions (lockSessions) so no session ends while it runs.
+ * No row locks on progress: an enrollment's progress is written only when one
+ * of its sessions ends, its sessions end one at a time (the session row is
+ * locked by loadSession and findState, and at most one is open), and the
+ * recompute holds a table lock on sessions (lockSessions) so no session ends
+ * while it runs. The one lock here is on the dictionary: lockSessionGlosses,
+ * which keeps a gloss merge out of a session's end (phase 31, spec D14).
  */
 export function createProgressRepo(tx: Tx) {
   return {
+    /** Phase 31 (spec D14). FOR SHARE on the lexemes of every gloss this session's
+     *  questions practise, in id order, before its evidence is read. A gloss never
+     *  changes lexeme, so this holds the right rows even while a merge re-keys
+     *  these questions; once the merge commits, the reads after this see it. */
+    lockSessionGlosses: async (sessionId: string): Promise<void> => {
+      await tx.execute(sql`
+        SELECT l.id FROM dict_lexemes l
+        WHERE l.id IN (
+          SELECT g.lexeme_id
+          FROM session_questions sq
+          JOIN questions q    ON q.id = sq.question_id
+          JOIN dict_glosses g ON g.id = q.gloss_id
+          WHERE sq.session_id = ${sessionId})
+        ORDER BY l.id
+        FOR SHARE`);
+    },
+
     findSessionEvidence: async (sessionId: string): Promise<SessionEvidence | undefined> => {
       const rows = await tx.execute<{
         enrollment_id: string;

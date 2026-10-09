@@ -8,6 +8,7 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { MERGE_GLOSSES } from '../domain/jobs';
 import { guardScript } from '../domain/languages';
 import {
   buildPrompt,
@@ -260,8 +261,9 @@ async function repairForm({
     // written: the lock persistEntries takes, so a repair and a lookup of one
     // lexeme cannot both create a gloss for one key (spec D7).
     await repos.dict.lockLexemes(rendered.map(({ lexeme }) => lexeme.lexemeId));
+    const needsMerge = new Set<string>();
     for (const { lexeme, senseVersion, senses } of rendered) {
-      await repos.dict.repairVariantRenderings({
+      const repaired = await repos.dict.repairVariantRenderings({
         variantId: lexeme.variantId,
         lexemeId: lexeme.lexemeId,
         userLanguageCode: to,
@@ -270,6 +272,12 @@ async function repairForm({
         lemmaForm: form.toLowerCase() === lexeme.lemma.toLowerCase(),
         senses,
       });
+      if (repaired.needsMerge) needsMerge.add(lexeme.lexemeId);
+    }
+    // Phase 31 (spec D7). A rename another gloss's key blocked: the merge job
+    // decides, in its own transaction, under the lexeme's lock.
+    for (const lexemeId of needsMerge) {
+      await repos.jobs.enqueue(MERGE_GLOSSES, { lexeme_id: lexemeId, user_language_code: to });
     }
     return repos.dict.findSensesByForm({ form, languageCode: from, userLanguageCode: to });
   });
@@ -663,7 +671,7 @@ export function createTranslationService({
     }
 
     try {
-      const { written, senses } = await transaction(async (repos) => {
+      const { written, senses, glosses } = await transaction(async (repos) => {
         const result = await repos.dict.persistEntries({
           form: effectiveForm,
           languageCode: from,
@@ -671,6 +679,11 @@ export function createTranslationService({
           kind,
           entries,
         });
+        // Phase 31 (spec D7). A rename another gloss's key blocked: the merge job
+        // decides, in its own transaction, under the lexeme's lock.
+        for (const pair of result.mergePairs) {
+          await repos.jobs.enqueue(MERGE_GLOSSES, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+        }
         // Step 9, in the SAME transaction as step 8. These two are DEPENDENT —
         // a redirect must not point at a form with no rows — which is what makes
         // phase 12's fail-closed rule cover this phase for free: a failed
@@ -692,6 +705,7 @@ export function createTranslationService({
         entry_count: written.length,
         lexemes_created: written.filter((entry) => entry.created).length,
       });
+      logger.info({ event: 'dict_glosses_assigned', from, to, created: glosses.created, joined: glosses.joined, members: glosses.members });
       if (correction) {
         logger.info({
           event: 'dict_corrected',

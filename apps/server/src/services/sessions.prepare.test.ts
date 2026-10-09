@@ -1,12 +1,21 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Enrollment, Question } from '@lang-tutor/core/api';
 
-import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
+import {
+  createFakeClock,
+  createFakeGlossRepo,
+  createFakeLlmClient,
+  createFakeLogger,
+  createFakeTransaction,
+  createFakeTranscriber,
+  stub,
+} from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { GenerationContext, RecentSentences } from '../domain/distractors';
 import type { SessionState } from '../domain/session';
-import { InvalidDistractors } from '../errors';
+import { GlossLanguageMismatch, InvalidDistractors } from '../errors';
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { GlossRepo } from '../repo/glosses';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
@@ -36,8 +45,21 @@ const GOOD = JSON.stringify({
   ],
 });
 
-function world(opts: { state?: SessionState; context?: GenerationContext[]; ready?: boolean; reply?: string | Error; recent?: RecentSentences }) {
-  const calls = { transitions: [] as string[], generated: [] as unknown[], sessionQuestions: [] as Question[][], recentAsked: [] as unknown[] };
+function world(opts: {
+  state?: SessionState;
+  context?: GenerationContext[];
+  ready?: boolean;
+  reply?: string | Error;
+  recent?: RecentSentences;
+  gloss?: GlossRepo;
+}) {
+  const calls = {
+    transitions: [] as string[],
+    generated: [] as unknown[],
+    sessionQuestions: [] as Question[][],
+    recentAsked: [] as unknown[],
+    contextAsked: [] as unknown[],
+  };
   const session = stub<SessionRepo>({
     findState: async () => opts.state ?? STATE,
     transition: async (_id, from, to) => {
@@ -50,7 +72,10 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
   });
   const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
   const question = stub<QuestionRepo>({
-    findGenerationContext: async () => opts.context ?? CONTEXT,
+    findGenerationContext: async (input) => {
+      calls.contextAsked.push(input);
+      return opts.context ?? CONTEXT;
+    },
     findRecentSentences: async (input) => {
       calls.recentAsked.push(input);
       return opts.recent ?? new Map();
@@ -104,7 +129,7 @@ function world(opts: { state?: SessionState; context?: GenerationContext[]; read
   const llm = createFakeLlmClient(opts.reply ?? GOOD);
   const logger = createFakeLogger();
   const service = createSessionService({
-    transaction: createFakeTransaction({ session, enrollment, question }),
+    transaction: createFakeTransaction({ session, enrollment, question, gloss: opts.gloss ?? createFakeGlossRepo() }),
     rng: testRng(7),
     logger,
     now: createFakeClock(1_000, 1_250),
@@ -559,5 +584,40 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
     expect(typed.sentence!.slice(typed.gapStart!, typed.gapEnd!)).toMatch(/^[а-яё]+$/u);
     expect(typed.sentenceTranslation).toBe('אני רואה את זה שם עכשיו.');
     expect(logger.events.map((e) => (e as { event: string }).event)).not.toContain('sentence_degraded');
+  });
+});
+
+// Phase 31 (spec D14). A merge can land between the request and the job, or
+// during the model call: a pick then names a forwarded gloss.
+describe('prepareSession, phase 31 (spec D14)', () => {
+  const merging = (survivorOf: Record<string, string>): GlossRepo => ({
+    ...createFakeGlossRepo(),
+    resolveGlosses: async (ids: string[]) =>
+      new Map(ids.map((id) => [id, { id: survivorOf[id] ?? id, lexemeId: `lexeme-of-${id}`, userLanguageCode: 'he' }])),
+  });
+
+  it('asks for a merged pick as its survivor, and writes its card on the survivor', async () => {
+    const { service, calls } = world({ gloss: merging({ 'g-s1': 'g-survivor' }) });
+    await service.prepareSession(PAYLOAD);
+    expect(calls.contextAsked).toEqual([
+      {
+        picks: [
+          { glossId: 'g-survivor', senseId: 's1', variantId: 'v1' },
+          { glossId: 'g-s2', senseId: 's2', variantId: 'v2' },
+        ],
+        sourceLanguage: 'he',
+      },
+    ]);
+    // The fake context still names g-s1, as a read made before the merge would:
+    // the write resolves again.
+    const [input] = calls.generated as { questions: { glossId: string }[] }[];
+    expect(input.questions.map((q) => q.glossId).sort()).toEqual(['g-s2', 'g-survivor']);
+  });
+
+  it('refuses a pick in another learner language before the model is called', async () => {
+    const { service, calls, llm } = world({ gloss: createFakeGlossRepo('ru') });
+    await expect(service.prepareSession(PAYLOAD)).rejects.toBeInstanceOf(GlossLanguageMismatch);
+    expect(llm.calls).toEqual([]);
+    expect(calls.generated).toEqual([]);
   });
 });

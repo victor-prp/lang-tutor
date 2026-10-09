@@ -1,5 +1,6 @@
 import type { LlmEntry, TranslationKind, TranslationSense } from '@lang-tutor/core/api';
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { normaliseGloss } from '@lang-tutor/core/domain';
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { RepairWouldDropSense } from '../errors';
@@ -50,6 +51,10 @@ export type PersistedEntry = {
 };
 
 export type MergePair = { lexemeId: string; userLanguageCode: string };
+
+/** Phase 31 (spec D19). What a write's gloss step did, for `dict_glosses_assigned`:
+ *  glosses created, senses that joined an existing gloss, memberships written. */
+export type GlossCounts = { created: number; joined: number; members: number };
 
 /** One stored redirect. `typedForm` comes back as it was written, so a caller
  *  that echoes it shows the learner what the dictionary actually holds. */
@@ -376,7 +381,7 @@ export function createDictRepo(tx: Tx) {
     userLanguageCode: string;
     lemmaForm: boolean;
     senses: AnswerSense[];
-  }): Promise<{ glossIds: string[]; needsMerge: boolean }> => {
+  }): Promise<{ glossIds: string[]; needsMerge: boolean; counts: GlossCounts }> => {
     const glosses = await tx
       .select({ id: dictGlosses.id, key: dictGlosses.key, alternatives: dictGlosses.alternatives })
       .from(dictGlosses)
@@ -387,6 +392,19 @@ export function createDictRepo(tx: Tx) {
           isNull(dictGlosses.mergedInto),
         ),
       );
+    // Phase 31 (spec D7). A merged gloss's key still names its survivor: a sense
+    // that names it later joins the survivor rather than reviving the word.
+    const forwarded = await tx
+      .select({ key: dictGlosses.key, survivor: dictGlosses.mergedInto })
+      .from(dictGlosses)
+      .where(
+        and(
+          eq(dictGlosses.lexemeId, input.lexemeId),
+          eq(dictGlosses.userLanguageCode, input.userLanguageCode),
+          isNotNull(dictGlosses.mergedInto),
+        ),
+      );
+    const aliases = new Map(forwarded.map((row) => [normaliseGloss(row.key), row.survivor!]));
     const members = await tx
       .select({ senseId: dictSenseGlosses.senseId, glossId: dictSenseGlosses.glossId })
       .from(dictSenseGlosses)
@@ -394,7 +412,7 @@ export function createDictRepo(tx: Tx) {
         and(eq(dictSenseGlosses.lexemeId, input.lexemeId), eq(dictSenseGlosses.userLanguageCode, input.userLanguageCode)),
       );
     const memberships = new Map(members.map((member) => [member.senseId, member.glossId]));
-    const plan = assignGlosses({ senses: input.senses, lemmaForm: input.lemmaForm, glosses, memberships });
+    const plan = assignGlosses({ senses: input.senses, lemmaForm: input.lemmaForm, glosses, memberships, aliases });
 
     // Renames first, so a key a rename frees is free for a new gloss of this write.
     for (const rename of plan.rename) {
@@ -419,7 +437,11 @@ export function createDictRepo(tx: Tx) {
         .values(added.map(({ senseId, glossId }) => ({ senseId, glossId, lexemeId: input.lexemeId, userLanguageCode: input.userLanguageCode })))
         .onConflictDoNothing({ target: [dictSenseGlosses.senseId, dictSenseGlosses.userLanguageCode] });
     }
-    return { glossIds: input.senses.map((sense) => glossBySense.get(sense.senseId)!), needsMerge: plan.needsMerge };
+    return {
+      glossIds: input.senses.map((sense) => glossBySense.get(sense.senseId)!),
+      needsMerge: plan.needsMerge,
+      counts: { created: plan.create.length, joined: plan.join.length, members: added.length },
+    };
   };
 
   /**
@@ -447,9 +469,10 @@ export function createDictRepo(tx: Tx) {
    */
   const persistEntries = async (
     input: PersistEntriesInput,
-  ): Promise<{ written: PersistedEntry[]; senses: TranslationSense[]; mergePairs: MergePair[] }> => {
+  ): Promise<{ written: PersistedEntry[]; senses: TranslationSense[]; mergePairs: MergePair[]; glosses: GlossCounts }> => {
     const written: PersistedEntry[] = [];
     const mergePairs: MergePair[] = [];
+    const glosses: GlossCounts = { created: 0, joined: 0, members: 0 };
     const rows = entriesToRows(input.entries);
 
     // 1 — every lexeme of this answer, which is the PAIR of a lemma and a part
@@ -627,7 +650,7 @@ export function createDictRepo(tx: Tx) {
       // this language before its rendering is written: kept, joined by key, or
       // new. Under 1b's lock, so two writers of one lexeme cannot both create a
       // gloss for one key.
-      const { glossIds, needsMerge } = await writeGlosses({
+      const { glossIds, needsMerge, counts } = await writeGlosses({
         lexemeId,
         userLanguageCode: input.userLanguageCode,
         lemmaForm: input.form.toLowerCase() === entry.lemma.toLowerCase(),
@@ -638,6 +661,9 @@ export function createDictRepo(tx: Tx) {
         })),
       });
       if (needsMerge) mergePairs.push({ lexemeId, userLanguageCode: input.userLanguageCode });
+      glosses.created += counts.created;
+      glosses.joined += counts.joined;
+      glosses.members += counts.members;
 
       // 5 — this variant's own renderings. DO NOTHING because a form written
       // twice keeps the answer it already gave: phase 10's guarantee, now held
@@ -709,7 +735,7 @@ export function createDictRepo(tx: Tx) {
       }),
     );
 
-    return { written, senses, mergePairs };
+    return { written, senses, mergePairs, glosses };
   };
 
   /**
