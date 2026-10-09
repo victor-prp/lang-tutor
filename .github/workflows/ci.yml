@@ -61,6 +61,8 @@ jobs:
       - run: ./scripts/test-release-guard.sh
       # Phase 30. A rollback applies master's Terraform, never the old tag's.
       - run: ./scripts/test-release-workflow.sh
+      # npm run release / rollback: tag naming and refusals, against a bare origin.
+      - run: ./scripts/test-release.sh
 
   check-types:
     runs-on: ubuntu-latest

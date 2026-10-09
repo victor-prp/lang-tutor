@@ -1,10 +1,12 @@
 name: Release
 
 # Phase 30 (spec D6–D9). A release is a pushed v* tag on a master commit, after
-# Victor has merged and tested master locally.
+# Victor has merged and tested master locally. `npm run release` names and
+# pushes that tag (scripts/release.sh).
 #
-# Rollback is this workflow run by hand FROM an earlier tag: Actions → Release →
-# Run workflow → pick the tag, or `gh workflow run release.yml --ref v2026.10.08`.
+# Rollback is this workflow run by hand FROM an earlier tag: `npm run rollback`
+# (the release before the newest) or `npm run rollback -- <tag>`; by hand,
+# Actions → Release → Run workflow → pick the tag.
 # The release role trusts tag refs only, so the tag is the ref, not an input.
 # Tags are immutable in ECR, so that image already exists: a rollback skips the
 # build and is one Terraform apply.
