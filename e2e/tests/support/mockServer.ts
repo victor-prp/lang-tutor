@@ -141,6 +141,15 @@ export async function expectGeminiMatching(
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
 
+/**
+ * Phase 31. The body regex for a model call whose user part is exactly `text`.
+ * The provider sends that part as `"parts":[{"text":"…"}]`, and the system
+ * prompt's quoted words are escaped inside the JSON, so they never match.
+ */
+export function userText(text: string): string {
+  return `"text":"${text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}"`;
+}
+
 /** Phase 29. Resend, answered 200 for this lane's namespace. `clearGemini` wipes it, so every sign-in registers it again. */
 export async function expectEmails(request: APIRequestContext): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {

@@ -13,6 +13,8 @@ import {
   READ_PHOTO,
   READ_PHOTO_EXPIRY_SECONDS,
   READ_PHOTO_FAILED,
+  RENDER_LEMMA,
+  RENDER_LEMMA_EXPIRY_SECONDS,
   type JobName,
 } from '../domain/jobs';
 import type { Db } from './client';
@@ -84,6 +86,12 @@ export const JOB_QUEUES: QueueDefinition[] = [
     name: MERGE_GLOSSES,
     options: { retryLimit: 2, retryBackoff: true, expireInSeconds: MERGE_GLOSSES_EXPIRY_SECONDS, deleteAfterSeconds: 86_400 },
   },
+  // Phase 31 (spec D12). No dead letter: no state to mark, and the saved form
+  // serves meanwhile.
+  {
+    name: RENDER_LEMMA,
+    options: { retryLimit: 2, retryBackoff: true, expireInSeconds: RENDER_LEMMA_EXPIRY_SECONDS, deleteAfterSeconds: 86_400 },
+  },
 ];
 
 /**
@@ -120,4 +128,31 @@ export async function installJobs(db: Db): Promise<void> {
     await boss.stop({ graceful: false });
   }
   if (failure) throw failure;
+}
+
+/**
+ * Phase 31. A started pg-boss on the caller's handle for the length of `run`,
+ * for an enqueue outside the server: the CLI's lemma backfill. Built as
+ * installJobs builds its own, and stopped however `run` ends.
+ */
+export async function withJobQueue<T>(db: Db, run: (boss: PgBoss) => Promise<T>): Promise<T> {
+  const boss = new PgBoss({
+    db: fromDrizzle(db, sql),
+    schema: JOB_SCHEMA,
+    migrate: false,
+    supervise: false,
+    schedule: false,
+    registerInstance: false,
+  });
+  let failure: unknown;
+  boss.on('error', (error) => {
+    failure ??= error;
+  });
+  await boss.start();
+  try {
+    return await run(boss);
+  } finally {
+    await boss.stop({ graceful: false });
+    if (failure) throw failure;
+  }
 }

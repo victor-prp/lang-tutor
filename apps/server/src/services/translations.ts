@@ -1,6 +1,7 @@
 import type {
   LanguageCode,
   LlmEntry,
+  LlmRendering,
   PartOfSpeech,
   TranslationKind,
   TranslationRequest,
@@ -8,7 +9,7 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
-import { MERGE_GLOSSES } from '../domain/jobs';
+import { MERGE_GLOSSES, RenderLemmaPayloadSchema } from '../domain/jobs';
 import { guardScript } from '../domain/languages';
 import {
   buildPrompt,
@@ -37,6 +38,20 @@ import type { RepairedRendering } from '../repo/dictionary';
 import { authorizeEnrollment } from './access';
 import type { LlmClient } from './llm';
 import type { Transaction } from './transaction';
+
+/** One rendering of the second call as the entry it becomes: the model's fields,
+ *  passed through for the write (renderingOf). */
+function entrySense(rendering: LlmRendering & { translation: string }): LlmEntry['senses'][number] {
+  return {
+    sense_code: rendering.sense_code,
+    translation: rendering.translation,
+    ...(rendering.example ? { example: rendering.example } : {}),
+    ...(rendering.alternatives ? { alternatives: rendering.alternatives } : {}),
+    ...(rendering.gloss ? { gloss: rendering.gloss } : {}),
+    ...(rendering.gloss_alternatives ? { gloss_alternatives: rendering.gloss_alternatives } : {}),
+    ...(rendering.definition ? { definition: rendering.definition } : {}),
+  };
+}
 
 /**
  * The second model call, per entry that names a lexeme already in the
@@ -113,16 +128,8 @@ async function reconcile(input: {
         if (known.has(rendering.sense_code)) reused += 1;
         else newlyNamed += 1;
 
-        senses.push({
-          sense_code: rendering.sense_code,
-          translation: rendering.translation,
-          ...(rendering.example ? { example: rendering.example } : {}),
-          // Phase 31: the rendering call's fields, for the write (renderingOf).
-          ...(rendering.alternatives ? { alternatives: rendering.alternatives } : {}),
-          ...(rendering.gloss ? { gloss: rendering.gloss } : {}),
-          ...(rendering.gloss_alternatives ? { gloss_alternatives: rendering.gloss_alternatives } : {}),
-          ...(rendering.definition ? { definition: rendering.definition } : {}),
-        });
+        // The spread restates the narrowing the null filter above made.
+        senses.push(entrySense({ ...rendering, translation: rendering.translation }));
       }
 
       // An answer that reconciled to nothing at all is not an answer. Falling
@@ -280,6 +287,60 @@ async function repairForm({
       await repos.jobs.enqueue(MERGE_GLOSSES, { lexeme_id: lexemeId, user_language_code: to });
     }
     return repos.dict.findSensesByForm({ form, languageCode: from, userLanguageCode: to });
+  });
+}
+
+/**
+ * Phase 31 (spec D12). The lemma form is already a hit, without this headword:
+ * the scoped rendering call names this lexeme's senses for the form, and the
+ * write adds the lexeme to the form at the next free entry rank, as a lookup
+ * would have listed it. Reuses buildRenderingPrompt, which is eval-scored.
+ */
+async function addHeadwordToForm({
+  llm,
+  transaction,
+  lexeme,
+  to,
+  kind,
+}: {
+  llm: LlmClient;
+  transaction: Transaction;
+  lexeme: { lemma: string; languageCode: string; partOfSpeech: string };
+  to: LanguageCode;
+  kind: TranslationKind;
+}): Promise<void> {
+  const from = lexeme.languageCode as LanguageCode;
+  const partOfSpeech = lexeme.partOfSpeech as PartOfSpeech;
+  const stored = await transaction((repos) =>
+    repos.dict.findSensesByLexeme({ lemma: lexeme.lemma, partOfSpeech, languageCode: from, userLanguageCode: to }),
+  );
+  if (stored.length === 0) return;
+  const raw = await llm(
+    buildRenderingPrompt({ form: lexeme.lemma, from, to, lemma: lexeme.lemma, partOfSpeech, storedSenses: stored }),
+  );
+  const parsed = parseLlmReconciliation(raw);
+  if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
+  const seen = new Set<string>();
+  const senses: LlmEntry['senses'] = [];
+  for (const rendering of parsed.senses) {
+    if (rendering.translation === null || seen.has(rendering.sense_code)) continue;
+    seen.add(rendering.sense_code);
+    senses.push(entrySense({ ...rendering, translation: rendering.translation }));
+  }
+  if (senses.length === 0) return;
+  await transaction(async (repos) => {
+    const entryRankOffset = await repos.dict.nextEntryRank({ form: lexeme.lemma, languageCode: from });
+    const { mergePairs } = await repos.dict.persistEntries({
+      form: lexeme.lemma,
+      languageCode: from,
+      userLanguageCode: to,
+      kind,
+      entries: [{ lemma: lexeme.lemma, part_of_speech: partOfSpeech, senses }],
+      entryRankOffset,
+    });
+    for (const pair of mergePairs) {
+      await repos.jobs.enqueue(MERGE_GLOSSES, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+    }
   });
 }
 
@@ -768,6 +829,61 @@ export function createTranslationService({
         repos.vocabulary.findSavedGlossIds({ enrollmentId: enrollment.id, glossIds }),
       );
       return { ...response, senses: markSaved(response.senses, new Set(saved)) };
+    },
+
+    /**
+     * Phase 31 (spec D12). The render-lemma job: renders a saved word's lemma form
+     * for its lexeme in one learner language, so a session can ask the standard
+     * form. A lemma form nobody has looked up runs the ordinary lookup, which
+     * writes every headword of the form: a form with renderings is a hit, and a
+     * hit only repairs the headwords already on it, so a lemma written for one
+     * headword alone would stay partial for every learner (`spike` without its
+     * noun). A form already a hit without this headword gets the scoped call.
+     * No session waits on this; the saved form serves until it lands.
+     *
+     * The job has no actor (phase 29): it calls the lookup above directly, with
+     * no enrollment, so nothing of anyone's is read and there is nothing to
+     * authorize.
+     */
+    renderLemma: async (data: unknown): Promise<void> => {
+      const { lexeme_id: lexemeId, user_language_code: language } = RenderLemmaPayloadSchema.parse(data);
+      const to = language as LanguageCode;
+      const skip = (reason: string) =>
+        logger.info({ event: 'lemma_render_skipped', lexeme_id: lexemeId, user_language_code: to, reason });
+      const state = await transaction(async (repos) => {
+        const lexeme = await repos.dict.findLexeme(lexemeId);
+        if (!lexeme) return null;
+        if (await repos.dict.hasLemmaRendering({ lexemeId, userLanguageCode: to })) return { lexeme, rendered: true, rows: [] };
+        const rows = await repos.dict.findSensesByForm({ form: lexeme.lemma, languageCode: lexeme.languageCode, userLanguageCode: to });
+        return { lexeme, rendered: false, rows };
+      });
+      if (!state) return skip('lexeme_gone');
+      if (state.rendered) return skip('already_rendered');
+      const path = state.rows.length === 0 ? 'lookup' : 'scoped';
+      try {
+        if (path === 'lookup') {
+          const response = await lookup({ text: state.lexeme.lemma, from: state.lexeme.languageCode as LanguageCode, to });
+          if (response.correction) return skip('corrected');
+          // A failed write still answers 200 (dict_persist_failed): retry it.
+          if (response.senses.length > 0 && response.senses.every((card) => card.gloss_id === undefined)) {
+            throw new Error('the lemma lookup answered without writing');
+          }
+        } else {
+          await addHeadwordToForm({ llm, transaction, lexeme: state.lexeme, to, kind: kindForForm(state.rows) });
+        }
+      } catch (error) {
+        logger.info({
+          event: 'lemma_render_failed',
+          lexeme_id: lexemeId,
+          user_language_code: to,
+          path,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+      const rendered = await transaction((repos) => repos.dict.hasLemmaRendering({ lexemeId, userLanguageCode: to }));
+      if (!rendered) return skip('no_entry');
+      logger.info({ event: 'lemma_rendered', lexeme_id: lexemeId, user_language_code: to, path });
     },
   };
 }

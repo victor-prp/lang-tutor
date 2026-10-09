@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { Enrollment } from '@lang-tutor/core/api';
 
 import { IMPORT_TTL_MS } from '../domain/photoImports';
-import { READ_PHOTO } from '../domain/jobs';
+import { READ_PHOTO, RENDER_LEMMA } from '../domain/jobs';
 import {
   AccessDenied,
   EnrollmentNotFound,
@@ -12,6 +12,7 @@ import {
   PhotoImportConflict,
   PhotoImportNotFound,
 } from '../errors';
+import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { PhotoImportItemRow, PhotoImportRepo, PhotoImportRow } from '../repo/photoImports';
@@ -211,12 +212,25 @@ describe('save', () => {
         inserted.push(input);
       },
     });
-    const { service, logger } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT) });
+    // Phase 31 (spec D12). The claim answers with the pairs never asked for.
+    const claims: unknown[] = [];
+    const dict = stub<DictRepo>({
+      claimLemmaRenders: async (pairs) => {
+        claims.push(pairs);
+        return [pairs[1]];
+      },
+    });
+    const jobs = createFakeJobRepo();
+    const { service, logger } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT), dict, jobs });
 
     expect(await service.save(OWNER, ID)).toEqual({ saved_gloss_ids: ['s1', 's2'] });
     expect(inserted).toEqual([{ enrollmentId: 'e1', addedByUserId: OWNER, entries: [saveable(1), saveable(2)] }]);
     expect(transitions).toEqual([[ID, ['read'], 'saved']]);
     expect(logger.events).toContainEqual({ event: 'photo_import_saved', import_id: ID, saved_count: 2, unticked_count: 1, changed_gloss_count: 1 });
+    // Every saved word's lemma render is claimed in the list's learner language,
+    // and only what the claim returns is enqueued.
+    expect(claims).toEqual([[{ lexemeId: 'l1', userLanguageCode: 'he' }, { lexemeId: 'l2', userLanguageCode: 'he' }]]);
+    expect(jobs.enqueued).toEqual([{ name: RENDER_LEMMA, data: { lexeme_id: 'l2', user_language_code: 'he' } }]);
   });
 
   it('answers a repeated save with the same ids and writes nothing', async () => {
@@ -254,7 +268,8 @@ describe('save', () => {
       transition: async () => false,
     });
     const vocabulary = stub<VocabularyRepo>({ findSaveable: async () => [saveable(1)], insertEntries: async () => undefined });
-    const { service } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT) });
+    const dict = stub<DictRepo>({ claimLemmaRenders: async () => [] });
+    const { service } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT), dict, jobs: createFakeJobRepo() });
     await expect(service.save(OWNER, ID)).rejects.toBeInstanceOf(PhotoImportConflict);
   });
 
@@ -279,7 +294,8 @@ describe('save', () => {
       ...createFakeGlossRepo(),
       resolveGlosses: async (ids: string[]) => new Map(ids.map((id) => [id, { id: 'g_survivor', lexemeId: 'l1', userLanguageCode: 'he' }])),
     };
-    const { service } = setup({ photoImport, vocabulary, gloss });
+    const dict = stub<DictRepo>({ claimLemmaRenders: async () => [] });
+    const { service } = setup({ photoImport, vocabulary, gloss, dict, jobs: createFakeJobRepo() });
     expect(await service.save(OWNER, ID)).toEqual({ saved_gloss_ids: ['s1'] });
     expect(asked).toEqual([[{ glossId: 'g_survivor', variantId: 'v1' }]]);
   });

@@ -1,6 +1,6 @@
 import type { LlmEntry, TranslationKind, TranslationSense } from '@lang-tutor/core/api';
 import { normaliseGloss } from '@lang-tutor/core/domain';
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { RepairWouldDropSense } from '../errors';
@@ -34,6 +34,9 @@ export type PersistEntriesInput = {
   userLanguageCode: string;
   kind: TranslationKind;
   entries: LlmEntry[];
+  /** Phase 31 (spec D12). Where this write's entry ranks start: past the form's
+   *  existing headwords, for one added to a form already written. 0 otherwise. */
+  entryRankOffset?: number;
 };
 
 /** What one entry became. `senseIds` is this entry's senses in the order the
@@ -50,7 +53,11 @@ export type PersistedEntry = {
   created: boolean;
 };
 
-export type MergePair = { lexemeId: string; userLanguageCode: string };
+/** Phase 31. One lexeme in one learner language: what a merge, a lemma render
+ *  and its request are each about. */
+export type LexemeLanguage = { lexemeId: string; userLanguageCode: string };
+
+export type MergePair = LexemeLanguage;
 
 /** Phase 31 (spec D19). What a write's gloss step did, for `dict_glosses_assigned`:
  *  glosses created, senses that joined an existing gloss, memberships written. */
@@ -473,7 +480,7 @@ export function createDictRepo(tx: Tx) {
     const written: PersistedEntry[] = [];
     const mergePairs: MergePair[] = [];
     const glosses: GlossCounts = { created: 0, joined: 0, members: 0 };
-    const rows = entriesToRows(input.entries);
+    const rows = entriesToRows(input.entries, input.entryRankOffset);
 
     // 1 — every lexeme of this answer, which is the PAIR of a lemma and a part
     // of speech from phase 12 on. DO NOTHING returns no row, which is exactly
@@ -871,13 +878,85 @@ export function createDictRepo(tx: Tx) {
     return { needsMerge };
   };
 
+  /** Phase 31. One lexeme, for the render-lemma job. */
+  const findLexeme = async (
+    lexemeId: string,
+  ): Promise<{ id: string; lemma: string; languageCode: string; partOfSpeech: string } | undefined> => {
+    const [row] = await tx
+      .select({ id: dictLexemes.id, lemma: dictLexemes.lemma, languageCode: dictLexemes.languageCode, partOfSpeech: dictLexemes.partOfSpeech })
+      .from(dictLexemes)
+      .where(eq(dictLexemes.id, lexemeId));
+    return row;
+  };
+
+  /** Phase 31 (spec D12). Whether a lexeme's lemma form renders it in a language:
+   *  the condition the read and both claims below share. */
+  const LEMMA_RENDERED = (lexeme: SQL, language: SQL) => sql`
+    EXISTS (
+      SELECT 1 FROM dict_variants v
+      JOIN dict_lexemes l           ON l.id = v.lexeme_id
+      JOIN dict_var_translations tr ON tr.variant_id = v.id AND tr.user_language_code = ${language}
+      WHERE v.lexeme_id = ${lexeme} AND lower(v.form) = lower(l.lemma))`;
+
+  /** Phase 31 (spec D12). Whether this lexeme's lemma form renders it in a language. */
+  const hasLemmaRendering = async (input: LexemeLanguage): Promise<boolean> => {
+    const rows = await tx.execute<{ rendered: boolean }>(
+      sql`SELECT ${LEMMA_RENDERED(sql`${input.lexemeId}`, sql`${input.userLanguageCode}`)} AS rendered`,
+    );
+    return rows.rows[0].rendered;
+  };
+
+  /** Phase 31 (spec D12). The next free entry rank of a form, for a headword added
+   *  to a form already written: the safety net
+   *  dict_variants_form_entry_rank_key stays a safety net. */
+  const nextEntryRank = async (input: { form: string; languageCode: string }): Promise<number> => {
+    const rows = await tx.execute<{ next: number }>(sql`
+      SELECT coalesce(max(entry_rank) + 1, 0)::int AS next FROM dict_variants
+      WHERE language_code = ${input.languageCode} AND lower(form) = lower(${input.form})`);
+    return rows.rows[0].next;
+  };
+
+  /** Phase 31 (plan item 3). Records a render request for each pair whose lemma
+   *  form is unrendered and that was never requested, and returns those: the
+   *  ones to enqueue. */
+  const claimLemmaRenders = async (pairs: LexemeLanguage[]): Promise<LexemeLanguage[]> => {
+    if (pairs.length === 0) return [];
+    const rows = await tx.execute<{ lexeme_id: string; user_language_code: string }>(sql`
+      INSERT INTO dict_lemma_renders (lexeme_id, user_language_code)
+      SELECT DISTINCT asked.lexeme_id, asked.user_language_code
+      FROM (VALUES ${sql.join(pairs.map((p) => sql`(${p.lexemeId}::text, ${p.userLanguageCode}::text)`), sql`, `)})
+           AS asked(lexeme_id, user_language_code)
+      WHERE NOT ${LEMMA_RENDERED(sql`asked.lexeme_id`, sql`asked.user_language_code`)}
+      ON CONFLICT DO NOTHING
+      RETURNING lexeme_id, user_language_code`);
+    return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, userLanguageCode: row.user_language_code }));
+  };
+
+  /** The same for every saved gloss of every enrollment: the start-up backfill. */
+  const claimSavedLemmaRenders = async (): Promise<LexemeLanguage[]> => {
+    const rows = await tx.execute<{ lexeme_id: string; user_language_code: string }>(sql`
+      INSERT INTO dict_lemma_renders (lexeme_id, user_language_code)
+      SELECT DISTINCT ve.lexeme_id, e.source_language
+      FROM vocabulary_entries ve
+      JOIN enrollments e ON e.id = ve.enrollment_id
+      WHERE NOT ${LEMMA_RENDERED(sql`ve.lexeme_id`, sql`e.source_language`)}
+      ON CONFLICT DO NOTHING
+      RETURNING lexeme_id, user_language_code`);
+    return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, userLanguageCode: row.user_language_code }));
+  };
+
   return {
+    claimLemmaRenders,
+    claimSavedLemmaRenders,
     findCorrectionByForm,
+    findLexeme,
     findSenseVersion,
     findSensesByForm,
     findSensesByLexeme,
     findStaleLexemesByForm,
+    hasLemmaRendering,
     lockLexemes,
+    nextEntryRank,
     persistCorrection,
     persistEntries,
     repairVariantRenderings,

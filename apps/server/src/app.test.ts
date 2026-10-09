@@ -70,6 +70,9 @@ const unreachableTranslations: TranslationService = {
   translate: () => {
     throw new Error('the health route must not reach the translation service');
   },
+  renderLemma: () => {
+    throw new Error('the health route must not reach the translation service');
+  },
 };
 
 const unreachableVocabulary: VocabularyService = {

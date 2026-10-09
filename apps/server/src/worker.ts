@@ -8,10 +8,12 @@ import {
   PREPARE_SESSION_FAILED,
   READ_PHOTO,
   READ_PHOTO_FAILED,
+  RENDER_LEMMA,
 } from './domain/jobs';
 import type { GlossService } from './services/glosses';
 import type { PhotoImportService } from './services/photoImports';
 import type { SessionService } from './services/sessions';
+import type { TranslationService } from './services/translations';
 
 /**
  * The job side of the app, as app.ts is the HTTP side (ADR 0007, ADR 0001 R5):
@@ -23,10 +25,15 @@ import type { SessionService } from './services/sessions';
  */
 export async function registerWorkers(
   boss: PgBoss,
-  services: { sessions: SessionService; photoImports: PhotoImportService; glosses: GlossService },
+  services: {
+    sessions: SessionService;
+    photoImports: PhotoImportService;
+    glosses: GlossService;
+    translations: TranslationService;
+  },
   options: { pollingIntervalSeconds: number },
 ): Promise<void> {
-  const { sessions, photoImports, glosses } = services;
+  const { sessions, photoImports, glosses, translations } = services;
   await boss.work(
     PREPARE_SESSION,
     // Four at once per process: one model call each, kept under the quota.
@@ -70,4 +77,13 @@ export async function registerWorkers(
   await boss.work(MERGE_GLOSSES, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
     for (const job of jobs) await glosses.mergeLexeme(job.data);
   });
+
+  // Phase 31 (spec D12). Two at once per process: each is a lookup's calls.
+  await boss.work(
+    RENDER_LEMMA,
+    { localConcurrency: 2, pollingIntervalSeconds: options.pollingIntervalSeconds },
+    async (jobs) => {
+      for (const job of jobs) await translations.renderLemma(job.data);
+    },
+  );
 }

@@ -8,6 +8,7 @@ import type {
 } from '@lang-tutor/core/api';
 import { LIVE_DIMENSIONS } from '@lang-tutor/core/domain';
 
+import { RENDER_LEMMA } from '../domain/jobs';
 import {
   assemblePage,
   buildWordDetail,
@@ -96,6 +97,14 @@ export function createVocabularyService({
           throw new InvalidVocabularyEntry(refused.gloss_id);
         }
         await repos.vocabulary.insertEntries({ enrollmentId, addedByUserId: actorUserId, entries: saveable });
+        // Phase 31 (spec D12). A word whose lemma form this language has not
+        // rendered gets it rendered in the background, once (plan item 3).
+        const claimed = await repos.dict.claimLemmaRenders(
+          saveable.map((row) => ({ lexemeId: row.lexemeId, userLanguageCode: enrolled.source_language })),
+        );
+        for (const pair of claimed) {
+          await repos.jobs.enqueue(RENDER_LEMMA, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+        }
       });
       logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length, by });
       return { saved_gloss_ids: asked.map((entry) => entry.gloss_id) };

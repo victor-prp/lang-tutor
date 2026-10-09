@@ -8,7 +8,13 @@ import type {
   TranslationResponse,
 } from '@lang-tutor/core/api';
 
-import { LOOK_UP_IMPORT_ITEM, LookUpImportItemPayloadSchema, READ_PHOTO, ReadPhotoPayloadSchema } from '../domain/jobs';
+import {
+  LOOK_UP_IMPORT_ITEM,
+  LookUpImportItemPayloadSchema,
+  READ_PHOTO,
+  RENDER_LEMMA,
+  ReadPhotoPayloadSchema,
+} from '../domain/jobs';
 import type { LanguageCode } from '../domain/languages';
 import { buildPhotoReadingPrompt, parsePhotoReading, type PhotoReading } from '../domain/photoReading';
 import {
@@ -185,7 +191,7 @@ export function createPhotoImportService({
      */
     save: async (actorUserId: string, importId: string): Promise<SaveVocabularyResponse> => {
       const outcome = await transaction(async (repos) => {
-        const { photoImport, vocabulary, gloss } = repos;
+        const { photoImport, vocabulary, gloss, dict, jobs } = repos;
         const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
         const enrolled = await authorizeImport(repos, actorUserId, row);
@@ -239,6 +245,14 @@ export function createPhotoImportService({
           addedByUserId: enrolled.user_id,
           entries: saveable,
         });
+        // Phase 31 (spec D12). A word whose lemma form this language has not
+        // rendered gets it rendered in the background, once (plan item 3).
+        const claimed = await dict.claimLemmaRenders(
+          saveable.map((entry) => ({ lexemeId: entry.lexemeId, userLanguageCode: enrolled.source_language })),
+        );
+        for (const pair of claimed) {
+          await jobs.enqueue(RENDER_LEMMA, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+        }
         // Conditional: a discard that landed first wins, and the throw rolls
         // the inserts back.
         if (!(await photoImport.transition(importId, ['read'], 'saved'))) {

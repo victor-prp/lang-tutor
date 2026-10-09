@@ -73,6 +73,7 @@ export function createFakeAppDeps(): AppDeps {
   const enrollments: EnrollmentService = { enroll: unreachable, list: unreachable };
   const translations: TranslationService = {
     translate: unreachable,
+    renderLemma: unreachable,
   };
   const vocabulary: VocabularyService = {
     save: unreachable,
@@ -345,6 +346,13 @@ export function createFakeDictRepo(): FakeDictRepo {
     },
     findSenseVersion: async () => 0,
     lockLexemes: async () => {},
+    // Phase 31 (spec D12). The render-lemma job's reads and the saves' claims;
+    // a lookup reaches none of them.
+    findLexeme: async () => undefined,
+    hasLemmaRendering: async () => false,
+    nextEntryRank: async () => 0,
+    claimLemmaRenders: async () => [],
+    claimSavedLemmaRenders: async () => [],
     repairVariantRenderings: async (input) => {
       repo.repaired.push({ variantId: input.variantId, senseVersion: input.senseVersion });
       return { needsMerge: false };

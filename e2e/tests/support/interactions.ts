@@ -2,7 +2,7 @@ import { expect, type APIRequestContext, type Locator, type Page } from '@playwr
 
 import { API_URL } from '../../urls';
 import { generationStub } from './cards';
-import { clearGemini, expectGemini, expectGeminiPayload } from './mockServer';
+import { clearGemini, expectGeminiMatching, expectGeminiPayload, userText } from './mockServer';
 
 // Retried: a static export serves markup before React hydrates, so an early
 // click is a silent no-op (the pattern the specs share).
@@ -15,7 +15,10 @@ export async function tapUntil(page: Page, testId: string, visible: string) {
 
 export async function lookUp(page: Page, request: APIRequestContext, text: string, payload: unknown) {
   await clearGemini(request);
-  await expectGemini(request, payload as Parameters<typeof expectGemini>[1]);
+  // Phase 31. Matched on its own text: a save of an inflected form looks its
+  // lemma up in the background, and a stub that answered every call would write
+  // this word's entries under that lemma.
+  await expectGeminiMatching(request, userText(text), payload);
   await page.getByTestId('translate-input').fill(text);
   await page.getByTestId('translate-submit').click();
   await expect(page.getByTestId('translate-sense').first()).toBeVisible();

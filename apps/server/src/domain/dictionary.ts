@@ -267,12 +267,16 @@ export type EntryRows = {
  * the translation rather than the sense, because it is this form's ordering and
  * not the lexeme's. Contiguous 0..n with no gaps, which is what lets the read
  * sort on the raw rank rather than a computed position.
+ *
+ * Phase 31 (spec D12). `entryRankOffset` starts the entry ranks past a form's
+ * existing headwords, for a headword added to a form already written: the
+ * render-lemma job's scoped path.
  */
-export function entriesToRows(entries: LlmEntry[]): EntryRows[] {
-  return entries.map((entry, entryRank) => ({
+export function entriesToRows(entries: LlmEntry[], entryRankOffset = 0): EntryRows[] {
+  return entries.map((entry, index) => ({
     lemma: entry.lemma,
     partOfSpeech: entry.part_of_speech,
-    entryRank,
+    entryRank: entryRankOffset + index,
     senses: entry.senses.map((sense, rank) => ({ senseCode: sense.sense_code, ...renderingOf(sense, rank) })),
   }));
 }

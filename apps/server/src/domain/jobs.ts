@@ -84,6 +84,17 @@ export const MergeGlossesPayloadSchema = z.object({
 });
 export type MergeGlossesPayload = z.infer<typeof MergeGlossesPayloadSchema>;
 
+/** Phase 31 (spec D12). Renders one lexeme's lemma form in one learner language. */
+export const RENDER_LEMMA = 'render-lemma';
+/** A lookup's two calls and a write, each call within the lookup's 25 s. */
+export const RENDER_LEMMA_EXPIRY_SECONDS = 180;
+
+export const RenderLemmaPayloadSchema = z.object({
+  lexeme_id: z.string().min(1),
+  user_language_code: z.string().min(1),
+});
+export type RenderLemmaPayload = z.infer<typeof RenderLemmaPayloadSchema>;
+
 export type JobPayloads = {
   [PREPARE_SESSION]: PrepareSessionPayload;
   [PREPARE_SESSION_FAILED]: PrepareSessionPayload;
@@ -92,5 +103,6 @@ export type JobPayloads = {
   [LOOK_UP_IMPORT_ITEM]: LookUpImportItemPayload;
   [LOOK_UP_IMPORT_ITEM_FAILED]: LookUpImportItemPayload;
   [MERGE_GLOSSES]: MergeGlossesPayload;
+  [RENDER_LEMMA]: RenderLemmaPayload;
 };
 export type JobName = keyof JobPayloads;

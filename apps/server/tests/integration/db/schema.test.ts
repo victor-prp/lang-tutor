@@ -46,6 +46,7 @@ const TABLES = [
   'dict_var_translations',
   'dict_glosses',
   'dict_sense_glosses',
+  'dict_lemma_renders',
   'dict_variant_renderings',
   'dict_corrections',
   'vocabulary_entries',

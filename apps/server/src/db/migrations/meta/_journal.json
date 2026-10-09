@@ -183,6 +183,13 @@
       "when": 1791565708588,
       "tag": "0025_glosses_rekey",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791581113684,
+      "tag": "0026_lemma_renders",
+      "breakpoints": true
     }
   ]
 }

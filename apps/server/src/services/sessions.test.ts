@@ -134,6 +134,21 @@ describe('repos', () => {
     repairVariantRenderings: () => {
       throw new Error('the session service must not write the dictionary tables');
     },
+    findLexeme: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    hasLemmaRendering: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    nextEntryRank: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    claimLemmaRenders: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    claimSavedLemmaRenders: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
   };
 
   // Phase 31. Bound into the same transaction, and untouched by these cases:

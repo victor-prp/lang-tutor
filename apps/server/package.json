@@ -42,6 +42,7 @@
     "db:progress:recompute": "tsx src/db/cli.ts --recompute-progress",
     "dict:export": "tsx src/db/cli.ts --export-dict",
     "dict:restore": "tsx src/db/cli.ts --import-dict",
+    "dict:lemmas:render": "tsx src/db/cli.ts --render-lemmas",
     "eval": "tsx tests/eval/run.ts",
     "content:generate": "tsx tests/eval/generate-content.ts",
     "lane:list": "tsx src/db/cli.ts --lane-list",

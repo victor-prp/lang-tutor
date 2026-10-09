@@ -454,6 +454,26 @@ export const dictSenseGlosses = pgTable(
 );
 
 /**
+ * Phase 31 (decided while planning, item 3; spec D12). One row per lexeme and
+ * learner language whose lemma form's rendering was ever requested, by a save or
+ * by the start-up backfill. Nothing requests it twice: a lemma the job skipped
+ * (the lemma's lookup had no entry for this headword) would otherwise cost model
+ * calls on every save and every container start.
+ */
+export const dictLemmaRenders = pgTable(
+  'dict_lemma_renders',
+  {
+    lexemeId: text('lexeme_id').notNull(),
+    userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'dict_lemma_renders_pkey', columns: [t.lexemeId, t.userLanguageCode] }),
+    foreignKey({ name: 'dict_lemma_renders_lexeme_fk', columns: [t.lexemeId], foreignColumns: [dictLexemes.id] }).onDelete('cascade'),
+  ],
+);
+
+/**
  * Phase 16. The lexeme's sense_version a form's translations were last written
  * against, PER EXPLANATION LANGUAGE. It replaces dict_variants'
  * rendered_sense_version, which was one counter for every language: a repair

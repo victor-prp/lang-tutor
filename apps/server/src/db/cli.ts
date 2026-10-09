@@ -5,6 +5,7 @@ import { loadConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, listLaneDatabases } from './lanes';
+import { requestLemmaRenders } from './lemmaRenders';
 import { runMigrations } from './migrate';
 import { createAuthRepo } from '../repo/auth';
 import { recomputeProgress } from './progressRecompute';
@@ -219,6 +220,13 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Phase 31 (plan item 3). On demand, after migrating: `npm run dict:lemmas:render`.
+    if (process.argv.includes('--render-lemmas')) {
+      const { requested } = await requestLemmaRenders(db);
+      console.log(`asked for ${requested} lemma renders in ${shownUrl}`);
+      return;
+    }
+
     if (importFrom) {
       const records = fromJsonl(readFileSync(importFrom, 'utf8'));
       console.log(`restoring ${records.length} forms from ${importFrom}`);
@@ -261,6 +269,11 @@ async function main(): Promise<void> {
       await seedContent(db);
       console.log(`migrated and seeded ${shownUrl}`);
     }
+
+    // Phase 31 (plan item 3). The words saved before glosses existed get their
+    // lemma form rendered once: production runs only this command (ADR 0010).
+    const { requested } = await requestLemmaRenders(db);
+    if (requested > 0) console.log(`asked for ${requested} lemma renders`);
   } finally {
     await close();
   }
