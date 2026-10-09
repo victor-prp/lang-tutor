@@ -75,19 +75,22 @@ proves before the next one starts.
    aws lightsail get-certificates --region eu-central-1 --certificate-name wordspal-app \
      --query 'certificates[0].certificateDetail.status' --output text   # ISSUED
    ```
-9. **The dictionary, once** (spec D14):
+9. **The database stays reachable from the laptop.** `publicly_accessible` defaults to `true`:
+   Lightsail cannot limit a database by IP, so the generated password and `verify-full` TLS are
+   all that guard it, and the password lives only in the Terraform state. To connect:
 
    ```bash
-   ./scripts/infra.sh prod apply -var publicly_accessible=true
    curl -fsSo "$TMPDIR/rds-global-bundle.pem" https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
-   DATABASE_URL="$(./scripts/infra.sh prod output -raw database_url \
-     | sed "s#/app/certs/rds-global-bundle.pem#$TMPDIR/rds-global-bundle.pem#")" npm run dict:restore
-   ./scripts/infra.sh prod apply
+   export PROD_DB="$(./scripts/infra.sh prod output -raw database_url \
+     | sed "s#/app/certs/rds-global-bundle.pem#$TMPDIR/rds-global-bundle.pem#")"
+   psql "$PROD_DB"
    ```
 
-   The restore migrates first, then loads the checked-in file, about two minutes; a rerun is
-   harmless. The last apply closes the database again. The first container start re-stamps
-   the database comment, which the restore wrote from your laptop's lane.
+   The first container start migrates and seeds the database, so nothing has to run from the
+   laptop first. Loading the checked-in dictionary (spec D14) is optional; without it the
+   dictionary starts empty and fills as words are looked up. `DATABASE_URL="$PROD_DB" npm run
+   dict:restore` migrates, then loads it in about two minutes, and a rerun is harmless. The next
+   container start re-stamps the database comment the restore wrote from your laptop's lane.
 10. **The first release.** Merge, pull, test master locally, then
     `tag=v$(date +%Y.%m.%d); git tag "$tag" && git push origin "$tag"`. The Release workflow waits for CI,
     builds, pushes, applies, and checks `/health` on the service's default address (the domain

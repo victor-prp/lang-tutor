@@ -48,9 +48,9 @@ variable "db_bundle_id" {
 }
 
 variable "publicly_accessible" {
-  description = "True only while the dictionary is loaded from the laptop (spec D14)."
+  description = "Open on purpose, so production can be inspected from the laptop. Lightsail cannot limit it by IP: only the generated password and TLS guard it (runbook step 9)."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "attach_domain" {
