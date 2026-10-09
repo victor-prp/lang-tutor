@@ -9,7 +9,7 @@ import { createDb, type Db } from '../../../src/db/client';
 import { runMigrations } from '../../../src/db/migrate';
 import { sessions, users } from '../../../src/db/schema';
 import { ADMIN_URL, testDbName, urlFor } from '../../support/dbNames';
-import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
+import { enrollmentOf, seedEnrollment, seedIdentity, seedUser } from '../../support/seedUser';
 
 // Created from scratch rather than cloned, because what is under test is the
 // migrations themselves. Named like a per-test database so the next run's sweep
@@ -98,6 +98,8 @@ describe('the migrated schema', () => {
   // Phase 8 dropped the he/en column defaults: onboarding always supplies the
   // language, so a default could only mask a bug. The column is still required.
   it('requires a native language rather than defaulting one', async () => {
+    // The identity first (phase 29), so the refusal below is the language's.
+    await seedIdentity(db, 'u_defaults');
     await expect(
       db.execute(
         sql`insert into users (id, username, display_name, age) values ('u_defaults', 'u_defaults', 'x', 30)`,

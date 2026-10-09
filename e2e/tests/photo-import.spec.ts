@@ -4,7 +4,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 
 import { tapUntil } from './support/interactions';
 import { clearGemini, expectGeminiMatching } from './support/mockServer';
-import { createLearner, logIn } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 
 test.setTimeout(180_000);
 test.beforeEach(async ({ request }) => {
@@ -60,8 +60,8 @@ async function uploadFromGallery(page: Page) {
 }
 
 test('a photo of an Italian list becomes three rows, and the review decides what is saved', async ({ page, request }) => {
-  await createLearner(request, 'e2e_photo_it', 'it');
-  await logIn(page, 'e2e_photo_it');
+  await signUpLearner(page, 'e2e_photo_it', 'it');
+  await openApp(page);
   await stubImport(request);
   await uploadFromGallery(page);
 
@@ -89,8 +89,8 @@ test('a photo of an Italian list becomes three rows, and the review decides what
 });
 
 test('leaving before the read finishes loses nothing: home shows the import, and it can be discarded', async ({ page, request }) => {
-  await createLearner(request, 'e2e_photo_leave', 'it');
-  await logIn(page, 'e2e_photo_leave');
+  await signUpLearner(page, 'e2e_photo_leave', 'it');
+  await openApp(page);
   await stubImport(request, { readDelayMs: 5_000 });
   await uploadFromGallery(page);
 
@@ -109,13 +109,13 @@ test('leaving before the read finishes loses nothing: home shows the import, and
   await expect(page.getByTestId('home-photo-card')).toHaveCount(0);
 
   // A fresh load reads the list from the server, so the discard was stored and
-  // not only drawn. The user lives in memory, so the load lands on the login
-  // screen, and logIn's page.goto is that load. Right after it the card is
+  // not only drawn. openApp's page.goto is that load, signed in by the
+  // session cookie. Right after it the card is
   // absent before the list has even arrived, so the list itself is checked.
   const listed = page.waitForResponse(
     (res) => /\/api\/enrollments\/[^/]+\/photo-imports$/.test(res.url()) && res.request().method() === 'GET',
   );
-  await logIn(page, 'e2e_photo_leave');
+  await openApp(page);
   expect(await (await listed).json()).toEqual([]);
   await expect(page.getByTestId('home-photo-card')).toHaveCount(0);
 });

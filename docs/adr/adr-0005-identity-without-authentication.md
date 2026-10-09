@@ -1,6 +1,6 @@
 # ADR 0005: Identity without authentication
 
-- **Status:** Accepted; amended 2026-10-07 by [ADR 0008](adr-0008-access-grants.md): authorization exists, over an asserted identity. No credential code, still.
+- **Status:** Superseded by [ADR 0009](adr-0009-sign-in.md) on 2026-10-08 (phase 29): sign-in exists. Its R2 and R3 live on as ADR 0009 R6 and R5.
 - **Date:** 2026-09-07
 - **Source:** [phase 8 design](../superpowers/specs/2026-09-07-lang-tutor-phase-8-onboarding-design.md)
 

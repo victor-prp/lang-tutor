@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Boots the app for a QA agent run: a freshly provisioned database, the Hono
-# server, and a static web export of the Expo app.
+# Boots the app for a QA agent run: a freshly provisioned database, a local
+# inbox standing in for Resend, the Hono server, and a static web export of the
+# Expo app.
 #
 # This is e2e/playwright.config.ts's `webServer` block as a shell script, with
 # one deliberate difference: GEMINI_BASE_URL is NOT set, so the server calls the
@@ -22,8 +23,12 @@ cd "$(dirname "$0")/.." || exit 1
 # serve on 8082 rather than attach to whatever sits on Metro's 8081.
 QA_API_PORT="${QA_API_PORT:-3101}"
 QA_APP_PORT="${QA_APP_PORT:-8092}"
+# Phase 29: the inbox sign-in codes are sent to (src/mail-sink.ts). Reserved
+# beside the other two, out of reach of scripts/lane-env.sh's formula.
+QA_MAIL_PORT="${QA_MAIL_PORT:-8093}"
 QA_API_URL="http://localhost:$QA_API_PORT"
 QA_APP_URL="http://localhost:$QA_APP_PORT"
+QA_MAIL_URL="http://localhost:$QA_MAIL_PORT"
 
 OUT="nightly-qa/.out"
 mkdir -p "$OUT"
@@ -41,7 +46,7 @@ case "${GEMINI_BASE_URL:-}" in
   *localhost*|*127.0.0.1*) fail "GEMINI_BASE_URL points at a local mock. Unset it." ;;
 esac
 
-for port in "$QA_API_PORT" "$QA_APP_PORT"; do
+for port in "$QA_API_PORT" "$QA_APP_PORT" "$QA_MAIL_PORT"; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     fail "Port $port is already in use. Stop whatever holds it (npm run server, an e2e run, a previous ./nightly-qa/down.sh that did not finish)."
   fi
@@ -50,11 +55,34 @@ done
 # --- 1. the database ---------------------------------------------------------
 npx tsx nightly-qa/src/provision-db.ts || fail "Could not provision lang_tutor_qa. Is Postgres up? (npm run db:up, from the MAIN checkout)"
 
-# --- 2. the server -----------------------------------------------------------
+# --- 2. the inbox ------------------------------------------------------------
+# Phase 29: the app signs in with an emailed code. Real email would need a real
+# address and a Resend key; the sink answers Resend's one call and shows the
+# agent its messages at /inbox?email=<address> instead.
+npx tsx nightly-qa/src/mail-sink.ts "$QA_MAIL_PORT" > "$OUT/mail.log" 2>&1 &
+echo $! >> "$OUT/pids"
+
+deadline=$((SECONDS + 30))
+until curl -sf -o /dev/null "$QA_MAIL_URL/inbox?email=qa@example.com"; do
+  [ "$SECONDS" -lt "$deadline" ] || { tail -20 "$OUT/mail.log" >&2; fail "Mail sink did not answer within 30s."; }
+  sleep 1
+done
+echo "  ok         inbox on :$QA_MAIL_PORT"
+
+# --- 3. the server -----------------------------------------------------------
 # Log to a file rather than the terminal: the log ships with the run, and a 502
 # the learner experienced as a blank screen is explained there and nowhere else.
+#
+# The sign-in variables (phase 29): a fresh secret per run, the QA app as the
+# one web origin, and Resend pointed at the inbox above.
 PORT="$QA_API_PORT" \
 DATABASE_URL="postgres://postgres:postgres@${PGHOST:-localhost}:${PGPORT:-5432}/lang_tutor_qa" \
+BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+AUTH_BASE_URL="$QA_API_URL" \
+WEB_ORIGINS="$QA_APP_URL" \
+RESEND_API_KEY=qa \
+RESEND_BASE_URL="$QA_MAIL_URL" \
+MAIL_FROM='WordsPal QA <qa@example.com>' \
   npm run start -w apps/server > "$OUT/server.log" 2>&1 &
 echo $! >> "$OUT/pids"
 
@@ -65,7 +93,7 @@ until curl -sf -o /dev/null "$QA_API_URL/health"; do
 done
 echo "  ok         server on :$QA_API_PORT (real Gemini)"
 
-# --- 3. the app --------------------------------------------------------------
+# --- 4. the app --------------------------------------------------------------
 # EXPO_PUBLIC_API_URL must be set at EXPORT time: Metro inlines EXPO_PUBLIC_*
 # into the bundle, so setting it when serving would be too late and the app
 # would throw at module scope.

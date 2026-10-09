@@ -1,7 +1,15 @@
 import { eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { enrollments, sessions, users } from '../../src/db/schema';
+import { authUsers, enrollments, sessions, users } from '../../src/db/schema';
+
+/** Phase 29. A profile needs a sign-in identity with the same id (spec D9). */
+export async function seedIdentity(db: Db, id: string): Promise<void> {
+  await db
+    .insert(authUsers)
+    .values({ id, name: `test ${id}`, email: `${id}@test.invalid` })
+    .onConflictDoNothing();
+}
 
 /** The id seedUser gives its learner's English enrollment. */
 export function enrollmentOf(userId: string): string {
@@ -21,6 +29,7 @@ export function enrollmentOf(userId: string): string {
  * five times.
  */
 export async function seedUser(db: Db, id: string): Promise<void> {
+  await seedIdentity(db, id);
   await db
     .insert(users)
     .values({ id, username: id, displayName: `test ${id}`, age: 30, nativeLanguage: 'he' })
@@ -51,6 +60,7 @@ export async function seedEnrollment(
  * which is why this lives here.
  */
 export async function seedLegacyLearner(db: Db): Promise<{ enrollmentId: string }> {
+  await seedIdentity(db, 'u_legacy');
   await db
     .insert(users)
     .values({ id: 'u_legacy', username: 'u_legacy', displayName: 'legacy', age: 40, nativeLanguage: 'en' })

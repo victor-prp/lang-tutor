@@ -1,7 +1,7 @@
 # ADR 0006: Every checkout is self-contained
 
 - **Status:** Accepted
-- **Date:** 2026-09-16
+- **Date:** 2026-09-16; R7 gains nightly QA's inbox port 2026-10-08 (phase 29)
 - **Source:** [phase 15 design](../superpowers/specs/2026-09-16-lang-tutor-phase-15-lanes-design.md)
 
 ## Decision
@@ -90,7 +90,7 @@ their subject.
   the branch is not `master`, naming the branch and giving the two commands that move the
   work into a lane of its own. A warning rather than a block, because the legitimate uses
   above are real and a block would only be worked around.
-- **R7 — `nightly-qa/` is deliberately outside the formula.** Its ports (3101, 8092) are
+- **R7 — `nightly-qa/` is deliberately outside the formula.** Its ports (3101, 8092, and 8093 for its inbox since phase 29) are
   hand-picked and unreachable by the arithmetic. In CI each run owns its runner, so lanes
   buy it nothing; locally its reserved ports already coexist with a dev loop.
 

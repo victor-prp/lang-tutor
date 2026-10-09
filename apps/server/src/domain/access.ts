@@ -7,11 +7,21 @@
  * services/access.ts authorize() in the use case that needs it: no migration, and
  * no grant changes. The owner may do anything with their own list.
  *
- * Pure (ADR 0001 R3). The actor is ASSERTED until login exists (ADR 0008 R5):
- * this is a correctness boundary for an honest client, not a security one.
+ * Phase 29 (spec D13, ADR 0009). The actor is the signed-in user, so this is a
+ * security boundary. Every use case that touches a learner's data asks it: the
+ * three permissions added then (reading the list, practising, photo imports)
+ * are in no role, so only the owner holds them.
+ *
+ * Pure (ADR 0001 R3).
  */
 
-export const PERMISSIONS = ['vocabulary.add', 'vocabulary.remove'] as const;
+export const PERMISSIONS = [
+  'vocabulary.add',
+  'vocabulary.remove',
+  'vocabulary.read',
+  'session.practice',
+  'photo_import.manage',
+] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 export const ROLES = ['tutor'] as const;

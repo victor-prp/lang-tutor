@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { PERMISSIONS, grantViewOf, isRole, may, mayAnswerInvite, mayEndGrant, type GrantView } from './access';
+import { PERMISSIONS, TUTOR, grantViewOf, isRole, may, mayAnswerInvite, mayEndGrant, type GrantView } from './access';
 
 const OWNER = 'u_student';
 const TUTOR_ID = 'u_tutor';
@@ -38,6 +38,16 @@ describe('may', () => {
   it('refuses a role this server does not know', () => {
     expect(may(TUTOR_ID, OWNER, { ...accepted, role: 'parent' }, 'vocabulary.add')).toBe(false);
   });
+
+  // Phase 29 (spec D13). Owner-only: no role holds these.
+  it.each(['vocabulary.read', 'session.practice', 'photo_import.manage'] as const)(
+    'lets the owner %s and refuses an accepted tutor',
+    (permission) => {
+      const grant = { ownerUserId: 'owner', granteeUserId: 'tutor', role: TUTOR, accepted: true };
+      expect(may('owner', 'owner', null, permission)).toBe(true);
+      expect(may('tutor', 'owner', grant, permission)).toBe(false);
+    },
+  );
 });
 
 describe('isRole', () => {

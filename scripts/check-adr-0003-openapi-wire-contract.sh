@@ -33,7 +33,7 @@ check() {
 }
 
 r1() {
-  grep -rnE "\.(get|post|put|patch|delete)\(" apps/server/src/routes/ apps/server/src/app.ts \
+  grep -rnE "\.(get|post|put|patch|delete)\(" apps/server/src/routes/ apps/server/src/app.ts --exclude='*.test.ts' \
     | grep -v "app.get('/docs'"
 }
 

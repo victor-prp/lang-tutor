@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { Hono } from 'hono';
 
-import { createTestServerDeps } from '../../support/serverDeps';
+import { createMeRouter } from '../../../src/routes/me';
 import { createUsersRouter } from '../../../src/routes/users';
+import { ACT_AS, actAs } from '../../support/actAs';
 import { createFakeLogger } from '../../support/fakes';
+import { seedIdentity } from '../../support/seedUser';
+import { createTestServerDeps } from '../../support/serverDeps';
 import { testRng } from '../../support/testRng';
 import { createTestDb, type TestDb } from '../../support/testDb';
 
@@ -11,6 +14,9 @@ let t: TestDb;
 
 beforeEach(async () => {
   t = await createTestDb();
+  // Phase 29: a signed-in user has an identity before they have a profile.
+  await seedIdentity(t.db, 'u_dana');
+  await seedIdentity(t.db, 'u_other');
 });
 
 afterEach(async () => {
@@ -19,18 +25,20 @@ afterEach(async () => {
 
 // Production's assembly with a per-test database, exactly as the sessions route
 // test does it. A route test that hand-wired repositories would be testing a
-// graph this server never builds.
+// graph this server never builds. actAs stands in for the session middleware.
 function buildTestApp() {
   const app = new Hono();
   const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
+  app.use('*', actAs());
+  app.route('/api', createMeRouter(deps.users));
   app.route('/api', createUsersRouter(deps.users));
   return app;
 }
 
-function postJson(app: Hono, path: string, body: unknown) {
+function postJson(app: Hono, path: string, actor: string, body: unknown) {
   return app.request(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', [ACT_AS]: actor },
     body: JSON.stringify(body),
   });
 }
@@ -43,60 +51,54 @@ const REQUEST = {
 };
 
 describe('POST /api/users', () => {
-  it('creates a user and returns it with a server-issued id', async () => {
-    const app = buildTestApp();
-    const res = await postJson(app, '/api/users', REQUEST);
-
+  it("creates the signed-in user's profile under their own id", async () => {
+    const res = await postJson(buildTestApp(), '/api/users', 'u_dana', REQUEST);
     expect(res.status).toBe(201);
-    const body = await res.json();
-    expect(body).toEqual({ id: expect.any(String), ...REQUEST });
+    expect(await res.json()).toEqual({ id: 'u_dana', ...REQUEST });
   });
 
-  it('returns 409 when the username is taken', async () => {
+  it('answers 409 profile exists for a second profile', async () => {
     const app = buildTestApp();
-    await postJson(app, '/api/users', REQUEST);
+    expect((await postJson(app, '/api/users', 'u_dana', REQUEST)).status).toBe(201);
 
-    const res = await postJson(app, '/api/users', { ...REQUEST, display_name: 'אחרת' });
+    const res = await postJson(app, '/api/users', 'u_dana', { ...REQUEST, username: 'dana_two' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'profile exists' });
+  });
+
+  it('answers 409 username is already taken when another user holds it', async () => {
+    const app = buildTestApp();
+    await postJson(app, '/api/users', 'u_dana', REQUEST);
+
+    const res = await postJson(app, '/api/users', 'u_other', { ...REQUEST, display_name: 'אחרת' });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'username is already taken' });
   });
 
   it('returns 400 with the contract error body for a malformed request', async () => {
-    const app = buildTestApp();
-    const res = await postJson(app, '/api/users', { ...REQUEST, username: 'Dana' });
+    const res = await postJson(buildTestApp(), '/api/users', 'u_dana', { ...REQUEST, username: 'Dana' });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid request' });
   });
 
-  it('ignores an id supplied by the caller', async () => {
-    const app = buildTestApp();
-    const res = await postJson(app, '/api/users', { ...REQUEST, id: 'chosen-by-client' });
+  it('ignores an id in the body: the profile is the actor’s', async () => {
+    const res = await postJson(buildTestApp(), '/api/users', 'u_dana', { ...REQUEST, id: 'chosen-by-client' });
     expect(res.status).toBe(201);
-    expect((await res.json()).id).not.toBe('chosen-by-client');
+    expect((await res.json()).id).toBe('u_dana');
   });
 });
 
-describe('POST /api/login', () => {
-  it('returns the user for a known username', async () => {
-    const app = buildTestApp();
-    const created = await (await postJson(app, '/api/users', REQUEST)).json();
-
-    const res = await postJson(app, '/api/login', { username: 'dana' });
+describe('GET /api/me', () => {
+  it('answers the signed-in address with no profile before onboarding', async () => {
+    const res = await buildTestApp().request('/api/me', { headers: { [ACT_AS]: 'u_dana' } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(created);
+    expect(await res.json()).toEqual({ email: 'u_dana@test.invalid', user: null });
   });
 
-  it('returns 404 for a username nobody registered', async () => {
+  it('answers the profile after it', async () => {
     const app = buildTestApp();
-    const res = await postJson(app, '/api/login', { username: 'nobody' });
-    expect(res.status).toBe(404);
-    expect(await res.json()).toEqual({ error: 'no such user' });
-  });
-
-  it('returns 400 with the contract error body for a malformed username', async () => {
-    const app = buildTestApp();
-    const res = await postJson(app, '/api/login', { username: 'D' });
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: 'invalid request' });
+    const created = await (await postJson(app, '/api/users', 'u_dana', REQUEST)).json();
+    const res = await app.request('/api/me', { headers: { [ACT_AS]: 'u_dana' } });
+    expect(await res.json()).toEqual({ email: 'u_dana@test.invalid', user: created });
   });
 });

@@ -6,7 +6,7 @@ import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
 import { answerChoice, generationStub, readCard, rightOption } from './support/cards';
 import { clearGemini, expectGeminiPayload } from './support/mockServer';
-import { createLearner, logIn } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
 test.setTimeout(180_000);
@@ -20,8 +20,8 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   page.on('dialog', (dialog) => void dialog.accept());
 
   await withVoices(page, []);
-  await createLearner(request, 'e2e_next_ru', 'ru');
-  await logIn(page, 'e2e_next_ru');
+  await signUpLearner(page, 'e2e_next_ru', 'ru');
+  await openApp(page);
 
   // 1. The seed comes first. Enter it, then skip it.
   await tapUntil(page, 'start-button', 'progress-label');
@@ -79,8 +79,8 @@ test('past the seed, a session is built from the saved words', async ({ page, re
 
 test('leaving mid-session offers resume', async ({ page, request }) => {
   await withVoices(page, []);
-  await createLearner(request, 'e2e_resume_ru', 'ru');
-  await logIn(page, 'e2e_resume_ru');
+  await signUpLearner(page, 'e2e_resume_ru', 'ru');
+  await openApp(page);
 
   await tapUntil(page, 'start-button', 'progress-label');
   await page.getByTestId('option-0').click();

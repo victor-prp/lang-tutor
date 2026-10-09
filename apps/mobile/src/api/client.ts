@@ -10,7 +10,7 @@ import type {
   GrantList,
   JudgedAnswerRequest,
   JudgedAnswerResponse,
-  LoginRequest,
+  MeResponse,
   NextStepRequest,
   NextStepResponse,
   PhotoImport,
@@ -56,13 +56,6 @@ async function failureOf(res: Response): Promise<ApiError> {
  *  button disabled; past this it becomes the "couldn't check" notice. */
 export const SPEECH_UPLOAD_TIMEOUT_MS = 15_000;
 
-// Phase 28 (ADR 0008 R2). The ONE place in the app that names the actor header.
-// Asserted, not a credential: the server checks what this user may do, and login
-// will replace it. The client is built before anyone logs in, so the caller
-// passes the id; nothing here holds it.
-const ACTOR_HEADER = 'X-Acting-User-Id';
-const actorHeader = (actorUserId: string | undefined): Record<string, string> =>
-  actorUserId ? { [ACTOR_HEADER]: actorUserId } : {};
 /** Phase 27 (spec D13). The server's own judge gives up after 8 s; past this the
  *  app does too, and the card offers "try again". */
 export const JUDGE_REQUEST_TIMEOUT_MS = 15_000;
@@ -74,70 +67,72 @@ export const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
 export type ApiClientDeps = {
   baseUrl: string;
   fetch: typeof globalThis.fetch;
+  /** Phase 29: the signed-in session as request headers (a Cookie on a phone, none on web). */
+  sessionHeaders: () => Promise<Record<string, string>>;
+  /** 'include' on web, where the browser keeps the cookie; 'omit' on a phone. */
+  credentials: RequestCredentials;
+  /** Told of every 401, before the call throws it. */
+  onUnauthorized: () => void;
 };
 
-// `baseUrl` and `fetch` are received, not read from the environment or the
-// global object. The literal process.env.EXPO_PUBLIC_API_URL now lives in
-// app/_layout.tsx, which is where Metro's build-time inlining still sees it.
-export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
+// Everything is received, not read from the environment or the global object.
+// The literal process.env.EXPO_PUBLIC_API_URL lives in app/_layout.tsx, which
+// is where Metro's build-time inlining still sees it. No call names its actor
+// (spec D12): the session, sent by sessionHeaders, says who is asking.
+export function createApiClient({ baseUrl, fetch, sessionHeaders, credentials, onUnauthorized }: ApiClientDeps) {
+  async function send(
+    method: string,
+    path: string,
+    init: { body?: unknown; signal?: AbortSignal } = {},
+  ): Promise<Response> {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method,
+      credentials,
+      headers: {
+        ...(await sessionHeaders()),
+        ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      ...(init.signal ? { signal: init.signal } : {}),
+    });
+    if (res.status === 401) onUnauthorized();
+    if (!res.ok) throw await failureOf(res);
+    return res;
+  }
+
   async function postJson<TResponse>(
     path: string,
     body: unknown,
-    options: { signal?: AbortSignal; actorUserId?: string } = {},
+    options: { signal?: AbortSignal } = {},
   ): Promise<TResponse> {
-    const res = await fetch(`${baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...actorHeader(options.actorUserId) },
-      body: JSON.stringify(body),
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-    if (!res.ok) throw await failureOf(res);
+    const res = await send('POST', path, { body, ...(options.signal ? { signal: options.signal } : {}) });
     return (await res.json()) as TResponse;
   }
 
   async function patchJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
-    const res = await fetch(`${baseUrl}${path}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw await failureOf(res);
+    const res = await send('PATCH', path, { body });
     return (await res.json()) as TResponse;
   }
 
   async function postNoContent(path: string): Promise<void> {
-    const res = await fetch(`${baseUrl}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    if (!res.ok) throw await failureOf(res);
+    await send('POST', path, { body: {} });
   }
 
-  async function getJson<TResponse>(path: string, actorUserId?: string): Promise<TResponse> {
-    const res = await fetch(`${baseUrl}${path}`, {
-      method: 'GET',
-      ...(actorUserId ? { headers: actorHeader(actorUserId) } : {}),
-    });
-    if (!res.ok) throw await failureOf(res);
+  async function getJson<TResponse>(path: string): Promise<TResponse> {
+    const res = await send('GET', path);
     return (await res.json()) as TResponse;
   }
 
-  async function deleteResource(path: string, actorUserId?: string): Promise<void> {
-    const res = await fetch(`${baseUrl}${path}`, {
-      method: 'DELETE',
-      ...(actorUserId ? { headers: actorHeader(actorUserId) } : {}),
-    });
-    if (!res.ok) throw await failureOf(res);
+  async function deleteResource(path: string): Promise<void> {
+    await send('DELETE', path);
   }
 
   const vocabularyPath = (enrollmentId: string) =>
     `/api/enrollments/${encodeURIComponent(enrollmentId)}/vocabulary`;
 
   return {
-    // Identification, not authentication: there is no password to send.
-    login: (request: LoginRequest) => postJson<User>('/api/login', request),
-    createUser: (request: CreateUserRequest) => postJson<User>('/api/users', request),
+    me: () => getJson<MeResponse>('/api/me'),
+    createProfile: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>
       postJson<CreateSessionResponse>('/api/sessions', request),
     nextStep: (sessionId: string, request: NextStepRequest) =>
@@ -176,14 +171,13 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       getJson<CurrentSessionResponse>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/sessions/current`),
     translate: (request: TranslationRequest) =>
       postJson<TranslationResponse>('/api/translations', request),
-    listEnrollments: (userId: string) =>
-      getJson<Enrollment[]>(`/api/users/${encodeURIComponent(userId)}/enrollments`),
-    createEnrollment: (userId: string, request: CreateEnrollmentRequest) =>
-      postJson<Enrollment>(`/api/users/${encodeURIComponent(userId)}/enrollments`, request),
-    saveVocabulary: (actorUserId: string, enrollmentId: string, request: SaveVocabularyRequest) =>
-      postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request, { actorUserId }),
-    unsaveVocabulary: (actorUserId: string, enrollmentId: string, senseId: string) =>
-      deleteResource(`${vocabularyPath(enrollmentId)}/senses/${encodeURIComponent(senseId)}`, actorUserId),
+    // Phase 29 (spec D12): the signed-in learner's own; the server knows who.
+    listEnrollments: () => getJson<Enrollment[]>('/api/enrollments'),
+    createEnrollment: (request: CreateEnrollmentRequest) => postJson<Enrollment>('/api/enrollments', request),
+    saveVocabulary: (enrollmentId: string, request: SaveVocabularyRequest) =>
+      postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request),
+    unsaveVocabulary: (enrollmentId: string, senseId: string) =>
+      deleteResource(`${vocabularyPath(enrollmentId)}/senses/${encodeURIComponent(senseId)}`),
     listVocabulary: (enrollmentId: string, query: { cursor?: string; limit?: number; level?: number }) => {
       const params = new URLSearchParams();
       if (query.cursor !== undefined) params.set('cursor', query.cursor);
@@ -194,14 +188,11 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
     },
     vocabularyWord: (enrollmentId: string, lemma: string) =>
       getJson<VocabularyWordDetail>(`${vocabularyPath(enrollmentId)}/word?lemma=${encodeURIComponent(lemma)}`),
-    // Phase 28. Grants: every call names the acting user (ADR 0008).
-    listGrants: (actorUserId: string) => getJson<GrantList>('/api/grants', actorUserId),
-    createGrant: (actorUserId: string, request: CreateGrantRequest) =>
-      postJson<Grant>('/api/grants', request, { actorUserId }),
-    acceptGrant: (actorUserId: string, grantId: string) =>
-      postJson<Grant>(`/api/grants/${encodeURIComponent(grantId)}/accept`, {}, { actorUserId }),
-    endGrant: (actorUserId: string, grantId: string) =>
-      deleteResource(`/api/grants/${encodeURIComponent(grantId)}`, actorUserId),
+    // Phase 28. Grants, as the signed-in user (phase 29: the session says who).
+    listGrants: () => getJson<GrantList>('/api/grants'),
+    createGrant: (request: CreateGrantRequest) => postJson<Grant>('/api/grants', request),
+    acceptGrant: (grantId: string) => postJson<Grant>(`/api/grants/${encodeURIComponent(grantId)}/accept`, {}),
+    endGrant: (grantId: string) => deleteResource(`/api/grants/${encodeURIComponent(grantId)}`),
 
     // Phase 26. Words from a photo.
     createPhotoImport: async (enrollmentId: string, request: PhotoImportCreateRequest) => {

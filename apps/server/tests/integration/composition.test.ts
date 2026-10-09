@@ -37,6 +37,14 @@ describe('createServerDeps', () => {
       now: () => 0,
       fetch: globalThis.fetch,
       gemini: { apiKey: 'test-key', baseUrl: 'http://127.0.0.1:9/never-registered', model: 'm' },
+      auth: {
+        secret: 'test-secret-that-is-at-least-32-chars',
+        baseUrl: 'http://localhost',
+        webOrigins: ['https://web.example.test'],
+        resendApiKey: 'test-key',
+        resendBaseUrl: 'http://127.0.0.1:9/never-registered',
+        mailFrom: 'test@example.com',
+      },
       translationTimeoutMs: 25_000,
       sessionGenerationTimeoutMs: 120_000,
       speechTimeoutMs: 8_000,
@@ -56,8 +64,8 @@ describe('createServerDeps', () => {
 
   it('assembles a session service that works against that database', async () => {
     const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
-    const { sessionId } = await deps.sessions.createNextSession(enrollmentOf('u_1'), { listening: false, speaking: false });
-    const record = await deps.sessions.getSession(sessionId);
+    const { sessionId } = await deps.sessions.createNextSession('u_1', enrollmentOf('u_1'), { listening: false, speaking: false });
+    const record = await deps.sessions.getSession('u_1', sessionId);
     expect(record.questions).toHaveLength(SESSION_LENGTH);
   });
 
@@ -91,7 +99,7 @@ describe('createServerDeps', () => {
     // that the service received a transaction at all.
     const deps = createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(7) });
 
-    await expect(deps.translations.translate({ text: 'Ladder', from: 'en', to: 'he' })).resolves.toMatchObject({
+    await expect(deps.translations.translate('u_1', { text: 'Ladder', from: 'en', to: 'he' })).resolves.toMatchObject({
       kind: 'word',
       senses: [{ translation: 'סולם', part_of_speech: 'noun' }],
     });

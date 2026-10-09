@@ -35,7 +35,7 @@ rm -f "$PIDS"
 # The ports are the real check: a process that ignored TERM still holds one, and
 # up.sh would then fail confusingly on "port already in use" rather than here.
 sleep 1
-for port in 3001 8082; do
+for port in "${QA_API_PORT:-3101}" "${QA_APP_PORT:-8092}" "${QA_MAIL_PORT:-8093}"; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "  !!         port $port is still held after TERM:" >&2
     lsof -nP -iTCP:"$port" -sTCP:LISTEN >&2

@@ -3,8 +3,8 @@ import { eq } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { users } from '../db/schema';
-import { UsernameTaken } from '../errors';
-import { isUniqueViolation } from './pgErrors';
+import { ProfileExists, UsernameTaken } from '../errors';
+import { constraintOf, isUniqueViolation } from './pgErrors';
 
 // The columns are nullable until task 10 tightens them, so the row type is
 // wider than User. Anything this function is handed came from an INSERT that
@@ -24,15 +24,19 @@ function toUser(row: UserRow): User {
 export function createUserRepo(tx: Tx) {
   return {
     /**
-     * Inserts optimistically and lets the unique constraint decide. A
+     * Phase 29 (spec D9). The profile, under the id of the sign-in identity it
+     * belongs to. Inserts optimistically and lets the constraints decide. A
      * check-then-insert would race: the gap between the SELECT and the INSERT
-     * is exactly long enough for another transaction to take the username.
+     * is exactly long enough for another transaction to take the username, or
+     * for a double tap to create the profile twice. The primary key refuses a
+     * second profile; the unique username refuses a taken handle.
      */
-    insertUser: async (input: CreateUserRequest): Promise<User> => {
+    insertUser: async (id: string, input: CreateUserRequest): Promise<User> => {
       try {
         const [row] = await tx
           .insert(users)
           .values({
+            id,
             username: input.username,
             displayName: input.display_name,
             age: input.age,
@@ -41,7 +45,10 @@ export function createUserRepo(tx: Tx) {
           .returning();
         return toUser(row);
       } catch (error) {
-        if (isUniqueViolation(error)) throw new UsernameTaken(input.username);
+        if (isUniqueViolation(error)) {
+          if (constraintOf(error) === 'users_pkey') throw new ProfileExists(id);
+          throw new UsernameTaken(input.username);
+        }
         throw error;
       }
     },

@@ -20,6 +20,7 @@
     "e2e:image": "E2E_TARGET=image bash scripts/lane-env.sh npm run e2e --workspace e2e",
     "test": "npm run test:unit && echo '' && echo 'Note: unit tests only. Run npm run test:all before pushing - database-backed tests did not run.'",
     "test:unit": "npm test --workspaces --if-present",
+    "db:claim-account": "bash scripts/lane-env.sh npm run db:claim-account --workspace apps/server --",
     "test:integration": "bash scripts/lane-env.sh npm run test:integration --workspaces --if-present",
     "test:all": "npm run test:unit && npm run test:integration",
     "test:lanes": "bash scripts/test-lane-env.sh && bash scripts/test-lane-clean.sh && bash scripts/test-lane-abandon.sh",

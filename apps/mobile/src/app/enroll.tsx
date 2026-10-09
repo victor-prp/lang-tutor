@@ -28,7 +28,7 @@ export default function EnrollScreen() {
   // still mounted while it animates away.
   const submitted = useRef(false);
 
-  if (!user) return <Redirect href="/login" />;
+  if (!user) return <Redirect href="/" />;
   // Reached with nothing left to enroll in: send the learner home. After a
   // successful submit, dismissTo is already doing that.
   if (targets.length === 0) return submitted.current ? null : <Redirect href="/" />;

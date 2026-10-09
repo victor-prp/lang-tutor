@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 
 import { LlmUnavailable, TranslationUnreadable } from '../../../src/errors';
 import { createTranslationsRouter } from '../../../src/routes/translations';
+import { ACT_AS, actAs } from '../../support/actAs';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import {
   clearNamespace,
@@ -55,14 +56,16 @@ function buildTestApp(opts: { translationTimeoutMs?: number } = {}): {
     translationTimeoutMs: opts.translationTimeoutMs,
   });
   const app = new Hono();
+  app.use('*', actAs());
   app.route('/api', createTranslationsRouter(deps.translations, deps.logger));
   return { app, logger };
 }
 
+// Acts as u_1, whose enrollment a case may name.
 function translate(body: unknown) {
   return buildTestApp().app.request('/api/translations', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', [ACT_AS]: 'u_1' },
     body: JSON.stringify(body),
   });
 }

@@ -6,6 +6,7 @@ import {
 } from '@lang-tutor/core/api/schemas';
 
 import {
+  AccessDenied,
   EnrollmentNotFound,
   LlmUnavailable,
   PairNotEnrolled,
@@ -13,6 +14,7 @@ import {
 } from '../errors';
 import type { Logger } from '../logger';
 import type { TranslationService } from '../services/translations';
+import { forbidden, learnerResponses, type ActorEnv } from './actor';
 
 const translateRoute = createRoute({
   method: 'post',
@@ -27,7 +29,7 @@ const translateRoute = createRoute({
     'English, Hebrew with Russian and Hebrew with Italian, either way. ' +
     "Optionally names the learner's `enrollment_id`; the response then marks, on a lookup " +
     "from the enrollment's target language, which senses that enrollment has `saved`. The " +
-    'enrollment is used only for that. ' +
+    "enrollment must be the caller's own, and is used only for that. " +
     'NOTE: this endpoint calls a paid third-party model on every request and there is no ' +
     'rate limit in front of it.',
   request: {
@@ -61,6 +63,8 @@ const translateRoute = createRoute({
         'The language model could not be reached, refused the request, ran out of time, or ' +
         'answered with something that did not match the expected shape.',
     },
+    ...learnerResponses,
+    403: forbidden("`enrollment_id` names another learner's enrollment"),
   },
 });
 
@@ -69,7 +73,7 @@ const translateRoute = createRoute({
 export function createTranslationsRouter(translations: TranslationService, logger: Logger) {
   // Without this hook the adapter's own 400 carries a Zod issue payload; the
   // contract says { error: 'invalid request' } (ADR 0003 R7).
-  const router = new OpenAPIHono({
+  const router = new OpenAPIHono<ActorEnv>({
     defaultHook: (result, c) => {
       if (!result.success) return c.json({ error: 'invalid request' }, 400);
     },
@@ -78,8 +82,9 @@ export function createTranslationsRouter(translations: TranslationService, logge
   router.openapi(translateRoute, async (c) => {
     const input = c.req.valid('json');
     try {
-      return c.json(await translations.translate(input), 200);
+      return c.json(await translations.translate(c.var.actor, input), 200);
     } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
       if (error instanceof PairNotEnrolled) return c.json({ error: 'pair not enrolled' }, 400);
       // Two errors, one status: the learner can do nothing different about

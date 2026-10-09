@@ -282,6 +282,14 @@ describe('session state (phase 19)', () => {
   it('answers undefined, never a 22P02, for a malformed id', async () => {
     expect(await repo((r) => r.findState('nope'))).toBeUndefined();
     expect(await repo((r) => r.transition('nope', ['ready'], 'skipped'))).toBe(false);
+    expect(await repo((r) => r.findEnrollmentId('nope'))).toBeUndefined();
+  });
+
+  // Phase 29 (spec D13): what a session-addressed use case authorizes against.
+  it('names the enrollment a session belongs to, and none for an unknown id', async () => {
+    const id = await repo((r) => r.insertPreparingSession('u_1', E));
+    expect(await repo((r) => r.findEnrollmentId(id))).toBe(E);
+    expect(await repo((r) => r.findEnrollmentId('00000000-0000-0000-0000-000000000000'))).toBeUndefined();
   });
 
   it('summarises the newest session: answered and total', async () => {

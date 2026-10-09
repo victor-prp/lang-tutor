@@ -1,44 +1,19 @@
-const STORAGE_KEY = 'lang-tutor:username';
-
-export type RememberedUsernameStoreDeps = {
+export type RememberedEnrollmentStoreDeps = {
   storage: {
     getItem(key: string): Promise<string | null>;
     setItem(key: string, value: string): Promise<void>;
   };
 };
 
-/**
- * Remembers the last username typed into the login screen — nothing else.
- *
- * The profile is deliberately not cached: it is a server fact, and a copy here
- * would go stale the moment anything changed it. The username is the one part
- * of identity that belongs to this device.
- *
- * There is no clear(): signing out keeps the username so the field stays
- * prefilled, which is the point of remembering it at all.
- */
-export function createRememberedUsernameStore({ storage }: RememberedUsernameStoreDeps) {
-  return {
-    // '' rather than null: the only consumer is a TextInput's value.
-    read: async (): Promise<string> => (await storage.getItem(STORAGE_KEY)) ?? '',
-    write: async (username: string): Promise<void> => {
-      await storage.setItem(STORAGE_KEY, username);
-    },
-  };
-}
-
-export type RememberedUsernameStore = ReturnType<typeof createRememberedUsernameStore>;
-
 const ENROLLMENT_KEY_PREFIX = 'lang-tutor:enrollment:';
 
 /**
  * Remembers which enrollment each username last had active on this device —
- * the one piece of enrollment state that belongs to the device, exactly as the
- * username does. Keyed per username so two learners sharing a phone never
+ * the one piece of enrollment state that belongs to the device. Keyed per username so two learners sharing a phone never
  * inherit each other's language. The enrollment list itself is never stored:
  * it is a server fact, read fresh at every login.
  */
-export function createRememberedEnrollmentStore({ storage }: RememberedUsernameStoreDeps) {
+export function createRememberedEnrollmentStore({ storage }: RememberedEnrollmentStoreDeps) {
   return {
     read: (username: string): Promise<string | null> =>
       storage.getItem(`${ENROLLMENT_KEY_PREFIX}${username}`),

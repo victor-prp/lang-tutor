@@ -11,16 +11,16 @@ import {
 } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import { JUDGE_MARKER } from '../domain/judge';
-import type { SessionRecord, SessionState } from '../domain/session';
-import { AnswerKindMismatch, LlmUnavailable, QuestionDesynced, SessionNotFound } from '../errors';
+import type { SessionRecord } from '../domain/session';
+import { AccessDenied, AnswerKindMismatch, LlmUnavailable, QuestionDesynced } from '../errors';
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { GrantRepo } from '../repo/grants';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import { createSessionService } from './sessions';
 
 const SESSION = '22222222-2222-2222-2222-222222222222';
-const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'ready', source: 'list' };
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'it', created_at: '' };
 const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין' };
 const SENTENCE: Question = {
@@ -51,7 +51,7 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
   const logger = createFakeLogger();
   const session = stub<SessionRepo>({
     loadSession: async () => loaded,
-    findState: async () => STATE,
+    findEnrollmentId: async () => 'e1',
     insertAnswer: async (...args) => {
       inserted.push(args);
     },
@@ -59,8 +59,10 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
   const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
   const question = stub<QuestionRepo>({ findJudgeContext: async () => CONTEXT });
   const progress = stub<ProgressRepo>({ findSnapshot: async () => [] });
+  // Phase 29: another learner holds no grant on the list.
+  const grant = stub<GrantRepo>({ findGrantFor: async () => null });
   const service = createSessionService({
-    transaction: createFakeTransaction({ session, enrollment, question, progress }),
+    transaction: createFakeTransaction({ session, enrollment, question, progress, grant }),
     rng: testRng(7),
     now: createFakeClock(1_000, 1_400),
     logger,
@@ -71,13 +73,13 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
   return { service, inserted, logger };
 }
 
-const answer = (text: string) => ({ userId: 'u1', questionId: 'm1', text });
+const answer = (text: string) => ({ questionId: 'm1', text });
 
 describe('answerJudged (spec D3)', () => {
   it('rules an empty answer wrong, without a call', async () => {
     const judge = createFakeLlmClient('{"verdict":"right"}');
     const { service, inserted } = setup(judge);
-    expect((await service.answerJudged(SESSION, answer('  '))).verdict).toBe('wrong');
+    expect((await service.answerJudged('u1', SESSION, answer('  '))).verdict).toBe('wrong');
     expect(judge.calls).toHaveLength(0);
     expect(inserted).toEqual([[SESSION, 0, 'm1', { text: '  ', verdict: 'wrong' }]]);
   });
@@ -85,7 +87,7 @@ describe('answerJudged (spec D3)', () => {
   it('rules the stored meaning exact, without a call, and logs it as a rule', async () => {
     const judge = createFakeLlmClient('{"verdict":"wrong"}');
     const { service, logger } = setup(judge);
-    expect((await service.answerJudged(SESSION, answer('לְהַזְמִין.'))).verdict).toBe('exact');
+    expect((await service.answerJudged('u1', SESSION, answer('לְהַזְמִין.'))).verdict).toBe('exact');
     expect(judge.calls).toHaveLength(0);
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_judged', judged_by: 'rule', verdict: 'exact' }));
   });
@@ -93,7 +95,7 @@ describe('answerJudged (spec D3)', () => {
   it('asks the model once otherwise, and records the mapped verdict', async () => {
     const judge = createFakeLlmClient('{"verdict":"right"}');
     const { service, inserted, logger } = setup(judge);
-    const result = await service.answerJudged(SESSION, answer('לשריין'));
+    const result = await service.answerJudged('u1', SESSION, answer('לשריין'));
     expect(result.verdict).toBe('exact');
     expect(result.session.answers[0]).toMatchObject({ verdict: 'exact', is_correct: true, answer_string: 'לשריין' });
     expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'לשריין', verdict: 'exact' }]]);
@@ -107,19 +109,19 @@ describe('answerJudged (spec D3)', () => {
 
   it('records another sense as an alternative', async () => {
     const { service } = setup(createFakeLlmClient('{"verdict":"other_sense"}'));
-    expect((await service.answerJudged(SESSION, answer('ספר'))).verdict).toBe('alternative');
+    expect((await service.answerJudged('u1', SESSION, answer('ספר'))).verdict).toBe('alternative');
   });
 
   it('records nothing when the judge fails, and says why', async () => {
     const { service, inserted, logger } = setup(createFakeLlmClient(new LlmUnavailable('timed out after 8000ms')));
-    await expect(service.answerJudged(SESSION, answer('לשריין'))).rejects.toBeInstanceOf(LlmUnavailable);
+    await expect(service.answerJudged('u1', SESSION, answer('לשריין'))).rejects.toBeInstanceOf(LlmUnavailable);
     expect(inserted).toEqual([]);
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_judge_failed', question_type: 'typed_meaning' }));
   });
 
   it('treats an unreadable verdict as a failed judge', async () => {
     const { service, inserted } = setup(createFakeLlmClient('{"verdict":"maybe"}'));
-    await expect(service.answerJudged(SESSION, answer('לשריין'))).rejects.toBeInstanceOf(LlmUnavailable);
+    await expect(service.answerJudged('u1', SESSION, answer('לשריין'))).rejects.toBeInstanceOf(LlmUnavailable);
     expect(inserted).toEqual([]);
   });
 
@@ -127,7 +129,7 @@ describe('answerJudged (spec D3)', () => {
     const judge = createFakeLlmClient('{"verdict":"wrong"}');
     const answered = record([MEANING, CHOICE], [{ question_id: 'm1', is_correct: true, answer_string: 'לשריין', verdict: 'exact' }]);
     const { service, inserted } = setup(judge, answered);
-    const result = await service.answerJudged(SESSION, answer('לשריין'));
+    const result = await service.answerJudged('u1', SESSION, answer('לשריין'));
     expect(result.verdict).toBe('exact');
     expect(judge.calls).toHaveLength(0);
     expect(inserted).toEqual([]);
@@ -139,7 +141,7 @@ describe('answerJudged (spec D3)', () => {
     let loads = 0;
     const session = stub<SessionRepo>({
       loadSession: async () => (++loads === 1 ? record() : stored),
-      findState: async () => STATE,
+      findEnrollmentId: async () => 'e1',
       insertAnswer: async () => undefined,
     });
     const service = createSessionService({
@@ -155,7 +157,7 @@ describe('answerJudged (spec D3)', () => {
       transcriber: createFakeTranscriber(''),
       judge,
     });
-    const result = await service.answerJudged(SESSION, answer('לשריין'));
+    const result = await service.answerJudged('u1', SESSION, answer('לשריין'));
     expect(judge.calls).toHaveLength(1);
     expect(result.verdict).toBe('wrong');
   });
@@ -169,36 +171,37 @@ describe('answerJudged (spec D3)', () => {
       status: 'completed',
     };
     const { service, inserted } = setup(judge, done);
-    expect((await service.answerJudged(SESSION, answer('לשריין'))).verdict).toBe('exact');
-    await expect(service.answerJudged(SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(QuestionDesynced);
+    expect((await service.answerJudged('u1', SESSION, answer('לשריין'))).verdict).toBe('exact');
+    await expect(service.answerJudged('u1', SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(QuestionDesynced);
     expect(judge.calls).toHaveLength(0);
     expect(inserted).toEqual([]);
   });
 
   it('refuses before judging: another learner, a stale card, a card that is not judged', async () => {
     const judge = createFakeLlmClient('{"verdict":"right"}');
-    await expect(setup(judge).service.answerJudged(SESSION, { ...answer('x'), userId: 'u2' })).rejects.toBeInstanceOf(SessionNotFound);
-    await expect(setup(judge).service.answerJudged(SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(QuestionDesynced);
+    // Phase 29: another learner's session is refused, not hidden as an unknown one.
+    await expect(setup(judge).service.answerJudged('u2', SESSION, answer('x'))).rejects.toBeInstanceOf(AccessDenied);
+    await expect(setup(judge).service.answerJudged('u1', SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(QuestionDesynced);
     const choiceFirst = record([CHOICE, MEANING]);
-    await expect(setup(judge, choiceFirst).service.answerJudged(SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(AnswerKindMismatch);
+    await expect(setup(judge, choiceFirst).service.answerJudged('u1', SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(AnswerKindMismatch);
     expect(judge.calls).toHaveLength(0);
   });
 
   describe('a sentence_translation card', () => {
-    const sentence = (text: string) => ({ userId: 'u1', questionId: 's1', text });
+    const sentence = (text: string) => ({ questionId: 's1', text });
     const first = () => record([SENTENCE, CHOICE]);
 
     it('rules the reference exact, without a call', async () => {
       const judge = createFakeLlmClient('{"verdict":"wrong"}');
       const { service } = setup(judge, first());
-      expect((await service.answerJudged(SESSION, sentence('i want to book a table'))).verdict).toBe('exact');
+      expect((await service.answerJudged('u1', SESSION, sentence('i want to book a table'))).verdict).toBe('exact');
       expect(judge.calls).toHaveLength(0);
     });
 
     it('asks the model once otherwise, with the sentence and the reference', async () => {
       const judge = createFakeLlmClient('{"verdict":"right"}');
       const { service } = setup(judge, first());
-      expect((await service.answerJudged(SESSION, sentence('I wish to reserve a table'))).verdict).toBe('exact');
+      expect((await service.answerJudged('u1', SESSION, sentence('I wish to reserve a table'))).verdict).toBe('exact');
       expect(judge.calls).toHaveLength(1);
       expect(JSON.parse(judge.calls[0].user)).toMatchObject({
         hebrew_sentence: 'אני רוצה להזמין שולחן.',
@@ -208,7 +211,7 @@ describe('answerJudged (spec D3)', () => {
 
     it('records misspelled as a near miss', async () => {
       const { service, inserted } = setup(createFakeLlmClient('{"verdict":"misspelled"}'), first());
-      expect((await service.answerJudged(SESSION, sentence('I want to bok a table'))).verdict).toBe('near_miss');
+      expect((await service.answerJudged('u1', SESSION, sentence('I want to bok a table'))).verdict).toBe('near_miss');
       expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'I want to bok a table', verdict: 'near_miss' }]]);
     });
   });

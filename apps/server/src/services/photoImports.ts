@@ -25,7 +25,6 @@ import {
 import { buildSenseMatchPrompt, choiceFromModel, firstChoice, parseSenseMatch, type MatchedBy } from '../domain/senseMatching';
 import { firstPerSense } from '../domain/vocabulary';
 import {
-  EnrollmentNotFound,
   InvalidPhotoImportItem,
   InvalidVocabularyEntry,
   PhotoImportConflict,
@@ -35,8 +34,9 @@ import {
 } from '../errors';
 import type { Logger } from '../logger';
 import type { ItemResult, PhotoImportItemRow, PhotoImportRow } from '../repo/photoImports';
+import { authorizeEnrollment } from './access';
 import type { LlmClient, VisionClient } from './llm';
-import type { Transaction } from './transaction';
+import type { Repos, Transaction } from './transaction';
 
 function toItem(row: PhotoImportItemRow): PhotoImportItem {
   return {
@@ -74,6 +74,9 @@ function toImport(row: PhotoImportRow, items: PhotoImportItemRow[]): PhotoImport
  * over by the composition root as a closure (spec D7). Its dictionary writes
  * are its own independent, idempotent transactions (ADR 0001 R8). The one
  * dependent write a row job makes is the row itself.
+ *
+ * Phase 29 (spec D13): every learner use case here is the list owner's alone
+ * (`photo_import.manage`), checked inside its transaction before any write.
  */
 export function createPhotoImportService({
   transaction,
@@ -86,17 +89,26 @@ export function createPhotoImportService({
   transaction: Transaction;
   vision: VisionClient;
   llm: LlmClient;
-  lookup: (input: TranslationRequest) => Promise<TranslationResponse>;
+  lookup: (actorUserId: string, input: TranslationRequest) => Promise<TranslationResponse>;
   now: () => number;
   logger: Logger;
 }) {
+  /** Phase 29. An import is addressed by its own id; its list decides. */
+  const authorizeImport = (repos: Repos, actorUserId: string, row: PhotoImportRow) =>
+    authorizeEnrollment(repos, logger, { actorUserId, enrollmentId: row.enrollmentId, permission: 'photo_import.manage' });
+
   return {
     /** The upload: one transaction stores the photo and enqueues its read
      *  (ADR 0007). Creating also clears the enrollment's expired imports
      *  (spec D10). */
-    create: async (enrollmentId: string, request: PhotoImportCreateRequest): Promise<PhotoImportSummary> => {
-      const created = await transaction(async ({ enrollment, photoImport, jobs }) => {
-        if (!(await enrollment.findById(enrollmentId))) throw new EnrollmentNotFound(enrollmentId);
+    create: async (
+      actorUserId: string,
+      enrollmentId: string,
+      request: PhotoImportCreateRequest,
+    ): Promise<PhotoImportSummary> => {
+      const created = await transaction(async (repos) => {
+        const { photoImport, jobs } = repos;
+        await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'photo_import.manage' });
         await photoImport.deleteExpired({ enrollmentId, before: new Date(now() - IMPORT_TTL_MS) });
         const row = await photoImport.insertImport({ enrollmentId, photo: request.image });
         await jobs.enqueue(READ_PHOTO, { import_id: row.id });
@@ -117,10 +129,10 @@ export function createPhotoImportService({
       };
     },
 
-    list: async (enrollmentId: string): Promise<PhotoImportSummary[]> =>
-      transaction(async ({ enrollment, photoImport }) => {
-        if (!(await enrollment.findById(enrollmentId))) throw new EnrollmentNotFound(enrollmentId);
-        const rows = await photoImport.listOpen({ enrollmentId, since: new Date(now() - IMPORT_TTL_MS) });
+    list: async (actorUserId: string, enrollmentId: string): Promise<PhotoImportSummary[]> =>
+      transaction(async (repos) => {
+        await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'photo_import.manage' });
+        const rows = await repos.photoImport.listOpen({ enrollmentId, since: new Date(now() - IMPORT_TTL_MS) });
         return rows.map((row) => ({
           id: row.id,
           status: deriveStatus(row.status, row.pendingCount),
@@ -130,17 +142,25 @@ export function createPhotoImportService({
         }));
       }),
 
-    getImport: async (importId: string): Promise<PhotoImport> =>
-      transaction(async ({ photoImport }) => {
-        const row = await photoImport.findImport(importId);
+    getImport: async (actorUserId: string, importId: string): Promise<PhotoImport> =>
+      transaction(async (repos) => {
+        const row = await repos.photoImport.findImport(importId);
         if (!row) throw new PhotoImportNotFound(importId);
-        return toImport(row, await photoImport.listItems(importId));
+        await authorizeImport(repos, actorUserId, row);
+        return toImport(row, await repos.photoImport.listItems(importId));
       }),
 
-    updateItem: async (importId: string, position: number, update: ItemUpdate): Promise<PhotoImportItem> =>
-      transaction(async ({ photoImport }) => {
+    updateItem: async (
+      actorUserId: string,
+      importId: string,
+      position: number,
+      update: ItemUpdate,
+    ): Promise<PhotoImportItem> =>
+      transaction(async (repos) => {
+        const { photoImport } = repos;
         const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
+        await authorizeImport(repos, actorUserId, row);
         if (!isOpen(row.status, row.createdAt, now())) throw new PhotoImportConflict(importId, 'not open');
         const item = await photoImport.findItem(importId, position);
         if (!item) throw new PhotoImportNotFound(importId, position);
@@ -162,10 +182,12 @@ export function createPhotoImportService({
      * answers the same ids and writes nothing, which covers a save whose
      * response was lost.
      */
-    save: async (importId: string): Promise<SaveVocabularyResponse> => {
-      const outcome = await transaction(async ({ photoImport, enrollment, vocabulary }) => {
+    save: async (actorUserId: string, importId: string): Promise<SaveVocabularyResponse> => {
+      const outcome = await transaction(async (repos) => {
+        const { photoImport, vocabulary } = repos;
         const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
+        const enrolled = await authorizeImport(repos, actorUserId, row);
         const items = await photoImport.listItems(importId);
         const entries = firstPerSense(entriesToSave(items));
         if (row.status === 'saved') return { entries, items, repeated: true };
@@ -175,8 +197,6 @@ export function createPhotoImportService({
           !items.some((item) => item.status === 'pending');
         if (!ready) throw new PhotoImportConflict(importId, 'not ready to save');
 
-        const enrolled = await enrollment.findById(row.enrollmentId);
-        if (!enrolled) throw new EnrollmentNotFound(row.enrollmentId);
         const saveable = await vocabulary.findSaveable({
           entries: entries.map((entry) => ({ senseId: entry.sense_id, variantId: entry.variant_id })),
           targetLanguage: enrolled.target_language,
@@ -196,7 +216,8 @@ export function createPhotoImportService({
           throw new InvalidVocabularyEntry(refused.sense_id);
         }
         // Phase 28. Only the list's owner photographs into it; no grant reaches
-        // a photo import, so the owner is who added these words.
+        // a photo import, so the owner is who added these words. Phase 29 made
+        // that true by construction: the check above lets only the owner here.
         await vocabulary.insertEntries({
           enrollmentId: row.enrollmentId,
           addedByUserId: enrolled.user_id,
@@ -223,10 +244,12 @@ export function createPhotoImportService({
     },
 
     /** Idempotent on a discarded import. A saved one is refused (409). */
-    discard: async (importId: string): Promise<void> => {
-      const discarded = await transaction(async ({ photoImport }) => {
+    discard: async (actorUserId: string, importId: string): Promise<void> => {
+      const discarded = await transaction(async (repos) => {
+        const { photoImport } = repos;
         const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
+        await authorizeImport(repos, actorUserId, row);
         if (row.status === 'discarded') return false;
         if (row.status === 'saved') throw new PhotoImportConflict(importId, 'already saved');
         if (await photoImport.transition(importId, ['reading', 'read', 'failed'], 'discarded')) return true;
@@ -335,7 +358,9 @@ export function createPhotoImportService({
       const { item, enrolled } = read;
       const target = enrolled.target_language as LanguageCode;
 
-      const response = await lookup({
+      // The job has no actor of its own. It looks up for the list's owner, the
+      // only one who could have made this import (photo_import.manage).
+      const response = await lookup(enrolled.user_id, {
         text: item.text,
         from: target,
         to: enrolled.source_language as LanguageCode,

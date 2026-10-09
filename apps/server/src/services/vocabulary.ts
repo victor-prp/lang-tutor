@@ -18,7 +18,7 @@ import {
 } from '../domain/vocabulary';
 import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
-import { authorize } from './access';
+import { authorize, authorizeEnrollment } from './access';
 import type { Repos, Transaction } from './transaction';
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -35,6 +35,7 @@ async function enrollmentOrThrow(repos: Repos, enrollmentId: string): Promise<En
  * exist is wrong, and so is a page read against one.
  *
  * Phase 28: both writes name an actor and pass ADR 0008's check first.
+ * Phase 29 (spec D13): so do both reads, which are the owner's alone.
  */
 export function createVocabularyService({
   transaction,
@@ -100,14 +101,22 @@ export function createVocabularyService({
      * exists; the cursor is the last row KEPT — from the page rows, never from
      * the assembled items, which may be one short (assemblePage's comment).
      */
-    listWords: async (enrollmentId: string, query: VocabularyPageQuery): Promise<VocabularyPage> => {
+    listWords: async (
+      actorUserId: string,
+      enrollmentId: string,
+      query: VocabularyPageQuery,
+    ): Promise<VocabularyPage> => {
       const limit = query.limit ?? DEFAULT_PAGE_SIZE;
       const level = query.level ?? null;
       const after = query.cursor === undefined ? null : decodeCursor(query.cursor);
       if (query.cursor !== undefined && !after) throw new InvalidCursor();
 
       return transaction(async (repos) => {
-        const enrolled = await enrollmentOrThrow(repos, enrollmentId);
+        const enrolled = await authorizeEnrollment(repos, logger, {
+          actorUserId,
+          enrollmentId,
+          permission: 'vocabulary.read',
+        });
         const read = await repos.vocabulary.findWordsPage({
           enrollmentId,
           limit: limit + 1,
@@ -132,9 +141,13 @@ export function createVocabularyService({
 
     /** Every lexeme with this lemma in the target language is one word. None is a
      *  404; a word with nothing saved is a 200 with no level. */
-    wordDetail: (enrollmentId: string, lemma: string): Promise<VocabularyWordDetail> =>
+    wordDetail: (actorUserId: string, enrollmentId: string, lemma: string): Promise<VocabularyWordDetail> =>
       transaction(async (repos) => {
-        const enrolled = await enrollmentOrThrow(repos, enrollmentId);
+        const enrolled = await authorizeEnrollment(repos, logger, {
+          actorUserId,
+          enrollmentId,
+          permission: 'vocabulary.read',
+        });
         const lexemes = await repos.vocabulary.findLemmaLexemes({
           languageCode: enrolled.target_language,
           lemma,

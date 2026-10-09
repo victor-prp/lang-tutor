@@ -181,8 +181,8 @@ export function TranslationProvider({
           }),
         request: () =>
           next
-            ? api.saveVocabulary(user.id, listId, { entries })
-            : api.unsaveVocabulary(user.id, listId, ids[0]),
+            ? api.saveVocabulary(listId, { entries })
+            : api.unsaveVocabulary(listId, ids[0]),
       });
       setSaveFailed(!ok);
     },

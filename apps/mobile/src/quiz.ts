@@ -13,7 +13,6 @@ export type Queued =
 
 export type QuizState = {
   sessionId: string;
-  userId: string;
   question: Question | undefined;
   position: number;
   total: number;

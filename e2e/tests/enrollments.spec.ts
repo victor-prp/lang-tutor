@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { clearGemini, expectGemini } from './support/mockServer';
-import { createLearner, logIn } from './support/users';
+import { openApp, signIn, signUpLearner } from './support/users';
 
 test.setTimeout(120_000);
 
@@ -31,8 +31,8 @@ async function openTranslate(page: Page) {
 }
 
 test('a Russian learner gets a Russian session', async ({ page, request }) => {
-  await createLearner(request, 'e2e_ru_session', 'ru');
-  await logIn(page, 'e2e_ru_session');
+  await signUpLearner(page, 'e2e_ru_session', 'ru');
+  await openApp(page);
 
   await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: רוסית');
   await startSession(page);
@@ -60,8 +60,8 @@ test('a Russian lookup opens ru → he, is served from the seed, and flips to he
       },
     ],
   });
-  await createLearner(request, 'e2e_ru_lookup', 'ru');
-  await logIn(page, 'e2e_ru_lookup');
+  await signUpLearner(page, 'e2e_ru_lookup', 'ru');
+  await openApp(page);
   await openTranslate(page);
 
   await expect(page.getByTestId('translate-direction')).toHaveText('מרוסית לעברית');
@@ -92,8 +92,8 @@ test('Hebrew typed under ru → he offers a one-tap flip', async ({ page, reques
       },
     ],
   });
-  await createLearner(request, 'e2e_ru_wrong_way', 'ru');
-  await logIn(page, 'e2e_ru_wrong_way');
+  await signUpLearner(page, 'e2e_ru_wrong_way', 'ru');
+  await openApp(page);
   await openTranslate(page);
 
   await page.getByTestId('translate-input').fill('שלום');
@@ -109,8 +109,8 @@ test('a learner adds English, switches both ways, and the choice survives signin
   page,
   request,
 }) => {
-  await createLearner(request, 'e2e_switcher', 'ru');
-  await logIn(page, 'e2e_switcher');
+  await signUpLearner(page, 'e2e_switcher', 'ru');
+  await openApp(page);
 
   await page.getByTestId('enrollment-switcher').click();
   await page.getByTestId('enrollment-add').click();
@@ -135,8 +135,10 @@ test('a learner adds English, switches both ways, and the choice survives signin
 
   // Every adding of a language is remembered; the last switch was to Russian.
   await page.getByTestId('profile-button').click();
-  await page.getByTestId('switch-user-button').click();
-  await logIn(page, 'e2e_switcher');
+  await page.getByTestId('sign-out-button').click();
+  await expect(page.getByTestId('sign-in-email')).toBeVisible({ timeout: 30_000 });
+  await signIn(page.request, 'e2e_switcher');
+  await openApp(page);
   await expect(page.getByTestId('enrollment-switcher')).toHaveText('לומד/ת: רוסית');
 });
 
@@ -144,8 +146,8 @@ test('a learner adds Italian from the switcher and gets an Italian session', asy
   page,
   request,
 }) => {
-  await createLearner(request, 'e2e_it_session', 'en');
-  await logIn(page, 'e2e_it_session');
+  await signUpLearner(page, 'e2e_it_session', 'en');
+  await openApp(page);
 
   await page.getByTestId('enrollment-switcher').click();
   await page.getByTestId('enrollment-add').click();
@@ -160,8 +162,8 @@ test('a learner adds Italian from the switcher and gets an Italian session', asy
 test('an Italian lookup opens it → he and is served from the seed', async ({ page, request }) => {
   // No Gemini expectation is registered: finestra is seeded, and a flip with
   // nothing looked up changes the direction without a request.
-  await createLearner(request, 'e2e_it_lookup', 'it');
-  await logIn(page, 'e2e_it_lookup');
+  await signUpLearner(page, 'e2e_it_lookup', 'it');
+  await openApp(page);
   await openTranslate(page);
 
   await expect(page.getByTestId('translate-direction')).toHaveText('מאיטלקית לעברית');

@@ -69,9 +69,9 @@ describe('a reported misspelling never becomes a dictionary variant', () => {
     });
     const service = translations();
 
-    await service.translate({ text: 'thruot', from: 'en', to: 'he' });
-    await service.translate({ text: 'thruot', from: 'en', to: 'he' });
-    await service.translate({ text: 'Thruot', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'thruot', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'thruot', from: 'en', to: 'he' });
+    await service.translate('u_1', { text: 'Thruot', from: 'en', to: 'he' });
 
     expect(await countDictVariants(t.db, 'thruot')).toBe(0);
     expect(await countDictVariants(t.db, 'Thruot')).toBe(0);

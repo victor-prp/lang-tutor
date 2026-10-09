@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { clearGemini, expectGemini, expectGeminiFailure } from './support/mockServer';
-import { createLearner, logIn } from './support/users';
+import { openApp, signUpLearner } from './support/users';
 
 // Three page loads and a handful of round trips — well inside this, and well
 // above Playwright's 30s default.
@@ -63,8 +63,8 @@ test.beforeEach(async ({ request }) => {
 });
 
 async function openTranslate(page: Page, request: APIRequestContext, username: string) {
-  await createLearner(request, username);
-  await logIn(page, username);
+  await signUpLearner(page, username);
+  await openApp(page);
   // Retried for the same reason session.spec.ts retries its start click: a
   // static export serves markup before React hydrates, so an early click is a
   // silent no-op.

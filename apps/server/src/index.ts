@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { PgBoss } from 'pg-boss';
 
 import { createApp } from './app';
-import { databaseNameFrom, loadConfig, loadGeminiConfig } from './config';
+import { databaseNameFrom, loadAuthConfig, loadConfig, loadGeminiConfig } from './config';
 import { createServerDeps } from './composition';
 import { createDb } from './db/client';
 import { JOB_SCHEMA } from './db/jobs';
@@ -18,6 +18,7 @@ export async function main(): Promise<void> {
   // Before the pool: a misconfigured server should fail without having opened
   // a connection it will never use.
   const gemini = loadGeminiConfig(process.env);
+  const authConfig = loadAuthConfig(process.env);
   // Constructed before the pool, because the pool's error policy closes over it.
   const logger = createConsoleLogger();
 
@@ -48,6 +49,7 @@ export async function main(): Promise<void> {
     now: Date.now,
     fetch: globalThis.fetch,
     gemini,
+    auth: authConfig,
     translationTimeoutMs: config.translationTimeoutMs,
     sessionGenerationTimeoutMs: config.sessionGenerationTimeoutMs,
     speechTimeoutMs: config.speechTimeoutMs,

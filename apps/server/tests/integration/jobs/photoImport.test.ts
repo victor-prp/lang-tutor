@@ -69,7 +69,7 @@ async function italian(lemma: string, translations: string[]) {
   });
 }
 
-const statusOf = async (id: string) => (await deps.photoImports.getImport(id)).status;
+const statusOf = async (id: string) => (await deps.photoImports.getImport('u_1', id)).status;
 
 describe('a photo import through the queue', () => {
   it('reads three rows, chooses each sense, and saves what the review kept', async () => {
@@ -83,10 +83,10 @@ describe('a photo import through the queue', () => {
     ]);
     await expectSenseMatch(ns, 0);
 
-    const { id } = await deps.photoImports.create(IT, { mime_type: 'image/jpeg', image: 'QUJD' });
+    const { id } = await deps.photoImports.create('u_1', IT, { mime_type: 'image/jpeg', image: 'QUJD' });
     await waitFor(async () => (await statusOf(id)) === 'ready');
 
-    const { items } = await deps.photoImports.getImport(id);
+    const { items } = await deps.photoImports.getImport('u_1', id);
     expect(items.map((item) => [item.text, item.chosen_sense_id, item.ticked, item.hebrew_mismatch])).toEqual([
       ['gatto', gatto.senseIds[0], true, false],
       ['banca', banca.senseIds[0], true, true],
@@ -94,16 +94,16 @@ describe('a photo import through the queue', () => {
     ]);
     expect(logger.events.map((event) => event.event)).toEqual(expect.arrayContaining(['photo_read', 'import_item_looked_up']));
 
-    await deps.photoImports.updateItem(id, 2, { sense_id: casa.senseIds[1] });
-    await deps.photoImports.updateItem(id, 1, { ticked: false });
-    expect(await deps.photoImports.save(id)).toEqual({ saved_sense_ids: [gatto.senseIds[0], casa.senseIds[1]] });
-    const page = await deps.vocabulary.listWords(IT, {});
+    await deps.photoImports.updateItem('u_1', id, 2, { sense_id: casa.senseIds[1] });
+    await deps.photoImports.updateItem('u_1', id, 1, { ticked: false });
+    expect(await deps.photoImports.save('u_1', id)).toEqual({ saved_sense_ids: [gatto.senseIds[0], casa.senseIds[1]] });
+    const page = await deps.vocabulary.listWords('u_1', IT, {});
     expect(page.items.map((item) => item.lemma).sort()).toEqual(['casa', 'gatto']);
   });
 
   it('marks the import failed, with no photo kept, when every read fails', async () => {
     await expectPhotoReadFailure(ns, 500);
-    const { id } = await deps.photoImports.create(IT, { mime_type: 'image/jpeg', image: 'QUJD' });
+    const { id } = await deps.photoImports.create('u_1', IT, { mime_type: 'image/jpeg', image: 'QUJD' });
     await waitFor(async () => (await statusOf(id)) === 'failed', 60_000);
     expect(logger.events.map((event) => event.event)).toContain('photo_read_failed');
   }, 90_000);
@@ -113,9 +113,9 @@ describe('a photo import through the queue', () => {
     // `zzzq` is in no dictionary, so its lookup calls the model, and nothing
     // in this namespace answers a lookup.
     await expectPhotoRead(ns, [{ text: 'gatto', hebrew: '' }, { text: 'zzzq', hebrew: '' }]);
-    const { id } = await deps.photoImports.create(IT, { mime_type: 'image/jpeg', image: 'QUJD' });
+    const { id } = await deps.photoImports.create('u_1', IT, { mime_type: 'image/jpeg', image: 'QUJD' });
     await waitFor(async () => (await statusOf(id)) === 'ready', 60_000);
-    const { items } = await deps.photoImports.getImport(id);
+    const { items } = await deps.photoImports.getImport('u_1', id);
     expect(items.map((item) => item.status)).toEqual(['ready', 'failed']);
   }, 90_000);
 });
