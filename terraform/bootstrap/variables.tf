@@ -4,8 +4,9 @@ variable "region" {
 }
 
 variable "github_repository" {
-  type    = string
-  default = "victor-prp/lang-tutor"
+  description = "The repository as the OIDC token's sub claim names it. The repo uses GitHub's immutable subject, owner@id/name@id, so a renamed or recreated repository cannot assume these roles. Check with: gh api repos/victor-prp/lang-tutor/actions/oidc/customization/sub."
+  type        = string
+  default     = "victor-prp@1573006/lang-tutor@1342656794"
 }
 
 variable "state_bucket" {
