@@ -106,8 +106,10 @@ proves before the next one starts.
 
 ## Releasing
 
-Merge, test master locally, then push a tag: `git tag v2026.10.08 && git push origin v2026.10.08`
-(a second release that day is `v2026.10.08.2`). Merging alone deploys nothing.
+Merge, pull, test master locally, then `npm run release`. It tags HEAD with the next
+`vYYYY.MM.DD` (a second release that day is `.2`, then `.3`) and pushes it, after checking that
+you are on `master` and level with `origin/master` and that HEAD is not released already.
+Merging alone deploys nothing.
 
 A red Release run leaves the previous deployment serving: Lightsail switches only to a
 container whose `/health` passes. The next `./scripts/infra.sh prod apply` from the laptop
@@ -117,8 +119,10 @@ the container log (below).
 
 ## Rolling back
 
-`gh workflow run release.yml --ref <earlier tag>`, or Actions → Release → Run workflow → pick
-the tag. The image exists, so this is one apply, one to two minutes. Only the image goes back:
+`npm run rollback` reruns the Release workflow from the release before the newest tag;
+`npm run rollback -- <tag>` from the one you name. After one rollback the newest tag is no
+longer live, so name the tag for the next. Both call `gh workflow run release.yml --ref <tag>`,
+which also works by hand, as does Actions → Release → Run workflow → pick the tag. The image exists, so this is one apply, one to two minutes. Only the image goes back:
 the workflow applies master's `terraform/`, so the domain, the budget and every secret stay as they
 are now. Rolling back past a
 migration does not undo the migration; ADR 0010 says why additive migrations make that safe.

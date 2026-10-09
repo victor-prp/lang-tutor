@@ -614,11 +614,21 @@ That is a defensible trade — it is the reason the job exists here rather than 
 ### Releasing
 
 A release is a pushed `v*` tag on a commit already on `master`, after testing master locally:
-`git tag v2026.10.08 && git push origin v2026.10.08`. The Release workflow waits for that
-commit's CI (every job but `test-eval`), builds the image into ECR, runs `terraform apply`
-through `scripts/infra.sh`, and goes green only when `/health` names the tag. Rolling back is
-the same workflow run from an earlier tag. Everything else, from the first apply to reading
-the container's log, is in the [hosting runbook](docs/runbooks/hosting.md).
+
+```bash
+npm run release                   # tags HEAD v2026.10.09, or .2, .3 for later ones that day, and pushes it
+npm run rollback                  # reruns the Release workflow from the release before the newest
+npm run rollback -- v2026.10.08   # ... or from the release you name
+```
+
+`npm run release` refuses off `master`, when `master` is behind or ahead of `origin`, and when
+HEAD is already released; it reads the tags from `origin`, not from the local list. The
+Release workflow waits for that commit's CI (every job but `test-eval`), builds the image into
+ECR, runs `terraform apply` through `scripts/infra.sh`, and goes green only when `/health`
+names the tag. Rolling back is the same workflow run from an earlier tag. After one rollback
+the newest tag is no longer live, so name the tag for the next. Everything else, from the
+first apply to reading the container's log, is in the
+[hosting runbook](docs/runbooks/hosting.md).
 
 ## End-to-end test
 
