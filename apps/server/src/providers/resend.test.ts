@@ -7,14 +7,26 @@ const okFetch = () =>
   jest.fn(async (_url: string, _init: RequestInit) => new Response('{"id":"m1"}', { status: 200 }));
 
 describe('signInEmail', () => {
-  it('puts the split code in the subject and names no app', () => {
-    const mail = signInEmail('12345678');
-    expect(mail.subject).toBe('קוד הכניסה שלך: 1234 5678');
+  it('puts the code in the subject and names no app', () => {
+    const mail = signInEmail('27508997');
+    expect(mail.subject).toBe('קוד הכניסה שלך: 27508997');
     expect(mail.text).toBe(
-      'קוד הכניסה שלך הוא 1234 5678.\nהקוד בתוקף ל-10 דקות.\nאם לא ביקשת אותו, אפשר להתעלם מהמייל הזה.',
+      'קוד הכניסה שלך הוא 27508997.\nהקוד בתוקף ל-10 דקות.\nאם לא ביקשת אותו, אפשר להתעלם מהמייל הזה.',
     );
-    expect(mail.html).toContain('1234 5678');
+    expect(mail.html).toContain('27508997');
     expect(mail.html).toContain('dir="rtl"');
+  });
+
+  // Every line is right-to-left Hebrew. Two digit groups separated by anything
+  // the bidi algorithm treats as neutral are drawn in swapped order, so
+  // "2750 8997" read as 8997 2750 and the learner typed a wrong code. One
+  // unbroken run of digits is drawn in order everywhere.
+  it('never separates the digits, so right-to-left text cannot reorder them', () => {
+    const mail = signInEmail('27508997');
+    for (const part of [mail.subject, mail.text, mail.html]) {
+      expect(part).toContain('27508997');
+      expect(part).not.toMatch(/2750\D+8997/);
+    }
   });
 });
 
@@ -40,7 +52,7 @@ describe('createResendMailer', () => {
     expect(body).toMatchObject({
       from: 'WordsPal <code@wordspal.ai>',
       to: ['learner@example.com'],
-      subject: 'קוד הכניסה שלך: 1234 5678',
+      subject: 'קוד הכניסה שלך: 12345678',
     });
   });
 
