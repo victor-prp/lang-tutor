@@ -25,7 +25,7 @@
 Each of these departs from the spec's letter for a reason found in the code. Task 17 writes them back into the spec.
 
 1. **ADR 0011, not 0009.** Phase 29's open branch holds `adr-0009-sign-in.md`, and phase 30 merged `adr-0010-single-container-migrations.md`.
-2. **Three migration files, applied as one.** `0022_glosses` (dictionary side, Task 2), `0023_glosses_rekey` (learner tables, Task 6) and `0024_lemma_renders` (Task 10). Drizzle's pg migrator applies every pending migration inside one transaction (`node_modules/drizzle-orm/pg-core/dialect.js`, `migrate()`), so a deploy still migrates atomically. If phase 29 lands first with `0022_auth` and `0023_users_auth_fk`, these become `0024`–`0026` (see Global Constraints).
+2. **Three migration files, applied as one.** Renumbered on 2026-10-09, after phase 29 merged first: they are `0024_glosses`, `0025_glosses_rekey` and `0026_lemma_renders`, and the phase 31 migration tests start at `0023_users_auth_fk`. `0024_glosses` (dictionary side, Task 2), `0025_glosses_rekey` (learner tables, Task 6) and `0026_lemma_renders` (Task 10). Drizzle's pg migrator applies every pending migration inside one transaction (`node_modules/drizzle-orm/pg-core/dialect.js`, `migrate()`), so a deploy still migrates atomically. If phase 29 lands first with `0022_auth` and `0023_users_auth_fk`, these become `0024`–`0026` (see Global Constraints).
 3. **The lemma backfill runs in the CLI's start-up path.** ADR 0010 makes the container's `node dist/cli.js` the only process that reaches production's database, so a separate `dict:lemmas:render` script could never run there. The CLI's default path (migrate, seed) now also requests lemma renders, and `npm run dict:lemmas:render` runs the same step on demand. A small table, `dict_lemma_renders`, records each (lexeme, learner language) render requested, so neither a second save nor the next restart requests it again: without it, a lemma the job skipped would cost model calls on every start.
 4. **The merge job's signal is the blocked rename.** The unique index on live glosses makes two live glosses with equal keys impossible, so the only equal-key drift D7 can meet is D6's: the lemma form's citation form equals another live gloss's key. The job looks for exactly that.
 5. **The re-key ships the wire's field renames, and the cards follow.** Task 6 renames `sense_id` to `gloss_id` everywhere, including the app and e2e, with lookup and detail cards still one per sense. Task 7 groups them into one card per gloss.
@@ -95,7 +95,7 @@ Each of these departs from the spec's letter for a reason found in the code. Tas
 **apps/server**
 - `src/db/migrate.ts`: the `gloss_key` SQL function (Task 2).
 - `src/db/schema.ts`: `dictGlosses`, `dictSenseGlosses`, `dictSenses.definition`, `dictVarTranslations.gloss` and `.alternatives` (Task 2); the re-key and `glossProgress` (Task 6); `dictLemmaRenders` (Task 10).
-- `src/db/migrations/0022_glosses.sql`, `0023_glosses_rekey.sql`, `0024_lemma_renders.sql`, with `meta/*` (Tasks 2, 6, 10).
+- `src/db/migrations/0024_glosses.sql`, `0025_glosses_rekey.sql`, `0026_lemma_renders.sql`, with `meta/*` (Tasks 2, 6, 10).
 - `src/domain/glosses.ts` (+ test): `splitTranslation`, `tidyGlossList` (Task 1); `assignGlosses` (Task 3); `mergeLevels`, `mergeSnapshots`, `keptEntry` (Task 9).
 - `src/domain/dictionary.ts`: `entriesToRows` fields (Tasks 2, 4); `SenseRow.glossId` (Task 6); `rowsToCards`, `flattenEntries` by gloss (Task 7).
 - `src/domain/translation.ts`: both prompts (Tasks 4, 5).
@@ -323,7 +323,7 @@ const tidy = (text: string): string => text.replace(/\s+/gu, ' ').trim();
  * first, so a comma or a slash inside one never splits: "אח (חבר, רע)" is אח.
  * What is left splits on the list marks; the first item is the translation and
  * the rest are its alternatives. Text that is nothing but a parenthetical stays
- * as it was, so a translation is never empty. 0022_glosses.sql holds the same
+ * as it was, so a translation is never empty. 0024_glosses.sql holds the same
  * rule in SQL, and the migration test runs lane 0's shapes through both.
  */
 export function splitTranslation(text: string): { translation: string; alternatives: string[] } {
@@ -370,7 +370,7 @@ git commit -m "feat(core): normaliseGloss and splitTranslation, the two text rul
 **Files:**
 - Modify: `apps/server/src/db/migrate.ts` (a third SQL function beside `correction_alternatives_valid`)
 - Modify: `apps/server/src/db/schema.ts` (`dictSenses`, `dictVarTranslations`; new `dictGlosses`, `dictSenseGlosses` right after `dictVarTranslations`)
-- Create: `apps/server/src/db/migrations/0022_glosses.sql` (+ `meta/0022_snapshot.json`, `meta/_journal.json`)
+- Create: `apps/server/src/db/migrations/0024_glosses.sql` (+ `meta/0022_snapshot.json`, `meta/_journal.json`)
 - Modify: `apps/server/src/domain/dictionary.ts` (`SenseToWrite`, `entriesToRows`, `toResponseSense`) and `dictionary.test.ts`
 - Modify: `apps/server/src/repo/dictionary.ts` (`RepairedRendering`, step 5 of `persistEntries`, the insert in `repairVariantRenderings`)
 - Modify: `apps/server/src/services/translations.ts` (`repairForm` builds its renderings with `renderingOf`)
@@ -402,7 +402,7 @@ const TRANSLATION_SHAPES = [
   'בית קפה', 'בלתי אפשרי', 'to deposit', 'ha scritto', 'א, ב / ג', 'רם, רָם, חזק, חזק', '(הערה)',
 ];
 
-describe('0022_glosses', () => {
+describe('0024_glosses', () => {
   it('cleans every rendering and gives every rendered sense one gloss per learner language', async () => {
     const db = await emptyDatabase();
     await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
@@ -688,7 +688,7 @@ export const dictSenseGlosses = pgTable(
 );
 ```
 
-- [ ] **Step 6: Generate the migration, then make it backfill.** From the worktree root: `npm run db:generate -w apps/server -- --name glosses`. Expected: `0022_glosses.sql`, `meta/0022_snapshot.json` and a `_journal.json` entry. Open the SQL and make four edits, keeping drizzle's `--> statement-breakpoint` separators:
+- [ ] **Step 6: Generate the migration, then make it backfill.** From the worktree root: `npm run db:generate -w apps/server -- --name glosses`. Expected: `0024_glosses.sql`, `meta/0022_snapshot.json` and a `_journal.json` entry. Open the SQL and make four edits, keeping drizzle's `--> statement-breakpoint` separators:
 
 1. Put this comment at the top:
 
@@ -696,7 +696,7 @@ export const dictSenseGlosses = pgTable(
 -- Phase 31 (spec §2, migration steps 1-3). The dictionary side of glosses:
 -- one gloss per (lexeme, learner language, target word), one membership per
 -- rendered sense, and one translation per rendering. Learner tables are
--- re-keyed in 0023_glosses_rekey; drizzle applies both in one transaction.
+-- re-keyed in 0025_glosses_rekey; drizzle applies both in one transaction.
 ```
 
 2. Replace `ALTER TABLE "dict_var_translations" ADD COLUMN "gloss" text NOT NULL;` with `ALTER TABLE "dict_var_translations" ADD COLUMN "gloss" text;`.
@@ -2294,7 +2294,7 @@ This task changes keys, not behaviour: after it, lookup and detail cards are sti
 
 **Files:**
 - Modify: `apps/server/src/db/schema.ts` (`vocabularyEntries`, `senseProgress` → `glossProgress`, `sessionProgress`, `questions`, `photoImportItems`, `dictVarTranslations`)
-- Create: `apps/server/src/db/migrations/0023_glosses_rekey.sql` (+ `meta/0023_snapshot.json`, `_journal.json`)
+- Create: `apps/server/src/db/migrations/0025_glosses_rekey.sql` (+ `meta/0023_snapshot.json`, `_journal.json`)
 - Modify: `packages/core/src/api/schemas.ts`, `schemas.test.ts`, `types.ts`, `index.ts`
 - Modify (server source): `domain/dictionary.ts`, `domain/vocabulary.ts`, `domain/progress.ts`, `domain/photoImports.ts`, `domain/distractors.ts`, `domain/jobs.ts`; `repo/dictionary.ts`, `repo/vocabulary.ts`, `repo/progress.ts`, `repo/questions.ts`, `repo/photoImports.ts`; `services/translations.ts`, `services/vocabulary.ts`, `services/sessions.ts`, `services/photoImports.ts`; `routes/vocabulary.ts`, `routes/sessions.ts`, `routes/photoImports.ts`; `errors.ts`; `db/seed.ts`, `db/progressRecompute.ts`
 - Modify (server tests): every file under `apps/server/src` and `apps/server/tests` that the `grep` of Step 11 lists, and `tests/support/{vocabularyRows,progressRows,questions,photoImportRows,dictRows,grantRows}.ts`
@@ -2318,7 +2318,7 @@ This task changes keys, not behaviour: after it, lookup and detail cards are sti
 - [ ] **Step 1: Write the failing migration test.** It starts at `0021`, so it runs `0022` and `0023` together, as a deploy will. Append to `apps/server/tests/integration/db/migrations.test.ts`:
 
 ```ts
-describe('0023_glosses_rekey', () => {
+describe('0025_glosses_rekey', () => {
   it("folds two saves of one gloss into one, keeping the earliest save and each dimension's best, and folds the sessions that asked both", async () => {
     const db = await emptyDatabase();
     await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
@@ -2517,13 +2517,13 @@ and add `foreignKey({ name: 'questions_gloss_fk', columns: [t.glossId], foreignC
 
 `photoImportItems`: `suggestedSenseId` and `chosenSenseId` become `suggestedGlossId: text('suggested_gloss_id')` and `chosenGlossId: text('chosen_gloss_id')`, and the check becomes `check('photo_import_items_tick_needs_gloss', sql\`not ${t.ticked} or ${t.chosenGlossId} is not null\`)`. Its `options` column keeps `$type<PhotoImportOption[]>()`: the type changes shape in Step 6.
 
-- [ ] **Step 4: Write the migration by hand.** `npm run db:generate -w apps/server -- --custom --name glosses_rekey`. Expected: an empty `0023_glosses_rekey.sql`, `meta/0023_snapshot.json` and a journal entry. Fill the SQL file with exactly this:
+- [ ] **Step 4: Write the migration by hand.** `npm run db:generate -w apps/server -- --custom --name glosses_rekey`. Expected: an empty `0025_glosses_rekey.sql`, `meta/0023_snapshot.json` and a journal entry. Fill the SQL file with exactly this:
 
 ```sql
 -- Phase 31 (spec §2, migration steps 4-6). Every learner table names a gloss
 -- instead of a sense. Hand-written (drizzle-kit generate --custom): drizzle reads
 -- a dropped sense_id beside a new gloss_id as a possible rename and stops to ask.
--- 0022_glosses gave every rendered sense a gloss in each language it is rendered
+-- 0024_glosses gave every rendered sense a gloss in each language it is rendered
 -- in, which is what each fill below joins through.
 ALTER TABLE "vocabulary_entries" ADD COLUMN "gloss_id" text;--> statement-breakpoint
 ALTER TABLE "sense_progress" ADD COLUMN "gloss_id" text;--> statement-breakpoint
@@ -3954,7 +3954,7 @@ const later = (a: string | null, b: string | null): string | null =>
   a === null ? b : b === null ? a : a > b ? a : b;
 
 /** Spec D3, done-means 4: two rows of one dimension folded into one, the higher
- *  level with the later of each date. 0023_glosses_rekey.sql holds the same rule. */
+ *  level with the later of each date. 0025_glosses_rekey.sql holds the same rule. */
 export function mergeLevels(a: LevelState, b: LevelState): LevelState {
   return {
     level: Math.max(a.level, b.level),
@@ -4813,7 +4813,7 @@ git commit -m "feat(server): merges — the merge job, forwarded glosses, and ev
 ### Task 10: Lemma renders — the `render-lemma` job, its enqueue on every save, and the start-up backfill (D12)
 
 **Files:**
-- Modify: `apps/server/src/db/schema.ts` (`dictLemmaRenders`); Create: `apps/server/src/db/migrations/0024_lemma_renders.sql` (+ meta)
+- Modify: `apps/server/src/db/schema.ts` (`dictLemmaRenders`); Create: `apps/server/src/db/migrations/0026_lemma_renders.sql` (+ meta)
 - Modify: `apps/server/src/domain/jobs.ts`, `apps/server/src/db/jobs.ts` (`RENDER_LEMMA`, `withJobQueue`), `apps/server/src/worker.ts`
 - Modify: `apps/server/src/domain/dictionary.ts` (`entriesToRows`' offset)
 - Modify: `apps/server/src/repo/dictionary.ts` (`findLexeme`, `hasLemmaRendering`, `nextEntryRank`, `claimLemmaRenders`, `claimSavedLemmaRenders`, `persistEntries`' `entryRankOffset`)
