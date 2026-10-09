@@ -29,8 +29,8 @@ const meaningItems = (context: GenerationContext[]) =>
   distractorItems(context, context.map((): QuestionType => 'multiple_choice').map(taskFor), NO_RECENT);
 
 const CONTEXT: GenerationContext[] = [
-  { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
-  { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
+  { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
+  { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
 ];
 const ITEMS = meaningItems(CONTEXT);
 
@@ -167,7 +167,7 @@ describe('validateDistractors', () => {
   // in a dictionary key, but here "the same option" ignores it, and nikud.
   describe('multi-word answers and pointed copies', () => {
     const phrase = meaningItems([
-      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'большое спасибо', lemma: 'спасибо', partOfSpeech: 'phrase', translation: 'תודה רבה', example: null, exampleTranslation: null },
+      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'большое спасибо', lemma: 'спасибо', partOfSpeech: 'phrase', translation: 'תודה רבה', example: null, exampleTranslation: null },
     ]);
     const one = (distractors: string[]) => ({ items: [{ key: 'q1', distractors }] });
 
@@ -196,9 +196,9 @@ describe('validateDistractors', () => {
   // same form twice. One sense's translation is a right answer on the other.
   describe('another saved meaning of the same word', () => {
     const polysemy = meaningItems([
-      { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
-      { senseId: 's2', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'קשת', example: null, exampleTranslation: null },
-      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'хлеб', lemma: 'хлеб', partOfSpeech: 'noun', translation: 'לחם', example: null, exampleTranslation: null },
+      { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
+      { glossId: 'g-s2', senseId: 's2', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'קשת', example: null, exampleTranslation: null },
+      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'хлеб', lemma: 'хлеб', partOfSpeech: 'noun', translation: 'לחם', example: null, exampleTranslation: null },
     ]);
     const batch = (q1: string[], q3: string[] = ['חלב', 'גבינה', 'ביצה']) => ({
       items: [
@@ -227,8 +227,8 @@ describe('validateDistractors', () => {
 // in English gets Hebrew options and English prompts.
 describe('a learner of Hebrew explained in English', () => {
   const HEBREW_WORDS: GenerationContext[] = [
-    { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'ספר', lemma: 'ספר', partOfSpeech: 'noun', translation: 'book', example: null, exampleTranslation: null },
-    { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'חלון', lemma: 'חלון', partOfSpeech: 'noun', translation: 'window', example: null, exampleTranslation: null },
+    { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'ספר', lemma: 'ספר', partOfSpeech: 'noun', translation: 'book', example: null, exampleTranslation: null },
+    { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'חלון', lemma: 'חלון', partOfSpeech: 'noun', translation: 'window', example: null, exampleTranslation: null },
   ];
   const items = distractorItems(HEBREW_WORDS, (['reverse_choice', 'typed_translation'] as QuestionType[]).map(taskFor), NO_RECENT);
 
@@ -265,7 +265,7 @@ describe('optionsFor', () => {
 describe('three tasks', () => {
   const CONTEXT3: GenerationContext[] = [
     ...CONTEXT,
-    { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
+    { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
   ];
   const TYPES: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
   const MIXED = distractorItems(CONTEXT3, TYPES.map(taskFor), NO_RECENT);
@@ -306,8 +306,8 @@ describe('three tasks', () => {
   it('refuses, on a word item, another item’s word that has the same meaning', () => {
     const same = distractorItems(
       [
-        { senseId: 'a', variantId: 'va', lexemeId: 'la', form: 'bella', lemma: 'bello', partOfSpeech: 'adjective', translation: 'יפה', example: null, exampleTranslation: null },
-        { senseId: 'b', variantId: 'vb', lexemeId: 'lb', form: 'carina', lemma: 'carino', partOfSpeech: 'adjective', translation: 'יפה', example: null, exampleTranslation: null },
+        { glossId: 'g-a', senseId: 'a', variantId: 'va', lexemeId: 'la', form: 'bella', lemma: 'bello', partOfSpeech: 'adjective', translation: 'יפה', example: null, exampleTranslation: null },
+        { glossId: 'g-b', senseId: 'b', variantId: 'vb', lexemeId: 'lb', form: 'carina', lemma: 'carino', partOfSpeech: 'adjective', translation: 'יפה', example: null, exampleTranslation: null },
       ],
       ['word', 'word'],
       NO_RECENT,
@@ -390,7 +390,7 @@ describe('phase 24 generation (spec D2, D10)', () => {
   });
 
   const row = (form: string, translation: string): GenerationContext => ({
-    senseId: `s-${form}-${translation}`, variantId: `v-${form}`, lexemeId: `l-${form}`, form, lemma: form, partOfSpeech: 'noun', translation, example: null, exampleTranslation: null,
+    glossId: `g-s-${form}-${translation}`, senseId: `s-${form}-${translation}`, variantId: `v-${form}`, lexemeId: `l-${form}`, form, lemma: form, partOfSpeech: 'noun', translation, example: null, exampleTranslation: null,
   });
 
   it("takes a board's fifth meaning from the first wrong one that is none of its four", () => {
@@ -432,7 +432,7 @@ describe('phase 24 generation (spec D2, D10)', () => {
 // tiles card, a board's later words) are still in the session.
 describe('rows that ask the model nothing', () => {
   const castle = distractorItems(
-    [{ senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'замок', lemma: 'замок', partOfSpeech: 'noun', translation: 'טירה', example: null, exampleTranslation: null }],
+    [{ glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'замок', lemma: 'замок', partOfSpeech: 'noun', translation: 'טירה', example: null, exampleTranslation: null }],
     ['meaning'],
     NO_RECENT,
   );
@@ -449,7 +449,7 @@ describe('rows that ask the model nothing', () => {
 
   it('refuses, on a word item, the word of another row with the same meaning', () => {
     const word = distractorItems(
-      [{ senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null }],
+      [{ glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null }],
       ['word'],
       NO_RECENT,
     );
@@ -490,7 +490,7 @@ describe('rows that ask the model nothing', () => {
 });
 
 describe('phase 25 generation', () => {
-  const row = { senseId: 's', variantId: 'v', lexemeId: 'l', form: 'gatto', lemma: 'gatto', partOfSpeech: 'noun', translation: 'חתול', example: null, exampleTranslation: null };
+  const row = { glossId: 'g-s', senseId: 's', variantId: 'v', lexemeId: 'l', form: 'gatto', lemma: 'gatto', partOfSpeech: 'noun', translation: 'חתול', example: null, exampleTranslation: null };
   it('asks the typed task for say the translation, and nothing for read aloud', () => {
     expect(taskFor('say_translation')).toBe('typed');
     expect(taskFor('read_aloud')).toBeNull();
@@ -530,7 +530,7 @@ describe('typed_meaning content (phase 27 D15)', () => {
 // Phase 27 Part B (spec D5 to D10): the three sentence tasks.
 describe('the sentence tasks (phase 27 D5 to D10)', () => {
   const ROW: GenerationContext = {
-    senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'parlare', lemma: 'parlare', partOfSpeech: 'verb', translation: 'לדבר',
+    glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'parlare', lemma: 'parlare', partOfSpeech: 'verb', translation: 'לדבר',
     example: 'Mi piace parlare con te.', exampleTranslation: 'אני אוהב לדבר איתך.',
   };
 
@@ -542,7 +542,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
 
   describe('distractorItems', () => {
     const recent: RecentSentences = new Map([
-      ['s1', { cloze: ['A uno.', 'B due.', 'C tre.', 'D quattro.'], translate: ['אחת', 'שתיים', 'שלוש', 'ארבע'] }],
+      ['g-s1', { cloze: ['A uno.', 'B due.', 'C tre.', 'D quattro.'], translate: ['אחת', 'שתיים', 'שלוש', 'ארבע'] }],
     ]);
     it('avoids the saved example and the three newest recent sentences on a sentence item', () => {
       const [item] = distractorItems([ROW], ['sentence'], recent);
@@ -570,7 +570,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
     const items = [
       ...distractorItems([ROW], ['gap'], NO_RECENT),
       ...distractorItems([ROW], ['sentence'], NO_RECENT).map((item) => ({ ...item, key: 'q2' })),
-      ...distractorItems([ROW], ['translate'], new Map([['s1', { cloze: [], translate: ['אחת'] }]])).map((item) => ({ ...item, key: 'q3' })),
+      ...distractorItems([ROW], ['translate'], new Map([['g-s1', { cloze: [], translate: ['אחת'] }]])).map((item) => ({ ...item, key: 'q3' })),
     ];
     const prompt = buildDistractorPrompt({ items, from: 'it', to: 'he', others: [] });
     it('describes the three tasks and keeps the marker', () => {

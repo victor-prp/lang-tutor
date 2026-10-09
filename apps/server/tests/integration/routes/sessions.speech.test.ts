@@ -9,7 +9,7 @@ import {
   geminiBaseUrlFor,
   mockNamespace,
 } from '../../support/mockServer';
-import { insertListSession, readStoredAnswers, type AskedSense } from '../../support/questions';
+import { insertListSession, readStoredAnswers, type AskedGloss } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -46,14 +46,14 @@ function buildTestApp(ns: string) {
 
 /** A ready list session: read aloud, say the translation, today's card. */
 async function startSpeaking() {
-  const asked: AskedSense[] = [];
+  const asked: AskedGloss[] = [];
   for (const [lemma, translation] of [
     ['tome', 'ספר'],
     ['lantern', 'פנס'],
     ['quill', 'נוצה'],
   ]) {
     const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
-    asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
   }
   return insertListSession(t.db, {
     userId: 'u_1',

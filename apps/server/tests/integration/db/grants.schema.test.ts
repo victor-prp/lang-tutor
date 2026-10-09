@@ -75,8 +75,8 @@ describe('vocabulary_entries.added_by_user_id', () => {
     });
     const insert = (addedBy: string | null) =>
       t.db.execute(sql`
-        insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, added_by_user_id)
-        values (${enrollmentOf('u_student')}, ${kite.senseIds[0]}, ${kite.lexemeId}, 'kite', ${kite.variantIds[0]}, ${addedBy})`);
+        insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, lemma, variant_id, added_by_user_id)
+        values (${enrollmentOf('u_student')}, ${kite.glossIds[0]}, ${kite.lexemeId}, 'kite', ${kite.variantIds[0]}, ${addedBy})`);
     await expect(insert(null)).rejects.toEqual(violating('added_by_user_id'));
     await expect(insert('u_nobody')).rejects.toEqual(violating('vocabulary_entries_added_by_fk'));
     await insert('u_tutor');

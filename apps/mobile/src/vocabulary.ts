@@ -7,7 +7,7 @@ import type {
 
 import { strings } from '@/strings';
 
-/** sense_id → saved, for the senses the server said can be saved here. A sense
+/** gloss_id → saved, for the senses the server said can be saved here. A sense
  *  absent from the map gets no toggle: a reverse lookup, a sentence, a failed
  *  write. The server decides; the screen only reads this. */
 export type SavedState = Record<string, boolean>;
@@ -15,7 +15,7 @@ export type SavedState = Record<string, boolean>;
 export function savedStateOf(senses: TranslationSense[]): SavedState {
   const state: SavedState = {};
   for (const sense of senses) {
-    if (sense.sense_id && sense.variant_id && sense.saved !== undefined) state[sense.sense_id] = sense.saved;
+    if (sense.gloss_id && sense.variant_id && sense.saved !== undefined) state[sense.gloss_id] = sense.saved;
   }
   return state;
 }
@@ -27,7 +27,7 @@ export function savedStateOf(senses: TranslationSense[]): SavedState {
 export function addableStateOf(senses: TranslationSense[], from: string, targetLanguage: string): SavedState {
   if (from !== targetLanguage) return {};
   const state: SavedState = {};
-  for (const sense of senses) if (sense.sense_id && sense.variant_id) state[sense.sense_id] = false;
+  for (const sense of senses) if (sense.gloss_id && sense.variant_id) state[sense.gloss_id] = false;
   return state;
 }
 
@@ -45,8 +45,8 @@ export function toggleIntent(mode: 'learner' | 'tutor', saved: boolean): 'save' 
 
 export function unsavedEntries(senses: TranslationSense[], saved: SavedState): VocabularyEntryInput[] {
   return senses.flatMap((sense) =>
-    sense.sense_id && sense.variant_id && saved[sense.sense_id] === false
-      ? [{ sense_id: sense.sense_id, variant_id: sense.variant_id }]
+    sense.gloss_id && sense.variant_id && saved[sense.gloss_id] === false
+      ? [{ gloss_id: sense.gloss_id, variant_id: sense.variant_id }]
       : [],
   );
 }
@@ -117,10 +117,10 @@ export function partsOfSpeechLabel(codes: string[]): string {
  *  server lists saved senses first, so taking its order would move the sense just
  *  tapped out from under the learner's finger. A sense new to the screen goes
  *  last; one the server no longer lists is dropped. */
-export function keepSenseOrder(shown: VocabularyWordDetail, fresh: VocabularyWordDetail): VocabularyWordDetail {
-  const position = new Map(shown.senses.map((sense, i) => [sense.sense_id, i]));
-  const at = (senseId: string) => position.get(senseId) ?? shown.senses.length;
-  return { ...fresh, senses: [...fresh.senses].sort((a, b) => at(a.sense_id) - at(b.sense_id)) };
+export function keepGlossOrder(shown: VocabularyWordDetail, fresh: VocabularyWordDetail): VocabularyWordDetail {
+  const position = new Map(shown.senses.map((sense, i) => [sense.gloss_id, i]));
+  const at = (glossId: string) => position.get(glossId) ?? shown.senses.length;
+  return { ...fresh, senses: [...fresh.senses].sort((a, b) => at(a.gloss_id) - at(b.gloss_id)) };
 }
 
 export function showsMark(word: VocabularyWord): boolean {

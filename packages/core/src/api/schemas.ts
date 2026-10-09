@@ -238,7 +238,7 @@ export const ScoreSchema = z.object({
   total: z.number().int(),
 });
 
-// Phase 20. Knowledge per saved sense: five dimensions, each with a level from
+// Phase 20. Knowledge per saved gloss: five dimensions, each with a level from
 // 1 to 5 that only rises. packages/core/src/domain/progress.ts holds the same
 // list as DIMENSIONS, and a test keeps the two equal.
 export const KnowledgeDimensionSchema = z.enum([
@@ -251,8 +251,8 @@ export const KnowledgeDimensionSchema = z.enum([
 
 export const LevelSchema = z.number().int().min(1).max(5);
 
-// A saved sense's badge and its five levels. Only a saved sense has one.
-export const SenseProgressSchema = z.object({
+// A saved gloss's badge and its five levels. Only a saved gloss has one.
+export const GlossProgressSchema = z.object({
   level: LevelSchema,
   dimensions: z.object({
     written_receptive: LevelSchema,
@@ -263,11 +263,11 @@ export const SenseProgressSchema = z.object({
   }),
 });
 
-// One practised saved sense on the results screen. Both levels are badges over
+// One practised saved gloss on the results screen. Both levels are badges over
 // the live dimensions. `form` is the prompt the learner saw; `translation` is
 // the right answer.
 export const SessionProgressItemSchema = z.object({
-  sense_id: z.string(),
+  gloss_id: z.string(),
   form: z.string(),
   translation: z.string(),
   level_before: LevelSchema,
@@ -282,7 +282,7 @@ export const SessionProgressItemSchema = z.object({
 export const SessionStatusSchema = z.enum(['preparing', 'ready', 'completed', 'skipped', 'failed']);
 
 // Where a session's questions came from: the shared seed, or the enrollment's
-// saved senses.
+// saved glosses.
 export const SessionSourceSchema = z.enum(['seed', 'list']);
 
 export const MissedQuestionSchema = z.object({
@@ -364,7 +364,7 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     complete: z.literal(true),
     score: ScoreSchema,
     missed_questions: z.array(MissedQuestionSchema),
-    // Phase 20. Every practised saved sense, with its badge before and after.
+    // Phase 20. Every practised saved gloss, with its badge before and after.
     progress: z.array(SessionProgressItemSchema),
   }),
 ]);
@@ -578,7 +578,7 @@ export const TranslationSenseSchema = z.object({
   // save it. Optional because two answers have none: a sentence is never
   // stored, and a word whose write failed is still answered, with 200, from the
   // model's reply.
-  sense_id: z.string().optional(),
+  gloss_id: z.string().optional(),
   variant_id: z.string().optional(),
   // Present only when the request named an enrollment AND `from` is that
   // enrollment's target language AND the sense has ids. Absent means "cannot be
@@ -639,11 +639,11 @@ export const TranslationResponseSchema = z.object({
   reason: TranslationGuardReasonSchema.optional(),
 });
 
-// Phase 18 — an enrollment's word list. One entry per (enrollment, sense); the
-// form it was first saved from travels with it, because a sense has no wording
-// of its own.
+// Phase 18 — an enrollment's word list. One entry per (enrollment, gloss) since
+// phase 31; the form it was first saved from travels with it, because a gloss
+// has no wording per form.
 export const VocabularyEntryInputSchema = z.object({
-  sense_id: z.string().min(1),
+  gloss_id: z.string().min(1),
   variant_id: z.string().min(1),
 });
 
@@ -653,9 +653,9 @@ export const SaveVocabularyRequestSchema = z.object({
   entries: z.array(VocabularyEntryInputSchema).min(1).max(20),
 });
 
-// Every sense of the request, saved now or already: saving is idempotent.
+// Every gloss of the request, saved now or already: saving is idempotent.
 export const SaveVocabularyResponseSchema = z.object({
-  saved_sense_ids: z.array(z.string()),
+  saved_gloss_ids: z.array(z.string()),
 });
 
 // Query-string values arrive as strings, hence coerce. A cursor is opaque: the
@@ -675,7 +675,7 @@ export const VocabularyPageQuerySchema = z.object({
 export const VocabularyWordSchema = z.object({
   lemma: z.string(),
   parts_of_speech: z.array(z.string()),
-  headline: z.object({ sense_id: z.string(), translation: z.string(), form: z.string() }),
+  headline: z.object({ gloss_id: z.string(), translation: z.string(), form: z.string() }),
   saved_count: z.number().int(),
   sense_count: z.number().int(),
   // Phase 20. The word's badge: the rounded mean over its saved senses and the live dimensions.
@@ -695,7 +695,7 @@ export const VocabularyPageSchema = z.object({
 // the saved form for a saved sense, a representative one otherwise. Saving from
 // the drill-down records that variant.
 export const VocabularySenseSchema = z.object({
-  sense_id: z.string(),
+  gloss_id: z.string(),
   variant_id: z.string(),
   form: z.string(),
   translation: z.string(),
@@ -704,7 +704,7 @@ export const VocabularySenseSchema = z.object({
   example: z.object({ source: z.string(), target: z.string() }).optional(),
   saved: z.boolean(),
   // Phase 20. Present on a saved sense only: its badge and five levels.
-  progress: SenseProgressSchema.optional(),
+  progress: GlossProgressSchema.optional(),
   // Phase 28. Present on a saved sense someone other than the list's owner added:
   // their display name.
   added_by: z.string().optional(),
@@ -944,7 +944,7 @@ export const LlmDistractorsSchema = z.object({
 });
 
 // Phase 26. Words from a photo: an import is one photo of a word list, read in
-// the background into rows, each a word or phrase with one chosen sense. The
+// the background into rows, each a word or phrase with one chosen gloss. The
 // image is base64 JPEG, because the app re-encodes every photo. 2 800 000
 // characters is about 2 MB decoded (spec D6).
 export const PhotoImportCreateRequestSchema = z.object({
@@ -960,13 +960,15 @@ export const PhotoImportItemStatusSchema = z.enum(['pending', 'ready', 'failed']
 // Why a ready row has no options (spec D7).
 export const PhotoImportItemReasonSchema = z.enum(['sentence', 'no_meaning', 'not_in_language']);
 
-// One saveable sense of a row's word: a snapshot of the lookup's answer.
+// One saveable gloss of a row's word: a snapshot of the lookup's card (spec
+// D15). Phase 31: a gloss, with one example per member sense.
 export const PhotoImportOptionSchema = z.object({
-  sense_id: z.string(),
+  gloss_id: z.string(),
   variant_id: z.string(),
   translation: z.string(),
   part_of_speech: z.string().optional(),
-  example: z.object({ source: z.string(), target: z.string() }).optional(),
+  examples: z.array(z.object({ source: z.string(), target: z.string() })).optional(),
+  alternatives: z.array(z.string()).optional(),
 });
 
 export const PhotoImportItemSchema = z.object({
@@ -979,7 +981,7 @@ export const PhotoImportItemSchema = z.object({
   // Set when the lookup corrected the text (`gatlo` read, `gatto` looked up).
   corrected_form: z.string().nullable(),
   options: z.array(PhotoImportOptionSchema),
-  chosen_sense_id: z.string().nullable(),
+  chosen_gloss_id: z.string().nullable(),
   ticked: z.boolean(),
   // The printed Hebrew names none of the options.
   hebrew_mismatch: z.boolean(),
@@ -1005,9 +1007,9 @@ export const PhotoImportListSchema = z.array(PhotoImportSummarySchema);
 export const PhotoImportItemUpdateSchema = z
   .object({
     ticked: z.boolean().optional(),
-    sense_id: z.string().min(1).optional(),
+    gloss_id: z.string().min(1).optional(),
   })
-  .refine((body) => body.ticked !== undefined || body.sense_id !== undefined, {
+  .refine((body) => body.ticked !== undefined || body.gloss_id !== undefined, {
     message: 'nothing to update',
   });
 

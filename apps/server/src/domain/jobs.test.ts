@@ -27,7 +27,7 @@ describe('PrepareSessionPayloadSchema', () => {
   // Review Focus 3: a job enqueued before phase 24 has neither field.
   it('reads a payload from before phase 24 as listening off, at the first ordinal', () => {
     expect(
-      PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [{ sense_id: 'a', variant_id: 'b' }] }),
+      PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [{ gloss_id: 'g', sense_id: 'a', variant_id: 'b' }] }),
     ).toMatchObject({ listening: false, ordinal: 0 });
   });
 
@@ -35,7 +35,7 @@ describe('PrepareSessionPayloadSchema', () => {
     expect(
       PrepareSessionPayloadSchema.parse({
         session_id: 's',
-        picks: [{ sense_id: 'a', variant_id: 'b' }],
+        picks: [{ gloss_id: 'g', sense_id: 'a', variant_id: 'b' }],
         listening: true,
         ordinal: 4,
       }),

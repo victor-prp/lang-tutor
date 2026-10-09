@@ -259,7 +259,6 @@ export const dictVarTranslations = pgTable(
     // inflection: the lookup card's "also …", and right answers to a meaning
     // card built on this form (D13). Never more than five (tidyGlossList).
     alternatives: text('alternatives').array().notNull().default(sql`'{}'::text[]`),
-    definitionNotes: text('definition_notes'),
     // Both halves of the example live here, because an example belongs to the
     // form that was typed: `booked` shows "I booked a table", not "I want to
     // book a table". The source half is duplicated per target language, which is
@@ -465,18 +464,19 @@ export const dictCorrections = pgTable(
 );
 
 /**
- * Phase 18. A learner's word list, one row per (enrollment, sense): the research
- * verdict, held as a primary key. Saving a meaning again from another form is ON
- * CONFLICT DO NOTHING, so the first form wins.
+ * Phase 18, re-keyed in phase 31 (spec D2). A learner's word list, one row per
+ * (enrollment, gloss): the research verdict, held as a primary key. Saving a
+ * meaning again from another form is ON CONFLICT DO NOTHING, so the first form
+ * wins.
  *
- * `variant_id` is the form the sense was first saved from. It is not part of the
- * key; it is here because a sense has no wording of its own — translations and
+ * `variant_id` is the form the gloss was first saved from. It is not part of the
+ * key; it is here because a gloss has no wording per form — translations and
  * examples live on dict_var_translations, per form — and the saved form is the
  * one rendering certain to exist.
  *
- * `lexeme_id` is a copy of dict_senses.lexeme_id. A sense never changes lexeme,
- * so the copy cannot go stale (dict_variants.language_code's reasoning), and it
- * keeps dict_senses out of every vocabulary read.
+ * `lexeme_id` is a copy of dict_glosses.lexeme_id. A gloss never changes lexeme,
+ * so the copy cannot go stale (dict_variants.language_code's reasoning), and
+ * vocabulary_entries_gloss_fk holds it equal to the gloss's.
  *
  * **No FK to dict_var_translations**, though (variant, sense, language) would be
  * the tightest constraint: repairVariantRenderings deletes and re-inserts a
@@ -484,7 +484,7 @@ export const dictCorrections = pgTable(
  * checks the rendering at save time; the repair's "may not drop a sense" rule
  * keeps it true afterwards.
  *
- * **No index on sense_id, variant_id or lexeme_id alone.** Postgres does not
+ * **No index on gloss_id, variant_id or lexeme_id alone.** Postgres does not
  * index the referencing side of an FK, so a cascade from ONE deleted dictionary
  * row would scan this table. Nothing deletes dictionary rows one at a time:
  * db:reseed's TRUNCATE ... CASCADE does no lookups, and the dictionary has no
@@ -497,7 +497,9 @@ export const vocabularyEntries = pgTable(
   'vocabulary_entries',
   {
     enrollmentId: text('enrollment_id').notNull(),
-    senseId: text('sense_id').notNull(),
+    // Phase 31 (spec D2). The gloss saved: one target word of one headword in the
+    // enrollment's learner language. Was sense_id (phase 18).
+    glossId: text('gloss_id').notNull(),
     lexemeId: text('lexeme_id').notNull(),
     // Phase 21. The lexeme's lemma, copied at save time. The saved list groups by
     // it, and the copy is what keeps that list as cheap as phase 20's: joining
@@ -505,23 +507,25 @@ export const vocabularyEntries = pgTable(
     // vocabulary_entries_lexeme_lemma_fk keeps it equal to the lexeme's.
     lemma: text('lemma').notNull(),
     variantId: text('variant_id').notNull(),
-    // Phase 28 (spec D5). Who put this sense in the list: the owner, or a
+    // Phase 28 (spec D5). Who put this gloss in the list: the owner, or a
     // grantee such as a tutor. NOT NULL so no reader has to know that null
     // means "the owner"; the migration backfilled older rows to the owner.
     addedByUserId: text('added_by_user_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ name: 'vocabulary_entries_pkey', columns: [t.enrollmentId, t.senseId] }),
+    primaryKey({ name: 'vocabulary_entries_pkey', columns: [t.enrollmentId, t.glossId] }),
     foreignKey({
       name: 'vocabulary_entries_enrollment_fk',
       columns: [t.enrollmentId],
       foreignColumns: [enrollments.id],
     }),
+    // Phase 31. The gloss AND the lexeme, through dict_glosses_id_lexeme_key: an
+    // entry's copied lexeme is its gloss's, which the sense key never held.
     foreignKey({
-      name: 'vocabulary_entries_sense_fk',
-      columns: [t.senseId],
-      foreignColumns: [dictSenses.id],
+      name: 'vocabulary_entries_gloss_fk',
+      columns: [t.glossId, t.lexemeId],
+      foreignColumns: [dictGlosses.id, dictGlosses.lexemeId],
     }).onDelete('cascade'),
     foreignKey({
       name: 'vocabulary_entries_lexeme_lemma_fk',
@@ -548,54 +552,58 @@ export const vocabularyEntries = pgTable(
 );
 
 /**
- * Phase 20. How well a learner knows one saved sense, per knowledge dimension
- * (spec §2). Five rows per vocabulary entry, written with it in the save
- * transaction (repo/vocabulary.ts insertEntries), so "not practised" is a level
- * 1 row and never a missing one, and a dimension that goes live later needs no
- * backfill.
+ * Phase 20, re-keyed in phase 31 (spec D16). How well a learner knows one saved
+ * gloss, per knowledge dimension (spec §2). Five rows per vocabulary entry,
+ * written with it in the save transaction (repo/vocabulary.ts insertEntries), so
+ * "not practised" is a level 1 row and never a missing one, and a dimension that
+ * goes live later needs no backfill.
  *
  * The level only rises. The two dates are the whole state the step rule needs
  * (domain/progress.ts): the UTC day of the last step and of the last mistake.
  * mode 'string' because node-postgres would otherwise turn a date into a JS Date
  * at local midnight.
  *
- * The FK into vocabulary_entries cascades: unsaving a sense drops its progress,
- * and a re-save starts at level 1. Only answers given while a sense is saved
+ * The FK into vocabulary_entries cascades: unsaving a gloss drops its progress,
+ * and a re-save starts at level 1. Only answers given while a gloss is saved
  * count.
  *
  * The dimension CHECK lists the same five names as DIMENSIONS in
  * packages/core. A literal, because drizzle-kit reads this file on its own; the
  * schema tests insert every DIMENSIONS value, which keeps the two equal.
  *
- * sense_progress_enrollment_dimension_idx serves the list's level and
+ * gloss_progress_enrollment_dimension_idx serves the list's level and
  * filter as an index-only scan of one enrollment's live-dimension rows.
  * Measured while planning at the plan test's volume: 35 ms without it, 12 ms
  * with it, for a 20k-word enrollment's first page. `level` is a key column
  * rather than INCLUDE because drizzle-kit cannot express INCLUDE.
  */
-export const senseProgress = pgTable(
-  'sense_progress',
+export const glossProgress = pgTable(
+  'gloss_progress',
   {
     enrollmentId: text('enrollment_id').notNull(),
-    senseId: text('sense_id').notNull(),
+    glossId: text('gloss_id').notNull(),
     dimension: text('dimension').notNull(),
     level: integer('level').notNull().default(1),
     lastStepOn: date('last_step_on', { mode: 'string' }),
     lastWrongOn: date('last_wrong_on', { mode: 'string' }),
   },
   (t) => [
-    primaryKey({ name: 'sense_progress_pkey', columns: [t.enrollmentId, t.senseId, t.dimension] }),
+    primaryKey({ name: 'gloss_progress_pkey', columns: [t.enrollmentId, t.glossId, t.dimension] }),
+    // ON UPDATE CASCADE (phase 31): a merge moves an entry to its survivor
+    // gloss, and its five rows follow it.
     foreignKey({
-      name: 'sense_progress_entry_fk',
-      columns: [t.enrollmentId, t.senseId],
-      foreignColumns: [vocabularyEntries.enrollmentId, vocabularyEntries.senseId],
-    }).onDelete('cascade'),
+      name: 'gloss_progress_entry_fk',
+      columns: [t.enrollmentId, t.glossId],
+      foreignColumns: [vocabularyEntries.enrollmentId, vocabularyEntries.glossId],
+    })
+      .onDelete('cascade')
+      .onUpdate('cascade'),
     check(
-      'sense_progress_dimension_known',
+      'gloss_progress_dimension_known',
       sql`${t.dimension} in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')`,
     ),
-    check('sense_progress_level_range', sql`${t.level} between 1 and 5`),
-    index('sense_progress_enrollment_dimension_idx').on(t.enrollmentId, t.dimension, t.senseId, t.level),
+    check('gloss_progress_level_range', sql`${t.level} between 1 and 5`),
+    index('gloss_progress_enrollment_dimension_idx').on(t.enrollmentId, t.dimension, t.glossId, t.level),
   ],
 );
 
@@ -607,9 +615,9 @@ export const questions = pgTable(
     // owner — user and enrollment — or neither; nothing writes one yet.
     userId: text('user_id').references(() => users.id),
     enrollmentId: text('enrollment_id'),
-    senseId: text('sense_id')
-      .notNull()
-      .references(() => dictSenses.id),
+    // Phase 31. The gloss the card practises; prompt_variant_id names the one
+    // form's rendering of one member it was built from (spec D12).
+    glossId: text('gloss_id').notNull(),
     promptVariantId: text('prompt_variant_id')
       .notNull()
       .references(() => dictVariants.id),
@@ -687,6 +695,7 @@ export const questions = pgTable(
       columns: [t.userId, t.enrollmentId],
       foreignColumns: [enrollments.userId, enrollments.id],
     }),
+    foreignKey({ name: 'questions_gloss_fk', columns: [t.glossId], foreignColumns: [dictGlosses.id] }),
     check('questions_owner_complete', sql`(${t.userId} is null) = (${t.enrollmentId} is null)`),
   ],
 );
@@ -711,7 +720,7 @@ export const sessions = pgTable(
     // every insert says which one it is, so a default could only hide a bug.
     status: text('status').notNull(),
     // Phase 19. Where the questions came from: the shared seed, or the
-    // enrollment's saved senses.
+    // enrollment's saved glosses.
     source: text('source').notNull(),
   },
   (t) => [
@@ -805,25 +814,25 @@ export const answers = pgTable(
 );
 
 /**
- * Phase 20. What one ended session did to each progress row of each saved
- * sense it practised: all five dimensions, moved or not. It is what lets the
- * results be read again after the session ended, and what the recompute
- * rebuilds. No FK to sense_progress: on the live path a sense unsaved later
- * keeps its history here, and the results of an old session still read. A
- * recompute rebuilds only what the current saves can explain, so it drops the
- * rows of a sense unsaved since.
+ * Phase 20, keyed on the gloss since phase 31. What one ended session did to
+ * each progress row of each saved gloss it practised: all five dimensions,
+ * moved or not. It is what lets the results be read again after the session
+ * ended, and what the recompute rebuilds. No FK to gloss_progress: on the live
+ * path a gloss unsaved later keeps its history here, and the results of an old
+ * session still read. A recompute rebuilds only what the current saves can
+ * explain, so it drops the rows of a gloss unsaved since.
  */
 export const sessionProgress = pgTable(
   'session_progress',
   {
     sessionId: uuid('session_id').notNull(),
-    senseId: text('sense_id').notNull(),
+    glossId: text('gloss_id').notNull(),
     dimension: text('dimension').notNull(),
     levelBefore: integer('level_before').notNull(),
     levelAfter: integer('level_after').notNull(),
   },
   (t) => [
-    primaryKey({ name: 'session_progress_pkey', columns: [t.sessionId, t.senseId, t.dimension] }),
+    primaryKey({ name: 'session_progress_pkey', columns: [t.sessionId, t.glossId, t.dimension] }),
     foreignKey({
       name: 'session_progress_session_fk',
       columns: [t.sessionId],
@@ -870,8 +879,9 @@ export const photoImports = pgTable(
 
 /**
  * Phase 26. One word or phrase read from an import's photo, with its lookup's
- * saveable senses as a snapshot (`options`), the sense the job chose
- * (`suggested_sense_id`, never changed after) and the learner's choice.
+ * saveable glosses as a snapshot (`options`), the gloss the job chose
+ * (`suggested_gloss_id`, never changed after) and the learner's choice. Phase
+ * 31 re-keyed both on the gloss (spec D15).
  */
 export const photoImportItems = pgTable(
   'photo_import_items',
@@ -883,8 +893,8 @@ export const photoImportItems = pgTable(
     status: text('status').notNull(),
     correctedForm: text('corrected_form'),
     options: jsonb('options').$type<PhotoImportOption[]>().notNull().default(sql`'[]'::jsonb`),
-    suggestedSenseId: text('suggested_sense_id'),
-    chosenSenseId: text('chosen_sense_id'),
+    suggestedGlossId: text('suggested_gloss_id'),
+    chosenGlossId: text('chosen_gloss_id'),
     ticked: boolean('ticked').notNull().default(false),
     hebrewMismatch: boolean('hebrew_mismatch').notNull().default(false),
     reason: text('reason'),
@@ -901,6 +911,6 @@ export const photoImportItems = pgTable(
       'photo_import_items_reason_known',
       sql`${t.reason} is null or ${t.reason} in ('sentence', 'no_meaning', 'not_in_language')`,
     ),
-    check('photo_import_items_tick_needs_sense', sql`not ${t.ticked} or ${t.chosenSenseId} is not null`),
+    check('photo_import_items_tick_needs_gloss', sql`not ${t.ticked} or ${t.chosenGlossId} is not null`),
   ],
 );

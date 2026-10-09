@@ -47,7 +47,7 @@ import type {
   SaveVocabularyRequestSchema,
   SaveVocabularyResponseSchema,
   ScoreSchema,
-  SenseProgressSchema,
+  GlossProgressSchema,
   SessionProgressItemSchema,
   SessionSourceSchema,
   SessionStatusSchema,
@@ -161,7 +161,7 @@ export type SessionView = z.infer<typeof SessionViewSchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
 export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;
 export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
-export type SenseProgress = z.infer<typeof SenseProgressSchema>;
+export type GlossProgress = z.infer<typeof GlossProgressSchema>;
 export type SessionProgressItem = z.infer<typeof SessionProgressItemSchema>;
 export type SkipSessionResponse = z.infer<typeof SkipSessionResponseSchema>;
 export type ReadAloudQuestion = z.infer<typeof ReadAloudQuestionSchema>;

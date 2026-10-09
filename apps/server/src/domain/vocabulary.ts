@@ -1,5 +1,5 @@
 import type {
-  SenseProgress,
+  GlossProgress,
   TranslationSense,
   VocabularyEntryInput,
   VocabularyWord,
@@ -71,7 +71,7 @@ export function decodeCursor(raw: string): VocabularyCursor | null {
 }
 
 /** One row of the grouped keyset read, in page order. `level` is the word's
- *  badge: the rounded mean over every saved sense of the lemma and the live
+ *  badge: the rounded mean over every saved gloss of the lemma and the live
  *  dimensions. */
 export type WordPageRow = { lemma: string; lastSavedAt: string; level: number };
 
@@ -85,12 +85,12 @@ export function cursorAfter(row: WordPageRow): VocabularyCursor {
 export type WordSummary = {
   lemma: string;
   partsOfSpeech: string[];
-  headlineSenseId: string;
+  headlineGlossId: string;
   headlineTranslation: string;
   headlineForm: string;
   savedCount: number;
   senseCount: number;
-  /** Display names of everyone but the list's owner who saved a sense of it. */
+  /** Display names of everyone but the list's owner who saved a gloss of it. */
   addedBy: string[];
 };
 
@@ -99,7 +99,7 @@ export type WordSummary = {
  * and comes back in whatever order Postgres chose.
  *
  * A row with no summary is dropped. The enrichment read inner-joins each saved
- * entry to its saved form's rendering, so a word whose saved senses lost every
+ * entry to its saved form's rendering, so a word whose saved glosses lost every
  * rendering has nothing to headline. A repair may not drop a rendering, so this
  * should not happen; if it does, the page is one word short and the cursor —
  * taken from the page rows, not from this output — still advances.
@@ -113,11 +113,7 @@ export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): Voc
       {
         lemma: s.lemma,
         parts_of_speech: s.partsOfSpeech,
-        headline: {
-          sense_id: s.headlineSenseId,
-          translation: s.headlineTranslation,
-          form: s.headlineForm,
-        },
+        headline: { gloss_id: s.headlineGlossId, translation: s.headlineTranslation, form: s.headlineForm },
         saved_count: s.savedCount,
         sense_count: s.senseCount,
         level: row.level,
@@ -135,6 +131,8 @@ export type WordLexeme = { lexemeId: string; partOfSpeech: string };
 export type LexemeRendering = {
   lexemeId: string;
   senseId: string;
+  /** Phase 31. The sense's gloss in the enrollment's learner language. */
+  glossId: string;
   variantId: string;
   form: string;
   rank: number;
@@ -144,15 +142,15 @@ export type LexemeRendering = {
 };
 
 /** `addedBy` is the adder's display name, or null when the list's owner saved it. */
-export type SavedEntry = { senseId: string; variantId: string; addedBy: string | null };
+export type SavedEntry = { glossId: string; variantId: string; addedBy: string | null };
 
-/** A saved sense's five levels and its badge over the live dimensions. A
+/** A saved gloss's five levels and its badge over the live dimensions. A
  *  dimension with no row reads as level 1: every entry has five rows, so that
  *  only guards a broken fixture. */
-function senseProgressOf(rows: ProgressRow[]): SenseProgress {
+function glossProgressOf(rows: ProgressRow[]): GlossProgress {
   const byDimension = new Map(rows.map((row) => [row.dimension, row.level]));
   const levelOf = (dimension: Dimension) => byDimension.get(dimension) ?? MIN_LEVEL;
-  const dimensions = {} as SenseProgress['dimensions'];
+  const dimensions = {} as GlossProgress['dimensions'];
   for (const dimension of DIMENSIONS) dimensions[dimension] = levelOf(dimension);
   return { level: badge(LIVE_DIMENSIONS.map(levelOf)), dimensions };
 }
@@ -178,6 +176,11 @@ function senseProgressOf(rows: ProgressRow[]): SenseProgress {
  * mean over every saved sense's live dimensions, the same number the list
  * shows, or null when nothing is saved. `progress` holds the rows of every
  * saved sense, including one with no rendering to show.
+ *
+ * Phase 31: a save and its levels are the gloss's (spec D2, D3). A card is
+ * still one per sense, and a sense is saved, in its gloss's saved form when
+ * that form renders it, exactly when its gloss is: two senses of one gloss
+ * show two cards that save together.
  */
 export function buildWordDetail(
   lemma: string,
@@ -187,8 +190,8 @@ export function buildWordDetail(
   progress: ProgressRow[],
 ): VocabularyWordDetail {
   const partOfSpeech = new Map(lexemes.map((lexeme) => [lexeme.lexemeId, lexeme.partOfSpeech]));
-  const savedVariant = new Map(saved.map((entry) => [entry.senseId, entry.variantId]));
-  const addedBy = new Map(saved.map((entry) => [entry.senseId, entry.addedBy]));
+  const savedVariant = new Map(saved.map((entry) => [entry.glossId, entry.variantId]));
+  const addedBy = new Map(saved.map((entry) => [entry.glossId, entry.addedBy]));
   const perVariant = new Map<string, number>();
   for (const r of renderings) perVariant.set(r.variantId, (perVariant.get(r.variantId) ?? 0) + 1);
 
@@ -206,14 +209,11 @@ export function buildWordDetail(
     bySense.set(r.senseId, list);
   }
 
-  const shown = [...bySense.entries()].map(([senseId, options]) => {
-    const own = savedVariant.get(senseId);
+  const shown = [...bySense.entries()].map(([, options]) => {
+    const glossId = options[0].glossId;
+    const own = savedVariant.get(glossId);
     const rendering = options.find((o) => o.variantId === own) ?? [...options].sort(better)[0];
-    return {
-      rendering,
-      partOfSpeech: partOfSpeech.get(rendering.lexemeId) ?? '',
-      saved: savedVariant.has(senseId),
-    };
+    return { rendering, partOfSpeech: partOfSpeech.get(rendering.lexemeId) ?? '', saved: savedVariant.has(glossId) };
   });
 
   shown.sort(
@@ -224,9 +224,9 @@ export function buildWordDetail(
       a.rendering.senseId.localeCompare(b.rendering.senseId),
   );
 
-  const progressBySense = new Map<string, ProgressRow[]>();
+  const progressByGloss = new Map<string, ProgressRow[]>();
   for (const row of progress) {
-    progressBySense.set(row.senseId, [...(progressBySense.get(row.senseId) ?? []), row]);
+    progressByGloss.set(row.glossId, [...(progressByGloss.get(row.glossId) ?? []), row]);
   }
   const live = progress.filter((row) => LIVE_DIMENSIONS.includes(row.dimension));
 
@@ -234,7 +234,7 @@ export function buildWordDetail(
     lemma,
     level: live.length === 0 ? null : badge(live.map((row) => row.level)),
     senses: shown.map(({ rendering: r, partOfSpeech: pos, saved: isSaved }) => ({
-      sense_id: r.senseId,
+      gloss_id: r.glossId,
       variant_id: r.variantId,
       form: r.form,
       translation: r.translation,
@@ -243,22 +243,23 @@ export function buildWordDetail(
         ? { example: { source: r.exampleSource, target: r.exampleTarget } }
         : {}),
       saved: isSaved,
-      ...(isSaved && addedBy.get(r.senseId) ? { added_by: addedBy.get(r.senseId)! } : {}),
-      ...(isSaved && progressBySense.has(r.senseId)
-        ? { progress: senseProgressOf(progressBySense.get(r.senseId)!) }
+      ...(isSaved && addedBy.get(r.glossId) ? { added_by: addedBy.get(r.glossId)! } : {}),
+      ...(isSaved && progressByGloss.has(r.glossId)
+        ? { progress: glossProgressOf(progressByGloss.get(r.glossId)!) }
         : {}),
     })),
   };
 }
 
 /** `saved` on every sense that carries an id; a sense without one (a sentence, a
- *  failed write) is returned untouched, with no `saved` key at all. */
+ *  failed write) is returned untouched, with no `saved` key at all. Phase 31:
+ *  `saved` holds gloss ids, so a sense is saved when its gloss is. */
 export function markSaved(
   senses: TranslationSense[],
   saved: ReadonlySet<string>,
 ): TranslationSense[] {
   return senses.map((sense) =>
-    sense.sense_id === undefined ? sense : { ...sense, saved: saved.has(sense.sense_id) },
+    sense.gloss_id === undefined ? sense : { ...sense, saved: saved.has(sense.gloss_id) },
   );
 }
 
@@ -274,13 +275,13 @@ export function coversPair(
   );
 }
 
-/** The first entry of each sense, in order. Saving is first-form-wins in the
+/** The first entry of each gloss, in order. Saving is first-form-wins in the
  *  database too, so this only spares a batch from validating a duplicate. */
-export function firstPerSense(entries: VocabularyEntryInput[]): VocabularyEntryInput[] {
+export function firstPerGloss(entries: VocabularyEntryInput[]): VocabularyEntryInput[] {
   const seen = new Set<string>();
   return entries.filter((entry) => {
-    if (seen.has(entry.sense_id)) return false;
-    seen.add(entry.sense_id);
+    if (seen.has(entry.gloss_id)) return false;
+    seen.add(entry.gloss_id);
     return true;
   });
 }

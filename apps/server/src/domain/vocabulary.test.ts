@@ -9,7 +9,7 @@ import {
   cursorAfter,
   decodeCursor,
   encodeCursor,
-  firstPerSense,
+  firstPerGloss,
   markSaved,
   type LexemeRendering,
   type WordLexeme,
@@ -84,7 +84,7 @@ describe('cursorAfter', () => {
 const summary = (lemma: string, over: Partial<WordSummary> = {}): WordSummary => ({
   lemma,
   partsOfSpeech: ['noun'],
-  headlineSenseId: `s-${lemma}`,
+  headlineGlossId: `g-${lemma}`,
   headlineTranslation: `tr-${lemma}`,
   headlineForm: `form-${lemma}`,
   savedCount: 1,
@@ -104,7 +104,7 @@ describe('assemblePage', () => {
     expect(page[0]).toEqual({
       lemma: 'b',
       parts_of_speech: ['noun', 'verb'],
-      headline: { sense_id: 's-b', translation: 'tr-b', form: 'form-b' },
+      headline: { gloss_id: 'g-b', translation: 'tr-b', form: 'form-b' },
       saved_count: 1,
       sense_count: 2,
       level: 3,
@@ -127,9 +127,11 @@ describe('assemblePage', () => {
   });
 });
 
+// Phase 31. One gloss per sense, `g-<sense id>`, unless a test names one.
 const rendering = (over: Partial<LexemeRendering>): LexemeRendering => ({
   lexemeId: 'lx',
   senseId: 's1',
+  glossId: `g-${over.senseId ?? 's1'}`,
   variantId: 'v1',
   form: 'прочитать',
   rank: 0,
@@ -151,11 +153,11 @@ describe('buildWordDetail', () => {
         rendering({ variantId: 'v-lemma', form: 'прочитать', translation: 'לקרוא' }),
         rendering({ variantId: 'v-past', form: 'прочитала', translation: 'קראה' }),
       ],
-      [{ senseId: 's1', variantId: 'v-past', addedBy: null }],
+      [{ glossId: 'g-s1', variantId: 'v-past', addedBy: null }],
       [],
     );
     expect(detail.senses).toEqual([
-      { sense_id: 's1', variant_id: 'v-past', form: 'прочитала', translation: 'קראה', part_of_speech: 'verb', saved: true },
+      { gloss_id: 'g-s1', variant_id: 'v-past', form: 'прочитала', translation: 'קראה', part_of_speech: 'verb', saved: true },
     ]);
   });
 
@@ -187,8 +189,8 @@ describe('buildWordDetail', () => {
       [],
       [],
     );
-    const shown = Object.fromEntries(detail.senses.map((s) => [s.sense_id, s.variant_id]));
-    expect(shown).toEqual({ s1: 'v-b', s2: 'v-b', s3: 'v-c' });
+    const shown = Object.fromEntries(detail.senses.map((s) => [s.gloss_id, s.variant_id]));
+    expect(shown).toEqual({ 'g-s1': 'v-b', 'g-s2': 'v-b', 'g-s3': 'v-c' });
   });
 
   // Review Focus 3 of phase 18: the saved form no longer renders the sense.
@@ -197,11 +199,11 @@ describe('buildWordDetail', () => {
       LEMMA,
       VERB,
       [rendering({ variantId: 'v-lemma', form: 'прочитать' })],
-      [{ senseId: 's1', variantId: 'v-gone', addedBy: null }],
+      [{ glossId: 'g-s1', variantId: 'v-gone', addedBy: null }],
       [],
     );
     expect(detail.senses).toEqual([
-      expect.objectContaining({ sense_id: 's1', variant_id: 'v-lemma', saved: true }),
+      expect.objectContaining({ gloss_id: 'g-s1', variant_id: 'v-lemma', saved: true }),
     ]);
   });
 
@@ -215,10 +217,10 @@ describe('buildWordDetail', () => {
         rendering({ senseId: 's-c', rank: 1 }),
         rendering({ senseId: 's-d', rank: 1 }),
       ],
-      [{ senseId: 's-b', variantId: 'v1', addedBy: null }],
+      [{ glossId: 'g-s-b', variantId: 'v1', addedBy: null }],
       [],
     );
-    expect(detail.senses.map((s) => s.sense_id)).toEqual(['s-b', 's-a', 's-c', 's-d']);
+    expect(detail.senses.map((s) => s.gloss_id)).toEqual(['g-s-b', 'g-s-a', 'g-s-c', 'g-s-d']);
   });
 
   it('carries an example only when both halves are present', () => {
@@ -245,8 +247,8 @@ describe('buildWordDetail', () => {
       VERB,
       [rendering({ senseId: 's1' }), rendering({ senseId: 's2', rank: 1 }), rendering({ senseId: 's3', rank: 2 })],
       [
-        { senseId: 's1', variantId: 'v1', addedBy: 'רינה' },
-        { senseId: 's2', variantId: 'v1', addedBy: null },
+        { glossId: 'g-s1', variantId: 'v1', addedBy: 'רינה' },
+        { glossId: 'g-s2', variantId: 'v1', addedBy: null },
       ],
       [],
     );
@@ -259,11 +261,11 @@ describe('buildWordDetail', () => {
     expect(buildWordDetail(LEMMA, VERB, [], [], [])).toEqual({ lemma: LEMMA, level: null, senses: [] });
   });
 
-  // Phases 23-25: every dimension is live, so a sense practised evenly has
+  // Phases 23-25: every dimension is live, so a gloss practised evenly has
   // them all at `live`.
-  const levels = (senseId: string, live: number): ProgressRow[] =>
+  const levels = (glossId: string, live: number): ProgressRow[] =>
     DIMENSIONS.map((dimension) => ({
-      senseId,
+      glossId,
       dimension,
       level: live,
       lastStepOn: null,
@@ -275,11 +277,11 @@ describe('buildWordDetail', () => {
       LEMMA,
       VERB,
       [rendering({ senseId: 's1' }), rendering({ senseId: 's2', rank: 1, translation: 'להקריא' })],
-      [{ senseId: 's1', variantId: 'v1', addedBy: null }],
-      levels('s1', 3),
+      [{ glossId: 'g-s1', variantId: 'v1', addedBy: null }],
+      levels('g-s1', 3),
     );
     expect(detail.senses[0]).toMatchObject({
-      sense_id: 's1',
+      gloss_id: 'g-s1',
       progress: {
         level: 3,
         dimensions: { written_receptive: 3, written_productive: 3, spoken_receptive: 3, spoken_productive: 3, spelling: 3 },
@@ -292,13 +294,13 @@ describe('buildWordDetail', () => {
   // writing and spelling are live.
   it('averages the badge over all five dimensions', () => {
     const recognisedOnly = DIMENSIONS.map((dimension) => ({
-      senseId: 's1',
+      glossId: 'g-s1',
       dimension,
       level: dimension === 'written_receptive' ? 3 : 1,
       lastStepOn: null,
       lastWrongOn: null,
     }));
-    const detail = buildWordDetail(LEMMA, VERB, [rendering({ senseId: 's1' })], [{ senseId: 's1', variantId: 'v1', addedBy: null }], recognisedOnly);
+    const detail = buildWordDetail(LEMMA, VERB, [rendering({ senseId: 's1' })], [{ glossId: 'g-s1', variantId: 'v1', addedBy: null }], recognisedOnly);
     expect(detail.senses[0].progress?.level).toBe(1);
     expect(detail.level).toBe(1);
   });
@@ -308,8 +310,8 @@ describe('buildWordDetail', () => {
       LEMMA,
       VERB,
       [rendering({ senseId: 's1' }), rendering({ senseId: 's2' })],
-      [{ senseId: 's1', variantId: 'v1', addedBy: null }, { senseId: 's2', variantId: 'v1', addedBy: null }],
-      [...levels('s1', 2), ...levels('s2', 3)],
+      [{ glossId: 'g-s1', variantId: 'v1', addedBy: null }, { glossId: 'g-s2', variantId: 'v1', addedBy: null }],
+      [...levels('g-s1', 2), ...levels('g-s2', 3)],
     );
     expect(detail.level).toBe(3);
   });
@@ -332,9 +334,9 @@ describe('buildWordDetail', () => {
 
     it('shows every sense of both, each with its own part of speech', () => {
       const detail = buildWordDetail('знать', ZNAT, [verb({ senseId: 'a-know' }), noun({ senseId: 'z-nobility' })], [], []);
-      expect(detail.senses.map((s) => [s.sense_id, s.part_of_speech])).toEqual([
-        ['z-nobility', 'noun'],
-        ['a-know', 'verb'],
+      expect(detail.senses.map((s) => [s.gloss_id, s.part_of_speech])).toEqual([
+        ['g-z-nobility', 'noun'],
+        ['g-a-know', 'verb'],
       ]);
     });
 
@@ -348,10 +350,10 @@ describe('buildWordDetail', () => {
           noun({ senseId: 'n1', rank: 0 }),
           noun({ senseId: 'n2', rank: 1, translation: 'עילית' }),
         ],
-        [{ senseId: 'v2', variantId: 'v-verb', addedBy: null }, { senseId: 'n2', variantId: 'v-noun', addedBy: null }],
+        [{ glossId: 'g-v2', variantId: 'v-verb', addedBy: null }, { glossId: 'g-n2', variantId: 'v-noun', addedBy: null }],
         [],
       );
-      expect(detail.senses.map((s) => s.sense_id)).toEqual(['n2', 'v2', 'n1', 'v1']);
+      expect(detail.senses.map((s) => s.gloss_id)).toEqual(['g-n2', 'g-v2', 'g-n1', 'g-v1']);
     });
 
     it("labels a saved sense with its lexeme's part of speech, not the saved form's neighbours'", () => {
@@ -361,12 +363,12 @@ describe('buildWordDetail', () => {
         'знать',
         ZNAT,
         [verb({ senseId: 'v1' }), noun({ senseId: 'n1' })],
-        [{ senseId: 'n1', variantId: 'v-noun', addedBy: null }],
+        [{ glossId: 'g-n1', variantId: 'v-noun', addedBy: null }],
         [],
       );
-      expect(detail.senses.map((s) => [s.sense_id, s.part_of_speech, s.saved])).toEqual([
-        ['n1', 'noun', true],
-        ['v1', 'verb', false],
+      expect(detail.senses.map((s) => [s.gloss_id, s.part_of_speech, s.saved])).toEqual([
+        ['g-n1', 'noun', true],
+        ['g-v1', 'verb', false],
       ]);
     });
 
@@ -375,8 +377,8 @@ describe('buildWordDetail', () => {
         'знать',
         ZNAT,
         [verb({ senseId: 'v1' }), noun({ senseId: 'n1' })],
-        [{ senseId: 'v1', variantId: 'v-verb', addedBy: null }, { senseId: 'n1', variantId: 'v-noun', addedBy: null }],
-        [...levels('v1', 5), ...levels('n1', 2)],
+        [{ glossId: 'g-v1', variantId: 'v-verb', addedBy: null }, { glossId: 'g-n1', variantId: 'v-noun', addedBy: null }],
+        [...levels('g-v1', 5), ...levels('g-n1', 2)],
       );
       expect(detail.level).toBe(4);
     });
@@ -387,11 +389,11 @@ describe('markSaved', () => {
   it('marks senses with ids and leaves a sense without ids alone', () => {
     const marked = markSaved(
       [
-        { translation: 'a', sense_id: 's1', variant_id: 'v1' },
-        { translation: 'b', sense_id: 's2', variant_id: 'v1' },
+        { translation: 'a', gloss_id: 'g-s1', variant_id: 'v1' },
+        { translation: 'b', gloss_id: 'g-s2', variant_id: 'v1' },
         { translation: 'sentence' },
       ],
-      new Set(['s2']),
+      new Set(['g-s2']),
     );
     expect(marked.map((s) => s.saved)).toEqual([false, true, undefined]);
     expect(marked[2]).not.toHaveProperty('saved');
@@ -412,18 +414,18 @@ describe('coversPair', () => {
   });
 });
 
-describe('firstPerSense', () => {
-  // Review Focus 1: a double-tapped save-all sends a sense twice.
-  it('keeps the first entry of each sense, in order', () => {
+describe('firstPerGloss', () => {
+  // Review Focus 1: a double-tapped save-all sends a gloss twice.
+  it('keeps the first entry of each gloss, in order', () => {
     expect(
-      firstPerSense([
-        { sense_id: 's1', variant_id: 'v1' },
-        { sense_id: 's2', variant_id: 'v1' },
-        { sense_id: 's1', variant_id: 'v2' },
+      firstPerGloss([
+        { gloss_id: 'g-s1', variant_id: 'v1' },
+        { gloss_id: 'g-s2', variant_id: 'v1' },
+        { gloss_id: 'g-s1', variant_id: 'v2' },
       ]),
     ).toEqual([
-      { sense_id: 's1', variant_id: 'v1' },
-      { sense_id: 's2', variant_id: 'v1' },
+      { gloss_id: 'g-s1', variant_id: 'v1' },
+      { gloss_id: 'g-s2', variant_id: 'v1' },
     ]);
   });
 });

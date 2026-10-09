@@ -29,7 +29,7 @@ const importRow = (over: Partial<PhotoImportRow> = {}): PhotoImportRow => ({
   createdAt: new Date(NOW - 60_000),
   ...over,
 });
-const option = (n: number) => ({ sense_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
+const option = (n: number) => ({ gloss_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
 const itemRow = (over: Partial<PhotoImportItemRow> = {}): PhotoImportItemRow => ({
   importId: ID,
   position: 0,
@@ -38,8 +38,8 @@ const itemRow = (over: Partial<PhotoImportItemRow> = {}): PhotoImportItemRow => 
   status: 'ready',
   correctedForm: null,
   options: [option(1), option(2)],
-  suggestedSenseId: 's1',
-  chosenSenseId: 's1',
+  suggestedGlossId: 's1',
+  chosenGlossId: 's1',
   ticked: true,
   hebrewMismatch: false,
   reason: null,
@@ -76,7 +76,7 @@ function setup(opts: {
 }
 
 const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
-const sense = (n: number, translation: string) => ({ translation, part_of_speech: 'noun', sense_id: `s${n}`, variant_id: `v${n}` });
+const sense = (n: number, translation: string) => ({ translation, part_of_speech: 'noun', gloss_id: `s${n}`, variant_id: `v${n}` });
 const response = (over: Partial<TranslationResponse>): TranslationResponse => ({ text: 'gatto', from: 'it', to: 'he', kind: 'word', senses: [], ...over });
 
 describe('readPhoto', () => {
@@ -190,7 +190,7 @@ describe('lookUpItem', () => {
     return { photoImport, written };
   };
   const pending = (over: Partial<PhotoImportItemRow> = {}) =>
-    itemRow({ status: 'pending', options: [], chosenSenseId: null, suggestedSenseId: null, ticked: false, ...over });
+    itemRow({ status: 'pending', options: [], chosenGlossId: null, suggestedGlossId: null, ticked: false, ...over });
 
   it('looks the word up as typed, and starts a row with no Hebrew on its first sense, ticked', async () => {
     const { photoImport, written } = repoFor(pending({ text: 'casa' }));
@@ -205,10 +205,10 @@ describe('lookUpItem', () => {
       {
         correctedForm: null,
         options: [
-          { sense_id: 's1', variant_id: 'v1', translation: 'בית', part_of_speech: 'noun' },
-          { sense_id: 's2', variant_id: 'v2', translation: 'משפחה', part_of_speech: 'noun' },
+          { gloss_id: 's1', variant_id: 'v1', translation: 'בית', part_of_speech: 'noun' },
+          { gloss_id: 's2', variant_id: 'v2', translation: 'משפחה', part_of_speech: 'noun' },
         ],
-        chosenSenseId: 's1',
+        chosenGlossId: 's1',
         ticked: true,
         hebrewMismatch: false,
         reason: null,
@@ -221,7 +221,7 @@ describe('lookUpItem', () => {
     const { service, llm } = setup({ repos: { photoImport, enrollment }, lookup: async () => response({ senses: [sense(1, 'בנק'), sense(2, 'גדה')] }) });
     await service.lookUpItem({ import_id: ID, position: 0 });
     expect(llm.calls).toEqual([]);
-    expect(written[0]).toMatchObject({ chosenSenseId: 's2', hebrewMismatch: false });
+    expect(written[0]).toMatchObject({ chosenGlossId: 's2', hebrewMismatch: false });
   });
 
   it('asks the model when no gloss matches, and takes its sense', async () => {
@@ -234,14 +234,14 @@ describe('lookUpItem', () => {
     await service.lookUpItem({ import_id: ID, position: 0 });
     expect(llm.calls).toHaveLength(1);
     expect(llm.calls[0].system).toContain(SENSE_MATCH_MARKER);
-    expect(written[0]).toMatchObject({ chosenSenseId: 's2', hebrewMismatch: false, ticked: true });
+    expect(written[0]).toMatchObject({ chosenGlossId: 's2', hebrewMismatch: false, ticked: true });
   });
 
   it('falls back to the first sense, flagged, when the model says none matches', async () => {
     const { photoImport, written } = repoFor(pending({ text: 'banca', hebrew: 'ספסל' }));
     const { service } = setup({ repos: { photoImport, enrollment }, llmReplies: ['{"sense":0}'], lookup: async () => response({ senses: [sense(1, 'בנק')] }) });
     await service.lookUpItem({ import_id: ID, position: 0 });
-    expect(written[0]).toMatchObject({ chosenSenseId: 's1', hebrewMismatch: true, ticked: true });
+    expect(written[0]).toMatchObject({ chosenGlossId: 's1', hebrewMismatch: true, ticked: true });
   });
 
   it('keeps the lookup’s correction, and asks the model about the corrected word', async () => {
@@ -253,14 +253,14 @@ describe('lookUpItem', () => {
     });
     await service.lookUpItem({ import_id: ID, position: 0 });
     expect(JSON.parse(llm.calls[0].user).word).toBe('gatto');
-    expect(written[0]).toMatchObject({ correctedForm: 'gatto', chosenSenseId: 's1' });
+    expect(written[0]).toMatchObject({ correctedForm: 'gatto', chosenGlossId: 's1' });
   });
 
   it('writes a row with no options unticked, with the reason', async () => {
     const { photoImport, written } = repoFor(pending({ text: 'la casa è grande' }));
     const { service } = setup({ repos: { photoImport, enrollment }, lookup: async () => response({ kind: 'sentence', senses: [{ translation: 'הבית גדול' }] }) });
     await service.lookUpItem({ import_id: ID, position: 0 });
-    expect(written).toEqual([{ correctedForm: null, options: [], chosenSenseId: null, ticked: false, hebrewMismatch: false, reason: 'sentence' }]);
+    expect(written).toEqual([{ correctedForm: null, options: [], chosenGlossId: null, ticked: false, hebrewMismatch: false, reason: 'sentence' }]);
   });
 
   it('spends no lookup on a discarded import or a row already settled (Review Focus 1)', async () => {

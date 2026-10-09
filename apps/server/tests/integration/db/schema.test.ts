@@ -49,6 +49,7 @@ const TABLES = [
   'dict_variant_renderings',
   'dict_corrections',
   'vocabulary_entries',
+  'gloss_progress',
   'questions',
   'sessions',
   'session_questions',
@@ -70,14 +71,18 @@ async function seedOneLexeme(db: Db): Promise<void> {
       (variant_id, sense_id, user_language_code, rank, translation, gloss, example_source, example_target)
       values ('tv-en-window-base', 'sense-window-default', 'he', 0, 'חלון', 'חלון',
               'I opened the window.', 'פתחתי את החלון.');
+    insert into dict_glosses (id, lexeme_id, user_language_code, key)
+      values ('gloss-window', 'vt-en-window', 'he', 'חלון');
+    insert into dict_sense_glosses (sense_id, lexeme_id, user_language_code, gloss_id)
+      values ('sense-window-default', 'vt-en-window', 'he', 'gloss-window');
   `);
 }
 
 async function insertQuestion(db: Db, id: string, options: unknown): Promise<unknown> {
   return db.execute(sql`
-    insert into questions (id, user_id, sense_id, prompt_variant_id,
+    insert into questions (id, user_id, gloss_id, prompt_variant_id,
                            target_language, user_language_code, type, options)
-    values (${id}, null, 'sense-window-default', 'tv-en-window-base',
+    values (${id}, null, 'gloss-window', 'tv-en-window-base',
             'en', 'he', 'multiple_choice', ${JSON.stringify(options)}::jsonb)
   `);
 }

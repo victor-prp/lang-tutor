@@ -87,16 +87,16 @@ describe('a photo import through the queue', () => {
     await waitFor(async () => (await statusOf(id)) === 'ready');
 
     const { items } = await deps.photoImports.getImport(id);
-    expect(items.map((item) => [item.text, item.chosen_sense_id, item.ticked, item.hebrew_mismatch])).toEqual([
-      ['gatto', gatto.senseIds[0], true, false],
-      ['banca', banca.senseIds[0], true, true],
-      ['casa', casa.senseIds[0], true, false],
+    expect(items.map((item) => [item.text, item.chosen_gloss_id, item.ticked, item.hebrew_mismatch])).toEqual([
+      ['gatto', gatto.glossIds[0], true, false],
+      ['banca', banca.glossIds[0], true, true],
+      ['casa', casa.glossIds[0], true, false],
     ]);
     expect(logger.events.map((event) => event.event)).toEqual(expect.arrayContaining(['photo_read', 'import_item_looked_up']));
 
-    await deps.photoImports.updateItem(id, 2, { sense_id: casa.senseIds[1] });
+    await deps.photoImports.updateItem(id, 2, { gloss_id: casa.glossIds[1] });
     await deps.photoImports.updateItem(id, 1, { ticked: false });
-    expect(await deps.photoImports.save(id)).toEqual({ saved_sense_ids: [gatto.senseIds[0], casa.senseIds[1]] });
+    expect(await deps.photoImports.save(id)).toEqual({ saved_gloss_ids: [gatto.glossIds[0], casa.glossIds[1]] });
     const page = await deps.vocabulary.listWords(IT, {});
     expect(page.items.map((item) => item.lemma).sort()).toEqual(['casa', 'gatto']);
   });

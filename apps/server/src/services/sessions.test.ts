@@ -144,13 +144,13 @@ describe('repos', () => {
     findSaveable: forbidden,
     insertEntries: forbidden,
     deleteEntry: forbidden,
-    findSavedSenseIds: forbidden,
+    findSavedGlossIds: forbidden,
     findWordsPage: forbidden,
     findWordSummaries: forbidden,
     findLemmaLexemes: forbidden,
     findLemmaRenderings: forbidden,
     findSavedInLemma: forbidden,
-    listSavedSenses: forbidden,
+    listSavedGlosses: forbidden,
     countEntries: forbidden,
   };
 
@@ -299,7 +299,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
           insertPreparingSession: async () => 's1',
         }),
         vocabulary: stub<VocabularyRepo>({
-          listSavedSenses: async () => [{ senseId: 's1', variantId: 'v1', lexemeId: 'l1' }] as never,
+          listSavedGlosses: async () => [{ glossId: 'g1', senseId: 's1', variantId: 'v1' }],
         }),
         jobs,
       }),

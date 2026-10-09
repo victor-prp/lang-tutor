@@ -162,6 +162,13 @@
       "when": 1791554594601,
       "tag": "0022_glosses",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791565708588,
+      "tag": "0023_glosses_rekey",
+      "breakpoints": true
     }
   ]
 }

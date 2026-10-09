@@ -31,6 +31,8 @@ function serviceWith(...replies: (string | Error)[]) {
 const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
   lexemeId: 't-1',
   senseId: 's-1',
+  // Phase 31. One gloss per sense, as before.
+  glossId: `g-${over.senseId ?? 's-1'}`,
   variantId: 'v-1',
   rank: 0,
   entryRank: 0,
@@ -180,7 +182,7 @@ describe('translate', () => {
     const result = await service.translate({ text: 'ladder', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(0);
-    expect(result.senses).toEqual([{ translation: 'סולם', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'סולם', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
     expect(logger.events[0]).toEqual({
       event: 'dict_cache_hit',
       from: 'en',
@@ -611,7 +613,7 @@ describe('the stored redirect', () => {
     const result = await service.translate({ text: 'thruot', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(0);
-    expect(result.senses).toEqual([{ translation: 'גרון', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'גרון', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
     expect(result.kind).toBe('word');
     // The typed string survives in exactly two places: the response's `text`, and
     // the dict_corrections row.
@@ -636,7 +638,7 @@ describe('the stored redirect', () => {
     const result = await service.translate({ text: 'throat', from: 'en', to: 'he' });
 
     expect(result.correction).toBeUndefined();
-    expect(result.senses).toEqual([{ translation: 'גרון', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'גרון', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
     expect(logger.events.map((event) => event.event)).toContain('dict_cache_hit');
   });
 
@@ -899,7 +901,7 @@ describe('the corrected-form probe', () => {
     ]);
     // The target's stored answer, unchanged, plus the correction block.
     expect(result.kind).toBe('word');
-    expect(result.senses).toEqual([{ translation: 'הזמין', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'הזמין', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
     expect(result.correction).toEqual({ corrected_form: 'booked', alternatives: [] });
     expect(logger.events.map((event) => event.event)).toContain('dict_corrected');
   });
@@ -972,7 +974,7 @@ describe('the corrected-form probe', () => {
     // The correction block names the HOP's target, and carries the hop's own
     // alternatives — the model's described `throte`, which nothing is written for.
     expect(result.correction).toEqual({ corrected_form: 'throat', alternatives: ['throaty'] });
-    expect(result.senses).toEqual([{ translation: 'גרון', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'גרון', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
   });
 
   // One hop, no further. A chain AND a truncated dictionary: accepted, and it

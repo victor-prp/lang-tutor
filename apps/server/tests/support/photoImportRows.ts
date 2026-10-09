@@ -8,7 +8,7 @@ export type SeedItem = {
   hebrew?: string | null;
   status?: 'pending' | 'ready' | 'failed';
   options?: PhotoImportOption[];
-  chosenSenseId?: string | null;
+  chosenGlossId?: string | null;
   ticked?: boolean;
   hebrewMismatch?: boolean;
 };
@@ -37,7 +37,7 @@ export async function seedPhotoImport(
     await db.insert(photoImportItems).values(
       input.items.map((item, position) => {
         const options = item.options ?? [];
-        const chosen = item.chosenSenseId !== undefined ? item.chosenSenseId : (options[0]?.sense_id ?? null);
+        const chosen = item.chosenGlossId !== undefined ? item.chosenGlossId : (options[0]?.gloss_id ?? null);
         return {
           importId: row.id,
           position,
@@ -45,8 +45,8 @@ export async function seedPhotoImport(
           hebrew: item.hebrew ?? null,
           status: item.status ?? (options.length > 0 ? 'ready' : 'pending'),
           options,
-          suggestedSenseId: chosen,
-          chosenSenseId: chosen,
+          suggestedGlossId: chosen,
+          chosenGlossId: chosen,
           ticked: item.ticked ?? chosen !== null,
           hebrewMismatch: item.hebrewMismatch ?? false,
         };

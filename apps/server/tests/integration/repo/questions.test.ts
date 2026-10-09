@@ -5,7 +5,7 @@ import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 import { content, optionsFor } from '../../../src/db/content';
-import { dictSenses, dictVariants } from '../../../src/db/schema';
+import { dictGlosses, dictVariants } from '../../../src/db/schema';
 import { optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
 import { asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -70,7 +70,7 @@ describe('loadQuestionPool', () => {
 
 describe('phase 19', () => {
   it('the seed pool never contains enrollment-owned questions', async () => {
-    const [{ id: senseId }] = await t.db.select({ id: dictSenses.id }).from(dictSenses).limit(1);
+    const [{ id: glossId }] = await t.db.select({ id: dictGlosses.id }).from(dictGlosses).limit(1);
     const [{ id: variantId }] = await t.db.select({ id: dictVariants.id }).from(dictVariants).limit(1);
     await withTx(t.db, (tx) =>
       createQuestionRepo(tx).insertGeneratedQuestions({
@@ -80,7 +80,7 @@ describe('phase 19', () => {
         userLanguageCode: 'he',
         questions: [
           {
-            senseId,
+            glossId,
             variantId,
             form: 'x',
             lemma: 'x',
@@ -105,16 +105,16 @@ describe('phase 19', () => {
     const context = await withTx(t.db, (tx) =>
       createQuestionRepo(tx).findGenerationContext({
         picks: [
-          { senseId: run.senseIds[0], variantId: run.variantId },
-          { senseId: 'gone', variantId: 'gone' },
-          { senseId: book.senseIds[0], variantId: book.variantId },
+          { glossId: run.glossIds[0], senseId: run.senseIds[0], variantId: run.variantId },
+          { glossId: 'gone', senseId: 'gone', variantId: 'gone' },
+          { glossId: book.glossIds[0], senseId: book.senseIds[0], variantId: book.variantId },
         ],
         sourceLanguage: 'he',
       }),
     );
     expect(context).toEqual([
-      { senseId: run.senseIds[0], variantId: run.variantId, lexemeId: run.lexemeId, form: 'sprint', lemma: 'sprint', partOfSpeech: 'noun', translation: 'ריצה', example: null, exampleTranslation: null },
-      { senseId: book.senseIds[0], variantId: book.variantId, lexemeId: book.lexemeId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', translation: 'ספר', example: null, exampleTranslation: null },
+      { glossId: run.glossIds[0], senseId: run.senseIds[0], variantId: run.variantId, lexemeId: run.lexemeId, form: 'sprint', lemma: 'sprint', partOfSpeech: 'noun', translation: 'ריצה', example: null, exampleTranslation: null },
+      { glossId: book.glossIds[0], senseId: book.senseIds[0], variantId: book.variantId, lexemeId: book.lexemeId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', translation: 'ספר', example: null, exampleTranslation: null },
     ]);
   });
 
@@ -128,7 +128,7 @@ describe('phase 19', () => {
         userLanguageCode: 'he',
         questions: [
           {
-            senseId: word.senseIds[0],
+            glossId: word.glossIds[0],
             variantId: word.variantId,
             form: 'tome',
             lemma: 'tome',
@@ -150,7 +150,7 @@ describe('phase 19', () => {
 describe('phase 23: reversed and typed questions', () => {
   it('inserts a reversed and a typed question and returns them in shape', async () => {
     const word = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'tome', translations: ['ספר'] });
-    const base = { senseId: word.senseIds[0], variantId: word.variantId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', lexemeId: word.lexemeId };
+    const base = { glossId: word.glossIds[0], variantId: word.variantId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', lexemeId: word.lexemeId };
     const [reversed, typed] = await withTx(t.db, (tx) =>
       createQuestionRepo(tx).insertGeneratedQuestions({
         userId: 'u_1',
@@ -215,7 +215,7 @@ describe('phase 23: reversed and typed questions', () => {
             userLanguageCode: 'he',
             questions: [
               {
-                senseId: word.senseIds[0],
+                glossId: word.glossIds[0],
                 variantId: word.variantId,
                 form: 'tome',
                 lemma: 'tome',
@@ -243,7 +243,7 @@ describe('phase 25: speaking questions', () => {
       ['lantern', 'פנס'],
     ]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
-      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { questions } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -276,7 +276,7 @@ describe('phase 27: meaning recall', () => {
       example,
     });
     const asked = [
-      { senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'to book', lemma: 'reserve', translation: 'להזמין' },
+      { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'to book', lemma: 'reserve', translation: 'להזמין' },
     ];
     const { questions } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -354,7 +354,7 @@ describe('phase 27 Part B: sentence cards', () => {
     gapEnd?: number;
   };
   const sentenceRow = (word: Awaited<ReturnType<typeof savedWord>>, extra: SentenceExtra) => ({
-    senseId: word.senseIds[0],
+    glossId: word.glossIds[0],
     variantId: word.variantId,
     form: 'parlavamo',
     lemma: 'parlare',
@@ -453,8 +453,8 @@ describe('phase 27 Part B: sentence cards', () => {
     const context = await withTx(t.db, (tx) =>
       createQuestionRepo(tx).findGenerationContext({
         picks: [
-          { senseId: word.senseIds[0], variantId: word.variantId },
-          { senseId: bare.senseIds[0], variantId: bare.variantId },
+          { glossId: word.glossIds[0], senseId: word.senseIds[0], variantId: word.variantId },
+          { glossId: bare.glossIds[0], senseId: bare.senseIds[0], variantId: bare.variantId },
         ],
         sourceLanguage: 'he',
       }),
@@ -481,7 +481,7 @@ describe('phase 27 Part B: sentence cards', () => {
     const typedWith = (n: number): SentenceExtra => ({ type: 'cloze_typed', alternatives: [], sentence: `Ieri parlavamo ${n}.`, gapStart: 5, gapEnd: 14 });
     const translateWith = (n: number): SentenceExtra => ({ type: 'sentence_translation', sentence: `We parlavamo ${n}.`, sentenceTranslation: `דיברנו ${n}.`, gapStart: 3, gapEnd: 12 });
 
-    it('returns, per sense, newest first, only this enrollment, only the two types, at most limit', async () => {
+    it('returns, per gloss, newest first, only this enrollment, only the two types, at most limit', async () => {
       await seedUser(t.db, 'u_2');
       const word = await savedWord();
       const enrollmentId = enrollmentOf('u_1');
@@ -491,21 +491,21 @@ describe('phase 27 Part B: sentence cards', () => {
       // A cloze_choice shows the saved example, which is not a written sentence.
       await ask(word, enrollmentId, 'u_1', [{ type: 'cloze_choice', options: generatedOptions('parlavamo', ['a', 'b', 'c']), sentence: 'Ieri parlavamo 9.' }]);
       await ask(word, enrollmentId, 'u_1', [typedWith(3)]);
-      // Another learner's question for the same sense.
+      // Another learner's question for the same gloss.
       await ask(word, enrollmentOf('u_2'), 'u_2', [typedWith(7)]);
       await ask(word, enrollmentId, 'u_1', [translateWith(2)]);
 
-      const read = (limit: number, senseIds = [word.senseIds[0], 'other']) =>
-        withTx(t.db, (tx) => createQuestionRepo(tx).findRecentSentences({ enrollmentId, senseIds, limit }));
+      const read = (limit: number, glossIds = [word.glossIds[0], 'other']) =>
+        withTx(t.db, (tx) => createQuestionRepo(tx).findRecentSentences({ enrollmentId, glossIds, limit }));
 
       const recent = await read(2);
-      expect(recent.get(word.senseIds[0])).toEqual({
+      expect(recent.get(word.glossIds[0])).toEqual({
         cloze: ['Ieri parlavamo 3.', 'Ieri parlavamo 2.'],
         // The Hebrew sentence asked, not the reference that follows the answer.
         translate: ['דיברנו 2.', 'דיברנו 1.'],
       });
-      expect((await read(10)).get(word.senseIds[0])!.cloze).toEqual(['Ieri parlavamo 3.', 'Ieri parlavamo 2.', 'Ieri parlavamo 1.']);
-      // A sense with none has no entry; no senses is an empty map.
+      expect((await read(10)).get(word.glossIds[0])!.cloze).toEqual(['Ieri parlavamo 3.', 'Ieri parlavamo 2.', 'Ieri parlavamo 1.']);
+      // A gloss with none has no entry; no glosses is an empty map.
       expect(recent.has('other')).toBe(false);
       expect((await read(2, [])).size).toBe(0);
     });

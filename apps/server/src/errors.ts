@@ -151,12 +151,14 @@ export class PairNotEnrolled extends Error {
   }
 }
 
-/** Phase 18. A save item failed a check: its sense is not in the enrollment's
- *  target language, its variant is not a form of that lexeme, or that form has
- *  no rendering of the sense in the enrollment's source language. */
+/** Phase 18, keyed on the gloss since phase 31. A save item failed one of the
+ *  gloss checks of `saveable` (repo/vocabulary.ts): the gloss is merged away or
+ *  not in the enrollment's source language, its lexeme is not in the target
+ *  language, its variant is not a form of that lexeme, or that form renders
+ *  none of the gloss's senses in the source language. */
 export class InvalidVocabularyEntry extends Error {
-  constructor(readonly senseId: string) {
-    super(`sense ${senseId} cannot be saved here`);
+  constructor(readonly glossId: string) {
+    super(`gloss ${glossId} cannot be saved here`);
     this.name = 'InvalidVocabularyEntry';
   }
 }

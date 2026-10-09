@@ -15,14 +15,14 @@ const SESSION = '11111111-1111-1111-1111-111111111111';
 const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'preparing', source: 'list' };
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'ru', created_at: '' };
 const CONTEXT: GenerationContext[] = [
-  { senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
-  { senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
+  { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
+  { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
 ];
 const PAYLOAD = {
   session_id: SESSION,
   picks: [
-    { sense_id: 's1', variant_id: 'v1' },
-    { sense_id: 's2', variant_id: 'v2' },
+    { gloss_id: 'g-s1', sense_id: 's1', variant_id: 'v1' },
+    { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2' },
   ],
   listening: false,
   ordinal: 0,
@@ -144,7 +144,7 @@ describe('prepareSession', () => {
   it('gives each position its type, in pick order, with the content each type needs', async () => {
     const context = [
       ...CONTEXT,
-      { senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
+      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
     ];
     const reply = JSON.stringify({
       items: [
@@ -154,7 +154,7 @@ describe('prepareSession', () => {
       ],
     });
     const { service, calls, llm } = world({ context, reply });
-    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { sense_id: 's3', variant_id: 'v3' }] });
+    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3' }] });
 
     expect(JSON.parse(llm.calls[0].user).items.map((item: { task: string }) => item.task)).toEqual(['meaning', 'word', 'typed']);
     const [input] = calls.generated as {
@@ -251,11 +251,11 @@ describe('prepareSession', () => {
 const FORMS = ['ромашка', 'черепаха', 'подушка', 'зонтик', 'ведро', 'скрипка', 'лопата', 'кастрюля', 'фонарь', 'ящерица'];
 const MEANINGS = ['מרגנית', 'צב', 'כרית', 'מטרייה', 'דלי', 'כינור', 'את חפירה', 'סיר', 'פנס', 'לטאה'];
 const TEN: GenerationContext[] = FORMS.map((form, i) => ({
-  senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i], example: null, exampleTranslation: null,
+  glossId: `g-s${i}`, senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i], example: null, exampleTranslation: null,
 }));
 const TEN_PAYLOAD = {
   session_id: SESSION,
-  picks: TEN.map((row) => ({ sense_id: row.senseId, variant_id: row.variantId })),
+  picks: TEN.map((row) => ({ gloss_id: row.glossId, sense_id: row.senseId, variant_id: row.variantId })),
   listening: true,
   ordinal: 0,
 };
@@ -422,13 +422,13 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
     }
   });
 
-  it('reads the recent sentences of the picked senses in the read step, and hands them to the items as what to avoid', async () => {
+  it('reads the recent sentences of the picked glosses in the read step, and hands them to the items as what to avoid', async () => {
     const recent: RecentSentences = new Map(
-      TEN.map((row) => [row.senseId, { cloze: [`Вчера ${row.form} там один раз.`, 'second'], translate: [`Я вижу ${row.form} здесь.`] }]),
+      TEN.map((row) => [row.glossId, { cloze: [`Вчера ${row.form} там один раз.`, 'second'], translate: [`Я вижу ${row.form} здесь.`] }]),
     );
     const { service, calls, llm } = world({ context: TEN, reply: TEN_REPLY, recent });
     await service.prepareSession(TEN_PAYLOAD);
-    expect(calls.recentAsked).toEqual([{ enrollmentId: 'e1', senseIds: TEN.map((row) => row.senseId), limit: 3 }]);
+    expect(calls.recentAsked).toEqual([{ enrollmentId: 'e1', glossIds: TEN.map((row) => row.glossId), limit: 3 }]);
     const item = JSON.parse(llm.calls[0].user).items.find((i: { task: string }) => i.task === 'sentence');
     expect(item.avoid).toEqual([`Вчера ${item.word} там один раз.`, 'second']);
   });
@@ -472,7 +472,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
     // Ordinal 2 plans a sentence_translation card among the ten.
     const PAYLOAD_T ={ ...TEN_PAYLOAD, ordinal: 2 };
     const hebrew = (row: GenerationContext) => `אתמול ראינו שם את ${row.translation} החדש.`;
-    const recent: RecentSentences = new Map(EXAMPLES.map((row) => [row.senseId, { cloze: [], translate: [hebrew(row)] }]));
+    const recent: RecentSentences = new Map(EXAMPLES.map((row) => [row.glossId, { cloze: [], translate: [hebrew(row)] }]));
     const probe = world({ context: EXAMPLES, reply: 'nope', recent });
     await expect(probe.service.prepareSession(PAYLOAD_T)).rejects.toThrow();
     const items = JSON.parse(probe.llm.calls[0].user).items as { key: string; task: string; word: string; avoid: string[] }[];

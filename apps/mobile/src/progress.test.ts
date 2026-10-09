@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import type { SenseProgress, SessionProgressItem } from '@lang-tutor/core/api';
+import type { GlossProgress, SessionProgressItem } from '@lang-tutor/core/api';
 
 import { dimensionRows, missedPair, pipsFor, practisedRows } from './progress';
 import { strings } from './strings';
@@ -14,14 +14,14 @@ describe('pipsFor', () => {
 
 describe('practisedRows', () => {
   const item = (
-    sense_id: string,
+    gloss_id: string,
     level_before: number,
     level_after: number,
     raised: SessionProgressItem['raised'] = [],
   ): SessionProgressItem => ({
-    sense_id,
-    form: `form-${sense_id}`,
-    translation: `tr-${sense_id}`,
+    gloss_id,
+    form: `form-${gloss_id}`,
+    translation: `tr-${gloss_id}`,
     level_before,
     level_after,
     raised,
@@ -29,7 +29,7 @@ describe('practisedRows', () => {
 
   it('puts the words whose badge rose first, each group in session order', () => {
     const rows = practisedRows([item('a', 1, 1), item('b', 1, 2), item('c', 2, 2), item('d', 3, 4)]);
-    expect(rows.map((row) => [row.sense_id, row.badgeRaised])).toEqual([
+    expect(rows.map((row) => [row.gloss_id, row.badgeRaised])).toEqual([
       ['b', true],
       ['d', true],
       ['a', false],
@@ -44,7 +44,7 @@ describe('practisedRows', () => {
       item('b', 1, 2, ['written_receptive', 'written_productive']),
       item('c', 1, 1, ['written_productive']),
     ]);
-    expect(rows.map((row) => [row.sense_id, row.badgeRaised, row.progressed])).toEqual([
+    expect(rows.map((row) => [row.gloss_id, row.badgeRaised, row.progressed])).toEqual([
       ['b', true, false],
       ['c', false, true],
       ['a', false, false],
@@ -91,7 +91,7 @@ describe('dimensionsRaised', () => {
 });
 
 describe('dimensionRows', () => {
-  const progress: SenseProgress = {
+  const progress: GlossProgress = {
     level: 3,
     dimensions: { written_receptive: 3, written_productive: 1, spoken_receptive: 1, spoken_productive: 1, spelling: 1 },
   };

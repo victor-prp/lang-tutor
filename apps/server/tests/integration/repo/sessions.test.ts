@@ -156,7 +156,7 @@ describe('phase 23: typed answers', () => {
       userLanguageCode: 'he',
       questions: [
         {
-          senseId: word.senseIds[0],
+          glossId: word.glossIds[0],
           variantId: word.variantId,
           form: 'tome',
           lemma: 'tome',
@@ -309,7 +309,7 @@ describe('phase 24: boards', () => {
     const words = [];
     for (const [lemma, translation] of [['tome', 'ספר'], ['quill', 'נוצה'], ['lantern', 'פנס'], ['kettle', 'קומקום']]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
-      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      words.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { sessionId, questions } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -363,7 +363,7 @@ describe('phase 25: spoken answers', () => {
       ['lantern', 'פנס'],
     ]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
-      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { sessionId, questions } = await insertListSession(t.db, {
       userId: 'u_1',

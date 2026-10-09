@@ -12,7 +12,7 @@ import { useVocabulary } from '@/hooks/useVocabulary';
 import { dimensionRows } from '@/progress';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
-import { keepSenseOrder, toggleOptimistically } from '@/vocabulary';
+import { keepGlossOrder, toggleOptimistically } from '@/vocabulary';
 
 export default function VocabularyWordScreen() {
   const { lemma } = useLocalSearchParams<{ lemma: string }>();
@@ -46,9 +46,9 @@ export default function VocabularyWordScreen() {
 
   // Optimistic, as on the translate screen. No save-all here: these senses are
   // browsed, not just looked up (spec §5).
-  async function toggle(senseId: string) {
-    const sense = word?.senses.find((s) => s.sense_id === senseId);
-    if (!sense || pending[senseId]) return;
+  async function toggle(glossId: string) {
+    const sense = word?.senses.find((s) => s.gloss_id === glossId);
+    if (!sense || pending[glossId]) return;
     const mine = generation.current;
     const ifCurrent = (run: () => void) => {
       if (mine === generation.current) run();
@@ -59,20 +59,20 @@ export default function VocabularyWordScreen() {
       apply: (saved) =>
         ifCurrent(() =>
           setWord(
-            (w) => w && { ...w, senses: w.senses.map((s) => (s.sense_id === senseId ? { ...s, saved } : s)) },
+            (w) => w && { ...w, senses: w.senses.map((s) => (s.gloss_id === glossId ? { ...s, saved } : s)) },
           ),
         ),
       inFlight: (inFlight) =>
         ifCurrent(() =>
           setPending((current) => {
             const rest = { ...current };
-            if (inFlight) rest[senseId] = true;
-            else delete rest[senseId];
+            if (inFlight) rest[glossId] = true;
+            else delete rest[glossId];
             return rest;
           }),
         ),
       request: async () => {
-        await (sense.saved ? unsave(senseId) : save([{ sense_id: senseId, variant_id: sense.variant_id }]));
+        await (sense.saved ? unsave(glossId) : save([{ gloss_id: glossId, variant_id: sense.variant_id }]));
         // Saving or unsaving moves the server's progress rows (unsave deletes them, a
         // new save starts at level 1), so the flipped `saved` alone leaves this screen
         // showing levels the server no longer has. Read the word again, inside the
@@ -81,7 +81,7 @@ export default function VocabularyWordScreen() {
         // the word on screen: the toggle itself succeeded.
         try {
           const detail = await loadWord(lemma);
-          ifCurrent(() => setWord((shown) => (shown ? keepSenseOrder(shown, detail) : detail)));
+          ifCurrent(() => setWord((shown) => (shown ? keepGlossOrder(shown, detail) : detail)));
         } catch {
           // keep the current word
         }
@@ -107,8 +107,9 @@ export default function VocabularyWordScreen() {
             {language ? <SpeakButton text={word.lemma} language={language} testID="speak-lemma" /> : null}
           </View>
           {word.level !== null ? <LevelBadge level={word.level} testID="vocabulary-detail-level" /> : null}
-          {word.senses.map((sense) => (
-            <View key={sense.sense_id} testID="vocabulary-sense" style={styles.card}>
+          {/* Two senses of one gloss are two cards that share an id, so the key adds the place. */}
+          {word.senses.map((sense, index) => (
+            <View key={`${sense.gloss_id}:${index}`} testID="vocabulary-sense" style={styles.card}>
               {strings.partOfSpeech(sense.part_of_speech) ? (
                 <Text testID="vocabulary-sense-pos" style={styles.meta}>
                   {strings.partOfSpeech(sense.part_of_speech)}
@@ -147,10 +148,10 @@ export default function VocabularyWordScreen() {
               ) : null}
               <Pressable
                 accessibilityRole="button"
-                accessibilityState={{ selected: sense.saved, disabled: Boolean(pending[sense.sense_id]) }}
-                disabled={Boolean(pending[sense.sense_id])}
+                accessibilityState={{ selected: sense.saved, disabled: Boolean(pending[sense.gloss_id]) }}
+                disabled={Boolean(pending[sense.gloss_id])}
                 testID="vocabulary-sense-save"
-                onPress={() => void toggle(sense.sense_id)}
+                onPress={() => void toggle(sense.gloss_id)}
                 style={[styles.toggle, sense.saved && styles.toggleSaved]}
               >
                 <Text style={[styles.toggleLabel, sense.saved && styles.toggleLabelSaved]}>

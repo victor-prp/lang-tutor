@@ -549,6 +549,7 @@ const taskOf = (item: DistractorCase['items'][number]): Task => item.task ?? 'me
 function itemsOf(kase: DistractorCase) {
   return distractorItems(
     kase.items.map((item, index) => ({
+      glossId: `g-s${index}`,
       senseId: `s${index}`,
       variantId: `v${index}`,
       lexemeId: `l${index}`,
@@ -620,11 +621,13 @@ function distractorTier2(kase: DistractorCase, answer: LlmDistractors): Check[] 
  *  translate case: each with its saved example, and the sentences to avoid as the
  *  service reads them from the last sessions. */
 function sentenceItemsOf(kase: SentenceCase) {
+  // Phase 31: keyed by gloss id, as findRecentSentences keys them.
   const recent: RecentSentences = new Map(
-    kase.items.map((item, index) => [`s${index}`, { cloze: item.avoidTarget ?? [], translate: item.avoidHebrew ?? [] }]),
+    kase.items.map((item, index) => [`g-s${index}`, { cloze: item.avoidTarget ?? [], translate: item.avoidHebrew ?? [] }]),
   );
   return distractorItems(
     kase.items.map((item, index) => ({
+      glossId: `g-s${index}`,
       senseId: `s${index}`,
       variantId: `v${index}`,
       lexemeId: `l${index}`,

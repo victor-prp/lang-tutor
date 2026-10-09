@@ -109,6 +109,7 @@ describe('findSensesByForm', () => {
       {
         lexemeId: expect.any(String),
         senseId: expect.any(String),
+        glossId: expect.any(String),
         variantId: expect.any(String),
         rank: 0,
         entryRank: 0,
@@ -247,7 +248,7 @@ describe('persistEntries', () => {
       (await find('saw')).map((row) => ({
         translation: row.translation,
         part_of_speech: row.partOfSpeech,
-        sense_id: row.senseId,
+        gloss_id: row.glossId,
         variant_id: row.variantId,
       })),
     );

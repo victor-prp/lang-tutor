@@ -6,7 +6,7 @@ import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 
 let t: TestDb;
-let kite: { lexemeId: string; variantIds: string[]; senseIds: string[] };
+let kite: { lexemeId: string; variantIds: string[]; senseIds: string[]; glossIds: string[] };
 
 beforeEach(async () => {
   t = await createTestDb();
@@ -33,11 +33,11 @@ afterEach(async () => {
   await t.close();
 });
 
-type Column = 'enrollment' | 'sense' | 'lexeme' | 'lemma' | 'variant';
+type Column = 'enrollment' | 'gloss' | 'lexeme' | 'lemma' | 'variant';
 const insert = (over: Partial<Record<Column, string>> = {}) =>
   t.db.execute(sql`
-    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, added_by_user_id)
-    values (${over.enrollment ?? enrollmentOf('u_1')}, ${over.sense ?? kite.senseIds[0]},
+    insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, lemma, variant_id, added_by_user_id)
+    values (${over.enrollment ?? enrollmentOf('u_1')}, ${over.gloss ?? kite.glossIds[0]},
             ${over.lexeme ?? kite.lexemeId}, ${over.lemma ?? 'kite'}, ${over.variant ?? kite.variantIds[0]}, 'u_1')`);
 
 const violating = (constraint: string) =>
@@ -61,14 +61,14 @@ describe('vocabulary_entries', () => {
     expect(Math.abs(parsedTime - Date.now())).toBeLessThan(60_000);
   });
 
-  it('holds one entry per (enrollment, sense) — the research decision as a constraint', async () => {
+  it('holds one entry per (enrollment, gloss) — the research decision as a constraint', async () => {
     await insert();
     await expect(insert()).rejects.toThrow(violating('vocabulary_entries_pkey'));
   });
 
   it.each<[Column, string]>([
     ['enrollment', 'vocabulary_entries_enrollment_fk'],
-    ['sense', 'vocabulary_entries_sense_fk'],
+    ['gloss', 'vocabulary_entries_gloss_fk'],
     ['lexeme', 'vocabulary_entries_lexeme_lemma_fk'],
     ['lemma', 'vocabulary_entries_lexeme_lemma_fk'],
     ['variant', 'vocabulary_entries_variant_fk'],
@@ -88,11 +88,33 @@ describe('vocabulary_entries', () => {
     await expect(insert({ lemma: 'fly' })).rejects.toThrow(violating('vocabulary_entries_lexeme_lemma_fk'));
   });
 
+  // Phase 31. The key holds the gloss and its lexeme together.
+  it("rejects a gloss that is not its lexeme's", async () => {
+    const fly = await insertLexeme(t.db, {
+      lemma: 'fly',
+      languageCode: 'en',
+      partOfSpeech: 'verb',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'move' }],
+      variants: [
+        {
+          form: 'fly',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'move', rank: 0, translation: 'לעוף', exampleSource: null, exampleTarget: null }],
+        },
+      ],
+    });
+    await expect(insert({ lexeme: fly.lexemeId, lemma: 'fly', variant: fly.variantIds[0] })).rejects.toThrow(
+      violating('vocabulary_entries_gloss_fk'),
+    );
+  });
+
   it('requires a lemma', async () => {
     await expect(
       t.db.execute(sql`
-        insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, variant_id, added_by_user_id)
-        values (${enrollmentOf('u_1')}, ${kite.senseIds[0]}, ${kite.lexemeId}, ${kite.variantIds[0]}, 'u_1')`),
+        insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, variant_id, added_by_user_id)
+        values (${enrollmentOf('u_1')}, ${kite.glossIds[0]}, ${kite.lexemeId}, ${kite.variantIds[0]}, 'u_1')`),
     ).rejects.toThrow(expect.objectContaining({ cause: expect.objectContaining({ message: expect.stringContaining('lemma') }) }));
   });
 

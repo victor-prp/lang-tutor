@@ -177,7 +177,7 @@ describe('NextStepResponseSchema', () => {
       score: { correct: 9, total: 10 },
       missed_questions: [{ question: QUESTION, correct_answer: 'כלב' }],
       progress: [
-        { sense_id: 'se1', form: 'dog', translation: 'כלב', level_before: 1, level_after: 2, raised: ['written_receptive'] },
+        { gloss_id: 'se1', form: 'dog', translation: 'כלב', level_before: 1, level_after: 2, raised: ['written_receptive'] },
       ],
     });
 
@@ -694,7 +694,7 @@ describe('CreateEnrollmentRequestSchema', () => {
 // provider's limit (see LlmTranslationSchema's comment).
 //
 // Phase 31 gave the model's sense four fields of its own (spec D4-D6, D9) and
-// still none of the wire's: no part_of_speech, sense_id, variant_id or saved.
+// still none of the wire's: no part_of_speech, gloss_id, variant_id or saved.
 describe('LlmSenseSchema after phase 18', () => {
   it('has exactly translation, example, sense_code and the four of phase 31, none of the wire sense', () => {
     expect(Object.keys(LlmSenseSchema.shape).sort()).toEqual([
@@ -730,7 +730,7 @@ describe('TranslationSenseSchema ids', () => {
     expect(
       TranslationSenseSchema.safeParse({
         translation: 'חלון',
-        sense_id: 's1',
+        gloss_id: 's1',
         variant_id: 'v1',
         saved: false,
       }).success,
@@ -739,7 +739,7 @@ describe('TranslationSenseSchema ids', () => {
 });
 
 describe('SaveVocabularyRequestSchema', () => {
-  const entry = { sense_id: 's1', variant_id: 'v1' };
+  const entry = { gloss_id: 's1', variant_id: 'v1' };
 
   it('accepts one entry and twenty', () => {
     expect(SaveVocabularyRequestSchema.safeParse({ entries: [entry] }).success).toBe(true);
@@ -756,7 +756,7 @@ describe('SaveVocabularyRequestSchema', () => {
   });
 
   it('rejects an entry missing its variant', () => {
-    expect(SaveVocabularyRequestSchema.safeParse({ entries: [{ sense_id: 's1' }] }).success).toBe(
+    expect(SaveVocabularyRequestSchema.safeParse({ entries: [{ gloss_id: 's1' }] }).success).toBe(
       false,
     );
   });
@@ -835,8 +835,8 @@ describe('phase 26 photo import schemas', () => {
   it('refuses an item update that changes nothing', () => {
     expect(PhotoImportItemUpdateSchema.safeParse({}).success).toBe(false);
     expect(PhotoImportItemUpdateSchema.safeParse({ ticked: false }).success).toBe(true);
-    expect(PhotoImportItemUpdateSchema.safeParse({ sense_id: 's1' }).success).toBe(true);
-    expect(PhotoImportItemUpdateSchema.safeParse({ sense_id: '' }).success).toBe(false);
+    expect(PhotoImportItemUpdateSchema.safeParse({ gloss_id: 's1' }).success).toBe(true);
+    expect(PhotoImportItemUpdateSchema.safeParse({ gloss_id: '' }).success).toBe(false);
   });
 
   it('parses a row and an import', () => {
@@ -846,8 +846,8 @@ describe('phase 26 photo import schemas', () => {
       hebrew: 'חתול',
       status: 'ready',
       corrected_form: null,
-      options: [{ sense_id: 's1', variant_id: 'v1', translation: 'חתול', part_of_speech: 'noun' }],
-      chosen_sense_id: 's1',
+      options: [{ gloss_id: 's1', variant_id: 'v1', translation: 'חתול', part_of_speech: 'noun' }],
+      chosen_gloss_id: 's1',
       ticked: true,
       hebrew_mismatch: false,
       reason: null,

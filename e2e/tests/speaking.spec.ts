@@ -36,10 +36,10 @@ async function saveTenWords(request: APIRequestContext, userId: string): Promise
       data: { text: word.form, from: 'ru', to: 'he', enrollment_id: enrollmentId },
     });
     expect(lookup.ok(), await lookup.text()).toBe(true);
-    const { senses } = (await lookup.json()) as { senses: { sense_id?: string; variant_id?: string }[] };
+    const { senses } = (await lookup.json()) as { senses: { gloss_id?: string; variant_id?: string }[] };
     const saved = await request.post(`${API_URL}/api/enrollments/${enrollmentId}/vocabulary`, {
       headers: { 'X-Acting-User-Id': userId },
-      data: { entries: senses.map((sense) => ({ sense_id: sense.sense_id!, variant_id: sense.variant_id! })) },
+      data: { entries: senses.map((sense) => ({ gloss_id: sense.gloss_id!, variant_id: sense.variant_id! })) },
     });
     expect(saved.ok(), await saved.text()).toBe(true);
   }

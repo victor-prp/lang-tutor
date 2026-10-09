@@ -44,7 +44,7 @@ const failure = (description: string) => ({
 });
 
 const progressItem = (change: ProgressChange) => ({
-  sense_id: change.senseId,
+  gloss_id: change.glossId,
   form: change.form,
   translation: change.translation,
   level_before: change.levelBefore,
@@ -222,7 +222,7 @@ const currentSessionRoute = createRoute({
   tags: ['sessions'],
   summary: "An enrollment's current session",
   description:
-    'The newest session while it is preparing, ready or failed; where the next one will come from; and how many senses are saved.',
+    'The newest session while it is preparing, ready or failed; where the next one will come from; and how many glosses are saved.',
   request: { params: z.object({ id: z.string() }) },
   responses: {
     200: {

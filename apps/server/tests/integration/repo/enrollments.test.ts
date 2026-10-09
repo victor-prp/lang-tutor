@@ -92,9 +92,9 @@ describe('enrollments repository', () => {
   it('rejects a per-learner question carrying only half its owner', async () => {
     await expect(
       t.db.execute(sql`
-        insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id,
+        insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id,
                                target_language, user_language_code, type, options)
-        select 'q-half', 'u_1', null, sense_id, prompt_variant_id, target_language,
+        select 'q-half', 'u_1', null, gloss_id, prompt_variant_id, target_language,
                user_language_code, type, options
           from questions limit 1`),
     ).rejects.toThrow();

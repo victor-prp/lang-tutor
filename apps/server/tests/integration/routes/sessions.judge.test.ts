@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 
 import { createFakeLogger } from '../../support/fakes';
 import { clearNamespace, expectGeminiStatus, expectJudge, geminiBaseUrlFor, mockNamespace } from '../../support/mockServer';
-import { insertListSession, readStoredAnswers, type AskedSense } from '../../support/questions';
+import { insertListSession, readStoredAnswers, type AskedGloss } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -40,7 +40,7 @@ function buildTestApp(ns: string) {
 
 /** A ready list session: a meaning card for "tome" (ספר), then a choice card. */
 async function startMeaning() {
-  const asked: AskedSense[] = [];
+  const asked: AskedGloss[] = [];
   for (const [lemma, translation] of [
     ['tome', 'ספר'],
     ['lantern', 'פנס'],
@@ -51,7 +51,7 @@ async function startMeaning() {
       translations: [translation],
       example: { source: `A sentence with the ${lemma}.`, target: `משפט עם ${translation}.` },
     });
-    asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
   }
   return insertListSession(t.db, {
     userId: 'u_1',

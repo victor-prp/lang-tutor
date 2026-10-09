@@ -36,7 +36,7 @@ function translate(body: unknown) {
   });
 }
 
-type Sense = { translation: string; sense_id?: string; variant_id?: string; saved?: boolean };
+type Sense = { translation: string; gloss_id?: string; variant_id?: string; saved?: boolean };
 
 async function rama() {
   return insertLexeme(t.db, {
@@ -62,14 +62,14 @@ async function rama() {
 describe('POST /api/translations with an enrollment', () => {
   it('carries ids on every stored sense, and saved flags for a target-language lookup', async () => {
     const ids = await rama();
-    await deps().vocabulary.save('u_1', RU, [{ sense_id: ids.senseIds[1], variant_id: ids.variantIds[0] }]);
+    await deps().vocabulary.save('u_1', RU, [{ gloss_id: ids.glossIds[1], variant_id: ids.variantIds[0] }]);
 
     const res = await translate({ text: 'рама', from: 'ru', to: 'he', enrollment_id: RU });
     expect(res.status).toBe(200);
     const { senses } = (await res.json()) as { senses: Sense[] };
     expect(senses).toEqual([
-      { translation: 'חלון', part_of_speech: 'noun', sense_id: ids.senseIds[0], variant_id: ids.variantIds[0], saved: false },
-      { translation: 'חלון זמן', part_of_speech: 'noun', sense_id: ids.senseIds[1], variant_id: ids.variantIds[0], saved: true },
+      { translation: 'חלון', part_of_speech: 'noun', gloss_id: ids.glossIds[0], variant_id: ids.variantIds[0], saved: false },
+      { translation: 'חלון זמן', part_of_speech: 'noun', gloss_id: ids.glossIds[1], variant_id: ids.variantIds[0], saved: true },
     ]);
   });
 
@@ -78,7 +78,7 @@ describe('POST /api/translations with an enrollment', () => {
     const { senses } = (await (await translate({ text: 'рама', from: 'ru', to: 'he' })).json()) as {
       senses: Sense[];
     };
-    expect(senses[0].sense_id).toEqual(expect.any(String));
+    expect(senses[0].gloss_id).toEqual(expect.any(String));
     expect(senses[0]).not.toHaveProperty('saved');
   });
 
@@ -106,7 +106,7 @@ describe('POST /api/translations with an enrollment', () => {
     expect(senses).toHaveLength(1);
     // Ids are present, so the missing flag is down to from ≠ target, not to a
     // sense the lookup could not identify.
-    expect(senses[0].sense_id).toEqual(expect.any(String));
+    expect(senses[0].gloss_id).toEqual(expect.any(String));
     expect(senses[0].variant_id).toEqual(expect.any(String));
     expect(senses[0]).not.toHaveProperty('saved');
   });
@@ -138,14 +138,14 @@ describe('POST /api/translations with an enrollment', () => {
         },
       ],
     });
-    await deps().vocabulary.save('u_1', RU, [{ sense_id: ids.senseIds[0], variant_id: ids.variantIds[0] }]);
+    await deps().vocabulary.save('u_1', RU, [{ gloss_id: ids.glossIds[0], variant_id: ids.variantIds[0] }]);
 
     const res = await translate({ text: 'рамы', from: 'ru', to: 'he', enrollment_id: RU });
     expect(res.status).toBe(200);
     const { senses } = (await res.json()) as { senses: Sense[] };
     expect(senses).toHaveLength(1);
     expect(senses[0]).toMatchObject({
-      sense_id: ids.senseIds[0],
+      gloss_id: ids.glossIds[0],
       variant_id: ids.variantIds[1],
       translation: 'חלונות',
       saved: true,
@@ -190,7 +190,7 @@ describe('POST /api/translations with an enrollment', () => {
       ],
     });
     await deps().vocabulary.save('u_legacy', enrollmentId, [
-      { sense_id: sefer.senseIds[0], variant_id: sefer.variantIds[0] },
+      { gloss_id: sefer.glossIds[0], variant_id: sefer.variantIds[0] },
     ]);
     const { senses } = (await (
       await translate({ text: 'ספר', from: 'he', to: 'en', enrollment_id: enrollmentId })

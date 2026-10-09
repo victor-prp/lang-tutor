@@ -11,35 +11,35 @@ import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/d
 export type ChoiceAnswerType = 'multiple_choice' | 'reverse_choice' | 'listen_choice' | 'matching' | 'cloze_choice';
 export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation' | 'typed_meaning' | 'cloze_typed' | 'sentence_translation';
 
-/** One answer as the rule reads it: which sense, which exercise, and how it
+/** One answer as the rule reads it: which gloss, which exercise, and how it
  *  was judged. A choice is right or wrong; a text answer has its verdict. */
 export type AnsweredQuestion =
-  | { senseId: string; type: ChoiceAnswerType; correct: boolean }
-  | { senseId: string; type: TextAnswerType; verdict: AnswerVerdict };
+  | { glossId: string; type: ChoiceAnswerType; correct: boolean }
+  | { glossId: string; type: TextAnswerType; verdict: AnswerVerdict };
 
 /** One piece of evidence about one dimension. A capped piece alone can carry
  *  a dimension to its cap and no further; null is no cap. */
 export type Evidence = { dimension: Dimension; correct: boolean; cap: number | null };
 
-/** One row of sense_progress. Days are UTC calendar dates, `YYYY-MM-DD`. */
+/** One row of gloss_progress. Days are UTC calendar dates, `YYYY-MM-DD`. */
 export type ProgressRow = {
-  senseId: string;
+  glossId: string;
   dimension: Dimension;
   level: number;
   lastStepOn: string | null;
   lastWrongOn: string | null;
 };
 
-/** What one ended session did to one row of a practised saved sense. */
-export type SnapshotRow = { senseId: string; dimension: Dimension; levelBefore: number; levelAfter: number };
+/** What one ended session did to one row of a practised saved gloss. */
+export type SnapshotRow = { glossId: string; dimension: Dimension; levelBefore: number; levelAfter: number };
 
 /** A snapshot row as the results read it back, with the question that asked it. */
 export type SnapshotRead = SnapshotRow & { form: string; translation: string; position: number };
 
-/** One practised saved sense, as badges, and the live dimensions that rose:
+/** One practised saved gloss, as badges, and the live dimensions that rose:
  *  with a badge over three dimensions, one can rise alone (phase 23, D11). */
 export type ProgressChange = {
-  senseId: string;
+  glossId: string;
   form: string;
   translation: string;
   levelBefore: number;
@@ -83,7 +83,7 @@ function typedEvidence(verdict: AnswerVerdict, piece: (dimension: Dimension, cor
       // about spelling a form the learner did not produce.
       return [piece('written_productive', false)];
     default:
-      // An alternative is right but not this word: nothing about this sense.
+      // An alternative is right but not this word: nothing about this gloss.
       return [];
   }
 }
@@ -203,15 +203,15 @@ export function advance(row: ProgressRow, pieces: readonly Evidence[], day: stri
   return { ...row, level: row.level + 1, lastStepOn: day };
 }
 
-const keyOf = (senseId: string, dimension: Dimension) => `${senseId} ${dimension}`;
+const keyOf = (glossId: string, dimension: Dimension) => `${glossId} ${dimension}`;
 
 /**
- * One ended session over the progress rows of the senses it asked about.
- * `rows` holds rows for saved senses only, so an answer about an unsaved sense
+ * One ended session over the progress rows of the glosses it asked about.
+ * `rows` holds rows for saved glosses only, so an answer about an unsaved gloss
  * finds none and counts for nothing.
  *
  * `changed` is what to write. `snapshot` is every row of every practised saved
- * sense, moved or not: a results badge averages over every live dimension,
+ * gloss, moved or not: a results badge averages over every live dimension,
  * including one this session did not exercise.
  */
 export function evaluateSession(
@@ -222,23 +222,23 @@ export function evaluateSession(
   const pieces = new Map<string, Evidence[]>();
   for (const answer of answers) {
     for (const piece of evidenceFor(answer)) {
-      const key = keyOf(answer.senseId, piece.dimension);
+      const key = keyOf(answer.glossId, piece.dimension);
       pieces.set(key, [...(pieces.get(key) ?? []), piece]);
     }
   }
   // A skipped card (spec D7) is in neither list: choice answers never skip.
   const practised = new Set(
-    answers.filter((answer) => !('verdict' in answer && answer.verdict === 'skipped')).map((answer) => answer.senseId),
+    answers.filter((answer) => !('verdict' in answer && answer.verdict === 'skipped')).map((answer) => answer.glossId),
   );
 
   const changed: ProgressRow[] = [];
   const snapshot: SnapshotRow[] = [];
   for (const row of rows) {
-    if (!practised.has(row.senseId)) continue;
-    const next = advance(row, pieces.get(keyOf(row.senseId, row.dimension)) ?? [], day);
+    if (!practised.has(row.glossId)) continue;
+    const next = advance(row, pieces.get(keyOf(row.glossId, row.dimension)) ?? [], day);
     if (next !== row) changed.push(next);
     snapshot.push({
-      senseId: row.senseId,
+      glossId: row.glossId,
       dimension: row.dimension,
       levelBefore: row.level,
       levelAfter: next.level,
@@ -247,22 +247,22 @@ export function evaluateSession(
   return { changed, snapshot };
 }
 
-/** A session's snapshot as the results show it: one change per sense, badges
+/** A session's snapshot as the results show it: one change per gloss, badges
  *  over the live dimensions, in the order the session first asked each. */
 export function progressChanges(
   rows: readonly SnapshotRead[],
   live: readonly Dimension[],
 ): ProgressChange[] {
-  const bySense = new Map<string, SnapshotRead[]>();
-  for (const row of rows) bySense.set(row.senseId, [...(bySense.get(row.senseId) ?? []), row]);
-  return [...bySense.values()]
-    .map((senseRows) => {
-      const shown = senseRows.filter((row) => live.includes(row.dimension));
-      const first = senseRows[0];
+  const byGloss = new Map<string, SnapshotRead[]>();
+  for (const row of rows) byGloss.set(row.glossId, [...(byGloss.get(row.glossId) ?? []), row]);
+  return [...byGloss.values()]
+    .map((glossRows) => {
+      const shown = glossRows.filter((row) => live.includes(row.dimension));
+      const first = glossRows[0];
       return {
-        position: Math.min(...senseRows.map((row) => row.position)),
+        position: Math.min(...glossRows.map((row) => row.position)),
         change: {
-          senseId: first.senseId,
+          glossId: first.glossId,
           form: first.form,
           translation: first.translation,
           levelBefore: badge(shown.map((row) => row.levelBefore)),

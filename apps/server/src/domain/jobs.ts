@@ -25,7 +25,15 @@ export const PREPARE_SESSION_EXPIRY_SECONDS = (2 * SESSION_GENERATION_BUDGET_MS)
 export const PrepareSessionPayloadSchema = z.object({
   session_id: z.string().min(1),
   picks: z
-    .array(z.object({ sense_id: z.string().min(1), variant_id: z.string().min(1) }))
+    .array(
+      z.object({
+        // Phase 31. The gloss practised, and the rendering its card is built
+        // from: one member sense in one form (spec D12).
+        gloss_id: z.string().min(1),
+        sense_id: z.string().min(1),
+        variant_id: z.string().min(1),
+      }),
+    )
     .min(1)
     .max(SESSION_LENGTH),
   // Phase 24 (spec D5, D3). Absent in a job enqueued before the deploy: such a

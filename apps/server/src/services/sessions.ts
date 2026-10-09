@@ -97,7 +97,7 @@ export type JudgedResult = { verdict: TypedVerdict; session: SessionResult };
  * (ADR 0001 R8, spec §3): an ended session without its progress, or progress
  * for a session that did not end, would each be wrong.
  *
- * A sense with no rows is not saved, so it is skipped: that is the whole of
+ * A gloss with no rows is not saved, so it is skipped: that is the whole of
  * "only answers given while saved count". A session with no answers has no
  * evidence and writes nothing.
  */
@@ -106,7 +106,7 @@ async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
   if (!evidence) return;
   const rows = await repos.progress.findRows({
     enrollmentId: evidence.enrollmentId,
-    senseIds: [...new Set(evidence.answers.map((answer) => answer.senseId))],
+    glossIds: [...new Set(evidence.answers.map((answer) => answer.glossId))],
     savedBy: null,
   });
   if (rows.length === 0) return;
@@ -183,7 +183,7 @@ export function createSessionService({
           return { sessionId, status: 'ready' as const, source: 'seed' as const };
         }
 
-        const saved = await vocabulary.listSavedSenses(enrollmentId);
+        const saved = await vocabulary.listSavedGlosses(enrollmentId);
         if (saved.length === 0) throw new NoSavedWords(enrollmentId);
         const picks = pickSenses(saved, SESSION_LENGTH, rng);
         // Phase 24 (spec D3): the rotation's step is how many list sessions came
@@ -192,7 +192,7 @@ export function createSessionService({
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
         await jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,
-          picks: picks.map((pick) => ({ sense_id: pick.senseId, variant_id: pick.variantId })),
+          picks: picks.map((pick) => ({ gloss_id: pick.glossId, sense_id: pick.senseId, variant_id: pick.variantId })),
           listening: options.listening,
           speaking: options.speaking,
           ordinal,
@@ -499,13 +499,13 @@ export function createSessionService({
         const enrolled = await enrollment.findById(state.enrollmentId);
         if (!enrolled) return undefined;
         const context = await question.findGenerationContext({
-          picks: payload.picks.map((pick) => ({ senseId: pick.sense_id, variantId: pick.variant_id })),
+          picks: payload.picks.map((pick) => ({ glossId: pick.gloss_id, senseId: pick.sense_id, variantId: pick.variant_id })),
           sourceLanguage: enrolled.source_language,
         });
         // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
         const recent = await question.findRecentSentences({
           enrollmentId: state.enrollmentId,
-          senseIds: context.map((row) => row.senseId),
+          glossIds: context.map((row) => row.glossId),
           limit: MAX_AVOID,
         });
         return { state, enrolled, context, recent };
@@ -617,7 +617,7 @@ export function createSessionService({
             const type = degraded ? 'typed_translation' : planned;
             const content = degraded ? NOTHING_GENERATED : made;
             return {
-              senseId: row.senseId,
+              glossId: row.glossId,
               variantId: row.variantId,
               form: row.form,
               lemma: row.lemma,

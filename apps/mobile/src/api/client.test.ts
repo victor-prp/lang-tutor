@@ -259,12 +259,12 @@ describe('api/client', () => {
   });
 
   it('saveVocabulary posts the entries to the enrollment', async () => {
-    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_sense_ids: ['s1'] }) }));
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_gloss_ids: ['s1'] }) }));
     const client = buildClient(mockFetch);
-    await client.saveVocabulary('u_1', 'e 1', { entries: [{ sense_id: 's1', variant_id: 'v1' }] });
+    await client.saveVocabulary('u_1', 'e 1', { entries: [{ gloss_id: 's1', variant_id: 'v1' }] });
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/enrollments/e%201/vocabulary',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ entries: [{ sense_id: 's1', variant_id: 'v1' }] }) }),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ entries: [{ gloss_id: 's1', variant_id: 'v1' }] }) }),
     );
   });
 
@@ -272,16 +272,16 @@ describe('api/client', () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 204 }));
     const client = buildClient(mockFetch);
     await client.unsaveVocabulary('u_1', 'e1', 's1');
-    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary/senses/s1', {
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/api/enrollments/e1/vocabulary/glosses/s1', {
       method: 'DELETE',
       headers: { 'X-Acting-User-Id': 'u_1' },
     });
   });
 
   it('sends the acting user on a save, and only there', async () => {
-    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_sense_ids: ['s1'] }) }));
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_gloss_ids: ['s1'] }) }));
     const client = buildClient(mockFetch);
-    await client.saveVocabulary('u_1', 'e1', { entries: [{ sense_id: 's1', variant_id: 'v1' }] });
+    await client.saveVocabulary('u_1', 'e1', { entries: [{ gloss_id: 's1', variant_id: 'v1' }] });
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/enrollments/e1/vocabulary',
       expect.objectContaining({ headers: { 'Content-Type': 'application/json', 'X-Acting-User-Id': 'u_1' } }),

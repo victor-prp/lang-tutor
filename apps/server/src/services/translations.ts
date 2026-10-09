@@ -746,10 +746,10 @@ export function createTranslationService({
       const response = await lookup(input);
       if (!enrollment || input.from !== enrollment.target_language) return response;
 
-      const senseIds = response.senses.flatMap((sense) => (sense.sense_id ? [sense.sense_id] : []));
-      if (senseIds.length === 0) return response;
+      const glossIds = response.senses.flatMap((sense) => (sense.gloss_id ? [sense.gloss_id] : []));
+      if (glossIds.length === 0) return response;
       const saved = await transaction((repos) =>
-        repos.vocabulary.findSavedSenseIds({ enrollmentId: enrollment.id, senseIds }),
+        repos.vocabulary.findSavedGlossIds({ enrollmentId: enrollment.id, glossIds }),
       );
       return { ...response, senses: markSaved(response.senses, new Set(saved)) };
     },

@@ -61,7 +61,7 @@ export type {
   SaveVocabularyResponse,
   SayTranslationQuestion,
   Score,
-  SenseProgress,
+  GlossProgress,
   SessionProgressItem,
   SessionSource,
   SessionStatus,

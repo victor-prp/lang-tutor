@@ -79,9 +79,12 @@ export { MAX_ALTERNATIVES };
  *  from a translation. Changing the wording means changing the stubs. */
 export const DISTRACTOR_MARKER = 'three wrong answers';
 
-/** One picked sense as the generation reads it: the saved form, its lexeme,
- *  and that form's rendering of the sense in the enrollment's source language. */
+/** One picked gloss as the generation reads it: the saved form, its lexeme,
+ *  and that form's rendering of one member sense in the enrollment's source
+ *  language. */
 export type GenerationContext = {
+  /** Phase 31. The gloss the card practises; senseId and variantId name the rendering it is built from. */
+  glossId: string;
   senseId: string;
   variantId: string;
   lexemeId: string;
@@ -95,9 +98,10 @@ export type GenerationContext = {
   exampleTranslation: string | null;
 };
 
-/** Phase 27 (spec D5, D6). Per sense, the sentences its last sessions asked,
- *  newest first, so a new one is never last time's. Read by the service. */
-export type RecentSentences = Map<string /* senseId */, { cloze: string[]; translate: string[] }>;
+/** Phase 27 (spec D5, D6). Per gloss (phase 31), the sentences its last
+ *  sessions asked, newest first, so a new one is never last time's. Read by
+ *  the service. */
+export type RecentSentences = Map<string /* glossId */, { cloze: string[]; translate: string[] }>;
 
 export type DistractorItem = {
   key: string;
@@ -144,7 +148,7 @@ export type DistractorVerdict =
  *  a translation avoids the last sessions' Hebrew sentences and the saved
  *  example's Hebrew, so the example is not written back as the sentence. */
 function avoidFor(row: GenerationContext, task: Task, recent: RecentSentences): string[] {
-  const seen = recent.get(row.senseId);
+  const seen = recent.get(row.glossId);
   if (task === 'sentence') {
     return [...(row.example ? [row.example] : []), ...(seen?.cloze ?? []).slice(0, MAX_AVOID)];
   }

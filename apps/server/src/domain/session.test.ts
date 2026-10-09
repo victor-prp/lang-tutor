@@ -228,12 +228,12 @@ describe('sessionScore and missedQuestions', () => {
 });
 
 describe('pickSenses', () => {
-  const entries = Array.from({ length: 12 }, (_, i) => ({ senseId: `s${i}` }));
+  const entries = Array.from({ length: 12 }, (_, i) => ({ glossId: `s${i}` }));
 
   it('takes at most `max`, with no repeats', () => {
     const picked = pickSenses(entries, 10, testRng(3));
     expect(picked).toHaveLength(10);
-    expect(new Set(picked.map((e) => e.senseId)).size).toBe(10);
+    expect(new Set(picked.map((e) => e.glossId)).size).toBe(10);
   });
 
   it('takes all of a shorter list', () => {

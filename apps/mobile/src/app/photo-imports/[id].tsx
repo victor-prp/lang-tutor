@@ -160,8 +160,8 @@ export default function PhotoImportReviewScreen() {
     act(async () => {
       setSaveFailed(false);
       try {
-        const { saved_sense_ids } = await save(id);
-        leaveSaved(saved_sense_ids.length);
+        const { saved_gloss_ids } = await save(id);
+        leaveSaved(saved_gloss_ids.length);
       } catch {
         // The save landed and only its answer was lost: the import read back
         // says saved, and this ends as a save does. Otherwise it was refused
@@ -286,10 +286,10 @@ export default function PhotoImportReviewScreen() {
 
                 {expanded && choosable
                   ? item.options.map((option) => {
-                      const selected = option.sense_id === item.chosen_sense_id;
+                      const selected = option.gloss_id === item.chosen_gloss_id;
                       return (
                         <Pressable
-                          key={option.sense_id}
+                          key={option.gloss_id}
                           accessibilityRole="button"
                           accessibilityState={{ selected, disabled: locked }}
                           aria-selected={selected}
@@ -297,19 +297,17 @@ export default function PhotoImportReviewScreen() {
                           testID="photo-import-option"
                           onPress={() => {
                             setOpen(null);
-                            if (!selected) void change(item.position, { sense_id: option.sense_id });
+                            if (!selected) void change(item.position, { gloss_id: option.gloss_id });
                           }}
                           style={[styles.option, selected && styles.optionSelected]}
                         >
                           <Meaning option={option} />
-                          {option.example ? (
-                            <>
-                              <Text style={[styles.exampleSource, { writingDirection: wordDirection }]}>
-                                {option.example.source}
-                              </Text>
-                              <Text style={styles.meta}>{option.example.target}</Text>
-                            </>
-                          ) : null}
+                          {(option.examples ?? []).map((example) => (
+                            <View key={example.source}>
+                              <Text style={[styles.exampleSource, { writingDirection: wordDirection }]}>{example.source}</Text>
+                              <Text style={styles.meta}>{example.target}</Text>
+                            </View>
+                          ))}
                         </Pressable>
                       );
                     })

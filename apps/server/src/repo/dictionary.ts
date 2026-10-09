@@ -96,6 +96,7 @@ export function createDictRepo(tx: Tx) {
       .select({
         lexemeId: dictVariants.lexemeId,
         senseId: dictSenses.id,
+        glossId: dictSenseGlosses.glossId,
         variantId: dictVariants.id,
         rank: dictVarTranslations.rank,
         entryRank: dictVariants.entryRank,
@@ -118,6 +119,11 @@ export function createDictRepo(tx: Tx) {
           eq(dictVarTranslations.senseId, dictSenses.id),
           eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
         ),
+      )
+      // Phase 31 (spec D8). Every rendered sense has its gloss in this language.
+      .innerJoin(
+        dictSenseGlosses,
+        and(eq(dictSenseGlosses.senseId, dictSenses.id), eq(dictSenseGlosses.userLanguageCode, input.userLanguageCode)),
       )
       .where(
         and(

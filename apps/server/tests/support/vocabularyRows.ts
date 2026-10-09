@@ -7,8 +7,9 @@ import { withTx } from './withTx';
 
 /**
  * One lexeme with one form rendering each translation as its own sense, every
- * sense saved into `enrollmentId`. Tests about list sessions need saved words
- * without driving the translate flow; this is that, in one call.
+ * sense's gloss saved into `enrollmentId`. Tests about list sessions need saved
+ * words without driving the translate flow; this is that, in one call.
+ * `senseIds` and `glossIds` are aligned: equal translations share a gloss.
  */
 export async function seedSavedSenses(
   db: Db,
@@ -23,7 +24,7 @@ export async function seedSavedSenses(
     /** Phase 27: the saved example of the first sense's rendering. */
     example?: { source: string; target: string };
   },
-): Promise<{ lexemeId: string; variantId: string; senseIds: string[] }> {
+): Promise<{ lexemeId: string; variantId: string; senseIds: string[]; glossIds: string[] }> {
   const word = await insertLexeme(db, {
     lemma: input.lemma,
     languageCode: input.languageCode ?? 'en',
@@ -47,16 +48,19 @@ export async function seedSavedSenses(
   });
   const variantId = word.variantIds[0];
   const addedByUserId = input.addedByUserId ?? (await ownerOf(db, input.enrollmentId));
+  // Phase 31. Saved by gloss. Distinct translations make one gloss per sense, as
+  // before; two equal ones are one gloss, saved once (spec D3).
+  const glossIds = [...new Set(word.glossIds)];
   // Through the repository, so each entry gets its five progress rows exactly
   // as a real save writes them.
   await withTx(db, (tx) =>
     createVocabularyRepo(tx).insertEntries({
       enrollmentId: input.enrollmentId,
       addedByUserId,
-      entries: word.senseIds.map((senseId) => ({ senseId, variantId, lexemeId: word.lexemeId, lemma: input.lemma })),
+      entries: glossIds.map((glossId) => ({ glossId, variantId, lexemeId: word.lexemeId, lemma: input.lemma })),
     }),
   );
-  return { lexemeId: word.lexemeId, variantId, senseIds: word.senseIds };
+  return { lexemeId: word.lexemeId, variantId, senseIds: word.senseIds, glossIds: word.glossIds };
 }
 
 export async function ownerOf(db: Db, enrollmentId: string): Promise<string> {

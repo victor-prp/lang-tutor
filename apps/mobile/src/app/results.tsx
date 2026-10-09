@@ -64,7 +64,7 @@ export default function ResultsScreen() {
             <Text style={styles.missedTitle}>{strings.resultsPractisedTitle}</Text>
             {practisedRows(progress).map((row) => (
               <View
-                key={row.sense_id}
+                key={row.gloss_id}
                 style={[styles.missedRow, row.badgeRaised && styles.raisedRow, row.progressed && styles.progressedRow]}
                 testID="practised-row"
               >

@@ -209,9 +209,9 @@ export function LookupPanel() {
               key={`${sense.translation}-${index}`}
               sense={sense}
               isTop={index === 0 && !isSentence}
-              saveState={sense.sense_id ? t.saved[sense.sense_id] : undefined}
-              pending={sense.sense_id ? Boolean(t.pending[sense.sense_id]) : false}
-              onToggle={() => sense.sense_id && t.toggleSave(sense.sense_id)}
+              saveState={sense.gloss_id ? t.saved[sense.gloss_id] : undefined}
+              pending={sense.gloss_id ? Boolean(t.pending[sense.gloss_id]) : false}
+              onToggle={() => sense.gloss_id && t.toggleSave(sense.gloss_id)}
               from={answerFrom}
               to={answerTo}
               tutor={t.mode === 'tutor'}

@@ -226,16 +226,18 @@ export function createQuestionRepo(tx: Tx) {
 
     /**
      * What generation needs for each pick: the saved form, its lexeme, and that
-     * form's rendering of the sense in the source language. In pick order. A
-     * pick whose rows are gone (a db:reseed between request and job) is
-     * dropped rather than failing the whole session.
+     * form's rendering of the picked sense in the source language, under the
+     * gloss the pick practises (phase 31). In pick order. A pick whose rows are
+     * gone (a db:reseed between request and job) is dropped rather than failing
+     * the whole session.
      */
     findGenerationContext: async (input: {
-      picks: { senseId: string; variantId: string }[];
+      picks: { glossId: string; senseId: string; variantId: string }[];
       sourceLanguage: string;
     }): Promise<GenerationContext[]> => {
       if (input.picks.length === 0) return [];
       const rows = await tx.execute<{
+        gloss_id: string;
         sense_id: string;
         variant_id: string;
         lexeme_id: string;
@@ -246,23 +248,24 @@ export function createQuestionRepo(tx: Tx) {
         example_source: string | null;
         example_target: string | null;
       }>(sql`
-        SELECT tr.sense_id, tr.variant_id, l.id AS lexeme_id, v.form, l.lemma, l.part_of_speech, tr.translation,
-               tr.example_source, tr.example_target
+        SELECT asked.gloss_id, tr.sense_id, tr.variant_id, l.id AS lexeme_id, v.form, l.lemma, l.part_of_speech,
+               tr.translation, tr.example_source, tr.example_target
         FROM (VALUES ${sql.join(
-          input.picks.map((pick) => sql`(${pick.senseId}::text, ${pick.variantId}::text)`),
+          input.picks.map((pick) => sql`(${pick.glossId}::text, ${pick.senseId}::text, ${pick.variantId}::text)`),
           sql`, `,
-        )}) AS asked(sense_id, variant_id)
+        )}) AS asked(gloss_id, sense_id, variant_id)
         JOIN dict_var_translations tr ON tr.sense_id = asked.sense_id
                                      AND tr.variant_id = asked.variant_id
                                      AND tr.user_language_code = ${input.sourceLanguage}
         JOIN dict_variants v          ON v.id = tr.variant_id
         JOIN dict_lexemes l           ON l.id = v.lexeme_id`);
-      const found = new Map(rows.rows.map((row) => [`${row.sense_id} ${row.variant_id}`, row]));
+      const found = new Map(rows.rows.map((row) => [`${row.gloss_id} ${row.sense_id} ${row.variant_id}`, row]));
       return input.picks.flatMap((pick) => {
-        const row = found.get(`${pick.senseId} ${pick.variantId}`);
+        const row = found.get(`${pick.glossId} ${pick.senseId} ${pick.variantId}`);
         return row
           ? [
               {
+                glossId: row.gloss_id,
                 senseId: row.sense_id,
                 variantId: row.variant_id,
                 lexemeId: row.lexeme_id,
@@ -279,36 +282,37 @@ export function createQuestionRepo(tx: Tx) {
     },
 
     /**
-     * Phase 27 (spec D5, D6). Per sense, the sentences this enrollment's last
-     * sessions asked, newest first by creation, so a new sentence is never last
-     * time's: a typed cloze's `sentence`, and a translation's Hebrew sentence (its
-     * `sentence_translation` column; its `sentence` is the reference). A cloze
-     * choice shows the saved example and is not a written sentence, so it is
-     * left out. At most `limit` of each; a sense with none has no entry.
+     * Phase 27 (spec D5, D6). Per gloss (phase 31), the sentences this
+     * enrollment's last sessions asked, newest first by creation, so a new
+     * sentence is never last time's: a typed cloze's `sentence`, and a
+     * translation's Hebrew sentence (its `sentence_translation` column; its
+     * `sentence` is the reference). A cloze choice shows the saved example and
+     * is not a written sentence, so it is left out. At most `limit` of each; a
+     * gloss with none has no entry.
      */
     findRecentSentences: async (input: {
       enrollmentId: string;
-      senseIds: string[];
+      glossIds: string[];
       limit: number;
     }): Promise<RecentSentences> => {
       const recent: RecentSentences = new Map();
-      if (input.senseIds.length === 0) return recent;
-      const rows = await tx.execute<{ sense_id: string; type: string; sentence: string }>(sql`
-        SELECT sense_id, type, sentence FROM (
-          SELECT q.sense_id, q.type,
+      if (input.glossIds.length === 0) return recent;
+      const rows = await tx.execute<{ gloss_id: string; type: string; sentence: string }>(sql`
+        SELECT gloss_id, type, sentence FROM (
+          SELECT q.gloss_id, q.type,
                  CASE WHEN q.type = 'sentence_translation' THEN q.sentence_translation ELSE q.sentence END AS sentence,
-                 row_number() OVER (PARTITION BY q.sense_id, q.type ORDER BY q.created_at DESC, q.id DESC) AS recency
+                 row_number() OVER (PARTITION BY q.gloss_id, q.type ORDER BY q.created_at DESC, q.id DESC) AS recency
           FROM questions q
           WHERE q.enrollment_id = ${input.enrollmentId}
             AND q.type IN ('cloze_typed', 'sentence_translation')
-            AND q.sense_id IN (${sql.join(input.senseIds.map((id) => sql`${id}`), sql`, `)})
+            AND q.gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
         ) ranked
         WHERE recency <= ${input.limit}
-        ORDER BY sense_id, type, recency`);
+        ORDER BY gloss_id, type, recency`);
       for (const row of rows.rows) {
-        const entry = recent.get(row.sense_id) ?? { cloze: [], translate: [] };
+        const entry = recent.get(row.gloss_id) ?? { cloze: [], translate: [] };
         (row.type === 'cloze_typed' ? entry.cloze : entry.translate).push(row.sentence);
-        recent.set(row.sense_id, entry);
+        recent.set(row.gloss_id, entry);
       }
       return recent;
     },
@@ -316,8 +320,9 @@ export function createQuestionRepo(tx: Tx) {
     /**
      * Phase 27 (spec D15). What the meaning judge is shown: the asked form, its
      * lexeme, the stored meaning, and the learner's saved example for that
-     * form and sense. questions.id is text, so an id that matches nothing is
-     * simply no row.
+     * form and, since phase 31, the lowest-ranked member of the card's gloss
+     * that form renders. questions.id is text, so an id that matches nothing
+     * is simply no row.
      */
     findJudgeContext: async (
       questionId: string,
@@ -344,9 +349,16 @@ export function createQuestionRepo(tx: Tx) {
         FROM questions q
         JOIN dict_variants v  ON v.id = q.prompt_variant_id
         JOIN dict_lexemes l   ON l.id = v.lexeme_id
-        LEFT JOIN dict_var_translations tr ON tr.variant_id = q.prompt_variant_id
-                                          AND tr.sense_id = q.sense_id
-                                          AND tr.user_language_code = q.user_language_code
+        LEFT JOIN LATERAL (
+          SELECT tr.example_source, tr.example_target
+          FROM dict_sense_glosses m
+          JOIN dict_var_translations tr ON tr.sense_id = m.sense_id
+                                       AND tr.user_language_code = m.user_language_code
+                                       AND tr.variant_id = q.prompt_variant_id
+          WHERE m.gloss_id = q.gloss_id AND m.user_language_code = q.user_language_code
+          ORDER BY tr.rank
+          LIMIT 1
+        ) tr ON true
         WHERE q.id = ${questionId}`);
       const row = rows.rows[0];
       return row
@@ -370,7 +382,7 @@ export function createQuestionRepo(tx: Tx) {
       targetLanguage: string;
       userLanguageCode: string;
       questions: {
-        senseId: string;
+        glossId: string;
         variantId: string;
         form: string;
         lemma: string;
@@ -397,7 +409,7 @@ export function createQuestionRepo(tx: Tx) {
             id: sql<string>`gen_random_uuid()::text`,
             userId: input.userId,
             enrollmentId: input.enrollmentId,
-            senseId: question.senseId,
+            glossId: question.glossId,
             promptVariantId: question.variantId,
             targetLanguage: input.targetLanguage,
             userLanguageCode: input.userLanguageCode,

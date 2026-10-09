@@ -9,7 +9,7 @@ import {
   dictLexemes,
   dictVariants,
   questions,
-  senseProgress,
+  glossProgress,
   sessionProgress,
   sessionQuestions,
   sessions,
@@ -25,68 +25,68 @@ import { withTx } from './withTx';
  */
 
 /** Five level 1 rows for entries a test inserted directly, as the save path writes them. */
-export async function insertProgressRows(db: Db, enrollmentId: string, senseIds: string[]): Promise<void> {
-  if (senseIds.length === 0) return;
+export async function insertProgressRows(db: Db, enrollmentId: string, glossIds: string[]): Promise<void> {
+  if (glossIds.length === 0) return;
   await db
-    .insert(senseProgress)
-    .values(senseIds.flatMap((senseId) => DIMENSIONS.map((dimension) => ({ enrollmentId, senseId, dimension }))));
+    .insert(glossProgress)
+    .values(glossIds.flatMap((glossId) => DIMENSIONS.map((dimension) => ({ enrollmentId, glossId, dimension }))));
 }
 
 /** Puts one row at a level, so a test about sorting or badges need not answer weeks of sessions. */
-/** Sets one dimension's level, or, with none named, every live one: a sense
+/** Sets one dimension's level, or, with none named, every live one: a gloss
  *  evenly at `level`, whose badge is `level` however many dimensions are live
  *  (phase 23 made three live). */
 export async function setLevel(
   db: Db,
-  input: { enrollmentId: string; senseId: string; level: number; dimension?: Dimension },
+  input: { enrollmentId: string; glossId: string; level: number; dimension?: Dimension },
 ): Promise<void> {
   await db
-    .update(senseProgress)
+    .update(glossProgress)
     .set({ level: input.level })
     .where(
       and(
-        eq(senseProgress.enrollmentId, input.enrollmentId),
-        eq(senseProgress.senseId, input.senseId),
-        inArray(senseProgress.dimension, input.dimension ? [input.dimension] : [...LIVE_DIMENSIONS]),
+        eq(glossProgress.enrollmentId, input.enrollmentId),
+        eq(glossProgress.glossId, input.glossId),
+        inArray(glossProgress.dimension, input.dimension ? [input.dimension] : [...LIVE_DIMENSIONS]),
       ),
     );
 }
 
 export type StoredProgress = {
-  senseId: string;
+  glossId: string;
   dimension: string;
   level: number;
   lastStepOn: string | null;
   lastWrongOn: string | null;
 };
 
-/** Every progress row of one enrollment, ordered by sense and dimension. */
+/** Every progress row of one enrollment, ordered by gloss and dimension. */
 export async function readProgress(db: Db, enrollmentId: string): Promise<StoredProgress[]> {
   return db
     .select({
-      senseId: senseProgress.senseId,
-      dimension: senseProgress.dimension,
-      level: senseProgress.level,
-      lastStepOn: senseProgress.lastStepOn,
-      lastWrongOn: senseProgress.lastWrongOn,
+      glossId: glossProgress.glossId,
+      dimension: glossProgress.dimension,
+      level: glossProgress.level,
+      lastStepOn: glossProgress.lastStepOn,
+      lastWrongOn: glossProgress.lastWrongOn,
     })
-    .from(senseProgress)
-    .where(eq(senseProgress.enrollmentId, enrollmentId))
-    .orderBy(asc(senseProgress.senseId), asc(senseProgress.dimension));
+    .from(glossProgress)
+    .where(eq(glossProgress.enrollmentId, enrollmentId))
+    .orderBy(asc(glossProgress.glossId), asc(glossProgress.dimension));
 }
 
-/** One session's snapshot rows, ordered by sense and dimension. */
+/** One session's snapshot rows, ordered by gloss and dimension. */
 export async function readSnapshot(db: Db, sessionId: string) {
   return db
     .select({
-      senseId: sessionProgress.senseId,
+      glossId: sessionProgress.glossId,
       dimension: sessionProgress.dimension,
       levelBefore: sessionProgress.levelBefore,
       levelAfter: sessionProgress.levelAfter,
     })
     .from(sessionProgress)
     .where(eq(sessionProgress.sessionId, sessionId))
-    .orderBy(asc(sessionProgress.senseId), asc(sessionProgress.dimension));
+    .orderBy(asc(sessionProgress.glossId), asc(sessionProgress.dimension));
 }
 
 /** The UTC date of a session's last answer: the day the rule counts it for. */
@@ -97,21 +97,21 @@ export async function sessionDay(db: Db, sessionId: string): Promise<string> {
   return rows.rows[0].day;
 }
 
-/** The sense and form of each question at `positions` of a session, as save
+/** The gloss and form of each question at `positions` of a session, as save
  *  entries. Phase 28: a test can save them through the service, as a tutor. */
-export async function sessionSenseEntries(
+export async function sessionGlossEntries(
   db: Db,
   input: { sessionId: string; positions: number[] },
-): Promise<{ sense_id: string; variant_id: string }[]> {
-  const rows = await selectSessionSenses(db, input);
-  return rows.map((row) => ({ sense_id: row.senseId, variant_id: row.variantId }));
+): Promise<{ gloss_id: string; variant_id: string }[]> {
+  const rows = await selectSessionGlosses(db, input);
+  return rows.map((row) => ({ gloss_id: row.glossId, variant_id: row.variantId }));
 }
 
-async function selectSessionSenses(db: Db, input: { sessionId: string; positions: number[] }) {
+async function selectSessionGlosses(db: Db, input: { sessionId: string; positions: number[] }) {
   const rows = await db
     .select({
       position: sessionQuestions.position,
-      senseId: questions.senseId,
+      glossId: questions.glossId,
       variantId: questions.promptVariantId,
       lexemeId: dictVariants.lexemeId,
       lemma: dictLexemes.lemma,
@@ -126,25 +126,25 @@ async function selectSessionSenses(db: Db, input: { sessionId: string; positions
 }
 
 /**
- * Saves the senses of a session's questions at `positions`, through the
- * repository, so each gets its five progress rows. Returns the sense ids in
- * position order. The seed's shared questions are about real senses, which is
+ * Saves the glosses of a session's questions at `positions`, through the
+ * repository, so each gets its five progress rows. Returns the gloss ids in
+ * position order. The seed's shared questions are about real glosses, which is
  * what lets a test practise saved words without the prepare-session job.
  */
-export async function saveSessionSenses(
+export async function saveSessionGlosses(
   db: Db,
   input: { sessionId: string; enrollmentId: string; positions: number[] },
 ): Promise<string[]> {
-  const picked = await selectSessionSenses(db, input);
+  const picked = await selectSessionGlosses(db, input);
   const addedByUserId = await ownerOf(db, input.enrollmentId);
   await withTx(db, (tx) =>
     createVocabularyRepo(tx).insertEntries({
       enrollmentId: input.enrollmentId,
       addedByUserId,
-      entries: picked.map(({ senseId, variantId, lexemeId, lemma }) => ({ senseId, variantId, lexemeId, lemma })),
+      entries: picked.map(({ glossId, variantId, lexemeId, lemma }) => ({ glossId, variantId, lexemeId, lemma })),
     }),
   );
-  return picked.map((row) => row.senseId);
+  return picked.map((row) => row.glossId);
 }
 
 /**
@@ -158,7 +158,7 @@ export async function insertAnsweredSession(
     userId: string;
     enrollmentId: string;
     status: 'ready' | 'completed' | 'skipped';
-    asked: { senseId: string; variantId: string; translation: string }[];
+    asked: { glossId: string; variantId: string; translation: string }[];
     answers: { position: number; correct: boolean; at: string }[];
   },
 ): Promise<string> {
@@ -168,7 +168,7 @@ export async function insertAnsweredSession(
       id: questionIds[i],
       userId: input.userId,
       enrollmentId: input.enrollmentId,
-      senseId: item.senseId,
+      glossId: item.glossId,
       promptVariantId: item.variantId,
       targetLanguage: 'en',
       userLanguageCode: 'he',
@@ -217,7 +217,7 @@ export async function insertAnsweredSession(
  * Makes every insert into `table` fail, to prove a write is all-or-nothing.
  * The database is the test's own clone, so the trigger goes with it.
  */
-export async function failInsertsInto(db: Db, table: 'session_progress' | 'sense_progress'): Promise<void> {
+export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss_progress'): Promise<void> {
   await db.execute(
     sql.raw(`
       create function fail_insert() returns trigger language plpgsql as $$

@@ -14,7 +14,7 @@ import {
   cursorAfter,
   decodeCursor,
   encodeCursor,
-  firstPerSense,
+  firstPerGloss,
 } from '../domain/vocabulary';
 import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
@@ -46,7 +46,7 @@ export function createVocabularyService({
   return {
     /**
      * All-or-nothing: every item is checked before anything is written, and the
-     * throw rolls the transaction back. A sense already saved is not an error —
+     * throw rolls the transaction back. A gloss already saved is not an error —
      * the insert's DO NOTHING keeps its first form — so a repeat answers 200
      * with the same ids.
      */
@@ -55,42 +55,42 @@ export function createVocabularyService({
       enrollmentId: string,
       entries: VocabularyEntryInput[],
     ): Promise<SaveVocabularyResponse> => {
-      const asked = firstPerSense(entries);
+      const asked = firstPerGloss(entries);
       let by: 'owner' | 'grantee' = 'owner';
       await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         by = await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.add' });
         const saveable = await repos.vocabulary.findSaveable({
-          entries: asked.map((entry) => ({ senseId: entry.sense_id, variantId: entry.variant_id })),
+          entries: asked.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
           targetLanguage: enrolled.target_language,
           sourceLanguage: enrolled.source_language,
         });
-        const passed = new Set(saveable.map((row) => `${row.senseId} ${row.variantId}`));
-        const refused = asked.find((entry) => !passed.has(`${entry.sense_id} ${entry.variant_id}`));
+        const passed = new Set(saveable.map((row) => `${row.glossId} ${row.variantId}`));
+        const refused = asked.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
         if (refused) {
-          // The 400 body is fixed; the sense that caused it is only in the log.
+          // The 400 body is fixed; the gloss that caused it is only in the log.
           // Logged before the throw, inside the transaction, so it is recorded
           // even though the rollback follows. Logger has no warn level, so this
           // is an info event like every other.
           logger.info({
             event: 'vocabulary_entry_refused',
             enrollment_id: enrollmentId,
-            sense_id: refused.sense_id,
+            gloss_id: refused.gloss_id,
             variant_id: refused.variant_id,
           });
-          throw new InvalidVocabularyEntry(refused.sense_id);
+          throw new InvalidVocabularyEntry(refused.gloss_id);
         }
         await repos.vocabulary.insertEntries({ enrollmentId, addedByUserId: actorUserId, entries: saveable });
       });
       logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length, by });
-      return { saved_sense_ids: asked.map((entry) => entry.sense_id) };
+      return { saved_gloss_ids: asked.map((entry) => entry.gloss_id) };
     },
 
-    unsave: async (actorUserId: string, enrollmentId: string, senseId: string): Promise<void> => {
+    unsave: async (actorUserId: string, enrollmentId: string, glossId: string): Promise<void> => {
       await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.remove' });
-        await repos.vocabulary.deleteEntry({ enrollmentId, senseId });
+        await repos.vocabulary.deleteEntry({ enrollmentId, glossId });
       });
       logger.info({ event: 'vocabulary_unsaved', enrollment_id: enrollmentId });
     },
@@ -152,7 +152,7 @@ export function createVocabularyService({
         });
         const progress = await repos.progress.findRows({
           enrollmentId,
-          senseIds: saved.map((entry) => entry.senseId),
+          glossIds: saved.map((entry) => entry.glossId),
           savedBy: null,
         });
         return buildWordDetail(lemma, lexemes, renderings, saved, progress);

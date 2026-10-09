@@ -35,14 +35,14 @@ export type TranslationValue = {
   text: string;
   setText: (value: string) => void;
   result: TranslationResponse | undefined;
-  /** sense_id → saved, for the senses that can be saved here (see savedStateOf). */
+  /** gloss_id → saved, for the senses that can be saved here (see savedStateOf). */
   saved: SavedState;
   /** Senses with a save or unsave in flight; their toggle is disabled, so a double
    *  tap cannot race a save against an unsave. */
   pending: Record<string, true>;
   /** The last toggle failed and was reverted. Cleared by the next toggle or lookup. */
   saveFailed: boolean;
-  toggleSave: (senseId: string) => void;
+  toggleSave: (glossId: string) => void;
   saveAll: () => void;
   canSaveAll: boolean;
   /** 'tutor' on a student's list: the cards add and never remove. */
@@ -162,10 +162,10 @@ export function TranslationProvider({
   // Optimistic: flip first, revert on failure (toggleOptimistically). `pending`
   // keeps one request per sense in flight.
   const send = useCallback(
-    async (entries: { sense_id: string; variant_id: string }[], next: boolean) => {
+    async (entries: { gloss_id: string; variant_id: string }[], next: boolean) => {
       if (!effective || !user || entries.length === 0) return;
       const listId = effective.enrollment.id;
-      const ids = entries.map((entry) => entry.sense_id);
+      const ids = entries.map((entry) => entry.gloss_id);
       setSaveFailed(false);
       const ok = await toggleOptimistically({
         next,
@@ -200,18 +200,18 @@ export function TranslationProvider({
       saveFailed,
       mode: effective?.mode ?? 'learner',
       canSaveAll: result ? canSaveAllOf(result.senses, saved) : false,
-      toggleSave: (senseId: string) => {
-        const sense = result?.senses.find((s) => s.sense_id === senseId);
-        if (!sense?.variant_id || saved[senseId] === undefined || pending[senseId]) return;
+      toggleSave: (glossId: string) => {
+        const sense = result?.senses.find((s) => s.gloss_id === glossId);
+        if (!sense?.variant_id || saved[glossId] === undefined || pending[glossId]) return;
         // A tutor adds and never removes (spec D10): an added card does nothing.
-        const intent = toggleIntent(effective?.mode ?? 'learner', saved[senseId]);
+        const intent = toggleIntent(effective?.mode ?? 'learner', saved[glossId]);
         if (intent === 'none') return;
-        void send([{ sense_id: senseId, variant_id: sense.variant_id }], intent === 'save');
+        void send([{ gloss_id: glossId, variant_id: sense.variant_id }], intent === 'save');
       },
       saveAll: () => {
         if (!result) return;
         void send(
-          unsavedEntries(result.senses, saved).filter((entry) => !pending[entry.sense_id]),
+          unsavedEntries(result.senses, saved).filter((entry) => !pending[entry.gloss_id]),
           true,
         );
       },

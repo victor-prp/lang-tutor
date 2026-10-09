@@ -182,8 +182,8 @@ export function createApiClient({ baseUrl, fetch }: ApiClientDeps) {
       postJson<Enrollment>(`/api/users/${encodeURIComponent(userId)}/enrollments`, request),
     saveVocabulary: (actorUserId: string, enrollmentId: string, request: SaveVocabularyRequest) =>
       postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request, { actorUserId }),
-    unsaveVocabulary: (actorUserId: string, enrollmentId: string, senseId: string) =>
-      deleteResource(`${vocabularyPath(enrollmentId)}/senses/${encodeURIComponent(senseId)}`, actorUserId),
+    unsaveVocabulary: (actorUserId: string, enrollmentId: string, glossId: string) =>
+      deleteResource(`${vocabularyPath(enrollmentId)}/glosses/${encodeURIComponent(glossId)}`, actorUserId),
     listVocabulary: (enrollmentId: string, query: { cursor?: string; limit?: number; level?: number }) => {
       const params = new URLSearchParams();
       if (query.cursor !== undefined) params.set('cursor', query.cursor);

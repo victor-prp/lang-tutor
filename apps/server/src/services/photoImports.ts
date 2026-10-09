@@ -23,7 +23,7 @@ import {
   type ItemUpdate,
 } from '../domain/photoImports';
 import { buildSenseMatchPrompt, choiceFromModel, firstChoice, parseSenseMatch, type MatchedBy } from '../domain/senseMatching';
-import { firstPerSense } from '../domain/vocabulary';
+import { firstPerGloss } from '../domain/vocabulary';
 import {
   EnrollmentNotFound,
   InvalidPhotoImportItem,
@@ -46,7 +46,7 @@ function toItem(row: PhotoImportItemRow): PhotoImportItem {
     status: row.status,
     corrected_form: row.correctedForm,
     options: row.options,
-    chosen_sense_id: row.chosenSenseId,
+    chosen_gloss_id: row.chosenGlossId,
     ticked: row.ticked,
     hebrew_mismatch: row.hebrewMismatch,
     reason: row.reason,
@@ -149,7 +149,7 @@ export function createPhotoImportService({
         if (refusal) throw new InvalidPhotoImportItem(importId, position, refusal);
         const updated = await photoImport.updateItem(importId, position, {
           ...(update.ticked !== undefined ? { ticked: update.ticked } : {}),
-          ...(update.sense_id !== undefined ? { chosenSenseId: update.sense_id } : {}),
+          ...(update.gloss_id !== undefined ? { chosenGlossId: update.gloss_id } : {}),
         });
         if (!updated) throw new PhotoImportNotFound(importId, position);
         return toItem(updated);
@@ -158,7 +158,7 @@ export function createPhotoImportService({
     /**
      * Spec D11. One transaction: the entries checked as today's save checks
      * them, inserted, and the import marked saved. These writes are dependent,
-     * so a refused sense or a lost race rolls all of them back. A repeated save
+     * so a refused gloss or a lost race rolls all of them back. A repeated save
      * answers the same ids and writes nothing, which covers a save whose
      * response was lost.
      */
@@ -167,7 +167,7 @@ export function createPhotoImportService({
         const row = await photoImport.findImportForUpdate(importId);
         if (!row) throw new PhotoImportNotFound(importId);
         const items = await photoImport.listItems(importId);
-        const entries = firstPerSense(entriesToSave(items));
+        const entries = firstPerGloss(entriesToSave(items));
         if (row.status === 'saved') return { entries, items, repeated: true };
         const ready =
           row.status === 'read' &&
@@ -178,22 +178,22 @@ export function createPhotoImportService({
         const enrolled = await enrollment.findById(row.enrollmentId);
         if (!enrolled) throw new EnrollmentNotFound(row.enrollmentId);
         const saveable = await vocabulary.findSaveable({
-          entries: entries.map((entry) => ({ senseId: entry.sense_id, variantId: entry.variant_id })),
+          entries: entries.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
           targetLanguage: enrolled.target_language,
           sourceLanguage: enrolled.source_language,
         });
-        const passed = new Set(saveable.map((entry) => `${entry.senseId} ${entry.variantId}`));
-        const refused = entries.find((entry) => !passed.has(`${entry.sense_id} ${entry.variant_id}`));
+        const passed = new Set(saveable.map((entry) => `${entry.glossId} ${entry.variantId}`));
+        const refused = entries.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
         if (refused) {
           // As today's save logs it: the 400 body is fixed, and an import that
           // can never be saved is diagnosed only from here.
           logger.info({
             event: 'photo_import_entry_refused',
             import_id: importId,
-            sense_id: refused.sense_id,
+            gloss_id: refused.gloss_id,
             variant_id: refused.variant_id,
           });
-          throw new InvalidVocabularyEntry(refused.sense_id);
+          throw new InvalidVocabularyEntry(refused.gloss_id);
         }
         // Phase 28. Only the list's owner photographs into it; no grant reaches
         // a photo import, so the owner is who added these words.
@@ -216,10 +216,10 @@ export function createPhotoImportService({
           import_id: importId,
           saved_count: outcome.entries.length,
           unticked_count: counts.unticked,
-          changed_sense_count: counts.changedSense,
+          changed_gloss_count: counts.changedGloss,
         });
       }
-      return { saved_sense_ids: outcome.entries.map((entry) => entry.sense_id) };
+      return { saved_gloss_ids: outcome.entries.map((entry) => entry.gloss_id) };
     },
 
     /** Idempotent on a discarded import. A saved one is refused (409). */
@@ -315,7 +315,7 @@ export function createPhotoImportService({
 
     /**
      * The look-up-import-item job (spec D7): the lookup exactly as if typed,
-     * then the sense, then one write. An import no longer open, or a row
+     * then the gloss, then one write. An import no longer open, or a row
      * already settled, costs no lookup (spec D2).
      */
     lookUpItem: async (data: unknown): Promise<void> => {
@@ -347,7 +347,7 @@ export function createPhotoImportService({
       let result: ItemResult;
       let matchedBy: MatchedBy | null = null;
       if (options.length === 0) {
-        result = { correctedForm, options, chosenSenseId: null, ticked: false, hebrewMismatch: false, reason: reasonFor(response) };
+        result = { correctedForm, options, chosenGlossId: null, ticked: false, hebrewMismatch: false, reason: reasonFor(response) };
       } else {
         let choice = firstChoice(item.hebrew, options);
         if (choice === 'ask_model') {
@@ -362,7 +362,7 @@ export function createPhotoImportService({
         result = {
           correctedForm,
           options,
-          chosenSenseId: options[choice.index].sense_id,
+          chosenGlossId: options[choice.index].gloss_id,
           ticked: true,
           hebrewMismatch: choice.mismatch,
           reason: null,

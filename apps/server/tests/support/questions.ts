@@ -24,9 +24,9 @@ export function asChoice(question: Question | undefined): ChoiceQuestion {
   return question;
 }
 
-/** One saved sense as a list session asks it. */
-export type AskedSense = {
-  senseId: string;
+/** One saved gloss as a list session asks it. */
+export type AskedGloss = {
+  glossId: string;
   variantId: string;
   lexemeId: string;
   form: string;
@@ -43,7 +43,7 @@ const HEBREW_SENTENCE = 'משפט לדוגמה';
  * the gap, as generatedContent wants them.
  */
 function sentenceCard(
-  sense: AskedSense,
+  sense: AskedGloss,
   type: QuestionType,
   alternatives: string[],
   build: (example: string | null, generated: Generated, gap: { start: number; end: number } | null) => QuestionContent,
@@ -78,7 +78,7 @@ const CYCLE: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_trans
  */
 export async function insertListSession(
   db: Db,
-  input: { userId: string; enrollmentId: string; asked: AskedSense[]; alternatives?: string[]; types?: QuestionType[] },
+  input: { userId: string; enrollmentId: string; asked: AskedGloss[]; alternatives?: string[]; types?: QuestionType[] },
 ): Promise<{ sessionId: string; questions: Question[] }> {
   return withTx(db, async (tx) => {
     const sessionRepo = createSessionRepo(tx);
@@ -92,7 +92,7 @@ export async function insertListSession(
       targetLanguage: 'en',
       userLanguageCode: 'he',
       questions: input.asked.map((sense, index) => ({
-        senseId: sense.senseId,
+        glossId: sense.glossId,
         variantId: sense.variantId,
         form: sense.form,
         lemma: sense.lemma,
@@ -101,7 +101,8 @@ export async function insertListSession(
         type: types[index],
         ...sentenceCard(sense, types[index], input.alternatives ?? [], (example, generated, gap) =>
           generatedContent(
-            { ...sense, partOfSpeech: 'noun', example, exampleTranslation: example ? HEBREW_SENTENCE : null },
+            // generatedContent reads neither id; a list session's card names its gloss alone.
+            { ...sense, senseId: '', partOfSpeech: 'noun', example, exampleTranslation: example ? HEBREW_SENTENCE : null },
             types[index],
             generated,
             {

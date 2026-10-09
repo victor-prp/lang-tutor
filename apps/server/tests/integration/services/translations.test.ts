@@ -80,7 +80,7 @@ describe('translate, against a real database', () => {
         translation: 'סולם',
         part_of_speech: 'verb',
         example: { source: 'A sentence about ladder.', target: 'משפט.' },
-        sense_id: expect.any(String),
+        gloss_id: expect.any(String),
         variant_id: expect.any(String),
       },
     ]);
@@ -114,7 +114,7 @@ describe('translate, against a real database', () => {
         translation: 'סולם',
         part_of_speech: 'verb',
         example: { source: 'A sentence about ladder.', target: 'משפט.' },
-        sense_id: expect.any(String),
+        gloss_id: expect.any(String),
         variant_id: expect.any(String),
       },
     ]);

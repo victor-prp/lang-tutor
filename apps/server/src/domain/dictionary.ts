@@ -137,6 +137,8 @@ export type SenseRow = {
   /** Phase 18: the sense and the form this row renders, so the wire can name
    *  what a client saves. */
   senseId: string;
+  /** Phase 31. The sense's gloss in the read's learner language. */
+  glossId: string;
   variantId: string;
   rank: number;
   entryRank: number;
@@ -286,14 +288,15 @@ export function staleLexemes(rows: StaleLexemeRow[]): StaleLexeme[] {
  *
  * A response carries `example` only when both halves are present: `example` is
  * legally optional, and half of one is not an example. Nothing here can emit
- * `sense_code`, because nothing here reads it. From phase 18 it emits the sense
- * and variant ids: identity, not model output.
+ * `sense_code`, because nothing here reads it. From phase 18 it emits the ids
+ * a client saves by, identity rather than model output: since phase 31 the
+ * sense's gloss and the variant.
  */
 export function rowsToSenses(rows: SenseRow[]): TranslationSense[] {
   return rows.map((row) => {
     const sense: TranslationSense = {
       translation: row.translation,
-      sense_id: row.senseId,
+      gloss_id: row.glossId,
       variant_id: row.variantId,
     };
     if (row.partOfSpeech) sense.part_of_speech = row.partOfSpeech;

@@ -112,7 +112,7 @@ describe('the document as a whole', () => {
       '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
-      '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
+      '/api/enrollments/{id}/vocabulary/glosses/{gloss_id}',
       '/api/enrollments/{id}/vocabulary/word',
       '/api/grants',
       '/api/grants/{id}',
@@ -297,7 +297,7 @@ describe('the vocabulary endpoints in the published document', () => {
   it.each([
     [BASE, 'post', ['200', '400', '403', '404']],
     [BASE, 'get', ['200', '400', '404']],
-    [`${BASE}/senses/{sense_id}`, 'delete', ['204', '400', '403', '404']],
+    [`${BASE}/glosses/{gloss_id}`, 'delete', ['204', '400', '403', '404']],
     [`${BASE}/word`, 'get', ['200', '400', '404']],
   ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
     const doc = await openApiDocument();
@@ -329,7 +329,7 @@ describe('the actor header in the published document (phase 28)', () => {
     const doc = await openApiDocument();
     for (const operation of [
       doc.paths['/api/enrollments/{id}/vocabulary'].post,
-      doc.paths['/api/enrollments/{id}/vocabulary/senses/{sense_id}'].delete,
+      doc.paths['/api/enrollments/{id}/vocabulary/glosses/{gloss_id}'].delete,
     ]) {
       const header = operation.parameters.find((p: { name: string }) => p.name === 'x-acting-user-id');
       expect(header).toMatchObject({ in: 'header', required: true });

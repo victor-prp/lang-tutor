@@ -244,6 +244,7 @@ describe('rowsToSenses', () => {
   const row = (over: Partial<SenseRow>): SenseRow => ({
     lexemeId: 't-see',
     senseId: 's-1',
+    glossId: 'g-s-1',
     variantId: 'v-1',
     rank: 0,
     entryRank: 0,
@@ -271,7 +272,7 @@ describe('rowsToSenses', () => {
   it('omits an absent part of speech rather than emitting null', () => {
     expect(rowsToSenses([row({})])[0]).toEqual({
       translation: 'לראות',
-      sense_id: 's-1',
+      gloss_id: 'g-s-1',
       variant_id: 'v-1',
     });
     expect(rowsToSenses([row({ partOfSpeech: 'verb' })])[0].part_of_speech).toBe('verb');
@@ -280,8 +281,8 @@ describe('rowsToSenses', () => {
   it('emits ids, never sense_code or any other row-only field', () => {
     const [sense] = rowsToSenses([row({ partOfSpeech: 'verb' })]);
     expect(Object.keys(sense).sort()).toEqual([
+      'gloss_id',
       'part_of_speech',
-      'sense_id',
       'translation',
       'variant_id',
     ]);
@@ -292,6 +293,7 @@ describe('kindForForm', () => {
   const row = (over: Partial<SenseRow>): SenseRow => ({
     lexemeId: 't-see',
     senseId: 's-1',
+    glossId: 'g-s-1',
     variantId: 'v-1',
     rank: 0,
     entryRank: 0,

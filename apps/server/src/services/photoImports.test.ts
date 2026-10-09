@@ -29,7 +29,7 @@ const importRow = (over: Partial<PhotoImportRow> = {}): PhotoImportRow => ({
   createdAt: new Date(NOW - 60_000),
   ...over,
 });
-const option = (n: number) => ({ sense_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
+const option = (n: number) => ({ gloss_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
 const itemRow = (over: Partial<PhotoImportItemRow> = {}): PhotoImportItemRow => ({
   importId: ID,
   position: 0,
@@ -38,8 +38,8 @@ const itemRow = (over: Partial<PhotoImportItemRow> = {}): PhotoImportItemRow => 
   status: 'ready',
   correctedForm: null,
   options: [option(1), option(2)],
-  suggestedSenseId: 's1',
-  chosenSenseId: 's1',
+  suggestedGlossId: 's1',
+  chosenGlossId: 's1',
   ticked: true,
   hebrewMismatch: false,
   reason: null,
@@ -105,14 +105,14 @@ describe('get', () => {
   it('derives looking_up while a row is pending, and counts settled rows', async () => {
     const photoImport = stub<PhotoImportRepo>({
       findImport: async () => importRow(),
-      listItems: async () => [itemRow(), itemRow({ position: 1, status: 'pending', options: [], chosenSenseId: null, suggestedSenseId: null, ticked: false })],
+      listItems: async () => [itemRow(), itemRow({ position: 1, status: 'pending', options: [], chosenGlossId: null, suggestedGlossId: null, ticked: false })],
     });
     const { service } = setup({ photoImport });
     const found = await service.getImport(ID);
     expect(found).toMatchObject({ id: ID, status: 'looking_up', item_count: 2, settled_count: 1 });
     expect(found.items[0]).toEqual({
       position: 0, text: 'gatto', hebrew: null, status: 'ready', corrected_form: null,
-      options: [option(1), option(2)], chosen_sense_id: 's1', ticked: true, hebrew_mismatch: false, reason: null,
+      options: [option(1), option(2)], chosen_gloss_id: 's1', ticked: true, hebrew_mismatch: false, reason: null,
     });
   });
 
@@ -130,7 +130,7 @@ describe('updateItem', () => {
       findItem: async () => item,
       updateItem: async (_id, _position, update) => {
         updates.push(update);
-        return { ...item, ...(update.ticked !== undefined ? { ticked: update.ticked } : {}), ...(update.chosenSenseId ? { chosenSenseId: update.chosenSenseId } : {}) };
+        return { ...item, ...(update.ticked !== undefined ? { ticked: update.ticked } : {}), ...(update.chosenGlossId ? { chosenGlossId: update.chosenGlossId } : {}) };
       },
     });
     return { photoImport, updates };
@@ -139,9 +139,9 @@ describe('updateItem', () => {
   it('switches the sense and unticks', async () => {
     const { photoImport, updates } = repoWith(itemRow());
     const { service } = setup({ photoImport });
-    const item = await service.updateItem(ID, 0, { sense_id: 's2', ticked: false });
-    expect(updates).toEqual([{ chosenSenseId: 's2', ticked: false }]);
-    expect(item).toMatchObject({ chosen_sense_id: 's2', ticked: false });
+    const item = await service.updateItem(ID, 0, { gloss_id: 's2', ticked: false });
+    expect(updates).toEqual([{ chosenGlossId: 's2', ticked: false }]);
+    expect(item).toMatchObject({ chosen_gloss_id: 's2', ticked: false });
   });
 
   it('refuses any change to a row whose lookup has not landed, and writes nothing (Review Focus 2)', async () => {
@@ -154,7 +154,7 @@ describe('updateItem', () => {
   it('refuses a sense outside the options as an invalid row change', async () => {
     const { photoImport } = repoWith(itemRow());
     const { service } = setup({ photoImport });
-    await expect(service.updateItem(ID, 0, { sense_id: 's9' })).rejects.toBeInstanceOf(InvalidPhotoImportItem);
+    await expect(service.updateItem(ID, 0, { gloss_id: 's9' })).rejects.toBeInstanceOf(InvalidPhotoImportItem);
   });
 
   it('refuses a change to a discarded or expired import', async () => {
@@ -173,14 +173,14 @@ describe('updateItem', () => {
 });
 
 describe('save', () => {
-  const saveable = (n: number) => ({ senseId: `s${n}`, variantId: `v${n}`, lexemeId: `l${n}`, lemma: `w${n}` });
+  const saveable = (n: number) => ({ glossId: `s${n}`, variantId: `v${n}`, lexemeId: `l${n}`, lemma: `w${n}` });
 
   it('saves the ticked rows’ chosen senses, marks the import saved, and logs how the review changed them', async () => {
     const inserted: unknown[] = [];
     const transitions: unknown[] = [];
     const items = [
       itemRow({ position: 0 }),
-      itemRow({ position: 1, chosenSenseId: 's2' }),
+      itemRow({ position: 1, chosenGlossId: 's2' }),
       itemRow({ position: 2, ticked: false }),
     ];
     const photoImport = stub<PhotoImportRepo>({
@@ -199,16 +199,16 @@ describe('save', () => {
     });
     const { service, logger } = setup({ photoImport, vocabulary, enrollment: enrollmentRepo(ENROLLMENT) });
 
-    expect(await service.save(ID)).toEqual({ saved_sense_ids: ['s1', 's2'] });
+    expect(await service.save(ID)).toEqual({ saved_gloss_ids: ['s1', 's2'] });
     expect(inserted).toEqual([{ enrollmentId: 'e1', entries: [saveable(1), saveable(2)] }]);
     expect(transitions).toEqual([[ID, ['read'], 'saved']]);
-    expect(logger.events).toContainEqual({ event: 'photo_import_saved', import_id: ID, saved_count: 2, unticked_count: 1, changed_sense_count: 1 });
+    expect(logger.events).toContainEqual({ event: 'photo_import_saved', import_id: ID, saved_count: 2, unticked_count: 1, changed_gloss_count: 1 });
   });
 
   it('answers a repeated save with the same ids and writes nothing', async () => {
     const photoImport = stub<PhotoImportRepo>({ findImportForUpdate: async () => importRow({ status: 'saved' }), listItems: async () => [itemRow()] });
     const { service } = setup({ photoImport, vocabulary: stub<VocabularyRepo>({}) });
-    expect(await service.save(ID)).toEqual({ saved_sense_ids: ['s1'] });
+    expect(await service.save(ID)).toEqual({ saved_gloss_ids: ['s1'] });
   });
 
   it('refuses a save while a row is pending, or once discarded', async () => {
@@ -230,7 +230,7 @@ describe('save', () => {
     await expect(service.save(ID)).rejects.toBeInstanceOf(InvalidVocabularyEntry);
     // The 400 body is fixed: the log is the only place that names the sense
     // an import that can never be saved is stuck on.
-    expect(logger.events).toEqual([{ event: 'photo_import_entry_refused', import_id: ID, sense_id: 's1', variant_id: 'v1' }]);
+    expect(logger.events).toEqual([{ event: 'photo_import_entry_refused', import_id: ID, gloss_id: 's1', variant_id: 'v1' }]);
   });
 
   it('refuses when a discard won the race to the final transition', async () => {

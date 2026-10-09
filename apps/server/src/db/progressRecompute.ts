@@ -4,7 +4,7 @@ import type { Db } from './client';
 import { createTransaction } from './transaction';
 
 /**
- * Phase 20. Rebuilds sense_progress and session_progress from the answer log,
+ * Phase 20. Rebuilds gloss_progress and session_progress from the answer log,
  * for when the rule changes (spec §3). Every ended session is replayed in the
  * order it ended, through the same evaluateSession the live path runs. One
  * transaction: a failure halfway leaves the old progress in place.
@@ -20,12 +20,12 @@ import { createTransaction } from './transaction';
  * test is what keeps the two in step.
  *
  * It rebuilds what today's saves can explain, no more. resetAll deletes every
- * session_progress row, and a session's rows come back only for senses that are
- * saved now and were saved by that session's last answer. So a sense unsaved
- * since, or an earlier save period of a re-saved sense, loses its snapshot rows;
- * and a sense saved between a session's last answer and its skip is counted by
+ * session_progress row, and a session's rows come back only for glosses that are
+ * saved now and were saved by that session's last answer. So a gloss unsaved
+ * since, or an earlier save period of a re-saved gloss, loses its snapshot rows;
+ * and a gloss saved between a session's last answer and its skip is counted by
  * the live path but not here. Both divergences are accepted. For a session about
- * senses still saved since before its last answer, the rebuild is exactly what
+ * glosses still saved since before its last answer, the rebuild is exactly what
  * the live path wrote.
  */
 export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
@@ -39,7 +39,7 @@ export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
       if (!evidence) continue;
       const rows = await progress.findRows({
         enrollmentId: evidence.enrollmentId,
-        senseIds: [...new Set(evidence.answers.map((answer) => answer.senseId))],
+        glossIds: [...new Set(evidence.answers.map((answer) => answer.glossId))],
         savedBy: evidence.lastAnsweredAt,
       });
       if (rows.length === 0) continue;
