@@ -31,7 +31,8 @@ function serviceWith(...replies: (string | Error)[]) {
 const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
   lexemeId: 't-1',
   senseId: 's-1',
-  // Phase 31. One gloss per sense, as before.
+  // Phase 31. One gloss per sense, `g-<sense id>`, its key the translation,
+  // unless a test names them. Rows of one gloss are one card.
   glossId: `g-${over.senseId ?? 's-1'}`,
   variantId: 'v-1',
   rank: 0,
@@ -41,6 +42,8 @@ const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
   translation,
   exampleTarget: null,
   kind: 'word',
+  glossKey: translation,
+  alternatives: [],
   ...over,
 });
 
@@ -112,6 +115,22 @@ describe('translate', () => {
 
     expect(result.kind).toBe('sentence');
     expect(result.senses).toEqual([{ translation: 'קראתי ספר.' }]);
+  });
+
+  // Phase 31. Spec D4's one translation is a word sense's rule: a sentence's
+  // comma is part of it, and splitting there answered half the sentence.
+  it("answers a sentence whole, comma and all", async () => {
+    const text = 'I want to go home, but it is already late';
+    const { service } = serviceWith(
+      reply({
+        kind: 'sentence',
+        ...oneEntry(text, [{ translation: 'אני רוצה ללכת הביתה, אבל כבר מאוחר.', sense_code: 's' }], 'verb'),
+      }),
+    );
+
+    const result = await service.translate({ text, from: 'en', to: 'he' });
+
+    expect(result.senses).toEqual([{ translation: 'אני רוצה ללכת הביתה, אבל כבר מאוחר.' }]);
   });
 
   it('treats no content as an empty result rather than a failure', async () => {
@@ -265,7 +284,7 @@ describe('translate', () => {
         ],
       }),
     );
-    dict.reread = [row('לראות'), row('מסור')];
+    dict.reread = [row('לראות'), row('מסור', { senseId: 's-2' })];
 
     const result = await service.translate({ text: 'saw', from: 'en', to: 'he' });
 

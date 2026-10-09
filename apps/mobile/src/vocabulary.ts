@@ -124,5 +124,5 @@ export function keepGlossOrder(shown: VocabularyWordDetail, fresh: VocabularyWor
 }
 
 export function showsMark(word: VocabularyWord): boolean {
-  return word.sense_count > 1;
+  return word.gloss_count > 1;
 }

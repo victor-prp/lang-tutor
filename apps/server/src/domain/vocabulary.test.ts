@@ -88,7 +88,7 @@ const summary = (lemma: string, over: Partial<WordSummary> = {}): WordSummary =>
   headlineTranslation: `tr-${lemma}`,
   headlineForm: `form-${lemma}`,
   savedCount: 1,
-  senseCount: 2,
+  glossCount: 2,
   addedBy: [],
   ...over,
 });
@@ -106,7 +106,7 @@ describe('assemblePage', () => {
       parts_of_speech: ['noun', 'verb'],
       headline: { gloss_id: 'g-b', translation: 'tr-b', form: 'form-b' },
       saved_count: 1,
-      sense_count: 2,
+      gloss_count: 2,
       level: 3,
       added_by: [],
     });
@@ -127,64 +127,103 @@ describe('assemblePage', () => {
   });
 });
 
-// Phase 31. One gloss per sense, `g-<sense id>`, unless a test names one.
-const rendering = (over: Partial<LexemeRendering>): LexemeRendering => ({
-  lexemeId: 'lx',
-  senseId: 's1',
-  glossId: `g-${over.senseId ?? 's1'}`,
-  variantId: 'v1',
-  form: 'прочитать',
+const rendering = (over: Partial<LexemeRendering> & Pick<LexemeRendering, 'senseId' | 'glossId' | 'variantId' | 'form' | 'translation'>): LexemeRendering => ({
+  lexemeId: 'l1',
   rank: 0,
-  translation: 'לקרוא',
   exampleSource: null,
   exampleTarget: null,
+  glossKey: over.translation,
+  glossAlternatives: [],
   ...over,
 });
+const NOUN: WordLexeme[] = [{ lexemeId: 'l1', partOfSpeech: 'noun' }];
 
-const LEMMA = 'прочитать';
-const VERB: WordLexeme[] = [{ lexemeId: 'lx', partOfSpeech: 'verb' }];
+describe('buildWordDetail by gloss (phase 31)', () => {
+  it("makes one card of a gloss's senses, headlined by the key, with an example from each member", () => {
+    const detail = buildWordDetail('mouse', NOUN, [
+      rendering({ senseId: 's1', glossId: 'g1', variantId: 'v1', form: 'mouse', translation: 'עכבר', rank: 0, exampleSource: 'The mouse ran.', exampleTarget: 'העכבר רץ.' }),
+      rendering({ senseId: 's2', glossId: 'g1', variantId: 'v1', form: 'mouse', translation: 'עכבר', rank: 1, exampleSource: 'Click the mouse.', exampleTarget: 'לחץ על העכבר.' }),
+    ], [], []);
+    expect(detail.senses).toHaveLength(1);
+    expect(detail.senses[0]).toMatchObject({
+      gloss_id: 'g1',
+      translation: 'עכבר',
+      examples: [
+        { source: 'The mouse ran.', target: 'העכבר רץ.' },
+        { source: 'Click the mouse.', target: 'לחץ על העכבר.' },
+      ],
+      saved: false,
+    });
+  });
 
+  it("headlines the key, not the saved form's rendering, and says which form it was saved from", () => {
+    const detail = buildWordDetail('finger', NOUN, [
+      rendering({ senseId: 's1', glossId: 'g1', variantId: 'v_fingers', form: 'fingers', translation: 'אצבעות', glossKey: 'אצבע', glossAlternatives: ['אצבע יד'] }),
+      rendering({ senseId: 's1', glossId: 'g1', variantId: 'v_finger', form: 'finger', translation: 'אצבע', glossKey: 'אצבע', glossAlternatives: ['אצבע יד'] }),
+    ], [{ glossId: 'g1', variantId: 'v_fingers', addedBy: null }], []);
+    expect(detail.senses[0]).toMatchObject({
+      translation: 'אצבע',
+      alternatives: ['אצבע יד'],
+      variant_id: 'v_fingers',
+      form: 'fingers',
+      saved: true,
+      saved_from: { form: 'fingers', translation: 'אצבעות' },
+    });
+  });
+
+  it('takes a member’s example from the lemma form where it has one', () => {
+    const detail = buildWordDetail('car', NOUN, [
+      rendering({ senseId: 's1', glossId: 'g1', variantId: 'v_cars', form: 'cars', translation: 'מכוניות', glossKey: 'מכונית', exampleSource: 'Cars pass.', exampleTarget: 'מכוניות עוברות.' }),
+      rendering({ senseId: 's1', glossId: 'g1', variantId: 'v_car', form: 'car', translation: 'מכונית', exampleSource: 'A car.', exampleTarget: 'מכונית.' }),
+    ], [], []);
+    expect(detail.senses[0].examples).toEqual([{ source: 'A car.', target: 'מכונית.' }]);
+    expect(detail.senses[0]).not.toHaveProperty('saved_from');
+  });
+
+  it('lists saved glosses first, then by part of speech, then by rank', () => {
+    const detail = buildWordDetail('stream', [{ lexemeId: 'ln', partOfSpeech: 'noun' }, { lexemeId: 'lv', partOfSpeech: 'verb' }], [
+      rendering({ lexemeId: 'ln', senseId: 'n1', glossId: 'g_nahal', variantId: 'vn', form: 'stream', translation: 'נחל', rank: 0 }),
+      rendering({ lexemeId: 'ln', senseId: 'n2', glossId: 'g_zerem', variantId: 'vn', form: 'stream', translation: 'זרם', rank: 1 }),
+      rendering({ lexemeId: 'lv', senseId: 'v1', glossId: 'g_lizrom', variantId: 'vv', form: 'stream', translation: 'לזרום', rank: 0 }),
+    ], [{ glossId: 'g_lizrom', variantId: 'vv', addedBy: null }], []);
+    expect(detail.senses.map((card) => card.translation)).toEqual(['לזרום', 'נחל', 'זרם']);
+  });
+});
+
+// The rules phases 18 to 28 pinned per sense, which hold per gloss: the form a
+// card names, the fallback, the adder, the levels, and the order across lexemes.
 describe('buildWordDetail', () => {
-  it("shows a saved sense in the form it was saved from, even when the lemma's form renders it", () => {
-    const detail = buildWordDetail(
-      LEMMA,
-      VERB,
-      [
-        rendering({ variantId: 'v-lemma', form: 'прочитать', translation: 'לקרוא' }),
-        rendering({ variantId: 'v-past', form: 'прочитала', translation: 'קראה' }),
-      ],
-      [{ glossId: 'g-s1', variantId: 'v-past', addedBy: null }],
-      [],
-    );
-    expect(detail.senses).toEqual([
-      { gloss_id: 'g-s1', variant_id: 'v-past', form: 'прочитала', translation: 'קראה', part_of_speech: 'verb', saved: true },
-    ]);
-  });
+  const LEMMA = 'прочитать';
+  const VERB: WordLexeme[] = [{ lexemeId: 'l1', partOfSpeech: 'verb' }];
+  /** One sense of its own gloss, `g-<sense id>`, rendered by the lemma's form
+   *  unless a test names another. */
+  const reading = (over: Partial<LexemeRendering> & Pick<LexemeRendering, 'senseId'>): LexemeRendering =>
+    rendering({ glossId: `g-${over.senseId}`, variantId: 'v1', form: LEMMA, translation: 'לקרוא', ...over });
 
-  it("shows an unsaved sense in the lemma's own form when one exists", () => {
+  it("names an unsaved gloss's rendering in the lemma's own form when one exists", () => {
     const detail = buildWordDetail(
       LEMMA,
       VERB,
       [
-        rendering({ variantId: 'v-past', form: 'прочитала', translation: 'קראה' }),
-        rendering({ variantId: 'v-lemma', form: 'Прочитать', translation: 'לקרוא' }),
+        reading({ senseId: 's1', variantId: 'v-past', form: 'прочитала', translation: 'קראה', glossKey: 'לקרוא' }),
+        reading({ senseId: 's1', variantId: 'v-lemma', form: 'Прочитать' }),
       ],
       [],
       [],
     );
-    expect(detail.senses[0]).toMatchObject({ variant_id: 'v-lemma', saved: false });
+    expect(detail.senses[0]).toMatchObject({ variant_id: 'v-lemma', form: 'Прочитать', translation: 'לקרוא', saved: false });
   });
 
-  it('otherwise uses the form that renders the most of this lexeme, ties by variant id', () => {
+  it('otherwise names the form that renders the most of this lexeme, ties by variant id', () => {
     const detail = buildWordDetail(
       LEMMA,
       VERB,
       [
-        rendering({ senseId: 's1', variantId: 'v-b', form: 'прочитаю' }),
-        rendering({ senseId: 's2', variantId: 'v-b', form: 'прочитаю', rank: 1 }),
-        rendering({ senseId: 's1', variantId: 'v-a', form: 'прочитала' }),
-        rendering({ senseId: 's3', variantId: 'v-c', form: 'прочитал', rank: 2 }),
-        rendering({ senseId: 's3', variantId: 'v-d', form: 'прочитали', rank: 2 }),
+        reading({ senseId: 's1', variantId: 'v-b', form: 'прочитаю' }),
+        reading({ senseId: 's2', variantId: 'v-b', form: 'прочитаю', rank: 1, translation: 'להקריא' }),
+        reading({ senseId: 's1', variantId: 'v-a', form: 'прочитала' }),
+        reading({ senseId: 's3', variantId: 'v-c', form: 'прочитал', rank: 2, translation: 'לסיים לקרוא' }),
+        reading({ senseId: 's3', variantId: 'v-d', form: 'прочитали', rank: 2, translation: 'לסיים לקרוא' }),
       ],
       [],
       [],
@@ -193,29 +232,28 @@ describe('buildWordDetail', () => {
     expect(shown).toEqual({ 'g-s1': 'v-b', 'g-s2': 'v-b', 'g-s3': 'v-c' });
   });
 
-  // Review Focus 3 of phase 18: the saved form no longer renders the sense.
-  it('falls back to the representative rendering when the saved form no longer renders the sense', () => {
+  // Review Focus 3 of phase 18: the saved form no longer renders the gloss.
+  it('falls back to the representative rendering when the saved form no longer renders the gloss', () => {
     const detail = buildWordDetail(
       LEMMA,
       VERB,
-      [rendering({ variantId: 'v-lemma', form: 'прочитать' })],
+      [reading({ senseId: 's1', variantId: 'v-lemma' })],
       [{ glossId: 'g-s1', variantId: 'v-gone', addedBy: null }],
       [],
     );
-    expect(detail.senses).toEqual([
-      expect.objectContaining({ gloss_id: 'g-s1', variant_id: 'v-lemma', saved: true }),
-    ]);
+    expect(detail.senses).toEqual([expect.objectContaining({ gloss_id: 'g-s1', variant_id: 'v-lemma', saved: true })]);
+    expect(detail.senses[0]).not.toHaveProperty('saved_from');
   });
 
-  it('orders saved senses first, each group by rank, then by sense id', () => {
+  it('orders saved glosses first, each group by rank, then by gloss id', () => {
     const detail = buildWordDetail(
       LEMMA,
       VERB,
       [
-        rendering({ senseId: 's-a', rank: 0 }),
-        rendering({ senseId: 's-b', rank: 2 }),
-        rendering({ senseId: 's-c', rank: 1 }),
-        rendering({ senseId: 's-d', rank: 1 }),
+        reading({ senseId: 's-a', rank: 0 }),
+        reading({ senseId: 's-b', rank: 2, translation: 'להקריא' }),
+        reading({ senseId: 's-d', rank: 1, translation: 'לקרוא בקול' }),
+        reading({ senseId: 's-c', rank: 1, translation: 'לסיים לקרוא' }),
       ],
       [{ glossId: 'g-s-b', variantId: 'v1', addedBy: null }],
       [],
@@ -223,29 +261,30 @@ describe('buildWordDetail', () => {
     expect(detail.senses.map((s) => s.gloss_id)).toEqual(['g-s-b', 'g-s-a', 'g-s-c', 'g-s-d']);
   });
 
-  it('carries an example only when both halves are present', () => {
+  it('takes only whole examples, and gives a gloss with none an empty list', () => {
     const detail = buildWordDetail(
       LEMMA,
       VERB,
       [
-        rendering({ senseId: 's1', exampleSource: 'Я прочитала книгу.', exampleTarget: 'קראתי את הספר.' }),
-        rendering({ senseId: 's2', rank: 1, exampleSource: 'half', exampleTarget: null }),
+        reading({ senseId: 's1', exampleSource: 'Я прочитала книгу.', exampleTarget: 'קראתי את הספר.' }),
+        reading({ senseId: 's2', rank: 1, translation: 'להקריא', exampleSource: 'half', exampleTarget: null }),
       ],
       [],
       [],
     );
-    expect(detail.senses[0].example).toEqual({
-      source: 'Я прочитала книгу.',
-      target: 'קראתי את הספר.',
-    });
-    expect(detail.senses[1]).not.toHaveProperty('example');
+    expect(detail.senses[0].examples).toEqual([{ source: 'Я прочитала книгу.', target: 'קראתי את הספר.' }]);
+    expect(detail.senses[1].examples).toEqual([]);
   });
 
-  it('names who added a saved sense when it was not the owner', () => {
+  it('names who added a saved gloss when it was not the owner', () => {
     const detail = buildWordDetail(
       LEMMA,
       VERB,
-      [rendering({ senseId: 's1' }), rendering({ senseId: 's2', rank: 1 }), rendering({ senseId: 's3', rank: 2 })],
+      [
+        reading({ senseId: 's1' }),
+        reading({ senseId: 's2', rank: 1, translation: 'להקריא' }),
+        reading({ senseId: 's3', rank: 2, translation: 'לסיים לקרוא' }),
+      ],
       [
         { glossId: 'g-s1', variantId: 'v1', addedBy: 'רינה' },
         { glossId: 'g-s2', variantId: 'v1', addedBy: null },
@@ -272,11 +311,11 @@ describe('buildWordDetail', () => {
       lastWrongOn: null,
     }));
 
-  it('gives a saved sense its badge and five levels, and an unsaved one neither', () => {
+  it('gives a saved gloss its badge and five levels, and an unsaved one neither', () => {
     const detail = buildWordDetail(
       LEMMA,
       VERB,
-      [rendering({ senseId: 's1' }), rendering({ senseId: 's2', rank: 1, translation: 'להקריא' })],
+      [reading({ senseId: 's1' }), reading({ senseId: 's2', rank: 1, translation: 'להקריא' })],
       [{ glossId: 'g-s1', variantId: 'v1', addedBy: null }],
       levels('g-s1', 3),
     );
@@ -300,16 +339,16 @@ describe('buildWordDetail', () => {
       lastStepOn: null,
       lastWrongOn: null,
     }));
-    const detail = buildWordDetail(LEMMA, VERB, [rendering({ senseId: 's1' })], [{ glossId: 'g-s1', variantId: 'v1', addedBy: null }], recognisedOnly);
+    const detail = buildWordDetail(LEMMA, VERB, [reading({ senseId: 's1' })], [{ glossId: 'g-s1', variantId: 'v1', addedBy: null }], recognisedOnly);
     expect(detail.senses[0].progress?.level).toBe(1);
     expect(detail.level).toBe(1);
   });
 
-  it("gives the word one flat mean over every saved sense's live-dimension levels, rounded once, ties up", () => {
+  it("gives the word one flat mean over every saved gloss's live-dimension levels, rounded once, ties up", () => {
     const detail = buildWordDetail(
       LEMMA,
       VERB,
-      [rendering({ senseId: 's1' }), rendering({ senseId: 's2' })],
+      [reading({ senseId: 's1' }), reading({ senseId: 's2', translation: 'להקריא' })],
       [{ glossId: 'g-s1', variantId: 'v1', addedBy: null }, { glossId: 'g-s2', variantId: 'v1', addedBy: null }],
       [...levels('g-s1', 2), ...levels('g-s2', 3)],
     );
@@ -317,22 +356,22 @@ describe('buildWordDetail', () => {
   });
 
   it('gives a word with nothing saved no level', () => {
-    expect(buildWordDetail(LEMMA, VERB, [rendering({})], [], []).level).toBeNull();
+    expect(buildWordDetail(LEMMA, VERB, [reading({ senseId: 's1' })], [], []).level).toBeNull();
   });
 
   describe('a lemma with two lexemes', () => {
-    // знать: the verb (to know) and the noun (nobility). Ids chosen so that sense
+    // знать: the verb (to know) and the noun (nobility). Ids chosen so that gloss
     // id order and part-of-speech order disagree, which the ordering must survive.
     const ZNAT: WordLexeme[] = [
       { lexemeId: 'lx-noun', partOfSpeech: 'noun' },
       { lexemeId: 'lx-verb', partOfSpeech: 'verb' },
     ];
-    const verb = (over: Partial<LexemeRendering>) =>
-      rendering({ lexemeId: 'lx-verb', variantId: 'v-verb', form: 'знать', translation: 'לדעת', ...over });
-    const noun = (over: Partial<LexemeRendering>) =>
-      rendering({ lexemeId: 'lx-noun', variantId: 'v-noun', form: 'знать', translation: 'אצולה', ...over });
+    const verb = (over: Partial<LexemeRendering> & Pick<LexemeRendering, 'senseId'>) =>
+      reading({ lexemeId: 'lx-verb', variantId: 'v-verb', form: 'знать', translation: 'לדעת', ...over });
+    const noun = (over: Partial<LexemeRendering> & Pick<LexemeRendering, 'senseId'>) =>
+      reading({ lexemeId: 'lx-noun', variantId: 'v-noun', form: 'знать', translation: 'אצולה', ...over });
 
-    it('shows every sense of both, each with its own part of speech', () => {
+    it('shows every gloss of both, each with its own part of speech', () => {
       const detail = buildWordDetail('знать', ZNAT, [verb({ senseId: 'a-know' }), noun({ senseId: 'z-nobility' })], [], []);
       expect(detail.senses.map((s) => [s.gloss_id, s.part_of_speech])).toEqual([
         ['g-z-nobility', 'noun'],
@@ -340,7 +379,7 @@ describe('buildWordDetail', () => {
       ]);
     });
 
-    it('orders saved first, then by part of speech, then by rank, then by sense id', () => {
+    it('orders saved first, then by part of speech, then by rank, then by gloss id', () => {
       const detail = buildWordDetail(
         'знать',
         ZNAT,
@@ -356,9 +395,9 @@ describe('buildWordDetail', () => {
       expect(detail.senses.map((s) => s.gloss_id)).toEqual(['g-n2', 'g-v2', 'g-n1', 'g-v1']);
     });
 
-    it("labels a saved sense with its lexeme's part of speech, not the saved form's neighbours'", () => {
-      // Both lexemes have a form spelled знать; the saved noun sense must still read
-      // as a noun even though the verb's sense sorts beside it.
+    it("labels a saved gloss with its lexeme's part of speech, not the saved form's neighbours'", () => {
+      // Both lexemes have a form spelled знать; the saved noun gloss must still read
+      // as a noun even though the verb's gloss sorts beside it.
       const detail = buildWordDetail(
         'знать',
         ZNAT,
@@ -372,7 +411,7 @@ describe('buildWordDetail', () => {
       ]);
     });
 
-    it("averages the word's level over the saved senses of both lexemes", () => {
+    it("averages the word's level over the saved glosses of both lexemes", () => {
       const detail = buildWordDetail(
         'знать',
         ZNAT,

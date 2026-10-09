@@ -123,7 +123,7 @@ export default function VocabularyScreen() {
                   <Text style={styles.lemma}>{item.lemma}</Text>
                   {showsMark(item) ? (
                     <Text testID="vocabulary-mark" style={styles.mark}>
-                      {strings.vocabularyMark(item.saved_count, item.sense_count)}
+                      {strings.vocabularyMark(item.saved_count, item.gloss_count)}
                     </Text>
                   ) : null}
                 </View>

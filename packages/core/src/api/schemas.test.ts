@@ -352,17 +352,22 @@ describe('TranslationRequestSchema', () => {
 });
 
 describe('TranslationSenseSchema', () => {
-  it('accepts a sense with no part of speech and no example — the sentence case', () => {
+  it('accepts a sense with no part of speech and no examples — the sentence case', () => {
     expect(TranslationSenseSchema.safeParse({ translation: 'קראתי ספר על החלל.' }).success).toBe(
       true,
     );
   });
 
-  it('accepts a full sense', () => {
+  it('accepts a full card: one example per member, the alternatives and the key', () => {
     const result = TranslationSenseSchema.safeParse({
-      translation: 'ספר',
+      translation: 'ספרים',
       part_of_speech: 'noun',
-      example: { source: 'I read a book.', target: 'קראתי ספר.' },
+      examples: [
+        { source: 'I read books.', target: 'אני קורא ספרים.' },
+        { source: 'The books are open.', target: 'הספרים פתוחים.' },
+      ],
+      alternatives: ['כרכים'],
+      key: 'ספר',
     });
     expect(result.success).toBe(true);
   });
@@ -373,8 +378,13 @@ describe('TranslationSenseSchema', () => {
 
   it('rejects a half-filled example', () => {
     expect(
-      TranslationSenseSchema.safeParse({ translation: 'ספר', example: { source: 'x' } }).success,
+      TranslationSenseSchema.safeParse({ translation: 'ספר', examples: [{ source: 'x' }] }).success,
     ).toBe(false);
+  });
+
+  it('rejects an empty key or alternative', () => {
+    expect(TranslationSenseSchema.safeParse({ translation: 'ספרים', key: '' }).success).toBe(false);
+    expect(TranslationSenseSchema.safeParse({ translation: 'ספרים', alternatives: [''] }).success).toBe(false);
   });
 });
 
@@ -476,7 +486,7 @@ describe('LlmTranslationSchema', () => {
   // Gemini past "too many states for serving" the moment the four phase 31 sense
   // fields were added — a 400 on every translation call. Measured against the
   // live API; the matrix is on `LlmTranslationSchema.entries`. `senses` stays at
-  // five, where READ_LIMIT holds it.
+  // five, where the lookup's card cap (RESPONSE_CARD_CAP) holds it.
   it('caps entries at three and senses at five within an entry', () => {
     const entry = { lemma: 'x', part_of_speech: 'noun', senses: [sense] };
     expect(

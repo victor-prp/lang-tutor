@@ -73,27 +73,22 @@ export function reviewCounts(items: readonly ImportItemState[]): { unticked: num
   };
 }
 
-/** A lookup's saveable glosses, in its order: one option per gloss, with every
- *  example its cards carry (spec D10, D15). */
-export function optionsFrom(senses: readonly TranslationSense[]): PhotoImportOption[] {
-  const byGloss = new Map<string, PhotoImportOption>();
-  for (const sense of senses) {
-    if (!sense.gloss_id || !sense.variant_id) continue;
-    const examples = sense.example ? [sense.example] : [];
-    const seen = byGloss.get(sense.gloss_id);
-    if (seen) {
-      if (examples.length > 0) seen.examples = [...(seen.examples ?? []), ...examples];
-      continue;
-    }
-    byGloss.set(sense.gloss_id, {
-      gloss_id: sense.gloss_id,
-      variant_id: sense.variant_id,
-      translation: sense.translation,
-      ...(sense.part_of_speech ? { part_of_speech: sense.part_of_speech } : {}),
-      ...(examples.length > 0 ? { examples } : {}),
-    });
-  }
-  return [...byGloss.values()];
+/** A lookup's saveable cards, in its order: one option per gloss (spec D15). */
+export function optionsFrom(cards: readonly TranslationSense[]): PhotoImportOption[] {
+  return cards.flatMap((card) =>
+    card.gloss_id && card.variant_id
+      ? [
+          {
+            gloss_id: card.gloss_id,
+            variant_id: card.variant_id,
+            translation: card.translation,
+            ...(card.part_of_speech ? { part_of_speech: card.part_of_speech } : {}),
+            ...(card.examples ? { examples: card.examples } : {}),
+            ...(card.alternatives ? { alternatives: card.alternatives } : {}),
+          },
+        ]
+      : [],
+  );
 }
 
 /** Why a looked-up row has no options. */

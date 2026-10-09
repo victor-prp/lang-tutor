@@ -77,7 +77,7 @@ describe('findSensesByForm', () => {
     ]);
   });
 
-  it('caps the read at five even though the database stores every sense', async () => {
+  it("reads every rendering of the form: the card cap is the service's, after grouping (phase 31)", async () => {
     await insertLexeme(t.db, {
       lemma: 'light',
       languageCode: 'en',
@@ -87,7 +87,7 @@ describe('findSensesByForm', () => {
       variants: [variant('light', [0, 1, 2, 3, 4, 5, 6].map((n) => `t${n}`))],
     });
 
-    expect(await find('light')).toHaveLength(5);
+    expect(await find('light')).toHaveLength(7);
   });
 
   it('carries the part of speech and both halves of the example', async () => {
@@ -118,7 +118,44 @@ describe('findSensesByForm', () => {
         translation: 'סולם',
         exampleTarget: 'היא טיפסה על הסולם.',
         kind: 'word',
+        glossKey: 'סולם',
+        alternatives: [],
       },
+    ]);
+  });
+
+  // The rendering here records a drifted citation form (spec D6), so only the
+  // gloss's own key can be read as `glossKey`.
+  it("carries the gloss's key, not the rendering's citation form, and the rendering's alternatives (phase 31)", async () => {
+    await insertLexeme(t.db, {
+      lemma: 'car',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: senses(1),
+      variants: [
+        variant('car', ['מכונית']),
+        {
+          form: 'cars',
+          kind: 'word',
+          entryRank: 0,
+          translations: [
+            {
+              senseCode: 's0',
+              rank: 0,
+              translation: 'מכוניות',
+              gloss: 'אוטו',
+              alternatives: ['רכבים'],
+              exampleSource: null,
+              exampleTarget: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await find('cars')).toEqual([
+      expect.objectContaining({ translation: 'מכוניות', glossKey: 'מכונית', alternatives: ['רכבים'] }),
     ]);
   });
 

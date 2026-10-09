@@ -159,10 +159,9 @@ export function createProgressRepo(tx: Tx) {
       );
     },
 
-    /** The snapshot with the form and the meaning of the first question in the
-     *  session that asked each gloss. Phase 23: a reversed or typed card asked
-     *  the meaning, which it stores as its prompt; today's card offers it as
-     *  its right option. Either way the results show form → meaning. */
+    /** The snapshot with, for each practised gloss, the form of the first
+     *  question in the session that asked it and the gloss's key: the results
+     *  name a saved word as the list does (phase 31, spec D11). */
     findSnapshot: async (sessionId: string): Promise<SnapshotRead[]> => {
       const rows = await tx.execute<{
         gloss_id: string;
@@ -170,14 +169,14 @@ export function createProgressRepo(tx: Tx) {
         level_before: number;
         level_after: number;
         form: string;
-        prompt: string | null;
-        options: QuestionOption[] | null;
+        key: string;
         position: number;
       }>(sql`
-        SELECT sp.gloss_id, sp.dimension, sp.level_before, sp.level_after, f.form, f.prompt, f.options, f.position
+        SELECT sp.gloss_id, sp.dimension, sp.level_before, sp.level_after, f.form, g.key, f.position
         FROM session_progress sp
+        JOIN dict_glosses g ON g.id = sp.gloss_id
         JOIN LATERAL (
-          SELECT v.form, q.prompt, q.options, sq.position
+          SELECT v.form, sq.position
           FROM session_questions sq
           JOIN questions q     ON q.id = sq.question_id
           JOIN dict_variants v ON v.id = q.prompt_variant_id
@@ -193,7 +192,7 @@ export function createProgressRepo(tx: Tx) {
         levelBefore: row.level_before,
         levelAfter: row.level_after,
         form: row.form,
-        translation: row.prompt ?? canonicalOptions(row.options!).find((option) => option.is_correct)!.text,
+        translation: row.key,
         position: row.position,
       }));
     },

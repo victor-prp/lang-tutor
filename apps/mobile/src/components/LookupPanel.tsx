@@ -272,24 +272,26 @@ function SenseCard({
       </View>
       {partOfSpeech ? <Text style={styles.partOfSpeech}>{partOfSpeech}</Text> : null}
 
-      {sense.example ? (
-        <View style={styles.example}>
+      {/* Phase 31: one example per member sense. Two members may share a
+          sentence, so the key adds the place. */}
+      {(sense.examples ?? []).map((example, index) => (
+        <View key={`${index}:${example.source}`} style={styles.example}>
           {/* An example is written in `from` then `to`; whichever half is in
               the language being learned speaks. */}
           <View style={styles.spoken}>
             <Text style={[styles.exampleSource, styles.grow, { writingDirection: strings.textDirection(from) }]}>
-              {sense.example.source}
+              {example.source}
             </Text>
-            <SpeakButton text={sense.example.source} language={from} testID="speak-example" />
+            <SpeakButton text={example.source} language={from} testID="speak-example" />
           </View>
           <View style={styles.spoken}>
             <Text style={[styles.exampleTarget, styles.grow, { writingDirection: strings.textDirection(to) }]}>
-              {sense.example.target}
+              {example.target}
             </Text>
-            <SpeakButton text={sense.example.target} language={to} testID="speak-example" />
+            <SpeakButton text={example.target} language={to} testID="speak-example" />
           </View>
         </View>
-      ) : null}
+      ))}
 
       {/* The card's own button saves it, not the card body: these cards are read
           and compared, and a tap-anywhere card turns reading into saving. */}

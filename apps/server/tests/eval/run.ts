@@ -194,7 +194,7 @@ function tier1(kase: EvalCase, result: ModelAnswer): Check[] {
     checks.push({ name: 'a sentence has exactly one sense', ok: senses.length === 1 });
     checks.push({
       name: 'a sentence has no part_of_speech and no example',
-      ok: senses.every((sense) => !sense.part_of_speech && !sense.example),
+      ok: senses.every((sense) => !sense.part_of_speech && !sense.examples),
     });
   } else {
     checks.push({
@@ -216,11 +216,15 @@ function tier1(kase: EvalCase, result: ModelAnswer): Check[] {
       // schema's `min(1)` cannot: a whitespace-only source that satisfies
       // `z.string().min(1)` character-count-wise, the same class of gap the
       // lemma/sense_code check above closes for entries.
-      ok: senses.every((sense) => Boolean(sense.example?.source?.trim())),
+      ok: senses.every(
+        (sense) => (sense.examples ?? []).length > 0 && sense.examples!.every((example) => example.source.trim()),
+      ),
     });
     checks.push({
       name: 'every example carries a non-empty translation',
-      ok: senses.every((sense) => Boolean(sense.example?.target?.trim())),
+      ok: senses.every(
+        (sense) => (sense.examples ?? []).length > 0 && sense.examples!.every((example) => example.target.trim()),
+      ),
     });
   }
 
@@ -380,7 +384,7 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
   // ambiguous sentence that prompted this rule sat at rank 1.
   if (kase.rejectExample) {
     const offenders = result.senses
-      .map((sense) => sense.example?.source ?? '')
+      .flatMap((sense) => (sense.examples ?? []).map((example) => example.source))
       .filter((source) =>
         kase.rejectExample!.some((rejected) =>
           source.toLowerCase().includes(rejected.toLowerCase()),

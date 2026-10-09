@@ -566,22 +566,23 @@ export const TranslationGuardReasonSchema = z.enum(['wrong_direction', 'out_of_p
 // phrase/sentence distinction, which no token count can settle.
 export const TranslationKindSchema = z.enum(['word', 'phrase', 'sentence']);
 
-// `part_of_speech` and `example` are optional because a sentence has neither: a
-// part of speech classifies a lexical item, and an example restates an input
-// that is already a sentence. Optional rather than empty strings keeps "none"
-// distinguishable from "the model forgot".
+// Phase 31 (spec D10, D15). A lookup card is one gloss: the senses of one
+// headword this language says with one target word. `translation` is the typed
+// form's rendering; `key` the gloss's citation form, present only when it
+// differs; `examples` one per member sense, in the typed form; `alternatives` the
+// typed form's other words for it (D5). Optional fields keep phase 18's
+// meaning: a sentence has no part of speech and no examples, and an answer whose
+// write failed has no ids.
 export const TranslationSenseSchema = z.object({
   translation: z.string().min(1),
   part_of_speech: z.string().optional(),
-  example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
-  // Phase 18. The dictionary rows this sense was served from, so a client can
-  // save it. Optional because two answers have none: a sentence is never
-  // stored, and a word whose write failed is still answered, with 200, from the
-  // model's reply.
+  examples: z.array(z.object({ source: z.string().min(1), target: z.string().min(1) })).optional(),
+  alternatives: z.array(z.string().min(1)).optional(),
+  key: z.string().min(1).optional(),
   gloss_id: z.string().optional(),
   variant_id: z.string().optional(),
   // Present only when the request named an enrollment AND `from` is that
-  // enrollment's target language AND the sense has ids. Absent means "cannot be
+  // enrollment's target language AND the card has ids. Absent means "cannot be
   // saved here", never "not saved".
   saved: z.boolean().optional(),
 });
@@ -667,17 +668,17 @@ export const VocabularyPageQuerySchema = z.object({
   level: z.coerce.number().int().min(1).max(5).optional(),
 });
 
-// Phase 21: one row per lemma. `headline` is the lowest-ranked saved sense, in
-// the wording of the form it was saved from; `parts_of_speech` are its saved
-// senses' parts of speech, distinct and ascending; `sense_count` counts the senses
-// of every lexeme with the lemma that have some rendering in the enrollment's
-// source language — what the drill-down can show.
+// Phase 21: one row per lemma. `parts_of_speech` are its saved glosses' parts of
+// speech, distinct and ascending. Phase 31: `headline` is the earliest saved
+// gloss, in its key and the form it was saved from; `gloss_count` counts the live
+// glosses of every lexeme with the lemma in the enrollment's language, what the
+// drill-down shows (spec D11).
 export const VocabularyWordSchema = z.object({
   lemma: z.string(),
   parts_of_speech: z.array(z.string()),
   headline: z.object({ gloss_id: z.string(), translation: z.string(), form: z.string() }),
   saved_count: z.number().int(),
-  sense_count: z.number().int(),
+  gloss_count: z.number().int(),
   // Phase 20. The word's badge: the rounded mean over its saved senses and the live dimensions.
   level: LevelSchema,
   // Phase 28 (spec D11). The display names of the people OTHER than the list's
@@ -691,23 +692,28 @@ export const VocabularyPageSchema = z.object({
   next_cursor: z.string().nullable(),
 });
 
-// One sense in the drill-down. `variant_id` and `form` name the rendering shown:
-// the saved form for a saved sense, a representative one otherwise. Saving from
-// the drill-down records that variant.
+// Phase 31 (spec D10, D11). One gloss on the word's page. `translation` is the
+// gloss's key, `alternatives` its other words ("also …"). `variant_id` and
+// `form` name the rendering a save from here records: the saved form for a saved
+// gloss, a representative one otherwise. `examples` holds one per member sense.
+// `saved_from` is there when the saved form is not the lemma: that form and its
+// rendering, "saved from fingers: אצבעות".
 export const VocabularySenseSchema = z.object({
   gloss_id: z.string(),
   variant_id: z.string(),
   form: z.string(),
   translation: z.string(),
-  // Phase 21. The detail spans every lexeme of a lemma, so each sense names its own.
+  alternatives: z.array(z.string()),
+  // Phase 21. The detail spans every lexeme of a lemma, so each card names its own.
   part_of_speech: z.string(),
-  example: z.object({ source: z.string(), target: z.string() }).optional(),
+  examples: z.array(z.object({ source: z.string(), target: z.string() })),
   saved: z.boolean(),
-  // Phase 20. Present on a saved sense only: its badge and five levels.
+  // Phase 20. Present on a saved gloss only: its badge and five levels.
   progress: GlossProgressSchema.optional(),
-  // Phase 28. Present on a saved sense someone other than the list's owner added:
+  // Phase 28. Present on a saved gloss someone other than the list's owner added:
   // their display name.
   added_by: z.string().optional(),
+  saved_from: z.object({ form: z.string(), translation: z.string() }).optional(),
 });
 
 // Phase 21. One word is every lexeme with this lemma in the enrollment's target
@@ -854,7 +860,7 @@ export const LlmTranslationSchema = z.object({
   //
   // Three entries of five senses, not four of three, to keep every lexeme's
   // sense depth: the response shows at most five cards whatever the cap
-  // (READ_LIMIT and TranslationResponseSchema), so cutting senses would take
+  // (RESPONSE_CARD_CAP and TranslationResponseSchema), so cutting senses would take
   // from the words a learner reads most, while cutting entries only takes from
   // a form with more than three parts of speech. `light` is noun, adjective and
   // verb, and `saw` is the verb `see`, the noun and the verb `saw`: both still

@@ -3,7 +3,7 @@ import type { User } from '@lang-tutor/core/api';
 import type { AppDeps } from '../../src/composition';
 import {
   flattenEntries,
-  rowsToSenses,
+  rowsToCards,
   type SenseRow,
   type StaleLexeme,
 } from '../../src/domain/dictionary';
@@ -336,7 +336,7 @@ export function createFakeDictRepo(): FakeDictRepo {
           glossIds: entry.senses.map((_, rank) => `g-${index}-${rank}`),
           created: true,
         })),
-        senses: repo.reread.length > 0 ? rowsToSenses(repo.reread) : flattenEntries(input.entries),
+        senses: repo.reread.length > 0 ? rowsToCards(repo.reread) : flattenEntries(input.entries, input.kind),
         mergePairs: repo.mergePairs,
       };
     },

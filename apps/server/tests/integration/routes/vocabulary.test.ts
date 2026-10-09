@@ -90,7 +90,16 @@ const list = (enrollmentId: string, query = '') =>
 const detail = (enrollmentId: string, lemma: string) =>
   app().request(`/api/enrollments/${enrollmentId}/vocabulary/word?lemma=${encodeURIComponent(lemma)}`);
 
-type Page = { items: { lemma: string; saved_count: number; sense_count: number; parts_of_speech: string[] }[]; next_cursor: string | null };
+type Page = {
+  items: {
+    lemma: string;
+    saved_count: number;
+    gloss_count: number;
+    parts_of_speech: string[];
+    headline: { gloss_id: string; translation: string; form: string };
+  }[];
+  next_cursor: string | null;
+};
 
 describe('POST /api/enrollments/{id}/vocabulary', () => {
   it('saves a sense, and the list shows its word', async () => {
@@ -106,7 +115,7 @@ describe('POST /api/enrollments/{id}/vocabulary', () => {
         parts_of_speech: ['noun'],
         headline: { gloss_id: rama.glossIds[0], translation: 'рама-1', form: 'рама' },
         saved_count: 1,
-        sense_count: 2,
+        gloss_count: 2,
         level: 1,
         added_by: [],
       },
@@ -311,7 +320,7 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
           parts_of_speech: ['noun', 'verb'],
           headline: expect.objectContaining({ gloss_id: expect.any(String) }),
           saved_count: 2,
-          sense_count: 3,
+          gloss_count: 3,
           level: 3,
           added_by: [],
         },
@@ -331,7 +340,7 @@ describe('GET /api/enrollments/{id}/vocabulary', () => {
 
       const body = (await (await list(RU)).json()) as Page & { items: { level: number }[] };
       expect(body.items).toEqual([
-        expect.objectContaining({ lemma: 'знать', parts_of_speech: ['verb'], saved_count: 1, sense_count: 3, level: 5 }),
+        expect.objectContaining({ lemma: 'знать', parts_of_speech: ['verb'], saved_count: 1, gloss_count: 3, level: 5 }),
       ]);
     });
   });
@@ -455,9 +464,9 @@ describe('GET /api/enrollments/{id}/vocabulary/word', () => {
     expect(((await (await detail(RU, 'рама')).json()) as Detail).level).toBeNull();
   });
 
-  // Phase 31 (spec D2, D3). Two senses one target word renders are one gloss:
-  // a card per sense still, and the two cards save, level and unsave together.
-  it('saves the two cards of one gloss with one save, one entry and one level', async () => {
+  // Phase 31 (spec D2, D3, D10). Two senses one target word renders are one
+  // gloss and one card, which saves, levels and unsaves with one entry.
+  it('shows the two senses of one gloss as one card, with one save, one entry and one level', async () => {
     const mouse = await insertLexeme(t.db, {
       lemma: 'мышь',
       languageCode: 'ru',
@@ -485,13 +494,12 @@ describe('GET /api/enrollments/{id}/vocabulary/word', () => {
     const body = (await (await detail(RU, 'мышь')).json()) as Detail;
     expect(body.senses.map((s) => [s.gloss_id, s.saved, (s.progress as { level: number } | undefined)?.level])).toEqual([
       [gloss, true, 3],
-      [gloss, true, 3],
     ]);
     expect(((await (await list(RU)).json()) as Page).items[0].saved_count).toBe(1);
 
     await unsave(RU, gloss);
     const after = (await (await detail(RU, 'мышь')).json()) as Detail;
-    expect(after.senses.map((s) => s.saved)).toEqual([false, false]);
+    expect(after.senses.map((s) => s.saved)).toEqual([false]);
   });
 });
 
@@ -612,5 +620,72 @@ describe('access (phase 28)', () => {
 
   it('answers 404 before 403: an unknown enrollment is not found for anyone', async () => {
     expect((await save('e_missing', await asked(), 'u_stranger')).status).toBe(404);
+  });
+});
+
+type Detail = {
+  senses: { gloss_id: string; translation: string; saved: boolean; examples: unknown[]; saved_from?: { form: string; translation: string } }[];
+};
+
+describe('glosses on the list and the word page (phase 31)', () => {
+  it('shows two senses with one target word as one card, saved once and counted once', async () => {
+    const mouse = await insertLexeme(t.db, {
+      lemma: 'мышь',
+      languageCode: 'ru',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'rodent' }, { senseCode: 'device' }],
+      variants: [
+        {
+          form: 'мышь',
+          kind: 'word',
+          entryRank: 0,
+          translations: [
+            { senseCode: 'rodent', rank: 0, translation: 'עכבר', exampleSource: 'Мышь бежит.', exampleTarget: 'עכבר רץ.' },
+            { senseCode: 'device', rank: 1, translation: 'עכבר', exampleSource: 'Кликни мышью.', exampleTarget: 'לחץ בעכבר.' },
+          ],
+        },
+      ],
+    });
+    expect(mouse.glossIds[0]).toBe(mouse.glossIds[1]);
+    expect((await save(RU, [{ gloss_id: mouse.glossIds[0], variant_id: mouse.variantIds[0] }])).status).toBe(200);
+
+    const page = (await (await list(RU)).json()) as Page;
+    expect(page.items[0]).toMatchObject({ lemma: 'мышь', saved_count: 1, gloss_count: 1, headline: { translation: 'עכבר', form: 'мышь' } });
+    const word = (await (await detail(RU, 'мышь')).json()) as Detail;
+    expect(word.senses).toHaveLength(1);
+    expect(word.senses[0]).toMatchObject({ gloss_id: mouse.glossIds[0], translation: 'עכבר', saved: true });
+    expect(word.senses[0].examples).toHaveLength(2);
+  });
+
+  it('headlines the key of a word saved from an inflected form, and says where it was saved from', async () => {
+    const palets = await insertLexeme(t.db, {
+      lemma: 'палец',
+      languageCode: 'ru',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'digit' }],
+      variants: [
+        {
+          form: 'палец',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null }],
+        },
+        {
+          form: 'пальцы',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבעות', gloss: 'אצבע', exampleSource: null, exampleTarget: null }],
+        },
+      ],
+    });
+    // The lemma form is rendered, so from Task 10 on this save asks for no job.
+    expect((await save(RU, [{ gloss_id: palets.glossIds[0], variant_id: palets.variantIds[1] }])).status).toBe(200);
+
+    const page = (await (await list(RU)).json()) as Page;
+    expect(page.items[0]).toMatchObject({ lemma: 'палец', headline: { translation: 'אצבע', form: 'пальцы' } });
+    const word = (await (await detail(RU, 'палец')).json()) as Detail;
+    expect(word.senses[0]).toMatchObject({ translation: 'אצבע', saved_from: { form: 'пальцы', translation: 'אצבעות' } });
   });
 });

@@ -91,39 +91,49 @@ describe('reviewCounts', () => {
 });
 
 describe('optionsFrom', () => {
-  it('keeps the saveable senses, in the lookup order, with what the list shows', () => {
+  it('keeps the saveable cards, in the lookup order, with what the list shows', () => {
     expect(
       optionsFrom([
-        { translation: 'בנק', part_of_speech: 'noun', gloss_id: 's1', variant_id: 'v1', saved: false },
+        { translation: 'בנק', part_of_speech: 'noun', gloss_id: 'g1', variant_id: 'v1', saved: false },
         { translation: 'אין מזהה' },
-        { translation: 'גדה', gloss_id: 's2', variant_id: 'v1', example: { source: 'the bank', target: 'הגדה' } },
+        { translation: 'גדה', gloss_id: 'g2', variant_id: 'v1', examples: [{ source: 'the bank', target: 'הגדה' }] },
       ]),
     ).toEqual([
-      { gloss_id: 's1', variant_id: 'v1', translation: 'בנק', part_of_speech: 'noun' },
-      { gloss_id: 's2', variant_id: 'v1', translation: 'גדה', examples: [{ source: 'the bank', target: 'הגדה' }] },
+      { gloss_id: 'g1', variant_id: 'v1', translation: 'בנק', part_of_speech: 'noun' },
+      { gloss_id: 'g2', variant_id: 'v1', translation: 'גדה', examples: [{ source: 'the bank', target: 'הגדה' }] },
     ]);
   });
 
-  // Phase 31 (spec D15): cards are still one per sense, and two senses of one
-  // gloss are one option, where its first card was, with every example.
-  it('folds the cards of one gloss into one option, with every example', () => {
+  // Phase 31 (spec D15): a lookup card is one gloss, so each card is one option,
+  // with every member's example and the card's alternatives. The option reads
+  // as the card does, in the typed form; the gloss's key stays on the card.
+  it("makes one option of a gloss's card, with every example and its alternatives", () => {
     expect(
       optionsFrom([
-        { translation: 'גדה', gloss_id: 'g1', variant_id: 'v1', example: { source: 'the bank', target: 'הגדה' } },
-        { translation: 'בנק', gloss_id: 'g2', variant_id: 'v1' },
-        { translation: 'גדה', gloss_id: 'g1', variant_id: 'v1', example: { source: 'the far bank', target: 'הגדה השנייה' } },
+        {
+          translation: 'גדות',
+          key: 'גדה',
+          gloss_id: 'g1',
+          variant_id: 'v1',
+          examples: [
+            { source: 'the banks', target: 'הגדות' },
+            { source: 'the far banks', target: 'הגדות הרחוקות' },
+          ],
+          alternatives: ['חופים'],
+          saved: false,
+        },
       ]),
     ).toEqual([
       {
         gloss_id: 'g1',
         variant_id: 'v1',
-        translation: 'גדה',
+        translation: 'גדות',
         examples: [
-          { source: 'the bank', target: 'הגדה' },
-          { source: 'the far bank', target: 'הגדה השנייה' },
+          { source: 'the banks', target: 'הגדות' },
+          { source: 'the far banks', target: 'הגדות הרחוקות' },
         ],
+        alternatives: ['חופים'],
       },
-      { gloss_id: 'g2', variant_id: 'v1', translation: 'בנק' },
     ]);
   });
 });

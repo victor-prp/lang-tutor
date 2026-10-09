@@ -357,19 +357,20 @@ describe('findWordsPage', () => {
 });
 
 describe('findWordSummaries', () => {
-  it('headlines the lowest-ranked saved sense in its saved form, and counts', async () => {
-    // bird is rank 1 in `kite`; toy is rank 0 in `kites`, so toy headlines.
-    await saveAt(kite.lexemeId, kite.glossIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
-    await saveAt(kite.lexemeId, kite.glossIds[TOY], kite.variantIds[KITES], '2026-10-04 13:00:00+00');
+  // Phase 31 (spec D11): the toy was saved from `kites`, which renders it
+  // עפיפונים; the list names it by its key.
+  it("headlines the earliest saved gloss in its key and its saved form, and counts glosses", async () => {
+    await saveAt(kite.lexemeId, kite.glossIds[TOY], kite.variantIds[KITES], '2026-10-04 12:00:00+00');
+    await saveAt(kite.lexemeId, kite.glossIds[BIRD], kite.variantIds[KITE], '2026-10-04 13:00:00+00');
     expect(await summaries(['kite'])).toEqual([
       {
         lemma: 'kite',
         partsOfSpeech: ['noun'],
         headlineGlossId: kite.glossIds[TOY],
-        headlineTranslation: 'עפיפונים',
+        headlineTranslation: 'עפיפון',
         headlineForm: 'kites',
         savedCount: 2,
-        senseCount: 2,
+        glossCount: 2,
         addedBy: [],
       },
     ]);
@@ -380,48 +381,65 @@ describe('findWordSummaries', () => {
     await saveAt(kite.lexemeId, kite.glossIds[TOY], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     await saveAt(verb.lexemeId, verb.glossIds[0], verb.variantIds[0], '2026-10-04 13:00:00+00');
     expect(await summaries(['kite'])).toEqual([
-      expect.objectContaining({ lemma: 'kite', partsOfSpeech: ['noun', 'verb'], savedCount: 2, senseCount: 3 }),
+      expect.objectContaining({ lemma: 'kite', partsOfSpeech: ['noun', 'verb'], savedCount: 2, glossCount: 3 }),
     ]);
   });
 
-  it('names only the parts of speech that have a saved sense, but counts every sense', async () => {
+  it('names only the parts of speech that have a saved gloss, but counts every gloss', async () => {
     await kiteVerb();
     await saveAt(kite.lexemeId, kite.glossIds[TOY], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     expect(await summaries(['kite'])).toEqual([
-      expect.objectContaining({ partsOfSpeech: ['noun'], savedCount: 1, senseCount: 3 }),
+      expect.objectContaining({ partsOfSpeech: ['noun'], savedCount: 1, glossCount: 3 }),
     ]);
   });
 
-  it('breaks a rank tie by the earlier save', async () => {
-    // Make bird rank 0 in `kite` (toy moves to 2), so both saved senses are rank 0
-    // in their own saved forms: toy in `kites`, bird in `kite`.
-    await t.db.execute(sql`
-      update dict_var_translations set rank = 2
-       where variant_id = ${kite.variantIds[KITE]} and sense_id = ${kite.senseIds[TOY]}`);
-    await t.db.execute(sql`
-      update dict_var_translations set rank = 0
-       where variant_id = ${kite.variantIds[KITE]} and sense_id = ${kite.senseIds[BIRD]}`);
+  // Phase 31 (decided while planning, item 9): no rendering is read, so there is
+  // no rank to sort by. The bird is ranked below the toy and still heads the
+  // word, because it was saved first.
+  it('heads the word with the earliest save, whatever the ranks', async () => {
     await saveAt(kite.lexemeId, kite.glossIds[TOY], kite.variantIds[KITES], '2026-10-04 13:00:00+00');
     await saveAt(kite.lexemeId, kite.glossIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     const [summary] = await summaries(['kite']);
-    // bird was saved first.
-    expect(summary.headlineGlossId).toBe(kite.glossIds[BIRD]);
+    expect(summary).toMatchObject({ headlineGlossId: kite.glossIds[BIRD], headlineTranslation: 'דיה', headlineForm: 'kite' });
   });
 
-  it('returns no summary for a lemma whose saved senses have no rendering left', async () => {
-    await saveAt(kite.lexemeId, kite.glossIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
-    await t.db.execute(sql`delete from dict_var_translations
-      where sense_id = ${kite.senseIds[BIRD]} and variant_id = ${kite.variantIds[KITE]}`);
-    expect(await summaries(['kite'])).toEqual([]);
+  it('counts a gloss of two senses once, and a merged gloss not at all', async () => {
+    const mouse = await insertLexeme(t.db, {
+      lemma: 'mouse',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'rodent' }, { senseCode: 'device' }, { senseCode: 'coward' }],
+      variants: [
+        {
+          form: 'mouse',
+          kind: 'word',
+          entryRank: 0,
+          translations: [
+            { senseCode: 'rodent', rank: 0, translation: 'עכבר', exampleSource: null, exampleTarget: null },
+            { senseCode: 'device', rank: 1, translation: 'עכבר', exampleSource: null, exampleTarget: null },
+            { senseCode: 'coward', rank: 2, translation: 'פחדן', exampleSource: null, exampleTarget: null },
+          ],
+        },
+      ],
+    });
+    await saveAt(mouse.lexemeId, mouse.glossIds[0], mouse.variantIds[0], '2026-10-04 12:00:00+00');
+    expect(await summaries(['mouse'])).toEqual([expect.objectContaining({ savedCount: 1, glossCount: 2 })]);
+
+    await t.db.execute(sql`update dict_glosses set merged_into = ${mouse.glossIds[0]} where id = ${mouse.glossIds[2]}`);
+    expect(await summaries(['mouse'])).toEqual([expect.objectContaining({ savedCount: 1, glossCount: 1 })]);
   });
 
-  it('drops such a word from an assembled page while its page row still advances the cursor', async () => {
+  // Before phase 31 the headline read the saved form's rendering, and a word
+  // whose saved form lost it had nothing to headline and fell off its page.
+  it('still headlines a saved gloss whose saved form no longer renders it, by its key', async () => {
     await saveAt(kite.lexemeId, kite.glossIds[BIRD], kite.variantIds[KITE], '2026-10-04 12:00:00+00');
     await t.db.execute(sql`delete from dict_var_translations
       where sense_id = ${kite.senseIds[BIRD]} and variant_id = ${kite.variantIds[KITE]}`);
     const rows = await page();
-    expect(rows.map((row) => row.lemma)).toEqual(['kite']);
-    expect(assemblePage(rows, await summaries(rows.map((row) => row.lemma)))).toEqual([]);
+    expect(assemblePage(rows, await summaries(rows.map((row) => row.lemma)))).toEqual([
+      expect.objectContaining({ lemma: 'kite', headline: { gloss_id: kite.glossIds[BIRD], translation: 'דיה', form: 'kite' } }),
+    ]);
   });
 
   it('answers nothing for no lemmas', async () => {
@@ -530,10 +548,11 @@ describe('a repaired variant', () => {
 
     expect(await repo((r) => r.findSavedInLemma({ enrollmentId: E, lemma: 'kite', ownerUserId: 'u_1' }))).toEqual([{ ...pair(TOY, KITES), addedBy: null }]);
     expect((await page()).map((row) => row.lemma)).toEqual(['kite']);
+    // Phase 31: by its key, which a repair of an inflected form never renames.
     expect(await summaries(['kite'])).toEqual([
       expect.objectContaining({
         headlineGlossId: kite.glossIds[TOY],
-        headlineTranslation: 'עפיפונים מתוקנים',
+        headlineTranslation: 'עפיפון',
         headlineForm: 'kites',
         savedCount: 1,
       }),

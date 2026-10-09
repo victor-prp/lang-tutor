@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
+import { rowsToCards } from '../../../src/domain/dictionary';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { insertLexeme, type SeedVariant } from '../../support/dictRows';
@@ -120,6 +121,9 @@ describe('the by-form merge', () => {
     expect((await find('cook')).map((row) => row.translation)).toEqual(['N1', 'V1', 'N2', 'V2']);
   });
 
+  // Phase 31: the read returns every rendering and the cap counts cards, after
+  // grouping (rowsToCards), so the read's round-robin order is what keeps מסור
+  // inside the five.
   it("cannot let a five-sense headword push another headword's top sense off the cap", async () => {
     await insertLexeme(t.db, {
       lemma: 'see',
@@ -138,10 +142,12 @@ describe('the by-form merge', () => {
       variants: [variant('saw', 1, ['מסור'])],
     });
 
-    const translations = (await find('saw')).map((row) => row.translation);
-    expect(translations).toHaveLength(5);
-    expect(translations).toContain('מסור');
-    expect(translations[1]).toBe('מסור');
+    const rows = await find('saw');
+    expect(rows.map((row) => row.translation)).toEqual(['see0', 'מסור', 'see1', 'see2', 'see3', 'see4']);
+    const cards = rowsToCards(rows).map((card) => card.translation);
+    expect(cards).toHaveLength(5);
+    expect(cards).toContain('מסור');
+    expect(cards[1]).toBe('מסור');
   });
 
   it('answers identical queries identically, because the sort is total', async () => {

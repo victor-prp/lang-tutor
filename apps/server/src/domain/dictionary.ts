@@ -5,6 +5,7 @@ import type {
   TranslationKind,
   TranslationSense,
 } from '@lang-tutor/core/api';
+import { normaliseGloss } from '@lang-tutor/core/domain';
 
 import { splitTranslation, tidyGlossList } from './glosses';
 import { stripStress } from './languages';
@@ -21,23 +22,9 @@ import { stripStress } from './languages';
  */
 
 // The response cap, and the only place five appears in this layer. The database
-// stores every sense; only what a client sees is truncated.
-const RESPONSE_SENSE_CAP = 5;
-
-/**
- * Field by field, never a spread. `sense_code` is on the model's sense and must
- * not reach a client, and a spread is exactly how it would — silently, and
- * without failing a schema, because Zod strips unknown keys on parse rather
- * than on serialize.
- */
-function toResponseSense(sense: LlmSense, partOfSpeech: PartOfSpeech): TranslationSense {
-  const result: TranslationSense = {
-    translation: splitTranslation(sense.translation).translation,
-    part_of_speech: partOfSpeech,
-  };
-  if (sense.example) result.example = { source: sense.example.source, target: sense.example.target };
-  return result;
-}
+// stores every sense; only what a client sees is truncated. Phase 31: it counts
+// cards, one per gloss, never rows (spec D15).
+const RESPONSE_CARD_CAP = 5;
 
 /**
  * Key on the pair, not the lemma. A model returning (book,noun) and (book,verb)
@@ -76,17 +63,51 @@ export function mergeEntries(entries: LlmEntry[]): LlmEntry[] {
  *
  * Used on the paths that do not write (a failed write, and the fallback) so
  * those answers match what a later lookup will return.
+ *
+ * Phase 31: grouped into cards like rowsToCards, by entry and citation form.
+ * `kind` is the answer's: a sentence's translation is taken whole (asWritten).
+ * A card is built field by field from the rendering, never spread from the
+ * model's sense: `sense_code` must not reach a client, and Zod strips unknown
+ * keys on parse, not on serialize, so a spread would leak it silently.
  */
-export function flattenEntries(entries: LlmEntry[]): TranslationSense[] {
-  const flat: TranslationSense[] = [];
+export function flattenEntries(entries: LlmEntry[], kind: TranslationKind): TranslationSense[] {
+  const rows: CardRow[] = [];
   const deepest = Math.max(0, ...entries.map((entry) => entry.senses.length));
   for (let rank = 0; rank < deepest; rank++) {
-    for (const entry of entries) {
+    entries.forEach((entry, index) => {
       const sense = entry.senses[rank];
-      if (sense) flat.push(toResponseSense(sense, entry.part_of_speech));
-    }
+      if (!sense) return;
+      const written = kind === 'sentence' ? asWritten(sense, rank) : renderingOf(sense, rank);
+      rows.push({
+        id: `${index} ${normaliseGloss(written.gloss)}`,
+        card: { translation: written.translation, part_of_speech: entry.part_of_speech },
+        key: written.gloss,
+        example: exampleOf(written.exampleSource, written.exampleTarget),
+        alternatives: written.alternatives,
+      });
+    });
   }
-  return flat.slice(0, RESPONSE_SENSE_CAP);
+  return groupCards(rows);
+}
+
+/**
+ * A sentence's sense as the model wrote it. Spec D4's one translation is a word
+ * sense's rule: a sentence is one translation already, and its comma is part of
+ * it, so splitting there answered half the sentence. A phrase still splits:
+ * its comma lists are alternatives ("pick up": לקלוט, ללמוד). A sentence is
+ * never stored, so nothing but the answer reads this.
+ */
+function asWritten(sense: LlmSense, rank: number): Rendering {
+  return {
+    rank,
+    translation: sense.translation,
+    alternatives: [],
+    gloss: sense.translation,
+    glossAlternatives: [],
+    definition: null,
+    exampleSource: sense.example?.source ?? null,
+    exampleTarget: sense.example?.target ?? null,
+  };
 }
 
 /**
@@ -149,16 +170,20 @@ export type SenseRow = {
   /** The queried form's own kind, copied onto every row from the
    *  entry_rank 0 variant's `dict_variants.kind` — see `kindForForm`. */
   kind: TranslationKind;
+  /** Phase 31. The gloss's key, for the card's `key` (spec D11). */
+  glossKey: string;
+  /** Phase 31 (spec D5). This rendering's alternatives. */
+  alternatives: string[];
 };
 
 /**
  * The kind a cache hit should answer with: the entry_rank 0 variant's, never
  * guessed. `entriesToRows` gives the query's own headword entry_rank 0, and
  * `(language_code, lower(form), entry_rank)` is unique, so at most one row
- * carries it. It is also never missing from a non-empty hit: the read orders
- * by `rank` first, so that row's rank-0 sense sorts ahead of every rank-1
- * sense from any other contributing term and can never be pushed off
- * `READ_LIMIT` — which is why this asserts rather than falls back to a guess.
+ * carries it. It is also never missing from a non-empty hit: the read returns
+ * every rendering of the form (phase 31; the cap is on cards, after grouping),
+ * so that variant's rows are always in it — which is why this asserts rather
+ * than falls back to a guess.
  */
 export function kindForForm(rows: SenseRow[]): TranslationKind {
   return rows.find((row) => row.entryRank === 0)!.kind;
@@ -283,26 +308,65 @@ export function staleLexemes(rows: StaleLexemeRow[]): StaleLexeme[] {
     }));
 }
 
+type Example = { source: string; target: string };
+type PendingCard = { card: TranslationSense; alternatives: string[] };
+
+const exampleOf = (source: string | null, target: string | null): Example | null =>
+  source && target ? { source, target } : null;
+
+/** A pending card's alternatives tidied, and the card returned. */
+function finish({ card, alternatives }: PendingCard): TranslationSense {
+  const tidy = tidyGlossList(alternatives, card.translation);
+  return tidy.length > 0 ? { ...card, alternatives: tidy } : card;
+}
+
 /**
- * Rows to the wire, field by field. The order is the read's, untouched.
- *
- * A response carries `example` only when both halves are present: `example` is
- * legally optional, and half of one is not an example. Nothing here can emit
- * `sense_code`, because nothing here reads it. From phase 18 it emits the ids
- * a client saves by, identity rather than model output: since phase 31 the
- * sense's gloss and the variant.
+ * Phase 31 (spec D10, D15). Rows to the wire: one card per gloss, in the order of
+ * each gloss's first row, which is the read's (rank first, then entry rank, so
+ * still round-robin across lexemes), at most five cards. The cap counts cards,
+ * not rows: `stream`'s seven rows are five glosses and show five cards. A card
+ * reads the typed form: its lowest-ranked member's rendering is the translation,
+ * every member adds its example, and the renderings' alternatives are pooled.
+ * `key` is the gloss's, sent only when it differs from the translation.
  */
-export function rowsToSenses(rows: SenseRow[]): TranslationSense[] {
-  return rows.map((row) => {
-    const sense: TranslationSense = {
-      translation: row.translation,
-      gloss_id: row.glossId,
-      variant_id: row.variantId,
-    };
-    if (row.partOfSpeech) sense.part_of_speech = row.partOfSpeech;
-    if (row.exampleSource && row.exampleTarget) {
-      sense.example = { source: row.exampleSource, target: row.exampleTarget };
+export function rowsToCards(rows: SenseRow[]): TranslationSense[] {
+  return groupCards(
+    rows.map((row) => ({
+      id: row.glossId,
+      card: {
+        translation: row.translation,
+        gloss_id: row.glossId,
+        variant_id: row.variantId,
+        ...(row.partOfSpeech ? { part_of_speech: row.partOfSpeech } : {}),
+      },
+      key: row.glossKey,
+      example: exampleOf(row.exampleSource, row.exampleTarget),
+      alternatives: row.alternatives,
+    })),
+  );
+}
+
+/** One rendering as card grouping reads it: the group it joins, the card it
+ *  starts when it is the group's first, and what every member adds. */
+type CardRow = { id: string; card: TranslationSense; key: string; example: Example | null; alternatives: readonly string[] };
+
+/** Renderings to cards by group id, in first-seen order, at most
+ *  RESPONSE_CARD_CAP cards. A group's first row names its card; every row adds
+ *  its example and its alternatives, so a capped card still gathers them. */
+function groupCards(rows: readonly CardRow[]): TranslationSense[] {
+  const cards = new Map<string, PendingCard>();
+  for (const row of rows) {
+    const seen = cards.get(row.id);
+    if (seen) {
+      if (row.example) seen.card.examples = [...(seen.card.examples ?? []), row.example];
+      seen.alternatives.push(...row.alternatives);
+      continue;
     }
-    return sense;
-  });
+    if (cards.size === RESPONSE_CARD_CAP) continue;
+    const card: TranslationSense = { ...row.card };
+    if (row.example) card.examples = [row.example];
+    if (normaliseGloss(row.key) !== normaliseGloss(card.translation)) card.key = row.key;
+    cards.set(row.id, { card, alternatives: [...row.alternatives] });
+  }
+  return [...cards.values()].map(finish);
 }

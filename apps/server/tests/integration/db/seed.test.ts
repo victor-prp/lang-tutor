@@ -12,7 +12,7 @@ import {
   dictGlosses,
   dictSenseGlosses,
 } from '../../../src/db/schema';
-import { flattenEntries, mergeEntries, rowsToSenses } from '../../../src/domain/dictionary';
+import { flattenEntries, mergeEntries, rowsToCards } from '../../../src/domain/dictionary';
 import { assertSeedable, seedContent } from '../../../src/db/seed';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -45,13 +45,14 @@ describe('seedContent', () => {
         });
         // The ids are database identity, not recorded content: compare everything
         // else, and that each stored sense carries them.
-        const wire = rowsToSenses(rows);
+        const wire = rowsToCards(rows);
         for (const sense of wire) {
           expect(sense.gloss_id).toEqual(expect.any(String));
           expect(sense.variant_id).toEqual(expect.any(String));
         }
+        const answer = recorded[recordingKey(entry)];
         expect(wire.map(({ gloss_id, variant_id, ...rest }) => rest)).toEqual(
-          flattenEntries(mergeEntries(recorded[recordingKey(entry)].entries)),
+          flattenEntries(mergeEntries(answer.entries), answer.kind),
         );
       }
     });

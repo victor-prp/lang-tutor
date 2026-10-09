@@ -108,7 +108,7 @@ const word = (lemma: string, over: Partial<VocabularyWord> = {}): VocabularyWord
   parts_of_speech: ['noun'],
   headline: { gloss_id: `s-${lemma}`, translation: 't', form: lemma },
   saved_count: 1,
-  sense_count: 1,
+  gloss_count: 1,
   level: 1,
   added_by: [],
   ...over,
@@ -141,8 +141,8 @@ describe('partsOfSpeechLabel', () => {
 
 describe('showsMark', () => {
   it('marks a word with more than one sense', () => {
-    expect(showsMark(word('a', { sense_count: 2 }))).toBe(true);
-    expect(showsMark(word('a', { sense_count: 1 }))).toBe(false);
+    expect(showsMark(word('a', { gloss_count: 2 }))).toBe(true);
+    expect(showsMark(word('a', { gloss_count: 1 }))).toBe(false);
   });
 });
 
@@ -152,7 +152,9 @@ describe('keepGlossOrder', () => {
     variant_id: 'v1',
     form: 'прочитала',
     translation: `tr-${gloss_id}`,
+    alternatives: [],
     part_of_speech: 'verb',
+    examples: [],
     saved,
     ...(level === undefined
       ? {}

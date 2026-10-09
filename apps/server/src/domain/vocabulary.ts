@@ -89,7 +89,8 @@ export type WordSummary = {
   headlineTranslation: string;
   headlineForm: string;
   savedCount: number;
-  senseCount: number;
+  /** Phase 31 (spec D11). The lemma's live glosses in the enrollment's language. */
+  glossCount: number;
   /** Display names of everyone but the list's owner who saved a gloss of it. */
   addedBy: string[];
 };
@@ -99,10 +100,10 @@ export type WordSummary = {
  * and comes back in whatever order Postgres chose.
  *
  * A row with no summary is dropped. The enrichment read inner-joins each saved
- * entry to its saved form's rendering, so a word whose saved glosses lost every
- * rendering has nothing to headline. A repair may not drop a rendering, so this
- * should not happen; if it does, the page is one word short and the cursor —
- * taken from the page rows, not from this output — still advances.
+ * entry to its gloss and its saved form, both foreign keys, so a word with a
+ * saved entry always has a headline (phase 31: no rendering is read). Should
+ * one be missing, the page is one word short and the cursor — taken from the
+ * page rows, not from this output — still advances.
  */
 export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): VocabularyWord[] {
   const byLemma = new Map(summaries.map((s) => [s.lemma, s]));
@@ -115,7 +116,7 @@ export function assemblePage(rows: WordPageRow[], summaries: WordSummary[]): Voc
         parts_of_speech: s.partsOfSpeech,
         headline: { gloss_id: s.headlineGlossId, translation: s.headlineTranslation, form: s.headlineForm },
         saved_count: s.savedCount,
-        sense_count: s.senseCount,
+        gloss_count: s.glossCount,
         level: row.level,
         added_by: s.addedBy,
       },
@@ -133,6 +134,9 @@ export type LexemeRendering = {
   senseId: string;
   /** Phase 31. The sense's gloss in the enrollment's learner language. */
   glossId: string;
+  /** Phase 31. The gloss's key and alternatives (spec D5, D11). */
+  glossKey: string;
+  glossAlternatives: string[];
   variantId: string;
   form: string;
   rank: number;
@@ -156,31 +160,20 @@ function glossProgressOf(rows: ProgressRow[]): GlossProgress {
 }
 
 /**
- * The drill-down: every sense of every lexeme with this lemma that the enrollment's
- * source language can show, each in one rendering and labelled with its part of
- * speech. Saved senses first, then by part of speech, then by rank, then by sense id.
+ * The drill-down (phase 31, spec D10, D11): one card per gloss of every lexeme
+ * with this lemma that the enrollment's learner language can show, labelled with
+ * its part of speech. Saved glosses first, then by part of speech, then by the
+ * gloss's best rank, then by gloss id.
  *
- * Which rendering:
- * - a saved sense is shown in its saved form;
- * - an unsaved one in a representative form — the lemma's own spelling if anyone
- *   looked it up, otherwise the form that renders the most senses, ties broken by
- *   variant id. A form belongs to one lexeme and a sense's renderings are all forms
- *   of its own lexeme, so the choice is always made within that lexeme.
+ * A card's headline is the gloss's key. The rendering it names, the one a save
+ * from here records, is the saved form's while that form still renders a member,
+ * otherwise a representative: the lemma's own spelling if anyone looked it up,
+ * else the form that renders the most senses, ties broken by variant id.
+ * `saved_from` names the saved form when it is not the lemma.
  *
- * A saved sense whose saved form no longer renders it falls back to the
- * representative and stays saved. Ranks compared across forms are approximate —
- * rank is per form — and that is accepted: it orders a short list, it ranks
- * nothing that is stored.
- *
- * Phase 20: a saved sense carries its five levels; the word carries the rounded
- * mean over every saved sense's live dimensions, the same number the list
- * shows, or null when nothing is saved. `progress` holds the rows of every
- * saved sense, including one with no rendering to show.
- *
- * Phase 31: a save and its levels are the gloss's (spec D2, D3). A card is
- * still one per sense, and a sense is saved, in its gloss's saved form when
- * that form renders it, exactly when its gloss is: two senses of one gloss
- * show two cards that save together.
+ * Each member sense gives one example, from the same choice of form: the lemma's
+ * where it renders that sense, otherwise the representative. All are shown;
+ * capping them would hide exactly the meaning the learner has not met.
  */
 export function buildWordDetail(
   lemma: string,
@@ -190,8 +183,7 @@ export function buildWordDetail(
   progress: ProgressRow[],
 ): VocabularyWordDetail {
   const partOfSpeech = new Map(lexemes.map((lexeme) => [lexeme.lexemeId, lexeme.partOfSpeech]));
-  const savedVariant = new Map(saved.map((entry) => [entry.glossId, entry.variantId]));
-  const addedBy = new Map(saved.map((entry) => [entry.glossId, entry.addedBy]));
+  const entries = new Map(saved.map((entry) => [entry.glossId, entry]));
   const perVariant = new Map<string, number>();
   for (const r of renderings) perVariant.set(r.variantId, (perVariant.get(r.variantId) ?? 0) + 1);
 
@@ -201,53 +193,66 @@ export function buildWordDetail(
     isLemma(b) - isLemma(a) ||
     perVariant.get(b.variantId)! - perVariant.get(a.variantId)! ||
     a.variantId.localeCompare(b.variantId);
+  const byRank = (a: LexemeRendering, b: LexemeRendering) => a.rank - b.rank || a.senseId.localeCompare(b.senseId);
 
-  const bySense = new Map<string, LexemeRendering[]>();
-  for (const r of renderings) {
-    const list = bySense.get(r.senseId) ?? [];
-    list.push(r);
-    bySense.set(r.senseId, list);
-  }
-
-  const shown = [...bySense.entries()].map(([, options]) => {
-    const glossId = options[0].glossId;
-    const own = savedVariant.get(glossId);
-    const rendering = options.find((o) => o.variantId === own) ?? [...options].sort(better)[0];
-    return { rendering, partOfSpeech: partOfSpeech.get(rendering.lexemeId) ?? '', saved: savedVariant.has(glossId) };
-  });
-
-  shown.sort(
-    (a, b) =>
-      Number(b.saved) - Number(a.saved) ||
-      (a.partOfSpeech < b.partOfSpeech ? -1 : a.partOfSpeech > b.partOfSpeech ? 1 : 0) ||
-      a.rendering.rank - b.rendering.rank ||
-      a.rendering.senseId.localeCompare(b.rendering.senseId),
-  );
+  const byGloss = new Map<string, LexemeRendering[]>();
+  for (const r of renderings) byGloss.set(r.glossId, [...(byGloss.get(r.glossId) ?? []), r]);
 
   const progressByGloss = new Map<string, ProgressRow[]>();
-  for (const row of progress) {
-    progressByGloss.set(row.glossId, [...(progressByGloss.get(row.glossId) ?? []), row]);
-  }
+  for (const row of progress) progressByGloss.set(row.glossId, [...(progressByGloss.get(row.glossId) ?? []), row]);
   const live = progress.filter((row) => LIVE_DIMENSIONS.includes(row.dimension));
+
+  const cards = [...byGloss.entries()].map(([glossId, options]) => {
+    const entry = entries.get(glossId);
+    const savedRendering = entry ? options.filter((o) => o.variantId === entry.variantId).sort(byRank)[0] : undefined;
+    const shown = savedRendering ?? [...options].sort(better)[0];
+
+    const bySense = new Map<string, LexemeRendering[]>();
+    for (const o of options) bySense.set(o.senseId, [...(bySense.get(o.senseId) ?? []), o]);
+    const examples = [...bySense.values()]
+      .map((own) => [...own].sort(better)[0])
+      .sort(byRank)
+      .flatMap((pick) =>
+        pick.exampleSource && pick.exampleTarget ? [{ source: pick.exampleSource, target: pick.exampleTarget }] : [],
+      );
+
+    const savedFrom =
+      savedRendering && savedRendering.form.toLowerCase() !== lowered
+        ? { form: savedRendering.form, translation: savedRendering.translation }
+        : undefined;
+    const glossProgress = progressByGloss.get(glossId);
+
+    return {
+      rank: [...options].sort(byRank)[0].rank,
+      partOfSpeech: partOfSpeech.get(shown.lexemeId) ?? '',
+      card: {
+        gloss_id: glossId,
+        variant_id: shown.variantId,
+        form: shown.form,
+        translation: shown.glossKey,
+        alternatives: [...shown.glossAlternatives],
+        part_of_speech: partOfSpeech.get(shown.lexemeId) ?? '',
+        examples,
+        saved: entry !== undefined,
+        ...(entry?.addedBy ? { added_by: entry.addedBy } : {}),
+        ...(entry && glossProgress ? { progress: glossProgressOf(glossProgress) } : {}),
+        ...(savedFrom ? { saved_from: savedFrom } : {}),
+      },
+    };
+  });
+
+  cards.sort(
+    (a, b) =>
+      Number(b.card.saved) - Number(a.card.saved) ||
+      (a.partOfSpeech < b.partOfSpeech ? -1 : a.partOfSpeech > b.partOfSpeech ? 1 : 0) ||
+      a.rank - b.rank ||
+      a.card.gloss_id.localeCompare(b.card.gloss_id),
+  );
 
   return {
     lemma,
     level: live.length === 0 ? null : badge(live.map((row) => row.level)),
-    senses: shown.map(({ rendering: r, partOfSpeech: pos, saved: isSaved }) => ({
-      gloss_id: r.glossId,
-      variant_id: r.variantId,
-      form: r.form,
-      translation: r.translation,
-      part_of_speech: pos,
-      ...(r.exampleSource && r.exampleTarget
-        ? { example: { source: r.exampleSource, target: r.exampleTarget } }
-        : {}),
-      saved: isSaved,
-      ...(isSaved && addedBy.get(r.glossId) ? { added_by: addedBy.get(r.glossId)! } : {}),
-      ...(isSaved && progressByGloss.has(r.glossId)
-        ? { progress: glossProgressOf(progressByGloss.get(r.glossId)!) }
-        : {}),
-    })),
+    senses: cards.map(({ card }) => card),
   };
 }
 

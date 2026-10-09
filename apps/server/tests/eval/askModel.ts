@@ -96,7 +96,7 @@ export async function askModel(
     to,
     kind,
     entries,
-    senses: normalizeSenses(kind, flattenEntries(entries)),
+    senses: normalizeSenses(kind, flattenEntries(entries, kind)),
     ...(correction ? { correction } : {}),
   };
 }

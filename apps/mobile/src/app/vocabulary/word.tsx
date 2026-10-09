@@ -107,9 +107,9 @@ export default function VocabularyWordScreen() {
             {language ? <SpeakButton text={word.lemma} language={language} testID="speak-lemma" /> : null}
           </View>
           {word.level !== null ? <LevelBadge level={word.level} testID="vocabulary-detail-level" /> : null}
-          {/* Two senses of one gloss are two cards that share an id, so the key adds the place. */}
-          {word.senses.map((sense, index) => (
-            <View key={`${sense.gloss_id}:${index}`} testID="vocabulary-sense" style={styles.card}>
+          {/* Phase 31: one card per gloss, so the gloss id keys it. */}
+          {word.senses.map((sense) => (
+            <View key={sense.gloss_id} testID="vocabulary-sense" style={styles.card}>
               {strings.partOfSpeech(sense.part_of_speech) ? (
                 <Text testID="vocabulary-sense-pos" style={styles.meta}>
                   {strings.partOfSpeech(sense.part_of_speech)}
@@ -124,17 +124,19 @@ export default function VocabularyWordScreen() {
               {sense.form.toLowerCase() !== word.lemma.toLowerCase() ? (
                 <Text style={styles.meta}>{strings.vocabularyFromForm(sense.form)}</Text>
               ) : null}
-              {sense.example ? (
-                <View style={styles.example}>
+              {/* One example per member sense. Two members may share a sentence,
+                  so the key adds the place. */}
+              {sense.examples.map((example, index) => (
+                <View key={`${index}:${example.source}`} style={styles.example}>
                   <View style={styles.spoken}>
-                    <Text style={[styles.exampleSource, styles.grow]}>{sense.example.source}</Text>
+                    <Text style={[styles.exampleSource, styles.grow]}>{example.source}</Text>
                     {language ? (
-                      <SpeakButton text={sense.example.source} language={language} testID="speak-example" />
+                      <SpeakButton text={example.source} language={language} testID="speak-example" />
                     ) : null}
                   </View>
-                  <Text style={styles.meta}>{sense.example.target}</Text>
+                  <Text style={styles.meta}>{example.target}</Text>
                 </View>
-              ) : null}
+              ))}
               {sense.saved && sense.progress ? (
                 <View style={styles.progress}>
                   <LevelBadge level={sense.progress.level} testID="vocabulary-sense-level" />

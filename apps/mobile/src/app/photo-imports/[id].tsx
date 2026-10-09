@@ -302,8 +302,9 @@ export default function PhotoImportReviewScreen() {
                           style={[styles.option, selected && styles.optionSelected]}
                         >
                           <Meaning option={option} />
-                          {(option.examples ?? []).map((example) => (
-                            <View key={example.source}>
+                          {/* Two members may share a sentence, so the key adds the place. */}
+                          {(option.examples ?? []).map((example, index) => (
+                            <View key={`${index}:${example.source}`}>
                               <Text style={[styles.exampleSource, { writingDirection: wordDirection }]}>{example.source}</Text>
                               <Text style={styles.meta}>{example.target}</Text>
                             </View>

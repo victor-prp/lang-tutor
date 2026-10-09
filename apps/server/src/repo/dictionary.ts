@@ -15,7 +15,7 @@ import {
 } from '../db/schema';
 import {
   entriesToRows,
-  rowsToSenses,
+  rowsToCards,
   staleLexemes,
   type EntryRows,
   type Rendering,
@@ -25,12 +25,6 @@ import {
 import { assignGlosses, type AnswerSense } from '../domain/glosses';
 import type { LanguageCode } from '../domain/languages';
 import { tidyAlternatives, type StoredSense } from '../domain/translation';
-
-// The response cap. The database has no five limit — `see` keeps all its
-// senses and `saw` all of its — so this truncates the merge and nothing else,
-// which is why a later lookup of `see` returns its full entry rather than
-// whatever slice fitted alongside `saw`.
-const READ_LIMIT = 5;
 
 export type PersistEntriesInput = {
   /** The queried string, already normalized. Stored as written; matched lower. */
@@ -86,6 +80,13 @@ export function createDictRepo(tx: Tx) {
    * senses in the same order — until its lexeme learns a new sense, at which
    * point that form re-renders and re-ranks once (phase 12, Task 13). This read is what
    * both the plain hit and the repaired hit answer with.
+   *
+   * Phase 31 (spec D15). It returns every rendering of the form, each with its
+   * gloss's key and its own alternatives: the database has no five limit, and
+   * neither has this read. The five-card cap is `rowsToCards`', applied after
+   * grouping, so a gloss can never hide behind a row cap (`stream`'s seven rows
+   * are five glosses and show five cards). A form renders a handful of senses
+   * per lexeme, so the read stays small.
    */
   const findSensesByForm = async (input: {
     form: string;
@@ -108,6 +109,8 @@ export function createDictRepo(tx: Tx) {
         // back untyped from Drizzle; cast rather than widen `SenseRow.kind`,
         // since the write (below) already only ever stores a `TranslationKind`.
         kind: sql<TranslationKind>`${dictVariants.kind}`,
+        glossKey: dictGlosses.key,
+        alternatives: dictVarTranslations.alternatives,
       })
       .from(dictVariants)
       .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
@@ -125,6 +128,7 @@ export function createDictRepo(tx: Tx) {
         dictSenseGlosses,
         and(eq(dictSenseGlosses.senseId, dictSenses.id), eq(dictSenseGlosses.userLanguageCode, input.userLanguageCode)),
       )
+      .innerJoin(dictGlosses, eq(dictGlosses.id, dictSenseGlosses.glossId))
       .where(
         and(
           eq(dictVariants.languageCode, input.languageCode),
@@ -141,8 +145,7 @@ export function createDictRepo(tx: Tx) {
         asc(dictVarTranslations.rank),
         asc(dictVariants.entryRank),
         asc(dictVariants.lexemeId),
-      )
-      .limit(READ_LIMIT);
+      );
 
   /**
    * One indexed lookup on `(language_code, lower(typed_form))` — the same
@@ -698,7 +701,7 @@ export function createDictRepo(tx: Tx) {
     // was already a variant of another lexeme. One query, and the invariant
     // becomes literal: the response is always the same merge the next lookup
     // would produce.
-    const senses = rowsToSenses(
+    const senses = rowsToCards(
       await findSensesByForm({
         form: input.form,
         languageCode: input.languageCode,

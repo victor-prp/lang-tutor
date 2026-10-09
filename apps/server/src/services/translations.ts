@@ -25,7 +25,7 @@ import {
   mergeEntries,
   normalizeForm,
   renderingOf,
-  rowsToSenses,
+  rowsToCards,
   type SenseRow,
   type StaleLexeme,
 } from '../domain/dictionary';
@@ -365,7 +365,7 @@ async function serveForm({
   // returns. `kind` is read, never guessed: it is written by the persisting call
   // onto the entry_rank 0 variant and read back by `kindForForm`, so a hit answers
   // with what was actually stored rather than a re-derived guess that can disagree.
-  return { kind: kindForForm(answerRows), senses: rowsToSenses(answerRows), rows: answerRows };
+  return { kind: kindForForm(answerRows), senses: rowsToCards(answerRows), rows: answerRows };
 }
 
 /**
@@ -616,7 +616,7 @@ export function createTranslationService({
     }
 
     let entries = mergeEntries(parsed.entries);
-    let flattened = normalizeSenses(kind, flattenEntries(entries));
+    let flattened = normalizeSenses(kind, flattenEntries(entries, kind));
 
     // A sentence is not a vocabulary item, and caching "no translation" would
     // freeze a transient answer into a permanent dictionary. Both keep
@@ -658,7 +658,7 @@ export function createTranslationService({
       entries = await reconcile({ llm, form: effectiveForm, from, to, entries, stored, logger });
       // Both return paths below read `flattened`; a stale one would serve the
       // un-reconciled renderings on the failed-write path only.
-      flattened = normalizeSenses(kind, flattenEntries(entries));
+      flattened = normalizeSenses(kind, flattenEntries(entries, kind));
     }
 
     try {

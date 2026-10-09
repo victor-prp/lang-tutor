@@ -281,10 +281,10 @@ export const dictVarTranslations = pgTable(
     ),
     check('dict_var_translations_rank_nonneg', sql`${t.rank} >= 0`),
     // Phase 18. The primary key leads with variant_id, so "which renderings does
-    // this SENSE have in this language" — the vocabulary list's sense_count and
-    // the drill-down's representative rendering — would otherwise scan the
-    // dictionary's largest table. findSensesByLexeme's join on tr.sense_id
-    // benefits too.
+    // this SENSE have in this language" — the drill-down's renderings (and,
+    // until phase 31 counted glosses, the vocabulary list's sense count) —
+    // would otherwise scan the dictionary's largest table. findSensesByLexeme's
+    // join on tr.sense_id benefits too.
     index('dict_var_translations_sense_language_idx').on(t.senseId, t.userLanguageCode),
   ],
 );

@@ -166,15 +166,16 @@ export const vocabularyQueries = {
 
   /**
    * One row per lemma of a page: the headline, the saved parts of speech, the two
-   * counts. The LATERAL is an INNER join on purpose — a word with no rendered saved
-   * gloss has nothing to headline and is dropped (assemblePage's comment).
+   * counts. The LATERAL is an INNER join on purpose — a word with no saved gloss
+   * has nothing to headline and is dropped (assemblePage's comment).
    *
-   * Headline: the lowest rank of a saved gloss's senses in its own saved form, then
-   * the earliest save, then gloss id, across every lexeme of the lemma —
-   * deterministic, and all inside SQL so no timestamp crosses into TypeScript.
-   * `saved_count` counts saved glosses. `sense_count` counts the senses of
-   * every lexeme with the lemma in the target language, found through
-   * dict_lexemes_language_lemma_pos_key.
+   * Headline: the earliest saved gloss of the lemma, across every lexeme, ties by
+   * gloss id — deterministic, and all inside SQL so no timestamp crosses into
+   * TypeScript. Both counts count glosses (spec D11): `saved_count` the saved
+   * ones, `gloss_count` the live glosses of every lexeme with the lemma in the
+   * target language, in the enrollment's learner language, found through
+   * dict_lexemes_language_lemma_pos_key and dict_glosses_live_key. So `mouse`,
+   * two senses and one gloss, reads 1 of 1 once saved.
    */
   wordSummaries: (input: {
     enrollmentId: string;
@@ -185,7 +186,7 @@ export const vocabularyQueries = {
   }): SQL => sql`
     SELECT w.lemma,
            h.gloss_id AS headline_gloss_id,
-           h.translation AS headline_translation,
+           h.key AS headline_translation,
            h.form AS headline_form,
            (SELECT array_agg(DISTINCT l.part_of_speech ORDER BY l.part_of_speech)
               FROM vocabulary_entries c
@@ -202,27 +203,26 @@ export const vocabularyQueries = {
                AND c.lemma = w.lemma
                AND c.added_by_user_id <> ${input.ownerUserId}) AS added_by,
            (SELECT count(*) FROM dict_lexemes l
-              JOIN dict_senses s ON s.lexeme_id = l.id
+              JOIN dict_glosses g ON g.lexeme_id = l.id
              WHERE l.language_code = ${input.targetLanguage}
                AND l.lemma = w.lemma
-               AND EXISTS (SELECT 1 FROM dict_var_translations r
-                            WHERE r.sense_id = s.id
-                              AND r.user_language_code = ${input.sourceLanguage}))::int AS sense_count
+               AND g.user_language_code = ${input.sourceLanguage}
+               AND g.merged_into IS NULL)::int AS gloss_count
     FROM (VALUES ${sql.join(
       input.lemmas.map((lemma) => sql`(${lemma}::text)`),
       sql`, `,
     )}) AS w(lemma)
+    -- Phase 31 (spec D11). The headline is the earliest saved gloss, in its key;
+    -- no rendering is read, so a form saved inflected still headlines its
+    -- citation form.
     JOIN LATERAL (
-      SELECT ve.gloss_id, tr.translation, v.form
+      SELECT ve.gloss_id, g.key, v.form
       FROM vocabulary_entries ve
-      JOIN dict_sense_glosses m     ON m.gloss_id = ve.gloss_id
-      JOIN dict_var_translations tr ON tr.variant_id = ve.variant_id
-                                   AND tr.sense_id = m.sense_id
-                                   AND tr.user_language_code = ${input.sourceLanguage}
-      JOIN dict_variants v          ON v.id = ve.variant_id
+      JOIN dict_glosses g  ON g.id = ve.gloss_id
+      JOIN dict_variants v ON v.id = ve.variant_id
       WHERE ve.enrollment_id = ${input.enrollmentId}
         AND ve.lemma = w.lemma
-      ORDER BY tr.rank, ve.created_at, ve.gloss_id
+      ORDER BY ve.created_at, ve.gloss_id
       LIMIT 1
     ) h ON true`,
 
@@ -236,16 +236,17 @@ export const vocabularyQueries = {
 
   /** Every rendering of the senses of every lexeme with this lemma, in one user
    *  language, by any form, each with its lexeme and (phase 31) its sense's
-   *  gloss in that language. */
+   *  gloss in that language, with the gloss's key and alternatives. */
   lemmaRenderings: (input: { languageCode: string; lemma: string; userLanguageCode: string }): SQL => sql`
-    SELECT s.lexeme_id, tr.sense_id, m.gloss_id, tr.variant_id, v.form, tr.rank, tr.translation,
-           tr.example_source, tr.example_target
+    SELECT s.lexeme_id, tr.sense_id, m.gloss_id, g.key AS gloss_key, g.alternatives AS gloss_alternatives,
+           tr.variant_id, v.form, tr.rank, tr.translation, tr.example_source, tr.example_target
     FROM dict_lexemes l
     JOIN dict_senses s            ON s.lexeme_id = l.id
     JOIN dict_var_translations tr ON tr.sense_id = s.id
                                  AND tr.user_language_code = ${input.userLanguageCode}
     JOIN dict_sense_glosses m     ON m.sense_id = tr.sense_id
                                  AND m.user_language_code = tr.user_language_code
+    JOIN dict_glosses g           ON g.id = m.gloss_id
     JOIN dict_variants v          ON v.id = tr.variant_id
     WHERE l.language_code = ${input.languageCode}
       AND l.lemma = ${input.lemma}`,
@@ -351,7 +352,7 @@ export function createVocabularyRepo(tx: Tx) {
         headline_translation: string;
         headline_form: string;
         saved_count: number;
-        sense_count: number;
+        gloss_count: number;
         added_by: string[];
       }>(vocabularyQueries.wordSummaries(input));
       return rows.rows.map((row) => ({
@@ -361,7 +362,7 @@ export function createVocabularyRepo(tx: Tx) {
         headlineTranslation: row.headline_translation,
         headlineForm: row.headline_form,
         savedCount: row.saved_count,
-        senseCount: row.sense_count,
+        glossCount: row.gloss_count,
         addedBy: row.added_by,
       }));
     },
@@ -382,6 +383,8 @@ export function createVocabularyRepo(tx: Tx) {
         lexeme_id: string;
         sense_id: string;
         gloss_id: string;
+        gloss_key: string;
+        gloss_alternatives: string[];
         variant_id: string;
         form: string;
         rank: number;
@@ -393,6 +396,8 @@ export function createVocabularyRepo(tx: Tx) {
         lexemeId: row.lexeme_id,
         senseId: row.sense_id,
         glossId: row.gloss_id,
+        glossKey: row.gloss_key,
+        glossAlternatives: row.gloss_alternatives,
         variantId: row.variant_id,
         form: row.form,
         rank: row.rank,

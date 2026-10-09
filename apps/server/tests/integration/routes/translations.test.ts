@@ -99,7 +99,7 @@ describe('POST /api/translations', () => {
         {
           translation: 'סולם',
           part_of_speech: 'noun',
-          example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
+          examples: [{ source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' }],
           gloss_id: expect.any(String),
           variant_id: expect.any(String),
         },

@@ -229,6 +229,49 @@ describe('findSnapshot over the phase 24 types', () => {
   });
 });
 
+describe('findSnapshot names a gloss by its key (phase 31, spec D11)', () => {
+  it("reads the form the session asked beside the gloss's key, not that form's rendering", async () => {
+    const finger = await insertLexeme(t.db, {
+      lemma: 'finger',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'digit' }],
+      variants: [
+        {
+          form: 'finger',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null }],
+        },
+        {
+          form: 'fingers',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבעות', gloss: 'אצבע', exampleSource: null, exampleTarget: null }],
+        },
+      ],
+    });
+    const sessionId = await insertAnsweredSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      status: 'completed',
+      asked: [{ glossId: finger.glossIds[0], variantId: finger.variantIds[1], translation: 'אצבעות' }],
+      answers: [],
+    });
+    await repo((r) =>
+      r.insertSnapshot({
+        sessionId,
+        rows: [{ glossId: finger.glossIds[0], dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 }],
+      }),
+    );
+
+    expect(await repo((r) => r.findSnapshot(sessionId))).toEqual([
+      expect.objectContaining({ glossId: finger.glossIds[0], form: 'fingers', translation: 'אצבע' }),
+    ]);
+  });
+});
+
 describe("the recompute's reads", () => {
   it('resets every row and every snapshot', async () => {
     await saveAt('2026-10-01 00:00:00+00', [0]);
