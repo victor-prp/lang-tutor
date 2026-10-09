@@ -660,8 +660,8 @@ describe('translate, against a real database', () => {
       ],
     });
     const service = translations();
-    const first = await service.translate({ text: 'trellis', from: 'en', to: 'he' });
-    const again = await service.translate({ text: 'trellis', from: 'en', to: 'he' });
+    const first = await service.translate('u_1', { text: 'trellis', from: 'en', to: 'he' });
+    const again = await service.translate('u_1', { text: 'trellis', from: 'en', to: 'he' });
 
     expect(first.senses).toHaveLength(5);
     expect(again.senses.map((card) => card.translation)).toEqual(first.senses.map((card) => card.translation));

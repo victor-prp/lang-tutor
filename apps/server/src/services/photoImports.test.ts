@@ -310,7 +310,7 @@ describe('authorization (phase 29)', () => {
       },
     });
     const vocabulary = stub<VocabularyRepo>({
-      findSaveable: async () => [{ senseId: 's1', variantId: 'v1', lexemeId: 'l1', lemma: 'gatto' }],
+      findSaveable: async () => [{ glossId: 's1', variantId: 'v1', lexemeId: 'l1', lemma: 'gatto' }],
       insertEntries: async () => {
         writes.push('insertEntries');
       },

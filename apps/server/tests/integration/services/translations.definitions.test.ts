@@ -58,14 +58,14 @@ describe('a learner language with no renderings yet', () => {
       ],
       matchText: '"חלון"',
     });
-    await translations().translate({ text: 'חלון', from: 'he', to: 'en' });
+    await translations().translate('u_1', { text: 'חלון', from: 'he', to: 'en' });
 
     // Registered first: only the reconciliation prompt says "reusing its sense_code EXACTLY".
     await expectReconciliation(ns, {
       senses: [{ sense_code: 'wall_opening', translation: 'окна', example: { source: 'החלונות נקיים.', target: 'Окна чистые.' } }],
     });
     await expectGeminiJson(ns, { ...WINDOWS_RU, matchText: '"חלונות"' });
-    await translations().translate({ text: 'חלונות', from: 'he', to: 'ru' });
+    await translations().translate('u_1', { text: 'חלונות', from: 'he', to: 'ru' });
 
     expect(await readSenseDefinitions(t.db, 'חלון')).toEqual([{ senseCode: 'wall_opening', definition: 'פתח בקיר שמכניס אור' }]);
     // The stored list comes before the reuse rule in the prompt.
@@ -88,7 +88,7 @@ describe('a learner language with no renderings yet', () => {
     });
     await expectGeminiJson(ns, { ...WINDOWS_RU, matchText: '"חלונות"' });
 
-    await translations().translate({ text: 'חלונות', from: 'he', to: 'ru' });
+    await translations().translate('u_1', { text: 'חלונות', from: 'he', to: 'ru' });
 
     expect(await readSenseDefinitions(t.db, 'חלון')).toEqual([{ senseCode: 'wall_opening', definition: 'פתח בקיר' }]);
     expect(await countGeminiRequests(ns, 'wall_opening — window \\(in English\\)[\\s\\S]*reusing its sense_code EXACTLY')).toBe(1);

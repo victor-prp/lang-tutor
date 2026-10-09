@@ -128,7 +128,7 @@ describe('translate', () => {
       }),
     );
 
-    const result = await service.translate({ text, from: 'en', to: 'he' });
+    const result = await service.translate('u1', { text, from: 'en', to: 'he' });
 
     expect(result.senses).toEqual([{ translation: 'אני רוצה ללכת הביתה, אבל כבר מאוחר.' }]);
   });
@@ -600,7 +600,7 @@ describe('reconciliation', () => {
     );
     dict.stored['cook:verb'] = storedReserve;
 
-    await service.translate({ text: 'cooked', from: 'en', to: 'he' });
+    await service.translate('u1', { text: 'cooked', from: 'en', to: 'he' });
 
     expect(dict.persisted[0].entries[0].senses).toEqual([
       {

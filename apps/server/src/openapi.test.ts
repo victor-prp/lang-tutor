@@ -386,7 +386,7 @@ describe('the 403 of an owner-only or granted route in the published document', 
   it.each([
     [VOCABULARY, 'post', /accepted grant that allows adding words/],
     [VOCABULARY, 'get', /owner, who alone may read it/],
-    [`${VOCABULARY}/senses/{sense_id}`, 'delete', /owner, who alone may remove a word/],
+    [`${VOCABULARY}/glosses/{gloss_id}`, 'delete', /owner, who alone may remove a word/],
     [`${VOCABULARY}/word`, 'get', /owner, who alone may read it/],
     ['/api/sessions', 'post', /another learner's/],
     ['/api/sessions/{id}', 'get', /another learner's/],
