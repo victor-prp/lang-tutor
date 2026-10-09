@@ -15,6 +15,7 @@ import {
   ClozeTypedQuestionSchema,
   SentenceTranslationQuestionSchema,
   LlmPhotoReadingSchema,
+  LlmReconciliationSchema,
   LlmSenseMatchSchema,
   LlmSenseSchema,
   LlmTranslationSchema,
@@ -469,19 +470,27 @@ describe('LlmTranslationSchema', () => {
     ).toBe(false);
   });
 
-  // Five, not the six this asserted before phase 13, and the ceiling is the
-  // provider's rather than ours: array caps multiply inside `responseSchema`, and
-  // six entries by five senses tipped Gemini past "too many states for serving"
-  // the moment `correction` was added — a 400 on every translation call. Measured
-  // against the live API. `senses` stays at five, where READ_LIMIT holds it.
-  it('caps entries at five and senses at five within an entry', () => {
+  // Three entries, not the five this asserted before phase 31 (and the six before
+  // phase 13), and the ceiling is the provider's rather than ours: array caps
+  // multiply inside `responseSchema`, and five entries by five senses tipped
+  // Gemini past "too many states for serving" the moment the four phase 31 sense
+  // fields were added — a 400 on every translation call. Measured against the
+  // live API; the matrix is on `LlmTranslationSchema.entries`. `senses` stays at
+  // five, where READ_LIMIT holds it.
+  it('caps entries at three and senses at five within an entry', () => {
     const entry = { lemma: 'x', part_of_speech: 'noun', senses: [sense] };
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(5).fill(entry) }).success,
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(3).fill(entry) }).success,
     ).toBe(true);
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(6).fill(entry) }).success,
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(4).fill(entry) }).success,
     ).toBe(false);
+    expect(
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [{ lemma: 'x', part_of_speech: 'noun', senses: Array(5).fill(sense) }],
+      }).success,
+    ).toBe(true);
     expect(
       LlmTranslationSchema.safeParse({
         kind: 'word',
@@ -500,6 +509,38 @@ describe('LlmTranslationSchema', () => {
     });
     expect(result.success).toBe(true);
     expect(result.data?.senses[0]).not.toHaveProperty('sense_code');
+  });
+
+  it('takes the phase 31 fields on a sense, and a sense without them', () => {
+    const full = {
+      translation: 'מכונית',
+      sense_code: 'motor_vehicle',
+      alternatives: ['רכב'],
+      gloss: 'מכונית',
+      gloss_alternatives: ['רכב'],
+      definition: 'a road vehicle with an engine',
+    };
+    expect(LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [full] }] }).success).toBe(true);
+    expect(LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכונית', sense_code: 'motor_vehicle' }] }] }).success).toBe(true);
+    // Zod strips a key the schema does not name, so success alone cannot tell a
+    // schema that takes the fields from one that silently drops them.
+    const kept = LlmTranslationSchema.parse({ kind: 'word', entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [full] }] });
+    expect(kept.entries[0].senses[0]).toEqual(full);
+  });
+});
+
+// Phase 31 (spec D4-D6, D9). The second call's rendering takes the same four fields,
+// absent or null: parseLlmReconciliation parses without dropNulls.
+describe('LlmReconciliationSchema', () => {
+  it('takes the phase 31 fields as absent or null, since this answer is parsed without dropNulls', () => {
+    const base = { sense_code: 'motor_vehicle', translation: 'מכוניות' };
+    expect(LlmReconciliationSchema.safeParse({ senses: [{ ...base, gloss: 'מכונית', alternatives: ['רכבים'], gloss_alternatives: ['רכב'], definition: 'a road vehicle' }] }).success).toBe(true);
+    expect(LlmReconciliationSchema.safeParse({ senses: [{ ...base, gloss: null, alternatives: null, gloss_alternatives: null, definition: null }] }).success).toBe(true);
+    // As above: success alone would also pass a schema that drops the keys.
+    const kept = LlmReconciliationSchema.parse({ senses: [{ ...base, gloss: 'מכונית', alternatives: ['רכבים'], gloss_alternatives: ['רכב'], definition: 'a road vehicle' }] });
+    expect(kept.senses[0]).toEqual({ ...base, gloss: 'מכונית', alternatives: ['רכבים'], gloss_alternatives: ['רכב'], definition: 'a road vehicle' });
+    const nulled = LlmReconciliationSchema.parse({ senses: [{ ...base, gloss: null, alternatives: null, gloss_alternatives: null, definition: null }] });
+    expect(nulled.senses[0]).toEqual({ ...base, gloss: null, alternatives: null, gloss_alternatives: null, definition: null });
   });
 });
 
@@ -539,17 +580,17 @@ describe('part_of_speech on the entry', () => {
     ).toBe(true);
   });
 
-  // Five and six, not six and seven: phase 13 lowered the entries cap because
-  // Gemini rejects the resulting `responseSchema` otherwise — see the comment on
-  // `LlmTranslationSchema.entries`.
-  it('accepts five entries and rejects six', () => {
+  // Three and four, not five and six: phases 13 and 31 each lowered the entries
+  // cap because Gemini rejects the resulting `responseSchema` otherwise — see the
+  // comment on `LlmTranslationSchema.entries`.
+  it('accepts three entries and rejects four', () => {
     const entry = { lemma: 'x', part_of_speech: 'noun' as const, senses: [aSense] };
     const make = (n: number) => ({
       kind: 'word' as const,
       entries: Array.from({ length: n }, () => entry),
     });
-    expect(LlmTranslationSchema.safeParse(make(5)).success).toBe(true);
-    expect(LlmTranslationSchema.safeParse(make(6)).success).toBe(false);
+    expect(LlmTranslationSchema.safeParse(make(3)).success).toBe(true);
+    expect(LlmTranslationSchema.safeParse(make(4)).success).toBe(false);
   });
 });
 
@@ -651,10 +692,17 @@ describe('CreateEnrollmentRequestSchema', () => {
 // travels to Gemini as responseSchema, where an extra property is either an
 // invitation to invent ids or one more state in a schema already at the
 // provider's limit (see LlmTranslationSchema's comment).
+//
+// Phase 31 gave the model's sense four fields of its own (spec D4-D6, D9) and
+// still none of the wire's: no part_of_speech, sense_id, variant_id or saved.
 describe('LlmSenseSchema after phase 18', () => {
-  it('still has exactly translation, example and sense_code', () => {
+  it('has exactly translation, example, sense_code and the four of phase 31, none of the wire sense', () => {
     expect(Object.keys(LlmSenseSchema.shape).sort()).toEqual([
+      'alternatives',
+      'definition',
       'example',
+      'gloss',
+      'gloss_alternatives',
       'sense_code',
       'translation',
     ]);

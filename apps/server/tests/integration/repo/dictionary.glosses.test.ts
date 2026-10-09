@@ -103,6 +103,19 @@ describe('persistEntries writes glosses (spec D6, D8)', () => {
     await Promise.all([persist('mouse', [MOUSE]), persist('mouse', [MOUSE])]);
     expect(await glossesOf('mouse')).toEqual([{ key: 'עכבר', members: ['computer_device', 'rodent'] }]);
   });
+
+  it("groups by the model's citation form, so an inflected form keys its gloss uninflected", async () => {
+    await persist('fingers', [{ lemma: 'finger', part_of_speech: 'noun', senses: [{ translation: 'אצבעות', gloss: 'אצבע', sense_code: 'body_part' }] }]);
+    expect(await glossesOf('finger')).toEqual([{ key: 'אצבע', members: ['body_part'] }]);
+  });
+
+  it('stores the first definition offered for a sense, and fills one a sense lacks', async () => {
+    await persist('car', [{ lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכונית', sense_code: 'vehicle' }] }]);
+    await persist('cars', [{ lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכוניות', sense_code: 'vehicle', definition: 'a road vehicle' }] }]);
+    await persist('car', [{ lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכונית', sense_code: 'vehicle', definition: 'an automobile' }] }]);
+    const rows = await t.db.execute<{ definition: string | null }>(sql`select definition from dict_senses where sense_code = 'vehicle'`);
+    expect(rows.rows).toEqual([{ definition: 'a road vehicle' }]);
+  });
 });
 
 describe('repairVariantRenderings writes glosses (spec D6)', () => {
@@ -168,6 +181,47 @@ describe('repairVariantRenderings writes glosses (spec D6)', () => {
     expect(await glossesOf('finger')).toEqual([
       { key: 'אצבע', members: ['digit'] },
       { key: 'אצבעות', members: ['body_part'] },
+    ]);
+  });
+
+  it('fills the definition a sense lacks, and keeps the one it has (spec D9)', async () => {
+    const word = await insertLexeme(t.db, {
+      lemma: 'bank',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'money' }, { senseCode: 'river' }],
+      variants: [
+        {
+          form: 'banks',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'money', rank: 0, translation: 'בנקים', gloss: 'בנק', exampleSource: null, exampleTarget: null }],
+        },
+      ],
+    });
+    await t.db.execute(sql`update dict_senses set definition = 'an institution that keeps money' where id = ${word.senseIds[0]}`);
+    await withTx(t.db, async (tx) => {
+      const dict = createDictRepo(tx);
+      await dict.lockLexemes([word.lexemeId]);
+      await dict.repairVariantRenderings({
+        variantId: word.variantIds[0],
+        lexemeId: word.lexemeId,
+        userLanguageCode: 'he',
+        senseVersion: 2,
+        lemmaForm: false,
+        senses: [
+          { ...rendering(word.senseIds[0], 0, 'בנקים', 'בנק'), definition: 'a shop that sells money' },
+          { ...rendering(word.senseIds[1], 1, 'גדות', 'גדה'), definition: 'the edge of a river' },
+        ],
+      });
+    });
+    const rows = await t.db.execute<{ sense_code: string; definition: string | null }>(
+      sql`select sense_code, definition from dict_senses where lexeme_id = ${word.lexemeId} order by sense_code`,
+    );
+    expect(rows.rows).toEqual([
+      { sense_code: 'money', definition: 'an institution that keeps money' },
+      { sense_code: 'river', definition: 'the edge of a river' },
     ]);
   });
 });

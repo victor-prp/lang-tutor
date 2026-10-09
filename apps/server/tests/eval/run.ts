@@ -27,7 +27,7 @@ import { comparable, distractorItems, validateDistractors, type RecentSentences,
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
-import { judgeSpoken } from '@lang-tutor/core/domain';
+import { judgeSpoken, normaliseGloss } from '@lang-tutor/core/domain';
 import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
 import { askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
@@ -401,6 +401,48 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
       name: 'top translation form',
       ok: !kase.rejectTop.some((rejected) => top.includes(rejected)),
       detail: `top was ${top}`,
+    });
+  }
+
+  // Phase 31 (spec D4-D6, D9).
+  const allSenses = result.entries.flatMap((entry) => entry.senses);
+  if (kase.expectOneTranslation) {
+    const lists = allSenses.filter((sense) => /[,/;()]/u.test(sense.translation));
+    checks.push({
+      name: 'every translation is one translation, with no list and no note',
+      ok: lists.length === 0,
+      detail: lists.map((sense) => sense.translation).join(' | ') || undefined,
+    });
+  }
+  if (kase.expectGloss) {
+    const gloss = result.entries[0]?.senses[0]?.gloss;
+    checks.push({
+      name: `the citation form is one of ${kase.expectGloss.join(', ')}`,
+      ok: gloss !== undefined && kase.expectGloss.some((accepted) => normaliseGloss(accepted) === normaliseGloss(gloss)),
+      detail: gloss ?? 'none',
+    });
+  }
+  if (kase.expectAlternativesIn) {
+    const words = allSenses.flatMap((sense) => [...(sense.alternatives ?? []), ...(sense.gloss_alternatives ?? [])]);
+    checks.push({
+      name: `every alternative is in ${kase.expectAlternativesIn} script`,
+      ok: words.every((word) => isInScript(word, kase.expectAlternativesIn!)),
+      detail: words.join(' | ') || 'none',
+    });
+  }
+  if (kase.expectAlternativeWord) {
+    const listed = allSenses.flatMap((sense) => sense.alternatives ?? []);
+    checks.push({
+      name: `lists one of ${kase.expectAlternativeWord.join(', ')} as an alternative`,
+      ok: kase.expectAlternativeWord.some((word) => listed.some((alt) => normaliseGloss(alt) === normaliseGloss(word))),
+      detail: listed.join(' | ') || 'none',
+    });
+  }
+  if (kase.expectDefinitionIn) {
+    checks.push({
+      name: `every sense has a definition in ${kase.expectDefinitionIn} script`,
+      ok: allSenses.length > 0 && allSenses.every((sense) => Boolean(sense.definition?.trim()) && isInScript(sense.definition!, kase.expectDefinitionIn!)),
+      detail: allSenses.map((sense) => sense.definition ?? 'none').join(' | '),
     });
   }
 

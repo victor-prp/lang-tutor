@@ -753,23 +753,32 @@ export const PartOfSpeechSchema = z.enum([
 // before the call, so offering them to the model would only invite it to
 // disagree with the server.
 //
-// `sense_code` goes on an extension rather than on TranslationSenseSchema, which
-// is shared with the wire. It is model-supplied, and from phase 12 it is
-// load-bearing rather than decorative: it is how a later form's translations are
-// attached to senses the lexeme already has.
+// `sense_code` is model-supplied, and from phase 12 it is load-bearing rather
+// than decorative: it is how a later form's translations are attached to senses
+// the lexeme already has.
 //
-// `.omit` rather than a fresh object: part_of_speech moved up to the entry, and
-// omitting it here is what makes a model that still puts one on a sense lose it
-// on parse rather than smuggle it through.
-export const LlmSenseSchema = TranslationSenseSchema.omit({
-  part_of_speech: true,
-  // Phase 18's wire-only fields. The model neither knows nor may invent them,
-  // and every property here travels to Gemini inside responseSchema.
-  sense_id: true,
-  variant_id: true,
-  saved: true,
-}).extend({
+// Phase 31. Written out rather than derived from TranslationSenseSchema, which
+// becomes a gloss card (Tasks 6 and 7) and shares nothing with what the model
+// writes but the translation and the example. A model that still puts a part
+// of speech on a sense loses it on parse, as before: the key is not here.
+//
+// The four phase 31 fields are optional and never defaulted, for the reason
+// LlmCorrectionSchema.alternatives gives: a missing decorative field must not
+// fail an answer, and a `default` would travel to Gemini. No maxItems either:
+// array caps multiply the response schema's states, which Gemini refuses past a
+// limit (see `entries` below). renderingOf cuts the lists after parsing.
+export const LlmSenseSchema = z.object({
+  translation: z.string().min(1),
+  example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
   sense_code: z.string().min(1).max(60),
+  // Spec D4, D5. The sense's other target words, in the translation's form.
+  alternatives: z.array(z.string().min(1)).optional(),
+  // Spec D6. The translation's citation form, uninflected.
+  gloss: z.string().min(1).optional(),
+  // Spec D5. The alternatives' citation forms.
+  gloss_alternatives: z.array(z.string().min(1)).optional(),
+  // Spec D9. One short phrase in the headword's language.
+  definition: z.string().min(1).optional(),
 });
 
 // One entry per (lemma, part of speech) — a lexeme. min(1) on senses: an entry
@@ -824,26 +833,44 @@ export const LlmCorrectionSchema = z.object({
 
 export const LlmTranslationSchema = z.object({
   kind: TranslationKindSchema,
-  // Five, not three: `light` alone is noun, adjective and verb, and a
-  // competing lemma still has to fit beside it.
-  //
-  // Five rather than six, and that ceiling is Gemini's rather than ours. This
-  // schema travels as `responseSchema`, where array caps multiply: six entries
-  // by five senses by a nested example object exceeded the provider's limit the
-  // moment phase 13 added `correction`, and every translation call answered
+  // Three, and that ceiling is Gemini's rather than ours. This schema travels as
+  // `responseSchema`, where array caps multiply: the provider refuses one with
   // `400 INVALID_ARGUMENT — the specified schema produces a constraint that has
-  // too many states for serving`. Measured against the live API, not reasoned:
-  // six entries fails with `correction` present and five succeeds, while
-  // `senses` stays at five because READ_LIMIT and TranslationResponseSchema both
-  // hold it there. No stub can catch this — MockServer accepts any
-  // `responseSchema` without validating it — so only `npm run eval` or a real
-  // lookup exercises it.
+  // too many states for serving`, and then every translation call fails.
+  // Measured against the live API, not reasoned. It was once raised from three
+  // to six so that `light`, which is noun, adjective and verb, had room for a
+  // competing lemma beside it. Phase 13 lowered it to five: six entries by five
+  // senses by a nested example object failed the moment `correction` was added,
+  // and five succeeded. Phase 31 gave every sense `alternatives`, `gloss`,
+  // `gloss_alternatives` and `definition`, and five by five failed again.
+  // Dropping fields does not rescue it: at five by five only `gloss` alone fits,
+  // and a shorter property name, an uncapped `sense_code`, no `min(1)` and no
+  // `correction` block do not either, alone or stacked. Only the caps do. All
+  // four fields, entries by senses per entry:
+  //
+  //   accepted  3 x 5 (no headroom: one more optional string is refused),
+  //             4 x 3 (room for one more field), 5 x 2
+  //   refused   5 x 5, 5 x 4, 5 x 3, 4 x 5, 4 x 4
+  //
+  // Three entries of five senses, not four of three, to keep every lexeme's
+  // sense depth: the response shows at most five cards whatever the cap
+  // (READ_LIMIT and TranslationResponseSchema), so cutting senses would take
+  // from the words a learner reads most, while cutting entries only takes from
+  // a form with more than three parts of speech. `light` is noun, adjective and
+  // verb, and `saw` is the verb `see`, the noun and the verb `saw`: both still
+  // fit. A form with four or five parts of speech now loses the least likely
+  // ones, and a competing lemma no longer fits beside a three-part word.
+  //
+  // This schema has no headroom left. A new field on a sense, or on the
+  // entry, means revisiting these caps, and measuring first. No stub can catch
+  // it — MockServer accepts any `responseSchema` without validating it — so
+  // only `npm run eval` or a real lookup exercises it.
   //
   // When `correction` is present these describe `corrected_form`, not the typed
   // text — and so does `kind`, which the prompt's fourth rule is what actually
   // secures. `resolveKind` only clamps a single token; it cannot rule on a
   // multi-token corrected form.
-  entries: z.array(LlmEntrySchema).max(5),
+  entries: z.array(LlmEntrySchema).max(3),
   correction: LlmCorrectionSchema.optional(),
 });
 
@@ -860,6 +887,13 @@ export const LlmRenderingSchema = z.object({
   sense_code: z.string().min(1).max(60),
   translation: z.string().min(1).nullable(),
   example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
+  // Phase 31: the first call's four fields, for the same reasons. Nullable as
+  // well as optional, because this answer is parsed without dropNulls: a
+  // provider spelling "none" as null must not fail the whole reconciliation.
+  alternatives: z.array(z.string().min(1)).nullable().optional(),
+  gloss: z.string().min(1).nullable().optional(),
+  gloss_alternatives: z.array(z.string().min(1)).nullable().optional(),
+  definition: z.string().min(1).nullable().optional(),
 });
 
 export const LlmReconciliationSchema = z.object({

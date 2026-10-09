@@ -560,7 +560,7 @@ export function createDictRepo(tx: Tx) {
         if (!id) {
           await tx
             .insert(dictSenses)
-            .values({ lexemeId, senseCode: sense.senseCode })
+            .values({ lexemeId, senseCode: sense.senseCode, definition: sense.definition })
             .onConflictDoNothing({ target: [dictSenses.lexemeId, dictSenses.senseCode] });
           const [row] = await tx
             .select({ id: dictSenses.id })
@@ -570,6 +570,14 @@ export function createDictRepo(tx: Tx) {
             );
           id = row.id;
           idByCode.set(sense.senseCode, id);
+        }
+        // Phase 31 (spec D9). The first definition offered stays: a sense written
+        // before the phase, or by a call that gave none, takes this one.
+        if (sense.definition !== null) {
+          await tx
+            .update(dictSenses)
+            .set({ definition: sense.definition })
+            .where(and(eq(dictSenses.id, id), isNull(dictSenses.definition)));
         }
         senseIds.push(id);
       }
@@ -770,6 +778,15 @@ export function createDictRepo(tx: Tx) {
         glossAlternatives: sense.glossAlternatives,
       })),
     });
+
+    // Phase 31 (spec D9). The rendering call names definitions too.
+    for (const sense of input.senses) {
+      if (sense.definition === null) continue;
+      await tx
+        .update(dictSenses)
+        .set({ definition: sense.definition })
+        .where(and(eq(dictSenses.id, sense.senseId), isNull(dictSenses.definition)));
+    }
 
     await tx
       .delete(dictVarTranslations)

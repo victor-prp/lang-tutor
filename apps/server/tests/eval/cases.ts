@@ -58,6 +58,18 @@ export type EvalCase = {
    *  a model that starts "correcting" real forms writes permanent redirects away
    *  from correctly spelled words. */
   expectNoCorrection?: true;
+  /** Phase 31 (spec D4). Every sense's translation is one translation: no comma,
+   *  slash or semicolon list and no parenthetical. */
+  expectOneTranslation?: true;
+  /** Phase 31 (spec D6). The first entry's first sense names one of these as its
+   *  citation form, compared by normaliseGloss. */
+  expectGloss?: string[];
+  /** Phase 31 (spec D5). Every alternative and citation alternative is in this script. */
+  expectAlternativesIn?: LanguageCode;
+  /** Phase 31 (spec D5). Some sense lists one of these among its alternatives. */
+  expectAlternativeWord?: string[];
+  /** Phase 31 (spec D9). Every sense has a definition, in this script. */
+  expectDefinitionIn?: LanguageCode;
 };
 
 export const CASES: EvalCase[] = [
@@ -100,9 +112,11 @@ export const CASES: EvalCase[] = [
     acceptTop: ['בנק'],
     expectAlso: ['גדה', 'גדת הנהר', 'שפה'],
   },
-  // Three parts of speech of one lemma, which is why the entry cap went 3 -> 6.
+  // Three parts of speech of one lemma, which is why the entry cap once went 3 -> 6.
+  // Phase 31 took it back to 3 (see LlmTranslationSchema.entries), so this case now
+  // fills the cap exactly.
   {
-    label: 'three parts of speech of one lemma, under the raised cap',
+    label: 'three parts of speech of one lemma, filling the entry cap',
     text: 'light',
     expectKind: 'word',
     acceptTop: ['אור'],
@@ -645,6 +659,54 @@ export const CASES: EvalCase[] = [
     expectKind: 'word',
     acceptTop: ['siamo andati', 'siamo andate', 'è andato', 'abbiamo camminato'],
     rejectTop: ['andammo', 'andavamo', 'andare', 'camminammo', 'camminare'],
+  },
+  // Phase 31 (spec D4, D5, D9). One main translation, the other target words as
+  // alternatives in the same language, and a definition in the headword's.
+  {
+    label: 'one main translation, the other target words as alternatives (phase 31)',
+    text: 'car',
+    expectKind: 'word',
+    acceptTop: ['מכונית', 'רכב', 'אוטו'],
+    expectOneTranslation: true,
+    expectAlternativesIn: 'he',
+    expectAlternativeWord: ['רכב', 'אוטו', 'מכונית'],
+    expectDefinitionIn: 'en',
+  },
+  // Phase 31 (spec D4). One meaning that Hebrew says in two words stays whole.
+  {
+    label: 'a compound translation survives whole (phase 31)',
+    text: 'café',
+    expectKind: 'word',
+    acceptTop: ['בית קפה'],
+    expectOneTranslation: true,
+  },
+  // Phase 31 (spec D6). The translation inflects with the form; the citation form does not.
+  {
+    label: 'an inflected form keeps its citation form uninflected (phase 31)',
+    text: 'fingers',
+    expectKind: 'word',
+    acceptTop: ['אצבעות'],
+    expectLemma: 'finger',
+    expectGloss: ['אצבע'],
+    expectOneTranslation: true,
+  },
+  {
+    label: 'a Russian plural: a singular citation form and a Russian definition (phase 31)',
+    text: 'столы',
+    from: 'ru',
+    expectKind: 'word',
+    acceptTop: ['שולחנות'],
+    expectGloss: ['שולחן'],
+    expectDefinitionIn: 'ru',
+  },
+  // Phase 31 (Review Focus 5). Lane 0 stored "קומבינציה, צירוף" for this word.
+  {
+    label: 'no comma list where lane 0 held one (phase 31)',
+    text: 'combination',
+    expectKind: 'word',
+    acceptTop: ['שילוב', 'צירוף', 'קומבינציה'],
+    expectOneTranslation: true,
+    expectAlternativesIn: 'he',
   },
 ];
 

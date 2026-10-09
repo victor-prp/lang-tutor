@@ -40,11 +40,13 @@ describe('toGeminiSchema', () => {
     expect(schema).not.toHaveProperty('additionalProperties');
     expect(entryItem).not.toHaveProperty('additionalProperties');
     expect(senseItem).not.toHaveProperty('additionalProperties');
-    // Five, not six, and the ceiling is the provider's: array caps multiply
-    // inside `responseSchema`, and six entries by five senses tipped Gemini past
-    // "too many states for serving" the moment phase 13 added `correction` —
-    // a 400 on every translation call. Measured against the live API.
-    expect(entries.maxItems).toBe(5);
+    // Three entries of five senses, and the ceiling is the provider's: array
+    // caps multiply inside `responseSchema`. Six entries by five senses tipped
+    // Gemini past "too many states for serving" the moment phase 13 added
+    // `correction`, and five by five did it again when phase 31 added the four
+    // sense fields — a 400 on every translation call. Measured against the live
+    // API; the matrix is on `LlmTranslationSchema.entries`.
+    expect(entries.maxItems).toBe(3);
     expect(senses.maxItems).toBe(5);
     expect(entryItem.required).toEqual(['lemma', 'part_of_speech', 'senses']);
     expect(senseItem.required).toEqual(['translation', 'sense_code']);

@@ -64,7 +64,7 @@ describe('buildPrompt', () => {
   it('asks for entries, one per headword, ranked', () => {
     const { system } = buildPrompt({ text: 'saw', from: 'en', to: 'he' });
     expect(system).toMatch(/entry per headword/i);
-    expect(system).toMatch(/at most 6/i);
+    expect(system).toMatch(/at most 3/i);
   });
 
   // Phase 12 inverted this. `book` is still the worked example, but it is now
@@ -181,6 +181,18 @@ describe('buildPrompt', () => {
         expect(system).not.toContain('see');
       }
     }
+  });
+});
+
+describe('buildPrompt (phase 31)', () => {
+  const system = buildPrompt({ text: 'car', from: 'en', to: 'he' }).system;
+
+  it('asks for one translation, alternatives, the citation forms and a definition', () => {
+    expect(system).toContain('one main Hebrew translation');
+    expect(system).toContain('"alternatives"');
+    expect(system).toContain('"gloss"');
+    expect(system).toContain('"gloss_alternatives"');
+    expect(system).toContain('one short phrase in English');
   });
 });
 
@@ -320,7 +332,10 @@ describe('buildPrompt, phase 12', () => {
     expect(system).toMatch(/grammatical form matching the input/i);
     expect(system).toMatch(/third-person masculine singular/i);
     expect(system).not.toMatch(/ONE entry per headword:/);
-    expect(system).not.toMatch(/at most 3\./);
+    // Phase 12 asserted "at most 3." absent here, when the cap had gone to six.
+    // Phase 31 took the cap back to three (see LlmTranslationSchema.entries), so
+    // the sentence is back on purpose and the rule above is what keeps the old
+    // phase 10 wording out.
   });
 });
 

@@ -218,6 +218,16 @@ function writingRules(source: Language, target: Language): string[] {
   return [...new Set([...source.writing, ...target.writing])];
 }
 
+/** Phase 31 (spec D4-D6). How each sense's target words are written: both
+ *  calls ask for them in these words. */
+function glossRules(to: string): string[] {
+  return [
+    `Give each sense one main ${to} translation: never a list of words, and never a note in brackets; a note that tells one sense from another belongs in "definition". A translation may be several words where ${to} needs them for one meaning.`,
+    `List other ${to} words that render the sense equally well in "alternatives", in the same grammatical form as the translation.`,
+    `Give the translation's dictionary citation form in "gloss", uninflected, and the alternatives' in "gloss_alternatives".`,
+  ];
+}
+
 /**
  * Phase 26 follow-up. A slash list answered as one form writes that form as a
  * dict_variants row under every lexeme in the answer: `decorate / decoration`
@@ -269,7 +279,7 @@ export function buildPrompt(input: {
     '"break a leg" is a phrase, not a sentence.',
     'Translate an idiom by its meaning, never word by word.',
     'Return one entry per headword the input could belong to, most likely reading first,',
-    'at most 6. An inflected form belongs to its headword and carries the headword\'s',
+    'at most 3. An inflected form belongs to its headword and carries the headword\'s',
     'senses: "running" is one entry whose lemma is "run".',
     'Return one entry per headword AND part of speech: "book" is two entries, one noun and',
     'one verb. An inflected form belongs to the entry whose part of speech it realises:',
@@ -297,6 +307,14 @@ export function buildPrompt(input: {
     // translation") pushed the model to translate at any cost, and `дякую`
     // came back as תודה in 8 of 15 calls instead of empty (15 of 15 without it).
     `Write every sense's translation in ${to}.`,
+    // Phase 31 (spec D4-D6, D9). A card shows one target word, so the
+    // translation is one, and the rest go where they are shown as "also …" and
+    // accepted as answers. The citation forms are what groups senses into
+    // glosses; the definition is what a learner language with no renderings yet
+    // reconciles against. Before changing a word here, check it against every
+    // registered MockServer expectation (see the illustration note below).
+    ...glossRules(to),
+    `Define the sense in "definition": one short phrase in ${from}.`,
     // Phase 16 eval fix. The sentence rule below is the only one that names a
     // missing example, and `example` is optional in the schema because of it,
     // so a phrase that can stand alone as an utterance — `как дела?`, `break a

@@ -458,4 +458,37 @@ describe('entriesToRows (phase 31)', () => {
       { translation: 'שילוב', alternatives: [], gloss: 'שילוב' },
     ]);
   });
+
+  it("takes the model's citation form, alternatives and definition, tidied", () => {
+    const [row] = entriesToRows([
+      {
+        lemma: 'car',
+        part_of_speech: 'noun',
+        senses: [
+          {
+            translation: 'מכוניות',
+            sense_code: 'motor_vehicle',
+            alternatives: ['רכבים', 'מכוניות', 'אוטואים'],
+            gloss: 'מכונית',
+            gloss_alternatives: ['רכב', 'אוטו', 'מכונית'],
+            definition: '  a road vehicle with an engine ',
+          },
+        ],
+      },
+    ]);
+    expect(row.senses[0]).toMatchObject({
+      translation: 'מכוניות',
+      alternatives: ['רכבים', 'אוטואים'],
+      gloss: 'מכונית',
+      glossAlternatives: ['רכב', 'אוטו'],
+      definition: 'a road vehicle with an engine',
+    });
+  });
+
+  it('cleans a citation form the model gave as a list, keeping the rest as citation alternatives', () => {
+    const [row] = entriesToRows([
+      { lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכונית', sense_code: 'v', gloss: 'מכונית, רכב' }] },
+    ]);
+    expect(row.senses[0]).toMatchObject({ gloss: 'מכונית', glossAlternatives: ['רכב'] });
+  });
 });

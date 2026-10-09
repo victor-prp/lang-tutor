@@ -6,7 +6,7 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
-import { splitTranslation } from './glosses';
+import { splitTranslation, tidyGlossList } from './glosses';
 import { stripStress } from './languages';
 
 /**
@@ -195,21 +195,31 @@ export type Rendering = Omit<SenseToWrite, 'senseCode'>;
 /**
  * Phase 31. A model's sense as every writer stores it: one clean translation and
  * the rest of any list as alternatives, so a model that ignores "one
- * translation" still never puts a list on a card (Review Focus 5). The lookup
- * and the repair both call it.
+ * translation" still never puts a list on a card (Review Focus 5). The citation
+ * form is the model's, cleaned the same way, or the translation when it gave
+ * none. The lookup and the repair both call it.
  */
 export function renderingOf(
-  sense: { translation: string; example?: { source: string; target: string } },
+  sense: {
+    translation: string;
+    example?: { source: string; target: string };
+    alternatives?: readonly string[] | null;
+    gloss?: string | null;
+    gloss_alternatives?: readonly string[] | null;
+    definition?: string | null;
+  },
   rank: number,
 ): Rendering {
-  const { translation, alternatives } = splitTranslation(sense.translation);
+  const said = splitTranslation(sense.translation);
+  const cited = sense.gloss ? splitTranslation(sense.gloss) : null;
+  const gloss = cited?.translation ?? said.translation;
   return {
     rank,
-    translation,
-    alternatives,
-    gloss: translation,
-    glossAlternatives: [],
-    definition: null,
+    translation: said.translation,
+    alternatives: tidyGlossList([...said.alternatives, ...(sense.alternatives ?? [])], said.translation),
+    gloss,
+    glossAlternatives: tidyGlossList([...(cited?.alternatives ?? []), ...(sense.gloss_alternatives ?? [])], gloss),
+    definition: sense.definition?.trim() || null,
     exampleSource: sense.example?.source ?? null,
     exampleTarget: sense.example?.target ?? null,
   };
