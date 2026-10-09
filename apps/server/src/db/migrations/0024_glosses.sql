@@ -1,7 +1,7 @@
 -- Phase 31 (spec §2, migration steps 1-3). The dictionary side of glosses:
 -- one gloss per (lexeme, learner language, target word), one membership per
 -- rendered sense, and one translation per rendering. Learner tables are
--- re-keyed in 0023_glosses_rekey; drizzle applies both in one transaction.
+-- re-keyed in 0025_glosses_rekey; drizzle applies both in one transaction.
 CREATE TABLE "dict_glosses" (
 	"id" text PRIMARY KEY DEFAULT gen_random_uuid()::text NOT NULL,
 	"lexeme_id" text NOT NULL,

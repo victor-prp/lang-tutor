@@ -1,7 +1,7 @@
 -- Phase 31 (spec §2, migration steps 4-6). Every learner table names a gloss
 -- instead of a sense. Hand-written (drizzle-kit generate --custom): drizzle reads
 -- a dropped sense_id beside a new gloss_id as a possible rename and stops to ask.
--- 0022_glosses gave every rendered sense a gloss in each language it is rendered
+-- 0024_glosses gave every rendered sense a gloss in each language it is rendered
 -- in, which is what each fill below joins through.
 ALTER TABLE "vocabulary_entries" ADD COLUMN "gloss_id" text;--> statement-breakpoint
 ALTER TABLE "sense_progress" ADD COLUMN "gloss_id" text;--> statement-breakpoint
