@@ -868,6 +868,27 @@ describe('phase 26 photo import schemas', () => {
     expect(PhotoImportStatusSchema.options).toEqual(['reading', 'looking_up', 'ready', 'failed', 'saved', 'discarded']);
   });
 
+  // Phase 31: an option is the lookup's card, key included when the typed form
+  // says something else. Options stored before carry none and still parse.
+  it("keeps an option's gloss key, and reads an option without one", () => {
+    const item = {
+      position: 0,
+      text: 'gatti',
+      hebrew: 'חתולים',
+      status: 'ready',
+      corrected_form: null,
+      options: [
+        { gloss_id: 'g1', variant_id: 'v1', translation: 'חתולים', key: 'חתול' },
+        { gloss_id: 'g2', variant_id: 'v1', translation: 'חתולות' },
+      ],
+      chosen_gloss_id: 'g1',
+      ticked: true,
+      hebrew_mismatch: false,
+      reason: null,
+    };
+    expect(PhotoImportItemSchema.parse(item)).toEqual(item);
+  });
+
   it('reads the model answers: a list of items, and a whole sense number', () => {
     expect(LlmPhotoReadingSchema.parse({ items: [{ text: 'gatto', hebrew: '' }] }).items[0].text).toBe('gatto');
     expect(LlmSenseMatchSchema.safeParse({ sense: 2 }).success).toBe(true);

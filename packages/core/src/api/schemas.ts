@@ -967,11 +967,14 @@ export const PhotoImportItemStatusSchema = z.enum(['pending', 'ready', 'failed']
 export const PhotoImportItemReasonSchema = z.enum(['sentence', 'no_meaning', 'not_in_language']);
 
 // One saveable gloss of a row's word: a snapshot of the lookup's card (spec
-// D15). Phase 31: a gloss, with one example per member sense.
+// D15). Phase 31: a gloss, with one example per member sense, and the gloss's
+// key when the typed form says something else, as on the card. Options stored
+// before the key reached them have none.
 export const PhotoImportOptionSchema = z.object({
   gloss_id: z.string(),
   variant_id: z.string(),
   translation: z.string(),
+  key: z.string().optional(),
   part_of_speech: z.string().optional(),
   examples: z.array(z.object({ source: z.string(), target: z.string() })).optional(),
   alternatives: z.array(z.string()).optional(),

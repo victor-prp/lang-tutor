@@ -73,7 +73,8 @@ export function reviewCounts(items: readonly ImportItemState[]): { unticked: num
   };
 }
 
-/** A lookup's saveable cards, in its order: one option per gloss (spec D15). */
+/** A lookup's saveable cards, in its order: one option per gloss, the same card,
+ *  its key included when it has one (spec D15). */
 export function optionsFrom(cards: readonly TranslationSense[]): PhotoImportOption[] {
   return cards.flatMap((card) =>
     card.gloss_id && card.variant_id
@@ -82,6 +83,7 @@ export function optionsFrom(cards: readonly TranslationSense[]): PhotoImportOpti
             gloss_id: card.gloss_id,
             variant_id: card.variant_id,
             translation: card.translation,
+            ...(card.key ? { key: card.key } : {}),
             ...(card.part_of_speech ? { part_of_speech: card.part_of_speech } : {}),
             ...(card.examples ? { examples: card.examples } : {}),
             ...(card.alternatives ? { alternatives: card.alternatives } : {}),

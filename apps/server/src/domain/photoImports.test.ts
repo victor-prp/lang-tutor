@@ -105,9 +105,9 @@ describe('optionsFrom', () => {
   });
 
   // Phase 31 (spec D15): a lookup card is one gloss, so each card is one option,
-  // with every member's example and the card's alternatives. The option reads
-  // as the card does, in the typed form; the gloss's key stays on the card.
-  it("makes one option of a gloss's card, with every example and its alternatives", () => {
+  // with every member's example, the card's alternatives, and the gloss's key
+  // when the typed form says something else: the review shows the same card.
+  it("makes one option of a gloss's card, with every example, its alternatives and its key", () => {
     expect(
       optionsFrom([
         {
@@ -128,6 +128,7 @@ describe('optionsFrom', () => {
         gloss_id: 'g1',
         variant_id: 'v1',
         translation: 'גדות',
+        key: 'גדה',
         examples: [
           { source: 'the banks', target: 'הגדות' },
           { source: 'the far banks', target: 'הגדות הרחוקות' },

@@ -171,9 +171,12 @@ function glossProgressOf(rows: ProgressRow[]): GlossProgress {
  * else the form that renders the most senses, ties broken by variant id.
  * `saved_from` names the saved form when it is not the lemma.
  *
- * Each member sense gives one example, from the same choice of form: the lemma's
- * where it renders that sense, otherwise the representative. All are shown;
- * capping them would hide exactly the meaning the learner has not met.
+ * Each member sense gives one example: the lemma form's example where it has
+ * one, otherwise the representative's, among the forms whose rendering of that
+ * sense has a whole example. A model call's example is optional, so the lemma
+ * form may render a member without one while another form has it. A member no
+ * form gives an example shows none. All are shown; capping them would hide
+ * exactly the meaning the learner has not met.
  */
 export function buildWordDetail(
   lemma: string,
@@ -194,6 +197,8 @@ export function buildWordDetail(
     perVariant.get(b.variantId)! - perVariant.get(a.variantId)! ||
     a.variantId.localeCompare(b.variantId);
   const byRank = (a: LexemeRendering, b: LexemeRendering) => a.rank - b.rank || a.senseId.localeCompare(b.senseId);
+  const hasExample = (r: LexemeRendering): r is LexemeRendering & { exampleSource: string; exampleTarget: string } =>
+    Boolean(r.exampleSource && r.exampleTarget);
 
   const byGloss = new Map<string, LexemeRendering[]>();
   for (const r of renderings) byGloss.set(r.glossId, [...(byGloss.get(r.glossId) ?? []), r]);
@@ -210,11 +215,9 @@ export function buildWordDetail(
     const bySense = new Map<string, LexemeRendering[]>();
     for (const o of options) bySense.set(o.senseId, [...(bySense.get(o.senseId) ?? []), o]);
     const examples = [...bySense.values()]
-      .map((own) => [...own].sort(better)[0])
+      .flatMap((own) => own.filter(hasExample).sort(better).slice(0, 1))
       .sort(byRank)
-      .flatMap((pick) =>
-        pick.exampleSource && pick.exampleTarget ? [{ source: pick.exampleSource, target: pick.exampleTarget }] : [],
-      );
+      .map((pick) => ({ source: pick.exampleSource, target: pick.exampleTarget }));
 
     const savedFrom =
       savedRendering && savedRendering.form.toLowerCase() !== lowered

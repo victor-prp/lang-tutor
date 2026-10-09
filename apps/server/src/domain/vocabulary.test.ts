@@ -180,6 +180,17 @@ describe('buildWordDetail by gloss (phase 31)', () => {
     expect(detail.senses[0]).not.toHaveProperty('saved_from');
   });
 
+  // Review, Task 7: saved from `fingers`, whose rendering has an example; the
+  // lemma was rendered later, by a model call whose example is optional, with
+  // none. The member keeps the example a form does have.
+  it("takes a member's example from another form when the lemma form renders it without one", () => {
+    const detail = buildWordDetail('finger', NOUN, [
+      rendering({ senseId: 's1', glossId: 'g1', variantId: 'v_fingers', form: 'fingers', translation: 'אצבעות', glossKey: 'אצבע', exampleSource: 'Ten fingers.', exampleTarget: 'עשר אצבעות.' }),
+      rendering({ senseId: 's1', glossId: 'g1', variantId: 'v_finger', form: 'finger', translation: 'אצבע' }),
+    ], [{ glossId: 'g1', variantId: 'v_fingers', addedBy: null }], []);
+    expect(detail.senses[0].examples).toEqual([{ source: 'Ten fingers.', target: 'עשר אצבעות.' }]);
+  });
+
   it('lists saved glosses first, then by part of speech, then by rank', () => {
     const detail = buildWordDetail('stream', [{ lexemeId: 'ln', partOfSpeech: 'noun' }, { lexemeId: 'lv', partOfSpeech: 'verb' }], [
       rendering({ lexemeId: 'ln', senseId: 'n1', glossId: 'g_nahal', variantId: 'vn', form: 'stream', translation: 'נחל', rank: 0 }),
