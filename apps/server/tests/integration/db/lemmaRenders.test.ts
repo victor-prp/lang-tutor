@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { sql } from 'drizzle-orm';
 
 import { RENDER_LEMMA } from '../../../src/domain/jobs';
-import { requestLemmaRenders } from '../../../src/db/lemmaRenders';
+import { requestLemmaRenders, requestLemmaRendersOnStart } from '../../../src/db/lemmaRenders';
 import { insertLexeme } from '../../support/dictRows';
 import { countJobs } from '../../support/jobs';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
@@ -39,5 +39,19 @@ describe('requestLemmaRenders, the start-up backfill (plan item 3)', () => {
     expect(await countJobs(t.db, RENDER_LEMMA)).toBe(2);
     expect(await requestLemmaRenders(t.db)).toEqual({ requested: 0 });
     expect(await countJobs(t.db, RENDER_LEMMA)).toBe(2);
+  });
+});
+
+describe('requestLemmaRendersOnStart, the CLI default path (ADR 0010)', () => {
+  // Everything before it has committed, and the image starts the server only on
+  // a zero exit: a failure comes back as one line, never as a throw.
+  it('answers as requestLemmaRenders does, and turns a failure into a one-line reason instead of a throw', async () => {
+    await savedFrom('finger', 'fingers', 'אצבעות');
+    expect(await requestLemmaRendersOnStart(t.db)).toEqual({ requested: 1 });
+
+    // A failure after the migrations and the seed have committed.
+    await t.db.execute(sql`drop table dict_lemma_renders`);
+    expect(await requestLemmaRendersOnStart(t.db)).toEqual({ failed: 'relation "dict_lemma_renders" does not exist' });
+    expect(await countJobs(t.db, RENDER_LEMMA)).toBe(1);
   });
 });

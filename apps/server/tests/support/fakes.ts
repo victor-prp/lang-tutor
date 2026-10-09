@@ -74,6 +74,7 @@ export function createFakeAppDeps(): AppDeps {
   const translations: TranslationService = {
     translate: unreachable,
     renderLemma: unreachable,
+    failLemmaRender: unreachable,
   };
   const vocabulary: VocabularyService = {
     save: unreachable,
@@ -353,6 +354,7 @@ export function createFakeDictRepo(): FakeDictRepo {
     nextEntryRank: async () => 0,
     claimLemmaRenders: async () => [],
     claimSavedLemmaRenders: async () => [],
+    releaseLemmaRender: async () => false,
     repairVariantRenderings: async (input) => {
       repo.repaired.push({ variantId: input.variantId, senseVersion: input.senseVersion });
       return { needsMerge: false };

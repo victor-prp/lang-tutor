@@ -125,7 +125,8 @@ export async function expectGeminiMatching(
   request: APIRequestContext,
   bodyRegex: string,
   payload: unknown,
-  opts: { delayMs?: number } = {},
+  /** `once`, as expectGemini's: a one-shot, consumed by the first call that matches. */
+  opts: { delayMs?: number; once?: boolean } = {},
 ): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
     data: {
@@ -136,6 +137,7 @@ export async function expectGeminiMatching(
         body: envelope(payload),
         ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
       },
+      ...(opts.once ? { times: { remainingTimes: 1, unlimited: false } } : {}),
     },
   });
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);

@@ -26,3 +26,28 @@ export async function requestLemmaRenders(db: Db): Promise<{ requested: number }
     });
   });
 }
+
+/**
+ * Phase 31. The CLI's default path's request, best-effort. It runs after the
+ * migrations and the seed have committed, and the image starts the server only
+ * when the CLI exits 0 (ADR 0010), so a failure here must not keep the server
+ * down: it comes back as a one-line reason instead of a throw. The claim it
+ * failed in rolled back with its transaction, so the next start asks again.
+ * `--render-lemmas` calls requestLemmaRenders itself, and fails loudly.
+ */
+export async function requestLemmaRendersOnStart(db: Db): Promise<{ requested: number } | { failed: string }> {
+  try {
+    return await requestLemmaRenders(db);
+  } catch (error) {
+    return { failed: reasonOf(error) };
+  }
+}
+
+/** The innermost cause's first line. Drizzle wraps a failed query in an error
+ *  whose message spans the whole statement; the driver's cause says what went
+ *  wrong, and never holds the database URL. */
+function reasonOf(error: unknown): string {
+  let cause = error;
+  while (cause instanceof Error && cause.cause instanceof Error) cause = cause.cause;
+  return (cause instanceof Error ? cause.message : String(cause)).split('\n')[0];
+}

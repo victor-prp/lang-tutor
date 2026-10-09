@@ -7,6 +7,7 @@ import { RepairWouldDropSense } from '../errors';
 import {
   dictCorrections,
   dictGlosses,
+  dictLemmaRenders,
   dictSenseGlosses,
   dictVarTranslations,
   dictVariantRenderings,
@@ -918,7 +919,14 @@ export function createDictRepo(tx: Tx) {
 
   /** Phase 31 (plan item 3). Records a render request for each pair whose lemma
    *  form is unrendered and that was never requested, and returns those: the
-   *  ones to enqueue. */
+   *  ones to enqueue.
+   *
+   *  Both claims insert in key order, (lexeme_id, user_language_code), for
+   *  lockLexemes' reason: an insert waits on another transaction's uncommitted
+   *  row with the same key, so two saves that share two unrendered lexemes and
+   *  inserted them in opposite orders would each hold one key the other waits
+   *  for, a deadlock. In one order, the second waits for the first and then
+   *  finds the rows there. */
   const claimLemmaRenders = async (pairs: LexemeLanguage[]): Promise<LexemeLanguage[]> => {
     if (pairs.length === 0) return [];
     const rows = await tx.execute<{ lexeme_id: string; user_language_code: string }>(sql`
@@ -927,12 +935,14 @@ export function createDictRepo(tx: Tx) {
       FROM (VALUES ${sql.join(pairs.map((p) => sql`(${p.lexemeId}::text, ${p.userLanguageCode}::text)`), sql`, `)})
            AS asked(lexeme_id, user_language_code)
       WHERE NOT ${LEMMA_RENDERED(sql`asked.lexeme_id`, sql`asked.user_language_code`)}
+      ORDER BY asked.lexeme_id, asked.user_language_code
       ON CONFLICT DO NOTHING
       RETURNING lexeme_id, user_language_code`);
     return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, userLanguageCode: row.user_language_code }));
   };
 
-  /** The same for every saved gloss of every enrollment: the start-up backfill. */
+  /** The same for every saved gloss of every enrollment: the start-up backfill.
+   *  In key order, as claimLemmaRenders explains. */
   const claimSavedLemmaRenders = async (): Promise<LexemeLanguage[]> => {
     const rows = await tx.execute<{ lexeme_id: string; user_language_code: string }>(sql`
       INSERT INTO dict_lemma_renders (lexeme_id, user_language_code)
@@ -940,9 +950,21 @@ export function createDictRepo(tx: Tx) {
       FROM vocabulary_entries ve
       JOIN enrollments e ON e.id = ve.enrollment_id
       WHERE NOT ${LEMMA_RENDERED(sql`ve.lexeme_id`, sql`e.source_language`)}
+      ORDER BY ve.lexeme_id, e.source_language
       ON CONFLICT DO NOTHING
       RETURNING lexeme_id, user_language_code`);
     return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, userLanguageCode: row.user_language_code }));
+  };
+
+  /** Phase 31 (spec D12). The render-lemma dead letter's write: gives back the
+   *  claim of a render whose retries are spent, so the next save or start asks
+   *  again. Whether there was a claim to give back. */
+  const releaseLemmaRender = async (input: LexemeLanguage): Promise<boolean> => {
+    const released = await tx
+      .delete(dictLemmaRenders)
+      .where(and(eq(dictLemmaRenders.lexemeId, input.lexemeId), eq(dictLemmaRenders.userLanguageCode, input.userLanguageCode)))
+      .returning({ lexemeId: dictLemmaRenders.lexemeId });
+    return released.length > 0;
   };
 
   return {
@@ -959,6 +981,7 @@ export function createDictRepo(tx: Tx) {
     nextEntryRank,
     persistCorrection,
     persistEntries,
+    releaseLemmaRender,
     repairVariantRenderings,
   };
 }

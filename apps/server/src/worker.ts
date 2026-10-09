@@ -9,6 +9,7 @@ import {
   READ_PHOTO,
   READ_PHOTO_FAILED,
   RENDER_LEMMA,
+  RENDER_LEMMA_FAILED,
 } from './domain/jobs';
 import type { GlossService } from './services/glosses';
 import type { PhotoImportService } from './services/photoImports';
@@ -86,4 +87,7 @@ export async function registerWorkers(
       for (const job of jobs) await translations.renderLemma(job.data);
     },
   );
+  await boss.work(RENDER_LEMMA_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
+    for (const job of jobs) await translations.failLemmaRender(job.data);
+  });
 }

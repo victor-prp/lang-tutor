@@ -86,6 +86,9 @@ export type MergeGlossesPayload = z.infer<typeof MergeGlossesPayloadSchema>;
 
 /** Phase 31 (spec D12). Renders one lexeme's lemma form in one learner language. */
 export const RENDER_LEMMA = 'render-lemma';
+/** Where pg-boss moves a render-lemma job once its retries are spent or it
+ *  expired. pg-boss copies the job's `data` across unchanged. */
+export const RENDER_LEMMA_FAILED = 'render-lemma-failed';
 /** A lookup's two calls and a write, each call within the lookup's 25 s. */
 export const RENDER_LEMMA_EXPIRY_SECONDS = 180;
 
@@ -104,5 +107,6 @@ export type JobPayloads = {
   [LOOK_UP_IMPORT_ITEM_FAILED]: LookUpImportItemPayload;
   [MERGE_GLOSSES]: MergeGlossesPayload;
   [RENDER_LEMMA]: RenderLemmaPayload;
+  [RENDER_LEMMA_FAILED]: RenderLemmaPayload;
 };
 export type JobName = keyof JobPayloads;

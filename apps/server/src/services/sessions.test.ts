@@ -149,6 +149,9 @@ describe('repos', () => {
     claimSavedLemmaRenders: () => {
       throw new Error('the session service must not write the dictionary tables');
     },
+    releaseLemmaRender: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
   };
 
   // Phase 31. Bound into the same transaction, and untouched by these cases:

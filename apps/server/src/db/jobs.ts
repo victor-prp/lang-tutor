@@ -15,6 +15,7 @@ import {
   READ_PHOTO_FAILED,
   RENDER_LEMMA,
   RENDER_LEMMA_EXPIRY_SECONDS,
+  RENDER_LEMMA_FAILED,
   type JobName,
 } from '../domain/jobs';
 import type { Db } from './client';
@@ -86,11 +87,19 @@ export const JOB_QUEUES: QueueDefinition[] = [
     name: MERGE_GLOSSES,
     options: { retryLimit: 2, retryBackoff: true, expireInSeconds: MERGE_GLOSSES_EXPIRY_SECONDS, deleteAfterSeconds: 86_400 },
   },
-  // Phase 31 (spec D12). No dead letter: no state to mark, and the saved form
-  // serves meanwhile.
+  // Phase 31 (spec D12). The dead letter releases the job's claim
+  // (dict_lemma_renders), so a render whose retries are spent is asked for again
+  // by the next save or start. The saved form serves meanwhile.
+  { name: RENDER_LEMMA_FAILED, options: { retryLimit: 2, deleteAfterSeconds: 86_400 } },
   {
     name: RENDER_LEMMA,
-    options: { retryLimit: 2, retryBackoff: true, expireInSeconds: RENDER_LEMMA_EXPIRY_SECONDS, deleteAfterSeconds: 86_400 },
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: RENDER_LEMMA_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
+      deadLetter: RENDER_LEMMA_FAILED,
+    },
   },
 ];
 

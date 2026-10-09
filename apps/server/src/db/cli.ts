@@ -5,7 +5,7 @@ import { loadConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, listLaneDatabases } from './lanes';
-import { requestLemmaRenders } from './lemmaRenders';
+import { requestLemmaRenders, requestLemmaRendersOnStart } from './lemmaRenders';
 import { runMigrations } from './migrate';
 import { createAuthRepo } from '../repo/auth';
 import { recomputeProgress } from './progressRecompute';
@@ -272,8 +272,11 @@ async function main(): Promise<void> {
 
     // Phase 31 (plan item 3). The words saved before glosses existed get their
     // lemma form rendered once: production runs only this command (ADR 0010).
-    const { requested } = await requestLemmaRenders(db);
-    if (requested > 0) console.log(`asked for ${requested} lemma renders`);
+    // Best-effort: everything above has committed, and a throw here would keep
+    // the image from starting the server. A failure is one line, with no address.
+    const lemmas = await requestLemmaRendersOnStart(db);
+    if ('failed' in lemmas) console.warn(`lemma renders not requested, the next start asks again: ${lemmas.failed}`);
+    else if (lemmas.requested > 0) console.log(`asked for ${lemmas.requested} lemma renders`);
   } finally {
     await close();
   }

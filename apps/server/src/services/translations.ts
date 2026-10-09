@@ -864,8 +864,14 @@ export function createTranslationService({
         if (path === 'lookup') {
           const response = await lookup({ text: state.lexeme.lemma, from: state.lexeme.languageCode as LanguageCode, to });
           if (response.correction) return skip('corrected');
-          // A failed write still answers 200 (dict_persist_failed): retry it.
-          if (response.senses.length > 0 && response.senses.every((card) => card.gloss_id === undefined)) {
+          // A failed write still answers 200 (dict_persist_failed): retry it. A
+          // sentence is never written, by design, so it is no failure: the
+          // no_entry check below skips it.
+          if (
+            response.kind !== 'sentence' &&
+            response.senses.length > 0 &&
+            response.senses.every((card) => card.gloss_id === undefined)
+          ) {
             throw new Error('the lemma lookup answered without writing');
           }
         } else {
@@ -884,6 +890,19 @@ export function createTranslationService({
       const rendered = await transaction((repos) => repos.dict.hasLemmaRendering({ lexemeId, userLanguageCode: to }));
       if (!rendered) return skip('no_entry');
       logger.info({ event: 'lemma_rendered', lexeme_id: lexemeId, user_language_code: to, path });
+    },
+
+    /**
+     * Phase 31 (spec D12). The render-lemma job's dead letter: its retries are
+     * spent, or it expired. The claim is released, so the next save of the word
+     * or the next start asks again: a provider outage during a deploy's
+     * backfill must not lose every render it touched. A skipped render is no
+     * failure, never reaches here, and keeps its claim.
+     */
+    failLemmaRender: async (data: unknown): Promise<void> => {
+      const { lexeme_id: lexemeId, user_language_code: userLanguageCode } = RenderLemmaPayloadSchema.parse(data);
+      const released = await transaction((repos) => repos.dict.releaseLemmaRender({ lexemeId, userLanguageCode }));
+      logger.info({ event: 'lemma_render_released', lexeme_id: lexemeId, user_language_code: userLanguageCode, released });
     },
   };
 }
