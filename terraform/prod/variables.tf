@@ -54,9 +54,9 @@ variable "publicly_accessible" {
 }
 
 variable "attach_domain" {
-  description = "Flipped to true by a commit once the certificate is ISSUED (runbook step 11)."
+  description = "True since the certificate was ISSUED (runbook step 11). With it, public_url is the domain, so the release checks /health there."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "image_tag" {
