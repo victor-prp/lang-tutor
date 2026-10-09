@@ -38,8 +38,8 @@ beforeAll(async () => {
        select 'ps' || g, 'pl' || g, 'only' from generate_series(1, 20000) g`,
     `insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
        select 'pv' || g, 'pl' || g, 'ru', 'слово' || g, 'word', 0 from generate_series(1, 20000) g`,
-    `insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
-       select 'pv' || g, 'ps' || g, 'he', 'מילה' || g, 0 from generate_series(1, 20000) g`,
+    `insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, gloss, rank)
+       select 'pv' || g, 'ps' || g, 'he', 'מילה' || g, 'מילה' || g, 0 from generate_series(1, 20000) g`,
     `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
        select 'pe' || e, 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu' || e
        from generate_series(2, 1000) e, generate_series(1, 200) s`,

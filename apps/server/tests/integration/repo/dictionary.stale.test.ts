@@ -109,8 +109,10 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
         senseVersion,
         senses: [
           // The NEWLY learned sense placed FIRST — which is the whole point.
-          { senseId: idOf('cookery_writer'), rank: 0, translation: 'NEW-FIRST',  exampleSource: null, exampleTarget: null },
-          { senseId: idOf('kitchen_worker'), rank: 1, translation: 'NEW-SECOND', exampleSource: null, exampleTarget: null },
+          { senseId: idOf('cookery_writer'), rank: 0, translation: 'NEW-FIRST',  exampleSource: null, exampleTarget: null,
+            alternatives: [], gloss: 'NEW-FIRST',  glossAlternatives: [], definition: null },
+          { senseId: idOf('kitchen_worker'), rank: 1, translation: 'NEW-SECOND', exampleSource: null, exampleTarget: null,
+            alternatives: [], gloss: 'NEW-SECOND', glossAlternatives: [], definition: null },
         ],
       }));
 
@@ -156,6 +158,7 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
         senseVersion,
         senses: stored.map((sense, rank) => ({
           senseId: sense.senseId, rank, translation: `R-${rank}`,
+          alternatives: [], gloss: `R-${rank}`, glossAlternatives: [], definition: null,
           exampleSource: null, exampleTarget: null,
         })),
       }));
@@ -182,6 +185,7 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
         senseVersion,
         senses: stored.map((sense, rank) => ({
           senseId: sense.senseId, rank, translation: `R-${rank}`,
+          alternatives: [], gloss: `R-${rank}`, glossAlternatives: [], definition: null,
           exampleSource: null, exampleTarget: null,
         })),
       }));
@@ -236,8 +240,10 @@ describe('a repair may not drop a sense the form already renders', () => {
         senseVersion,
         senses: [
           { senseId: idOf('kitchen_worker'), rank: 0, translation: 'R-0',
+            alternatives: [], gloss: 'R-0', glossAlternatives: [], definition: null,
             exampleSource: null, exampleTarget: null },
           { senseId: idOf('ships_cook'), rank: 1, translation: 'R-1',
+            alternatives: [], gloss: 'R-1', glossAlternatives: [], definition: null,
             exampleSource: null, exampleTarget: null },
         ],
       }));
@@ -274,6 +280,7 @@ describe('a repair may not drop a sense the form already renders', () => {
         senseVersion,
         senses: stored.map((sense, rank) => ({
           senseId: sense.senseId, rank, translation: `R-${rank}`,
+          alternatives: [], gloss: `R-${rank}`, glossAlternatives: [], definition: null,
           exampleSource: null, exampleTarget: null,
         })),
       }));

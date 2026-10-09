@@ -34,6 +34,10 @@ export type SeedTranslation = {
   senseCode: string;
   rank: number;
   translation: string;
+  /** Phase 31. The citation form; the translation when omitted. */
+  gloss?: string;
+  /** Phase 31. The rendering's alternatives; none when omitted. */
+  alternatives?: string[];
   exampleSource: string | null;
   exampleTarget: string | null;
 };
@@ -109,6 +113,8 @@ export async function insertLexeme(
           userLanguageCode: spec.userLanguageCode,
           rank: translation.rank,
           translation: translation.translation,
+          gloss: translation.gloss ?? translation.translation,
+          alternatives: translation.alternatives ?? [],
           exampleSource: translation.exampleSource,
           exampleTarget: translation.exampleTarget,
         })),

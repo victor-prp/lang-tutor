@@ -218,13 +218,23 @@ export const dictSenses = pgTable(
     // load-bearing, and the unique key below is why: it is the only handle a
     // later form's translations have on senses this lexeme already holds.
     senseCode: text('sense_code').notNull(),
+    // Phase 31 (spec D9). One short phrase in the headword's language: the handle
+    // a learner language with no renderings yet reconciles against. Written by
+    // the call that names the sense; null for a sense written before the phase
+    // until a lookup touches it. Never shown to a learner.
+    definition: text('definition'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   // The table is pure identity now. `part_of_speech` went up to the lexeme, and
   // `rank` and `example_source` went down to the translation: a sense has no
   // order and no example of its own, only a position and a wording within some
   // given form's answer.
-  (t) => [unique('dict_senses_lexeme_code_key').on(t.lexemeId, t.senseCode)],
+  (t) => [
+    unique('dict_senses_lexeme_code_key').on(t.lexemeId, t.senseCode),
+    // Phase 31. The target of dict_sense_glosses' composite foreign key, which is
+    // what makes Postgres hold "a sense and its gloss share a lexeme".
+    unique('dict_senses_id_lexeme_key').on(t.id, t.lexemeId),
+  ],
 );
 
 export const dictVarTranslations = pgTable(
@@ -241,6 +251,14 @@ export const dictVarTranslations = pgTable(
       .references(() => dictSenses.id, { onDelete: 'cascade' }),
     userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
     translation: text('translation').notNull(),
+    // Phase 31 (spec D6). The citation form the model gave this rendering's
+    // sense, uninflected: `fingers` renders אצבעות and records אצבע here. A
+    // session asks this form only while it agrees with its gloss's key (D12).
+    gloss: text('gloss').notNull(),
+    // Phase 31 (spec D5). The sense's other target words in this form's
+    // inflection: the lookup card's "also …", and right answers to a meaning
+    // card built on this form (D13). Never more than five (tidyGlossList).
+    alternatives: text('alternatives').array().notNull().default(sql`'{}'::text[]`),
     definitionNotes: text('definition_notes'),
     // Both halves of the example live here, because an example belongs to the
     // form that was typed: `booked` shows "I booked a table", not "I want to
@@ -269,6 +287,88 @@ export const dictVarTranslations = pgTable(
     // dictionary's largest table. findSensesByLexeme's join on tr.sense_id
     // benefits too.
     index('dict_var_translations_sense_language_idx').on(t.senseId, t.userLanguageCode),
+  ],
+);
+
+/**
+ * Phase 31 (spec D1, D2, D7). A gloss: one target word of one lexeme in one
+ * learner language, and what a learner saves, levels and practises. Its senses
+ * are in dict_sense_glosses; a sense has one gloss per language, so `mouse`'s two
+ * senses are one gloss for Hebrew and would be two for Italian.
+ *
+ * `key` is the target word's citation form as the model wrote it. Two live
+ * glosses of one lexeme and language never share a normalised key
+ * (dict_glosses_live_key, on gloss_key(), the SQL twin of normaliseGloss).
+ * `alternatives` are the sense's other target words, in citation form.
+ *
+ * `merged_into` is set when a merge folded this gloss into another (D7). The row
+ * stays, so an id still on a learner's screen or in a photo import's snapshot
+ * resolves to its survivor, and every read of live glosses skips it.
+ */
+export const dictGlosses = pgTable(
+  'dict_glosses',
+  {
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    lexemeId: text('lexeme_id').notNull(),
+    userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
+    key: text('key').notNull(),
+    alternatives: text('alternatives').array().notNull().default(sql`'{}'::text[]`),
+    mergedInto: text('merged_into'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'dict_glosses_lexeme_fk', columns: [t.lexemeId], foreignColumns: [dictLexemes.id] }).onDelete('cascade'),
+    foreignKey({ name: 'dict_glosses_merged_into_fk', columns: [t.mergedInto], foreignColumns: [t.id] }),
+    // The target of the composite keys that tie a membership and an entry to
+    // their gloss's lexeme: phase 21's dict_lexemes_id_lemma_key trick.
+    unique('dict_glosses_id_lexeme_key').on(t.id, t.lexemeId),
+    uniqueIndex('dict_glosses_live_key')
+      .on(t.lexemeId, t.userLanguageCode, sql`gloss_key(${t.key})`)
+      .where(sql`${t.mergedInto} is null`),
+    // Spec D18: a session's siblings are the live glosses of other lexemes with
+    // one key in one language. Without it that read scans the table.
+    index('dict_glosses_language_key_idx')
+      .on(t.userLanguageCode, sql`gloss_key(${t.key})`)
+      .where(sql`${t.mergedInto} is null`),
+    check('dict_glosses_not_self', sql`${t.mergedInto} is null or ${t.mergedInto} <> ${t.id}`),
+  ],
+);
+
+/**
+ * Phase 31 (spec D1, D6, D8). Which gloss a sense belongs to in one learner
+ * language. Written by the lookup and the repair in the transaction of the
+ * rendering it comes with, and before that rendering (D8). The first rendering in
+ * a language decides, and only a merge moves a membership (D6, D7).
+ *
+ * `lexeme_id` is here so both composite keys can hold "a sense and its gloss
+ * share a lexeme": a noun's sense never joins a verb's gloss.
+ */
+export const dictSenseGlosses = pgTable(
+  'dict_sense_glosses',
+  {
+    senseId: text('sense_id').notNull(),
+    lexemeId: text('lexeme_id').notNull(),
+    userLanguageCode: varchar('user_language_code', { length: 10 }).notNull(),
+    glossId: text('gloss_id').notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'dict_sense_glosses_pkey', columns: [t.senseId, t.userLanguageCode] }),
+    foreignKey({
+      name: 'dict_sense_glosses_sense_fk',
+      columns: [t.senseId, t.lexemeId],
+      foreignColumns: [dictSenses.id, dictSenses.lexemeId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'dict_sense_glosses_gloss_fk',
+      columns: [t.glossId, t.lexemeId],
+      foreignColumns: [dictGlosses.id, dictGlosses.lexemeId],
+    }).onDelete('cascade'),
+    // A gloss's members, for a session's renderings (D12) and a merge.
+    index('dict_sense_glosses_gloss_idx').on(t.glossId),
+    // A lexeme's memberships in one language, for the write's gloss step.
+    index('dict_sense_glosses_lexeme_idx').on(t.lexemeId, t.userLanguageCode),
   ],
 );
 

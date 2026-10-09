@@ -24,6 +24,7 @@ import {
   kindForForm,
   mergeEntries,
   normalizeForm,
+  renderingOf,
   rowsToSenses,
   type SenseRow,
   type StaleLexeme,
@@ -231,10 +232,8 @@ async function repairForm({
           senseId: idByCode.get(rendering.sense_code)!,
           // Re-sequenced from 0 and contiguous, never the model's index:
           // UNIQUE(variant_id, user_language_code, rank) rejects a hole.
-          rank: senses.length,
-          translation: rendering.translation,
-          exampleSource: rendering.example?.source ?? null,
-          exampleTarget: rendering.example?.target ?? null,
+          // The spread restates the narrowing the null filter above made.
+          ...renderingOf({ ...rendering, translation: rendering.translation }, senses.length),
         });
       }
 

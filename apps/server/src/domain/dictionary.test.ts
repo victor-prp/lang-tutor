@@ -219,6 +219,10 @@ describe('entriesToRows', () => {
       rank: 0,
       senseCode: 'printed_book',
       translation: 'ספר',
+      alternatives: [],
+      gloss: 'ספר',
+      glossAlternatives: [],
+      definition: null,
       exampleSource: 'I read a book.',
       exampleTarget: 'קראתי ספר.',
     });
@@ -226,6 +230,10 @@ describe('entriesToRows', () => {
       rank: 1,
       senseCode: 'volume',
       translation: 'כרך',
+      alternatives: [],
+      gloss: 'כרך',
+      glossAlternatives: [],
+      definition: null,
       exampleSource: null,
       exampleTarget: null,
     });
@@ -430,5 +438,24 @@ describe('mergeEntries and Russian stress', () => {
     expect(merged).toHaveLength(1);
     expect(merged[0].lemma).toBe('молоко');
     expect(merged[0].senses).toHaveLength(2);
+  });
+});
+
+describe('entriesToRows (phase 31)', () => {
+  it('writes one clean translation and keeps the rest of a list as alternatives', () => {
+    const [row] = entriesToRows([
+      {
+        lemma: 'combination',
+        part_of_speech: 'noun',
+        senses: [
+          { translation: 'קומבינציה, צירוף', sense_code: 'lock_code' },
+          { translation: 'שילוב (של דברים)', sense_code: 'mixture' },
+        ],
+      },
+    ]);
+    expect(row.senses.map(({ translation, alternatives, gloss }) => ({ translation, alternatives, gloss }))).toEqual([
+      { translation: 'קומבינציה', alternatives: ['צירוף'], gloss: 'קומבינציה' },
+      { translation: 'שילוב', alternatives: [], gloss: 'שילוב' },
+    ]);
   });
 });

@@ -5,6 +5,7 @@ import { DIMENSIONS } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
 import { createDb } from '../../../src/db/client';
+import { splitTranslation } from '../../../src/domain/glosses';
 import { nextSource } from '../../../src/domain/session';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { runMigrations, runMigrationsFrom } from '../../../src/db/migrate';
@@ -696,5 +697,111 @@ describe('0021_enrollment_grants', () => {
       { enrollment_id: 'e_1', added_by_user_id: 'u_1' },
       { enrollment_id: 'e_2', added_by_user_id: 'u_2' },
     ]);
+  });
+});
+
+// Lane 0's shapes (Task 1's unit test holds their expected values): every comma
+// list, every parenthetical, a sample of compounds, and the edge cases.
+const TRANSLATION_SHAPES = [
+  'להימנע מ-, להתחמק מ-', 'שפל, נחות', 'לבסס, להשתית', 'בסיס, יסוד', 'מאוד, נורא', 'ארור, מקולל',
+  'עקוב מדם, אלים', 'מדמם, מלא דם', 'קומבינציה, צירוף', 'שילוב, צירוף', 'לשלב, לאחד', 'לשלב, להכיל',
+  'להלחין, לחבר', 'להרכיב, להוות', 'לפתח, לבנות', 'לפתח, לרכוש', 'לפתח, ליצור', 'רם, חזק', 'ראשי, עיקרי',
+  'צינור ראשי, קו ראשי', 'להורות, לפקוד', 'להשתפר, להתאושש', 'לקלוט, ללמוד', 'ראוותנות, מהומה, בלבול',
+  'לבלבל, להרשים בראוותנות', 'לזנק, לעלות בחדות', 'לקבע במסמרים, לתקוע יתד', 'לסרב, לדחות',
+  'להנמיך, להפחית', 'טוב, בסדר', 'בסיס (צבאי)', 'בסיס (כימיה)', 'אח (במסדר דתי)', 'להנחית (כדור בווֹליבול)',
+  'כבד, עשיר (בטעמים)', 'עמוק, עשיר (בגוון/צליל)', 'לסמם (משקה), להוסיף חומר (למשקה)', 'אח (חבר, רע)',
+  'בית קפה', 'בלתי אפשרי', 'to deposit', 'ha scritto', 'א, ב / ג', 'רם, רָם, חזק, חזק', '(הערה)',
+];
+
+describe('0022_glosses', () => {
+  it('cleans every rendering and gives every rendered sense one gloss per learner language', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await db.execute(sql`
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values
+        ('l_mouse', 'en', 'mouse', 'noun'), ('l_car', 'en', 'car', 'noun'), ('l_finger', 'en', 'finger', 'noun'),
+        ('l_base', 'en', 'base', 'noun'), ('l_comb', 'en', 'combination', 'noun'), ('l_window', 'he', 'חלון', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values
+        ('s_rodent', 'l_mouse', 'rodent'), ('s_device', 'l_mouse', 'device'), ('s_vehicle', 'l_car', 'vehicle'),
+        ('s_body', 'l_finger', 'body_part'), ('s_military', 'l_base', 'military'), ('s_chemistry', 'l_base', 'chemistry'),
+        ('s_lock', 'l_comb', 'lock_code'), ('s_mix', 'l_comb', 'mixture'), ('s_window', 'l_window', 'opening');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank) values
+        ('v_mouse', 'l_mouse', 'en', 'mouse', 'word', 0), ('v_car', 'l_car', 'en', 'car', 'word', 0),
+        ('v_cars', 'l_car', 'en', 'cars', 'word', 0), ('v_fingers', 'l_finger', 'en', 'fingers', 'word', 0),
+        ('v_base', 'l_base', 'en', 'base', 'word', 0), ('v_comb', 'l_comb', 'en', 'combination', 'word', 0),
+        ('v_window', 'l_window', 'he', 'חלון', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank) values
+        ('v_mouse', 's_rodent', 'he', 'עכבר', 0), ('v_mouse', 's_device', 'he', 'עַכְבָּר', 1),
+        ('v_car', 's_vehicle', 'he', 'מכונית, רכב', 0), ('v_cars', 's_vehicle', 'he', 'מכוניות, רכבים', 0),
+        ('v_fingers', 's_body', 'he', 'אצבעות', 0),
+        ('v_base', 's_military', 'he', 'בסיס (צבאי)', 0), ('v_base', 's_chemistry', 'he', 'בסיס (כימיה)', 1),
+        ('v_comb', 's_lock', 'he', 'קומבינציה, צירוף', 0), ('v_comb', 's_mix', 'he', 'שילוב, צירוף', 1),
+        ('v_window', 's_window', 'en', 'window', 0), ('v_window', 's_window', 'ru', 'окно', 0);
+    `);
+
+    await runMigrations(db);
+
+    const renderings = await db.execute<{ variant_id: string; sense_id: string; translation: string; gloss: string; alternatives: string[] }>(sql`
+      select variant_id, sense_id, translation, gloss, alternatives from dict_var_translations
+      where user_language_code = 'he' and variant_id in ('v_car', 'v_cars', 'v_base') order by variant_id, sense_id`);
+    expect(renderings.rows).toEqual([
+      { variant_id: 'v_base', sense_id: 's_chemistry', translation: 'בסיס', gloss: 'בסיס', alternatives: [] },
+      { variant_id: 'v_base', sense_id: 's_military', translation: 'בסיס', gloss: 'בסיס', alternatives: [] },
+      { variant_id: 'v_car', sense_id: 's_vehicle', translation: 'מכונית', gloss: 'מכונית', alternatives: ['רכב'] },
+      { variant_id: 'v_cars', sense_id: 's_vehicle', translation: 'מכוניות', gloss: 'מכוניות', alternatives: ['רכבים'] },
+    ]);
+
+    const glosses = await db.execute<{ lemma: string; lang: string; key: string; alternatives: string[]; members: string[] }>(sql`
+      select l.lemma, g.user_language_code as lang, g.key, g.alternatives,
+             array_agg(m.sense_id order by m.sense_id) as members
+      from dict_glosses g join dict_lexemes l on l.id = g.lexeme_id
+      join dict_sense_glosses m on m.gloss_id = g.id
+      group by l.lemma, g.user_language_code, g.key, g.alternatives
+      order by l.lemma, g.user_language_code, g.key`);
+    expect(glosses.rows).toEqual([
+      // The parenthetical was the only difference: one target word, one gloss (D3).
+      { lemma: 'base', lang: 'he', key: 'בסיס', alternatives: [], members: ['s_chemistry', 's_military'] },
+      // Keyed from the lemma form, whose alternative it keeps; `cars`' plural is not a citation form.
+      { lemma: 'car', lang: 'he', key: 'מכונית', alternatives: ['רכב'], members: ['s_vehicle'] },
+      { lemma: 'combination', lang: 'he', key: 'קומבינציה', alternatives: ['צירוף'], members: ['s_lock'] },
+      { lemma: 'combination', lang: 'he', key: 'שילוב', alternatives: ['צירוף'], members: ['s_mix'] },
+      // Only an inflected form was ever rendered: the key is inflected until D6 renames it.
+      { lemma: 'finger', lang: 'he', key: 'אצבעות', alternatives: [], members: ['s_body'] },
+      // Spelled as the lowest-ranked member wrote it.
+      { lemma: 'mouse', lang: 'he', key: 'עכבר', alternatives: [], members: ['s_device', 's_rodent'] },
+      // One sense, two learner languages, two glosses (D1).
+      { lemma: 'חלון', lang: 'en', key: 'window', alternatives: [], members: ['s_window'] },
+      { lemma: 'חלון', lang: 'ru', key: 'окно', alternatives: [], members: ['s_window'] },
+    ]);
+
+    const counts = await db.execute<{ rendered: number; memberships: number }>(sql`
+      select (select count(distinct (sense_id, user_language_code)) from dict_var_translations)::int as rendered,
+             (select count(*) from dict_sense_glosses)::int as memberships`);
+    expect(counts.rows[0].memberships).toBe(counts.rows[0].rendered);
+  });
+
+  it("cleans lane 0's translation shapes exactly as splitTranslation does", async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0021_enrollment_grants'));
+    await db.execute(sql`
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l_shapes', 'en', 'shapes', 'noun');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v_shapes', 'l_shapes', 'en', 'shapes', 'word', 0);
+    `);
+    for (const [rank, shape] of TRANSLATION_SHAPES.entries()) {
+      await db.execute(sql`insert into dict_senses (id, lexeme_id, sense_code) values (${`s${rank}`}, 'l_shapes', ${`code_${rank}`})`);
+      await db.execute(sql`insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v_shapes', ${`s${rank}`}, 'he', ${shape}, ${rank})`);
+    }
+
+    await runMigrations(db);
+
+    const rows = await db.execute<{ sense_id: string; translation: string; alternatives: string[] }>(
+      sql`select sense_id, translation, alternatives from dict_var_translations where variant_id = 'v_shapes'`,
+    );
+    for (const [rank, shape] of TRANSLATION_SHAPES.entries()) {
+      const row = rows.rows.find((r) => r.sense_id === `s${rank}`)!;
+      expect({ shape, translation: row.translation, alternatives: row.alternatives }).toEqual({ shape, ...splitTranslation(shape) });
+    }
   });
 });

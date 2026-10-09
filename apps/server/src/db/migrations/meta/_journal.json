@@ -155,6 +155,13 @@
       "when": 1791407185686,
       "tag": "0021_enrollment_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791554594601,
+      "tag": "0022_glosses",
+      "breakpoints": true
     }
   ]
 }

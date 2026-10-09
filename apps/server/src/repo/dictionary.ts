@@ -16,6 +16,7 @@ import {
   rowsToSenses,
   staleLexemes,
   type EntryRows,
+  type Rendering,
   type SenseRow,
   type StaleLexeme,
 } from '../domain/dictionary';
@@ -56,14 +57,8 @@ export type CorrectionRow = {
   alternatives: string[];
 };
 
-/** One rendering a repair produces. Exported beside `PersistedEntry`. */
-export type RepairedRendering = {
-  senseId: string;
-  rank: number;
-  translation: string;
-  exampleSource: string | null;
-  exampleTarget: string | null;
-};
+/** One rendering a repair produces: what the lookup writes, by sense id. */
+export type RepairedRendering = Rendering & { senseId: string };
 
 export function createDictRepo(tx: Tx) {
   /**
@@ -546,6 +541,8 @@ export function createDictRepo(tx: Tx) {
             // returned for it — `entriesToRows` set it from the array position.
             rank: sense.rank,
             translation: sense.translation,
+            gloss: sense.gloss,
+            alternatives: sense.alternatives,
             exampleSource: sense.exampleSource,
             exampleTarget: sense.exampleTarget,
           })),
@@ -688,6 +685,8 @@ export function createDictRepo(tx: Tx) {
         userLanguageCode: input.userLanguageCode,
         rank: sense.rank,
         translation: sense.translation,
+        gloss: sense.gloss,
+        alternatives: sense.alternatives,
         exampleSource: sense.exampleSource,
         exampleTarget: sense.exampleTarget,
       })),

@@ -6,6 +6,7 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { splitTranslation } from './glosses';
 import { stripStress } from './languages';
 
 /**
@@ -30,7 +31,10 @@ const RESPONSE_SENSE_CAP = 5;
  * than on serialize.
  */
 function toResponseSense(sense: LlmSense, partOfSpeech: PartOfSpeech): TranslationSense {
-  const result: TranslationSense = { translation: sense.translation, part_of_speech: partOfSpeech };
+  const result: TranslationSense = {
+    translation: splitTranslation(sense.translation).translation,
+    part_of_speech: partOfSpeech,
+  };
   if (sense.example) result.example = { source: sense.example.source, target: sense.example.target };
   return result;
 }
@@ -170,10 +174,46 @@ export function kindForForm(rows: SenseRow[]): TranslationKind {
 export type SenseToWrite = {
   rank: number;
   senseCode: string;
+  /** Phase 31. One translation, never a list (splitTranslation). */
   translation: string;
+  /** Phase 31 (spec D5). The sense's other target words in this form's inflection. */
+  alternatives: string[];
+  /** Phase 31 (spec D6). The translation's citation form: the translation itself
+   *  until the prompt asks the model for one. */
+  gloss: string;
+  /** Phase 31 (spec D5). The alternatives' citation forms, for the gloss. */
+  glossAlternatives: string[];
+  /** Phase 31 (spec D9). */
+  definition: string | null;
   exampleSource: string | null;
   exampleTarget: string | null;
 };
+
+/** One rendering as every writer stores it; the lookup adds the sense code. */
+export type Rendering = Omit<SenseToWrite, 'senseCode'>;
+
+/**
+ * Phase 31. A model's sense as every writer stores it: one clean translation and
+ * the rest of any list as alternatives, so a model that ignores "one
+ * translation" still never puts a list on a card (Review Focus 5). The lookup
+ * and the repair both call it.
+ */
+export function renderingOf(
+  sense: { translation: string; example?: { source: string; target: string } },
+  rank: number,
+): Rendering {
+  const { translation, alternatives } = splitTranslation(sense.translation);
+  return {
+    rank,
+    translation,
+    alternatives,
+    gloss: translation,
+    glossAlternatives: [],
+    definition: null,
+    exampleSource: sense.example?.source ?? null,
+    exampleTarget: sense.example?.target ?? null,
+  };
+}
 
 export type EntryRows = {
   lemma: string;
@@ -196,13 +236,7 @@ export function entriesToRows(entries: LlmEntry[]): EntryRows[] {
     lemma: entry.lemma,
     partOfSpeech: entry.part_of_speech,
     entryRank,
-    senses: entry.senses.map((sense, rank) => ({
-      rank,
-      senseCode: sense.sense_code,
-      translation: sense.translation,
-      exampleSource: sense.example?.source ?? null,
-      exampleTarget: sense.example?.target ?? null,
-    })),
+    senses: entry.senses.map((sense, rank) => ({ senseCode: sense.sense_code, ...renderingOf(sense, rank) })),
   }));
 }
 
