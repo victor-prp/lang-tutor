@@ -5,10 +5,10 @@
 #
 #   - the image is built from the tag, so build-push checks out the default ref;
 #   - Terraform is applied from master, so the apply job checks out master. A
-#     rollback runs this workflow FROM an old tag; applying that tag's infra/
+#     rollback runs this workflow FROM an old tag; applying that tag's terraform/
 #     would undo every infrastructure change merged since (the domain binding
 #     first of all) and take the site down. The guard already requires the tag
-#     to be on master, so master's infra is never older than the tag's.
+#     to be on master, so master's terraform/ is never older than the tag's.
 
 set -u
 

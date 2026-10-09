@@ -10,7 +10,7 @@
 .vscode
 drafts
 docs
-infra
+terraform
 data
 test-results
 playwright-report

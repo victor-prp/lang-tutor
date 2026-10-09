@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# The one way Terraform runs against the two stacks under infra/ (phase 30, spec
+# The one way Terraform runs against the two stacks under terraform/ (phase 30, spec
 # D7, D10): from the laptop, from CI's plan job, and from the release workflow.
 #
 #   scripts/infra.sh <bootstrap|prod> <init|plan|apply|output> [terraform args...]
@@ -37,7 +37,7 @@ fi
 
 TERRAFORM="${TERRAFORM:-terraform}"
 AWS="${AWS:-aws}"
-dir="infra/$stack"
+dir="terraform/$stack"
 
 # The tag of the image Lightsail's current deployment runs, or nothing when
 # there is no service or no deployment yet. The service name is infra/prod's

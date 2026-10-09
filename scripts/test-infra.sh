@@ -66,25 +66,25 @@ export TF_STATE_BUCKET=test-bucket
 printf '123456789012.dkr.ecr.eu-central-1.amazonaws.com/wordspal:v2026.10.01\n' > "$STUB_LIVE"
 run prod apply -auto-approve
 expect_eq "an apply from the laptop keeps the tag Lightsail is serving, not the state's" \
-  "-chdir=infra/prod apply -input=false -var image_tag=v2026.10.01 -auto-approve" "$(last_call)"
+  "-chdir=terraform/prod apply -input=false -var image_tag=v2026.10.01 -auto-approve" "$(last_call)"
 
 IMAGE_TAG=v2026.10.08 run prod apply -auto-approve
 expect_eq "the release's IMAGE_TAG wins over what Lightsail serves" \
-  "-chdir=infra/prod apply -input=false -var image_tag=v2026.10.08 -auto-approve" "$(last_call)"
+  "-chdir=terraform/prod apply -input=false -var image_tag=v2026.10.08 -auto-approve" "$(last_call)"
 
 IMAGE_TAG= run prod plan
 expect_eq "an empty IMAGE_TAG is ignored, not deployed" \
-  "-chdir=infra/prod plan -input=false -var image_tag=v2026.10.01" "$(last_call)"
+  "-chdir=terraform/prod plan -input=false -var image_tag=v2026.10.01" "$(last_call)"
 
 printf 'None\n' > "$STUB_LIVE"
 run prod plan
 expect_eq "a service with no deployment yet means no deployment" \
-  "-chdir=infra/prod plan -input=false -var image_tag=" "$(last_call)"
+  "-chdir=terraform/prod plan -input=false -var image_tag=" "$(last_call)"
 
 rm -f "$STUB_LIVE"
 run prod plan
 expect_eq "no service yet means no deployment" \
-  "-chdir=infra/prod plan -input=false -var image_tag=" "$(last_call)"
+  "-chdir=terraform/prod plan -input=false -var image_tag=" "$(last_call)"
 
 printf 'An error occurred (ExpiredToken) when calling the GetContainerServices operation\n' > "$STUB_AWS_ERROR"
 checks=$((checks + 1))
@@ -99,15 +99,15 @@ rm -f "$STUB_AWS_ERROR"
 
 run bootstrap plan -lock=false
 expect_eq "bootstrap takes no image tag" \
-  "-chdir=infra/bootstrap plan -input=false -lock=false" "$(last_call)"
+  "-chdir=terraform/bootstrap plan -input=false -lock=false" "$(last_call)"
 
 run prod plan
 expect_eq "init names the bucket from TF_STATE_BUCKET" \
-  "-chdir=infra/prod init -input=false -reconfigure -backend-config=bucket=test-bucket" "$(head -1 "$STUB_LOG")"
+  "-chdir=terraform/prod init -input=false -reconfigure -backend-config=bucket=test-bucket" "$(head -1 "$STUB_LOG")"
 
 run prod output -raw public_url
 expect_eq "output passes its arguments through" \
-  "-chdir=infra/prod output -raw public_url" "$(last_call)"
+  "-chdir=terraform/prod output -raw public_url" "$(last_call)"
 
 checks=$((checks + 1))
 if (cd "$REPO" && TF_STATE_BUCKET= bash scripts/infra.sh prod plan) > /dev/null 2>&1; then

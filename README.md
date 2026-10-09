@@ -126,7 +126,7 @@ enforced.
 | [0006](docs/adr/adr-0006-lanes.md) | Every checkout is a self-contained lane — its ports, databases and namespaces all derive from one slot and branch name in `scripts/lane-env.sh` |
 | [0007](docs/adr/adr-0007-background-jobs.md) | Background jobs run on pg-boss, enqueued only inside a transaction — `repo/jobs.ts` is the only enqueue, `worker.ts` the only place handlers are registered |
 | [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, an asserted actor header; `repo/grants.ts` is the only reader of the table |
-| [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `infra/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
+| [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 
 All nine are enforced by `npm run lint:arch` (17 + 7 + 6 + 8 + 3 + 6 + 4 + 3 + 3 = 57 checks, grep only, no deps,
 no database) — see *Checks* below.
@@ -550,7 +550,7 @@ eight by hand, which matters for the one job whose result can change without a c
 | `test-integration` | `npm run db:up` | `npm run db:check -w apps/server` (migration-history consistency), then `npm run db:generate -w apps/server` followed by a `git status` check that fails if it produced any change (schema↔migrations drift), then `npm run test:integration` | 1-2 min |
 | `test-e2e` | `npm run db:up` | `npm run e2e` — the Playwright suite described below | 4-5 min |
 | `build-image` | `npm run db:up` | `npm run e2e:image` — the production image, built for this job's own address, driven by the whole Playwright suite plus the two image-only specs | 10-15 min |
-| `terraform-plan` | none | `terraform fmt -check` and `validate` on both stacks under `infra/`; then, once the `AWS_PLAN_ROLE_ARN` variable exists, a read-only `plan` of both through the plan role | 1 min |
+| `terraform-plan` | none | `terraform fmt -check` and `validate` on both stacks under `terraform/`; then, once the `AWS_PLAN_ROLE_ARN` variable exists, a read-only `plan` of both through the plan role | 1 min |
 | `test-eval` | **none, and no MockServer either** | `npm run eval` — the golden set against the real Gemini API, keyed by the `GEMINI_API_KEY` secret and the `GEMINI_MODEL` variable | 1 min |
 
 `test-unit` has no database available at all. That is the point: it *proves* the

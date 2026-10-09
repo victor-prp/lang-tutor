@@ -105,9 +105,9 @@ jobs:
       IMAGE_TAG: ${{ github.ref_name }}
     steps:
       # Terraform comes from master, never from the tag. A rollback runs this
-      # workflow from an earlier tag, and that tag's infra/ would undo every
+      # workflow from an earlier tag, and that tag's terraform/ would undo every
       # infrastructure change merged since, the domain binding first. The guard
-      # requires the tag to be on master, so master's infra is never older. The
+      # requires the tag to be on master, so master's terraform/ is never older. The
       # image is still the tag's: IMAGE_TAG above, built by build-push.
       - uses: actions/checkout@v5
         with:

@@ -252,7 +252,7 @@ jobs:
           retention-days: 7
 
   # Phase 30 (spec D7). fmt and validate need no AWS and always run. The plan
-  # needs the plan role, which exists once infra/bootstrap has been applied: until
+  # needs the plan role, which exists once terraform/bootstrap has been applied: until
   # the AWS_PLAN_ROLE_ARN variable is set, the step says so and passes. -lock=false
   # keeps the job read-only, since a plan otherwise writes the state's lock file.
   terraform-plan:
@@ -273,12 +273,12 @@ jobs:
         with:
           terraform_version: 1.16.3
           terraform_wrapper: false
-      - run: terraform fmt -check -recursive infra
+      - run: terraform fmt -check -recursive terraform
       - name: Validate both stacks
         run: |
           for stack in bootstrap prod; do
-            terraform -chdir="infra/$stack" init -backend=false -input=false
-            terraform -chdir="infra/$stack" validate
+            terraform -chdir="terraform/$stack" init -backend=false -input=false
+            terraform -chdir="terraform/$stack" validate
           done
       - name: Assume the plan role
         if: vars.AWS_PLAN_ROLE_ARN != ''
@@ -291,7 +291,7 @@ jobs:
           PLAN_ROLE: ${{ vars.AWS_PLAN_ROLE_ARN }}
         run: |
           if [ -z "$PLAN_ROLE" ]; then
-            echo "::notice::AWS_PLAN_ROLE_ARN is not set: infra/bootstrap has not been applied yet. fmt and validate ran; the plan was skipped."
+            echo "::notice::AWS_PLAN_ROLE_ARN is not set: terraform/bootstrap has not been applied yet. fmt and validate ran; the plan was skipped."
             exit 0
           fi
           ./scripts/infra.sh bootstrap plan -lock=false

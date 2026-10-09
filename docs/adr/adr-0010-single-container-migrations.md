@@ -29,9 +29,9 @@ so a migration that drops or renames something the old code reads errors for tha
 
 | # | Subject | Must | Must not |
 |---|---|---|---|
-| R1 | `infra/prod/*.tf` | declare the container service with `scale = 1` | declare any other scale |
+| R1 | `terraform/prod/*.tf` | declare the container service with `scale = 1` | declare any other scale |
 | R2 | `Dockerfile` | start with `node dist/cli.js && exec node dist/index.js` | have a `CMD` or `ENTRYPOINT` that starts the server another way |
-| R3 | `infra/prod/*.tf` | — | set a container `command`, which would replace the image's start command |
+| R3 | `terraform/prod/*.tf` | — | set a container `command`, which would replace the image's start command |
 
 ## How to detect a violation
 
@@ -39,19 +39,19 @@ Mirrored by `scripts/check-adr-0010-single-container-migrations.sh`. Each comman
 
 ```bash
 # R1 — one container: no scale other than 1, and a scale = 1 that exists
-{ grep -qE '^[[:space:]]*scale[[:space:]]*=[[:space:]]*1[[:space:]]*(#.*)?$' infra/prod/main.tf || echo "infra/prod/main.tf: no scale = 1"; grep -nE '^[[:space:]]*scale[[:space:]]*=' infra/prod/*.tf | grep -vE 'scale[[:space:]]*=[[:space:]]*1[[:space:]]*(#.*)?$'; }
+{ grep -qE '^[[:space:]]*scale[[:space:]]*=[[:space:]]*1[[:space:]]*(#.*)?$' terraform/prod/main.tf || echo "terraform/prod/main.tf: no scale = 1"; grep -nE '^[[:space:]]*scale[[:space:]]*=' terraform/prod/*.tf | grep -vE 'scale[[:space:]]*=[[:space:]]*1[[:space:]]*(#.*)?$'; }
 
 # R2 — migrate, then serve: the start command exists, and nothing else starts the image
 { grep -qF 'CMD ["sh", "-c", "node dist/cli.js && exec node dist/index.js"]' Dockerfile || echo "Dockerfile: no migrate-then-serve CMD"; grep -nE '^(CMD|ENTRYPOINT)' Dockerfile | grep -vF 'node dist/cli.js && exec node dist/index.js'; }
 
 # R3 — no start-command override in the deployment
-grep -nE '^[[:space:]]*command[[:space:]]*=' infra/prod/*.tf
+grep -nE '^[[:space:]]*command[[:space:]]*=' terraform/prod/*.tf
 ```
 
 ### What the rules cover
 
-- `infra/prod/*.tf` for R1 and R3; `Dockerfile` for R2.
-- `infra/bootstrap` is out: it declares no container.
+- `terraform/prod/*.tf` for R1 and R3; `Dockerfile` for R2.
+- `terraform/bootstrap` is out: it declares no container.
 - R1 and R2 each fail when their file lacks the required line, not only when a wrong one is present.
 
 ## Why

@@ -25,13 +25,13 @@ check() {
   fi
 }
 
-r1() { { grep -qE '^[[:space:]]*scale[[:space:]]*=[[:space:]]*1[[:space:]]*(#.*)?$' infra/prod/main.tf || echo "infra/prod/main.tf: no scale = 1"; grep -nE '^[[:space:]]*scale[[:space:]]*=' infra/prod/*.tf | grep -vE 'scale[[:space:]]*=[[:space:]]*1[[:space:]]*(#.*)?$'; }; }
+r1() { { grep -qE '^[[:space:]]*scale[[:space:]]*=[[:space:]]*1[[:space:]]*(#.*)?$' terraform/prod/main.tf || echo "terraform/prod/main.tf: no scale = 1"; grep -nE '^[[:space:]]*scale[[:space:]]*=' terraform/prod/*.tf | grep -vE 'scale[[:space:]]*=[[:space:]]*1[[:space:]]*(#.*)?$'; }; }
 
 r2() { { grep -qF 'CMD ["sh", "-c", "node dist/cli.js && exec node dist/index.js"]' Dockerfile || echo "Dockerfile: no migrate-then-serve CMD"; grep -nE '^(CMD|ENTRYPOINT)' Dockerfile | grep -vF 'node dist/cli.js && exec node dist/index.js'; }; }
 
-r3() { grep -nE '^[[:space:]]*command[[:space:]]*=' infra/prod/*.tf; }
+r3() { grep -nE '^[[:space:]]*command[[:space:]]*=' terraform/prod/*.tf; }
 
-echo "Checking the image and infra/prod against ADR 0010 (single-container migrations)"
+echo "Checking the image and terraform/prod against ADR 0010 (single-container migrations)"
 echo
 
 check "R1  production runs exactly one container"            r1

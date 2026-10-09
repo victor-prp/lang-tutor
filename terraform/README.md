@@ -1,4 +1,4 @@
-# infra
+# terraform
 
 Two Terraform stacks for production (phase 30). `bootstrap` holds what GitHub needs to reach
 AWS and the image repository; `prod` holds the database, the container service, the
