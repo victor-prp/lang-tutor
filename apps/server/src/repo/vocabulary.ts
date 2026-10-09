@@ -2,6 +2,7 @@ import { DIMENSIONS, type Dimension } from '@lang-tutor/core/domain';
 import { sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
+import type { SavedGloss } from '../domain/session';
 import type {
   LexemeRendering,
   SavedEntry,
@@ -301,20 +302,17 @@ export function createVocabularyRepo(tx: Tx) {
       return rows.rows.map((row) => row.gloss_id);
     },
 
-    /** Every saved gloss of one enrollment, with the sense its saved form ranks
-     *  first, for picking a list session. Ordered so a seeded rng picks
-     *  reproducibly. Task 11 replaces the sense with a rendering chosen per pick. */
-    listSavedGlosses: async (enrollmentId: string): Promise<{ glossId: string; senseId: string; variantId: string }[]> => {
-      const rows = await tx.execute<{ gloss_id: string; sense_id: string; variant_id: string }>(sql`
-        SELECT DISTINCT ON (ve.gloss_id) ve.gloss_id, tr.sense_id, ve.variant_id
+    /** Every saved gloss of one enrollment with its key and the form it was saved
+     *  from, for picking a list session (spec D12, D18). Ordered so a seeded rng
+     *  picks reproducibly. */
+    listSavedGlosses: async (enrollmentId: string): Promise<SavedGloss[]> => {
+      const rows = await tx.execute<{ gloss_id: string; key: string; variant_id: string }>(sql`
+        SELECT ve.gloss_id, g.key, ve.variant_id
         FROM vocabulary_entries ve
-        JOIN dict_sense_glosses m     ON m.gloss_id = ve.gloss_id
-        JOIN dict_var_translations tr ON tr.variant_id = ve.variant_id
-                                     AND tr.sense_id = m.sense_id
-                                     AND tr.user_language_code = m.user_language_code
+        JOIN dict_glosses g ON g.id = ve.gloss_id
         WHERE ve.enrollment_id = ${enrollmentId}
-        ORDER BY ve.gloss_id, tr.rank`);
-      return rows.rows.map((row) => ({ glossId: row.gloss_id, senseId: row.sense_id, variantId: row.variant_id }));
+        ORDER BY ve.gloss_id`);
+      return rows.rows.map((row) => ({ glossId: row.gloss_id, key: row.key, variantId: row.variant_id }));
     },
 
     countEntries: async (enrollmentId: string): Promise<number> => {

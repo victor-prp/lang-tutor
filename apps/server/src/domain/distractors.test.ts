@@ -16,6 +16,7 @@ import {
   taskFor,
   tasksFor,
   validateDistractors,
+  withSiblingAlternatives,
   type GenerationContext,
   type RecentSentences,
 } from './distractors';
@@ -715,5 +716,18 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(() => generatedContent(ROW, 'cloze_choice', NOTHING_GENERATED, NO_EXTRAS)).toThrow();
       expect(() => generatedContent({ ...ROW, example: null }, 'cloze_choice', NOTHING_GENERATED, extras)).toThrow();
     });
+  });
+});
+
+describe('withSiblingAlternatives (spec D18)', () => {
+  it('accepts the sibling headwords first, never the card’s own word, at most five', () => {
+    expect(
+      withSiblingAlternatives({
+        form: 'booked',
+        lemma: 'book',
+        siblings: ['order', 'reserve', 'book'],
+        alternatives: ['reserved', 'Order', 'arranged', 'scheduled', 'set up'],
+      }),
+    ).toEqual(['order', 'reserve', 'reserved', 'arranged', 'scheduled']);
   });
 });

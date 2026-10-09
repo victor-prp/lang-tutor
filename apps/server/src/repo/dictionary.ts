@@ -26,6 +26,7 @@ import {
 } from '../domain/dictionary';
 import { assignGlosses, type AnswerSense } from '../domain/glosses';
 import type { LanguageCode } from '../domain/languages';
+import type { GlossRendering } from '../domain/session';
 import { tidyAlternatives, type StoredSense } from '../domain/translation';
 
 export type PersistEntriesInput = {
@@ -967,14 +968,56 @@ export function createDictRepo(tx: Tx) {
     return released.length > 0;
   };
 
+  /** Phase 31 (spec D12). Every rendering of every member of these glosses in one
+   *  learner language, with its form and its own citation form. */
+  const findGlossRenderings = async (input: { glossIds: string[]; userLanguageCode: string }): Promise<GlossRendering[]> => {
+    if (input.glossIds.length === 0) return [];
+    const rows = await tx.execute<{ gloss_id: string; sense_id: string; variant_id: string; form: string; gloss: string; rank: number }>(sql`
+      SELECT m.gloss_id, tr.sense_id, tr.variant_id, v.form, tr.gloss, tr.rank
+      FROM dict_sense_glosses m
+      JOIN dict_var_translations tr ON tr.sense_id = m.sense_id AND tr.user_language_code = m.user_language_code
+      JOIN dict_variants v          ON v.id = tr.variant_id
+      WHERE m.gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
+        AND m.user_language_code = ${input.userLanguageCode}`);
+    return rows.rows.map((row) => ({
+      glossId: row.gloss_id,
+      senseId: row.sense_id,
+      variantId: row.variant_id,
+      form: row.form,
+      gloss: row.gloss,
+      rank: row.rank,
+    }));
+  };
+
+  /** Phase 31 (spec D18). For each of these glosses, the lemmas of the other
+   *  headwords of its language pair whose live gloss has the same key: `order`
+   *  beside `book` under להזמין. Through dict_glosses_language_key_idx. */
+  const findSiblings = async (input: { glossIds: string[] }): Promise<{ glossId: string; lemma: string }[]> => {
+    if (input.glossIds.length === 0) return [];
+    const rows = await tx.execute<{ gloss_id: string; lemma: string }>(sql`
+      SELECT DISTINCT p.id AS gloss_id, l2.lemma
+      FROM dict_glosses p
+      JOIN dict_lexemes l1 ON l1.id = p.lexeme_id
+      JOIN dict_glosses s  ON s.user_language_code = p.user_language_code
+                          AND gloss_key(s.key) = gloss_key(p.key)
+                          AND s.lexeme_id <> p.lexeme_id
+                          AND s.merged_into IS NULL
+      JOIN dict_lexemes l2 ON l2.id = s.lexeme_id AND l2.language_code = l1.language_code
+      WHERE p.id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
+      ORDER BY 1, 2`);
+    return rows.rows.map((row) => ({ glossId: row.gloss_id, lemma: row.lemma }));
+  };
+
   return {
     claimLemmaRenders,
     claimSavedLemmaRenders,
     findCorrectionByForm,
+    findGlossRenderings,
     findLexeme,
     findSenseVersion,
     findSensesByForm,
     findSensesByLexeme,
+    findSiblings,
     findStaleLexemesByForm,
     hasLemmaRendering,
     lockLexemes,

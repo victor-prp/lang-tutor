@@ -346,21 +346,33 @@ function badChoice(
   return null;
 }
 
-/** Never a refusal: alternatives only widen what a typed card accepts, so a
- *  bad one is dropped (empty, in the explanation language, the answer itself,
- *  a repeat) and the rest kept, up to MAX_ALTERNATIVES. */
-function cleanAlternatives(item: DistractorItem, found: string[] | undefined, explanationLetters: RegExp): string[] {
-  const seen = new Set([item.form, item.lemma].map(comparable));
+/** Alternatives for a typed card: trimmed, never empty, never the card's own
+ *  form or lemma, no two alike under `comparable`, at most MAX_ALTERNATIVES, in
+ *  the order given. `accept` adds a caller's own refusal. */
+function keepAlternatives(
+  form: string,
+  lemma: string,
+  candidates: readonly string[],
+  accept: (text: string) => boolean = () => true,
+): string[] {
+  const seen = new Set([form, lemma].map(comparable));
   const kept: string[] = [];
-  for (const raw of found ?? []) {
+  for (const raw of candidates) {
     const text = raw.trim();
     const key = comparable(text);
-    if (text === '' || explanationLetters.test(text) || seen.has(key)) continue;
+    if (text === '' || !accept(text) || seen.has(key)) continue;
     seen.add(key);
     kept.push(text);
     if (kept.length === MAX_ALTERNATIVES) break;
   }
   return kept;
+}
+
+/** Never a refusal: alternatives only widen what a typed card accepts, so a
+ *  bad one is dropped (empty, in the explanation language, the answer itself,
+ *  a repeat) and the rest kept, up to MAX_ALTERNATIVES. */
+function cleanAlternatives(item: DistractorItem, found: string[] | undefined, explanationLetters: RegExp): string[] {
+  return keepAlternatives(item.form, item.lemma, found ?? [], (text) => !explanationLetters.test(text));
 }
 
 /**
@@ -568,4 +580,19 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
       };
     }
   }
+}
+
+/**
+ * Phase 31 (spec D18). A typed or spoken card's right answers: the sibling
+ * headwords first, which are certain (`order` is right where להזמין asks for
+ * `book`), then the model's, never the card's own form or lemma, at most
+ * MAX_ALTERNATIVES, the column check's five.
+ */
+export function withSiblingAlternatives(input: {
+  form: string;
+  lemma: string;
+  siblings: readonly string[];
+  alternatives: readonly string[];
+}): string[] {
+  return keepAlternatives(input.form, input.lemma, [...input.siblings, ...input.alternatives]);
 }

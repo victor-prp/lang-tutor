@@ -49,6 +49,14 @@ export async function countJobs(db: Db, name: string): Promise<number> {
   return rows.rows[0].n;
 }
 
+/** Phase 31. The payloads of every job of one queue, oldest first. */
+export async function jobPayloads(db: Db, name: string): Promise<unknown[]> {
+  const rows = await db.execute<{ data: unknown }>(
+    sql`select data from ${sql.raw(JOB_SCHEMA)}.job where name = ${name} order by created_on`,
+  );
+  return rows.rows.map((row) => row.data);
+}
+
 /** Polls until `check` holds, for effects a worker produces on its own schedule. */
 export async function waitFor(check: () => Promise<boolean>, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

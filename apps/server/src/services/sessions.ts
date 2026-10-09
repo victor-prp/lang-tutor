@@ -24,6 +24,7 @@ import {
   parseLlmDistractors,
   tasksFor,
   validateDistractors,
+  withSiblingAlternatives,
   type DistractorVerdict,
 } from '../domain/distractors';
 import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
@@ -34,12 +35,14 @@ import { evaluateSession, progressChanges, type ProgressChange } from '../domain
 import type { SessionRecord, SessionSummary } from '../domain/session';
 import {
   SESSION_LENGTH,
+  askableRenderings,
   currentQuestion,
   isCurrent,
   isOpen,
   newSessionRecord,
   nextSource,
-  pickSenses,
+  pickGlosses,
+  pickRendering,
   sessionScore,
   step,
 } from '../domain/session';
@@ -183,7 +186,7 @@ export function createSessionService({
       options: { listening: boolean; speaking: boolean },
     ): Promise<{ sessionId: string; status: SessionStatus; source: SessionSource }> =>
       transaction(async (repos) => {
-        const { session, question, vocabulary, jobs } = repos;
+        const { session, question, vocabulary, dict, jobs } = repos;
         // No implicit creation: an unknown enrollment is a 404, another
         // learner's a 403, both before anything is written.
         const enrolled = await authorizeEnrollment(repos, logger, {
@@ -214,14 +217,27 @@ export function createSessionService({
 
         const saved = await vocabulary.listSavedGlosses(enrollmentId);
         if (saved.length === 0) throw new NoSavedWords(enrollmentId);
-        const picks = pickSenses(saved, SESSION_LENGTH, rng);
+        // Phase 31 (spec D18). At most one gloss per key, across headwords.
+        const picked = pickGlosses(saved, SESSION_LENGTH, rng);
+        // Spec D12. One rendering per gloss, uniformly over every form of every
+        // member that agrees with the gloss, the saved form always among them.
+        // No model call: a lemma form not yet rendered joins once its job lands.
+        const renderings = await dict.findGlossRenderings({
+          glossIds: picked.map((gloss) => gloss.glossId),
+          userLanguageCode: enrolled.source_language,
+        });
+        const picks = picked.flatMap((gloss) => {
+          const rendering = pickRendering(askableRenderings(gloss, renderings), rng);
+          return rendering ? [{ gloss_id: gloss.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId }] : [];
+        });
+        if (picks.length === 0) throw new NoSavedWords(enrollmentId);
         // Phase 24 (spec D3): the rotation's step is how many list sessions came
         // before this one. Read before the insert, so it does not count itself.
         const ordinal = await session.countListSessions(enrollmentId);
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
         await jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,
-          picks: picks.map((pick) => ({ gloss_id: pick.glossId, sense_id: pick.senseId, variant_id: pick.variantId })),
+          picks,
           listening: options.listening,
           speaking: options.speaking,
           ordinal,
@@ -527,7 +543,7 @@ export function createSessionService({
       const payload = PrepareSessionPayloadSchema.parse(data);
       const sessionId = payload.session_id;
 
-      const read = await transaction(async ({ session, enrollment, question, gloss }) => {
+      const read = await transaction(async ({ session, enrollment, question, gloss, dict }) => {
         const state = await session.findState(sessionId);
         // Skipped, or gone (a reseed): nothing to prepare, and not a failure.
         if (!state || state.status !== 'preparing') return undefined;
@@ -554,7 +570,9 @@ export function createSessionService({
           glossIds: context.map((row) => row.glossId),
           limit: MAX_AVOID,
         });
-        return { state, enrolled, context, recent };
+        // Phase 31 (spec D18): the other headwords with each card's key.
+        const siblings = await dict.findSiblings({ glossIds: context.map((row) => row.glossId) });
+        return { state, enrolled, context, recent, siblings };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -581,9 +599,16 @@ export function createSessionService({
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor(plan);
       const items = distractorItems(ordered, tasks, read.recent);
+      // Phase 31 (spec D18). Another headword with this card's key is right where
+      // the card asks for this one: off limits as a wrong option, and named to the
+      // model with the session's other rows, so it never offers one the
+      // validator would refuse on every retry.
+      const siblingsOf = (glossId: string) =>
+        read.siblings.filter((sibling) => sibling.glossId === glossId).map((sibling) => sibling.lemma);
+      const siblingRows = ordered.flatMap((row) => siblingsOf(row.glossId).map((lemma) => ({ form: lemma, translation: row.translation })));
       // The rows that ask the model nothing are still in the session: the
       // validation and the prompt must know their words and meanings.
-      const others = ordered.filter((_, index) => !tasks[index]);
+      const others = [...ordered.filter((_, index) => !tasks[index]), ...siblingRows];
       // Where each pick's form sits in its saved example: the same search that
       // made the gap item's blank and the plan's eligibility.
       const gaps = ordered.map((row) => findGap(row.example ?? '', [row.form, row.lemma]));
@@ -665,6 +690,19 @@ export function createSessionService({
             }
             const type = degraded ? 'typed_translation' : planned;
             const content = degraded ? NOTHING_GENERATED : made;
+            // Spec D18. A sibling headword is a right answer to a typed or spoken card.
+            const answered =
+              type === 'typed_translation' || type === 'say_translation'
+                ? {
+                    ...content,
+                    alternatives: withSiblingAlternatives({
+                      form: row.form,
+                      lemma: row.lemma,
+                      siblings: siblingsOf(row.glossId),
+                      alternatives: content.alternatives,
+                    }),
+                  }
+                : content;
             return {
               glossId: survivors.get(row.glossId)?.id ?? row.glossId,
               variantId: row.variantId,
@@ -673,7 +711,7 @@ export function createSessionService({
               partOfSpeech: row.partOfSpeech,
               lexemeId: row.lexemeId,
               type,
-              ...generatedContent(row, type, content, {
+              ...generatedContent(row, type, answered, {
                 tiles: type === 'letter_tiles' ? tilesFor(row.form, LANGUAGES[target].alphabet, rng) : null,
                 board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
                 gap: gaps[index],

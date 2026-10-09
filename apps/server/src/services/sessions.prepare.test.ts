@@ -14,6 +14,7 @@ import { testRng } from '../../tests/support/testRng';
 import type { GenerationContext, RecentSentences } from '../domain/distractors';
 import type { SessionState } from '../domain/session';
 import { GlossLanguageMismatch, InvalidDistractors } from '../errors';
+import type { DictRepo } from '../repo/dictionary';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GlossRepo } from '../repo/glosses';
 import type { QuestionRepo } from '../repo/questions';
@@ -52,6 +53,8 @@ function world(opts: {
   reply?: string | Error;
   recent?: RecentSentences;
   gloss?: GlossRepo;
+  /** Phase 31 (spec D18). What findSiblings answers: other headwords with a card's key. */
+  siblings?: { glossId: string; lemma: string }[];
 }) {
   const calls = {
     transitions: [] as string[],
@@ -59,6 +62,7 @@ function world(opts: {
     sessionQuestions: [] as Question[][],
     recentAsked: [] as unknown[],
     contextAsked: [] as unknown[],
+    siblingsAsked: [] as unknown[],
   };
   const session = stub<SessionRepo>({
     findState: async () => opts.state ?? STATE,
@@ -129,7 +133,18 @@ function world(opts: {
   const llm = createFakeLlmClient(opts.reply ?? GOOD);
   const logger = createFakeLogger();
   const service = createSessionService({
-    transaction: createFakeTransaction({ session, enrollment, question, gloss: opts.gloss ?? createFakeGlossRepo() }),
+    transaction: createFakeTransaction({
+      session,
+      enrollment,
+      question,
+      gloss: opts.gloss ?? createFakeGlossRepo(),
+      dict: stub<DictRepo>({
+        findSiblings: async (input) => {
+          calls.siblingsAsked.push(input);
+          return opts.siblings ?? [];
+        },
+      }),
+    }),
     rng: testRng(7),
     logger,
     now: createFakeClock(1_000, 1_250),
@@ -619,5 +634,31 @@ describe('prepareSession, phase 31 (spec D14)', () => {
     await expect(service.prepareSession(PAYLOAD)).rejects.toBeInstanceOf(GlossLanguageMismatch);
     expect(llm.calls).toEqual([]);
     expect(calls.generated).toEqual([]);
+  });
+});
+
+// Phase 31 (spec D18). Another headword with a card's key: `order` beside
+// `book` under להזמין.
+describe('prepareSession, phase 31 (spec D18)', () => {
+  it('accepts a sibling headword on the typed card and names it to the model (spec D18)', async () => {
+    const context: GenerationContext[] = [
+      ...CONTEXT,
+      { glossId: 'g_book', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'book', lemma: 'book', partOfSpeech: 'verb', translation: 'להזמין', example: null, exampleTranslation: null },
+    ];
+    const reply = JSON.stringify({
+      items: [
+        { key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] },
+        { key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] },
+        { key: 'q3', distractors: [], alternatives: ['reserve'] },
+      ],
+    });
+    const { service, calls, llm } = world({ context, reply, siblings: [{ glossId: 'g_book', lemma: 'order' }] });
+    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { gloss_id: 'g_book', sense_id: 's3', variant_id: 'v3' }] });
+
+    const inserted = (calls.generated[0] as { questions: { type: string; alternatives: string[] | null }[] }).questions;
+    expect(inserted[2]).toMatchObject({ type: 'typed_translation', alternatives: ['order', 'reserve'] });
+    expect(JSON.parse(llm.calls[0].user).also_in_session).toContainEqual({ word: 'order', correct: 'להזמין' });
+    // Read once, in the read step, for the cards' glosses.
+    expect(calls.siblingsAsked).toEqual([{ glossIds: ['g-s1', 'g-s2', 'g_book'] }]);
   });
 });

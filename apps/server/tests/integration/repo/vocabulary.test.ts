@@ -561,24 +561,26 @@ describe('a repaired variant', () => {
 });
 
 describe('the saved list for sessions (phase 19)', () => {
-  it('lists every saved gloss with its form and the sense that form ranks first, and counts them', async () => {
+  // Phase 31 (spec D12, D18). With its key, which a session picks by, and the
+  // form it was saved from; the rendering is chosen per pick.
+  it('lists every saved gloss with its key and the form it was saved from, and counts them', async () => {
     const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'onion', translations: ['בצל', 'קשת'] });
-    const listed = await repo((r) => r.listSavedGlosses(E));
-    expect(listed).toHaveLength(2);
-    expect(new Set(listed.map((e) => e.glossId))).toEqual(new Set(word.glossIds));
-    expect(listed.every((e) => e.senseId === word.senseIds[word.glossIds.indexOf(e.glossId)])).toBe(true);
-    expect(listed.every((e) => e.variantId === word.variantId)).toBe(true);
+    const byGloss = <T extends { glossId: string }>(rows: T[]) => [...rows].sort((a, b) => a.glossId.localeCompare(b.glossId));
+    expect(byGloss(await repo((r) => r.listSavedGlosses(E)))).toEqual(
+      byGloss([
+        { glossId: word.glossIds[0], key: 'בצל', variantId: word.variantId },
+        { glossId: word.glossIds[1], key: 'קשת', variantId: word.variantId },
+      ]),
+    );
     expect(await repo((r) => r.countEntries(E))).toBe(2);
   });
 
   // Phase 31 (spec D3). Two senses one target word renders are one gloss,
-  // saved and listed once, with the sense the saved form ranks first.
-  it('lists a gloss of two senses once, with the sense its saved form ranks first', async () => {
+  // saved and listed once.
+  it('lists a gloss of two senses once', async () => {
     const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'mouse', translations: ['עכבר', 'עכבר'] });
     expect(word.glossIds[1]).toBe(word.glossIds[0]);
-    expect(await repo((r) => r.listSavedGlosses(E))).toEqual([
-      { glossId: word.glossIds[0], senseId: word.senseIds[0], variantId: word.variantId },
-    ]);
+    expect(await repo((r) => r.listSavedGlosses(E))).toEqual([{ glossId: word.glossIds[0], key: 'עכבר', variantId: word.variantId }]);
     expect(await repo((r) => r.countEntries(E))).toBe(1);
   });
 

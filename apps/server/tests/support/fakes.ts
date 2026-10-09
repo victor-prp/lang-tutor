@@ -355,6 +355,9 @@ export function createFakeDictRepo(): FakeDictRepo {
     claimLemmaRenders: async () => [],
     claimSavedLemmaRenders: async () => [],
     releaseLemmaRender: async () => false,
+    // Phase 31 (spec D12, D18). A session's reads; a lookup reaches neither.
+    findGlossRenderings: async () => [],
+    findSiblings: async () => [],
     repairVariantRenderings: async (input) => {
       repo.repaired.push({ variantId: input.variantId, senseVersion: input.senseVersion });
       return { needsMerge: false };
