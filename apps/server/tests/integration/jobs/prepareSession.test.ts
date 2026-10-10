@@ -52,6 +52,9 @@ afterEach(async () => {
 });
 
 const WORDS: Record<string, string> = { tome: 'ספר', sprint: 'ריצה', lantern: 'פנס' };
+/** The seeded English headwords that share a word's Hebrew key (spec D18): only
+ *  ספר has one, the seed's `book`. */
+const SEEDED_SIBLINGS: Record<string, string[]> = { tome: ['book'] };
 
 /** Past the seed (skipped), three saved words, and a list session requested. */
 async function requestListSession(): Promise<string> {
@@ -197,8 +200,12 @@ describe('prepare-session through the queue', () => {
     expect(reversed.question).toBe(WORDS[reversedWord]);
     expect([...reversed.options].sort()).toEqual([reversedWord, ...STUB_WRONG_ENGLISH].sort());
     // The typed card: the meaning, the word as its answer, the alternative kept.
+    // Phase 31 (spec D18): the seeded `book` is also ספר, so when `tome` is the
+    // typed word its sibling is accepted too, ahead of the model's alternative.
+    // Which word is typed varies from run to run (saved glosses are read in id
+    // order, and ids are random), so the expectation covers each of them.
     expect(typed.question).toBe(WORDS[typed.answer]);
-    expect(typed.alternatives).toEqual([STUB_ALTERNATIVE]);
+    expect(typed.alternatives).toEqual([...(SEEDED_SIBLINGS[typed.answer] ?? []), STUB_ALTERNATIVE]);
     expect(new Set([choice.question, reversedWord, typed.answer]).size).toBe(3);
   });
 
