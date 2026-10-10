@@ -27,7 +27,8 @@ check() {
 
 # The five allow-listed files are the exceptions the ADR names: the two entry
 # points, the composition root, db/jobs.ts (its two short-lived instances: the
-# schema installer and the CLI's withJobQueue) and the enqueue seam.
+# schema installer and withJobQueue, which db/lemmaRenders.ts calls for the CLI)
+# and the enqueue seam.
 r1_import() {
   grep -rnE "from 'pg-boss'" apps/server/src --include='*.ts' \
     | grep -vE '^apps/server/src/(index|composition|worker)\.ts:|^apps/server/src/(db|repo)/jobs\.ts:'

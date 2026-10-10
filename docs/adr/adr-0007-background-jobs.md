@@ -1,7 +1,7 @@
 # ADR 0007: Background jobs run on pg-boss, enqueued only inside a transaction
 
 - **Status:** Accepted
-- **Date:** 2026-10-05; `db/jobs.ts` gains a second short-lived instance, `withJobQueue`, for the CLI's enqueue 2026-10-10 (phase 31), no rule change
+- **Date:** 2026-10-05; `db/jobs.ts` gains a second short-lived instance, `withJobQueue`, called from `db/lemmaRenders.ts` for the CLI's enqueue 2026-10-10 (phase 31), no rule change
 - **Source:** [phase 19 design](../superpowers/specs/2026-10-05-lang-tutor-phase-19-next-enrollment-session-design.md) — §1 for the pg-boss verdict and its switch signals, §3 for the port, the lifecycle and the dead-letter path
 
 ## Decision
@@ -21,7 +21,8 @@ roll back together.
                   handler ──► one service use case, nothing else
 
   db/jobs.ts      installJobs: schema + queues, run by runMigrations
-                  withJobQueue: a short-lived boss for db/cli.ts's enqueue ──► repo/jobs.ts
+                  withJobQueue: a short-lived boss, called by db/lemmaRenders.ts for the CLI,
+                  whose callback enqueues through repo/jobs.ts
 ```
 
 pg-boss's schema and queues are installed by `runMigrations`, through `db/jobs.ts`. Jobs are
@@ -29,9 +30,10 @@ enqueued only through `repo/jobs.ts`'s tx-bound `enqueue`. Handlers are register
 `worker.ts`, each calling one service use case. The server's boss is constructed and started in
 `index.ts` and passed down. `db/jobs.ts` makes the only other instances, each short-lived and
 on its caller's database handle: `installJobs`, for the schema and queues, and (phase 31)
-`withJobQueue`, which the CLI starts for the length of one callback to enqueue outside the
-server (the start-up lemma backfill and `--render-lemmas`) and stops however the callback ends.
-That callback enqueues through `repo/jobs.ts` like any other caller.
+`withJobQueue`, which `db/lemmaRenders.ts` calls for the CLI (the start-up lemma backfill and
+`--render-lemmas`): it starts a boss for the length of one callback, to enqueue outside the
+server, and stops it however the callback ends. That callback enqueues through `repo/jobs.ts`
+like any other caller.
 
 ## Rules
 
@@ -78,8 +80,8 @@ grep -rnE "\.work\(" apps/server/src --include='*.ts' \
   every command; a test of `worker.ts` registers nothing itself.
 - **The five allow-listed files are the exceptions.** `index.ts` and `worker.ts` are the two
   entry points, `composition.ts` only names the `PgBoss` type, `db/jobs.ts` makes the two
-  short-lived instances (`installJobs` for the schema, `withJobQueue` for the CLI's enqueue),
-  and `repo/jobs.ts` is the enqueue seam.
+  short-lived instances (`installJobs` for the schema, `withJobQueue` for the CLI's enqueue,
+  called from `db/lemmaRenders.ts`), and `repo/jobs.ts` is the enqueue seam.
 - R2 matches the receiver name `boss` (optionally `boss?.`); a boss passed under another
   name is still caught by R1, which stops it being imported. R3 matches any receiver.
 - `apps/mobile` and `packages/core` never see pg-boss, and no command scans them.

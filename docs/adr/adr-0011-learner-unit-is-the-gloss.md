@@ -14,7 +14,7 @@ learner language, on `dict_var_translations`. Which gloss a sense belongs to is 
 sense and learner language in `dict_sense_glosses`, so `mouse`'s two senses are one gloss for
 Hebrew and would be two for Italian.
 
-The learner's tables key on the gloss and never on a sense: a saved word (`vocabulary_entries`),
+The learner's tables hold gloss ids rather than sense ids: a saved word (`vocabulary_entries`),
 its progress (`gloss_progress`), the question a card was built from (`questions`), a session's
 results (`session_progress`) and a photo import's items (`photo_import_items`). Every sense the
 lookup renders has a gloss, written by the lookup and by the repair in the transaction of the
@@ -53,23 +53,25 @@ SCHEMA=apps/server/src/db/schema.ts
 
 # Every line of schema.ts, prefixed with the table whose pgTable(...) block it
 # is in: the first quoted snake_case word after `pgTable(`, on its line or the next.
+# The prefix is joined with \001, never a tab: a tab inside the source line would
+# split it, and whatever followed the tab would leave field 2 unseen.
 tables() {
   awk '
     /= pgTable\(/ { pending = 1; table = "" }
     pending && match($0, /'"'"'[a-z_]+'"'"'/) { table = substr($0, RSTART + 1, RLENGTH - 2); pending = 0 }
-    { print table "\t" NR ": " $0 }
+    { print table "\001" NR ": " $0 }
   ' "$SCHEMA"
 }
 
 # R1 — no table outside the dict_ prefix references dict_senses or dict_var_translations.
 r1() {
-  tables | awk -F '\t' -v file="$SCHEMA" '$1 != "" && $1 !~ /^dict_/ && $2 ~ /(dictSenses|dictVarTranslations)\./ { print file ":" $2 }'
+  tables | awk -F '\001' -v file="$SCHEMA" '$1 != "" && $1 !~ /^dict_/ && $2 ~ /(dictSenses|dictVarTranslations)\./ { print file ":" $2 }'
 }
 
 # R2 — vocabulary_entries and questions each declare a foreign key to dict_glosses.
 r2() {
   for t in vocabulary_entries questions; do
-    tables | awk -F '\t' -v want="$t" -v file="$SCHEMA" \
+    tables | awk -F '\001' -v want="$t" -v file="$SCHEMA" \
       '$1 == want && $2 ~ /dictGlosses\./ { found = 1 } END { if (!found) print file ": " want " declares no foreign key to dict_glosses" }'
   done
 }

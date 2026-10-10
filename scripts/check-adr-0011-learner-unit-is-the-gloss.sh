@@ -29,11 +29,13 @@ SCHEMA=apps/server/src/db/schema.ts
 
 # Every line of schema.ts, prefixed with the table whose pgTable(...) block it
 # is in: the first quoted snake_case word after `pgTable(`, on its line or the next.
+# The prefix is joined with \001, never a tab: a tab inside the source line would
+# split it, and whatever followed the tab would leave field 2 unseen.
 tables() {
   awk '
     /= pgTable\(/ { pending = 1; table = "" }
     pending && match($0, /'"'"'[a-z_]+'"'"'/) { table = substr($0, RSTART + 1, RLENGTH - 2); pending = 0 }
-    { print table "\t" NR ": " $0 }
+    { print table "\001" NR ": " $0 }
   ' "$SCHEMA"
 }
 
@@ -43,7 +45,7 @@ tables() {
 # new dictionary table needs no edit here. Lines before the first pgTable( have no
 # table and are skipped. Tests and migrations are not scanned: only schema.ts is.
 r1() {
-  tables | awk -F '\t' -v file="$SCHEMA" '$1 != "" && $1 !~ /^dict_/ && $2 ~ /(dictSenses|dictVarTranslations)\./ { print file ":" $2 }'
+  tables | awk -F '\001' -v file="$SCHEMA" '$1 != "" && $1 !~ /^dict_/ && $2 ~ /(dictSenses|dictVarTranslations)\./ { print file ":" $2 }'
 }
 
 # R2 — vocabulary_entries and questions each declare a foreign key to dict_glosses.
@@ -51,7 +53,7 @@ r1() {
 # renamed table both report rather than pass.
 r2() {
   for t in vocabulary_entries questions; do
-    tables | awk -F '\t' -v want="$t" -v file="$SCHEMA" \
+    tables | awk -F '\001' -v want="$t" -v file="$SCHEMA" \
       '$1 == want && $2 ~ /dictGlosses\./ { found = 1 } END { if (!found) print file ": " want " declares no foreign key to dict_glosses" }'
   done
 }

@@ -1,7 +1,7 @@
 # ADR 0006: Every checkout is self-contained
 
 - **Status:** Accepted
-- **Date:** 2026-09-16; R7 gains nightly QA's inbox port 2026-10-08 (phase 29); R3's key list gains `dict:lemmas:render` and `dict:glosses:merge` 2026-10-10 (phase 31)
+- **Date:** 2026-09-16; R7 gains nightly QA's inbox port 2026-10-08 (phase 29); R3's key list gains `dict:lemmas:render` and `dict:glosses:merge` 2026-10-10 (phase 31); R3's command shows the script's missing-key branch 2026-10-10 (phase 31)
 - **Source:** [phase 15 design](../superpowers/specs/2026-09-16-lang-tutor-phase-15-lanes-design.md)
 
 ## Decision
@@ -111,11 +111,15 @@ grep -rnE "['\"\`/]lang_tutor" e2e scripts package.json \
   --include='*.ts' --include='*.sh' --include='*.json' \
   | grep -vE '^(scripts/lane-env\.sh|scripts/test-lane-env\.sh|scripts/check-adr-0006-lanes\.sh):'
 
-# R3 — a start-or-test script that bypasses the wrapper
+# R3 — a start-or-test script that bypasses the wrapper, or has gone missing
 for key in server mobile e2e test:integration db:up db:migrate db:reseed \
            db:progress:recompute dict:export dict:restore dict:lemmas:render \
            dict:glosses:merge lane:list lane:down; do
   line=$(grep -E "^    \"$key\": " package.json)
+  if [ -z "$line" ]; then
+    echo "\"$key\" is missing from package.json scripts"
+    continue
+  fi
   printf '%s' "$line" | grep -q 'lane-env.sh' || echo "$line"
 done
 
