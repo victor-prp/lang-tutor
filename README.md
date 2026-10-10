@@ -126,8 +126,9 @@ enforced.
 | [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, the signed-in user as actor; `repo/grants.ts` is the only reader of the table |
 | [0009](docs/adr/adr-0009-sign-in.md) | Sign-in with Better Auth, behind one seam — one import site per app, the session becomes an actor in `routes/actor.ts` only, exact version pins |
 | [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
+| [0011](docs/adr/adr-0011-learner-unit-is-the-gloss.md) | The learner's unit is the gloss — learner tables key on `dict_glosses`, senses stay the dictionary's, and no table outside the `dict_` prefix references `dict_senses` or `dict_var_translations` |
 
-All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 = 62 checks, grep only, no deps,
+All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 = 64 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
@@ -561,7 +562,7 @@ npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container) — grep only, no deps, no database
+npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container, 0011 learner unit) — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go
