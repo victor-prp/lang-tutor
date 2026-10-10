@@ -24,6 +24,10 @@ export type ImportResult = {
  * the wording it answers with. Restoring is therefore idempotent and never
  * overwrites live content.
  *
+ * Phase 31. A sense's other words, citation form, gloss alternatives and
+ * definition replay through the same call: a definition fills only a sense
+ * that has none, and a sense joins or creates its gloss as a lookup's would.
+ *
  * Chunked rather than one transaction for the whole file: the full backfill is
  * ~89k records, and a single transaction holding that many inserts would keep
  * one connection and its locks busy for minutes and pile the lot into one WAL

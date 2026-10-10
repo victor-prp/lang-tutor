@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import type { PartOfSpeech } from '@lang-tutor/core/api';
-import { eq } from 'drizzle-orm';
+import type { LlmSense, PartOfSpeech } from '@lang-tutor/core/api';
+import { asc, eq } from 'drizzle-orm';
 
-import { dictVarTranslations } from '../../../src/db/schema';
+import { dictGlosses, dictLexemes, dictSenses, dictVarTranslations } from '../../../src/db/schema';
 import {
   correctionsFromJsonl,
   correctionsToJsonl,
@@ -39,7 +39,7 @@ async function lookUp(
     entries: {
       lemma: string;
       part_of_speech: PartOfSpeech;
-      senses: { translation: string; sense_code: string }[];
+      senses: LlmSense[];
     }[];
   },
 ): Promise<void> {
@@ -55,6 +55,33 @@ async function restoreInto(t: TestDb, records: Awaited<ReturnType<typeof exportD
     chunkSize: 50,
     onProgress: () => {},
   });
+}
+
+/** Phase 31. What one lemma's rows hold: its senses' definitions, its
+ *  renderings' citation forms and other words, and its glosses. */
+async function storedWord(t: TestDb, lemma: string) {
+  const [lexeme] = await t.db.select({ id: dictLexemes.id }).from(dictLexemes).where(eq(dictLexemes.lemma, lemma));
+  const senses = await t.db
+    .select({ senseCode: dictSenses.senseCode, definition: dictSenses.definition })
+    .from(dictSenses)
+    .where(eq(dictSenses.lexemeId, lexeme.id))
+    .orderBy(asc(dictSenses.senseCode));
+  const renderings = await t.db
+    .select({
+      translation: dictVarTranslations.translation,
+      gloss: dictVarTranslations.gloss,
+      alternatives: dictVarTranslations.alternatives,
+    })
+    .from(dictVarTranslations)
+    .innerJoin(dictSenses, eq(dictSenses.id, dictVarTranslations.senseId))
+    .where(eq(dictSenses.lexemeId, lexeme.id))
+    .orderBy(asc(dictVarTranslations.rank));
+  const glosses = await t.db
+    .select({ key: dictGlosses.key, alternatives: dictGlosses.alternatives })
+    .from(dictGlosses)
+    .where(eq(dictGlosses.lexemeId, lexeme.id))
+    .orderBy(asc(dictGlosses.key));
+  return { senses, renderings, glosses };
 }
 
 describe('dictionary export/restore', () => {
@@ -184,6 +211,66 @@ describe('dictionary export/restore', () => {
     ]);
 
     await restoreInto(target, exported);
+    expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
+  });
+
+  // Phase 31 (spec D5, D6, D9). What a sense gained travels with it, each field
+  // only when present: a rendering's other words and citation form, its gloss's
+  // other words, and its definition. Without them a restore would key `cars`'
+  // gloss on the plural and drop the definition and every "also".
+  it("round-trips a sense's definition, other words and citation form, and keys its gloss the same", async () => {
+    await lookUp(source, {
+      form: 'cars',
+      entries: [
+        {
+          lemma: 'car',
+          part_of_speech: 'noun' as const,
+          senses: [
+            {
+              translation: 'מכוניות',
+              sense_code: 'road_vehicle',
+              alternatives: ['רכבים'],
+              gloss: 'מכונית',
+              gloss_alternatives: ['רכב'],
+              definition: 'a road vehicle with an engine',
+            },
+            { translation: 'קרונות', sense_code: 'railway_carriage' },
+          ],
+        },
+      ],
+    });
+
+    const exported = await exportDictionary(source.db, EN_HE);
+    expect(exported.find((record) => record.form === 'cars')?.entries[0].senses).toEqual([
+      {
+        translation: 'מכוניות',
+        sense_code: 'road_vehicle',
+        alternatives: ['רכבים'],
+        gloss: 'מכונית',
+        gloss_alternatives: ['רכב'],
+        definition: 'a road vehicle with an engine',
+      },
+      { translation: 'קרונות', sense_code: 'railway_carriage' },
+    ]);
+
+    await restoreInto(target, exported);
+
+    const car = {
+      senses: [
+        { senseCode: 'railway_carriage', definition: null },
+        { senseCode: 'road_vehicle', definition: 'a road vehicle with an engine' },
+      ],
+      renderings: [
+        { translation: 'מכוניות', gloss: 'מכונית', alternatives: ['רכבים'] },
+        { translation: 'קרונות', gloss: 'קרונות', alternatives: [] },
+      ],
+      glosses: [
+        { key: 'מכונית', alternatives: ['רכב'] },
+        { key: 'קרונות', alternatives: [] },
+      ],
+    };
+    expect(await storedWord(source, 'car')).toEqual(car);
+    expect(await storedWord(target, 'car')).toEqual(car);
     expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
   });
 });

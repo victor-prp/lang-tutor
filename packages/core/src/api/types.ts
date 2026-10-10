@@ -28,6 +28,7 @@ import type {
   LlmCorrectionSchema,
   LlmDistractorsSchema,
   LlmEntrySchema,
+  LlmGlossMergeSchema,
   LlmPhotoReadingSchema,
   LlmReconciliationSchema,
   LlmRenderingSchema,
@@ -145,6 +146,7 @@ export type LlmSense = z.infer<typeof LlmSenseSchema>;
 export type LlmEntry = z.infer<typeof LlmEntrySchema>;
 export type LlmRendering = z.infer<typeof LlmRenderingSchema>;
 export type LlmReconciliation = z.infer<typeof LlmReconciliationSchema>;
+export type LlmGlossMerge = z.infer<typeof LlmGlossMergeSchema>;
 export type Enrollment = z.infer<typeof EnrollmentSchema>;
 export type CreateEnrollmentRequest = z.infer<typeof CreateEnrollmentRequestSchema>;
 export type CreateGrantRequest = z.infer<typeof CreateGrantRequestSchema>;

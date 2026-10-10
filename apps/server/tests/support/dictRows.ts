@@ -242,6 +242,14 @@ export async function insertCorrection(
   await withTx(db, (tx) => createDictRepo(tx).persistCorrection(input));
 }
 
+/** Phase 31. Gives every sense written so far a definition if it has none. The
+ *  seed's senses have none, so without this dict:glosses:merge's model tier
+ *  asks about every seeded headword, one model call each per plan, rather than
+ *  only about those holding two glosses. */
+export async function defineEverySense(db: Db): Promise<void> {
+  await db.execute(sql`update dict_senses set definition = 'defined before the test' where definition is null`);
+}
+
 /** Phase 31. One lemma's senses with their definitions, by code. For service
  *  tests, which may not reach the database themselves (ADR 0001 R2). */
 export async function readSenseDefinitions(db: Db, lemma: string): Promise<{ senseCode: string; definition: string | null }[]> {

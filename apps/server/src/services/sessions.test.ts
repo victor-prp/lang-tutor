@@ -173,6 +173,12 @@ describe('repos', () => {
     mergeGlosses: () => {
       throw new Error('the session service must not merge glosses');
     },
+    findMergeWork: () => {
+      throw new Error('the session service must not merge glosses');
+    },
+    setDefinitions: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
   };
 
   // Bound into the same transaction since phase 18, and untouched by these use

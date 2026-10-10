@@ -85,6 +85,23 @@ describe('mergeGlosses (spec D7)', () => {
     expect(await merge(w.lexemeId, w.survivor, w.other)).toBeNull();
   });
 
+  // dict:glosses:merge applies plans built from the model's groups, where a
+  // repeated word can pair a gloss with itself.
+  it('does nothing when asked to merge a gloss into itself', async () => {
+    const w = await twoGlosses();
+    const e1 = enrollmentOf('u_1');
+    await save(e1, w.survivor, w.finger, w.lexemeId, '2026-01-01');
+    const glossRows = () =>
+      t.db.execute<{ id: string; key: string; alternatives: string[]; merged_into: string | null }>(sql`
+        select id, key, alternatives, merged_into from dict_glosses where lexeme_id = ${w.lexemeId} order by id`);
+    const before = (await glossRows()).rows;
+
+    expect(await merge(w.lexemeId, w.survivor, w.survivor)).toBeNull();
+
+    expect((await glossRows()).rows).toEqual(before);
+    expect(await readSavedGlossIds(t.db, e1)).toEqual([w.survivor]);
+  });
+
   it('resolves a forwarded id to its survivor', async () => {
     const w = await twoGlosses();
     await merge(w.lexemeId, w.survivor, w.other);

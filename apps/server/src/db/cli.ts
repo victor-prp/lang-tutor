@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
-import { loadConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
+import { createGlossTools } from '../composition';
+import { loadConfig, loadGeminiConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
+import { createConsoleLogger } from '../logger';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, listLaneDatabases } from './lanes';
@@ -224,6 +226,33 @@ async function main(): Promise<void> {
     if (process.argv.includes('--render-lemmas')) {
       const { requested } = await requestLemmaRenders(db);
       console.log(`asked for ${requested} lemma renders in ${shownUrl}`);
+      return;
+    }
+
+    // Phase 31 (spec D7). `npm run dict:glosses:merge -- --model --yes`, either
+    // flag optional: prints the plan, and changes nothing without --yes, as
+    // lane:clean does. --model adds tier 2, one model call per lexeme and
+    // language. The database is named by its redacted URL only.
+    if (process.argv.includes('--merge-glosses')) {
+      const tools = createGlossTools({
+        db,
+        logger: createConsoleLogger(),
+        fetch: globalThis.fetch,
+        gemini: loadGeminiConfig(process.env),
+        timeoutMs: 60_000,
+      });
+      const model = process.argv.includes('--model');
+      const plan = await tools.planMerges({ model });
+      for (const merge of plan.merges) console.log(`tier ${merge.tier}  ${merge.lemma}: ${merge.otherKey} → ${merge.survivorKey}`);
+      for (const suggestion of plan.suggestions) console.log(`suggestion, not merged: ${suggestion.lemma}: ${suggestion.keys.join(' ↔ ')}`);
+      console.log(`${plan.merges.length} merges, ${plan.definitions.length} definitions to fill in ${shownUrl}`);
+      if (!process.argv.includes('--yes')) {
+        // The same tiers again: a bare --yes after a --model plan would apply tier 1 alone.
+        console.log(`Nothing changed. Run again with -- ${model ? '--model --yes' : '--yes'} to apply.`);
+        return;
+      }
+      const done = await tools.applyMerges(plan);
+      console.log(`merged ${done.merged}, filled ${done.definitions} definitions in ${shownUrl}`);
       return;
     }
 

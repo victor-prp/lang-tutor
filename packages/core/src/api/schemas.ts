@@ -899,6 +899,15 @@ export const LlmReconciliationSchema = z.object({
   senses: z.array(LlmRenderingSchema).max(5),
 });
 
+// Phase 31 (spec D7). The by-hand merge tool's answer: groups of target words
+// that are forms of one word, the citation form first, and definitions for the
+// senses that had none. Lists only, no caps: the tool reads them, and nothing it
+// reads reaches a learner without an operator's --yes.
+export const LlmGlossMergeSchema = z.object({
+  groups: z.array(z.array(z.string().min(1))),
+  definitions: z.array(z.object({ sense_code: z.string().min(1), definition: z.string().min(1) })),
+});
+
 // Phase 25 (spec D13). The transcriber's answer: the words it heard, or an
 // empty string for nothing intelligible.
 export const LlmTranscriptSchema = z.object({ heard: z.string() });

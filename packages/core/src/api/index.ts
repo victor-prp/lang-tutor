@@ -31,6 +31,7 @@ export type {
   LlmCorrection,
   LlmDistractors,
   LlmEntry,
+  LlmGlossMerge,
   LlmMeaningJudge,
   LlmTranslationJudge,
   Gap,

@@ -4,6 +4,8 @@ import { and, asc, eq } from 'drizzle-orm';
 import type { Db } from './client';
 import {
   dictCorrections,
+  dictGlosses,
+  dictSenseGlosses,
   dictVarTranslations,
   dictVariants,
   dictLexemes,
@@ -44,6 +46,14 @@ type FlatRow = {
   exampleSource: string | null;
   translation: string;
   exampleTarget: string | null;
+  // Phase 31 (spec D5, D6). The rendering's other words and citation form.
+  alternatives: string[];
+  gloss: string;
+  // Phase 31 (spec D9). The sense's, so every form of it carries the same one.
+  definition: string | null;
+  // Phase 31 (spec D5). The other words of the sense's gloss in the export's
+  // learner language; null only if the sense had no membership there.
+  glossAlternatives: string[] | null;
 };
 
 /**
@@ -78,6 +88,14 @@ function groupRows(rows: FlatRow[]): DictRecord[] {
     if (row.exampleSource && row.exampleTarget) {
       sense.example = { source: row.exampleSource, target: row.exampleTarget };
     }
+    // Phase 31. Each only when present, as `example` is: a sense written without
+    // them exports exactly as it did before, and persistEntries reads an absent
+    // field the way it read it the first time (renderingOf: the translation is
+    // the citation form, no other words, no definition).
+    if (row.alternatives.length > 0) sense.alternatives = row.alternatives;
+    if (row.gloss !== row.translation) sense.gloss = row.gloss;
+    if (row.glossAlternatives && row.glossAlternatives.length > 0) sense.gloss_alternatives = row.glossAlternatives;
+    if (row.definition !== null) sense.definition = row.definition;
     entry.senses[row.rank] = sense;
   }
 
@@ -104,6 +122,11 @@ function groupRows(rows: FlatRow[]): DictRecord[] {
  * no renderings of its own in `userLanguageCode` contributes nothing, so the
  * export carries exactly what a lookup could hit — never a form whose lexeme
  * has senses it has never rendered.
+ *
+ * Phase 31. A sense's gloss alternatives are read through its membership in
+ * the export's learner language, a left join so a sense without one still
+ * exports. A membership names a live gloss, since a merge re-points them, and
+ * there is one per sense and language, so the join adds no row.
  */
 export async function exportDictionary(
   db: Db,
@@ -121,6 +144,10 @@ export async function exportDictionary(
       exampleSource: dictVarTranslations.exampleSource,
       translation: dictVarTranslations.translation,
       exampleTarget: dictVarTranslations.exampleTarget,
+      alternatives: dictVarTranslations.alternatives,
+      gloss: dictVarTranslations.gloss,
+      definition: dictSenses.definition,
+      glossAlternatives: dictGlosses.alternatives,
     })
     .from(dictVariants)
     .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
@@ -133,6 +160,14 @@ export async function exportDictionary(
         eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
       ),
     )
+    .leftJoin(
+      dictSenseGlosses,
+      and(
+        eq(dictSenseGlosses.senseId, dictSenses.id),
+        eq(dictSenseGlosses.userLanguageCode, input.userLanguageCode),
+      ),
+    )
+    .leftJoin(dictGlosses, eq(dictGlosses.id, dictSenseGlosses.glossId))
     .where(eq(dictVariants.languageCode, input.languageCode))
     .orderBy(asc(dictVariants.form), asc(dictVariants.entryRank), asc(dictVarTranslations.rank));
 

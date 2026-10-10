@@ -103,7 +103,7 @@ export function createFakeAppDeps(): AppDeps {
     vocabulary,
     grants,
     photoImports,
-    glosses: { mergeLexeme: unreachable },
+    glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
     webDistDir: null,
@@ -160,6 +160,8 @@ export function createFakeGlossRepo(userLanguageCode = 'he') {
     },
     findMergeCandidates: async () => [],
     mergeGlosses: async () => null,
+    findMergeWork: async () => [],
+    setDefinitions: async () => 0,
   };
 }
 

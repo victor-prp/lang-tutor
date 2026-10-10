@@ -16,6 +16,18 @@ export type MergeCounts = {
   memberships: number;
 };
 
+/** One lexeme and learner language the tool looks at: two or more live glosses,
+ *  or a sense with no definition. */
+export type MergeWork = {
+  lexemeId: string;
+  lemma: string;
+  partOfSpeech: string;
+  languageCode: string;
+  userLanguageCode: string;
+  glosses: { id: string; key: string; alternatives: string[] }[];
+  senses: { senseId: string; senseCode: string; gloss: string; definition: string | null }[];
+};
+
 const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}`), sql`, `);
 // A save time as fixed-width UTC text, so keptEntry can compare it as text.
 const savedAt = (alias: 's' | 'o') =>
@@ -108,10 +120,13 @@ export function createGlossRepo(tx: Tx) {
    * forwarded to the other. Photo rows are left alone: their options are a
    * snapshot, and a stale id resolves when the import is saved.
    *
-   * Null when there is nothing to do (either gloss gone or no longer live),
-   * which is what makes a retried job safe. The caller holds lockLexemes.
+   * Null when there is nothing to do (either gloss gone or no longer live, or
+   * one gloss asked to merge into itself, which a plan built from the model's
+   * groups can name), which is what makes a retried job safe. The caller holds
+   * lockLexemes.
    */
   const mergeGlosses = async (input: { survivorId: string; otherId: string }): Promise<MergeCounts | null> => {
+    if (input.survivorId === input.otherId) return null;
     const glosses = await tx.execute<{
       id: string;
       lexeme_id: string;
@@ -233,7 +248,62 @@ export function createGlossRepo(tx: Tx) {
     };
   };
 
-  return { resolveGlosses, findMergeCandidates, mergeGlosses };
+  /** Phase 31 (spec D7, the tool). The whole dictionary's work list. A by-hand
+   *  tool reads everything once; nothing on a learner's path calls this. */
+  const findMergeWork = async (): Promise<MergeWork[]> => {
+    const glosses = await tx.execute<{
+      id: string; lexeme_id: string; lemma: string; part_of_speech: string;
+      language_code: string; user_language_code: string; key: string; alternatives: string[];
+    }>(sql`
+      SELECT g.id, g.lexeme_id, l.lemma, l.part_of_speech, l.language_code, g.user_language_code, g.key, g.alternatives
+      FROM dict_glosses g JOIN dict_lexemes l ON l.id = g.lexeme_id
+      WHERE g.merged_into IS NULL
+      ORDER BY l.lemma, g.user_language_code, g.key`);
+    const senses = await tx.execute<{
+      sense_id: string; sense_code: string; definition: string | null; lexeme_id: string; user_language_code: string; key: string;
+    }>(sql`
+      SELECT s.id AS sense_id, s.sense_code, s.definition, m.lexeme_id, m.user_language_code, g.key
+      FROM dict_sense_glosses m
+      JOIN dict_senses s  ON s.id = m.sense_id
+      JOIN dict_glosses g ON g.id = m.gloss_id
+      ORDER BY s.sense_code`);
+    const work = new Map<string, MergeWork>();
+    for (const row of glosses.rows) {
+      const id = `${row.lexeme_id} ${row.user_language_code}`;
+      const item = work.get(id) ?? {
+        lexemeId: row.lexeme_id,
+        lemma: row.lemma,
+        partOfSpeech: row.part_of_speech,
+        languageCode: row.language_code,
+        userLanguageCode: row.user_language_code,
+        glosses: [],
+        senses: [],
+      };
+      item.glosses.push({ id: row.id, key: row.key, alternatives: row.alternatives });
+      work.set(id, item);
+    }
+    for (const row of senses.rows) {
+      work.get(`${row.lexeme_id} ${row.user_language_code}`)?.senses.push({
+        senseId: row.sense_id,
+        senseCode: row.sense_code,
+        gloss: row.key,
+        definition: row.definition,
+      });
+    }
+    return [...work.values()].filter((item) => item.glosses.length >= 2 || item.senses.some((sense) => sense.definition === null));
+  };
+
+  /** Phase 31 (spec D9). Fills definitions a sense lacks; one already there stays. */
+  const setDefinitions = async (rows: { senseId: string; definition: string }[]): Promise<number> => {
+    let filled = 0;
+    for (const row of rows) {
+      const result = await tx.execute(sql`UPDATE dict_senses SET definition = ${row.definition} WHERE id = ${row.senseId} AND definition IS NULL`);
+      filled += result.rowCount ?? 0;
+    }
+    return filled;
+  };
+
+  return { resolveGlosses, findMergeCandidates, mergeGlosses, findMergeWork, setDefinitions };
 }
 
 export type GlossRepo = ReturnType<typeof createGlossRepo>;
