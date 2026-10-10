@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { createDictRepo, type RepairedRendering } from '../../../src/repo/dictionary';
 import { createGlossRepo } from '../../../src/repo/glosses';
 import { insertDriftedFinger, insertLexeme, insertRendering } from '../../support/dictRows';
+import { holdMergeOpen, waitForBlockedQuery } from '../../support/locks';
 import { insertAnsweredSession, insertProgressRows, setLevel } from '../../support/progressRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -203,5 +204,59 @@ describe('mergeGlosses (spec D7)', () => {
     // Once the first member itself says מסובך, the write asks, and the job agrees.
     expect(await repair([rendering(hard, 0, 'מסובך'), rendering(complicated, 1, 'קשה'), rendering(intricate, 2, 'מסובך')])).toEqual({ needsMerge: true });
     expect(await candidatesOf(word.lexemeId)).toEqual([{ otherId: hardGloss.id, survivorId: complexGloss.id }]);
+  });
+});
+
+// Spec §3: a lookup that joins a sense to a gloss while the job merges that
+// gloss. The lookup's write waits on the lexeme row the merge holds FOR UPDATE
+// (persistEntries' step 1b), then reads what the merge left: the key it names
+// is a forwarded gloss's, so the new sense joins the survivor (D7).
+describe('a lookup racing a merge (spec D7)', () => {
+  const membershipsOf = async (lexemeId: string) =>
+    (
+      await t.db.execute<{ sense_code: string; gloss_id: string; live: boolean }>(sql`
+        select s.sense_code, m.gloss_id, g.merged_into is null as live
+        from dict_sense_glosses m
+        join dict_senses s  on s.id = m.sense_id
+        join dict_glosses g on g.id = m.gloss_id
+        where m.lexeme_id = ${lexemeId} and m.user_language_code = 'he'
+        order by s.sense_code`)
+    ).rows;
+  const renderingsWithoutGloss = async (lexemeId: string) =>
+    (
+      await t.db.execute<{ n: number }>(sql`
+        select count(*)::int as n
+        from dict_var_translations tr
+        join dict_variants v on v.id = tr.variant_id
+        left join dict_sense_glosses m on m.sense_id = tr.sense_id and m.user_language_code = tr.user_language_code
+        where v.lexeme_id = ${lexemeId} and m.gloss_id is null`)
+    ).rows[0].n;
+
+  it('commits both: the new sense joins the survivor, and no rendering is left without a gloss', async () => {
+    const w = await twoGlosses();
+    const merging = holdMergeOpen(t.db, { lexemeId: w.lexemeId, survivorId: w.survivor, otherId: w.other });
+    await merging.ready;
+    // A miss on another form of `finger`, whose answer brings a sense the
+    // dictionary has not met, its citation form the key the merge folds away.
+    const looking = withTx(t.db, (tx) =>
+      createDictRepo(tx).persistEntries({
+        form: "finger's",
+        languageCode: 'en',
+        userLanguageCode: 'he',
+        kind: 'word',
+        entries: [{ lemma: 'finger', part_of_speech: 'noun', senses: [{ sense_code: 'measure', translation: 'אצבעות', gloss: 'אצבעות' }] }],
+      }),
+    );
+    await waitForBlockedQuery(t.db);
+    merging.release();
+
+    await expect(merging.done).resolves.toBeUndefined();
+    expect((await looking).glosses).toEqual({ created: 0, joined: 1, members: 1 });
+    expect(await membershipsOf(w.lexemeId)).toEqual([
+      { sense_code: 'body_part', gloss_id: w.survivor, live: true },
+      { sense_code: 'digit', gloss_id: w.survivor, live: true },
+      { sense_code: 'measure', gloss_id: w.survivor, live: true },
+    ]);
+    expect(await renderingsWithoutGloss(w.lexemeId)).toBe(0);
   });
 });
