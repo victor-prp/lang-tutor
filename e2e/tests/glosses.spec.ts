@@ -104,11 +104,12 @@ test('a word saved from fingers headlines אצבע and says where it was saved f
   }).toPass({ timeout: 60_000 });
 
   // Each session asks one agreeing rendering at random (spec D12): `fingers` or
-  // `finger`. Ten sessions miss `finger` once in 1024 runs.
+  // `finger`. Twenty-four sessions miss `finger` once in 2^24 runs (about 6e-8),
+  // and the loop stops at the first `finger`.
   await clearGemini(request);
   await expectGeminiPayload(request, generationStub());
   const asked = new Set<string>();
-  for (let attempt = 0; attempt < 10 && !asked.has('finger'); attempt++) {
+  for (let attempt = 0; attempt < 24 && !asked.has('finger'); attempt++) {
     const session = await readyListSession(page.request, enrollmentId);
     asked.add(askedForm(session.question));
     await skipSession(page.request, session.id);
