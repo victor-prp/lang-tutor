@@ -243,9 +243,9 @@ export async function insertCorrection(
 }
 
 /** Phase 31. Gives every sense written so far a definition if it has none. The
- *  seed's senses have none, so without this dict:glosses:merge's model tier
- *  asks about every seeded headword, one model call each per plan, rather than
- *  only about those holding two glosses. */
+ *  seed's senses have none, so without this a `--definitions` plan of
+ *  dict:glosses:merge's model tier asks about every seeded headword, one model
+ *  call each, rather than only about those holding two glosses. */
 export async function defineEverySense(db: Db): Promise<void> {
   await db.execute(sql`update dict_senses set definition = 'defined before the test' where definition is null`);
 }

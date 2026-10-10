@@ -1,20 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { createGlossTools } from '../../../src/composition';
-import { defineEverySense, insertDriftedFinger, insertRendering, readSenseDefinitions } from '../../support/dictRows';
+import type { MergeProgress } from '../../../src/services/glosses';
+import { defineEverySense, insertDriftedFinger, insertLexeme, insertRendering, readSenseDefinitions } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { geminiResponse } from '../../support/geminiResponse';
-import { clearNamespace, expectGeminiRawBody, geminiBaseUrlFor, mockNamespace } from '../../support/mockServer';
+import { clearNamespace, countGeminiRequests, expectGeminiRawBody, geminiBaseUrlFor, mockNamespace } from '../../support/mockServer';
 import { createTestDb, type TestDb } from '../../support/testDb';
 
 let t: TestDb;
 let ns: string;
 beforeEach(async () => {
   t = await createTestDb();
-  // The model tier asks about every headword with two glosses or a sense with no
-  // definition, the seed's included: one MockServer call each, per plan, on a
-  // container the whole suite shares. Defined here, the seed's headwords cost a
-  // call only where they hold two glosses, not every one of them.
+  // The model tier asks about every headword with two glosses, and with
+  // --definitions about every one with a sense that has no definition, the
+  // seed's included: one MockServer call each, per plan, on a container the
+  // whole suite shares. Defined here, the seed's headwords cost a
+  // --definitions plan a call only where they hold two glosses.
   await defineEverySense(t.db);
   ns = mockNamespace('services-glosses-tools');
 });
@@ -34,6 +36,10 @@ const tools = () =>
     timeoutMs: 25_000,
   });
 
+const quiet = (): void => {};
+const TIER_1 = { model: false, definitions: false, onProgress: quiet };
+const TIER_2 = { model: true, definitions: false, onProgress: quiet };
+
 /** `finger` whose lemma form renders body_part as אצבע while body_part's gloss is
  *  keyed אצבעות: the blocked rename tier 1 finds. insertLexeme alone cannot
  *  build it, since its rule keys body_part from the lemma form. */
@@ -46,13 +52,13 @@ async function blockedRename() {
 describe('dict:glosses:merge (spec D7)', () => {
   it('plans tier 1 without writing, and applies it only when asked', async () => {
     await blockedRename();
-    const plan = await tools().planMerges({ model: false });
+    const plan = await tools().planMerges(TIER_1);
     expect(plan.merges.map(({ otherKey, survivorKey, tier }) => ({ otherKey, survivorKey, tier }))).toEqual([
       { otherKey: 'אצבעות', survivorKey: 'אצבע', tier: 1 },
     ]);
-    expect((await tools().planMerges({ model: false })).merges).toHaveLength(1);
+    expect((await tools().planMerges(TIER_1)).merges).toHaveLength(1);
     expect(await tools().applyMerges(plan)).toEqual({ merged: 1, definitions: 0 });
-    expect((await tools().planMerges({ model: false })).merges).toHaveLength(0);
+    expect((await tools().planMerges(TIER_1)).merges).toHaveLength(0);
   });
 
   // Tier 1 reads the dictionary alone: the CLI composes no model, and reads no
@@ -66,7 +72,7 @@ describe('dict:glosses:merge (spec D7)', () => {
       gemini: null,
       timeoutMs: 25_000,
     });
-    const plan = await withoutModel.planMerges({ model: false });
+    const plan = await withoutModel.planMerges(TIER_1);
     expect(plan.merges.map(({ otherKey, survivorKey, tier }) => ({ otherKey, survivorKey, tier }))).toEqual([
       { otherKey: 'אצבעות', survivorKey: 'אצבע', tier: 1 },
     ]);
@@ -75,7 +81,7 @@ describe('dict:glosses:merge (spec D7)', () => {
   it("plans tier 2 from the model's groups, the citation form surviving", async () => {
     await insertDriftedFinger(t.db);
     await expectGeminiRawBody(ns, JSON.stringify(geminiResponse({ groups: [['אצבע', 'אצבעות']], definitions: [] })));
-    const plan = await tools().planMerges({ model: true });
+    const plan = await tools().planMerges(TIER_2);
     expect(plan.merges.map(({ otherKey, survivorKey, tier }) => ({ otherKey, survivorKey, tier }))).toEqual([
       { otherKey: 'אצבעות', survivorKey: 'אצבע', tier: 2 },
     ]);
@@ -93,7 +99,7 @@ describe('dict:glosses:merge (spec D7)', () => {
       ns,
       JSON.stringify(geminiResponse({ groups: [], definitions: [{ sense_code: 'body_part', definition: finger[0].definition }] })),
     );
-    const plan = await tools().planMerges({ model: true });
+    const plan = await tools().planMerges(TIER_2);
     expect(plan.merges).toEqual([]);
     expect(await readSenseDefinitions(t.db, 'finger')).toEqual([
       { senseCode: 'body_part', definition: null },
@@ -106,7 +112,38 @@ describe('dict:glosses:merge (spec D7)', () => {
     // A plan made before the fill, applied again, and a new plan: neither
     // touches a definition that is there.
     expect(await tools().applyMerges(plan)).toEqual({ merged: 0, definitions: 0 });
-    expect((await tools().planMerges({ model: true })).definitions).toEqual([]);
+    expect((await tools().planMerges(TIER_2)).definitions).toEqual([]);
     expect(await readSenseDefinitions(t.db, 'finger')).toEqual(finger);
+  });
+
+  // After the deploy nearly every sense lacks a definition, so tier 2 asks
+  // about a headword with one gloss only when --definitions asks for it.
+  it('asks about a headword with one gloss and an undefined sense only with --definitions', async () => {
+    await insertLexeme(t.db, {
+      lemma: 'thimble',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'sewing_cap' }],
+      variants: [
+        { form: 'thimble', kind: 'word', entryRank: 0, translations: [{ senseCode: 'sewing_cap', rank: 0, translation: 'אצבעון', exampleSource: null, exampleTarget: null }] },
+      ],
+    });
+    const definition = 'a small cap that guards the finger while sewing';
+    await expectGeminiRawBody(ns, JSON.stringify(geminiResponse({ groups: [], definitions: [{ sense_code: 'sewing_cap', definition }] })));
+    const asking = (seen: MergeProgress[]) => seen.flatMap((progress) => (progress.kind === 'asking' ? [progress.headwords] : []));
+
+    const plainSeen: MergeProgress[] = [];
+    const plain = await tools().planMerges({ ...TIER_2, onProgress: (progress) => plainSeen.push(progress) });
+    expect(await countGeminiRequests(ns, 'thimble')).toBe(0);
+    expect(plain.definitions).toEqual([]);
+
+    const fullSeen: MergeProgress[] = [];
+    const full = await tools().planMerges({ ...TIER_2, definitions: true, onProgress: (progress) => fullSeen.push(progress) });
+    expect(await countGeminiRequests(ns, 'thimble')).toBe(1);
+    expect(full.definitions.map((row) => row.definition)).toEqual([definition]);
+    // Counted before the calls: one headword more than the plain run asked.
+    expect(asking(fullSeen)).toEqual([asking(plainSeen)[0] + 1]);
+    expect(fullSeen.filter((progress) => progress.kind === 'asked' && progress.lemma === 'thimble')).toHaveLength(1);
   });
 });

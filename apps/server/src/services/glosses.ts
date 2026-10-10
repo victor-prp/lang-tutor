@@ -5,7 +5,7 @@ import { MergeGlossesPayloadSchema } from '../domain/jobs';
 import type { LanguageCode } from '../domain/languages';
 import { LlmUnavailable } from '../errors';
 import type { Logger } from '../logger';
-import type { MergeCounts } from '../repo/glosses';
+import type { MergeCounts, MergeWork } from '../repo/glosses';
 import type { LlmClient } from './llm';
 import type { Transaction } from './transaction';
 
@@ -43,6 +43,30 @@ export type MergePlan = {
    *  answered unreadably: logged, left out of tier 2, and asked again next run. */
   skipped: number;
 };
+
+/** What planMerges reports while tier 2 runs, for the CLI to print (ADR 0001
+ *  R7 keeps `console` out of a service): how many headwords it will ask, before
+ *  the first call, then each headword once its call is done. */
+export type MergeProgress =
+  | { kind: 'asking'; headwords: number }
+  | {
+      kind: 'asked';
+      done: number;
+      of: number;
+      lemma: string;
+      partOfSpeech: string;
+      userLanguageCode: string;
+      merges: number;
+      definitions: number;
+      skipped: boolean;
+    };
+
+/** Spec D7's tier 2 selection: a headword with more than one live gloss, whose
+ *  answer also fills its senses' missing definitions; with `definitions`, also
+ *  a headword one of whose senses has no definition. */
+function asksModel(item: MergeWork, definitions: boolean): boolean {
+  return item.glosses.length >= 2 || (definitions && item.senses.some((sense) => sense.definition === null));
+}
 
 /**
  * Phase 31 (spec D7). The gloss use cases that are not a lookup: the merge job,
@@ -82,38 +106,58 @@ export function createGlossService({
 
     /**
      * Spec D7, the by-hand tool. Tier 1 is the job's signal over the whole
-     * dictionary; tier 2 (`model`) asks the model, once per lexeme and language,
-     * which target words are forms of one word, and for missing definitions.
-     * Mutual-alternative pairs are listed as suggestions and never merged.
-     * Writes nothing. The model is called outside any transaction (ADR 0001 R8).
-     * A headword whose call fails (LlmUnavailable) or answers unreadably is
-     * logged and skipped, and the rest are still planned: one call in thousands
-     * must not cost the run. Any other error is a bug, and stops it.
+     * dictionary. Tier 2 (`model`) asks the model, once per headword (a lexeme
+     * in one learner language) with more than one live gloss, which of its
+     * target words are forms of one word, and fills those headwords' missing
+     * definitions on the way. `definitions` extends tier 2 to every headword
+     * with a sense that has no definition, which after phase 31's deploy is
+     * nearly every headword, so it is asked for by name. Mutual-alternative
+     * pairs are listed as suggestions and never merged. Writes nothing.
+     *
+     * The model is called outside any transaction (ADR 0001 R8), after tier 1,
+     * and `onProgress` hears how many headwords tier 2 will ask before the
+     * first call, then each headword as its call ends. A headword whose call
+     * fails (LlmUnavailable) or answers unreadably is logged and skipped, and
+     * the rest are still planned: one call in thousands must not cost the run.
+     * Any other error is a bug, and stops it.
      */
-    planMerges: async ({ model }: { model: boolean }): Promise<MergePlan> => {
-      // A tier 2 request answered with tier 1 alone would print as a full plan.
+    planMerges: async ({
+      model,
+      definitions,
+      onProgress,
+    }: {
+      model: boolean;
+      definitions: boolean;
+      onProgress: (progress: MergeProgress) => void;
+    }): Promise<MergePlan> => {
+      // A tier 2 request answered with tier 1 alone would print as a full plan,
+      // and a definitions run without the model as one with none missing.
       if (model && !llm) throw new Error('tier 2 needs a model client: compose the tools with a Gemini config');
+      if (definitions && !model) throw new Error('--definitions extends tier 2: ask for the model too');
       const work = await transaction(({ gloss }) => gloss.findMergeWork());
       const plan: MergePlan = { merges: [], definitions: [], suggestions: [], skipped: 0 };
+      // Every gloss a merge already takes away, so no later merge names it again.
+      const planned = new Set<string>();
+      const baseOf = (item: MergeWork) => ({ lexemeId: item.lexemeId, userLanguageCode: item.userLanguageCode, lemma: item.lemma });
+
+      // Tier 1. A pair needs two live glosses, so a headword with one costs no read.
       for (const item of work) {
+        if (item.glosses.length < 2) continue;
         const keyOf = new Map(item.glosses.map((g) => [g.id, g.key]));
-        const planned = new Set<string>();
-        const base = { lexemeId: item.lexemeId, userLanguageCode: item.userLanguageCode, lemma: item.lemma };
-        // A pair needs two live glosses: an item here for a missing definition
-        // alone costs no read.
-        const candidates =
-          item.glosses.length < 2
-            ? []
-            : await transaction(({ gloss }) =>
-                gloss.findMergeCandidates({ lexemeId: item.lexemeId, userLanguageCode: item.userLanguageCode }),
-              );
+        const candidates = await transaction(({ gloss }) =>
+          gloss.findMergeCandidates({ lexemeId: item.lexemeId, userLanguageCode: item.userLanguageCode }),
+        );
         for (const pair of candidates) {
           planned.add(pair.otherId);
-          plan.merges.push({ ...base, ...pair, survivorKey: keyOf.get(pair.survivorId)!, otherKey: keyOf.get(pair.otherId)!, tier: 1 });
+          plan.merges.push({ ...baseOf(item), ...pair, survivorKey: keyOf.get(pair.survivorId)!, otherKey: keyOf.get(pair.otherId)!, tier: 1 });
         }
         for (const [a, b] of mutualPairs(item.glosses)) plan.suggestions.push({ lemma: item.lemma, keys: [keyOf.get(a)!, keyOf.get(b)!] });
-        if (!model || !llm) continue;
+      }
+      if (!model || !llm) return plan;
+      const client = llm;
 
+      /** One headword's call, planned into `plan`; false when skipped. */
+      const ask = async (item: MergeWork): Promise<boolean> => {
         const prompt = buildGlossMergePrompt({
           lemma: item.lemma,
           partOfSpeech: item.partOfSpeech,
@@ -124,23 +168,21 @@ export function createGlossService({
         });
         let raw: string;
         try {
-          raw = await llm(prompt);
+          raw = await client(prompt);
         } catch (error) {
           if (!(error instanceof LlmUnavailable)) throw error;
-          plan.skipped += 1;
           logger.info({
             event: 'gloss_merge_unavailable',
             lexeme_id: item.lexemeId,
             user_language_code: item.userLanguageCode,
             reason: error.message,
           });
-          continue;
+          return false;
         }
         const answer = parseGlossMerge(raw);
         if (!answer) {
-          plan.skipped += 1;
           logger.info({ event: 'gloss_merge_unreadable', lexeme_id: item.lexemeId, user_language_code: item.userLanguageCode });
-          continue;
+          return false;
         }
         const byKey = new Map(item.glosses.map((g) => [normaliseGloss(g.key), g]));
         for (const group of answer.groups) {
@@ -151,7 +193,7 @@ export function createGlossService({
           for (const other of others) {
             if (!survivor || other.id === survivor.id || planned.has(other.id)) continue;
             planned.add(other.id);
-            plan.merges.push({ ...base, survivorId: survivor.id, survivorKey: survivor.key, otherId: other.id, otherKey: other.key, tier: 2 });
+            plan.merges.push({ ...baseOf(item), survivorId: survivor.id, survivorKey: survivor.key, otherId: other.id, otherKey: other.key, tier: 2 });
           }
         }
         const senseOf = new Map(item.senses.map((sense) => [sense.senseCode, sense]));
@@ -159,6 +201,27 @@ export function createGlossService({
           const sense = senseOf.get(senseCode);
           if (sense && sense.definition === null && definition !== '') plan.definitions.push({ senseId: sense.senseId, definition });
         }
+        return true;
+      };
+
+      // Tier 2.
+      const asked = work.filter((item) => asksModel(item, definitions));
+      onProgress({ kind: 'asking', headwords: asked.length });
+      for (const [index, item] of asked.entries()) {
+        const before = { merges: plan.merges.length, definitions: plan.definitions.length };
+        const answered = await ask(item);
+        if (!answered) plan.skipped += 1;
+        onProgress({
+          kind: 'asked',
+          done: index + 1,
+          of: asked.length,
+          lemma: item.lemma,
+          partOfSpeech: item.partOfSpeech,
+          userLanguageCode: item.userLanguageCode,
+          merges: plan.merges.length - before.merges,
+          definitions: plan.definitions.length - before.definitions,
+          skipped: !answered,
+        });
       }
       return plan;
     },

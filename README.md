@@ -432,19 +432,30 @@ restored corrections rather than failing when the sibling file is absent.
 **A restore carries no gloss merge.** The file holds each form's renderings, not which
 gloss each sense belongs to, so a restore rebuilds the glosses from the renderings, form by
 form, and two glosses `dict:glosses:merge` had merged come back apart. After a restore, run
-both tiers of the merge tool on the same database:
+the merge tool on the same database, tier 1 and then tier 2:
 
 ```bash
-npm run dict:glosses:merge               # tier 1: the merge job's signal, no model
-npm run dict:glosses:merge -- --model    # tier 2: one model call per headword
+npm run dict:glosses:merge                            # tier 1: the merge job's signal, no model call
+npm run dict:glosses:merge -- --model                 # tier 2: one model call per headword with more than one gloss
+npm run dict:glosses:merge -- --model --definitions   # optional: also one per headword with an undefined sense
 ```
 
-Each prints its plan and changes nothing; run it again with `--yes` added
-(`-- --yes`, `-- --model --yes`) to apply it. Even the dry run migrates the database
-first, as `dict:restore` does. `--model` reads `GEMINI_API_KEY` and `GEMINI_MODEL` the way
-the server does; tier 1 needs neither. The tool runs wherever `DATABASE_URL` points, so a
-production restore (`docs/runbooks/hosting.md`) is followed by the same two commands with
-`DATABASE_URL="$PROD_DB"` in front.
+What a run costs: tier 1 calls no model. `--model` asks the model once per headword (a
+lexeme in one learner language) that has more than one gloss, which forms of one word they
+are, and fills those headwords' missing definitions on the way. `--definitions` extends
+tier 2 to every headword with a sense that has no definition, one call each; after phase
+31's migration that is nearly the whole dictionary, so it is optional, and without it such a
+definition waits for the next lookup whose model call names its sense (spec D9). Tier 2
+prints how many headwords it will ask before the first call, then one line per headword as
+it goes.
+
+Each run prints its plan and changes nothing; run it again with `--yes` added (`-- --yes`,
+`-- --model --yes`, `-- --model --definitions --yes`) to apply it. That run plans again
+before it applies, as `lane:clean` does, so it pays tier 2's calls a second time. Even the
+dry run migrates the database first, as `dict:restore` does. `--model` reads
+`GEMINI_API_KEY` and `GEMINI_MODEL` the way the server does; tier 1 needs neither. The tool
+runs wherever `DATABASE_URL` points, so a production restore (`docs/runbooks/hosting.md`) is
+followed by the same commands with `DATABASE_URL="$PROD_DB"` in front.
 
 > **`data/backfill/en-he/dictionary.jsonl` predates migration `0005` and will not restore.**
 > Its entries carry no `part_of_speech`, and the renderings it holds were stored per meaning

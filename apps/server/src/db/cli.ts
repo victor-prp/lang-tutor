@@ -229,12 +229,21 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Phase 31 (spec D7). `npm run dict:glosses:merge -- --model --yes`, either
-    // flag optional: prints the plan, and changes nothing without --yes, as
-    // lane:clean does. --model adds tier 2, one model call per lexeme and
-    // language. The database is named by its redacted URL only.
+    // Phase 31 (spec D7). `npm run dict:glosses:merge -- --model --definitions
+    // --yes`, every flag optional: prints the plan, and changes nothing without
+    // --yes, as lane:clean does; --yes plans again before applying, model calls
+    // included. Tier 1 calls no model. --model adds tier 2, one model call per
+    // headword with more than one gloss; --definitions extends it to every
+    // headword with a sense that has no definition, one call each. The
+    // database is named by its redacted URL only.
     if (process.argv.includes('--merge-glosses')) {
       const model = process.argv.includes('--model');
+      const definitions = process.argv.includes('--definitions');
+      if (definitions && !model) {
+        console.error('usage: npm run dict:glosses:merge -- --model --definitions [--yes]: --definitions extends the model tier');
+        process.exitCode = 1;
+        return;
+      }
       const tools = createGlossTools({
         db,
         logger: createConsoleLogger(),
@@ -243,7 +252,20 @@ async function main(): Promise<void> {
         gemini: model ? loadGeminiConfig(process.env) : null,
         timeoutMs: 60_000,
       });
-      const plan = await tools.planMerges({ model });
+      const plan = await tools.planMerges({
+        model,
+        definitions,
+        // What tier 2 is about to cost, then each headword as its call ends.
+        onProgress: (progress) =>
+          console.log(
+            progress.kind === 'asking'
+              ? `tier 2 asks the model about ${progress.headwords} headwords, one call each`
+              : `  ${progress.done}/${progress.of} ${progress.lemma}, ${progress.partOfSpeech} (${progress.userLanguageCode}): ` +
+                  (progress.skipped
+                    ? 'skipped, no readable answer'
+                    : `${progress.merges} merges, ${progress.definitions} definitions`),
+          ),
+      });
       for (const merge of plan.merges) console.log(`tier ${merge.tier}  ${merge.lemma}: ${merge.otherKey} → ${merge.survivorKey}`);
       for (const suggestion of plan.suggestions) console.log(`suggestion, not merged: ${suggestion.lemma}: ${suggestion.keys.join(' ↔ ')}`);
       const counts = [`${plan.merges.length} merges`, `${plan.definitions.length} definitions to fill`];
@@ -251,8 +273,9 @@ async function main(): Promise<void> {
       if (model) counts.push(`${plan.skipped} skipped (no readable model answer)`);
       console.log(`${counts.join(', ')} in ${shownUrl}`);
       if (!process.argv.includes('--yes')) {
-        // The same tiers again: a bare --yes after a --model plan would apply tier 1 alone.
-        console.log(`Nothing changed. Run again with -- ${model ? '--model --yes' : '--yes'} to apply.`);
+        // Every flag given, again: a bare --yes after a --model plan would apply tier 1 alone.
+        const flags = [...(model ? ['--model'] : []), ...(definitions ? ['--definitions'] : []), '--yes'];
+        console.log(`Nothing changed. Run again with -- ${flags.join(' ')} to apply.`);
         return;
       }
       const done = await tools.applyMerges(plan);
