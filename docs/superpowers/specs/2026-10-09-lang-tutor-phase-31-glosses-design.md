@@ -664,6 +664,27 @@ above, it is listed here with its reason; everything else was built as written.
   (PR #113); tier 1 needs no Gemini settings, and a tier 2 lexeme whose call fails is logged,
   skipped and counted in the plan.** Production's database is no longer reachable from the
   container alone, and one provider failure should not throw away a reviewed plan.
+- **Tier 2 asks the model about the headwords with more than one live gloss, as §2 selects them,
+  and fills their senses' missing definitions on the way; `--definitions` extends it to every
+  headword with a sense that has no definition, and is refused without `--model`. Tier 2 prints
+  how many headwords it will ask before the first call, then one line per headword, and the
+  "Nothing changed" hint repeats every flag given.** After the deploy nearly every sense lacks a
+  definition, so asking about each such headword would cost a model call per headword in the
+  dictionary, silently, and again on `--yes`, which still plans again before applying. A
+  definition that waits for `--definitions` is filled meanwhile by the next lookup whose model
+  call names its sense.
+- **A typed or spoken card accepts at most three sibling headwords before the model's
+  alternatives, then any remaining siblings, five in all (D18).** Siblings are lemmas while the
+  model's alternatives are inflected to the card's form, so five siblings filling every slot
+  marked a right inflected synonym wrong while a sibling lemma was accepted.
+- **The meaning card's rule accepts the gloss key too (D13), unless it is the stored meaning
+  itself.** The list and the word page head a saved word with its key (D11), so a learner asked
+  the meaning of `fingers` who types אצבע is right without a judge call.
+- **No gloss key normalises to nothing.** `renderingOf` takes the translation as the citation form
+  when the model's normalises to '' ("-", a bare parenthetical, blank text), and `assignGlosses`
+  keys such a sense by its translation, whichever writer calls it, and never renames a gloss to
+  such a key. One key of '' would gather every such sense of a headword into one gloss and head
+  its card with nothing.
 - **`also` and `savedFrom` are Hebrew only.** The app's strings have one language, so "both
   languages" had nothing to fill.
 - **`0025`'s snapshot was made with drizzle-kit's `generateDrizzleJson`.** `db:generate --custom`
@@ -675,9 +696,11 @@ above, it is listed here with its reason; everything else was built as written.
 
 **Consequences worth knowing**
 
-- **Siblings fill a typed or spoken card's five alternatives first, alphabetically.** A key with
-  five sibling headwords leaves no room for the model's inflected alternatives, so a right
-  inflected synonym is then marked wrong while a sibling lemma is accepted.
+- **A key with more than three sibling headwords may leave some of them unaccepted.** Three come
+  first, alphabetically, and the rest only fill the slots the model's alternatives leave of five.
+- **A translation that itself normalises to nothing still keys its gloss.** The fallback is the
+  translation, and nothing stands behind it; the model's schema refuses an empty translation, so
+  only a translation that is nothing but a parenthetical or a dash can reach it.
 - **Siblings are lemmas only.** A sibling's inflected form is accepted only when the model listed
   it, and kept off a reverse card's wrong options by the prompt alone.
 - **The judge context reads one rendering per card, the lowest-ranked.** A form that renders two
