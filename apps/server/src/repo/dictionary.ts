@@ -666,6 +666,7 @@ export function createDictRepo(tx: Tx) {
         lemmaForm: input.form.toLowerCase() === entry.lemma.toLowerCase(),
         senses: entry.senses.map((sense, i) => ({
           senseId: senseIds[i],
+          translation: sense.translation,
           gloss: sense.gloss,
           glossAlternatives: sense.glossAlternatives,
           alternatives: sense.alternatives,
@@ -830,6 +831,7 @@ export function createDictRepo(tx: Tx) {
       lemmaForm: input.lemmaForm,
       senses: input.senses.map((sense) => ({
         senseId: sense.senseId,
+        translation: sense.translation,
         gloss: sense.gloss,
         glossAlternatives: sense.glossAlternatives,
         alternatives: sense.alternatives,

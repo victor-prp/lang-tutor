@@ -236,7 +236,8 @@ export type EntryToStore = Omit<LlmEntry, 'senses'> & { senses: SenseToStore[] }
  * the rest of any list as alternatives, so a model that ignores "one
  * translation" still never puts a list on a card (Review Focus 5). The citation
  * form is the model's, cleaned the same way, or the translation when it gave
- * none. The lookup and the repair both call it.
+ * none or one that normalises to nothing ("-", a bare parenthetical), which
+ * would key a gloss by ''. The lookup and the repair both call it.
  */
 export function renderingOf(
   sense: {
@@ -251,7 +252,7 @@ export function renderingOf(
 ): Rendering {
   const said = splitTranslation(sense.translation);
   const cited = sense.gloss ? splitTranslation(sense.gloss) : null;
-  const gloss = cited?.translation ?? said.translation;
+  const gloss = cited && normaliseGloss(cited.translation) !== '' ? cited.translation : said.translation;
   return {
     rank,
     translation: said.translation,

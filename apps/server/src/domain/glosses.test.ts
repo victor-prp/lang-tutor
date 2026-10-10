@@ -80,8 +80,10 @@ describe('tidyGlossList', () => {
   });
 });
 
+/** A sense whose translation is its citation form, as a lemma form's usually is. */
 const sense = (senseId: string, gloss: string, glossAlternatives: string[] = [], alternatives: string[] = []) => ({
   senseId,
+  translation: gloss,
   gloss,
   glossAlternatives,
   alternatives,
@@ -262,7 +264,7 @@ describe('folding two glosses (spec D3, D7)', () => {
 describe("assignGlosses and the lemma form's own alternatives (spec D5)", () => {
   it("gives a new gloss the alternatives of a lemma-form rendering", () => {
     const plan = assignGlosses({
-      senses: [{ senseId: 's1', gloss: 'מכונית', glossAlternatives: [], alternatives: ['רכב', 'אוטו'] }],
+      senses: [{ senseId: 's1', translation: 'מכונית', gloss: 'מכונית', glossAlternatives: [], alternatives: ['רכב', 'אוטו'] }],
       lemmaForm: true,
       glosses: [],
       memberships: none,
@@ -273,8 +275,8 @@ describe("assignGlosses and the lemma form's own alternatives (spec D5)", () => 
   it('widens the gloss a lemma-form sense belongs to, and the one it joins, after the citation alternatives', () => {
     const plan = assignGlosses({
       senses: [
-        { senseId: 's1', gloss: 'מכונית', glossAlternatives: [], alternatives: ['רכב'] },
-        { senseId: 's2', gloss: 'מכונית', glossAlternatives: ['אוטו'], alternatives: ['רכב', 'מכונית'] },
+        { senseId: 's1', translation: 'מכונית', gloss: 'מכונית', glossAlternatives: [], alternatives: ['רכב'] },
+        { senseId: 's2', translation: 'מכונית', gloss: 'מכונית', glossAlternatives: ['אוטו'], alternatives: ['רכב', 'מכונית'] },
       ],
       lemmaForm: true,
       glosses: [{ id: 'g1', key: 'מכונית', alternatives: [] }],
@@ -287,8 +289,8 @@ describe("assignGlosses and the lemma form's own alternatives (spec D5)", () => 
   it("leaves an inflected form's alternatives off the gloss", () => {
     const plan = assignGlosses({
       senses: [
-        { senseId: 's1', gloss: 'מכונית', glossAlternatives: ['רכב'], alternatives: ['רכבים', 'אוטואים'] },
-        { senseId: 's2', gloss: 'מכונית', glossAlternatives: [], alternatives: ['מכוניות'] },
+        { senseId: 's1', translation: 'מכוניות', gloss: 'מכונית', glossAlternatives: ['רכב'], alternatives: ['רכבים', 'אוטואים'] },
+        { senseId: 's2', translation: 'מכוניות', gloss: 'מכונית', glossAlternatives: [], alternatives: ['מכוניות'] },
       ],
       lemmaForm: false,
       glosses: [{ id: 'g1', key: 'מכונית', alternatives: [] }],
@@ -310,5 +312,47 @@ describe('assignGlosses after a merge (spec D7)', () => {
     });
     expect(plan.join).toEqual([{ senseId: 's9', glossId: 'g_survivor' }]);
     expect(plan.create).toEqual([]);
+  });
+});
+
+// A key that normalises to nothing would gather every other such sense of the
+// headword into one gloss and head its card with nothing. renderingOf already
+// hands such a sense its translation; this holds whatever a writer passes.
+describe('assignGlosses never keys a gloss by nothing (phase 31)', () => {
+  const blank = (senseId: string, translation: string, gloss = '-') => ({ senseId, translation, gloss, glossAlternatives: [], alternatives: [] });
+
+  it("creates a new gloss under the sense's translation, and joins by it", () => {
+    const fresh = assignGlosses({ senses: [blank('s1', 'עכבר'), blank('s2', 'חולדה', '(מכרסם)')], lemmaForm: true, glosses: [], memberships: none });
+    expect(fresh.create).toEqual([
+      { key: 'עכבר', alternatives: [], senseIds: ['s1'] },
+      { key: 'חולדה', alternatives: [], senseIds: ['s2'] },
+    ]);
+    const joined = assignGlosses({
+      senses: [blank('s3', 'עַכְבָּר', '   ')],
+      lemmaForm: false,
+      glosses: [{ id: 'g1', key: 'עכבר', alternatives: [] }],
+      memberships: none,
+    });
+    expect(joined).toMatchObject({ create: [], join: [{ senseId: 's3', glossId: 'g1' }] });
+  });
+
+  it('lets the lemma form rename by its translation when its citation form normalises to nothing', () => {
+    const plan = assignGlosses({
+      senses: [blank('s1', 'אצבע')],
+      lemmaForm: true,
+      glosses: [{ id: 'g1', key: 'אצבעות', alternatives: [] }],
+      memberships: new Map([['s1', 'g1']]),
+    });
+    expect(plan.rename).toEqual([{ glossId: 'g1', key: 'אצבע' }]);
+  });
+
+  it('never renames a gloss to a key that normalises to nothing, and asks for no merge', () => {
+    const plan = assignGlosses({
+      senses: [blank('s1', '(הערה)', '־')],
+      lemmaForm: true,
+      glosses: [{ id: 'g1', key: 'אצבעות', alternatives: [] }],
+      memberships: new Map([['s1', 'g1']]),
+    });
+    expect(plan).toEqual({ create: [], join: [], alternatives: [], rename: [], needsMerge: false });
   });
 });

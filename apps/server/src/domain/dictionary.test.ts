@@ -7,6 +7,7 @@ import {
   kindForForm,
   mergeEntries,
   normalizeForm,
+  renderingOf,
   rowsToCards,
   staleLexemes,
 } from './dictionary';
@@ -317,6 +318,25 @@ describe('rowsToCards (phase 31, spec D10, D15)', () => {
     const rows = Array.from({ length: 7 }, (_, i) => row({ senseId: `s${i}`, glossId: `g${i}`, translation: `מילה${i}`, rank: i }));
     expect(rowsToCards(rows)).toHaveLength(5);
   });
+
+  // The cap stops new cards, not the rows of a card already started: the read
+  // sorts by rank across headwords, so a member of the first card can arrive
+  // after a sixth gloss's row has been turned away.
+  it("still gathers a started card's later member after the sixth gloss is turned away", () => {
+    const cards = rowsToCards([
+      row({ senseId: 's0', glossId: 'g0', translation: 'עכבר', rank: 0, exampleSource: 'The mouse ran.', exampleTarget: 'העכבר רץ.', alternatives: ['מכרסם'] }),
+      ...[1, 2, 3, 4, 5].map((i) => row({ senseId: `s${i}`, glossId: `g${i}`, translation: `מילה${i}`, rank: 0, entryRank: i })),
+      row({ senseId: 's6', glossId: 'g0', translation: 'עכבר', rank: 1, exampleSource: 'Click the mouse.', exampleTarget: 'לחץ על העכבר.', alternatives: ['עכברון'] }),
+    ]);
+    expect(cards.map((card) => card.gloss_id)).toEqual(['g0', 'g1', 'g2', 'g3', 'g4']);
+    expect(cards[0]).toMatchObject({
+      examples: [
+        { source: 'The mouse ran.', target: 'העכבר רץ.' },
+        { source: 'Click the mouse.', target: 'לחץ על העכבר.' },
+      ],
+      alternatives: ['מכרסם', 'עכברון'],
+    });
+  });
 });
 
 // The per-field rules rowsToSenses held before phase 31, kept for the cards.
@@ -626,5 +646,30 @@ describe('entriesToRows (phase 31)', () => {
       { lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכונית', sense_code: 'v', gloss: 'מכונית, רכב' }] },
     ]);
     expect(row.senses[0]).toMatchObject({ gloss: 'מכונית', glossAlternatives: ['רכב'] });
+  });
+});
+
+// A citation form that normalises to nothing would key a gloss by '', which
+// every other such sense of the headword then joins, and head its card with
+// nothing: the translation stands in for it.
+describe('renderingOf, a citation form that normalises to nothing (phase 31)', () => {
+  it.each([
+    ['a hyphen', '-'],
+    ['a bare parenthetical', '(צורת יסוד)'],
+    ['blank text', '   '],
+    ['a maqaf and vowel points', '־ְ'],
+  ])('takes the translation for %s', (_, gloss) => {
+    expect(renderingOf({ translation: 'אצבעות, בהונות', gloss }, 0)).toMatchObject({
+      translation: 'אצבעות',
+      gloss: 'אצבעות',
+      glossAlternatives: [],
+    });
+  });
+
+  it("keeps the model's citation alternatives, minus the translation that stands in", () => {
+    expect(renderingOf({ translation: 'מכונית', gloss: '-', gloss_alternatives: ['רכב', 'מכונית'] }, 0)).toMatchObject({
+      gloss: 'מכונית',
+      glossAlternatives: ['רכב'],
+    });
   });
 });

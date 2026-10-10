@@ -52,10 +52,12 @@ export function tidyGlossList(items: readonly string[], main: string, cap = MAX_
 }
 
 /** One sense of one write, for one lexeme, in the order the answer ranked them:
- *  its citation form and citation alternatives, and its rendering's own
- *  alternatives, in the written form's inflection. */
+ *  its rendering's translation, its citation form and citation alternatives,
+ *  and its rendering's own alternatives, in the written form's inflection. */
 export type AnswerSense = {
   senseId: string;
+  /** What keys the sense's gloss when its citation form normalises to nothing. */
+  translation: string;
   gloss: string;
   glossAlternatives: readonly string[];
   alternatives: readonly string[];
@@ -98,6 +100,11 @@ export type GlossPlan = {
  * (D7) and only asks for. If it agrees, the key stands. A later member never
  * renames the gloss, whatever it says: like any later form, it keeps its other
  * word on its own rendering (D6).
+ *
+ * No key ever normalises to nothing: it would gather every other such sense of
+ * the headword into one gloss and head its card with nothing. A sense whose
+ * citation form does ("-", a bare parenthetical) is keyed by its translation,
+ * as renderingOf already stores it, and a gloss is never renamed to such a key.
  */
 export function assignGlosses(input: {
   senses: readonly AnswerSense[];
@@ -132,6 +139,9 @@ export function assignGlosses(input: {
   // what fills a new gloss's list. An inflected form's alternatives never do.
   const citations = (sense: AnswerSense): readonly string[] =>
     input.lemmaForm ? [...sense.glossAlternatives, ...sense.alternatives] : sense.glossAlternatives;
+  // The word a sense names its gloss by: its citation form, unless that
+  // normalises to nothing.
+  const keyWordOf = (sense: AnswerSense): string => (normaliseGloss(sense.gloss) === '' ? sense.translation : sense.gloss);
 
   const firsts = new Map<string, AnswerSense>();
   for (const sense of input.senses) if (!firsts.has(sense.senseId)) firsts.set(sense.senseId, sense);
@@ -143,14 +153,15 @@ export function assignGlosses(input: {
     if (!gloss) continue;
     if (input.lemmaForm && !decided.has(glossId)) {
       decided.add(glossId);
-      const key = normaliseGloss(sense.gloss);
-      if (key !== normaliseGloss(gloss.key)) {
+      const word = keyWordOf(sense);
+      const key = normaliseGloss(word);
+      if (key !== '' && key !== normaliseGloss(gloss.key)) {
         const holder = byKey.get(key);
         if (holder === undefined) {
           byKey.delete(normaliseGloss(gloss.key));
           byKey.set(key, glossId);
-          gloss.key = sense.gloss;
-          plan.rename.push({ glossId, key: sense.gloss });
+          gloss.key = word;
+          plan.rename.push({ glossId, key: word });
         } else {
           plan.needsMerge = true;
         }
@@ -160,7 +171,8 @@ export function assignGlosses(input: {
   }
 
   for (const sense of senses.filter(({ senseId }) => !input.memberships.has(senseId))) {
-    const key = normaliseGloss(sense.gloss);
+    const word = keyWordOf(sense);
+    const key = normaliseGloss(word);
     const existing = byKey.get(key) ?? input.aliases?.get(key);
     if (existing !== undefined) {
       plan.join.push({ senseId: sense.senseId, glossId: existing });
@@ -174,8 +186,8 @@ export function assignGlosses(input: {
       continue;
     }
     created.set(key, {
-      key: sense.gloss,
-      alternatives: tidyGlossList(citations(sense), sense.gloss),
+      key: word,
+      alternatives: tidyGlossList(citations(sense), word),
       senseIds: [sense.senseId],
     });
   }
