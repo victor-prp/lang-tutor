@@ -455,10 +455,13 @@ export const dictSenseGlosses = pgTable(
 
 /**
  * Phase 31 (decided while planning, item 3; spec D12). One row per lexeme and
- * learner language whose lemma form's rendering was ever requested, by a save or
- * by the start-up backfill. Nothing requests it twice: a lemma the job skipped
- * (the lemma's lookup had no entry for this headword) would otherwise cost model
- * calls on every save and every container start.
+ * learner language whose lemma form's rendering has been requested, by a save,
+ * the start-up backfill or `dict:lemmas:render`: the claim that keeps a second
+ * request from being made. A render the job skipped (the lemma's lookup had no
+ * entry for this headword) keeps its claim, since it would otherwise cost model
+ * calls on every save and every container start. A render whose retries are
+ * spent gives its claim back through the dead letter, so a later save or start
+ * asks again.
  */
 export const dictLemmaRenders = pgTable(
   'dict_lemma_renders',

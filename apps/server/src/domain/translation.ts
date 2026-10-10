@@ -225,8 +225,9 @@ function writingRules(source: Language, target: Language): string[] {
  * The citation sentence's wording and place are measured, not style: the first
  * call's third-language rule (below, in buildPrompt) is balanced on `pour`,
  * English though French has the word, and this sentence tips it. Against the
- * live API on 2026-10-10, with no `gloss_alternatives` in the first call, ten
- * to twenty calls each: as written here, `pour` came back empty in 0 of 30.
+ * live API on 2026-10-10, with no `gloss_alternatives` in the first call: as
+ * written here, `pour` came back empty in none of 40 probe calls, five runs of
+ * the case alone and two full runs. Each variant, ten to thirty calls:
  * "Give the translation's dictionary citation form in "gloss", uninflected."
  * in the same place: 11 of 20 empty. Adding "as a dictionary lists it", or two
  * examples of citation forms: 20 of 20. The same sentence moved before the

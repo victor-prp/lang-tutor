@@ -770,10 +770,15 @@ export const PartOfSpeechSchema = z.enum([
 // API on 2026-10-10, with all four fields the first call answered `pour` (en ->
 // he, an English word that French spells the same) with no entries in 4 to 7
 // of 10 calls, and with any two of the others beside `gloss_alternatives` in 10
-// of 10; with these three, in 0 of 20, as with the schema before phase 31.
-// Rewording the prompt, renaming the field and pinning property order did not
-// help. A lemma-form write's own `alternatives` are citation forms already, so
-// they feed the gloss's list instead (assignGlosses), as 0024 built it.
+// of 10; rewording the prompt, renaming the field and pinning property order
+// did not help. Dropping the field is necessary but not sufficient. With these
+// three, `pour` was empty in 0 of 20 calls only while the prompt kept its old
+// clause naming the field; without that clause and with the citation sentence
+// as first written, in 11 of 20. The citation sentence as measured is what
+// leaves it empty in none of 40 probe calls: glossRules' comment, in
+// apps/server/src/domain/translation.ts, records each variant. A lemma-form
+// write's own `alternatives` are citation forms already, so they feed the
+// gloss's list instead (assignGlosses), as 0024 built it.
 export const LlmSenseSchema = z.object({
   translation: z.string().min(1),
   example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),

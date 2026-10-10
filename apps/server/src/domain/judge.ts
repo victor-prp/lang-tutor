@@ -27,8 +27,9 @@ export type MeaningJudgeContext = {
   meaning: string;
   example: string | null;
   exampleTranslation: string | null;
-  /** Phase 31 (spec D13). The gloss's other words and the rendering's: right as
-   *  typed, so רכב for מכונית costs no judge call. */
+  /** Phase 31 (spec D13). The rendering's other words, the gloss's key and the
+   *  gloss's other words: right as typed, so רכב for מכונית, or אצבע on a card
+   *  asking `fingers`, costs no judge call. */
   alternatives?: readonly string[];
 };
 

@@ -162,8 +162,10 @@ export async function speak(page: Page) {
   await page.getByTestId('speak-record').click();
 }
 
-/** Phase 27. Answers a meaning card. The stored meaning is judged by rule,
- *  with no model call; anything else needs an expectJudge stub first. */
+/** Phase 27. Answers a meaning card. The stored meaning is judged by rule, with
+ *  no model call, and since phase 31 so are the gloss key and the stored
+ *  alternatives of the card's rendering and gloss; anything else needs an
+ *  expectJudge stub first. */
 export async function answerMeaning(page: Page, text: string) {
   await page.getByTestId('typed-input').fill(text);
   await page.getByTestId('typed-submit').click();

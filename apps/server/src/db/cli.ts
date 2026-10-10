@@ -327,7 +327,10 @@ async function main(): Promise<void> {
     }
 
     // Phase 31 (plan item 3). The words saved before glosses existed get their
-    // lemma form rendered once: production runs only this command (ADR 0010).
+    // lemma form rendered: every deploy runs this command (ADR 0010), so this is
+    // the automatic path, while `--render-lemmas` asks on demand wherever
+    // DATABASE_URL points, production included since PR #113. A render whose
+    // retries are spent gives its claim back, so a later start asks again.
     // Best-effort: everything above has committed, and a throw here would keep
     // the image from starting the server. A failure is one line, with no address.
     const lemmas = await requestLemmaRendersOnStart(db);

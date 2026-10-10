@@ -8,11 +8,15 @@ import { createTransaction } from './transaction';
 /**
  * Phase 31 (plan item 3; spec §2, "old glosses keyed from an inflected
  * rendering"). Asks for the render-lemma job for every saved gloss whose lexeme
- * has no lemma-form rendering in its enrollment's language and was never asked
- * for. The CLI's default path runs this after migrating and seeding, because that
- * is the only process that reaches production's database (ADR 0010); `npm run
- * dict:lemmas:render` runs it on demand. dict_lemma_renders records each request,
- * so a second run, or the next start, asks for nothing again.
+ * has no lemma-form rendering in its enrollment's language and no claim in
+ * dict_lemma_renders. The CLI's default path runs this after migrating and
+ * seeding, the one step every deploy runs (ADR 0010), so the backfill is
+ * automatic; production's database is reachable from the laptop too since PR
+ * #113, and `npm run dict:lemmas:render` runs it on demand wherever DATABASE_URL
+ * points. Each request is claimed, so a second run or the next start asks only
+ * for what holds no claim: a skipped render keeps its claim, and a render whose
+ * retries are spent gives it back through the dead letter, so a later save or
+ * start asks again.
  */
 export async function requestLemmaRenders(db: Db): Promise<{ requested: number }> {
   return withJobQueue(db, async (boss) => {
