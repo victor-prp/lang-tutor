@@ -122,6 +122,48 @@ describe('matching a printed word to a gloss card (phase 31)', () => {
     expect(firstChoice('אוטו', [{ translation: 'מכונית', alternatives: ['רכב', 'אוטו!'] }])).toMatchObject({ index: 0, matchedBy: 'exact' });
   });
 
+  // A typed form's card says its own rendering, and carries the gloss's key when
+  // that differs: מכוניות on the card, מכונית its key. A list printing the
+  // citation form names the card as surely as one printing the rendering.
+  it('finds the card by its key when the key is not its translation, with no model call', () => {
+    expect(firstChoice('מכונית', [{ translation: 'שולחן' }, { translation: 'מכוניות', key: 'מכונית' }])).toEqual({
+      index: 1,
+      mismatch: false,
+      matchedBy: 'exact',
+    });
+  });
+
+  it("folds a card key like the card's other words", () => {
+    expect(firstChoice('מכונית', [{ translation: 'מכוניות', key: 'מכונית.' }])).toMatchObject({ index: 0, matchedBy: 'exact' });
+  });
+
+  // A card's own words, its translation and its key, name it before its other
+  // words do: an earlier card that merely lists the printed word never beats a
+  // later card that is it.
+  it('prefers a card whose translation is the printed word to an earlier card that only lists it among its other words', () => {
+    expect(firstChoice('רכב', [{ translation: 'מכונית', alternatives: ['רכב', 'אוטו'] }, { translation: 'רכב' }])).toEqual({
+      index: 1,
+      mismatch: false,
+      matchedBy: 'exact',
+    });
+  });
+
+  it('prefers a card whose key is the printed word to an earlier card that only lists it among its other words', () => {
+    expect(
+      firstChoice('מכונית', [{ translation: 'רכב', alternatives: ['מכונית'] }, { translation: 'מכוניות', key: 'מכונית' }]),
+    ).toMatchObject({ index: 1, matchedBy: 'exact' });
+  });
+
+  it('keeps the lookup order between cards that the printed word names alike', () => {
+    // Both list it among their other words.
+    expect(
+      firstChoice('רכב', [{ translation: 'שולחן', alternatives: ['רכב'] }, { translation: 'מכונית', alternatives: ['רכב'] }]),
+    ).toMatchObject({ index: 0 });
+    // A translation and a key rank together, so the earlier card wins either way round.
+    expect(firstChoice('מכונית', [{ translation: 'מכוניות', key: 'מכונית' }, { translation: 'מכונית' }])).toMatchObject({ index: 0 });
+    expect(firstChoice('מכונית', [{ translation: 'מכונית' }, { translation: 'מכוניות', key: 'מכונית' }])).toMatchObject({ index: 0 });
+  });
+
   it('splits a printed meaning into words, each folded with the gloss rule and freed of a mark at its end', () => {
     expect(glossesOf('מכונית. / רכב… ; בֵּית־סֵפֶר (מוסד)')).toEqual(['מכונית', 'רכב', 'בית ספר']);
   });

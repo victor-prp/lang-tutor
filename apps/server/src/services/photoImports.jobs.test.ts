@@ -228,6 +228,22 @@ describe('lookUpItem', () => {
     expect(written[0]).toMatchObject({ chosenGlossId: 's2', hebrewMismatch: false });
   });
 
+  // Phase 31: the lookup's cards reach the matcher as they are, so a card's key and
+  // its other words name it without a model call.
+  it.each([
+    ['its key', 'מכונית', { ...sense(2, 'מכוניות'), key: 'מכונית' }],
+    ['one of its other words', 'רכב', { ...sense(2, 'מכונית'), alternatives: ['רכב', 'אוטו'] }],
+  ])('takes the card the printed Hebrew names by %s, with no model call', async (_, hebrew, card) => {
+    const { photoImport, written } = repoFor(pending({ text: 'macchina', hebrew }));
+    const { service, llm } = setup({
+      repos: { photoImport, enrollment },
+      lookup: async () => response({ text: 'macchina', senses: [sense(1, 'שולחן'), card] }),
+    });
+    await service.lookUpItem({ import_id: ID, position: 0 });
+    expect(llm.calls).toEqual([]);
+    expect(written[0]).toMatchObject({ chosenGlossId: 's2', hebrewMismatch: false });
+  });
+
   it('asks the model when no gloss matches, and takes its sense', async () => {
     const { photoImport, written } = repoFor(pending({ text: 'bank', hebrew: 'גדת נהר' }));
     const { service, llm } = setup({

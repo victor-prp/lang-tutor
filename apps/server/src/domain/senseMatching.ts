@@ -9,15 +9,18 @@ import { dropNulls, unfence } from './translation';
  * names. A free check first: any printed gloss equal to a sense's translation.
  * Only when that finds nothing is the model asked, through LlmClient.
  *
- * Phase 31. A sense is a gloss card now, so the free check reads the card's
- * alternatives as well as its translation, and "equal" is the gloss key's rule
- * (normaliseGloss), bar a sentence mark at the end of a word.
+ * Phase 31. A sense is a gloss card now, so the free check reads the card's key
+ * and its alternatives as well as its translation, the translation and the key
+ * before the alternatives, and "equal" is the gloss key's rule (normaliseGloss),
+ * bar a sentence mark at the end of a word.
  */
 
 /** In the instruction verbatim, so MockServer can tell this call apart. */
 export const SENSE_MATCH_MARKER = 'which numbered sense';
 
-export type MatchOption = { translation: string; alternatives?: readonly string[]; part_of_speech?: string };
+/** A gloss card as the matcher reads it. `key` is the gloss's own, which a card
+ *  carries only when it differs from `translation` (a typed form's rendering). */
+export type MatchOption = { translation: string; key?: string; alternatives?: readonly string[]; part_of_speech?: string };
 export type MatchedBy = 'exact' | 'model' | 'none' | 'no_hebrew';
 export type SenseChoice = { index: number; mismatch: boolean; matchedBy: MatchedBy };
 
@@ -52,10 +55,14 @@ export function glossesOf(hebrew: string): string[] {
 export function firstChoice(hebrew: string | null, options: readonly MatchOption[]): SenseChoice | 'ask_model' {
   if (hebrew === null) return { index: 0, mismatch: false, matchedBy: 'no_hebrew' };
   const printed = new Set(glossesOf(hebrew));
-  // Phase 31: a card's other words name it too, so a printed רכב finds מכונית.
-  const index = options.findIndex((option) =>
-    [option.translation, ...(option.alternatives ?? [])].some((word) => printed.has(wordKey(word))),
-  );
+  const named = (words: readonly (string | undefined)[]): boolean =>
+    words.some((word) => word !== undefined && printed.has(wordKey(word)));
+  // Phase 31: a card's other words name it too, so a printed רכב finds מכונית. A
+  // card's own words, its translation and its key, name it before those do, so an
+  // earlier card that only lists the printed word never beats a later card that
+  // is it. Within a tier the lookup's order decides.
+  const own = options.findIndex((option) => named([option.translation, option.key]));
+  const index = own !== -1 ? own : options.findIndex((option) => named(option.alternatives ?? []));
   return index === -1 ? 'ask_model' : { index, mismatch: false, matchedBy: 'exact' };
 }
 
