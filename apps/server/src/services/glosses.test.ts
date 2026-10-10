@@ -66,6 +66,16 @@ describe('planMerges when the model fails one headword (spec D7, the tool)', () 
     await expect(service.planMerges({ model: true })).rejects.toThrow('a bug in the call');
   });
 
+  // A service composed with no model (the server's, or the tools without
+  // --model) must not answer a tier 2 request with tier 1 alone.
+  it('refuses tier 2 when no model is composed', async () => {
+    const gloss = stub<GlossRepo>({ findMergeWork: async () => [FINGER, THUMB], findMergeCandidates: async () => [] });
+    const service = createGlossService({ transaction: createFakeTransaction({ gloss }), logger: createFakeLogger(), llm: null });
+
+    await expect(service.planMerges({ model: true })).rejects.toThrow('tier 2 needs a model');
+    expect((await service.planMerges({ model: false })).skipped).toBe(0);
+  });
+
   it('counts nothing skipped when the model is not asked', async () => {
     const { service, llm } = setup(groups());
 

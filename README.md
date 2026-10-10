@@ -419,6 +419,23 @@ was used — `data/backfill/en-he/corrections.jsonl` by default, or beside a cus
 `--export-dict` path — and `dict:restore` reads it back the same way, reporting zero
 restored corrections rather than failing when the sibling file is absent.
 
+**A restore carries no gloss merge.** The file holds each form's renderings, not which
+gloss each sense belongs to, so a restore rebuilds the glosses from the renderings, form by
+form, and two glosses `dict:glosses:merge` had merged come back apart. After a restore, run
+both tiers of the merge tool on the same database:
+
+```bash
+npm run dict:glosses:merge               # tier 1: the merge job's signal, no model
+npm run dict:glosses:merge -- --model    # tier 2: one model call per headword
+```
+
+Each prints its plan and changes nothing; run it again with `--yes` added
+(`-- --yes`, `-- --model --yes`) to apply it. Even the dry run migrates the database
+first, as `dict:restore` does. `--model` reads `GEMINI_API_KEY` and `GEMINI_MODEL` the way
+the server does; tier 1 needs neither. The tool runs wherever `DATABASE_URL` points, so a
+production restore (`docs/runbooks/hosting.md`) is followed by the same two commands with
+`DATABASE_URL="$PROD_DB"` in front.
+
 > **`data/backfill/en-he/dictionary.jsonl` predates migration `0005` and will not restore.**
 > Its entries carry no `part_of_speech`, and the renderings it holds were stored per meaning
 > rather than per form, so restoring it would reintroduce both defects phase 12 fixes. The

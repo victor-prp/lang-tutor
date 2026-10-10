@@ -254,23 +254,26 @@ export function createServerDeps(io: {
 
 /**
  * Phase 31 (spec D7). The by-hand merge tool's use cases, for db/cli.ts: the
- * glosses service with a transaction and a model client, and nothing else a
- * server needs. No I/O here (R6): the caller owns the pool.
+ * glosses service with a transaction and, for tier 2, a model client, and
+ * nothing else a server needs. No I/O here (R6): the caller owns the pool.
+ * `gemini` null composes no client: tier 1 alone, which needs no Gemini settings.
  */
 export function createGlossTools(io: {
   db: Db;
   logger: Logger;
   fetch: typeof globalThis.fetch;
-  gemini: GeminiConfig;
+  gemini: GeminiConfig | null;
   timeoutMs: number;
 }): GlossService {
   const transaction = createTransaction(io.db, (tx) => bindRepos(tx, null));
-  const llm: LlmClient = createGeminiClient({
-    fetch: io.fetch,
-    baseUrl: io.gemini.baseUrl,
-    apiKey: io.gemini.apiKey,
-    model: io.gemini.model,
-    timeoutMs: io.timeoutMs,
-  });
+  const llm: LlmClient | null = io.gemini
+    ? createGeminiClient({
+        fetch: io.fetch,
+        baseUrl: io.gemini.baseUrl,
+        apiKey: io.gemini.apiKey,
+        model: io.gemini.model,
+        timeoutMs: io.timeoutMs,
+      })
+    : null;
   return createGlossService({ transaction, logger: io.logger, llm });
 }

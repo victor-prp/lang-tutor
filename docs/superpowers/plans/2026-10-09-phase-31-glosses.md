@@ -6421,7 +6421,7 @@ Then, in `apps/server/src/db/cli.ts` (import `loadGeminiConfig` from `../config`
     }
 ```
 
-Scripts: `apps/server/package.json`, `"dict:glosses:merge": "tsx src/db/cli.ts --merge-glosses"`; root, `"dict:glosses:merge": "bash scripts/lane-env.sh npm run dict:glosses:merge --workspace apps/server --"`. The tool runs in a lane; production's database is reachable only from the container's start command (ADR 0010), so in production the automatic job is the only merge.
+Scripts: `apps/server/package.json`, `"dict:glosses:merge": "tsx src/db/cli.ts --merge-glosses"`; root, `"dict:glosses:merge": "bash scripts/lane-env.sh npm run dict:glosses:merge --workspace apps/server --"`. The tool runs wherever `DATABASE_URL` points: a lane by default, and production from the laptop with `DATABASE_URL="$PROD_DB"` since master's PR #113 (`docs/runbooks/hosting.md`). A dictionary restore carries no merge (the export holds renderings, not memberships), so the README and the runbook follow a restore with both tiers (corrected in Task 14's review).
 
 - [ ] **Step 6: Test the use cases.** Create `apps/server/tests/integration/services/glosses.tools.test.ts` (no `src/repo`, no Drizzle; the composition factory and the support helpers only):
 
@@ -6885,7 +6885,7 @@ Start `npm run server` for a minute and watch for `lemma_rendered` and `lemma_re
 - [ ] **Step 3: The spec as built.** In the spec, add a `- **Built:**` line under its Status naming the PR, and a short section `## As built` after `## Risks` listing the eight items of this plan's "Decided while planning", each in one sentence with its reason, plus:
   - the lookup card's and the word page's exact shapes (Task 7);
   - the list headline is the earliest saved gloss (Task 7), not the lowest-ranked;
-  - the merge tool runs only in a lane: production's database is reachable only from the container's start command (ADR 0010), so in production the automatic job is the only merge;
+  - the merge tool runs wherever `DATABASE_URL` points, production included from the laptop (PR #113); a dictionary restore carries no merge, since the export holds renderings and not memberships, so the README and the hosting runbook follow a restore with both tiers (Task 14);
   - Task 10's failed-render case checks the word page on the saved form, not session preparation: preparation never reads lemma renders, so it cannot wait on one;
   - `also` and `savedFrom` are Hebrew only: the app's strings have one language, so the spec's "both languages" had nothing to fill.
   Replace every "ADR 0009" in the spec with "ADR 0011": Done means, Scope, D17, Testing and Build order name it, five places in all (`grep -n "ADR 0009" docs/superpowers/specs/2026-10-09-lang-tutor-phase-31-glosses-design.md`).

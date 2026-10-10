@@ -48,8 +48,9 @@ export type MergePlan = {
  * Phase 31 (spec D7). The gloss use cases that are not a lookup: the merge job,
  * and the by-hand tool's plan and apply. A merge runs here, outside the lookup,
  * in a transaction of its own under the lexeme's lock; the lookup only ever asks
- * for one. `llm` is the tool's model tier: createGlossTools passes one, and the
- * server's service, which nothing asks for a plan, is handed null.
+ * for one. `llm` is the tool's model tier: createGlossTools passes one when the
+ * CLI asks for tier 2 and null otherwise, and the server's service, which
+ * nothing asks for a plan, is handed null.
  */
 export function createGlossService({
   transaction,
@@ -90,6 +91,8 @@ export function createGlossService({
      * must not cost the run. Any other error is a bug, and stops it.
      */
     planMerges: async ({ model }: { model: boolean }): Promise<MergePlan> => {
+      // A tier 2 request answered with tier 1 alone would print as a full plan.
+      if (model && !llm) throw new Error('tier 2 needs a model client: compose the tools with a Gemini config');
       const work = await transaction(({ gloss }) => gloss.findMergeWork());
       const plan: MergePlan = { merges: [], definitions: [], suggestions: [], skipped: 0 };
       for (const item of work) {

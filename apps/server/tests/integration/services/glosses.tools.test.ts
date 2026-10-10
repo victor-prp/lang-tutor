@@ -55,6 +55,23 @@ describe('dict:glosses:merge (spec D7)', () => {
     expect((await tools().planMerges({ model: false })).merges).toHaveLength(0);
   });
 
+  // Tier 1 reads the dictionary alone: the CLI composes no model, and reads no
+  // Gemini settings, unless --model asks for tier 2.
+  it('composes and plans tier 1 with no model configured', async () => {
+    await blockedRename();
+    const withoutModel = createGlossTools({
+      db: t.db,
+      logger: createFakeLogger(),
+      fetch: globalThis.fetch,
+      gemini: null,
+      timeoutMs: 25_000,
+    });
+    const plan = await withoutModel.planMerges({ model: false });
+    expect(plan.merges.map(({ otherKey, survivorKey, tier }) => ({ otherKey, survivorKey, tier }))).toEqual([
+      { otherKey: 'אצבעות', survivorKey: 'אצבע', tier: 1 },
+    ]);
+  });
+
   it("plans tier 2 from the model's groups, the citation form surviving", async () => {
     await insertDriftedFinger(t.db);
     await expectGeminiRawBody(ns, JSON.stringify(geminiResponse({ groups: [['אצבע', 'אצבעות']], definitions: [] })));

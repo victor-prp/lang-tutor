@@ -91,6 +91,17 @@ proves before the next one starts.
    dictionary starts empty and fills as words are looked up. `DATABASE_URL="$PROD_DB" npm run
    dict:restore` migrates, then loads it in about two minutes, and a rerun is harmless. The next
    container start re-stamps the database comment the restore wrote from your laptop's lane.
+
+   A restore carries no gloss merge: it rebuilds the glosses from the renderings, so follow it
+   with both tiers of the merge tool (README, *Backing the dictionary up*):
+
+   ```bash
+   DATABASE_URL="$PROD_DB" npm run dict:glosses:merge               # tier 1
+   DATABASE_URL="$PROD_DB" npm run dict:glosses:merge -- --model    # tier 2, one model call per headword
+   ```
+
+   Each prints its plan and changes nothing until run again with `--yes` added (`-- --yes`,
+   `-- --model --yes`). Even the dry run migrates the database first, as `dict:restore` does.
 10. **The first release.** Merge, pull, test master locally, then
     `tag=v$(date +%Y.%m.%d); git tag "$tag" && git push origin "$tag"`. The Release workflow waits for CI,
     builds, pushes, applies, and checks `/health` on the service's default address (the domain

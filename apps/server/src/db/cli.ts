@@ -234,14 +234,15 @@ async function main(): Promise<void> {
     // lane:clean does. --model adds tier 2, one model call per lexeme and
     // language. The database is named by its redacted URL only.
     if (process.argv.includes('--merge-glosses')) {
+      const model = process.argv.includes('--model');
       const tools = createGlossTools({
         db,
         logger: createConsoleLogger(),
         fetch: globalThis.fetch,
-        gemini: loadGeminiConfig(process.env),
+        // Tier 1 needs no model, so the Gemini settings are read only for --model.
+        gemini: model ? loadGeminiConfig(process.env) : null,
         timeoutMs: 60_000,
       });
-      const model = process.argv.includes('--model');
       const plan = await tools.planMerges({ model });
       for (const merge of plan.merges) console.log(`tier ${merge.tier}  ${merge.lemma}: ${merge.otherKey} → ${merge.survivorKey}`);
       for (const suggestion of plan.suggestions) console.log(`suggestion, not merged: ${suggestion.lemma}: ${suggestion.keys.join(' ↔ ')}`);

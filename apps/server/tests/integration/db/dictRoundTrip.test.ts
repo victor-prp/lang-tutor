@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { LlmSense, PartOfSpeech } from '@lang-tutor/core/api';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 import { dictGlosses, dictLexemes, dictSenses, dictVarTranslations } from '../../../src/db/schema';
 import {
@@ -13,6 +13,8 @@ import {
 } from '../../../src/db/dictExport';
 import { importCorrections, importDictionary } from '../../../src/db/dictImport';
 import { createDictRepo } from '../../../src/repo/dictionary';
+import { createGlossRepo } from '../../../src/repo/glosses';
+import { insertDriftedFinger } from '../../support/dictRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 
@@ -82,6 +84,20 @@ async function storedWord(t: TestDb, lemma: string) {
     .where(eq(dictGlosses.lexemeId, lexeme.id))
     .orderBy(asc(dictGlosses.key));
   return { senses, renderings, glosses };
+}
+
+/** Phase 31. One lemma's live glosses in Hebrew, by key, with their senses. */
+async function liveGlosses(t: TestDb, lemma: string): Promise<{ key: string; senses: string[] }[]> {
+  const rows = await t.db.execute<{ key: string; senses: string[] }>(sql`
+    select g.key, array_agg(s.sense_code order by s.sense_code) as senses
+    from dict_glosses g
+    join dict_lexemes l       on l.id = g.lexeme_id
+    join dict_sense_glosses m on m.gloss_id = g.id
+    join dict_senses s        on s.id = m.sense_id
+    where l.lemma = ${lemma} and g.user_language_code = 'he' and g.merged_into is null
+    group by g.key
+    order by g.key`);
+  return rows.rows.map((row) => ({ key: row.key, senses: row.senses }));
 }
 
 describe('dictionary export/restore', () => {
@@ -272,6 +288,36 @@ describe('dictionary export/restore', () => {
     expect(await storedWord(source, 'car')).toEqual(car);
     expect(await storedWord(target, 'car')).toEqual(car);
     expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
+  });
+
+  // Phase 31 (spec D7). Pinned as it is: the export carries each rendering's
+  // citation form, not the sense's membership, and a restore rebuilds glosses
+  // from the renderings form by form (assignGlosses), so a merge does not
+  // survive it. `finger` merged by the model tier comes back as two live
+  // glosses, and tier 1's signal, the blocked rename, does not see them; only
+  // tier 2 can merge them again. Hence the README's and the hosting runbook's
+  // `dict:glosses:merge`, then `dict:glosses:merge -- --model`, after a restore.
+  it('restores a merged gloss as two live glosses again, which tier 1 does not plan', async () => {
+    const w = await insertDriftedFinger(source.db);
+    // What the tool applies for the model's group [אצבע, אצבעות].
+    await withTx(source.db, async (tx) => {
+      await createDictRepo(tx).lockLexemes([w.lexemeId]);
+      return createGlossRepo(tx).mergeGlosses({ survivorId: w.survivor, otherId: w.other });
+    });
+    expect(await liveGlosses(source, 'finger')).toEqual([{ key: 'אצבע', senses: ['body_part', 'digit'] }]);
+
+    await restoreInto(target, await exportDictionary(source.db, EN_HE));
+
+    expect(await liveGlosses(target, 'finger')).toEqual([
+      { key: 'אצבע', senses: ['digit'] },
+      { key: 'אצבעות', senses: ['body_part'] },
+    ]);
+    const [restored] = await target.db.select({ id: dictLexemes.id }).from(dictLexemes).where(eq(dictLexemes.lemma, 'finger'));
+    expect(
+      await withTx(target.db, (tx) =>
+        createGlossRepo(tx).findMergeCandidates({ lexemeId: restored.id, userLanguageCode: 'he' }),
+      ),
+    ).toEqual([]);
   });
 });
 
