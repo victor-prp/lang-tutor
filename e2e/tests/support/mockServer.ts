@@ -125,11 +125,14 @@ export async function expectGeminiMatching(
   request: APIRequestContext,
   bodyRegex: string,
   payload: unknown,
-  /** `once`, as expectGemini's: a one-shot, consumed by the first call that matches. */
-  opts: { delayMs?: number; once?: boolean } = {},
+  /** `once`, as expectGemini's: a one-shot, consumed by the first call that matches.
+   *  Phase 31. `priority`: MockServer tries a higher priority first, so a stub
+   *  matched on a marker outranks one matched on the same text. */
+  opts: { delayMs?: number; once?: boolean; priority?: number } = {},
 ): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
     data: {
+      ...(opts.priority ? { priority: opts.priority } : {}),
       httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: `[\\s\\S]*${bodyRegex}[\\s\\S]*` } },
       httpResponse: {
         statusCode: 200,
