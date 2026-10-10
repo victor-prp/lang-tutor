@@ -9,6 +9,7 @@ import { withTx } from '../../support/withTx';
 import { content, optionsFor } from '../../../src/db/content';
 import { dictGlosses, dictSenseGlosses, dictVariants } from '../../../src/db/schema';
 import { optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
+import { meaningRuleVerdict } from '../../../src/domain/judge';
 import { asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createQuestionRepo } from '../../../src/repo/questions';
@@ -335,7 +336,7 @@ describe('phase 27: meaning recall', () => {
 
 // The words the meaning judge's rule accepts besides the stored meaning (spec D13):
 // the asked form's rendering lists its sense's other words in its own inflection,
-// and the gloss lists them in citation form.
+// and the gloss holds its key and lists the others, in citation form.
 describe('phase 31: findJudgeContext reads the stored alternatives (spec D13)', () => {
   /** A meaning card for `cars`, which renders מכוניות under the gloss מכונית. */
   async function carsSession() {
@@ -366,13 +367,13 @@ describe('phase 31: findJudgeContext reads the stored alternatives (spec D13)', 
     return { questions, car };
   }
 
-  it("gets the rendering's other words, then the gloss's", async () => {
+  it("gets the rendering's other words, then the gloss's key and other words", async () => {
     const { questions } = await carsSession();
     await withTx(t.db, async (tx) => {
       expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
         form: 'cars',
         meaning: 'מכוניות',
-        alternatives: ['רכבים', 'רכב'],
+        alternatives: ['רכבים', 'מכונית', 'רכב'],
       });
     });
   });
@@ -384,8 +385,53 @@ describe('phase 31: findJudgeContext reads the stored alternatives (spec D13)', 
     await withTx(t.db, async (tx) => {
       expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
         example: null,
-        alternatives: ['רכב'],
+        alternatives: ['מכונית', 'רכב'],
       });
+    });
+  });
+
+  // The list and the word page head a saved word with its gloss key (D11), so
+  // a learner asked the meaning of `fingers` may well type that citation form.
+  it('takes the gloss key, so the citation form the list shows is right by rule, with no judge call', async () => {
+    const finger = await insertLexeme(t.db, {
+      lemma: 'finger',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'body_part' }],
+      variants: [
+        {
+          form: 'fingers',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'body_part', rank: 0, translation: 'אצבעות', gloss: 'אצבע', exampleSource: null, exampleTarget: null }],
+        },
+      ],
+    });
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked: [{ glossId: finger.glossIds[0], variantId: finger.variantIds[0], lexemeId: finger.lexemeId, form: 'fingers', lemma: 'finger', translation: 'אצבעות' }],
+      types: ['typed_meaning'],
+    });
+    await withTx(t.db, async (tx) => {
+      const context = await createQuestionRepo(tx).findJudgeContext(questions[0].id);
+      expect(context).toMatchObject({ form: 'fingers', meaning: 'אצבעות', alternatives: ['אצבע'] });
+      expect(meaningRuleVerdict(context!.meaning, 'אצבע', context!.alternatives)).toBe('exact');
+    });
+  });
+
+  // A key that is the meaning itself is not another word: a lemma form's card.
+  it('leaves out a key that is the stored meaning', async () => {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'car', translations: ['מכונית'] });
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked: [{ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'car', lemma: 'car', translation: 'מכונית' }],
+      types: ['typed_meaning'],
+    });
+    await withTx(t.db, async (tx) => {
+      expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({ meaning: 'מכונית', alternatives: [] });
     });
   });
 });

@@ -730,4 +730,40 @@ describe('withSiblingAlternatives (spec D18)', () => {
       }),
     ).toEqual(['order', 'reserve', 'reserved', 'arranged', 'scheduled']);
   });
+
+  it('keeps three siblings and both of the model’s alternatives when five or more siblings share the key', () => {
+    expect(
+      withSiblingAlternatives({
+        form: 'booked',
+        lemma: 'book',
+        siblings: ['arrange', 'charter', 'hire', 'order', 'reserve', 'schedule'],
+        alternatives: ['reserved', 'ordered'],
+      }),
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered']);
+  });
+
+  it('lets more siblings in after the model’s alternatives when the model gave few', () => {
+    expect(
+      withSiblingAlternatives({
+        form: 'booked',
+        lemma: 'book',
+        siblings: ['arrange', 'charter', 'hire', 'order', 'reserve'],
+        alternatives: ['reserved'],
+      }),
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'order']);
+    expect(
+      withSiblingAlternatives({ form: 'booked', lemma: 'book', siblings: ['arrange', 'charter', 'hire', 'order', 'reserve'], alternatives: [] }),
+    ).toEqual(['arrange', 'charter', 'hire', 'order', 'reserve']);
+  });
+
+  it('counts only kept siblings among the first three: the card’s own lemma or a repeat takes no slot', () => {
+    expect(
+      withSiblingAlternatives({
+        form: 'booked',
+        lemma: 'book',
+        siblings: ['Book', 'arrange', 'Arrange', 'charter', 'hire', 'order'],
+        alternatives: ['reserved', 'ordered', 'set up'],
+      }),
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered']);
+  });
 });

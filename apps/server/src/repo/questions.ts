@@ -323,8 +323,10 @@ export function createQuestionRepo(tx: Tx) {
      * form and, since phase 31, the lowest-ranked member of the card's gloss
      * that form renders. `alternatives` (spec D13) are the other words the
      * meaning card's rule takes as right: that rendering's, in the form's
-     * inflection, then the gloss's, in citation form. questions.id is text, so
-     * an id that matches nothing is simply no row.
+     * inflection, then the gloss's key, the citation form the list and the
+     * word page head the saved word with (D11), unless it is the stored meaning
+     * itself, then the gloss's other words, in citation form. questions.id is
+     * text, so an id that matches nothing is simply no row.
      */
     findJudgeContext: async (
       questionId: string,
@@ -348,11 +350,12 @@ export function createQuestionRepo(tx: Tx) {
         example_source: string | null;
         example_target: string | null;
         rendering_alternatives: string[];
+        key: string;
         gloss_alternatives: string[];
       }>(sql`
         SELECT v.form, l.lemma, l.part_of_speech, q.prompt, tr.example_source, tr.example_target,
                coalesce(tr.alternatives, '{}'::text[]) AS rendering_alternatives,
-               g.alternatives AS gloss_alternatives
+               g.key, g.alternatives AS gloss_alternatives
         FROM questions q
         JOIN dict_glosses g   ON g.id = q.gloss_id
         JOIN dict_variants v  ON v.id = q.prompt_variant_id
@@ -377,7 +380,7 @@ export function createQuestionRepo(tx: Tx) {
             meaning: row.prompt,
             example: row.example_source,
             exampleTranslation: row.example_target,
-            alternatives: [...row.rendering_alternatives, ...row.gloss_alternatives],
+            alternatives: [...row.rendering_alternatives, ...(row.key === row.prompt ? [] : [row.key]), ...row.gloss_alternatives],
           }
         : undefined;
     },

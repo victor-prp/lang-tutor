@@ -582,11 +582,17 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
   }
 }
 
+/** How many sibling headwords a typed or spoken card accepts before the model's alternatives. */
+const SIBLINGS_FIRST = 3;
+
 /**
- * Phase 31 (spec D18). A typed or spoken card's right answers: the sibling
- * headwords first, which are certain (`order` is right where להזמין asks for
- * `book`), then the model's, never the card's own form or lemma, at most
- * MAX_ALTERNATIVES, the column check's five.
+ * Phase 31 (spec D18). A typed or spoken card's right answers: up to three
+ * sibling headwords first, which are certain (`order` is right where להזמין
+ * asks for `book`), then the model's alternatives, then any remaining
+ * siblings, never the card's own form or lemma, no two alike, at most
+ * MAX_ALTERNATIVES, the column check's five. Siblings are lemmas, while the
+ * model's alternatives are inflected to the card's form, so a key with five
+ * sibling headwords must still leave room for a right inflected synonym.
  */
 export function withSiblingAlternatives(input: {
   form: string;
@@ -594,5 +600,6 @@ export function withSiblingAlternatives(input: {
   siblings: readonly string[];
   alternatives: readonly string[];
 }): string[] {
-  return keepAlternatives(input.form, input.lemma, [...input.siblings, ...input.alternatives]);
+  const first = keepAlternatives(input.form, input.lemma, input.siblings).slice(0, SIBLINGS_FIRST);
+  return keepAlternatives(input.form, input.lemma, [...first, ...input.alternatives, ...input.siblings]);
 }
