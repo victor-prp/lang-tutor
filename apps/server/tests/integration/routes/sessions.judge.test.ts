@@ -13,6 +13,14 @@ import { createSessionsRouter } from '../../../src/routes/sessions';
 import { ACT_AS, actAs } from '../../support/actAs';
 
 let t: TestDb;
+// Every namespace a test makes, cleared after it: a once-only judge stub that a
+// failing test never consumed would otherwise stay on the shared MockServer.
+const namespaces: string[] = [];
+const namespaceFor = (label: string) => {
+  const ns = mockNamespace(label);
+  namespaces.push(ns);
+  return ns;
+};
 
 beforeEach(async () => {
   t = await createTestDb();
@@ -20,6 +28,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await Promise.all(namespaces.splice(0).map(clearNamespace));
   await t.close();
 });
 
@@ -65,7 +74,7 @@ async function startMeaning() {
 
 describe('POST /api/sessions/:id/judged-answer', () => {
   it('rules the stored meaning exact, with points, without a model call', async () => {
-    const app = buildTestApp(mockNamespace('judged-rule'));
+    const app = buildTestApp(namespaceFor('judged-rule'));
     const { sessionId, questions } = await startMeaning();
     const res = await postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id: questions[0].id, text: 'סֵפֶר.' });
     expect(res.status).toBe(200);
@@ -76,7 +85,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   });
 
   it('asks the judge for a synonym, then replays the same request without a second record', async () => {
-    const ns = mockNamespace('judged-model');
+    const ns = namespaceFor('judged-model');
     await expectJudge(ns, 'right');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startMeaning();
@@ -91,7 +100,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   });
 
   it('502s a failing judge and records nothing; the same answer then succeeds', async () => {
-    const ns = mockNamespace('judged-failure');
+    const ns = namespaceFor('judged-failure');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startMeaning();
     const send = () => postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id: questions[0].id, text: 'כרך' });
@@ -106,7 +115,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   });
 
   it('403s another learner, 409s a card that is not current, 400s a card that is not judged', async () => {
-    const app = buildTestApp(mockNamespace('judged-errors'));
+    const app = buildTestApp(namespaceFor('judged-errors'));
     const { sessionId, questions } = await startMeaning();
     const at = (question_id: string, actor = 'u_1') =>
       postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id, text: 'ספר' }, actor);
@@ -120,7 +129,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   });
 
   it('refuses a next-step text for a meaning card, and records nothing', async () => {
-    const app = buildTestApp(mockNamespace('judged-next-step'));
+    const app = buildTestApp(namespaceFor('judged-next-step'));
     const { sessionId, questions } = await startMeaning();
     const res = await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[0].id, text: 'ספר' });
     expect(res.status).toBe(400);
@@ -128,7 +137,7 @@ describe('POST /api/sessions/:id/judged-answer', () => {
   });
 
   it('400s a text over 300 characters', async () => {
-    const app = buildTestApp(mockNamespace('judged-long'));
+    const app = buildTestApp(namespaceFor('judged-long'));
     const { sessionId, questions } = await startMeaning();
     const res = await postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id: questions[0].id, text: 'א'.repeat(301) });
     expect(res.status).toBe(400);

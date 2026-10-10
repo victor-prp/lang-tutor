@@ -6,7 +6,7 @@ import { signUpWithProfile } from '../../support/auth';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { addedByOf, seedGrant } from '../../support/grantRows';
-import { expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
+import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
 import { seedPhotoImport } from '../../support/photoImportRows';
 import { countRows } from '../../support/rowCounts';
 import { createTestServerDeps } from '../../support/serverDeps';
@@ -24,6 +24,7 @@ type Doc = { paths: Record<string, Record<string, unknown>> };
 type Account = { cookie: string; userId: string };
 
 let t: TestDb;
+let ns: string;
 let app: ReturnType<typeof createApp>;
 let owner: Account;
 let stranger: Account;
@@ -165,7 +166,7 @@ async function written() {
 
 beforeAll(async () => {
   t = await createTestDb();
-  const ns = mockNamespace('auth-matrix');
+  ns = mockNamespace('auth-matrix');
   await expectEmails(ns);
   app = createApp(
     createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(29), mailBaseUrl: mailBaseUrlFor(ns) }),
@@ -224,6 +225,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  await clearNamespace(ns);
   await t.close();
 });
 

@@ -5,7 +5,7 @@ import { createApp } from '../../src/app';
 import { signUpWithProfile } from '../support/auth';
 import { createTestServerDeps } from '../support/serverDeps';
 import { createFakeLogger } from '../support/fakes';
-import { expectEmails, mailBaseUrlFor, mockNamespace } from '../support/mockServer';
+import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../support/mockServer';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
 
@@ -40,6 +40,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await clearNamespace(ns);
   await t.close();
 });
 

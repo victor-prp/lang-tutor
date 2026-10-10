@@ -19,6 +19,14 @@ import { createSessionsRouter } from '../../../src/routes/sessions';
 import { ACT_AS, actAs } from '../../support/actAs';
 
 let t: TestDb;
+// Every namespace a test makes, cleared after it: an expectation left behind
+// stays on the shared MockServer, and every later request is matched against it.
+const namespaces: string[] = [];
+const namespaceFor = (label: string) => {
+  const ns = mockNamespace(label);
+  namespaces.push(ns);
+  return ns;
+};
 
 beforeEach(async () => {
   t = await createTestDb();
@@ -26,6 +34,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await Promise.all(namespaces.splice(0).map(clearNamespace));
   await t.close();
 });
 
@@ -70,7 +79,7 @@ const AUDIO = 'A'.repeat(2_000);
 
 describe('POST /api/sessions/:id/speech', () => {
   it('records an understood attempt and carries the next step; an unheard one records nothing', async () => {
-    const ns = mockNamespace('speech-understood');
+    const ns = namespaceFor('speech-understood');
     await expectTranscription(ns, 'tomb', { once: true });
     await expectTranscription(ns, 'the tome', { once: true });
     const app = buildTestApp(ns);
@@ -88,7 +97,7 @@ describe('POST /api/sessions/:id/speech', () => {
   });
 
   it('answers say the translation with an alternative, then completes with a skip left out of the score', async () => {
-    const ns = mockNamespace('speech-score');
+    const ns = namespaceFor('speech-score');
     await expectTranscription(ns, 'lamp');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
@@ -105,7 +114,7 @@ describe('POST /api/sessions/:id/speech', () => {
   });
 
   it('stores a long transcript truncated to 100 characters', async () => {
-    const ns = mockNamespace('speech-long');
+    const ns = namespaceFor('speech-long');
     await expectTranscription(ns, `tome ${'a'.repeat(150)}`);
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
@@ -120,7 +129,7 @@ describe('POST /api/sessions/:id/speech', () => {
   });
 
   it('400s a choice card, 403s another learner, 409s a card that is not current, and 502s a failing model', async () => {
-    const ns = mockNamespace('speech-errors');
+    const ns = namespaceFor('speech-errors');
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
     const at = (question_id: string, actor = 'u_1') =>
@@ -139,7 +148,7 @@ describe('POST /api/sessions/:id/speech', () => {
   });
 
   it('413s a body over 300 KB', async () => {
-    const app = buildTestApp(mockNamespace('speech-large'));
+    const app = buildTestApp(namespaceFor('speech-large'));
     const { sessionId, questions } = await startSpeaking();
     const res = await app.request(`/api/sessions/${sessionId}/speech`, {
       method: 'POST',

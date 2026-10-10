@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 import { createApp } from '../../../src/app';
 import { createFakeLogger } from '../../support/fakes';
-import { codeSentTo, expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
+import { clearNamespace, codeSentTo, expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -20,6 +20,7 @@ beforeEach(async () => {
   );
 });
 afterEach(async () => {
+  await clearNamespace(ns);
   await t.close();
 });
 
