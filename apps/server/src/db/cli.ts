@@ -245,7 +245,10 @@ async function main(): Promise<void> {
       const plan = await tools.planMerges({ model });
       for (const merge of plan.merges) console.log(`tier ${merge.tier}  ${merge.lemma}: ${merge.otherKey} → ${merge.survivorKey}`);
       for (const suggestion of plan.suggestions) console.log(`suggestion, not merged: ${suggestion.lemma}: ${suggestion.keys.join(' ↔ ')}`);
-      console.log(`${plan.merges.length} merges, ${plan.definitions.length} definitions to fill in ${shownUrl}`);
+      const counts = [`${plan.merges.length} merges`, `${plan.definitions.length} definitions to fill`];
+      // Tier 2's headwords whose call failed or was unreadable: logged above, asked again next run.
+      if (model) counts.push(`${plan.skipped} skipped (no readable model answer)`);
+      console.log(`${counts.join(', ')} in ${shownUrl}`);
       if (!process.argv.includes('--yes')) {
         // The same tiers again: a bare --yes after a --model plan would apply tier 1 alone.
         console.log(`Nothing changed. Run again with -- ${model ? '--model --yes' : '--yes'} to apply.`);

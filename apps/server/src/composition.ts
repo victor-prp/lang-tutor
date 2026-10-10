@@ -54,8 +54,8 @@ export type AppDeps = {
   grants: GrantService;
   photoImports: PhotoImportService;
   // Phase 31 (spec D7). The merge job's use case; no route reaches it. The
-  // tool's plan and apply come with the type, unused here and without a model:
-  // db/cli.ts builds its own through createGlossTools.
+  // tool's plan and apply come with the type, unused here and composed with a
+  // null model: db/cli.ts builds its own through createGlossTools.
   glosses: GlossService;
   health: HealthRepo;
   identity: ServerIdentity;
@@ -240,7 +240,8 @@ export function createServerDeps(io: {
       now: io.now,
       logger: io.logger,
     }),
-    glosses: createGlossService({ transaction, logger: io.logger }),
+    // No model composed here: the tool's tier 2 is built by createGlossTools.
+    glosses: createGlossService({ transaction, logger: io.logger, llm: null }),
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,
     webDistDir: io.webDistDir,

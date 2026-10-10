@@ -3,6 +3,7 @@ import { normaliseGloss } from '@lang-tutor/core/domain';
 import { buildGlossMergePrompt, mutualPairs, parseGlossMerge } from '../domain/glossMerge';
 import { MergeGlossesPayloadSchema } from '../domain/jobs';
 import type { LanguageCode } from '../domain/languages';
+import { LlmUnavailable } from '../errors';
 import type { Logger } from '../logger';
 import type { MergeCounts } from '../repo/glosses';
 import type { LlmClient } from './llm';
@@ -38,14 +39,17 @@ export type MergePlan = {
   merges: PlannedMerge[];
   definitions: { senseId: string; definition: string }[];
   suggestions: { lemma: string; keys: [string, string] }[];
+  /** Headwords (one lexeme in one language each) whose model call failed or
+   *  answered unreadably: logged, left out of tier 2, and asked again next run. */
+  skipped: number;
 };
 
 /**
  * Phase 31 (spec D7). The gloss use cases that are not a lookup: the merge job,
  * and the by-hand tool's plan and apply. A merge runs here, outside the lookup,
  * in a transaction of its own under the lexeme's lock; the lookup only ever asks
- * for one. `llm` is the tool's model tier: only createGlossTools passes one,
- * and the server's service, which nothing asks for a plan, has none.
+ * for one. `llm` is the tool's model tier: createGlossTools passes one, and the
+ * server's service, which nothing asks for a plan, is handed null.
  */
 export function createGlossService({
   transaction,
@@ -54,7 +58,7 @@ export function createGlossService({
 }: {
   transaction: Transaction;
   logger: Logger;
-  llm?: LlmClient;
+  llm: LlmClient | null;
 }) {
   return {
     /** The merge-glosses job: every pair of one lexeme and language whose lemma
@@ -81,10 +85,13 @@ export function createGlossService({
      * which target words are forms of one word, and for missing definitions.
      * Mutual-alternative pairs are listed as suggestions and never merged.
      * Writes nothing. The model is called outside any transaction (ADR 0001 R8).
+     * A headword whose call fails (LlmUnavailable) or answers unreadably is
+     * logged and skipped, and the rest are still planned: one call in thousands
+     * must not cost the run. Any other error is a bug, and stops it.
      */
     planMerges: async ({ model }: { model: boolean }): Promise<MergePlan> => {
       const work = await transaction(({ gloss }) => gloss.findMergeWork());
-      const plan: MergePlan = { merges: [], definitions: [], suggestions: [] };
+      const plan: MergePlan = { merges: [], definitions: [], suggestions: [], skipped: 0 };
       for (const item of work) {
         const keyOf = new Map(item.glosses.map((g) => [g.id, g.key]));
         const planned = new Set<string>();
@@ -104,18 +111,31 @@ export function createGlossService({
         for (const [a, b] of mutualPairs(item.glosses)) plan.suggestions.push({ lemma: item.lemma, keys: [keyOf.get(a)!, keyOf.get(b)!] });
         if (!model || !llm) continue;
 
-        const raw = await llm(
-          buildGlossMergePrompt({
-            lemma: item.lemma,
-            partOfSpeech: item.partOfSpeech,
-            from: item.languageCode as LanguageCode,
-            to: item.userLanguageCode as LanguageCode,
-            glosses: item.glosses,
-            senses: item.senses,
-          }),
-        );
+        const prompt = buildGlossMergePrompt({
+          lemma: item.lemma,
+          partOfSpeech: item.partOfSpeech,
+          from: item.languageCode as LanguageCode,
+          to: item.userLanguageCode as LanguageCode,
+          glosses: item.glosses,
+          senses: item.senses,
+        });
+        let raw: string;
+        try {
+          raw = await llm(prompt);
+        } catch (error) {
+          if (!(error instanceof LlmUnavailable)) throw error;
+          plan.skipped += 1;
+          logger.info({
+            event: 'gloss_merge_unavailable',
+            lexeme_id: item.lexemeId,
+            user_language_code: item.userLanguageCode,
+            reason: error.message,
+          });
+          continue;
+        }
         const answer = parseGlossMerge(raw);
         if (!answer) {
+          plan.skipped += 1;
           logger.info({ event: 'gloss_merge_unreadable', lexeme_id: item.lexemeId, user_language_code: item.userLanguageCode });
           continue;
         }
