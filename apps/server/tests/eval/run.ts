@@ -427,7 +427,8 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
     });
   }
   if (kase.expectAlternativesIn) {
-    const words = allSenses.flatMap((sense) => [...(sense.alternatives ?? []), ...(sense.gloss_alternatives ?? [])]);
+    // The first call asks for no citation alternatives (see LlmSenseSchema).
+    const words = allSenses.flatMap((sense) => sense.alternatives ?? []);
     checks.push({
       name: `every alternative is in ${kase.expectAlternativesIn} script`,
       ok: words.every((word) => isInScript(word, kase.expectAlternativesIn!)),

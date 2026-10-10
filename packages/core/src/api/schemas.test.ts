@@ -521,7 +521,6 @@ describe('LlmTranslationSchema', () => {
       sense_code: 'motor_vehicle',
       alternatives: ['רכב'],
       gloss: 'מכונית',
-      gloss_alternatives: ['רכב'],
       definition: 'a road vehicle with an engine',
     };
     expect(LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [full] }] }).success).toBe(true);
@@ -531,10 +530,18 @@ describe('LlmTranslationSchema', () => {
     const kept = LlmTranslationSchema.parse({ kind: 'word', entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [full] }] });
     expect(kept.entries[0].senses[0]).toEqual(full);
   });
+
+  it("has no citation alternatives: only the rendering call asks for them (see LlmSenseSchema)", () => {
+    const parsed = LlmTranslationSchema.parse({
+      kind: 'word',
+      entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכונית', sense_code: 'motor_vehicle', gloss_alternatives: ['רכב'] }] }],
+    });
+    expect(parsed.entries[0].senses[0]).toEqual({ translation: 'מכונית', sense_code: 'motor_vehicle' });
+  });
 });
 
-// Phase 31 (spec D4-D6, D9). The second call's rendering takes the same four fields,
-// absent or null: parseLlmReconciliation parses without dropNulls.
+// Phase 31 (spec D4-D6, D9). The second call's rendering takes the first call's three
+// fields and gloss_alternatives, absent or null: parseLlmReconciliation parses without dropNulls.
 describe('LlmReconciliationSchema', () => {
   it('takes the phase 31 fields as absent or null, since this answer is parsed without dropNulls', () => {
     const base = { sense_code: 'motor_vehicle', translation: 'מכוניות' };
@@ -697,16 +704,16 @@ describe('CreateEnrollmentRequestSchema', () => {
 // invitation to invent ids or one more state in a schema already at the
 // provider's limit (see LlmTranslationSchema's comment).
 //
-// Phase 31 gave the model's sense four fields of its own (spec D4-D6, D9) and
-// still none of the wire's: no part_of_speech, gloss_id, variant_id or saved.
+// Phase 31 gave the model's sense three fields of its own (spec D4, D6, D9; the
+// citation alternatives are the rendering call's alone) and still none of the
+// wire's: no part_of_speech, gloss_id, variant_id or saved.
 describe('LlmSenseSchema after phase 18', () => {
-  it('has exactly translation, example, sense_code and the four of phase 31, none of the wire sense', () => {
+  it('has exactly translation, example, sense_code and three of phase 31, none of the wire sense', () => {
     expect(Object.keys(LlmSenseSchema.shape).sort()).toEqual([
       'alternatives',
       'definition',
       'example',
       'gloss',
-      'gloss_alternatives',
       'sense_code',
       'translation',
     ]);

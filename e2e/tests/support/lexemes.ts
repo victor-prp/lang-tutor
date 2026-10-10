@@ -96,7 +96,7 @@ export const MOUSE = {
       lemma: 'mouse',
       part_of_speech: 'noun',
       senses: [
-        { translation: 'עכבר', gloss: 'עכבר', alternatives: ['עכברון'], gloss_alternatives: ['עכברון'], definition: 'a small rodent with a long tail', sense_code: 'rodent', example: { source: 'A mouse ran across the kitchen floor.', target: 'עכבר רץ על רצפת המטבח.' } },
+        { translation: 'עכבר', gloss: 'עכבר', alternatives: ['עכברון'], definition: 'a small rodent with a long tail', sense_code: 'rodent', example: { source: 'A mouse ran across the kitchen floor.', target: 'עכבר רץ על רצפת המטבח.' } },
         { translation: 'עכבר', gloss: 'עכבר', definition: 'a hand-held device that moves a pointer', sense_code: 'computer_device', example: { source: 'Click the left mouse button.', target: 'לחץ על הכפתור השמאלי של העכבר.' } },
       ],
     },
@@ -110,7 +110,7 @@ export const FINGERS = {
     {
       lemma: 'finger',
       part_of_speech: 'noun',
-      senses: [{ translation: 'אצבעות', gloss: 'אצבע', alternatives: [], gloss_alternatives: [], definition: 'one of the five digits of the hand', sense_code: 'body_part', example: { source: 'He has long fingers.', target: 'יש לו אצבעות ארוכות.' } }],
+      senses: [{ translation: 'אצבעות', gloss: 'אצבע', alternatives: [], definition: 'one of the five digits of the hand', sense_code: 'body_part', example: { source: 'He has long fingers.', target: 'יש לו אצבעות ארוכות.' } }],
     },
   ],
 };

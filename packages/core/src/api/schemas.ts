@@ -759,11 +759,21 @@ export const PartOfSpeechSchema = z.enum([
 // writes but the translation and the example. A model that still puts a part
 // of speech on a sense loses it on parse, as before: the key is not here.
 //
-// The four phase 31 fields are optional and never defaulted, for the reason
+// The phase 31 fields are optional and never defaulted, for the reason
 // LlmCorrectionSchema.alternatives gives: a missing decorative field must not
 // fail an answer, and a `default` would travel to Gemini. No maxItems either:
 // array caps multiply the response schema's states, which Gemini refuses past a
 // limit (see `entries` below). renderingOf cuts the lists after parsing.
+//
+// Three of the four, not `gloss_alternatives`: the alternatives' citation forms
+// are the rendering call's alone (LlmRenderingSchema). Measured against the live
+// API on 2026-10-10, with all four fields the first call answered `pour` (en ->
+// he, an English word that French spells the same) with no entries in 4 to 7
+// of 10 calls, and with any two of the others beside `gloss_alternatives` in 10
+// of 10; with these three, in 0 of 20, as with the schema before phase 31.
+// Rewording the prompt, renaming the field and pinning property order did not
+// help. A lemma-form write's own `alternatives` are citation forms already, so
+// they feed the gloss's list instead (assignGlosses), as 0024 built it.
 export const LlmSenseSchema = z.object({
   translation: z.string().min(1),
   example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
@@ -772,8 +782,6 @@ export const LlmSenseSchema = z.object({
   alternatives: z.array(z.string().min(1)).optional(),
   // Spec D6. The translation's citation form, uninflected.
   gloss: z.string().min(1).optional(),
-  // Spec D5. The alternatives' citation forms.
-  gloss_alternatives: z.array(z.string().min(1)).optional(),
   // Spec D9. One short phrase in the headword's language.
   definition: z.string().min(1).optional(),
 });
@@ -858,6 +866,10 @@ export const LlmTranslationSchema = z.object({
   // fit. A form with four or five parts of speech now loses the least likely
   // ones, and a competing lemma no longer fits beside a three-part word.
   //
+  // These caps were measured with all four fields. `gloss_alternatives` has since
+  // left this call (see LlmSenseSchema, for a reason that is not the state
+  // limit), and the caps were kept rather than measured again.
+  //
   // This schema has no headroom left. A new field on a sense, or on the
   // entry, means revisiting these caps, and measuring first. No stub can catch
   // it — MockServer accepts any `responseSchema` without validating it — so
@@ -884,9 +896,11 @@ export const LlmRenderingSchema = z.object({
   sense_code: z.string().min(1).max(60),
   translation: z.string().min(1).nullable(),
   example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
-  // Phase 31: the first call's four fields, for the same reasons. Nullable as
-  // well as optional, because this answer is parsed without dropNulls: a
-  // provider spelling "none" as null must not fail the whole reconciliation.
+  // Phase 31: the first call's three fields, for the same reasons, and
+  // `gloss_alternatives`, which only this call asks for (see LlmSenseSchema).
+  // Nullable as well as optional, because this answer is parsed without
+  // dropNulls: a provider spelling "none" as null must not fail the whole
+  // reconciliation.
   alternatives: z.array(z.string().min(1)).nullable().optional(),
   gloss: z.string().min(1).nullable().optional(),
   gloss_alternatives: z.array(z.string().min(1)).nullable().optional(),

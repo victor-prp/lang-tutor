@@ -1,6 +1,5 @@
 import type {
   LanguageCode,
-  LlmEntry,
   LlmRendering,
   PartOfSpeech,
   TranslationKind,
@@ -28,7 +27,9 @@ import {
   normalizeForm,
   renderingOf,
   rowsToCards,
+  type EntryToStore,
   type SenseRow,
+  type SenseToStore,
   type StaleLexeme,
 } from '../domain/dictionary';
 import { coversPair, markSaved } from '../domain/vocabulary';
@@ -40,8 +41,9 @@ import type { LlmClient } from './llm';
 import type { Transaction } from './transaction';
 
 /** One rendering of the second call as the entry it becomes: the model's fields,
- *  passed through for the write (renderingOf). */
-function entrySense(rendering: LlmRendering & { translation: string }): LlmEntry['senses'][number] {
+ *  passed through for the write (renderingOf), the citation alternatives only
+ *  this call asks for among them. */
+function entrySense(rendering: LlmRendering & { translation: string }): SenseToStore {
   return {
     sense_code: rendering.sense_code,
     translation: rendering.translation,
@@ -75,10 +77,10 @@ async function reconcile(input: {
   form: string;
   from: LanguageCode;
   to: LanguageCode;
-  entries: LlmEntry[];
+  entries: EntryToStore[];
   stored: StoredSense[][];
   logger: Logger;
-}): Promise<LlmEntry[]> {
+}): Promise<EntryToStore[]> {
   let reused = 0;
   let newlyNamed = 0;
   let reconciledEntries = 0;
@@ -108,7 +110,7 @@ async function reconcile(input: {
       reconciledEntries += 1;
       const known = new Set(storedSenses.map((sense) => sense.senseCode));
       const seen = new Set<string>();
-      const senses: LlmEntry['senses'] = [];
+      const senses: SenseToStore[] = [];
 
       for (const rendering of parsed.senses) {
         // `translation: null` is the model saying this form does not admit that
@@ -321,7 +323,7 @@ async function addHeadwordToForm({
   const parsed = parseLlmReconciliation(raw);
   if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
   const seen = new Set<string>();
-  const senses: LlmEntry['senses'] = [];
+  const senses: SenseToStore[] = [];
   for (const rendering of parsed.senses) {
     if (rendering.translation === null || seen.has(rendering.sense_code)) continue;
     seen.add(rendering.sense_code);
@@ -685,7 +687,7 @@ export function createTranslationService({
       }
     }
 
-    let entries = mergeEntries(parsed.entries);
+    let entries: EntryToStore[] = mergeEntries(parsed.entries);
     let flattened = normalizeSenses(kind, flattenEntries(entries, kind));
 
     // A sentence is not a vocabulary item, and caching "no translation" would

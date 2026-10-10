@@ -220,6 +220,18 @@ export type SenseToWrite = {
 export type Rendering = Omit<SenseToWrite, 'senseCode'>;
 
 /**
+ * Phase 31. A sense as a writer hands it over: the first call's (LlmSense),
+ * which may also carry the gloss's citation alternatives. The rendering call
+ * answers them (services/translations.ts) and a dictionary restore replays them
+ * (db/dictExport.ts); the first call no longer asks the model for them
+ * (LlmSenseSchema).
+ */
+export type SenseToStore = LlmSense & { gloss_alternatives?: readonly string[] };
+
+/** An entry as a writer hands it over: the first call's, with SenseToStore senses. */
+export type EntryToStore = Omit<LlmEntry, 'senses'> & { senses: SenseToStore[] };
+
+/**
  * Phase 31. A model's sense as every writer stores it: one clean translation and
  * the rest of any list as alternatives, so a model that ignores "one
  * translation" still never puts a list on a card (Review Focus 5). The citation
@@ -272,7 +284,7 @@ export type EntryRows = {
  * existing headwords, for a headword added to a form already written: the
  * render-lemma job's scoped path.
  */
-export function entriesToRows(entries: LlmEntry[], entryRankOffset = 0): EntryRows[] {
+export function entriesToRows(entries: readonly EntryToStore[], entryRankOffset = 0): EntryRows[] {
   return entries.map((entry, index) => ({
     lemma: entry.lemma,
     partOfSpeech: entry.part_of_speech,

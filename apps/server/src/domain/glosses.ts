@@ -51,8 +51,15 @@ export function tidyGlossList(items: readonly string[], main: string, cap = MAX_
   return kept;
 }
 
-/** One sense of one write, for one lexeme, in the order the answer ranked them. */
-export type AnswerSense = { senseId: string; gloss: string; glossAlternatives: readonly string[] };
+/** One sense of one write, for one lexeme, in the order the answer ranked them:
+ *  its citation form and citation alternatives, and its rendering's own
+ *  alternatives, in the written form's inflection. */
+export type AnswerSense = {
+  senseId: string;
+  gloss: string;
+  glossAlternatives: readonly string[];
+  alternatives: readonly string[];
+};
 
 /** A live gloss of the lexeme in the write's learner language. */
 export type LiveGloss = { id: string; key: string; alternatives: readonly string[] };
@@ -118,6 +125,14 @@ export function assignGlosses(input: {
     }
   };
 
+  // Spec D5, as 0024 builds a gloss's list from its members' lemma-form
+  // alternatives: a lemma-form write's own alternatives are in the citation
+  // inflection already, so they join the gloss's, after its citation
+  // alternatives. The first call asks for no citation alternatives, so they are
+  // what fills a new gloss's list. An inflected form's alternatives never do.
+  const citations = (sense: AnswerSense): readonly string[] =>
+    input.lemmaForm ? [...sense.glossAlternatives, ...sense.alternatives] : sense.glossAlternatives;
+
   const firsts = new Map<string, AnswerSense>();
   for (const sense of input.senses) if (!firsts.has(sense.senseId)) firsts.set(sense.senseId, sense);
   const senses = [...firsts.values()];
@@ -141,7 +156,7 @@ export function assignGlosses(input: {
         }
       }
     }
-    widen(glossId, sense.glossAlternatives);
+    widen(glossId, citations(sense));
   }
 
   for (const sense of senses.filter(({ senseId }) => !input.memberships.has(senseId))) {
@@ -149,18 +164,18 @@ export function assignGlosses(input: {
     const existing = byKey.get(key) ?? input.aliases?.get(key);
     if (existing !== undefined) {
       plan.join.push({ senseId: sense.senseId, glossId: existing });
-      widen(existing, sense.glossAlternatives);
+      widen(existing, citations(sense));
       continue;
     }
     const fresh = created.get(key);
     if (fresh) {
       fresh.senseIds.push(sense.senseId);
-      fresh.alternatives = tidyGlossList([...fresh.alternatives, ...sense.glossAlternatives], fresh.key);
+      fresh.alternatives = tidyGlossList([...fresh.alternatives, ...citations(sense)], fresh.key);
       continue;
     }
     created.set(key, {
       key: sense.gloss,
-      alternatives: tidyGlossList(sense.glossAlternatives, sense.gloss),
+      alternatives: tidyGlossList(citations(sense), sense.gloss),
       senseIds: [sense.senseId],
     });
   }

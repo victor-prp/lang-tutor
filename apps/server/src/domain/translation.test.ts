@@ -187,12 +187,15 @@ describe('buildPrompt', () => {
 describe('buildPrompt (phase 31)', () => {
   const system = buildPrompt({ text: 'car', from: 'en', to: 'he' }).system;
 
-  it('asks for one translation, alternatives, the citation forms and a definition', () => {
+  it('asks for one translation, alternatives, the citation form and a definition', () => {
     expect(system).toContain('one main Hebrew translation');
     expect(system).toContain('"alternatives"');
     expect(system).toContain('"gloss"');
-    expect(system).toContain('"gloss_alternatives"');
     expect(system).toContain('one short phrase in English');
+  });
+
+  it("asks for no citation alternatives: only the rendering call does (see LlmSenseSchema)", () => {
+    expect(system).not.toContain('gloss_alternatives');
   });
 });
 
@@ -924,5 +927,10 @@ describe('buildRenderingPrompt (phase 31, spec D9)', () => {
 
   it('asks for a definition where a sense has none, and for every new code', () => {
     expect(prompt.system).toContain('for every sense whose line above has no definition, and for every new sense_code');
+  });
+
+  it("asks for the citation form and, unlike the first call, the alternatives' citation forms", () => {
+    expect(prompt.system).toContain('"gloss"');
+    expect(prompt.system).toContain('"gloss_alternatives"');
   });
 });

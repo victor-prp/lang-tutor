@@ -1,4 +1,4 @@
-import type { LlmEntry, TranslationKind, TranslationSense } from '@lang-tutor/core/api';
+import type { TranslationKind, TranslationSense } from '@lang-tutor/core/api';
 import { normaliseGloss } from '@lang-tutor/core/domain';
 import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
@@ -20,6 +20,7 @@ import {
   rowsToCards,
   staleLexemes,
   type EntryRows,
+  type EntryToStore,
   type Rendering,
   type SenseRow,
   type StaleLexeme,
@@ -35,7 +36,7 @@ export type PersistEntriesInput = {
   languageCode: string;
   userLanguageCode: string;
   kind: TranslationKind;
-  entries: LlmEntry[];
+  entries: EntryToStore[];
   /** Phase 31 (spec D12). Where this write's entry ranks start: past the form's
    *  existing headwords, for one added to a form already written. 0 otherwise. */
   entryRankOffset?: number;
@@ -667,6 +668,7 @@ export function createDictRepo(tx: Tx) {
           senseId: senseIds[i],
           gloss: sense.gloss,
           glossAlternatives: sense.glossAlternatives,
+          alternatives: sense.alternatives,
         })),
       });
       if (needsMerge) mergePairs.push({ lexemeId, userLanguageCode: input.userLanguageCode });
@@ -830,6 +832,7 @@ export function createDictRepo(tx: Tx) {
         senseId: sense.senseId,
         gloss: sense.gloss,
         glossAlternatives: sense.glossAlternatives,
+        alternatives: sense.alternatives,
       })),
     });
 

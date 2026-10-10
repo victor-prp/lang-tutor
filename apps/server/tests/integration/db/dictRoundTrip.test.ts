@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import type { LlmSense, PartOfSpeech } from '@lang-tutor/core/api';
+import type { PartOfSpeech } from '@lang-tutor/core/api';
 import { asc, eq, sql } from 'drizzle-orm';
 
 import { dictGlosses, dictLexemes, dictSenses, dictVarTranslations } from '../../../src/db/schema';
@@ -12,6 +12,7 @@ import {
   toJsonl,
 } from '../../../src/db/dictExport';
 import { importCorrections, importDictionary } from '../../../src/db/dictImport';
+import type { SenseToStore } from '../../../src/domain/dictionary';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createGlossRepo } from '../../../src/repo/glosses';
 import { insertDriftedFinger } from '../../support/dictRows';
@@ -33,7 +34,8 @@ afterEach(async () => {
   await target.close();
 });
 
-/** A lookup, written the way `services/translations.ts` writes one. */
+/** A lookup, written the way `services/translations.ts` writes one. A sense
+ *  may carry citation alternatives, as a rendering call's does. */
 async function lookUp(
   t: TestDb,
   input: {
@@ -41,7 +43,7 @@ async function lookUp(
     entries: {
       lemma: string;
       part_of_speech: PartOfSpeech;
-      senses: LlmSense[];
+      senses: SenseToStore[];
     }[];
   },
 ): Promise<void> {

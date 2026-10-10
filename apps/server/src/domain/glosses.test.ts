@@ -80,7 +80,12 @@ describe('tidyGlossList', () => {
   });
 });
 
-const sense = (senseId: string, gloss: string, glossAlternatives: string[] = []) => ({ senseId, gloss, glossAlternatives });
+const sense = (senseId: string, gloss: string, glossAlternatives: string[] = [], alternatives: string[] = []) => ({
+  senseId,
+  gloss,
+  glossAlternatives,
+  alternatives,
+});
 const none = new Map<string, string>();
 
 describe('assignGlosses (spec D6, D7)', () => {
@@ -247,6 +252,50 @@ describe('folding two glosses (spec D3, D7)', () => {
     const late = { variantId: 'v_finger', addedByUserId: 'u_1', savedAt: '2026-02-01T00:00:00.000000' };
     expect(keptEntry(late, early)).toBe(early);
     expect(keptEntry(early, late)).toBe(early);
+  });
+});
+
+// Spec D5, as 0024 builds a gloss's alternatives from its members' lemma-form
+// alternatives: the first call no longer asks for citation alternatives, so the
+// lemma form's own alternatives, already in the citation inflection, are what
+// keep a new gloss's list filled. An inflected form's are not citation forms.
+describe("assignGlosses and the lemma form's own alternatives (spec D5)", () => {
+  it("gives a new gloss the alternatives of a lemma-form rendering", () => {
+    const plan = assignGlosses({
+      senses: [{ senseId: 's1', gloss: 'מכונית', glossAlternatives: [], alternatives: ['רכב', 'אוטו'] }],
+      lemmaForm: true,
+      glosses: [],
+      memberships: none,
+    });
+    expect(plan.create).toEqual([{ key: 'מכונית', alternatives: ['רכב', 'אוטו'], senseIds: ['s1'] }]);
+  });
+
+  it('widens the gloss a lemma-form sense belongs to, and the one it joins, after the citation alternatives', () => {
+    const plan = assignGlosses({
+      senses: [
+        { senseId: 's1', gloss: 'מכונית', glossAlternatives: [], alternatives: ['רכב'] },
+        { senseId: 's2', gloss: 'מכונית', glossAlternatives: ['אוטו'], alternatives: ['רכב', 'מכונית'] },
+      ],
+      lemmaForm: true,
+      glosses: [{ id: 'g1', key: 'מכונית', alternatives: [] }],
+      memberships: new Map([['s1', 'g1']]),
+    });
+    expect(plan.join).toEqual([{ senseId: 's2', glossId: 'g1' }]);
+    expect(plan.alternatives).toEqual([{ glossId: 'g1', alternatives: ['רכב', 'אוטו'] }]);
+  });
+
+  it("leaves an inflected form's alternatives off the gloss", () => {
+    const plan = assignGlosses({
+      senses: [
+        { senseId: 's1', gloss: 'מכונית', glossAlternatives: ['רכב'], alternatives: ['רכבים', 'אוטואים'] },
+        { senseId: 's2', gloss: 'מכונית', glossAlternatives: [], alternatives: ['מכוניות'] },
+      ],
+      lemmaForm: false,
+      glosses: [{ id: 'g1', key: 'מכונית', alternatives: [] }],
+      memberships: new Map([['s2', 'g1']]),
+    });
+    expect(plan.join).toEqual([{ senseId: 's1', glossId: 'g1' }]);
+    expect(plan.alternatives).toEqual([{ glossId: 'g1', alternatives: ['רכב'] }]);
   });
 });
 

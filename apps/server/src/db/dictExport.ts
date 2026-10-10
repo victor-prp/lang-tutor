@@ -1,6 +1,7 @@
-import type { LlmEntry, LlmSense, PartOfSpeech, TranslationKind } from '@lang-tutor/core/api';
+import type { PartOfSpeech, TranslationKind } from '@lang-tutor/core/api';
 import { and, asc, eq } from 'drizzle-orm';
 
+import type { EntryToStore, SenseToStore } from '../domain/dictionary';
 import type { Db } from './client';
 import {
   dictCorrections,
@@ -29,7 +30,7 @@ import {
 export type DictRecord = {
   form: string;
   kind: TranslationKind;
-  entries: LlmEntry[];
+  entries: EntryToStore[];
 };
 
 type FlatRow = {
@@ -69,7 +70,7 @@ type FlatRow = {
  * be null and is always emitted: it is half of the lexeme's identity.
  */
 function groupRows(rows: FlatRow[]): DictRecord[] {
-  const byForm = new Map<string, { record: DictRecord; entries: Map<number, LlmEntry> }>();
+  const byForm = new Map<string, { record: DictRecord; entries: Map<number, EntryToStore> }>();
 
   for (const row of rows) {
     let group = byForm.get(row.form);
@@ -84,7 +85,7 @@ function groupRows(rows: FlatRow[]): DictRecord[] {
       group.entries.set(row.entryRank, entry);
     }
 
-    const sense: LlmSense = { translation: row.translation, sense_code: row.senseCode };
+    const sense: SenseToStore = { translation: row.translation, sense_code: row.senseCode };
     if (row.exampleSource && row.exampleTarget) {
       sense.example = { source: row.exampleSource, target: row.exampleTarget };
     }

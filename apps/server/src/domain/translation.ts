@@ -218,15 +218,34 @@ function writingRules(source: Language, target: Language): string[] {
   return [...new Set([...source.writing, ...target.writing])];
 }
 
-/** Phase 31 (spec D4-D6). How each sense's target words are written: both
- *  calls ask for them in these words. */
+/**
+ * Phase 31 (spec D4-D6). How each sense's target words are written: both calls
+ * ask for them in these words.
+ *
+ * The citation sentence's wording and place are measured, not style: the first
+ * call's third-language rule (below, in buildPrompt) is balanced on `pour`,
+ * English though French has the word, and this sentence tips it. Against the
+ * live API on 2026-10-10, with no `gloss_alternatives` in the first call, ten
+ * to twenty calls each: as written here, `pour` came back empty in 0 of 30.
+ * "Give the translation's dictionary citation form in "gloss", uninflected."
+ * in the same place: 11 of 20 empty. Adding "as a dictionary lists it", or two
+ * examples of citation forms: 20 of 20. The same sentence moved before the
+ * other words: 0 of 30 empty, but `come` (it) then lost an example in 4 of 10
+ * and `cool` ran past the 30 s budget in 2 of 10. Run `pour`, `come` and
+ * `cool` several times before changing a word here.
+ */
 function glossRules(to: string): string[] {
   return [
     `Give each sense one main ${to} translation: never a list of words, and never a note in brackets; a note that tells one sense from another belongs in "definition". A translation may be several words where ${to} needs them for one meaning.`,
     `List other ${to} words that render the sense equally well in "alternatives", in the same grammatical form as the translation.`,
-    `Give the translation's dictionary citation form in "gloss", uninflected, and the alternatives' in "gloss_alternatives".`,
+    `Give the citation form of the translation, uninflected, in "gloss".`,
   ];
 }
+
+/** Phase 31 (spec D5). The rendering call's alone: the first call asks for no
+ *  citation alternatives, because with them in its response schema it answered
+ *  `pour` with no entries about half the time (see LlmSenseSchema). */
+const CITATION_ALTERNATIVES_RULE = `Give the alternatives' citation forms in "gloss_alternatives".`;
 
 /**
  * Phase 26 follow-up. A slash list answered as one form writes that form as a
@@ -598,8 +617,10 @@ export function buildRenderingPrompt(input: {
     'translation: null rather than forcing a translation.',
     // Same rule as the first call — see buildPrompt.
     `Write every sense's translation in ${to}.`,
-    // Phase 31 (spec D4-D6, D9): the first call's rules, for the same reasons.
+    // Phase 31 (spec D4-D6, D9): the first call's rules, for the same reasons,
+    // and the citation alternatives, which only this call asks for.
     ...glossRules(to),
+    CITATION_ALTERNATIVES_RULE,
     `Give "definition", one short phrase in ${from}, for every sense whose line above has no definition, and for every new sense_code.`,
     // The same rule as the first call, for the same reason — see buildPrompt.
     // It belongs here too: this call writes examples for a form the first call

@@ -85,8 +85,8 @@ describe('the merge-glosses job (spec D7)', () => {
           lemma: 'amazing',
           part_of_speech: 'adjective',
           senses: [
-            { ...sense('surprising', 'מדהים', 'מדהים'), gloss_alternatives: ['נהדר'] },
-            { ...sense('excellent', 'נהדר', 'נהדר'), gloss_alternatives: ['מדהים'] },
+            { ...sense('surprising', 'מדהים', 'מדהים'), alternatives: ['נהדר'] },
+            { ...sense('excellent', 'נהדר', 'נהדר'), alternatives: ['מדהים'] },
           ],
         },
       ],
@@ -94,6 +94,15 @@ describe('the merge-glosses job (spec D7)', () => {
     });
     await deps().translations.translate('u_1', { text: 'amazing', from: 'en', to: 'he' });
     expect(await countJobs(t.db, MERGE_GLOSSES)).toBe(0);
+    // The lemma form's own alternatives are its glosses' (spec D5), so each
+    // gloss names the other's key.
+    const named = await t.db.execute<{ key: string; alternatives: string[] }>(sql`
+      select g.key, g.alternatives from dict_glosses g join dict_lexemes l on l.id = g.lexeme_id
+      where l.lemma = 'amazing' and g.merged_into is null order by g.key`);
+    expect(named.rows).toEqual([
+      { key: 'מדהים', alternatives: ['נהדר'] },
+      { key: 'נהדר', alternatives: ['מדהים'] },
+    ]);
 
     const logger = createFakeLogger();
     await deps(logger).glosses.mergeLexeme({ lexeme_id: await lexemeOf('amazing'), user_language_code: 'he' });

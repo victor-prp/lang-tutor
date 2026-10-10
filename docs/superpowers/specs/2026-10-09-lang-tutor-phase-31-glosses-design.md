@@ -605,9 +605,19 @@ above, it is listed here with its reason; everything else was built as written.
 **Ruled during the build**
 
 - **The first call returns at most three headwords (`LlmTranslationSchema.entries` is capped at
-  3, five senses each).** With the four new sense fields Gemini refuses five by five as having
-  too many states; three by five keeps every headword's sense depth, with no headroom left for a
-  further field.
+  3, five senses each).** With the four new sense fields Gemini refused five by five as having
+  too many states; three by five keeps every headword's sense depth, and the cap stayed when the
+  first call later lost one field.
+- **The first call asks for no citation alternatives; the rendering call still does, and a
+  lemma-form write's own alternatives feed its gloss's, as `0024` built them, in the lookup and
+  the repair alike.** With `gloss_alternatives` in its response schema the first call answered
+  `pour`, English though French has the word, with no entries in four to seven calls of ten,
+  where the schema before phase 31 never did. A lemma form's alternatives are citation forms
+  already, so D5's list stays filled, while an inflected form's never join it.
+- **The first call's citation sentence is worded as measured, because `pour` tips on it too.**
+  Without the field but with the sentence as first written, `pour` was still empty in 11 of 20
+  calls, and two harmless rewordings made it 20 of 20; as built it was empty in none of 40 probe
+  calls, five runs of the case alone and two full runs. `glossRules` records each variant.
 - **An answer's senses that already have a membership are assigned before its new ones, each
   group in rank order, and a sense code repeated in one answer counts once.** Renames then land
   before a new sense looks up a key, so one answer never leaves a pair for the merge job (D7).
@@ -672,8 +682,9 @@ above, it is listed here with its reason; everything else was built as written.
   it, and kept off a reverse card's wrong options by the prompt alone.
 - **The judge context reads one rendering per card, the lowest-ranked.** A form that renders two
   members of one gloss contributes only the first member's inflected alternatives.
-- **A slash splits a translation as a comma does, since the splitter is phase 26's.** `and/or`
-  comes back as ו with או as an alternative, and a gender form such as "חבר/ה" splits.
+- **Known limitation: a slash splits a translation as a comma does.** The splitter is the sense
+  matcher's, as §2 says, so `and/or` comes back as ו with או as an alternative, and a gender form
+  such as "חבר/ה" splits the same way.
 - **A `merge-glosses` job has no dead letter.** A merge that keeps failing leaves two glosses,
   which `dict:glosses:merge` also finds.
 - **A prepare-session job queued by the old container fails once after the deploy**, on the new
