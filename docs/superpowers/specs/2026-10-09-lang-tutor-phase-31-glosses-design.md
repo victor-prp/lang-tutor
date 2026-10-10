@@ -6,6 +6,9 @@
   rendering decides membership and glosses only ever merge (D6, D7); a definition per sense,
   stored and not shown (D9); sessions rotate over every rendering of a gloss (D12). Every decision
   is in §1 with its reason, so each one can be overturned in review.
+- **Built:** on branch `phase-31-glosses`, 2026-10-09 to 2026-10-10, from the plan
+  `docs/superpowers/plans/2026-10-09-phase-31-glosses.md`. Where the build departs from the
+  letter of this spec, "As built" at the end says what was built instead, and why.
 - **Date:** 2026-10-09
 - **Source:** the one-pager `drafts/2026-10-08-merge-same-target-senses-one-pager.md`. `drafts/`
   is gitignored, so everything this spec depends on is restated below.
@@ -43,7 +46,7 @@ and `mouse`, still sees two.
    (אצבע) as its translation on the list and the word page, and sessions practise its other forms
    too, the standard one included.
 6. `npm test`, `npm run test:all`, `npm run lint:arch` and `npm run e2e` pass; `npm run eval`
-   passes with the new prompt cases. ADR 0009's check reports a planted violation.
+   passes with the new prompt cases. ADR 0011's check reports a planted violation.
 
 ## Scope
 
@@ -62,7 +65,7 @@ and `mouse`, still sees two.
 - the gloss key as the headline translation on the list and the detail;
 - sessions picking a rendering at random over every form of every member, with the lemma form
   rendered on demand;
-- ADR 0009 and its check.
+- ADR 0011 and its check.
 
 **Out** (from the one-pager):
 - merging across parts of speech: a noun and a verb with the same target word stay separate;
@@ -248,7 +251,7 @@ endpoints; the app is ours, so the cost is coordination.
 **D16. `sense_progress` is renamed `gloss_progress`;** every row is now about a gloss.
 `session_progress` keeps its name.
 
-**D17. ADR 0009, "The learner's unit is the gloss".** Records D1, D2 and D8. Its checkable rule: no
+**D17. ADR 0011, "The learner's unit is the gloss".** Records D1, D2 and D8. Its checkable rule: no
 table outside the `dict_` prefix references `dict_senses` or `dict_var_translations`; learner tables
 reference `dict_glosses`. The check scans `schema.ts` for foreign keys and gets its planted
 violation.
@@ -535,7 +538,7 @@ Nothing live depends on either.
 - a session card prompts with `finger` for a word saved from `fingers`, after the job has run.
 
 ### Architecture
-- ADR 0009's check: plant a foreign key from a non-`dict_` table to `dict_senses` and confirm the
+- ADR 0011's check: plant a foreign key from a non-`dict_` table to `dict_senses` and confirm the
   report.
 
 ## Build order
@@ -549,7 +552,7 @@ Nothing live depends on either.
    pick and siblings.
 6. Mobile cards and strings; E2E.
 7. `dict:lemmas:render`, `dict:glosses:merge`, export and import, recompute.
-8. ADR 0009 and its check.
+8. ADR 0011 and its check.
 
 ## Risks
 
@@ -561,3 +564,118 @@ Nothing live depends on either.
 - **Reconciliation with definitions changes the second call's behaviour** for every new form,
   not only for new languages. The eval's reconciliation case and the existing stale-form tests cover
   it; the first lookups after deploy are watched through `dict_reconciled`'s `reused` count.
+
+## As built
+
+Built on branch `phase-31-glosses`. Where the build departs from the letter of the sections
+above, it is listed here with its reason; everything else was built as written.
+
+**Decided while planning**
+
+1. **This phase's ADR is 0011.** Phase 29 holds `adr-0009-sign-in.md` and phase 30
+   `adr-0010-single-container-migrations.md`.
+2. **Three migrations, `0024_glosses`, `0025_glosses_rekey` and `0026_lemma_renders`, where §2
+   names one `0022_glosses`.** Phase 29 merged first with `0022_auth` and `0023_users_auth_fk`,
+   and drizzle applies every pending migration in one transaction, so a deploy still migrates
+   atomically.
+3. **The lemma backfill runs at every start of the CLI's default path, after migrate and seed,
+   and on demand as `npm run dict:lemmas:render`; `dict_lemma_renders` records each lexeme and
+   learner language asked for.** The container's start command is the one step every deploy runs
+   (ADR 0010), and without the record a lemma the job skipped would cost model calls on every
+   start.
+4. **The merge job's one signal is a blocked rename: a lemma form whose citation form another live
+   gloss of the lexeme already holds.** The unique index on live keys makes two live glosses with
+   one key impossible, so that is the only equal-key drift left for D7.
+5. **`sense_id` left the wire in one change across the server, the app and the e2e suite (D15).**
+   A contract renamed halfway would have had an endpoint speaking both.
+6. **`normaliseGloss` and `gloss_key` map a hyphen as well as a maqaf to a space.** The spec's own
+   example, "בית-ספר", is written with a hyphen.
+7. **`0025` rewrites a photo import's stored options into one card per gloss, and a merge leaves
+   photo rows alone.** Options are a snapshot, and a stale gloss id in one resolves through
+   `merged_into` when the import is saved.
+8. **The results name a practised gloss by its key, beside the form the session asked.** The
+   asked form is what the row's speak button says; the missed list still shows each card as it
+   was asked.
+9. **The list's headline is the learner's earliest saved gloss of the lemma.** D11's headline is
+   the key, which reads no rendering, so the rendering rank that used to pick it is gone.
+10. **ADR 0001 R4 lets `db/cli.ts` import the composition root.** The merge tool's model tier
+    needs a Gemini client, only `composition.ts` may build one (R11), and the CLI is an entry
+    point (R7).
+
+**Ruled during the build**
+
+- **The first call returns at most three headwords (`LlmTranslationSchema.entries` is capped at
+  3, five senses each).** With the four new sense fields Gemini refuses five by five as having
+  too many states; three by five keeps every headword's sense depth, with no headroom left for a
+  further field.
+- **An answer's senses that already have a membership are assigned before its new ones, each
+  group in rank order, and a sense code repeated in one answer counts once.** Renames then land
+  before a new sense looks up a key, so one answer never leaves a pair for the merge job (D7).
+- **Only a gloss's first member in the write, by rank, can rename it; a later member that drifts
+  never does, and the merge job's finder reads the same member.** D6 records drift on the
+  rendering and never moves a membership, and the finder must not fold glosses this rule keeps
+  apart.
+- **`gloss_key` spells out the whitespace JavaScript's `\s` matches and lowercases with the
+  database's `lower()`.** That makes it `normaliseGloss`'s twin except on dotted capital I and
+  Greek final sigma, which none of the app's languages use.
+- **A sentence's translation is never split into alternatives; a word's or a phrase's is.** A
+  sentence's comma is punctuation, while lane 0's comma phrases are real lists.
+- **The lookup card and the word page's card are two shapes.** The lookup card is the typed form's
+  rendering, with `key` only when the key normalises differently, the typed form's alternatives
+  and one example per member; the word page's card is headlined by the key and adds the gloss's
+  alternatives, `form`, `saved_from`, `added_by` and `progress`, because a lookup answers for the
+  form typed and the page for the saved word.
+- **The word page takes each member's example from that member's renderings that have a whole
+  example, the lemma form first, then the representative form.** D10 shows every member's
+  example, and picking the lemma form before checking for an example lost some.
+- **A photo option carries the gloss key, and the photo review shows the key and "also …" on its
+  collapsed row too.** §2 calls the photo review the same card as the lookup's.
+- **The photo import's exact match trims a trailing mark before `normaliseGloss`, compares a
+  card's translation, key and alternatives, and ranks a card's own translation or key above
+  another card's alternatives, ties in lookup order.** A printed gloss often ends in a mark or
+  prints a citation form beside an inflected word, and a word one card lists as an alternative
+  can be another card's own.
+- **A render whose retries are spent goes to a dead-letter queue that releases its claim, so the
+  next save or start asks again; a skip keeps its claim, and a sentence answer is a skip.** A
+  provider outage during a deploy's backfill would otherwise lose every render it touched.
+- **The CLI's start-up request is best-effort, and claims are inserted in key order.** A failure
+  logs one line and the server starts, since the claim rolled back and the next start asks
+  again; key order is `lockLexemes`' order, so two saves sharing lexemes cannot deadlock.
+- **The render job's closing check that the lemma now renders is a read-only transaction of its
+  own, after the model call and the lookup's write.** ADR 0001 R8 lets only reads before
+  third-party I/O stand alone, but this read changes nothing and only chooses between
+  `lemma_rendered` and `lemma_render_skipped`.
+- **The failed-render test checks the word page on the saved form, not session preparation.**
+  Preparation never reads lemma renders, so it cannot wait on one.
+- **A dictionary restore carries no merge, so the README and the hosting runbook follow it with
+  `dict:glosses:merge`, tier 1 then `-- --model`, and a round-trip test pins the gap.** The
+  export holds renderings and not memberships, so a restore rebuilds glosses from renderings.
+- **`dict:glosses:merge` runs wherever `DATABASE_URL` points, production included from the laptop
+  (PR #113); tier 1 needs no Gemini settings, and a tier 2 lexeme whose call fails is logged,
+  skipped and counted in the plan.** Production's database is no longer reachable from the
+  container alone, and one provider failure should not throw away a reviewed plan.
+- **`also` and `savedFrom` are Hebrew only.** The app's strings have one language, so "both
+  languages" had nothing to fill.
+- **`0025`'s snapshot was made with drizzle-kit's `generateDrizzleJson`.** `db:generate --custom`
+  in drizzle-kit 0.31.10 copies the previous snapshot rather than snapshotting `schema.ts`.
+- **ADR 0007 names the CLI's queue (`withJobQueue`, in `db/lemmaRenders.ts`), ADR 0006 R3 checks
+  the two new root scripts, ADR 0002 R6 lists the three new factories, and ADR 0010 carries a
+  dated note that production's database is reachable from the laptop.** Every ADR binds, so
+  each new entry point is written into the one that governs it.
+
+**Consequences worth knowing**
+
+- **Siblings fill a typed or spoken card's five alternatives first, alphabetically.** A key with
+  five sibling headwords leaves no room for the model's inflected alternatives, so a right
+  inflected synonym is then marked wrong while a sibling lemma is accepted.
+- **Siblings are lemmas only.** A sibling's inflected form is accepted only when the model listed
+  it, and kept off a reverse card's wrong options by the prompt alone.
+- **The judge context reads one rendering per card, the lowest-ranked.** A form that renders two
+  members of one gloss contributes only the first member's inflected alternatives.
+- **A slash splits a translation as a comma does, since the splitter is phase 26's.** `and/or`
+  comes back as ו with או as an alternative, and a gender form such as "חבר/ה" splits.
+- **A `merge-glosses` job has no dead letter.** A merge that keeps failing leaves two glosses,
+  which `dict:glosses:merge` also finds.
+- **A prepare-session job queued by the old container fails once after the deploy**, on the new
+  picks schema, and its session is marked failed; deploying while no session is being prepared
+  avoids it.
