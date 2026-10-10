@@ -142,6 +142,11 @@ the workflow applies master's `terraform/`, so the domain, the budget and every 
 are now. Rolling back past a
 migration does not undo the migration; ADR 0010 says why additive migrations make that safe.
 
+Phase 31's release is the exception: its migrations rename `sense_progress` to `gloss_progress`
+and drop the learner tables' `sense_id` columns, so an image from before it cannot read the
+migrated database. Never roll back past the first release that carries phase 31; fix forward
+with a new tag instead.
+
 ## Reading the container's log
 
 ```bash
