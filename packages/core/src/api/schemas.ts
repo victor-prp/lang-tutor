@@ -238,7 +238,7 @@ export const ScoreSchema = z.object({
   total: z.number().int(),
 });
 
-// Phase 20. Knowledge per saved sense: five dimensions, each with a level from
+// Phase 20. Knowledge per saved gloss: five dimensions, each with a level from
 // 1 to 5 that only rises. packages/core/src/domain/progress.ts holds the same
 // list as DIMENSIONS, and a test keeps the two equal.
 export const KnowledgeDimensionSchema = z.enum([
@@ -251,8 +251,8 @@ export const KnowledgeDimensionSchema = z.enum([
 
 export const LevelSchema = z.number().int().min(1).max(5);
 
-// A saved sense's badge and its five levels. Only a saved sense has one.
-export const SenseProgressSchema = z.object({
+// A saved gloss's badge and its five levels. Only a saved gloss has one.
+export const GlossProgressSchema = z.object({
   level: LevelSchema,
   dimensions: z.object({
     written_receptive: LevelSchema,
@@ -263,11 +263,11 @@ export const SenseProgressSchema = z.object({
   }),
 });
 
-// One practised saved sense on the results screen. Both levels are badges over
+// One practised saved gloss on the results screen. Both levels are badges over
 // the live dimensions. `form` is the prompt the learner saw; `translation` is
 // the right answer.
 export const SessionProgressItemSchema = z.object({
-  sense_id: z.string(),
+  gloss_id: z.string(),
   form: z.string(),
   translation: z.string(),
   level_before: LevelSchema,
@@ -282,7 +282,7 @@ export const SessionProgressItemSchema = z.object({
 export const SessionStatusSchema = z.enum(['preparing', 'ready', 'completed', 'skipped', 'failed']);
 
 // Where a session's questions came from: the shared seed, or the enrollment's
-// saved senses.
+// saved glosses.
 export const SessionSourceSchema = z.enum(['seed', 'list']);
 
 export const MissedQuestionSchema = z.object({
@@ -361,7 +361,7 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     complete: z.literal(true),
     score: ScoreSchema,
     missed_questions: z.array(MissedQuestionSchema),
-    // Phase 20. Every practised saved sense, with its badge before and after.
+    // Phase 20. Every practised saved gloss, with its badge before and after.
     progress: z.array(SessionProgressItemSchema),
   }),
 ]);
@@ -557,22 +557,23 @@ export const TranslationGuardReasonSchema = z.enum(['wrong_direction', 'out_of_p
 // phrase/sentence distinction, which no token count can settle.
 export const TranslationKindSchema = z.enum(['word', 'phrase', 'sentence']);
 
-// `part_of_speech` and `example` are optional because a sentence has neither: a
-// part of speech classifies a lexical item, and an example restates an input
-// that is already a sentence. Optional rather than empty strings keeps "none"
-// distinguishable from "the model forgot".
+// Phase 31 (spec D10, D15). A lookup card is one gloss: the senses of one
+// headword this language says with one target word. `translation` is the typed
+// form's rendering; `key` the gloss's citation form, present only when it
+// differs; `examples` one per member sense, in the typed form; `alternatives` the
+// typed form's other words for it (D5). Optional fields keep phase 18's
+// meaning: a sentence has no part of speech and no examples, and an answer whose
+// write failed has no ids.
 export const TranslationSenseSchema = z.object({
   translation: z.string().min(1),
   part_of_speech: z.string().optional(),
-  example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
-  // Phase 18. The dictionary rows this sense was served from, so a client can
-  // save it. Optional because two answers have none: a sentence is never
-  // stored, and a word whose write failed is still answered, with 200, from the
-  // model's reply.
-  sense_id: z.string().optional(),
+  examples: z.array(z.object({ source: z.string().min(1), target: z.string().min(1) })).optional(),
+  alternatives: z.array(z.string().min(1)).optional(),
+  key: z.string().min(1).optional(),
+  gloss_id: z.string().optional(),
   variant_id: z.string().optional(),
   // Present only when the request named an enrollment AND `from` is that
-  // enrollment's target language AND the sense has ids. Absent means "cannot be
+  // enrollment's target language AND the card has ids. Absent means "cannot be
   // saved here", never "not saved".
   saved: z.boolean().optional(),
 });
@@ -630,11 +631,11 @@ export const TranslationResponseSchema = z.object({
   reason: TranslationGuardReasonSchema.optional(),
 });
 
-// Phase 18 — an enrollment's word list. One entry per (enrollment, sense); the
-// form it was first saved from travels with it, because a sense has no wording
-// of its own.
+// Phase 18 — an enrollment's word list. One entry per (enrollment, gloss) since
+// phase 31; the form it was first saved from travels with it, because a gloss
+// has no wording per form.
 export const VocabularyEntryInputSchema = z.object({
-  sense_id: z.string().min(1),
+  gloss_id: z.string().min(1),
   variant_id: z.string().min(1),
 });
 
@@ -644,9 +645,9 @@ export const SaveVocabularyRequestSchema = z.object({
   entries: z.array(VocabularyEntryInputSchema).min(1).max(20),
 });
 
-// Every sense of the request, saved now or already: saving is idempotent.
+// Every gloss of the request, saved now or already: saving is idempotent.
 export const SaveVocabularyResponseSchema = z.object({
-  saved_sense_ids: z.array(z.string()),
+  saved_gloss_ids: z.array(z.string()),
 });
 
 // Query-string values arrive as strings, hence coerce. A cursor is opaque: the
@@ -658,17 +659,17 @@ export const VocabularyPageQuerySchema = z.object({
   level: z.coerce.number().int().min(1).max(5).optional(),
 });
 
-// Phase 21: one row per lemma. `headline` is the lowest-ranked saved sense, in
-// the wording of the form it was saved from; `parts_of_speech` are its saved
-// senses' parts of speech, distinct and ascending; `sense_count` counts the senses
-// of every lexeme with the lemma that have some rendering in the enrollment's
-// source language — what the drill-down can show.
+// Phase 21: one row per lemma. `parts_of_speech` are its saved glosses' parts of
+// speech, distinct and ascending. Phase 31: `headline` is the earliest saved
+// gloss, in its key and the form it was saved from; `gloss_count` counts the live
+// glosses of every lexeme with the lemma in the enrollment's language, what the
+// drill-down shows (spec D11).
 export const VocabularyWordSchema = z.object({
   lemma: z.string(),
   parts_of_speech: z.array(z.string()),
-  headline: z.object({ sense_id: z.string(), translation: z.string(), form: z.string() }),
+  headline: z.object({ gloss_id: z.string(), translation: z.string(), form: z.string() }),
   saved_count: z.number().int(),
-  sense_count: z.number().int(),
+  gloss_count: z.number().int(),
   // Phase 20. The word's badge: the rounded mean over its saved senses and the live dimensions.
   level: LevelSchema,
   // Phase 28 (spec D11). The display names of the people OTHER than the list's
@@ -682,23 +683,28 @@ export const VocabularyPageSchema = z.object({
   next_cursor: z.string().nullable(),
 });
 
-// One sense in the drill-down. `variant_id` and `form` name the rendering shown:
-// the saved form for a saved sense, a representative one otherwise. Saving from
-// the drill-down records that variant.
+// Phase 31 (spec D10, D11). One gloss on the word's page. `translation` is the
+// gloss's key, `alternatives` its other words ("also …"). `variant_id` and
+// `form` name the rendering a save from here records: the saved form for a saved
+// gloss, a representative one otherwise. `examples` holds one per member sense.
+// `saved_from` is there when the saved form is not the lemma: that form and its
+// rendering, "saved from fingers: אצבעות".
 export const VocabularySenseSchema = z.object({
-  sense_id: z.string(),
+  gloss_id: z.string(),
   variant_id: z.string(),
   form: z.string(),
   translation: z.string(),
-  // Phase 21. The detail spans every lexeme of a lemma, so each sense names its own.
+  alternatives: z.array(z.string()),
+  // Phase 21. The detail spans every lexeme of a lemma, so each card names its own.
   part_of_speech: z.string(),
-  example: z.object({ source: z.string(), target: z.string() }).optional(),
+  examples: z.array(z.object({ source: z.string(), target: z.string() })),
   saved: z.boolean(),
-  // Phase 20. Present on a saved sense only: its badge and five levels.
-  progress: SenseProgressSchema.optional(),
-  // Phase 28. Present on a saved sense someone other than the list's owner added:
+  // Phase 20. Present on a saved gloss only: its badge and five levels.
+  progress: GlossProgressSchema.optional(),
+  // Phase 28. Present on a saved gloss someone other than the list's owner added:
   // their display name.
   added_by: z.string().optional(),
+  saved_from: z.object({ form: z.string(), translation: z.string() }).optional(),
 });
 
 // Phase 21. One word is every lexeme with this lemma in the enrollment's target
@@ -744,23 +750,45 @@ export const PartOfSpeechSchema = z.enum([
 // before the call, so offering them to the model would only invite it to
 // disagree with the server.
 //
-// `sense_code` goes on an extension rather than on TranslationSenseSchema, which
-// is shared with the wire. It is model-supplied, and from phase 12 it is
-// load-bearing rather than decorative: it is how a later form's translations are
-// attached to senses the lexeme already has.
+// `sense_code` is model-supplied, and from phase 12 it is load-bearing rather
+// than decorative: it is how a later form's translations are attached to senses
+// the lexeme already has.
 //
-// `.omit` rather than a fresh object: part_of_speech moved up to the entry, and
-// omitting it here is what makes a model that still puts one on a sense lose it
-// on parse rather than smuggle it through.
-export const LlmSenseSchema = TranslationSenseSchema.omit({
-  part_of_speech: true,
-  // Phase 18's wire-only fields. The model neither knows nor may invent them,
-  // and every property here travels to Gemini inside responseSchema.
-  sense_id: true,
-  variant_id: true,
-  saved: true,
-}).extend({
+// Phase 31. Written out rather than derived from TranslationSenseSchema, which
+// becomes a gloss card (Tasks 6 and 7) and shares nothing with what the model
+// writes but the translation and the example. A model that still puts a part
+// of speech on a sense loses it on parse, as before: the key is not here.
+//
+// The phase 31 fields are optional and never defaulted, for the reason
+// LlmCorrectionSchema.alternatives gives: a missing decorative field must not
+// fail an answer, and a `default` would travel to Gemini. No maxItems either:
+// array caps multiply the response schema's states, which Gemini refuses past a
+// limit (see `entries` below). renderingOf cuts the lists after parsing.
+//
+// Three of the four, not `gloss_alternatives`: the alternatives' citation forms
+// are the rendering call's alone (LlmRenderingSchema). Measured against the live
+// API on 2026-10-10, with all four fields the first call answered `pour` (en ->
+// he, an English word that French spells the same) with no entries in 4 to 7
+// of 10 calls, and with any two of the others beside `gloss_alternatives` in 10
+// of 10; rewording the prompt, renaming the field and pinning property order
+// did not help. Dropping the field is necessary but not sufficient. With these
+// three, `pour` was empty in 0 of 20 calls only while the prompt kept its old
+// clause naming the field; without that clause and with the citation sentence
+// as first written, in 11 of 20. The citation sentence as measured is what
+// leaves it empty in none of 40 probe calls: glossRules' comment, in
+// apps/server/src/domain/translation.ts, records each variant. A lemma-form
+// write's own `alternatives` are citation forms already, so they feed the
+// gloss's list instead (assignGlosses), as 0024 built it.
+export const LlmSenseSchema = z.object({
+  translation: z.string().min(1),
+  example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
   sense_code: z.string().min(1).max(60),
+  // Spec D4, D5. The sense's other target words, in the translation's form.
+  alternatives: z.array(z.string().min(1)).optional(),
+  // Spec D6. The translation's citation form, uninflected.
+  gloss: z.string().min(1).optional(),
+  // Spec D9. One short phrase in the headword's language.
+  definition: z.string().min(1).optional(),
 });
 
 // One entry per (lemma, part of speech) — a lexeme. min(1) on senses: an entry
@@ -815,26 +843,48 @@ export const LlmCorrectionSchema = z.object({
 
 export const LlmTranslationSchema = z.object({
   kind: TranslationKindSchema,
-  // Five, not three: `light` alone is noun, adjective and verb, and a
-  // competing lemma still has to fit beside it.
-  //
-  // Five rather than six, and that ceiling is Gemini's rather than ours. This
-  // schema travels as `responseSchema`, where array caps multiply: six entries
-  // by five senses by a nested example object exceeded the provider's limit the
-  // moment phase 13 added `correction`, and every translation call answered
+  // Three, and that ceiling is Gemini's rather than ours. This schema travels as
+  // `responseSchema`, where array caps multiply: the provider refuses one with
   // `400 INVALID_ARGUMENT — the specified schema produces a constraint that has
-  // too many states for serving`. Measured against the live API, not reasoned:
-  // six entries fails with `correction` present and five succeeds, while
-  // `senses` stays at five because READ_LIMIT and TranslationResponseSchema both
-  // hold it there. No stub can catch this — MockServer accepts any
-  // `responseSchema` without validating it — so only `npm run eval` or a real
-  // lookup exercises it.
+  // too many states for serving`, and then every translation call fails.
+  // Measured against the live API, not reasoned. It was once raised from three
+  // to six so that `light`, which is noun, adjective and verb, had room for a
+  // competing lemma beside it. Phase 13 lowered it to five: six entries by five
+  // senses by a nested example object failed the moment `correction` was added,
+  // and five succeeded. Phase 31 gave every sense `alternatives`, `gloss`,
+  // `gloss_alternatives` and `definition`, and five by five failed again.
+  // Dropping fields does not rescue it: at five by five only `gloss` alone fits,
+  // and a shorter property name, an uncapped `sense_code`, no `min(1)` and no
+  // `correction` block do not either, alone or stacked. Only the caps do. All
+  // four fields, entries by senses per entry:
+  //
+  //   accepted  3 x 5 (no headroom: one more optional string is refused),
+  //             4 x 3 (room for one more field), 5 x 2
+  //   refused   5 x 5, 5 x 4, 5 x 3, 4 x 5, 4 x 4
+  //
+  // Three entries of five senses, not four of three, to keep every lexeme's
+  // sense depth: the response shows at most five cards whatever the cap
+  // (RESPONSE_CARD_CAP and TranslationResponseSchema), so cutting senses would take
+  // from the words a learner reads most, while cutting entries only takes from
+  // a form with more than three parts of speech. `light` is noun, adjective and
+  // verb, and `saw` is the verb `see`, the noun and the verb `saw`: both still
+  // fit. A form with four or five parts of speech now loses the least likely
+  // ones, and a competing lemma no longer fits beside a three-part word.
+  //
+  // These caps were measured with all four fields. `gloss_alternatives` has since
+  // left this call (see LlmSenseSchema, for a reason that is not the state
+  // limit), and the caps were kept rather than measured again.
+  //
+  // This schema has no headroom left. A new field on a sense, or on the
+  // entry, means revisiting these caps, and measuring first. No stub can catch
+  // it — MockServer accepts any `responseSchema` without validating it — so
+  // only `npm run eval` or a real lookup exercises it.
   //
   // When `correction` is present these describe `corrected_form`, not the typed
   // text — and so does `kind`, which the prompt's fourth rule is what actually
   // secures. `resolveKind` only clamps a single token; it cannot rule on a
   // multi-token corrected form.
-  entries: z.array(LlmEntrySchema).max(5),
+  entries: z.array(LlmEntrySchema).max(3),
   correction: LlmCorrectionSchema.optional(),
 });
 
@@ -851,12 +901,30 @@ export const LlmRenderingSchema = z.object({
   sense_code: z.string().min(1).max(60),
   translation: z.string().min(1).nullable(),
   example: z.object({ source: z.string().min(1), target: z.string().min(1) }).optional(),
+  // Phase 31: the first call's three fields, for the same reasons, and
+  // `gloss_alternatives`, which only this call asks for (see LlmSenseSchema).
+  // Nullable as well as optional, because this answer is parsed without
+  // dropNulls: a provider spelling "none" as null must not fail the whole
+  // reconciliation.
+  alternatives: z.array(z.string().min(1)).nullable().optional(),
+  gloss: z.string().min(1).nullable().optional(),
+  gloss_alternatives: z.array(z.string().min(1)).nullable().optional(),
+  definition: z.string().min(1).nullable().optional(),
 });
 
 export const LlmReconciliationSchema = z.object({
   // Ranked FOR THE QUERIED FORM. Stored codes reused where the meaning matches;
   // a new code only for a reading the stored list does not contain.
   senses: z.array(LlmRenderingSchema).max(5),
+});
+
+// Phase 31 (spec D7). The by-hand merge tool's answer: groups of target words
+// that are forms of one word, the citation form first, and definitions for the
+// senses that had none. Lists only, no caps: the tool reads them, and nothing it
+// reads reaches a learner without an operator's --yes.
+export const LlmGlossMergeSchema = z.object({
+  groups: z.array(z.array(z.string().min(1))),
+  definitions: z.array(z.object({ sense_code: z.string().min(1), definition: z.string().min(1) })),
 });
 
 // Phase 25 (spec D13). The transcriber's answer: the words it heard, or an
@@ -901,7 +969,7 @@ export const LlmDistractorsSchema = z.object({
 });
 
 // Phase 26. Words from a photo: an import is one photo of a word list, read in
-// the background into rows, each a word or phrase with one chosen sense. The
+// the background into rows, each a word or phrase with one chosen gloss. The
 // image is base64 JPEG, because the app re-encodes every photo. 2 800 000
 // characters is about 2 MB decoded (spec D6).
 export const PhotoImportCreateRequestSchema = z.object({
@@ -917,13 +985,18 @@ export const PhotoImportItemStatusSchema = z.enum(['pending', 'ready', 'failed']
 // Why a ready row has no options (spec D7).
 export const PhotoImportItemReasonSchema = z.enum(['sentence', 'no_meaning', 'not_in_language']);
 
-// One saveable sense of a row's word: a snapshot of the lookup's answer.
+// One saveable gloss of a row's word: a snapshot of the lookup's card (spec
+// D15). Phase 31: a gloss, with one example per member sense, and the gloss's
+// key when the typed form says something else, as on the card. Options stored
+// before the key reached them have none.
 export const PhotoImportOptionSchema = z.object({
-  sense_id: z.string(),
+  gloss_id: z.string(),
   variant_id: z.string(),
   translation: z.string(),
+  key: z.string().optional(),
   part_of_speech: z.string().optional(),
-  example: z.object({ source: z.string(), target: z.string() }).optional(),
+  examples: z.array(z.object({ source: z.string(), target: z.string() })).optional(),
+  alternatives: z.array(z.string()).optional(),
 });
 
 export const PhotoImportItemSchema = z.object({
@@ -936,7 +1009,7 @@ export const PhotoImportItemSchema = z.object({
   // Set when the lookup corrected the text (`gatlo` read, `gatto` looked up).
   corrected_form: z.string().nullable(),
   options: z.array(PhotoImportOptionSchema),
-  chosen_sense_id: z.string().nullable(),
+  chosen_gloss_id: z.string().nullable(),
   ticked: z.boolean(),
   // The printed Hebrew names none of the options.
   hebrew_mismatch: z.boolean(),
@@ -962,9 +1035,9 @@ export const PhotoImportListSchema = z.array(PhotoImportSummarySchema);
 export const PhotoImportItemUpdateSchema = z
   .object({
     ticked: z.boolean().optional(),
-    sense_id: z.string().min(1).optional(),
+    gloss_id: z.string().min(1).optional(),
   })
-  .refine((body) => body.ticked !== undefined || body.sense_id !== undefined, {
+  .refine((body) => body.ticked !== undefined || body.gloss_id !== undefined, {
     message: 'nothing to update',
   });
 

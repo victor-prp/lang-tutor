@@ -1,4 +1,5 @@
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { GlossRepo } from '../repo/glosses';
 import type { GrantRepo } from '../repo/grants';
 import type { JobRepo } from '../repo/jobs';
 import type { PhotoImportRepo } from '../repo/photoImports';
@@ -19,6 +20,7 @@ export type Repos = {
   enrollment: EnrollmentRepo;
   grant: GrantRepo;
   dict: DictRepo;
+  gloss: GlossRepo;
   vocabulary: VocabularyRepo;
   progress: ProgressRepo;
   jobs: JobRepo;

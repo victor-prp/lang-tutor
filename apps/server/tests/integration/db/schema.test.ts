@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { normaliseGloss } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
 import { eq } from 'drizzle-orm';
@@ -43,9 +44,13 @@ const TABLES = [
   'dict_variants',
   'dict_senses',
   'dict_var_translations',
+  'dict_glosses',
+  'dict_sense_glosses',
+  'dict_lemma_renders',
   'dict_variant_renderings',
   'dict_corrections',
   'vocabulary_entries',
+  'gloss_progress',
   'questions',
   'sessions',
   'session_questions',
@@ -64,17 +69,21 @@ async function seedOneLexeme(db: Db): Promise<void> {
     insert into dict_senses (id, lexeme_id, sense_code)
       values ('sense-window-default', 'vt-en-window', 'window_opening');
     insert into dict_var_translations
-      (variant_id, sense_id, user_language_code, rank, translation, example_source, example_target)
-      values ('tv-en-window-base', 'sense-window-default', 'he', 0, 'חלון',
+      (variant_id, sense_id, user_language_code, rank, translation, gloss, example_source, example_target)
+      values ('tv-en-window-base', 'sense-window-default', 'he', 0, 'חלון', 'חלון',
               'I opened the window.', 'פתחתי את החלון.');
+    insert into dict_glosses (id, lexeme_id, user_language_code, key)
+      values ('gloss-window', 'vt-en-window', 'he', 'חלון');
+    insert into dict_sense_glosses (sense_id, lexeme_id, user_language_code, gloss_id)
+      values ('sense-window-default', 'vt-en-window', 'he', 'gloss-window');
   `);
 }
 
 async function insertQuestion(db: Db, id: string, options: unknown): Promise<unknown> {
   return db.execute(sql`
-    insert into questions (id, user_id, sense_id, prompt_variant_id,
+    insert into questions (id, user_id, gloss_id, prompt_variant_id,
                            target_language, user_language_code, type, options)
-    values (${id}, null, 'sense-window-default', 'tv-en-window-base',
+    values (${id}, null, 'gloss-window', 'tv-en-window-base',
             'en', 'he', 'multiple_choice', ${JSON.stringify(options)}::jsonb)
   `);
 }
@@ -234,13 +243,13 @@ describe('the migrated schema', () => {
         values ('tv-rank', 'vt-rank', 'en', 'rank', 'word', 0);
       insert into dict_senses (id, lexeme_id, sense_code) values ('s-rank-a', 'vt-rank', 'a');
       insert into dict_senses (id, lexeme_id, sense_code) values ('s-rank-b', 'vt-rank', 'b');
-      insert into dict_var_translations (variant_id, sense_id, user_language_code, rank, translation)
-        values ('tv-rank', 's-rank-a', 'he', 0, 'A');
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, rank, translation, gloss)
+        values ('tv-rank', 's-rank-a', 'he', 0, 'A', 'A');
     `);
     await expect(
       db.execute(sql`insert into dict_var_translations
-                       (variant_id, sense_id, user_language_code, rank, translation)
-                     values ('tv-rank', 's-rank-b', 'he', 0, 'B')`),
+                       (variant_id, sense_id, user_language_code, rank, translation, gloss)
+                     values ('tv-rank', 's-rank-b', 'he', 0, 'B', 'B')`),
     ).rejects.toThrow(
       expect.objectContaining({
         cause: expect.objectContaining({
@@ -253,8 +262,8 @@ describe('the migrated schema', () => {
   it('refuses a negative rank or entry_rank', async () => {
     await expect(
       db.execute(sql`insert into dict_var_translations
-                       (variant_id, sense_id, user_language_code, rank, translation)
-                     values ('tv-rank', 's-rank-b', 'he', -1, 'B')`),
+                       (variant_id, sense_id, user_language_code, rank, translation, gloss)
+                     values ('tv-rank', 's-rank-b', 'he', -1, 'B', 'B')`),
     ).rejects.toThrow();
     await expect(
       db.execute(sql`insert into dict_variants (lexeme_id, language_code, form, kind, entry_rank)
@@ -301,6 +310,47 @@ describe('the migrated schema', () => {
           message: expect.stringContaining('entry_rank'),
         }),
       }),
+    );
+  });
+
+  // Phase 31. The SQL twin of normaliseGloss is what the unique index runs on,
+  // so a disagreement would let the database and the domain call two keys equal
+  // differently. The list is the core test's, plus a tab and three spaces that
+  // JavaScript's \s matches and Postgres's own \s does not: a no-break space, a
+  // byte-order mark and a figure space.
+  it('runs gloss_key exactly as normaliseGloss', async () => {
+    const cases = ['סֵפֶר', 'בְּרֵאשִׁ֖ית', 'молоко́', 'בסיס (צבאי)', 'בית   קפה', 'Città', 'ДОМ', 'בית־ספר', 'בית-ספר', '  עכבר ', 'café', 'עַכְבָּר', 'Tab\there',
+      'בית\u00a0קפה', '\ufeffבית', 'בית\u2007קפה'];
+    for (const text of cases) {
+      const rows = await db.execute<{ key: string }>(sql`select gloss_key(${text}) as key`);
+      expect({ text, key: rows.rows[0].key }).toEqual({ text, key: normaliseGloss(text) });
+    }
+  });
+
+  it('refuses a second live gloss with one normalised key, and allows it once the first is forwarded', async () => {
+    await db.execute(sql`
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('gl-mouse', 'en', 'mouse', 'noun');
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('gl-1', 'gl-mouse', 'he', 'עכבר'), ('gl-2', 'gl-mouse', 'he', 'חולדה');
+    `);
+    const second = sql`insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('gl-3', 'gl-mouse', 'he', 'עַכְבָּר')`;
+    await expect(db.execute(second)).rejects.toThrow(
+      expect.objectContaining({ cause: expect.objectContaining({ message: expect.stringContaining('dict_glosses_live_key') }) }),
+    );
+    await db.execute(sql`update dict_glosses set merged_into = 'gl-2' where id = 'gl-1'`);
+    await db.execute(second);
+  });
+
+  it("refuses a membership in another lexeme's gloss", async () => {
+    await db.execute(sql`
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech)
+        values ('gm-noun', 'en', 'stream', 'noun'), ('gm-verb', 'en', 'stream', 'verb');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('gm-s', 'gm-noun', 'current');
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('gm-g', 'gm-verb', 'he', 'לזרום');
+    `);
+    await expect(
+      db.execute(sql`insert into dict_sense_glosses (sense_id, lexeme_id, user_language_code, gloss_id) values ('gm-s', 'gm-noun', 'he', 'gm-g')`),
+    ).rejects.toThrow(
+      expect.objectContaining({ cause: expect.objectContaining({ message: expect.stringContaining('dict_sense_glosses_gloss_fk') }) }),
     );
   });
 });

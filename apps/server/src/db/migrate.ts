@@ -48,11 +48,41 @@ const CORRECTION_ALTERNATIVES_FUNCTION = sql`
     $$;
 `;
 
+// Phase 31 (spec §2). The SQL twin of normaliseGloss in packages/core, which the
+// unique index on live glosses and the migrations run on. Here for the reason the
+// two above give. String.raw keeps the regex backslashes for Postgres: a template
+// literal would turn \( into a bare (, so '([^)]*)' would match the whole string,
+// and would write the space class's escapes as invisible characters.
+//
+// The space class is JavaScript's \s spelled out, because Postgres's own \s
+// follows the database's ctype, which leaves out the no-break spaces and U+FEFF:
+// TAB, LF, VT, FF, CR, SPACE, U+00A0, U+1680, U+2000-U+200A, U+2028, U+2029,
+// U+202F, U+205F, U+3000 and U+FEFF. Each run of them becomes one space, so the
+// spaces btrim then removes are exactly what trim() removes. lower() and
+// toLowerCase() part ways on the dotted capital I and the Greek final sigma,
+// which none of the app's languages (en, ru, it, he) uses.
+//
+// It must stay character for character the same as normaliseGloss: the schema
+// integration test runs both over one list. Changing it needs a migration that
+// REINDEXes dict_glosses_live_key and dict_glosses_language_key_idx.
+const GLOSS_KEY_FUNCTION = sql.raw(String.raw`
+  create or replace function gloss_key(t text) returns text
+    language sql immutable parallel safe as $$
+    select lower(btrim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
+             normalize(t, NFC),
+             '[־-]', ' ', 'g'),
+             '[֑-ׇ́]', '', 'g'),
+             '\([^)]*\)', '', 'g'),
+             '[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]+', ' ', 'g')))
+  $$;
+`);
+
 /** `folder` is a parameter so a migration test can stop at a chosen migration,
  *  insert rows shaped by the schema of that moment, then migrate the rest. */
 export async function runMigrationsFrom(db: Db, folder: string): Promise<void> {
   await db.execute(OPTIONS_VALIDATION_FUNCTION);
   await db.execute(CORRECTION_ALTERNATIVES_FUNCTION);
+  await db.execute(GLOSS_KEY_FUNCTION);
   await migrate(db, { migrationsFolder: folder });
   // Phase 19. pg-boss's schema and queues, after the app's own tables. They
   // share nothing, so the order is only about failing on the app's migration

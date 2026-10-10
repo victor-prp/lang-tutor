@@ -1,7 +1,7 @@
 # ADR 0010: Production is one container, which migrates the database before it serves
 
 - **Status:** Accepted
-- **Date:** 2026-10-08
+- **Date:** 2026-10-08; note 2026-10-10 (phase 31): the database has been reachable from the laptop since PR #113, no rule change
 - **Source:** [phase 30 design](../superpowers/specs/2026-10-08-lang-tutor-phase-30-hosting-design.md) — D4, D5
 
 ## Decision
@@ -24,6 +24,16 @@ container starts, under a new ADR that supersedes this one.
 
 During a rollout the old container serves for about a minute after the new one has migrated,
 so a migration that drops or renames something the old code reads errors for that minute.
+
+**Note, 2026-10-10 (phase 31): the database is no longer private.** Since PR #113 (`7cbf861`),
+`publicly_accessible` defaults to `true` in `terraform/prod/variables.tf`, so production's
+database is reachable from the laptop. Lightsail cannot limit a database by IP, so only its
+generated password and `verify-full` TLS guard it ([hosting runbook](../runbooks/hosting.md),
+step 9). The runbook restores the dictionary with `DATABASE_URL="$PROD_DB" npm run dict:restore`
+and follows it with `dict:glosses:merge` the same way, and both run `runMigrations` first. An
+outside run can therefore migrate production, to the schema of the checkout it runs from, which
+makes "no outside job can reach it" above untrue. R1 to R3 and their check are unchanged: they
+still make the one container migrate before it serves, and they never saw the laptop.
 
 ## Rules
 

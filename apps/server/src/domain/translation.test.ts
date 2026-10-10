@@ -64,7 +64,7 @@ describe('buildPrompt', () => {
   it('asks for entries, one per headword, ranked', () => {
     const { system } = buildPrompt({ text: 'saw', from: 'en', to: 'he' });
     expect(system).toMatch(/entry per headword/i);
-    expect(system).toMatch(/at most 6/i);
+    expect(system).toMatch(/at most 3/i);
   });
 
   // Phase 12 inverted this. `book` is still the worked example, but it is now
@@ -181,6 +181,21 @@ describe('buildPrompt', () => {
         expect(system).not.toContain('see');
       }
     }
+  });
+});
+
+describe('buildPrompt (phase 31)', () => {
+  const system = buildPrompt({ text: 'car', from: 'en', to: 'he' }).system;
+
+  it('asks for one translation, alternatives, the citation form and a definition', () => {
+    expect(system).toContain('one main Hebrew translation');
+    expect(system).toContain('"alternatives"');
+    expect(system).toContain('"gloss"');
+    expect(system).toContain('one short phrase in English');
+  });
+
+  it("asks for no citation alternatives: only the rendering call does (see LlmSenseSchema)", () => {
+    expect(system).not.toContain('gloss_alternatives');
   });
 });
 
@@ -320,7 +335,10 @@ describe('buildPrompt, phase 12', () => {
     expect(system).toMatch(/grammatical form matching the input/i);
     expect(system).toMatch(/third-person masculine singular/i);
     expect(system).not.toMatch(/ONE entry per headword:/);
-    expect(system).not.toMatch(/at most 3\./);
+    // Phase 12 asserted "at most 3." absent here, when the cap had gone to six.
+    // Phase 31 took the cap back to three (see LlmTranslationSchema.entries), so
+    // the sentence is back on purpose and the rule above is what keeps the old
+    // phase 10 wording out.
   });
 });
 
@@ -882,5 +900,37 @@ describe('resolveCorrection guard 4 reads the language table', () => {
       resolveCorrection(parsed('ёлка'), { typedForm: 'елка', from: 'ru', to: 'he' })?.correction
         ?.corrected_form,
     ).toBe('ёлка');
+  });
+});
+
+describe('buildRenderingPrompt (phase 31, spec D9)', () => {
+  const prompt = buildRenderingPrompt({
+    form: 'חלונות',
+    from: 'he',
+    to: 'ru',
+    lemma: 'חלון',
+    partOfSpeech: 'noun',
+    storedSenses: [
+      { senseCode: 'wall_opening', definition: 'פתח בקיר', translation: 'window', glossLanguage: 'en', exampleSource: 'פתחתי את החלון.', exampleTarget: 'I opened the window.' },
+      { senseCode: 'time_slot', definition: null, translation: 'окно', exampleSource: null, exampleTarget: null },
+    ],
+  });
+
+  it('lists each stored sense as code — definition — gloss, and names a gloss in another language', () => {
+    expect(prompt.system).toContain('- wall_opening — פתח בקיר — window (in English) — e.g. "פתחתי את החלון."');
+    expect(prompt.system).toContain('- time_slot — окно');
+  });
+
+  it('keeps the marker MockServer matches the reconciliation on', () => {
+    expect(prompt.system).toContain('reusing its sense_code EXACTLY');
+  });
+
+  it('asks for a definition where a sense has none, and for every new code', () => {
+    expect(prompt.system).toContain('for every sense whose line above has no definition, and for every new sense_code');
+  });
+
+  it("asks for the citation form and, unlike the first call, the alternatives' citation forms", () => {
+    expect(prompt.system).toContain('"gloss"');
+    expect(prompt.system).toContain('"gloss_alternatives"');
   });
 });

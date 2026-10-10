@@ -6,6 +6,7 @@ import {
   isChoice,
   isSpeaking,
   missed,
+  normaliseGloss,
   pickQuestions,
   score,
   spokenVerdict,
@@ -170,3 +171,50 @@ export type SessionSummary = {
   answered: number;
   total: number;
 };
+
+/** Phase 31. A saved gloss as a session picks it: its key, and the form it was saved from. */
+export type SavedGloss = { glossId: string; key: string; variantId: string };
+
+/** Phase 31 (spec D12). One rendering of one member of a gloss, by one form, with
+ *  the citation form the model gave it. */
+export type GlossRendering = { glossId: string; senseId: string; variantId: string; form: string; gloss: string; rank: number };
+
+/**
+ * Spec D18. Up to `max` saved glosses, uniformly at random, at most one per
+ * normalised key: `book` and `order` both saved under להזמין give one card, so a
+ * session never asks one target word twice. Which of them is uniform too.
+ */
+export function pickGlosses(saved: readonly SavedGloss[], max: number, rng: () => number): SavedGloss[] {
+  const keys = new Set<string>();
+  const picked: SavedGloss[] = [];
+  for (const gloss of pickSenses(saved, saved.length, rng)) {
+    const key = normaliseGloss(gloss.key);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    picked.push(gloss);
+    if (picked.length === max) break;
+  }
+  return picked;
+}
+
+/**
+ * Spec D12. The renderings a session may ask for a gloss: every form of every
+ * member whose own citation form is the gloss's key, and the saved form always,
+ * so a learner is never asked a word that was never on their card (a drifted or
+ * misspelt citation form) and always may be asked the one they saved. Ordered by
+ * variant and sense, so a seeded rng picks reproducibly.
+ */
+export function askableRenderings(gloss: SavedGloss, renderings: readonly GlossRendering[]): GlossRendering[] {
+  const key = normaliseGloss(gloss.key);
+  return renderings
+    .filter(
+      (rendering) =>
+        rendering.glossId === gloss.glossId && (normaliseGloss(rendering.gloss) === key || rendering.variantId === gloss.variantId),
+    )
+    .sort((a, b) => a.variantId.localeCompare(b.variantId) || a.senseId.localeCompare(b.senseId));
+}
+
+/** One of `options`, uniformly under the injected rng; undefined when there is none. */
+export function pickRendering(options: readonly GlossRendering[], rng: () => number): GlossRendering | undefined {
+  return options[Math.floor(rng() * options.length)];
+}

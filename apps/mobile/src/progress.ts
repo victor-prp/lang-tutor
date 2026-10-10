@@ -1,4 +1,4 @@
-import type { MissedQuestion, SenseProgress, SessionProgressItem } from '@lang-tutor/core/api';
+import type { MissedQuestion, GlossProgress, SessionProgressItem } from '@lang-tutor/core/api';
 import { DIMENSIONS, MAX_LEVEL, type Dimension } from '@lang-tutor/core/domain';
 
 /** Phase 20. The screens' progress rules, as pure functions the tests can reach. */
@@ -31,7 +31,7 @@ export type DimensionRow = { dimension: Dimension; level: number | null };
 
 /** A saved sense's five dimensions in a fixed order. `level` is null for a
  *  dimension no exercise feeds yet, which the screen shows as not practised. */
-export function dimensionRows(progress: SenseProgress, live: readonly Dimension[]): DimensionRow[] {
+export function dimensionRows(progress: GlossProgress, live: readonly Dimension[]): DimensionRow[] {
   return DIMENSIONS.map((dimension) => ({
     dimension,
     level: live.includes(dimension) ? progress.dimensions[dimension] : null,

@@ -27,7 +27,7 @@ import { comparable, distractorItems, validateDistractors, type RecentSentences,
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
-import { judgeSpoken } from '@lang-tutor/core/domain';
+import { judgeSpoken, normaliseGloss } from '@lang-tutor/core/domain';
 import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
 import { askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
@@ -194,7 +194,7 @@ function tier1(kase: EvalCase, result: ModelAnswer): Check[] {
     checks.push({ name: 'a sentence has exactly one sense', ok: senses.length === 1 });
     checks.push({
       name: 'a sentence has no part_of_speech and no example',
-      ok: senses.every((sense) => !sense.part_of_speech && !sense.example),
+      ok: senses.every((sense) => !sense.part_of_speech && !sense.examples),
     });
   } else {
     checks.push({
@@ -216,11 +216,15 @@ function tier1(kase: EvalCase, result: ModelAnswer): Check[] {
       // schema's `min(1)` cannot: a whitespace-only source that satisfies
       // `z.string().min(1)` character-count-wise, the same class of gap the
       // lemma/sense_code check above closes for entries.
-      ok: senses.every((sense) => Boolean(sense.example?.source?.trim())),
+      ok: senses.every(
+        (sense) => (sense.examples ?? []).length > 0 && sense.examples!.every((example) => example.source.trim()),
+      ),
     });
     checks.push({
       name: 'every example carries a non-empty translation',
-      ok: senses.every((sense) => Boolean(sense.example?.target?.trim())),
+      ok: senses.every(
+        (sense) => (sense.examples ?? []).length > 0 && sense.examples!.every((example) => example.target.trim()),
+      ),
     });
   }
 
@@ -380,7 +384,7 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
   // ambiguous sentence that prompted this rule sat at rank 1.
   if (kase.rejectExample) {
     const offenders = result.senses
-      .map((sense) => sense.example?.source ?? '')
+      .flatMap((sense) => (sense.examples ?? []).map((example) => example.source))
       .filter((source) =>
         kase.rejectExample!.some((rejected) =>
           source.toLowerCase().includes(rejected.toLowerCase()),
@@ -401,6 +405,49 @@ function tier2(kase: EvalCase, result: ModelAnswer): Check[] {
       name: 'top translation form',
       ok: !kase.rejectTop.some((rejected) => top.includes(rejected)),
       detail: `top was ${top}`,
+    });
+  }
+
+  // Phase 31 (spec D4-D6, D9).
+  const allSenses = result.entries.flatMap((entry) => entry.senses);
+  if (kase.expectOneTranslation) {
+    const lists = allSenses.filter((sense) => /[,/;()]/u.test(sense.translation));
+    checks.push({
+      name: 'every translation is one translation, with no list and no note',
+      ok: lists.length === 0,
+      detail: lists.map((sense) => sense.translation).join(' | ') || undefined,
+    });
+  }
+  if (kase.expectGloss) {
+    const gloss = result.entries[0]?.senses[0]?.gloss;
+    checks.push({
+      name: `the citation form is one of ${kase.expectGloss.join(', ')}`,
+      ok: gloss !== undefined && kase.expectGloss.some((accepted) => normaliseGloss(accepted) === normaliseGloss(gloss)),
+      detail: gloss ?? 'none',
+    });
+  }
+  if (kase.expectAlternativesIn) {
+    // The first call asks for no citation alternatives (see LlmSenseSchema).
+    const words = allSenses.flatMap((sense) => sense.alternatives ?? []);
+    checks.push({
+      name: `every alternative is in ${kase.expectAlternativesIn} script`,
+      ok: words.every((word) => isInScript(word, kase.expectAlternativesIn!)),
+      detail: words.join(' | ') || 'none',
+    });
+  }
+  if (kase.expectAlternativeWord) {
+    const listed = allSenses.flatMap((sense) => sense.alternatives ?? []);
+    checks.push({
+      name: `lists one of ${kase.expectAlternativeWord.join(', ')} as an alternative`,
+      ok: kase.expectAlternativeWord.some((word) => listed.some((alt) => normaliseGloss(alt) === normaliseGloss(word))),
+      detail: listed.join(' | ') || 'none',
+    });
+  }
+  if (kase.expectDefinitionIn) {
+    checks.push({
+      name: `every sense has a definition in ${kase.expectDefinitionIn} script`,
+      ok: allSenses.length > 0 && allSenses.every((sense) => Boolean(sense.definition?.trim()) && isInScript(sense.definition!, kase.expectDefinitionIn!)),
+      detail: allSenses.map((sense) => sense.definition ?? 'none').join(' | '),
     });
   }
 
@@ -507,6 +554,7 @@ const taskOf = (item: DistractorCase['items'][number]): Task => item.task ?? 'me
 function itemsOf(kase: DistractorCase) {
   return distractorItems(
     kase.items.map((item, index) => ({
+      glossId: `g-s${index}`,
       senseId: `s${index}`,
       variantId: `v${index}`,
       lexemeId: `l${index}`,
@@ -578,11 +626,13 @@ function distractorTier2(kase: DistractorCase, answer: LlmDistractors): Check[] 
  *  translate case: each with its saved example, and the sentences to avoid as the
  *  service reads them from the last sessions. */
 function sentenceItemsOf(kase: SentenceCase) {
+  // Phase 31: keyed by gloss id, as findRecentSentences keys them.
   const recent: RecentSentences = new Map(
-    kase.items.map((item, index) => [`s${index}`, { cloze: item.avoidTarget ?? [], translate: item.avoidHebrew ?? [] }]),
+    kase.items.map((item, index) => [`g-s${index}`, { cloze: item.avoidTarget ?? [], translate: item.avoidHebrew ?? [] }]),
   );
   return distractorItems(
     kase.items.map((item, index) => ({
+      glossId: `g-s${index}`,
       senseId: `s${index}`,
       variantId: `v${index}`,
       lexemeId: `l${index}`,

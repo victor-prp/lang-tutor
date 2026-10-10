@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-import { clearGemini, expectGemini, expectGeminiFailure } from './support/mockServer';
+import { clearGemini, expectGeminiFailure, expectGeminiMatching, userText } from './support/mockServer';
 import { openApp, signUpLearner } from './support/users';
 
 // Three page loads and a handful of round trips — well inside this, and well
@@ -58,6 +58,11 @@ const sense = (page: Page, text: string) => page.getByText(text, { exact: true }
 
 // Registers expectations through Playwright's `request` fixture, the pattern
 // phase 8 established for creating a learner via POST /api/users.
+//
+// Phase 31. Every answer is matched on its own text, as lookUp's is: a
+// render-lemma job from the spec before this one may still be calling, and a
+// stub that answered every call would write its word under that lemma, or be
+// consumed by it.
 test.beforeEach(async ({ request }) => {
   await clearGemini(request);
 });
@@ -78,7 +83,7 @@ test('a word shows every sense at once, ranked, and saves one', async ({
   page,
   request,
 }) => {
-  await expectGemini(request, { kind: 'word', entries: LADDER_ENTRIES });
+  await expectGeminiMatching(request, userText('ladder'), { kind: 'word', entries: LADDER_ENTRIES });
   await openTranslate(page, request, 'e2e_translate_word');
 
   await page.getByTestId('translate-input').fill('ladder');
@@ -108,7 +113,7 @@ test('a sentence gets one translation, with neither a count nor a save button', 
   page,
   request,
 }) => {
-  await expectGemini(request, {
+  await expectGeminiMatching(request, userText("I'm looking forward to seeing you"), {
     kind: 'sentence',
     entries: [
       {
@@ -133,7 +138,7 @@ test('a sentence gets one translation, with neither a count nor a save button', 
 });
 
 test('gibberish says so instead of inventing a translation', async ({ page, request }) => {
-  await expectGemini(request, { kind: 'word', entries: [] });
+  await expectGeminiMatching(request, userText('asdkjhasd'), { kind: 'word', entries: [] });
   await openTranslate(page, request, 'e2e_translate_empty');
 
   await page.getByTestId('translate-input').fill('asdkjhasd');
@@ -174,7 +179,7 @@ test('a failing provider shows the error, and retry works once it recovers', asy
   // Replacing the expectation is what makes this a test of retry *working*
   // rather than of the error state rendering.
   await clearGemini(request);
-  await expectGemini(request, { kind: 'word', entries: ANCHOR_ENTRIES });
+  await expectGeminiMatching(request, userText('anchor'), { kind: 'word', entries: ANCHOR_ENTRIES });
 
   await page.getByTestId('translate-retry').click();
   await expect(sense(page, 'עוגן')).toBeVisible();
@@ -203,7 +208,7 @@ test('a word looked up twice is answered without the provider the second time', 
     },
   ];
 
-  await expectGemini(request, { kind: 'word', entries: KITE_ENTRIES });
+  await expectGeminiMatching(request, userText('kite'), { kind: 'word', entries: KITE_ENTRIES });
   await openTranslate(page, request, 'e2e_translate_reuse');
 
   await page.getByTestId('translate-input').fill('kite');
@@ -238,8 +243,9 @@ test('a misspelling shows the correction, and an alternative can be tapped', asy
   page,
   request,
 }) => {
-  await expectGemini(
+  await expectGeminiMatching(
     request,
+    userText('thruot'),
     {
       kind: 'word',
       entries: [
@@ -259,8 +265,9 @@ test('a misspelling shows the correction, and an alternative can be tapped', asy
     },
     { once: true },
   );
-  await expectGemini(
+  await expectGeminiMatching(
     request,
+    userText('throughout'),
     {
       kind: 'word',
       entries: [
@@ -313,13 +320,14 @@ test('swapping direction puts the translation in the box and looks it up in reve
   page,
   request,
 }) => {
-  // Two one-shot expectations, consumed in registration order: the en_he lookup
+  // Two one-shot expectations, each consumed by its own call: the en_he lookup
   // of the typed word, then the he_en lookup of its translation. A word the seed
   // does not hold and no other spec here writes, so both calls are full misses
   // that reach MockServer — and a third call would find no expectation at all,
   // which is what makes the resubmit assertion below meaningful.
-  await expectGemini(
+  await expectGeminiMatching(
     request,
+    userText('hedgehog'),
     {
       kind: 'word',
       entries: [
@@ -338,8 +346,9 @@ test('swapping direction puts the translation in the box and looks it up in reve
     },
     { once: true },
   );
-  await expectGemini(
+  await expectGeminiMatching(
     request,
+    userText('קיפוד'),
     {
       kind: 'word',
       entries: [

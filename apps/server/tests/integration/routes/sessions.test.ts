@@ -8,7 +8,7 @@ import {
   seedLegacyLearner,
   seedUser,
 } from '../../support/seedUser';
-import { saveSessionSenses } from '../../support/progressRows';
+import { saveSessionGlosses } from '../../support/progressRows';
 import { insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -205,7 +205,7 @@ async function startMixed() {
     ['lantern', 'פנס'],
   ]) {
     const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
-    asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
   }
   return insertListSession(t.db, { userId: 'u_1', enrollmentId: enrollmentOf('u_1'), asked, alternatives: ['lamp'] });
 }
@@ -524,7 +524,7 @@ describe('another learner', () => {
 });
 
 describe('the progress block (phase 20)', () => {
-  type Item = { sense_id: string; form: string; translation: string; level_before: number; level_after: number };
+  type Item = { gloss_id: string; form: string; translation: string; level_before: number; level_after: number };
   type Step = { complete: boolean; question: SeedView['question'] | null; progress?: Item[] };
 
   /** Answers all ten questions right; returns the last response and the questions asked. */
@@ -548,7 +548,7 @@ describe('the progress block (phase 20)', () => {
   it('the completing answer carries what the session did to the saved words, and a read repeats it', async () => {
     const app = buildTestApp();
     const first = await startSeed(app, enrollmentOf('u_1'));
-    const [s0, s1] = await saveSessionSenses(t.db, {
+    const [s0, s1] = await saveSessionGlosses(t.db, {
       sessionId: first.session_id,
       enrollmentId: enrollmentOf('u_1'),
       positions: [0, 1],
@@ -558,8 +558,8 @@ describe('the progress block (phase 20)', () => {
     expect(last.complete).toBe(true);
     // Phase 23: the badge averages three live dimensions, so recognition alone,
     // (2, 1, 1), reads 1; `raised` names what moved.
-    const item = (senseId: string, q: SeedView['question']) => ({
-      sense_id: senseId,
+    const item = (glossId: string, q: SeedView['question']) => ({
+      gloss_id: glossId,
       form: q.question,
       translation: q.options[q.correct_option],
       level_before: 1,

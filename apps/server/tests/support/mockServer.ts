@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { LlmEntry, TranslationKind } from '@lang-tutor/core/api';
+import type { LlmEntry, LlmRendering, TranslationKind } from '@lang-tutor/core/api';
 
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
 import { JUDGE_MARKER } from '../../src/domain/judge';
@@ -108,7 +108,8 @@ export async function expectGeminiJson(
 export async function expectReconciliation(
   ns: string,
   opts: {
-    senses: { sense_code: string; translation: string | null; example?: { source: string; target: string } }[];
+    /** The schema's own type, so a stub can carry the phase 31 fields. */
+    senses: LlmRendering[];
     matchText?: string;
     /** Holds the answer back, so a test can do something else while this call is
      *  in flight — the 5-15 seconds a real reconciliation takes is the window

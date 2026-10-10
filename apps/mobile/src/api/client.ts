@@ -176,8 +176,8 @@ export function createApiClient({ baseUrl, fetch, sessionHeaders, credentials, o
     createEnrollment: (request: CreateEnrollmentRequest) => postJson<Enrollment>('/api/enrollments', request),
     saveVocabulary: (enrollmentId: string, request: SaveVocabularyRequest) =>
       postJson<SaveVocabularyResponse>(vocabularyPath(enrollmentId), request),
-    unsaveVocabulary: (enrollmentId: string, senseId: string) =>
-      deleteResource(`${vocabularyPath(enrollmentId)}/senses/${encodeURIComponent(senseId)}`),
+    unsaveVocabulary: (enrollmentId: string, glossId: string) =>
+      deleteResource(`${vocabularyPath(enrollmentId)}/glosses/${encodeURIComponent(glossId)}`),
     listVocabulary: (enrollmentId: string, query: { cursor?: string; limit?: number; level?: number }) => {
       const params = new URLSearchParams();
       if (query.cursor !== undefined) params.set('cursor', query.cursor);

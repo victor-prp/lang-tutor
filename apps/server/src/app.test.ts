@@ -70,6 +70,12 @@ const unreachableTranslations: TranslationService = {
   translate: () => {
     throw new Error('the health route must not reach the translation service');
   },
+  renderLemma: () => {
+    throw new Error('the health route must not reach the translation service');
+  },
+  failLemmaRender: () => {
+    throw new Error('the health route must not reach the translation service');
+  },
 };
 
 const unreachableVocabulary: VocabularyService = {
@@ -112,6 +118,7 @@ function depsWithPing(ok: boolean): AppDeps {
     translations: unreachableTranslations,
     vocabulary: unreachableVocabulary,
     photoImports: unreachablePhotoImports,
+    glosses: createFakeAppDeps().glosses,
     health: { ping: async () => ok },
     identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001, version: 'v-test' },
     webDistDir: null,

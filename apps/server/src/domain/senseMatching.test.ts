@@ -81,3 +81,111 @@ describe('choiceFromModel', () => {
     expect(choiceFromModel(1)).toEqual({ index: 1, mismatch: false, matchedBy: 'model' });
   });
 });
+
+describe('matching a printed word to a gloss card (phase 31)', () => {
+  it('finds the card by one of its other words, with no model call', () => {
+    expect(firstChoice('רכב', [{ translation: 'שולחן' }, { translation: 'מכונית', alternatives: ['רכב', 'אוטו'] }])).toEqual({
+      index: 1,
+      mismatch: false,
+      matchedBy: 'exact',
+    });
+  });
+
+  it('folds points, a maqaf and a note in brackets the way glosses do', () => {
+    expect(firstChoice('בֵּית־סֵפֶר (מוסד)', [{ translation: 'בית ספר' }])).toMatchObject({ index: 0, matchedBy: 'exact' });
+  });
+
+  // normaliseGloss keeps a sentence mark at the end of a word, which the session's
+  // `comparable` drops. A word list prints "מכונית." as readily as "מכונית", and the
+  // mark must not turn a free match into a model call.
+  it.each([
+    ['a full stop', 'מכונית.'],
+    ['an ellipsis', 'מכונית…'],
+    ['a question mark', 'מכונית?'],
+    ['an exclamation mark', 'מכונית!'],
+    ['a colon', 'מכונית:'],
+    ['an Arabic question mark', 'מכונית؟'],
+    ['an Arabic semicolon', 'מכונית؛'],
+    ['an Arabic comma', 'מכונית،'],
+    ['a mark after a space', 'מכונית .'],
+    ['a mark after a note in brackets', 'מכונית (רכב).'],
+  ])('ignores %s ending the printed meaning, with no model call', (_, printed) => {
+    expect(firstChoice(printed, [{ translation: 'שולחן' }, { translation: 'מכונית' }])).toEqual({
+      index: 1,
+      mismatch: false,
+      matchedBy: 'exact',
+    });
+  });
+
+  it("ignores a mark ending one of the card's own words too", () => {
+    expect(firstChoice('מכונית', [{ translation: 'שולחן' }, { translation: 'מכונית.' }])).toMatchObject({ index: 1, matchedBy: 'exact' });
+    expect(firstChoice('אוטו', [{ translation: 'מכונית', alternatives: ['רכב', 'אוטו!'] }])).toMatchObject({ index: 0, matchedBy: 'exact' });
+  });
+
+  // A typed form's card says its own rendering, and carries the gloss's key when
+  // that differs: מכוניות on the card, מכונית its key. A list printing the
+  // citation form names the card as surely as one printing the rendering.
+  it('finds the card by its key when the key is not its translation, with no model call', () => {
+    expect(firstChoice('מכונית', [{ translation: 'שולחן' }, { translation: 'מכוניות', key: 'מכונית' }])).toEqual({
+      index: 1,
+      mismatch: false,
+      matchedBy: 'exact',
+    });
+  });
+
+  it("folds a card key like the card's other words", () => {
+    expect(firstChoice('מכונית', [{ translation: 'מכוניות', key: 'מכונית.' }])).toMatchObject({ index: 0, matchedBy: 'exact' });
+  });
+
+  // A card's own words, its translation and its key, name it before its other
+  // words do: an earlier card that merely lists the printed word never beats a
+  // later card that is it.
+  it('prefers a card whose translation is the printed word to an earlier card that only lists it among its other words', () => {
+    expect(firstChoice('רכב', [{ translation: 'מכונית', alternatives: ['רכב', 'אוטו'] }, { translation: 'רכב' }])).toEqual({
+      index: 1,
+      mismatch: false,
+      matchedBy: 'exact',
+    });
+  });
+
+  it('prefers a card whose key is the printed word to an earlier card that only lists it among its other words', () => {
+    expect(
+      firstChoice('מכונית', [{ translation: 'רכב', alternatives: ['מכונית'] }, { translation: 'מכוניות', key: 'מכונית' }]),
+    ).toMatchObject({ index: 1, matchedBy: 'exact' });
+  });
+
+  it('keeps the lookup order between cards that the printed word names alike', () => {
+    // Both list it among their other words.
+    expect(
+      firstChoice('רכב', [{ translation: 'שולחן', alternatives: ['רכב'] }, { translation: 'מכונית', alternatives: ['רכב'] }]),
+    ).toMatchObject({ index: 0 });
+    // A translation and a key rank together, so the earlier card wins either way round.
+    expect(firstChoice('מכונית', [{ translation: 'מכוניות', key: 'מכונית' }, { translation: 'מכונית' }])).toMatchObject({ index: 0 });
+    expect(firstChoice('מכונית', [{ translation: 'מכונית' }, { translation: 'מכוניות', key: 'מכונית' }])).toMatchObject({ index: 0 });
+  });
+
+  it('splits a printed meaning into words, each folded with the gloss rule and freed of a mark at its end', () => {
+    expect(glossesOf('מכונית. / רכב… ; בֵּית־סֵפֶר (מוסד)')).toEqual(['מכונית', 'רכב', 'בית ספר']);
+  });
+
+  it('asks the model when no word of any card is printed', () => {
+    expect(firstChoice('כלי תחבורה', [{ translation: 'שולחן' }, { translation: 'מכונית', alternatives: ['רכב', 'אוטו'] }])).toBe('ask_model');
+  });
+
+  it("lists a card's other words in the prompt when it has any", () => {
+    const prompt = buildSenseMatchPrompt({
+      word: 'car',
+      target: 'en',
+      hebrew: 'כלי תחבורה',
+      options: [
+        { translation: 'מכונית', alternatives: ['רכב', 'אוטו'], part_of_speech: 'noun' },
+        { translation: 'קרון', alternatives: [] },
+      ],
+    });
+    expect(prompt.system).toContain(SENSE_MATCH_MARKER);
+    expect(JSON.parse(prompt.user).senses).toEqual([
+      { number: 1, hebrew: 'מכונית', also: ['רכב', 'אוטו'], part_of_speech: 'noun' },
+      { number: 2, hebrew: 'קרון' },
+    ]);
+  });
+});

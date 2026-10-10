@@ -19,10 +19,10 @@ import {
 } from './photoImports';
 import { strings } from './strings';
 
-const option = (n: number) => ({ sense_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
+const option = (n: number) => ({ gloss_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
 const item = (position: number, over: Partial<PhotoImportItem> = {}): PhotoImportItem => ({
   position, text: `w${position}`, hebrew: null, status: 'ready', corrected_form: null,
-  options: [option(1), option(2)], chosen_sense_id: 's1', ticked: true, hebrew_mismatch: false, reason: null, ...over,
+  options: [option(1), option(2)], chosen_gloss_id: 's1', ticked: true, hebrew_mismatch: false, reason: null, ...over,
 });
 const imp = (items: PhotoImportItem[], status: PhotoImport['status'] = 'ready'): PhotoImport => ({
   id: 'i1', status, item_count: items.length, settled_count: items.length, created_at: '2026-10-07T10:00:00Z', items,
@@ -51,8 +51,8 @@ describe('polling and saving', () => {
 
 describe('withChange', () => {
   it('applies a tick and a sense switch to one row', () => {
-    const next = withChange(imp([item(0), item(1)]), 1, { ticked: false, sense_id: 's2' });
-    expect(next.items[1]).toMatchObject({ ticked: false, chosen_sense_id: 's2' });
+    const next = withChange(imp([item(0), item(1)]), 1, { ticked: false, gloss_id: 's2' });
+    expect(next.items[1]).toMatchObject({ ticked: false, chosen_gloss_id: 's2' });
     expect(next.items[0]).toEqual(item(0));
     expect(chosenOption(next.items[1])).toEqual(option(2));
   });
@@ -60,7 +60,7 @@ describe('withChange', () => {
 
 describe('mergePolled', () => {
   it('takes the server’s rows, except those with a change still in flight', () => {
-    const local = withChange(imp([item(0), item(1, { status: 'pending', options: [], chosen_sense_id: null, ticked: false })], 'looking_up'), 0, { ticked: false });
+    const local = withChange(imp([item(0), item(1, { status: 'pending', options: [], chosen_gloss_id: null, ticked: false })], 'looking_up'), 0, { ticked: false });
     const polled = imp([item(0), item(1)], 'ready');
     const merged = mergePolled(polled, local, new Set([0]));
     expect(merged.status).toBe('ready');
@@ -104,10 +104,10 @@ describe('savedWordCount', () => {
   it('counts what a saved import saved, one word per chosen sense of a ticked row', () => {
     const rows = [
       item(0),
-      item(1, { chosen_sense_id: 's2' }),
+      item(1, { chosen_gloss_id: 's2' }),
       item(2, { ticked: false }),
       item(3), // the same sense as row 0: saved once
-      item(4, { status: 'failed', options: [], chosen_sense_id: null, ticked: false }),
+      item(4, { status: 'failed', options: [], chosen_gloss_id: null, ticked: false }),
     ];
     expect(savedWordCount(imp(rows, 'saved'))).toBe(2);
   });
@@ -156,7 +156,7 @@ describe('rowNotes', () => {
   });
 
   it('says why a row has nothing to save', () => {
-    const none = { options: [], chosen_sense_id: null, ticked: false };
+    const none = { options: [], chosen_gloss_id: null, ticked: false };
     expect(rowNotes(item(0, { ...none, reason: 'sentence' }))).toEqual([strings.photoImportReasonSentence]);
     expect(rowNotes(item(0, { ...none, reason: 'no_meaning' }))).toEqual([strings.photoImportReasonNoMeaning]);
     expect(rowNotes(item(0, { ...none, reason: 'not_in_language' }))).toEqual([strings.photoImportReasonNotInLanguage]);

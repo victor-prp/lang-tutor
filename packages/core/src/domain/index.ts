@@ -24,3 +24,4 @@ export { judgeTiles, judgeTyped, normaliseTyped } from './typed';
 export type { TypedTarget } from './typed';
 export { DIMENSIONS, LIVE_DIMENSIONS, MAX_LEVEL, MIN_LEVEL, badge } from './progress';
 export type { Dimension } from './progress';
+export { normaliseGloss } from './gloss';

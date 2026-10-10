@@ -201,9 +201,12 @@ export const strings = {
   // "2/5": saved of total. Isolated for the reason progressLabel is: a run with
   // no strong direction is reordered by the RTL layout on Android.
   vocabularyMark: (saved: number, total: number) => isolateLtr(`${saved}/${total}`),
+  // Phase 31 (spec D5). The gloss's other target words, under its headline.
+  also: (words: readonly string[]) => `גם: ${words.join(', ')}`,
+  // Phase 31 (spec D11). The form a word was saved from, when it is not the lemma.
   // FSI/PDI around the form, as in translateCorrectionNotice: a Cyrillic or Latin
   // word inside a Hebrew sentence.
-  vocabularyFromForm: (form: string) => `מתוך \u2068${form}\u2069`,
+  savedFrom: (form: string, translation: string) => `נשמר מתוך ⁨${form}⁩: ${translation}`,
   // U+2068 FSI and U+2069 PDI around each form. In the en_he direction this
   // banner embeds a Latin word inside a Hebrew RTL sentence, and without an
   // isolate the bidi algorithm reorders it against the wrong clause. The he_en

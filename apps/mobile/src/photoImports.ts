@@ -26,7 +26,7 @@ export const tickedCount = (imp: PhotoImport): number =>
 export const canSave = (imp: PhotoImport): boolean => imp.status === 'ready' && tickedCount(imp) > 0;
 
 export const chosenOption = (item: PhotoImportItem): PhotoImportOption | null =>
-  item.options.find((option) => option.sense_id === item.chosen_sense_id) ?? null;
+  item.options.find((option) => option.gloss_id === item.chosen_gloss_id) ?? null;
 
 /** The status line of an import, on the review and in the list of open ones.
  *  A saved or discarded import has none: there is nothing left to wait for. */
@@ -74,7 +74,7 @@ export function withChange(imp: PhotoImport, position: number, change: PhotoImpo
         : {
             ...item,
             ...(change.ticked !== undefined ? { ticked: change.ticked } : {}),
-            ...(change.sense_id !== undefined ? { chosen_sense_id: change.sense_id } : {}),
+            ...(change.gloss_id !== undefined ? { chosen_gloss_id: change.gloss_id } : {}),
           },
     ),
   };
@@ -120,7 +120,7 @@ export function savedWordCount(imp: PhotoImport | null): number | null {
   const senses = new Set(
     imp.items
       .filter((item) => item.status === 'ready' && item.ticked && chosenOption(item) !== null)
-      .map((item) => item.chosen_sense_id),
+      .map((item) => item.chosen_gloss_id),
   );
   return senses.size;
 }

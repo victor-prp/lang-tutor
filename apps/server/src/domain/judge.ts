@@ -27,14 +27,20 @@ export type MeaningJudgeContext = {
   meaning: string;
   example: string | null;
   exampleTranslation: string | null;
+  /** Phase 31 (spec D13). The rendering's other words, the gloss's key and the
+   *  gloss's other words: right as typed, so רכב for מכונית, or אצבע on a card
+   *  asking `fingers`, costs no judge call. */
+  alternatives?: readonly string[];
 };
 
-/** Spec D3 step 2. Empty text is "show me the answer"; the stored meaning is
- *  right as typed. Null: only the model can tell. */
-export function meaningRuleVerdict(meaning: string, text: string): TypedVerdict | null {
+/** Spec D3 step 2. Empty text is "show me the answer"; the stored meaning, or
+ *  (phase 31, D13) one of its stored alternatives, is right as typed. Null: only
+ *  the model can tell. */
+export function meaningRuleVerdict(meaning: string, text: string, alternatives: readonly string[] = []): TypedVerdict | null {
   const typed = normaliseHebrew(text);
   if (typed === '') return 'wrong';
-  return typed === normaliseHebrew(meaning) ? 'exact' : null;
+  if (typed === normaliseHebrew(meaning)) return 'exact';
+  return alternatives.some((alternative) => normaliseHebrew(alternative) === typed) ? 'exact' : null;
 }
 
 export function buildMeaningJudgePrompt(context: MeaningJudgeContext, answer: string) {
@@ -130,10 +136,10 @@ export function parseTranslationJudge(raw: string): TypedVerdict | null {
   }
 }
 
-export function ruleVerdict(question: JudgedQuestion, text: string): TypedVerdict | null {
+export function ruleVerdict(question: JudgedQuestion, text: string, alternatives: readonly string[] = []): TypedVerdict | null {
   switch (question.type) {
     case 'typed_meaning':
-      return meaningRuleVerdict(question.meaning, text);
+      return meaningRuleVerdict(question.meaning, text, alternatives);
     case 'sentence_translation':
       return translationRuleVerdict(question.sentence, text);
   }

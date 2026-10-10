@@ -32,9 +32,9 @@ import {
   failInsertsInto,
   readProgress,
   readSnapshot,
-  saveSessionSenses,
+  saveSessionGlosses,
   sessionDay,
-  sessionSenseEntries,
+  sessionGlossEntries,
 } from '../../support/progressRows';
 
 // The other half of this file's tests is src/services/sessions.test.ts, which
@@ -123,7 +123,9 @@ describe('createNextSession', () => {
     expect(jobs[0].data.picks).toHaveLength(SESSION_LENGTH);
     // Phase 24: listening on, and the ordinal is the list sessions before this one (none).
     expect(jobs[0].data).toMatchObject({ listening: true, ordinal: 0 });
-    expect(jobs[0].data.picks.every((p) => saved.senseIds.includes(p.sense_id))).toBe(true);
+    expect(jobs[0].data.picks.every((p) => saved.glossIds.includes(p.gloss_id))).toBe(true);
+    // Phase 31: each pick names its gloss, and the sense its saved form renders.
+    expect(jobs[0].data.picks.every((p) => saved.senseIds[saved.glossIds.indexOf(p.gloss_id)] === p.sense_id)).toBe(true);
   });
 
   // Phase 28, done-means 2: the planner draws a tutor's words like the owner's.
@@ -144,7 +146,7 @@ describe('createNextSession', () => {
     expect(
       jobs
         .find((job) => job.data.session_id === created.sessionId)!
-        .data.picks.every((p) => added.senseIds.includes(p.sense_id)),
+        .data.picks.every((p) => added.glossIds.includes(p.gloss_id)),
     ).toBe(true);
   });
 });
@@ -315,7 +317,7 @@ describe('progress (phase 20)', () => {
   /** The seed, with the senses of its first three questions saved. */
   async function seedWithSavedSenses() {
     const { sessionId, record } = await startSeed(E);
-    const saved = await saveSessionSenses(t.db, { sessionId, enrollmentId: E, positions: [0, 1, 2] });
+    const saved = await saveSessionGlosses(t.db, { sessionId, enrollmentId: E, positions: [0, 1, 2] });
     return { sessionId, record, saved };
   }
 
@@ -332,20 +334,20 @@ describe('progress (phase 20)', () => {
     return last!;
   }
 
-  const receptive = (rows: Awaited<ReturnType<typeof readProgress>>, senseId: string) =>
-    rows.find((row) => row.senseId === senseId && row.dimension === 'written_receptive');
+  const receptive = (rows: Awaited<ReturnType<typeof readProgress>>, glossId: string) =>
+    rows.find((row) => row.glossId === glossId && row.dimension === 'written_receptive');
 
   // Phase 28, done-means 2: a word a tutor added is practised like any other.
   it('practises a sense a tutor added, and a right answer lifts it', async () => {
     await seedUser(t.db, 'u_tutor');
     await seedGrant(t.db, { enrollmentId: E, ownerUserId: 'u_1', granteeUserId: 'u_tutor', accepted: true });
     const { sessionId, record } = await startSeed(E);
-    const [added] = await sessionSenseEntries(t.db, { sessionId, positions: [0] });
+    const [added] = await sessionGlossEntries(t.db, { sessionId, positions: [0] });
     await vocabulary.save('u_tutor', E, [added]);
 
     await answerAll(sessionId, record);
 
-    expect(receptive(await readProgress(t.db, E), added.sense_id)).toMatchObject({ level: 2 });
+    expect(receptive(await readProgress(t.db, E), added.gloss_id)).toMatchObject({ level: 2 });
   });
 
   it('completing a session lifts each saved sense answered right, and records what it did', async () => {
@@ -361,7 +363,7 @@ describe('progress (phase 20)', () => {
     expect(await readSnapshot(t.db, sessionId)).toHaveLength(15);
     // Phase 23: recognition alone moves one of three live dimensions, so the
     // badge, (2, 1, 1), still reads 1; `raised` says what did move.
-    expect(result.progress.map((p) => [p.senseId, p.levelBefore, p.levelAfter, p.raised])).toEqual([
+    expect(result.progress.map((p) => [p.glossId, p.levelBefore, p.levelAfter, p.raised])).toEqual([
       [saved[0], 1, 1, ['written_receptive']],
       [saved[1], 1, 1, []],
       [saved[2], 1, 1, ['written_receptive']],
@@ -374,7 +376,7 @@ describe('progress (phase 20)', () => {
     await service.skipSession('u_1', sessionId);
     const rows = await readProgress(t.db, E);
     expect(receptive(rows, saved[0])).toMatchObject({ level: 2 });
-    expect(rows.filter((row) => row.senseId !== saved[0]).every((row) => row.level === 1)).toBe(true);
+    expect(rows.filter((row) => row.glossId !== saved[0]).every((row) => row.level === 1)).toBe(true);
     expect(await readSnapshot(t.db, sessionId)).toHaveLength(5);
   });
 
@@ -403,9 +405,9 @@ describe('progress (phase 20)', () => {
     const finished = await service.getSession('u_1', sessionId);
     expect(finished.status).toBe('completed');
     const rows = await readProgress(t.db, E);
-    expect(rows.some((row) => row.senseId === saved[0])).toBe(false);
+    expect(rows.some((row) => row.glossId === saved[0])).toBe(false);
     expect(receptive(rows, saved[1])).toMatchObject({ level: 2 });
-    expect(finished.progress.map((p) => p.senseId)).toEqual([saved[1], saved[2]]);
+    expect(finished.progress.map((p) => p.glossId)).toEqual([saved[1], saved[2]]);
   });
 
   it('completion and its progress are one transaction', async () => {
@@ -431,7 +433,7 @@ describe('progress (phase 20)', () => {
   it('getSession answers a completed session with the change it made', async () => {
     const { sessionId, record, saved } = await seedWithSavedSenses();
     const finished = await answerAll(sessionId, record);
-    expect(finished.progress.map((p) => p.senseId)).toEqual(saved);
+    expect(finished.progress.map((p) => p.glossId)).toEqual(saved);
     expect((await service.getSession('u_1', sessionId)).progress).toEqual(finished.progress);
   });
 });
@@ -445,7 +447,7 @@ describe('authorization (phase 29)', () => {
   const E = enrollmentOf(OWNER);
   const OPTIONS = { listening: false, speaking: false };
   // Everything these use cases write: the session, its answers, and the progress a completion or skip records.
-  const TABLES = ['sessions', 'session_questions', 'answers', 'sense_progress', 'session_progress'];
+  const TABLES = ['sessions', 'session_questions', 'answers', 'gloss_progress', 'session_progress'];
 
   beforeEach(async () => {
     await seedUser(t.db, OWNER);

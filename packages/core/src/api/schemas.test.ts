@@ -15,6 +15,7 @@ import {
   ClozeTypedQuestionSchema,
   SentenceTranslationQuestionSchema,
   LlmPhotoReadingSchema,
+  LlmReconciliationSchema,
   LlmSenseMatchSchema,
   LlmSenseSchema,
   LlmTranslationSchema,
@@ -180,7 +181,7 @@ describe('NextStepResponseSchema', () => {
       score: { correct: 9, total: 10 },
       missed_questions: [{ question: QUESTION, correct_answer: 'כלב' }],
       progress: [
-        { sense_id: 'se1', form: 'dog', translation: 'כלב', level_before: 1, level_after: 2, raised: ['written_receptive'] },
+        { gloss_id: 'se1', form: 'dog', translation: 'כלב', level_before: 1, level_after: 2, raised: ['written_receptive'] },
       ],
     });
 
@@ -345,17 +346,22 @@ describe('TranslationRequestSchema', () => {
 });
 
 describe('TranslationSenseSchema', () => {
-  it('accepts a sense with no part of speech and no example — the sentence case', () => {
+  it('accepts a sense with no part of speech and no examples — the sentence case', () => {
     expect(TranslationSenseSchema.safeParse({ translation: 'קראתי ספר על החלל.' }).success).toBe(
       true,
     );
   });
 
-  it('accepts a full sense', () => {
+  it('accepts a full card: one example per member, the alternatives and the key', () => {
     const result = TranslationSenseSchema.safeParse({
-      translation: 'ספר',
+      translation: 'ספרים',
       part_of_speech: 'noun',
-      example: { source: 'I read a book.', target: 'קראתי ספר.' },
+      examples: [
+        { source: 'I read books.', target: 'אני קורא ספרים.' },
+        { source: 'The books are open.', target: 'הספרים פתוחים.' },
+      ],
+      alternatives: ['כרכים'],
+      key: 'ספר',
     });
     expect(result.success).toBe(true);
   });
@@ -366,8 +372,13 @@ describe('TranslationSenseSchema', () => {
 
   it('rejects a half-filled example', () => {
     expect(
-      TranslationSenseSchema.safeParse({ translation: 'ספר', example: { source: 'x' } }).success,
+      TranslationSenseSchema.safeParse({ translation: 'ספר', examples: [{ source: 'x' }] }).success,
     ).toBe(false);
+  });
+
+  it('rejects an empty key or alternative', () => {
+    expect(TranslationSenseSchema.safeParse({ translation: 'ספרים', key: '' }).success).toBe(false);
+    expect(TranslationSenseSchema.safeParse({ translation: 'ספרים', alternatives: [''] }).success).toBe(false);
   });
 });
 
@@ -463,19 +474,27 @@ describe('LlmTranslationSchema', () => {
     ).toBe(false);
   });
 
-  // Five, not the six this asserted before phase 13, and the ceiling is the
-  // provider's rather than ours: array caps multiply inside `responseSchema`, and
-  // six entries by five senses tipped Gemini past "too many states for serving"
-  // the moment `correction` was added — a 400 on every translation call. Measured
-  // against the live API. `senses` stays at five, where READ_LIMIT holds it.
-  it('caps entries at five and senses at five within an entry', () => {
+  // Three entries, not the five this asserted before phase 31 (and the six before
+  // phase 13), and the ceiling is the provider's rather than ours: array caps
+  // multiply inside `responseSchema`, and five entries by five senses tipped
+  // Gemini past "too many states for serving" the moment the four phase 31 sense
+  // fields were added — a 400 on every translation call. Measured against the
+  // live API; the matrix is on `LlmTranslationSchema.entries`. `senses` stays at
+  // five, where the lookup's card cap (RESPONSE_CARD_CAP) holds it.
+  it('caps entries at three and senses at five within an entry', () => {
     const entry = { lemma: 'x', part_of_speech: 'noun', senses: [sense] };
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(5).fill(entry) }).success,
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(3).fill(entry) }).success,
     ).toBe(true);
     expect(
-      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(6).fill(entry) }).success,
+      LlmTranslationSchema.safeParse({ kind: 'word', entries: Array(4).fill(entry) }).success,
     ).toBe(false);
+    expect(
+      LlmTranslationSchema.safeParse({
+        kind: 'word',
+        entries: [{ lemma: 'x', part_of_speech: 'noun', senses: Array(5).fill(sense) }],
+      }).success,
+    ).toBe(true);
     expect(
       LlmTranslationSchema.safeParse({
         kind: 'word',
@@ -494,6 +513,45 @@ describe('LlmTranslationSchema', () => {
     });
     expect(result.success).toBe(true);
     expect(result.data?.senses[0]).not.toHaveProperty('sense_code');
+  });
+
+  it('takes the phase 31 fields on a sense, and a sense without them', () => {
+    const full = {
+      translation: 'מכונית',
+      sense_code: 'motor_vehicle',
+      alternatives: ['רכב'],
+      gloss: 'מכונית',
+      definition: 'a road vehicle with an engine',
+    };
+    expect(LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [full] }] }).success).toBe(true);
+    expect(LlmTranslationSchema.safeParse({ kind: 'word', entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכונית', sense_code: 'motor_vehicle' }] }] }).success).toBe(true);
+    // Zod strips a key the schema does not name, so success alone cannot tell a
+    // schema that takes the fields from one that silently drops them.
+    const kept = LlmTranslationSchema.parse({ kind: 'word', entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [full] }] });
+    expect(kept.entries[0].senses[0]).toEqual(full);
+  });
+
+  it("has no citation alternatives: only the rendering call asks for them (see LlmSenseSchema)", () => {
+    const parsed = LlmTranslationSchema.parse({
+      kind: 'word',
+      entries: [{ lemma: 'car', part_of_speech: 'noun', senses: [{ translation: 'מכונית', sense_code: 'motor_vehicle', gloss_alternatives: ['רכב'] }] }],
+    });
+    expect(parsed.entries[0].senses[0]).toEqual({ translation: 'מכונית', sense_code: 'motor_vehicle' });
+  });
+});
+
+// Phase 31 (spec D4-D6, D9). The second call's rendering takes the first call's three
+// fields and gloss_alternatives, absent or null: parseLlmReconciliation parses without dropNulls.
+describe('LlmReconciliationSchema', () => {
+  it('takes the phase 31 fields as absent or null, since this answer is parsed without dropNulls', () => {
+    const base = { sense_code: 'motor_vehicle', translation: 'מכוניות' };
+    expect(LlmReconciliationSchema.safeParse({ senses: [{ ...base, gloss: 'מכונית', alternatives: ['רכבים'], gloss_alternatives: ['רכב'], definition: 'a road vehicle' }] }).success).toBe(true);
+    expect(LlmReconciliationSchema.safeParse({ senses: [{ ...base, gloss: null, alternatives: null, gloss_alternatives: null, definition: null }] }).success).toBe(true);
+    // As above: success alone would also pass a schema that drops the keys.
+    const kept = LlmReconciliationSchema.parse({ senses: [{ ...base, gloss: 'מכונית', alternatives: ['רכבים'], gloss_alternatives: ['רכב'], definition: 'a road vehicle' }] });
+    expect(kept.senses[0]).toEqual({ ...base, gloss: 'מכונית', alternatives: ['רכבים'], gloss_alternatives: ['רכב'], definition: 'a road vehicle' });
+    const nulled = LlmReconciliationSchema.parse({ senses: [{ ...base, gloss: null, alternatives: null, gloss_alternatives: null, definition: null }] });
+    expect(nulled.senses[0]).toEqual({ ...base, gloss: null, alternatives: null, gloss_alternatives: null, definition: null });
   });
 });
 
@@ -533,17 +591,17 @@ describe('part_of_speech on the entry', () => {
     ).toBe(true);
   });
 
-  // Five and six, not six and seven: phase 13 lowered the entries cap because
-  // Gemini rejects the resulting `responseSchema` otherwise — see the comment on
-  // `LlmTranslationSchema.entries`.
-  it('accepts five entries and rejects six', () => {
+  // Three and four, not five and six: phases 13 and 31 each lowered the entries
+  // cap because Gemini rejects the resulting `responseSchema` otherwise — see the
+  // comment on `LlmTranslationSchema.entries`.
+  it('accepts three entries and rejects four', () => {
     const entry = { lemma: 'x', part_of_speech: 'noun' as const, senses: [aSense] };
     const make = (n: number) => ({
       kind: 'word' as const,
       entries: Array.from({ length: n }, () => entry),
     });
-    expect(LlmTranslationSchema.safeParse(make(5)).success).toBe(true);
-    expect(LlmTranslationSchema.safeParse(make(6)).success).toBe(false);
+    expect(LlmTranslationSchema.safeParse(make(3)).success).toBe(true);
+    expect(LlmTranslationSchema.safeParse(make(4)).success).toBe(false);
   });
 });
 
@@ -645,10 +703,17 @@ describe('CreateEnrollmentRequestSchema', () => {
 // travels to Gemini as responseSchema, where an extra property is either an
 // invitation to invent ids or one more state in a schema already at the
 // provider's limit (see LlmTranslationSchema's comment).
+//
+// Phase 31 gave the model's sense three fields of its own (spec D4, D6, D9; the
+// citation alternatives are the rendering call's alone) and still none of the
+// wire's: no part_of_speech, gloss_id, variant_id or saved.
 describe('LlmSenseSchema after phase 18', () => {
-  it('still has exactly translation, example and sense_code', () => {
+  it('has exactly translation, example, sense_code and three of phase 31, none of the wire sense', () => {
     expect(Object.keys(LlmSenseSchema.shape).sort()).toEqual([
+      'alternatives',
+      'definition',
       'example',
+      'gloss',
       'sense_code',
       'translation',
     ]);
@@ -676,7 +741,7 @@ describe('TranslationSenseSchema ids', () => {
     expect(
       TranslationSenseSchema.safeParse({
         translation: 'חלון',
-        sense_id: 's1',
+        gloss_id: 's1',
         variant_id: 'v1',
         saved: false,
       }).success,
@@ -685,7 +750,7 @@ describe('TranslationSenseSchema ids', () => {
 });
 
 describe('SaveVocabularyRequestSchema', () => {
-  const entry = { sense_id: 's1', variant_id: 'v1' };
+  const entry = { gloss_id: 's1', variant_id: 'v1' };
 
   it('accepts one entry and twenty', () => {
     expect(SaveVocabularyRequestSchema.safeParse({ entries: [entry] }).success).toBe(true);
@@ -702,7 +767,7 @@ describe('SaveVocabularyRequestSchema', () => {
   });
 
   it('rejects an entry missing its variant', () => {
-    expect(SaveVocabularyRequestSchema.safeParse({ entries: [{ sense_id: 's1' }] }).success).toBe(
+    expect(SaveVocabularyRequestSchema.safeParse({ entries: [{ gloss_id: 's1' }] }).success).toBe(
       false,
     );
   });
@@ -782,8 +847,8 @@ describe('phase 26 photo import schemas', () => {
   it('refuses an item update that changes nothing', () => {
     expect(PhotoImportItemUpdateSchema.safeParse({}).success).toBe(false);
     expect(PhotoImportItemUpdateSchema.safeParse({ ticked: false }).success).toBe(true);
-    expect(PhotoImportItemUpdateSchema.safeParse({ sense_id: 's1' }).success).toBe(true);
-    expect(PhotoImportItemUpdateSchema.safeParse({ sense_id: '' }).success).toBe(false);
+    expect(PhotoImportItemUpdateSchema.safeParse({ gloss_id: 's1' }).success).toBe(true);
+    expect(PhotoImportItemUpdateSchema.safeParse({ gloss_id: '' }).success).toBe(false);
   });
 
   it('parses a row and an import', () => {
@@ -793,8 +858,8 @@ describe('phase 26 photo import schemas', () => {
       hebrew: 'חתול',
       status: 'ready',
       corrected_form: null,
-      options: [{ sense_id: 's1', variant_id: 'v1', translation: 'חתול', part_of_speech: 'noun' }],
-      chosen_sense_id: 's1',
+      options: [{ gloss_id: 's1', variant_id: 'v1', translation: 'חתול', part_of_speech: 'noun' }],
+      chosen_gloss_id: 's1',
       ticked: true,
       hebrew_mismatch: false,
       reason: null,
@@ -803,6 +868,27 @@ describe('phase 26 photo import schemas', () => {
     const summary = { id: 'i1', status: 'looking_up', item_count: 3, settled_count: 1, created_at: '2026-10-07T10:00:00.000Z' };
     expect(PhotoImportSchema.parse({ ...summary, items: [item] }).items).toHaveLength(1);
     expect(PhotoImportStatusSchema.options).toEqual(['reading', 'looking_up', 'ready', 'failed', 'saved', 'discarded']);
+  });
+
+  // Phase 31: an option is the lookup's card, key included when the typed form
+  // says something else. Options stored before carry none and still parse.
+  it("keeps an option's gloss key, and reads an option without one", () => {
+    const item = {
+      position: 0,
+      text: 'gatti',
+      hebrew: 'חתולים',
+      status: 'ready',
+      corrected_form: null,
+      options: [
+        { gloss_id: 'g1', variant_id: 'v1', translation: 'חתולים', key: 'חתול' },
+        { gloss_id: 'g2', variant_id: 'v1', translation: 'חתולות' },
+      ],
+      chosen_gloss_id: 'g1',
+      ticked: true,
+      hebrew_mismatch: false,
+      reason: null,
+    };
+    expect(PhotoImportItemSchema.parse(item)).toEqual(item);
   });
 
   it('reads the model answers: a list of items, and a whole sense number', () => {

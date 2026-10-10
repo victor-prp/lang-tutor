@@ -12,13 +12,13 @@ import {
   type ImportItemState,
 } from './photoImports';
 
-const option = (n: number) => ({ sense_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
+const option = (n: number) => ({ gloss_id: `s${n}`, variant_id: `v${n}`, translation: `t${n}` });
 const row = (over: Partial<ImportItemState> = {}): ImportItemState => ({
   position: 0,
   status: 'ready',
   options: [option(1), option(2)],
-  suggestedSenseId: 's1',
-  chosenSenseId: 's1',
+  suggestedGlossId: 's1',
+  chosenGlossId: 's1',
   ticked: true,
   ...over,
 });
@@ -51,12 +51,12 @@ describe('refuseItemUpdate', () => {
     expect(refuseItemUpdate(row({ status: 'failed' }), { ticked: false })).toBe('not_ready');
   });
   it('refuses a sense that is not one of the options, and a tick on a row with none', () => {
-    expect(refuseItemUpdate(row(), { sense_id: 's9' })).toBe('unknown_sense');
-    expect(refuseItemUpdate(row({ options: [], chosenSenseId: null, suggestedSenseId: null, ticked: false }), { ticked: true })).toBe('no_options');
+    expect(refuseItemUpdate(row(), { gloss_id: 's9' })).toBe('unknown_gloss');
+    expect(refuseItemUpdate(row({ options: [], chosenGlossId: null, suggestedGlossId: null, ticked: false }), { ticked: true })).toBe('no_options');
   });
   it('lets an untick, a tick and a switch through', () => {
     expect(refuseItemUpdate(row(), { ticked: false })).toBeNull();
-    expect(refuseItemUpdate(row({ ticked: false }), { ticked: true, sense_id: 's2' })).toBeNull();
+    expect(refuseItemUpdate(row({ ticked: false }), { ticked: true, gloss_id: 's2' })).toBeNull();
   });
 });
 
@@ -65,14 +65,14 @@ describe('entriesToSave', () => {
     expect(
       entriesToSave([
         row({ position: 0 }),
-        row({ position: 1, chosenSenseId: 's2' }),
+        row({ position: 1, chosenGlossId: 's2' }),
         row({ position: 2, ticked: false }),
         row({ position: 3, status: 'failed', ticked: false }),
-        row({ position: 4, options: [], chosenSenseId: null, ticked: false }),
+        row({ position: 4, options: [], chosenGlossId: null, ticked: false }),
       ]),
     ).toEqual([
-      { sense_id: 's1', variant_id: 'v1' },
-      { sense_id: 's2', variant_id: 'v2' },
+      { gloss_id: 's1', variant_id: 'v1' },
+      { gloss_id: 's2', variant_id: 'v2' },
     ]);
   });
 });
@@ -83,24 +83,58 @@ describe('reviewCounts', () => {
       reviewCounts([
         row(),
         row({ ticked: false }),
-        row({ chosenSenseId: 's2' }),
-        row({ options: [], chosenSenseId: null, suggestedSenseId: null, ticked: false }),
+        row({ chosenGlossId: 's2' }),
+        row({ options: [], chosenGlossId: null, suggestedGlossId: null, ticked: false }),
       ]),
-    ).toEqual({ unticked: 1, changedSense: 1 });
+    ).toEqual({ unticked: 1, changedGloss: 1 });
   });
 });
 
 describe('optionsFrom', () => {
-  it('keeps the saveable senses, in the lookup order, with what the list shows', () => {
+  it('keeps the saveable cards, in the lookup order, with what the list shows', () => {
     expect(
       optionsFrom([
-        { translation: 'בנק', part_of_speech: 'noun', sense_id: 's1', variant_id: 'v1', saved: false },
+        { translation: 'בנק', part_of_speech: 'noun', gloss_id: 'g1', variant_id: 'v1', saved: false },
         { translation: 'אין מזהה' },
-        { translation: 'גדה', sense_id: 's2', variant_id: 'v1', example: { source: 'the bank', target: 'הגדה' } },
+        { translation: 'גדה', gloss_id: 'g2', variant_id: 'v1', examples: [{ source: 'the bank', target: 'הגדה' }] },
       ]),
     ).toEqual([
-      { sense_id: 's1', variant_id: 'v1', translation: 'בנק', part_of_speech: 'noun' },
-      { sense_id: 's2', variant_id: 'v1', translation: 'גדה', example: { source: 'the bank', target: 'הגדה' } },
+      { gloss_id: 'g1', variant_id: 'v1', translation: 'בנק', part_of_speech: 'noun' },
+      { gloss_id: 'g2', variant_id: 'v1', translation: 'גדה', examples: [{ source: 'the bank', target: 'הגדה' }] },
+    ]);
+  });
+
+  // Phase 31 (spec D15): a lookup card is one gloss, so each card is one option,
+  // with every member's example, the card's alternatives, and the gloss's key
+  // when the typed form says something else: the review shows the same card.
+  it("makes one option of a gloss's card, with every example, its alternatives and its key", () => {
+    expect(
+      optionsFrom([
+        {
+          translation: 'גדות',
+          key: 'גדה',
+          gloss_id: 'g1',
+          variant_id: 'v1',
+          examples: [
+            { source: 'the banks', target: 'הגדות' },
+            { source: 'the far banks', target: 'הגדות הרחוקות' },
+          ],
+          alternatives: ['חופים'],
+          saved: false,
+        },
+      ]),
+    ).toEqual([
+      {
+        gloss_id: 'g1',
+        variant_id: 'v1',
+        translation: 'גדות',
+        key: 'גדה',
+        examples: [
+          { source: 'the banks', target: 'הגדות' },
+          { source: 'the far banks', target: 'הגדות הרחוקות' },
+        ],
+        alternatives: ['חופים'],
+      },
     ]);
   });
 });

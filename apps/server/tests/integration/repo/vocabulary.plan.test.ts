@@ -14,7 +14,7 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 // If one of these fails, read the plan in the failure before touching the
 // assertion. The fix is an index or a query shape, never a looser test.
 
-const WATCHED = ['vocabulary_entries', 'dict_var_translations', 'sense_progress', 'dict_lexemes'];
+const WATCHED = ['vocabulary_entries', 'dict_var_translations', 'gloss_progress', 'dict_lexemes', 'dict_glosses', 'dict_sense_glosses'];
 const HEAVY = 'pe1';
 const BUDGET_MS = 50;
 
@@ -41,19 +41,23 @@ beforeAll(async () => {
        select 'ps' || g, 'pl' || g, 'only' from generate_series(1, 20000) g`,
     `insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
        select 'pv' || g, 'pl' || g, 'ru', 'слово' || g, 'word', 0 from generate_series(1, 20000) g`,
-    `insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
-       select 'pv' || g, 'ps' || g, 'he', 'מילה' || g, 0 from generate_series(1, 20000) g`,
-    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
-       select 'pe' || e, 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu' || e
+    `insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, gloss, rank)
+       select 'pv' || g, 'ps' || g, 'he', 'מילה' || g, 'מילה' || g, 0 from generate_series(1, 20000) g`,
+    `insert into dict_glosses (id, lexeme_id, user_language_code, key)
+       select 'pg' || g, 'pl' || g, 'he', 'מילה' || g from generate_series(1, 20000) g`,
+    `insert into dict_sense_glosses (sense_id, lexeme_id, user_language_code, gloss_id)
+       select 'ps' || g, 'pl' || g, 'he', 'pg' || g from generate_series(1, 20000) g`,
+    `insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
+       select 'pe' || e, 'pg' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu' || e
        from generate_series(2, 1000) e, generate_series(1, 200) s`,
-    `insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
-       select '${HEAVY}', 'ps' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu1'
+    `insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
+       select '${HEAVY}', 'pg' || s, 'pl' || s, 'слово' || s, 'pv' || s, now() - (s || ' seconds')::interval, 'pu1'
        from generate_series(1, 20000) s`,
     // Phase 20. Five progress rows per entry, levels spread over 1–5 so a level
     // filter has real work to do. `& 2147483647` keeps hashtext non-negative
     // without abs(), which overflows on the one negative int4 with no positive.
-    `insert into sense_progress (enrollment_id, sense_id, dimension, level)
-       select ve.enrollment_id, ve.sense_id, d, 1 + ((hashtext(ve.sense_id || d) & 2147483647) % 5)
+    `insert into gloss_progress (enrollment_id, gloss_id, dimension, level)
+       select ve.enrollment_id, ve.gloss_id, d, 1 + ((hashtext(ve.gloss_id || d) & 2147483647) % 5)
        from vocabulary_entries ve
        cross join unnest(array['written_receptive', 'written_productive', 'spoken_receptive',
                                'spoken_productive', 'spelling']) d`,
@@ -61,7 +65,7 @@ beforeAll(async () => {
   for (const statement of LOAD) await t.db.execute(sql.raw(statement));
   // Outside any transaction (VACUUM refuses one), so the visibility map is set
   // and an index-only scan is available, and the planner has real statistics.
-  for (const table of ['vocabulary_entries', 'dict_var_translations', 'dict_senses', 'dict_lexemes', 'dict_variants', 'sense_progress']) {
+  for (const table of ['vocabulary_entries', 'dict_var_translations', 'dict_senses', 'dict_lexemes', 'dict_variants', 'gloss_progress', 'dict_glosses', 'dict_sense_glosses']) {
     await t.db.execute(sql.raw(`vacuum analyze ${table}`));
   }
 }, 120_000);
@@ -136,13 +140,13 @@ const WORDS_PAGES: [string, () => SQL][] = [
 describe('every vocabulary read at volume', () => {
   it.each([
     ['saveable', () => vocabularyQueries.saveable({
-      entries: [{ senseId: 'ps5', variantId: 'pv5' }, { senseId: 'ps6', variantId: 'pv6' }],
+      entries: [{ glossId: 'pg5', variantId: 'pv5' }, { glossId: 'pg6', variantId: 'pv6' }],
       targetLanguage: 'ru',
       sourceLanguage: 'he',
     })],
-    ['savedSenseIds', () => vocabularyQueries.savedSenseIds({
+    ['savedGlossIds', () => vocabularyQueries.savedGlossIds({
       enrollmentId: HEAVY,
-      senseIds: ['ps1', 'ps2', 'ps3', 'ps4', 'ps5'],
+      glossIds: ['pg1', 'pg2', 'pg3', 'pg4', 'pg5'],
     })],
     ...WORDS_PAGES,
     ['wordSummaries', () => vocabularyQueries.wordSummaries({
@@ -164,11 +168,11 @@ describe('every vocabulary read at volume', () => {
     expect(seqScans(plan)).toEqual([]);
   });
 
-  // The scan check alone is not enough: a bitmap scan on sense_progress_pkey
+  // The scan check alone is not enough: a bitmap scan on gloss_progress_pkey
   // dodges it, and the budget below is met without the index (35 ms measured).
-  it.each(WORDS_PAGES)('%s reads progress through sense_progress_enrollment_dimension_idx', async (_name, build) => {
+  it.each(WORDS_PAGES)('%s reads progress through gloss_progress_enrollment_dimension_idx', async (_name, build) => {
     const plan = await explain(build());
-    expect(indexesUsed(plan)).toContain('sense_progress_enrollment_dimension_idx');
+    expect(indexesUsed(plan)).toContain('gloss_progress_enrollment_dimension_idx');
   });
 
   // The scan check alone cannot tell the lemma index from a bitmap scan of the
@@ -184,9 +188,9 @@ describe('every vocabulary read at volume', () => {
     ['insertEntries', () => vocabularyQueries.insertEntries({
       enrollmentId: 'pe2',
       addedByUserId: 'pu2',
-      entries: [{ senseId: 'ps300', lexemeId: 'pl300', lemma: 'слово300', variantId: 'pv300' }],
+      entries: [{ glossId: 'pg300', lexemeId: 'pl300', lemma: 'слово300', variantId: 'pv300' }],
     })],
-    ['deleteEntry', () => vocabularyQueries.deleteEntry({ enrollmentId: HEAVY, senseId: 'ps5' })],
+    ['deleteEntry', () => vocabularyQueries.deleteEntry({ enrollmentId: HEAVY, glossId: 'pg5' })],
   ])('%s scans no watched table sequentially', async (_name, build) => {
     const plan = await explainWrite(build());
     expect(seqScans(plan)).toEqual([]);

@@ -94,14 +94,14 @@ const updateItemRoute = createRoute({
   method: 'patch',
   path: '/photo-imports/{id}/items/{position}',
   tags: ['photo-imports'],
-  summary: "Tick, untick or change a row's sense",
+  summary: "Tick, untick or change a row's gloss",
   request: {
     params: itemParams,
     body: { required: true, content: { 'application/json': { schema: PhotoImportItemUpdateSchema } } },
   },
   responses: {
     200: json(PhotoImportItemSchema, 'The row as it now is.'),
-    400: json(ErrorSchema, "The body did not validate, the sense is not one of the row's options, or the row has none to tick."),
+    400: json(ErrorSchema, "The body did not validate, the gloss is not one of the row's options, or the row has none to tick."),
     404: json(ErrorSchema, 'No photo import has this id, or it has no such row.'),
     409: CONFLICT,
     ...learnerResponses,
@@ -113,13 +113,13 @@ const saveImportRoute = createRoute({
   method: 'post',
   path: '/photo-imports/{id}/save',
   tags: ['photo-imports'],
-  summary: "Save the ticked rows' senses",
+  summary: "Save the ticked rows' glosses",
   description:
     "All or nothing, in one transaction, and the import becomes saved. Saving a saved import answers the same ids and writes nothing.",
   request: { params: importParams },
   responses: {
-    200: json(SaveVocabularyResponseSchema, 'Every ticked sense is now saved.'),
-    400: json(ErrorSchema, 'A sense cannot be saved in this enrollment.'),
+    200: json(SaveVocabularyResponseSchema, 'Every ticked gloss is now saved.'),
+    400: json(ErrorSchema, 'A gloss cannot be saved in this enrollment.'),
     404: NO_IMPORT,
     409: json(ErrorSchema, 'The import is not ready: still reading or looking up, failed, or discarded.'),
     ...learnerResponses,

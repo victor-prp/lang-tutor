@@ -40,19 +40,19 @@ const EVIDENCE: SessionEvidence = {
   day: DAY,
   lastAnsweredAt: '2026-10-05 12:00:00+00',
   answers: [
-    { senseId: 's1', type: 'multiple_choice', correct: true },
-    { senseId: 'sX', type: 'multiple_choice', correct: true },
+    { glossId: 's1', type: 'multiple_choice', correct: true },
+    { glossId: 'sX', type: 'multiple_choice', correct: true },
   ],
 };
 const ROWS: ProgressRow[] = DIMENSIONS.map((dimension) => ({
-  senseId: 's1',
+  glossId: 's1',
   dimension,
   level: 1,
   lastStepOn: null,
   lastWrongOn: null,
 }));
 const SNAPSHOT: SnapshotRead[] = DIMENSIONS.map((dimension) => ({
-  senseId: 's1',
+  glossId: 's1',
   dimension,
   levelBefore: 1,
   levelAfter: dimension === 'written_receptive' ? 2 : 1,
@@ -63,7 +63,7 @@ const SNAPSHOT: SnapshotRead[] = DIMENSIONS.map((dimension) => ({
 // Phase 23: written_receptive rose, and the badge over the three live written
 // dimensions did not: (2, 1, 1) still reads 1.
 const CHANGE = [
-  { senseId: 's1', form: 'word0', translation: 'right0', levelBefore: 1, levelAfter: 1, raised: ['written_receptive'] },
+  { glossId: 's1', form: 'word0', translation: 'right0', levelBefore: 1, levelAfter: 1, raised: ['written_receptive'] },
 ];
 
 function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null; rows?: ProgressRow[] }) {
@@ -73,6 +73,8 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     asked: [] as string[][],
     updated: [] as ProgressRow[][],
     snapshots: [] as unknown[][],
+    // Phase 31. The order of the share lock and the evidence read.
+    steps: [] as string[],
   };
   const session = stub<SessionRepo>({
     loadSession: async () => opts.record,
@@ -85,12 +87,16 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     findEnrollmentId: async () => 'e1',
   });
   const progress = stub<ProgressRepo>({
+    lockSessionGlosses: async () => {
+      calls.steps.push('lock');
+    },
     findSessionEvidence: async () => {
+      calls.steps.push('evidence');
       calls.evidence += 1;
       return opts.evidence === null ? undefined : (opts.evidence ?? EVIDENCE);
     },
     findRows: async (input) => {
-      calls.asked.push(input.senseIds);
+      calls.asked.push(input.glossIds);
       return opts.rows ?? ROWS;
     },
     updateRows: async (input) => {
@@ -124,10 +130,18 @@ describe('progress when a session ends', () => {
     expect(calls.completed).toBe(1);
     expect(calls.asked).toEqual([['s1', 'sX']]);
     expect(calls.updated).toEqual([
-      [{ senseId: 's1', dimension: 'written_receptive', level: 2, lastStepOn: DAY, lastWrongOn: null }],
+      [{ glossId: 's1', dimension: 'written_receptive', level: 2, lastStepOn: DAY, lastWrongOn: null }],
     ]);
     expect(calls.snapshots[0]).toHaveLength(5);
     expect(result.progress).toEqual(CHANGE);
+  });
+
+  // Phase 31 (spec D14). A merge of a practised gloss lands wholly before the
+  // evidence is read or wholly after the progress is written.
+  it('share-locks the practised glosses before it reads the evidence', async () => {
+    const { service, calls } = world({ record: record(9) });
+    await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
+    expect(calls.steps).toEqual(['lock', 'evidence']);
   });
 
   it('an answer that does not complete the session writes no progress', async () => {

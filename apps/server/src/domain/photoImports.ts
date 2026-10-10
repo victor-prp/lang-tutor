@@ -25,8 +25,8 @@ export type ImportItemState = {
   position: number;
   status: StoredItemStatus;
   options: PhotoImportOption[];
-  suggestedSenseId: string | null;
-  chosenSenseId: string | null;
+  suggestedGlossId: string | null;
+  chosenGlossId: string | null;
   ticked: boolean;
 };
 
@@ -41,49 +41,52 @@ export function isOpen(stored: StoredImportStatus, createdAt: Date, now: number)
   return stored !== 'saved' && stored !== 'discarded' && now - createdAt.getTime() < IMPORT_TTL_MS;
 }
 
-export type ItemUpdate = { ticked?: boolean; sense_id?: string };
-export type ItemUpdateRefusal = 'not_ready' | 'no_options' | 'unknown_sense';
+export type ItemUpdate = { ticked?: boolean; gloss_id?: string };
+export type ItemUpdateRefusal = 'not_ready' | 'no_options' | 'unknown_gloss';
 
 /** `not_ready` is a 409, because the row is still being looked up or failed.
  *  The other two are 400s. */
 export function refuseItemUpdate(item: ImportItemState, update: ItemUpdate): ItemUpdateRefusal | null {
   if (item.status !== 'ready') return 'not_ready';
-  if (update.sense_id !== undefined && !item.options.some((option) => option.sense_id === update.sense_id)) {
-    return 'unknown_sense';
+  if (update.gloss_id !== undefined && !item.options.some((option) => option.gloss_id === update.gloss_id)) {
+    return 'unknown_gloss';
   }
   if (update.ticked === true && item.options.length === 0) return 'no_options';
   return null;
 }
 
-/** The ticked rows' chosen senses, as today's save takes them. */
+/** The ticked rows' chosen glosses, as today's save takes them. */
 export function entriesToSave(items: readonly ImportItemState[]): VocabularyEntryInput[] {
   return items.flatMap((item) => {
-    if (item.status !== 'ready' || !item.ticked || item.chosenSenseId === null) return [];
-    const option = item.options.find((candidate) => candidate.sense_id === item.chosenSenseId);
-    return option ? [{ sense_id: option.sense_id, variant_id: option.variant_id }] : [];
+    if (item.status !== 'ready' || !item.ticked || item.chosenGlossId === null) return [];
+    const option = item.options.find((candidate) => candidate.gloss_id === item.chosenGlossId);
+    return option ? [{ gloss_id: option.gloss_id, variant_id: option.variant_id }] : [];
   });
 }
 
 /** Spec D14: how often the default was changed, among rows that had one. */
-export function reviewCounts(items: readonly ImportItemState[]): { unticked: number; changedSense: number } {
+export function reviewCounts(items: readonly ImportItemState[]): { unticked: number; changedGloss: number } {
   const offered = items.filter((item) => item.status === 'ready' && item.options.length > 0);
   return {
     unticked: offered.filter((item) => !item.ticked).length,
-    changedSense: offered.filter((item) => item.chosenSenseId !== item.suggestedSenseId).length,
+    changedGloss: offered.filter((item) => item.chosenGlossId !== item.suggestedGlossId).length,
   };
 }
 
-/** A lookup's saveable senses, in its order: the order a typed lookup lists. */
-export function optionsFrom(senses: readonly TranslationSense[]): PhotoImportOption[] {
-  return senses.flatMap((sense) =>
-    sense.sense_id && sense.variant_id
+/** A lookup's saveable cards, in its order: one option per gloss, the same card,
+ *  its key included when it has one (spec D15). */
+export function optionsFrom(cards: readonly TranslationSense[]): PhotoImportOption[] {
+  return cards.flatMap((card) =>
+    card.gloss_id && card.variant_id
       ? [
           {
-            sense_id: sense.sense_id,
-            variant_id: sense.variant_id,
-            translation: sense.translation,
-            ...(sense.part_of_speech ? { part_of_speech: sense.part_of_speech } : {}),
-            ...(sense.example ? { example: sense.example } : {}),
+            gloss_id: card.gloss_id,
+            variant_id: card.variant_id,
+            translation: card.translation,
+            ...(card.key ? { key: card.key } : {}),
+            ...(card.part_of_speech ? { part_of_speech: card.part_of_speech } : {}),
+            ...(card.examples ? { examples: card.examples } : {}),
+            ...(card.alternatives ? { alternatives: card.alternatives } : {}),
           },
         ]
       : [],

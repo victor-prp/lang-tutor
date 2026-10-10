@@ -35,8 +35,8 @@ export type PhotoImportItemRow = {
   status: StoredItemStatus;
   correctedForm: string | null;
   options: PhotoImportOption[];
-  suggestedSenseId: string | null;
-  chosenSenseId: string | null;
+  suggestedGlossId: string | null;
+  chosenGlossId: string | null;
   ticked: boolean;
   hebrewMismatch: boolean;
   reason: PhotoImportItemReason | null;
@@ -46,7 +46,7 @@ export type PhotoImportItemRow = {
 export type ItemResult = {
   correctedForm: string | null;
   options: PhotoImportOption[];
-  chosenSenseId: string | null;
+  chosenGlossId: string | null;
   ticked: boolean;
   hebrewMismatch: boolean;
   reason: PhotoImportItemReason | null;
@@ -68,8 +68,8 @@ const itemColumns = {
   status: photoImportItems.status,
   correctedForm: photoImportItems.correctedForm,
   options: photoImportItems.options,
-  suggestedSenseId: photoImportItems.suggestedSenseId,
-  chosenSenseId: photoImportItems.chosenSenseId,
+  suggestedGlossId: photoImportItems.suggestedGlossId,
+  chosenGlossId: photoImportItems.chosenGlossId,
   ticked: photoImportItems.ticked,
   hebrewMismatch: photoImportItems.hebrewMismatch,
   reason: photoImportItems.reason,
@@ -201,8 +201,8 @@ export function createPhotoImportRepo(tx: Tx) {
           status: 'ready',
           correctedForm: result.correctedForm,
           options: result.options,
-          suggestedSenseId: result.chosenSenseId,
-          chosenSenseId: result.chosenSenseId,
+          suggestedGlossId: result.chosenGlossId,
+          chosenGlossId: result.chosenGlossId,
           ticked: result.ticked,
           hebrewMismatch: result.hebrewMismatch,
           reason: result.reason,
@@ -227,14 +227,14 @@ export function createPhotoImportRepo(tx: Tx) {
     updateItem: async (
       importId: string,
       position: number,
-      update: { ticked?: boolean; chosenSenseId?: string },
+      update: { ticked?: boolean; chosenGlossId?: string },
     ): Promise<PhotoImportItemRow | null> => {
       if (!UUID_RE.test(importId)) return null;
       const [row] = await tx
         .update(photoImportItems)
         .set({
           ...(update.ticked !== undefined ? { ticked: update.ticked } : {}),
-          ...(update.chosenSenseId !== undefined ? { chosenSenseId: update.chosenSenseId } : {}),
+          ...(update.chosenGlossId !== undefined ? { chosenGlossId: update.chosenGlossId } : {}),
         })
         .where(itemKey(importId, position))
         .returning(itemColumns);

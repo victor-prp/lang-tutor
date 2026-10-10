@@ -103,16 +103,21 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
     const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
     const idOf = (code: string) => stored.find((s) => s.senseCode === code)!.senseId;
 
-    await withTx(t.db, (tx) =>
-      createDictRepo(tx).repairVariantRenderings({
-        variantId: stale.variantId, userLanguageCode: 'he',
-        senseVersion,
+    await withTx(t.db, async (tx) => {
+      const dict = createDictRepo(tx);
+      await dict.lockLexemes([stale.lexemeId]);
+      await dict.repairVariantRenderings({
+        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        senseVersion, lemmaForm: true,
         senses: [
           // The NEWLY learned sense placed FIRST — which is the whole point.
-          { senseId: idOf('cookery_writer'), rank: 0, translation: 'NEW-FIRST',  exampleSource: null, exampleTarget: null },
-          { senseId: idOf('kitchen_worker'), rank: 1, translation: 'NEW-SECOND', exampleSource: null, exampleTarget: null },
+          { senseId: idOf('cookery_writer'), rank: 0, translation: 'NEW-FIRST',  exampleSource: null, exampleTarget: null,
+            alternatives: [], gloss: 'NEW-FIRST',  glossAlternatives: [], definition: null },
+          { senseId: idOf('kitchen_worker'), rank: 1, translation: 'NEW-SECOND', exampleSource: null, exampleTarget: null,
+            alternatives: [], gloss: 'NEW-SECOND', glossAlternatives: [], definition: null },
         ],
-      }));
+      });
+    });
 
     // Appending at max(rank)+1 would have put NEW-FIRST last, which is exactly
     // the failure the spec's "Sense order belongs to the form" describes.
@@ -150,15 +155,19 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
         ] },
     ]);
 
-    await withTx(t.db, (tx) =>
-      createDictRepo(tx).repairVariantRenderings({
-        variantId: stale.variantId, userLanguageCode: 'he',
-        senseVersion,
+    await withTx(t.db, async (tx) => {
+      const dict = createDictRepo(tx);
+      await dict.lockLexemes([stale.lexemeId]);
+      await dict.repairVariantRenderings({
+        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        senseVersion, lemmaForm: true,
         senses: stored.map((sense, rank) => ({
           senseId: sense.senseId, rank, translation: `R-${rank}`,
+          alternatives: [], gloss: `R-${rank}`, glossAlternatives: [], definition: null,
           exampleSource: null, exampleTarget: null,
         })),
-      }));
+      });
+    });
 
     // Still stale, and it must be: this repair rendered two of the lexeme's
     // three senses. Re-reading the version inside the write would have stamped
@@ -176,15 +185,19 @@ describe('a form is re-rendered when its lexeme has learned more', () => {
 
     const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
 
-    await withTx(t.db, (tx) =>
-      createDictRepo(tx).repairVariantRenderings({
-        variantId: stale.variantId, userLanguageCode: 'he',
-        senseVersion,
+    await withTx(t.db, async (tx) => {
+      const dict = createDictRepo(tx);
+      await dict.lockLexemes([stale.lexemeId]);
+      await dict.repairVariantRenderings({
+        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        senseVersion, lemmaForm: true,
         senses: stored.map((sense, rank) => ({
           senseId: sense.senseId, rank, translation: `R-${rank}`,
+          alternatives: [], gloss: `R-${rank}`, glossAlternatives: [], definition: null,
           exampleSource: null, exampleTarget: null,
         })),
-      }));
+      });
+    });
 
     expect(
       await withTx(t.db, (tx) =>
@@ -230,17 +243,22 @@ describe('a repair may not drop a sense the form already renders', () => {
     // The flaky answer: `cookery_writer` came back as `translation: null`, so
     // the service filtered it out and this repair renders two of three — one of
     // them a sense the form is serving right now.
-    const write = withTx(t.db, (tx) =>
-      createDictRepo(tx).repairVariantRenderings({
-        variantId: stale.variantId, userLanguageCode: 'he',
-        senseVersion,
+    const write = withTx(t.db, async (tx) => {
+      const dict = createDictRepo(tx);
+      await dict.lockLexemes([stale.lexemeId]);
+      return dict.repairVariantRenderings({
+        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        senseVersion, lemmaForm: true,
         senses: [
           { senseId: idOf('kitchen_worker'), rank: 0, translation: 'R-0',
+            alternatives: [], gloss: 'R-0', glossAlternatives: [], definition: null,
             exampleSource: null, exampleTarget: null },
           { senseId: idOf('ships_cook'), rank: 1, translation: 'R-1',
+            alternatives: [], gloss: 'R-1', glossAlternatives: [], definition: null,
             exampleSource: null, exampleTarget: null },
         ],
-      }));
+      });
+    });
 
     await expect(write).rejects.toThrow(/would drop/);
 
@@ -268,15 +286,19 @@ describe('a repair may not drop a sense the form already renders', () => {
       createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
     const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
 
-    await withTx(t.db, (tx) =>
-      createDictRepo(tx).repairVariantRenderings({
-        variantId: stale.variantId, userLanguageCode: 'he',
-        senseVersion,
+    await withTx(t.db, async (tx) => {
+      const dict = createDictRepo(tx);
+      await dict.lockLexemes([stale.lexemeId]);
+      await dict.repairVariantRenderings({
+        variantId: stale.variantId, lexemeId: stale.lexemeId, userLanguageCode: 'he',
+        senseVersion, lemmaForm: true,
         senses: stored.map((sense, rank) => ({
           senseId: sense.senseId, rank, translation: `R-${rank}`,
+          alternatives: [], gloss: `R-${rank}`, glossAlternatives: [], definition: null,
           exampleSource: null, exampleTarget: null,
         })),
-      }));
+      });
+    });
 
     expect((await find('cook')).map((row) => row.translation)).toEqual(['R-0', 'R-1', 'R-2']);
   });

@@ -219,6 +219,36 @@ function writingRules(source: Language, target: Language): string[] {
 }
 
 /**
+ * Phase 31 (spec D4-D6). How each sense's target words are written: both calls
+ * ask for them in these words.
+ *
+ * The citation sentence's wording and place are measured, not style: the first
+ * call's third-language rule (below, in buildPrompt) is balanced on `pour`,
+ * English though French has the word, and this sentence tips it. Against the
+ * live API on 2026-10-10, with no `gloss_alternatives` in the first call: as
+ * written here, `pour` came back empty in none of 40 probe calls, five runs of
+ * the case alone and two full runs. Each variant, ten to thirty calls:
+ * "Give the translation's dictionary citation form in "gloss", uninflected."
+ * in the same place: 11 of 20 empty. Adding "as a dictionary lists it", or two
+ * examples of citation forms: 20 of 20. The same sentence moved before the
+ * other words: 0 of 30 empty, but `come` (it) then lost an example in 4 of 10
+ * and `cool` ran past the 30 s budget in 2 of 10. Run `pour`, `come` and
+ * `cool` several times before changing a word here.
+ */
+function glossRules(to: string): string[] {
+  return [
+    `Give each sense one main ${to} translation: never a list of words, and never a note in brackets; a note that tells one sense from another belongs in "definition". A translation may be several words where ${to} needs them for one meaning.`,
+    `List other ${to} words that render the sense equally well in "alternatives", in the same grammatical form as the translation.`,
+    `Give the citation form of the translation, uninflected, in "gloss".`,
+  ];
+}
+
+/** Phase 31 (spec D5). The rendering call's alone: the first call asks for no
+ *  citation alternatives, because with them in its response schema it answered
+ *  `pour` with no entries about half the time (see LlmSenseSchema). */
+const CITATION_ALTERNATIVES_RULE = `Give the alternatives' citation forms in "gloss_alternatives".`;
+
+/**
  * Phase 26 follow-up. A slash list answered as one form writes that form as a
  * dict_variants row under every lexeme in the answer: `decorate / decoration`
  * became a form of both, and a saved sense showed it in sessions. Routing it
@@ -269,7 +299,7 @@ export function buildPrompt(input: {
     '"break a leg" is a phrase, not a sentence.',
     'Translate an idiom by its meaning, never word by word.',
     'Return one entry per headword the input could belong to, most likely reading first,',
-    'at most 6. An inflected form belongs to its headword and carries the headword\'s',
+    'at most 3. An inflected form belongs to its headword and carries the headword\'s',
     'senses: "running" is one entry whose lemma is "run".',
     'Return one entry per headword AND part of speech: "book" is two entries, one noun and',
     'one verb. An inflected form belongs to the entry whose part of speech it realises:',
@@ -297,6 +327,14 @@ export function buildPrompt(input: {
     // translation") pushed the model to translate at any cost, and `дякую`
     // came back as תודה in 8 of 15 calls instead of empty (15 of 15 without it).
     `Write every sense's translation in ${to}.`,
+    // Phase 31 (spec D4-D6, D9). A card shows one target word, so the
+    // translation is one, and the rest go where they are shown as "also …" and
+    // accepted as answers. The citation forms are what groups senses into
+    // glosses; the definition is what a learner language with no renderings yet
+    // reconciles against. Before changing a word here, check it against every
+    // registered MockServer expectation (see the illustration note below).
+    ...glossRules(to),
+    `Define the sense in "definition": one short phrase in ${from}.`,
     // Phase 16 eval fix. The sentence rule below is the only one that names a
     // missing example, and `example` is optional in the schema because of it,
     // so a phrase that can stand alone as an utterance — `как дела?`, `break a
@@ -501,11 +539,15 @@ export function normalizeSenses(
   return senses.slice(0, 1).map((sense) => ({ translation: sense.translation }));
 }
 
-/** One stored sense as the reconciliation prompt needs it: a code and the gloss
- *  that names what it means. */
+/** One stored sense as the reconciliation prompt needs it: its code, its
+ *  definition, and the gloss that names what it means. Phase 31 (spec D9): the
+ *  gloss may be in another learner language when the learner's has none yet;
+ *  `glossLanguage` says which, and an absent one is the learner's. */
 export type StoredSense = {
   senseCode: string;
+  definition?: string | null;
   translation: string;
+  glossLanguage?: LanguageCode;
   exampleSource: string | null;
   exampleTarget: string | null;
 };
@@ -533,13 +575,16 @@ export function buildRenderingPrompt(input: {
   const from = source.name;
   const to = target.name;
 
-  // Each stored sense as `code — gloss — example`, one per line. The gloss is
-  // what the model matches on; the code is what it must give back unchanged
-  // when it decides the meaning is the same one.
+  // Each stored sense as `code — definition — gloss — example`, one per line.
+  // The definition, in the headword's language, is the handle every learner
+  // language shares (spec D9); a gloss in another learner language says so.
   const stored = input.storedSenses
     .map((sense) => {
+      const definition = sense.definition ? ` — ${sense.definition}` : '';
+      const other =
+        sense.glossLanguage && sense.glossLanguage !== input.to ? ` (in ${LANGUAGES[sense.glossLanguage].name})` : '';
       const example = sense.exampleSource ? ` — e.g. "${sense.exampleSource}"` : '';
-      return `- ${sense.senseCode} — ${sense.translation}${example}`;
+      return `- ${sense.senseCode}${definition} — ${sense.translation}${other}${example}`;
     })
     .join('\n');
 
@@ -547,8 +592,8 @@ export function buildRenderingPrompt(input: {
     learnerLine(source, target),
     'Return JSON only, matching the supplied schema.',
     `The ${from} headword "${input.lemma}" (${input.partOfSpeech}) is already in this`,
-    `dictionary with the senses below, each a sense_code and the ${to} gloss recorded for`,
-    'it:',
+    `dictionary with the senses below, each a sense_code, its definition in ${from} where one`,
+    `is recorded, and the gloss recorded for it, in ${to} unless another language is named:`,
     '',
     stored,
     '',
@@ -573,6 +618,11 @@ export function buildRenderingPrompt(input: {
     'translation: null rather than forcing a translation.',
     // Same rule as the first call — see buildPrompt.
     `Write every sense's translation in ${to}.`,
+    // Phase 31 (spec D4-D6, D9): the first call's rules, for the same reasons,
+    // and the citation alternatives, which only this call asks for.
+    ...glossRules(to),
+    CITATION_ALTERNATIVES_RULE,
+    `Give "definition", one short phrase in ${from}, for every sense whose line above has no definition, and for every new sense_code.`,
     // The same rule as the first call, for the same reason — see buildPrompt.
     // It belongs here too: this call writes examples for a form the first call
     // never saw, so without it a reconciled form reintroduces exactly the

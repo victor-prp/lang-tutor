@@ -166,4 +166,19 @@ describe('the dispatchers', () => {
     expect(parseJudge('sentence_translation', '{"verdict":"misspelled"}')).toBe('near_miss');
     expect(parseJudge('sentence_translation', '{"verdict":"other_sense"}')).toBeNull();
   });
+  it('hand the stored alternatives to a meaning card only (spec D13)', () => {
+    expect(ruleVerdict(MEANING_Q, 'רכב', ['רכב'])).toBe('exact');
+    expect(ruleVerdict(MEANING_Q, 'רכב')).toBeNull();
+    // A translation's reference is a sentence in the language being learned; the lists are words in the learner's.
+    expect(ruleVerdict(QUESTION, 'book', ['book'])).toBeNull();
+  });
+});
+
+describe('meaningRuleVerdict over the stored alternatives (spec D13)', () => {
+  it("takes the gloss's or the rendering's other words as the meaning, and still asks the judge about any other", () => {
+    expect(meaningRuleVerdict('מכונית', 'רכב', ['רכב', 'אוטו'])).toBe('exact');
+    expect(meaningRuleVerdict('מכונית', 'רֶכֶב', ['רכב'])).toBe('exact');
+    expect(meaningRuleVerdict('מכונית', 'משאית', ['רכב'])).toBeNull();
+    expect(meaningRuleVerdict('מכונית', 'מכונית', [])).toBe('exact');
+  });
 });

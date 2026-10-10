@@ -8,15 +8,16 @@ import type {
 } from '@lang-tutor/core/api';
 import { LIVE_DIMENSIONS } from '@lang-tutor/core/domain';
 
+import { RENDER_LEMMA } from '../domain/jobs';
 import {
   assemblePage,
   buildWordDetail,
   cursorAfter,
   decodeCursor,
   encodeCursor,
-  firstPerSense,
+  firstPerGloss,
 } from '../domain/vocabulary';
-import { EnrollmentNotFound, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
+import { EnrollmentNotFound, GlossLanguageMismatch, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
 import { authorize, authorizeEnrollment } from './access';
 import type { Repos, Transaction } from './transaction';
@@ -47,7 +48,7 @@ export function createVocabularyService({
   return {
     /**
      * All-or-nothing: every item is checked before anything is written, and the
-     * throw rolls the transaction back. A sense already saved is not an error —
+     * throw rolls the transaction back. A gloss already saved is not an error —
      * the insert's DO NOTHING keeps its first form — so a repeat answers 200
      * with the same ids.
      */
@@ -56,42 +57,67 @@ export function createVocabularyService({
       enrollmentId: string,
       entries: VocabularyEntryInput[],
     ): Promise<SaveVocabularyResponse> => {
-      const asked = firstPerSense(entries);
+      const asked = firstPerGloss(entries);
       let by: 'owner' | 'grantee' = 'owner';
       await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         by = await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.add' });
+        // Phase 31 (spec D14). Share-lock and resolve before anything is checked or
+        // written: a merge of these glosses runs wholly before this or wholly after.
+        const resolved = await repos.gloss.resolveGlosses(asked.map((entry) => entry.gloss_id));
+        const foreign = asked.find((entry) => {
+          const gloss = resolved.get(entry.gloss_id);
+          return gloss !== undefined && gloss.userLanguageCode !== enrolled.source_language;
+        });
+        if (foreign) {
+          logger.info({ event: 'vocabulary_entry_refused', enrollment_id: enrollmentId, gloss_id: foreign.gloss_id, reason: 'language' });
+          throw new GlossLanguageMismatch(foreign.gloss_id);
+        }
+        const toSave = firstPerGloss(
+          asked.map((entry) => ({ gloss_id: resolved.get(entry.gloss_id)?.id ?? entry.gloss_id, variant_id: entry.variant_id })),
+        );
         const saveable = await repos.vocabulary.findSaveable({
-          entries: asked.map((entry) => ({ senseId: entry.sense_id, variantId: entry.variant_id })),
+          entries: toSave.map((entry) => ({ glossId: entry.gloss_id, variantId: entry.variant_id })),
           targetLanguage: enrolled.target_language,
           sourceLanguage: enrolled.source_language,
         });
-        const passed = new Set(saveable.map((row) => `${row.senseId} ${row.variantId}`));
-        const refused = asked.find((entry) => !passed.has(`${entry.sense_id} ${entry.variant_id}`));
+        const passed = new Set(saveable.map((row) => `${row.glossId} ${row.variantId}`));
+        const refused = toSave.find((entry) => !passed.has(`${entry.gloss_id} ${entry.variant_id}`));
         if (refused) {
-          // The 400 body is fixed; the sense that caused it is only in the log.
+          // The 400 body is fixed; the gloss that caused it is only in the log.
           // Logged before the throw, inside the transaction, so it is recorded
           // even though the rollback follows. Logger has no warn level, so this
           // is an info event like every other.
           logger.info({
             event: 'vocabulary_entry_refused',
             enrollment_id: enrollmentId,
-            sense_id: refused.sense_id,
+            gloss_id: refused.gloss_id,
             variant_id: refused.variant_id,
           });
-          throw new InvalidVocabularyEntry(refused.sense_id);
+          throw new InvalidVocabularyEntry(refused.gloss_id);
         }
         await repos.vocabulary.insertEntries({ enrollmentId, addedByUserId: actorUserId, entries: saveable });
+        // Phase 31 (spec D12). A word whose lemma form this language has not
+        // rendered gets it rendered in the background, once (plan item 3).
+        const claimed = await repos.dict.claimLemmaRenders(
+          saveable.map((row) => ({ lexemeId: row.lexemeId, userLanguageCode: enrolled.source_language })),
+        );
+        for (const pair of claimed) {
+          await repos.jobs.enqueue(RENDER_LEMMA, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+        }
       });
       logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length, by });
-      return { saved_sense_ids: asked.map((entry) => entry.sense_id) };
+      return { saved_gloss_ids: asked.map((entry) => entry.gloss_id) };
     },
 
-    unsave: async (actorUserId: string, enrollmentId: string, senseId: string): Promise<void> => {
+    unsave: async (actorUserId: string, enrollmentId: string, glossId: string): Promise<void> => {
       await transaction(async (repos) => {
         const enrolled = await enrollmentOrThrow(repos, enrollmentId);
         await authorize(repos, logger, { actorUserId, enrollment: enrolled, permission: 'vocabulary.remove' });
-        await repos.vocabulary.deleteEntry({ enrollmentId, senseId });
+        // Phase 31 (spec D14). A card on screen since before a merge names the
+        // forwarded id: share-lock, resolve, and delete the survivor's entry.
+        const resolved = await repos.gloss.resolveGlosses([glossId]);
+        await repos.vocabulary.deleteEntry({ enrollmentId, glossId: resolved.get(glossId)?.id ?? glossId });
       });
       logger.info({ event: 'vocabulary_unsaved', enrollment_id: enrollmentId });
     },
@@ -165,7 +191,7 @@ export function createVocabularyService({
         });
         const progress = await repos.progress.findRows({
           enrollmentId,
-          senseIds: saved.map((entry) => entry.senseId),
+          glossIds: saved.map((entry) => entry.glossId),
           savedBy: null,
         });
         return buildWordDetail(lemma, lexemes, renderings, saved, progress);

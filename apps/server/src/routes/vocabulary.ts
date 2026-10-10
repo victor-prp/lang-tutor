@@ -28,21 +28,21 @@ const saveRoute = createRoute({
   method: 'post',
   path: BASE,
   tags: ['vocabulary'],
-  summary: "Save senses to an enrollment's word list",
+  summary: "Save glosses to an enrollment's word list",
   description:
-    'One entry per sense. Each item names the sense and the form (variant) it was saved from; ' +
-    'saving a sense that is already saved keeps its first form and is not an error. The batch is ' +
+    'One entry per gloss. Each item names the gloss and the form (variant) it was saved from; ' +
+    'saving a gloss that is already saved keeps its first form and is not an error. The batch is ' +
     'all-or-nothing.',
   request: {
     params: enrollmentParams,
     body: { required: true, content: { 'application/json': { schema: SaveVocabularyRequestSchema } } },
   },
   responses: {
-    200: json(SaveVocabularyResponseSchema, 'Every sense of the request is now saved.'),
+    200: json(SaveVocabularyResponseSchema, 'Every gloss of the request is now saved.'),
     400: json(
       ErrorSchema,
-      'The body did not validate, or an item cannot be saved here: its sense is not in the ' +
-        "enrollment's target language, or its form does not render it in the source language.",
+      'The body did not validate, or an item cannot be saved here: its gloss is not a word of the ' +
+        "enrollment's target language in its source language, or its form does not render the gloss.",
     ),
     404: NOT_ENROLLED,
     ...learnerResponses,
@@ -57,7 +57,7 @@ const listRoute = createRoute({
   summary: "List an enrollment's words",
   description:
     'One item per word: every lexeme with the same lemma is one word, with one level over all its ' +
-    'saved senses. Ordered newest save first; `level` keeps one level only. Keyset-paginated: pass ' +
+    'saved glosses. Ordered newest save first; `level` keeps one level only. Keyset-paginated: pass ' +
     '`next_cursor` back as `cursor`. A word saved into again moves to the top and is never served ' +
     'twice in one walk.',
   request: { params: enrollmentParams, query: VocabularyPageQuerySchema },
@@ -75,13 +75,13 @@ const listRoute = createRoute({
 
 const unsaveRoute = createRoute({
   method: 'delete',
-  path: `${BASE}/senses/{sense_id}`,
+  path: `${BASE}/glosses/{gloss_id}`,
   tags: ['vocabulary'],
-  summary: 'Unsave a sense',
-  description: 'Idempotent: unsaving a sense that is not saved also answers 204.',
-  request: { params: z.object({ id: z.string(), sense_id: z.string() }) },
+  summary: 'Unsave a gloss',
+  description: 'Idempotent: unsaving a gloss that is not saved also answers 204.',
+  request: { params: z.object({ id: z.string(), gloss_id: z.string() }) },
   responses: {
-    204: { description: 'The sense is not saved.' },
+    204: { description: 'The gloss is not saved.' },
     404: NOT_ENROLLED,
     ...learnerResponses,
     403: forbidden("the caller is not the list's owner, who alone may remove a word"),
@@ -148,9 +148,9 @@ export function createVocabularyRouter(vocabulary: VocabularyService) {
   });
 
   router.openapi(unsaveRoute, async (c) => {
-    const { id, sense_id } = c.req.valid('param');
+    const { id, gloss_id } = c.req.valid('param');
     try {
-      await vocabulary.unsave(c.var.actor, id, sense_id);
+      await vocabulary.unsave(c.var.actor, id, gloss_id);
       return c.body(null, 204);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);

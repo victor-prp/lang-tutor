@@ -15,7 +15,7 @@ import {
 } from './progress';
 
 const row = (over: Partial<ProgressRow> = {}): ProgressRow => ({
-  senseId: 's1',
+  glossId: 's1',
   dimension: 'written_receptive',
   level: 1,
   lastStepOn: null,
@@ -42,26 +42,26 @@ describe('daysBetween', () => {
 
 describe('evidenceFor', () => {
   it('reads a multiple-choice answer as uncapped written_receptive evidence', () => {
-    expect(evidenceFor({ senseId: 's1', type: 'multiple_choice', correct: true })).toEqual([right]);
-    expect(evidenceFor({ senseId: 's1', type: 'multiple_choice', correct: false })).toEqual([wrong]);
+    expect(evidenceFor({ glossId: 's1', type: 'multiple_choice', correct: true })).toEqual([right]);
+    expect(evidenceFor({ glossId: 's1', type: 'multiple_choice', correct: false })).toEqual([wrong]);
   });
 });
 
 // Phase 23: spec D6, every row.
 describe('evidenceFor, every type and verdict', () => {
   it.each([
-    [{ senseId: 's', type: 'multiple_choice', correct: true }, [['written_receptive', true, null]]],
-    [{ senseId: 's', type: 'multiple_choice', correct: false }, [['written_receptive', false, null]]],
+    [{ glossId: 's', type: 'multiple_choice', correct: true }, [['written_receptive', true, null]]],
+    [{ glossId: 's', type: 'multiple_choice', correct: false }, [['written_receptive', false, null]]],
     [
-      { senseId: 's', type: 'reverse_choice', correct: true },
+      { glossId: 's', type: 'reverse_choice', correct: true },
       [
         ['written_receptive', true, null],
         ['written_productive', true, 3],
       ],
     ],
-    [{ senseId: 's', type: 'reverse_choice', correct: false }, [['written_productive', false, 3]]],
+    [{ glossId: 's', type: 'reverse_choice', correct: false }, [['written_productive', false, 3]]],
     [
-      { senseId: 's', type: 'typed_translation', verdict: 'exact' },
+      { glossId: 's', type: 'typed_translation', verdict: 'exact' },
       [
         ['written_receptive', true, null],
         ['written_productive', true, null],
@@ -69,15 +69,15 @@ describe('evidenceFor, every type and verdict', () => {
       ],
     ],
     [
-      { senseId: 's', type: 'typed_translation', verdict: 'near_miss' },
+      { glossId: 's', type: 'typed_translation', verdict: 'near_miss' },
       [
         ['written_receptive', true, null],
         ['written_productive', true, null],
         ['spelling', false, null],
       ],
     ],
-    [{ senseId: 's', type: 'typed_translation', verdict: 'alternative' }, []],
-    [{ senseId: 's', type: 'typed_translation', verdict: 'wrong' }, [['written_productive', false, null]]],
+    [{ glossId: 's', type: 'typed_translation', verdict: 'alternative' }, []],
+    [{ glossId: 's', type: 'typed_translation', verdict: 'wrong' }, [['written_productive', false, null]]],
   ])('%o gives %j', (answer, expected) => {
     expect(
       evidenceFor(answer as AnsweredQuestion).map((piece) => [piece.dimension, piece.correct, piece.cap]),
@@ -152,10 +152,10 @@ describe('advance', () => {
   });
 });
 
-const fiveRows = (senseId: string, over: Partial<ProgressRow> = {}): ProgressRow[] =>
-  DIMENSIONS.map((dimension) => row({ senseId, dimension, ...over }));
-const answer = (senseId: string, correct: boolean): AnsweredQuestion => ({
-  senseId,
+const fiveRows = (glossId: string, over: Partial<ProgressRow> = {}): ProgressRow[] =>
+  DIMENSIONS.map((dimension) => row({ glossId, dimension, ...over }));
+const answer = (glossId: string, correct: boolean): AnsweredQuestion => ({
+  glossId,
   type: 'multiple_choice',
   correct,
 });
@@ -166,14 +166,14 @@ describe('evaluateSession', () => {
     const outcome = evaluateSession(rows, [answer('s1', true), answer('s1', true), answer('s2', true), answer('s2', false)], D);
 
     expect(outcome.changed).toEqual([
-      row({ senseId: 's1', level: 2, lastStepOn: D }),
-      row({ senseId: 's2', lastWrongOn: D }),
+      row({ glossId: 's1', level: 2, lastStepOn: D }),
+      row({ glossId: 's2', lastWrongOn: D }),
     ]);
     expect(outcome.snapshot).toHaveLength(10);
     expect(outcome.snapshot.filter((s) => s.levelAfter !== s.levelBefore)).toEqual([
-      { senseId: 's1', dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 },
+      { glossId: 's1', dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 },
     ]);
-    expect(outcome.snapshot.some((s) => s.senseId === 's3')).toBe(false);
+    expect(outcome.snapshot.some((s) => s.glossId === 's3')).toBe(false);
   });
 
   it('ignores answers about a sense that has no rows, an unsaved one', () => {
@@ -185,13 +185,13 @@ describe('evaluateSession', () => {
     const outcome = evaluateSession(
       rows,
       [
-        { senseId: 's1', type: 'read_aloud', verdict: 'skipped' },
-        { senseId: 's2', type: 'read_aloud', verdict: 'understood' },
+        { glossId: 's1', type: 'read_aloud', verdict: 'skipped' },
+        { glossId: 's2', type: 'read_aloud', verdict: 'understood' },
       ],
       D,
     );
-    expect(outcome.snapshot.some((s) => s.senseId === 's1')).toBe(false);
-    expect(outcome.snapshot.filter((s) => s.senseId === 's2')).toHaveLength(5);
+    expect(outcome.snapshot.some((s) => s.glossId === 's1')).toBe(false);
+    expect(outcome.snapshot.filter((s) => s.glossId === 's2')).toHaveLength(5);
   });
 });
 
@@ -201,7 +201,7 @@ describe('evaluateSession, reverse choice only', () => {
   it('carries written_productive to 3 and no further', () => {
     let rows = fiveRows('s1');
     for (const day of ['2026-10-01', '2026-10-02', '2026-10-09', '2026-10-30', '2026-11-30']) {
-      const outcome = evaluateSession(rows, [{ senseId: 's1', type: 'reverse_choice', correct: true }], day);
+      const outcome = evaluateSession(rows, [{ glossId: 's1', type: 'reverse_choice', correct: true }], day);
       const changed = new Map(outcome.changed.map((r) => [r.dimension, r]));
       rows = rows.map((r) => changed.get(r.dimension) ?? r);
     }
@@ -213,13 +213,13 @@ describe('evaluateSession, reverse choice only', () => {
 });
 
 describe('progressChanges', () => {
-  const read = (senseId: string, position: number, dimension: Dimension, before: number, after: number): SnapshotRead => ({
-    senseId,
+  const read = (glossId: string, position: number, dimension: Dimension, before: number, after: number): SnapshotRead => ({
+    glossId,
     dimension,
     levelBefore: before,
     levelAfter: after,
-    form: `form-${senseId}`,
-    translation: `tr-${senseId}`,
+    form: `form-${glossId}`,
+    translation: `tr-${glossId}`,
     position,
   });
 
@@ -229,9 +229,9 @@ describe('progressChanges', () => {
       ...DIMENSIONS.map((d) => read('s2', 0, d, 2, 2)),
     ];
     expect(progressChanges(rows, ['written_receptive'])).toEqual([
-      { senseId: 's2', form: 'form-s2', translation: 'tr-s2', levelBefore: 2, levelAfter: 2, raised: [] },
+      { glossId: 's2', form: 'form-s2', translation: 'tr-s2', levelBefore: 2, levelAfter: 2, raised: [] },
       {
-        senseId: 's1',
+        glossId: 's1',
         form: 'form-s1',
         translation: 'tr-s1',
         levelBefore: 1,
@@ -246,7 +246,7 @@ describe('progressChanges', () => {
     const rows = DIMENSIONS.map((d) => read('s1', 0, d, 1, d === 'written_receptive' || d === 'spoken_receptive' ? 2 : 1));
     expect(progressChanges(rows, ['written_receptive', 'written_productive', 'spelling'])).toEqual([
       {
-        senseId: 's1',
+        glossId: 's1',
         form: 'form-s1',
         translation: 'tr-s1',
         levelBefore: 1,
@@ -273,25 +273,25 @@ describe('evidenceFor, phase 24 (spec D12)', () => {
   const sense = 's1';
   const piece = (dimension: string, correct: boolean, cap: number | null = null) => ({ dimension, correct, cap });
   const cases: [AnsweredQuestion, Evidence[]][] = [
-    [{ senseId: sense, type: 'listen_choice', correct: true }, [piece('spoken_receptive', true)] as Evidence[]],
-    [{ senseId: sense, type: 'listen_choice', correct: false }, [piece('spoken_receptive', false)] as Evidence[]],
-    [{ senseId: sense, type: 'dictation', verdict: 'exact' }, [piece('spoken_receptive', true), piece('spelling', true)] as Evidence[]],
-    [{ senseId: sense, type: 'dictation', verdict: 'near_miss' }, [piece('spoken_receptive', true), piece('spelling', false)] as Evidence[]],
-    [{ senseId: sense, type: 'dictation', verdict: 'wrong' }, [piece('spoken_receptive', false)] as Evidence[]],
-    [{ senseId: sense, type: 'matching', correct: true }, [piece('written_receptive', true)] as Evidence[]],
-    [{ senseId: sense, type: 'matching', correct: false }, [piece('written_receptive', false)] as Evidence[]],
+    [{ glossId: sense, type: 'listen_choice', correct: true }, [piece('spoken_receptive', true)] as Evidence[]],
+    [{ glossId: sense, type: 'listen_choice', correct: false }, [piece('spoken_receptive', false)] as Evidence[]],
+    [{ glossId: sense, type: 'dictation', verdict: 'exact' }, [piece('spoken_receptive', true), piece('spelling', true)] as Evidence[]],
+    [{ glossId: sense, type: 'dictation', verdict: 'near_miss' }, [piece('spoken_receptive', true), piece('spelling', false)] as Evidence[]],
+    [{ glossId: sense, type: 'dictation', verdict: 'wrong' }, [piece('spoken_receptive', false)] as Evidence[]],
+    [{ glossId: sense, type: 'matching', correct: true }, [piece('written_receptive', true)] as Evidence[]],
+    [{ glossId: sense, type: 'matching', correct: false }, [piece('written_receptive', false)] as Evidence[]],
     [
-      { senseId: sense, type: 'letter_tiles', verdict: 'exact' },
+      { glossId: sense, type: 'letter_tiles', verdict: 'exact' },
       [piece('written_receptive', true), piece('written_productive', true, 3)] as Evidence[],
     ],
-    [{ senseId: sense, type: 'letter_tiles', verdict: 'wrong' }, [piece('written_productive', false, 3)] as Evidence[]],
+    [{ glossId: sense, type: 'letter_tiles', verdict: 'wrong' }, [piece('written_productive', false, 3)] as Evidence[]],
   ];
   it.each(cases)('%o', (answer, expected) => {
     expect(evidenceFor(answer)).toEqual(expected);
   });
 
   it('never credits a written dimension for listening: nothing crosses modalities', () => {
-    const dimensions = evidenceFor({ senseId: sense, type: 'dictation', verdict: 'exact' }).map((p) => p.dimension);
+    const dimensions = evidenceFor({ glossId: sense, type: 'dictation', verdict: 'exact' }).map((p) => p.dimension);
     expect(dimensions.filter((d) => d.startsWith('written'))).toEqual([]);
   });
 });
@@ -299,29 +299,29 @@ describe('evidenceFor, phase 24 (spec D12)', () => {
 describe('phase 25 evidence (spec D10)', () => {
   const s = 's1';
   it('reads aloud as spoken_productive capped at 2, crediting nothing below', () => {
-    expect(evidenceFor({ senseId: s, type: 'read_aloud', verdict: 'understood' })).toEqual([
+    expect(evidenceFor({ glossId: s, type: 'read_aloud', verdict: 'understood' })).toEqual([
       { dimension: 'spoken_productive', correct: true, cap: READ_ALOUD_MAX_LEVEL },
     ]);
-    expect(evidenceFor({ senseId: s, type: 'read_aloud', verdict: 'skipped' })).toEqual([]);
+    expect(evidenceFor({ glossId: s, type: 'read_aloud', verdict: 'skipped' })).toEqual([]);
   });
 
   it('says the translation as spoken_productive, credited down to spoken_receptive', () => {
-    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'understood' })).toEqual([
+    expect(evidenceFor({ glossId: s, type: 'say_translation', verdict: 'understood' })).toEqual([
       { dimension: 'spoken_receptive', correct: true, cap: null },
       { dimension: 'spoken_productive', correct: true, cap: null },
     ]);
-    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'gave_up' })).toEqual([
+    expect(evidenceFor({ glossId: s, type: 'say_translation', verdict: 'gave_up' })).toEqual([
       { dimension: 'spoken_productive', correct: false, cap: null },
     ]);
-    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'alternative' })).toEqual([]);
-    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'skipped' })).toEqual([]);
+    expect(evidenceFor({ glossId: s, type: 'say_translation', verdict: 'alternative' })).toEqual([]);
+    expect(evidenceFor({ glossId: s, type: 'say_translation', verdict: 'skipped' })).toEqual([]);
   });
 
   it('reads a typed answer to say the translation as a typed card', () => {
-    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'exact' })).toEqual(
-      evidenceFor({ senseId: s, type: 'typed_translation', verdict: 'exact' }),
+    expect(evidenceFor({ glossId: s, type: 'say_translation', verdict: 'exact' })).toEqual(
+      evidenceFor({ glossId: s, type: 'typed_translation', verdict: 'exact' }),
     );
-    expect(evidenceFor({ senseId: s, type: 'say_translation', verdict: 'wrong' })).toEqual([
+    expect(evidenceFor({ glossId: s, type: 'say_translation', verdict: 'wrong' })).toEqual([
       { dimension: 'written_productive', correct: false, cap: null },
     ]);
   });
@@ -345,7 +345,7 @@ describe('phase 25 evidence (spec D10)', () => {
 });
 
 describe('typed_meaning evidence (phase 27 D10)', () => {
-  const answer = (verdict: 'exact' | 'alternative' | 'wrong') => ({ senseId: 's1', type: 'typed_meaning' as const, verdict });
+  const answer = (verdict: 'exact' | 'alternative' | 'wrong') => ({ glossId: 's1', type: 'typed_meaning' as const, verdict });
   it('credits written_receptive, uncapped, for a right meaning', () => {
     expect(evidenceFor(answer('exact'))).toEqual([{ dimension: 'written_receptive', correct: true, cap: null }]);
   });
@@ -359,20 +359,20 @@ describe('typed_meaning evidence (phase 27 D10)', () => {
 
 describe('the sentence cards evidence (phase 27 D10)', () => {
   it('scores a cloze choice as a reversed card: right is receptive and capped productive, wrong is capped productive', () => {
-    expect(evidenceFor({ senseId: 's', type: 'cloze_choice', correct: true })).toEqual([
+    expect(evidenceFor({ glossId: 's', type: 'cloze_choice', correct: true })).toEqual([
       { dimension: 'written_receptive', correct: true, cap: null },
       { dimension: 'written_productive', correct: true, cap: 3 },
     ]);
-    expect(evidenceFor({ senseId: 's', type: 'cloze_choice', correct: false })).toEqual([
+    expect(evidenceFor({ glossId: 's', type: 'cloze_choice', correct: false })).toEqual([
       { dimension: 'written_productive', correct: false, cap: 3 },
     ]);
   });
   it.each(['cloze_typed', 'sentence_translation'] as const)('scores %s as a typed translation', (type) => {
     for (const verdict of ['exact', 'near_miss', 'alternative', 'wrong'] as const) {
-      expect(evidenceFor({ senseId: 's', type, verdict })).toEqual(
-        evidenceFor({ senseId: 's', type: 'typed_translation', verdict }),
+      expect(evidenceFor({ glossId: 's', type, verdict })).toEqual(
+        evidenceFor({ glossId: 's', type: 'typed_translation', verdict }),
       );
     }
-    expect(evidenceFor({ senseId: 's', type, verdict: 'exact' }).length).toBeGreaterThan(0);
+    expect(evidenceFor({ glossId: 's', type, verdict: 'exact' }).length).toBeGreaterThan(0);
   });
 });

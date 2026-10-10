@@ -102,14 +102,14 @@ describe('POST /api/translations', () => {
         {
           translation: 'סולם',
           part_of_speech: 'noun',
-          example: { source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' },
-          sense_id: expect.any(String),
+          examples: [{ source: 'She climbed the ladder.', target: 'היא טיפסה על הסולם.' }],
+          gloss_id: expect.any(String),
           variant_id: expect.any(String),
         },
         {
           translation: 'דירוג',
           part_of_speech: 'noun',
-          sense_id: expect.any(String),
+          gloss_id: expect.any(String),
           variant_id: expect.any(String),
         },
       ],
@@ -191,7 +191,7 @@ describe('POST /api/translations', () => {
     expect(kind).toBe('sentence');
     expect(senses).toHaveLength(1);
     expect(senses[0]).not.toHaveProperty('saved');
-    expect(senses[0]).not.toHaveProperty('sense_id');
+    expect(senses[0]).not.toHaveProperty('gloss_id');
     expect(senses[0]).not.toHaveProperty('variant_id');
   });
 

@@ -19,7 +19,7 @@ afterEach(async () => {
   await t.close();
 });
 
-const option = { sense_id: 's1', variant_id: 'v1', translation: 'חתול', part_of_speech: 'noun' };
+const option = { gloss_id: 's1', variant_id: 'v1', translation: 'חתול', part_of_speech: 'noun' };
 
 describe('photo import repository', () => {
   it('creates an import reading with its photo, and clears the photo on every transition', async () => {
@@ -69,7 +69,7 @@ describe('photo import repository', () => {
         { position: 1, text: 'casa', hebrew: null },
       ]),
     );
-    const result = { correctedForm: null, options: [option], chosenSenseId: 's1', ticked: true, hebrewMismatch: false, reason: null };
+    const result = { correctedForm: null, options: [option], chosenGlossId: 's1', ticked: true, hebrewMismatch: false, reason: null };
     expect(await repo((r) => r.writeItem(id, 0, result))).toBe(true);
     expect(await repo((r) => r.writeItem(id, 0, result))).toBe(false);
     expect(await repo((r) => r.markItemFailed(id, 0))).toBe(false);
@@ -77,7 +77,7 @@ describe('photo import repository', () => {
 
     const items = await repo((r) => r.listItems(id));
     expect(items.map((item) => [item.position, item.status])).toEqual([[0, 'ready'], [1, 'failed']]);
-    expect(items[0]).toMatchObject({ options: [option], suggestedSenseId: 's1', chosenSenseId: 's1', ticked: true });
+    expect(items[0]).toMatchObject({ options: [option], suggestedGlossId: 's1', chosenGlossId: 's1', ticked: true });
   });
 
   it('updates a tick and a sense, keeping the suggested sense', async () => {
@@ -86,15 +86,15 @@ describe('photo import repository', () => {
     await repo((r) =>
       r.writeItem(id, 0, {
         correctedForm: null,
-        options: [option, { ...option, sense_id: 's2', translation: 'גדה' }],
-        chosenSenseId: 's1',
+        options: [option, { ...option, gloss_id: 's2', translation: 'גדה' }],
+        chosenGlossId: 's1',
         ticked: true,
         hebrewMismatch: false,
         reason: null,
       }),
     );
-    const updated = await repo((r) => r.updateItem(id, 0, { chosenSenseId: 's2', ticked: false }));
-    expect(updated).toMatchObject({ chosenSenseId: 's2', suggestedSenseId: 's1', ticked: false });
+    const updated = await repo((r) => r.updateItem(id, 0, { chosenGlossId: 's2', ticked: false }));
+    expect(updated).toMatchObject({ chosenGlossId: 's2', suggestedGlossId: 's1', ticked: false });
     expect(await repo((r) => r.updateItem(id, 7, { ticked: false }))).toBeNull();
   });
 

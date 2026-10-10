@@ -5,7 +5,7 @@ import { answerTyped, generationStubFor, readCard, type Card } from './support/c
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { skipListSession, tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
-import { clearGemini, expectGemini, expectGeminiPayload } from './support/mockServer';
+import { clearGemini, expectGeminiMatching, expectGeminiPayload, userText } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { spoken, spokenAfter, withVoices } from './support/voices';
@@ -25,14 +25,17 @@ async function saveTenWords(request: APIRequestContext): Promise<string> {
   expect((await request.post(`${API_URL}/api/sessions/${seed.session_id}/skip`)).ok()).toBe(true);
   for (const word of BOARD_WORDS) {
     await clearGemini(request);
-    await expectGemini(request, word.payload);
+    // Phase 31. Matched on its own text, as lookUp's is: a background render-lemma
+    // job from an earlier spec's save may still be calling, and a stub that
+    // answered every call would write this word under that lemma.
+    await expectGeminiMatching(request, userText(word.form), word.payload);
     const lookup = await request.post(`${API_URL}/api/translations`, {
       data: { text: word.form, from: 'ru', to: 'he', enrollment_id: enrollmentId },
     });
     expect(lookup.ok(), await lookup.text()).toBe(true);
-    const { senses } = (await lookup.json()) as { senses: { sense_id?: string; variant_id?: string }[] };
+    const { senses } = (await lookup.json()) as { senses: { gloss_id?: string; variant_id?: string }[] };
     const saved = await request.post(`${API_URL}/api/enrollments/${enrollmentId}/vocabulary`, {
-      data: { entries: senses.map((sense) => ({ sense_id: sense.sense_id!, variant_id: sense.variant_id! })) },
+      data: { entries: senses.map((sense) => ({ gloss_id: sense.gloss_id!, variant_id: sense.variant_id! })) },
     });
     expect(saved.ok(), await saved.text()).toBe(true);
   }

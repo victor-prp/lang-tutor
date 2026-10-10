@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { QuestionType } from '@lang-tutor/core/domain';
+import { eq } from 'drizzle-orm';
 
+import { insertLexeme } from '../../support/dictRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 import { content, optionsFor } from '../../../src/db/content';
-import { dictSenses, dictVariants } from '../../../src/db/schema';
+import { dictGlosses, dictSenseGlosses, dictVariants } from '../../../src/db/schema';
 import { optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
+import { meaningRuleVerdict } from '../../../src/domain/judge';
 import { asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createQuestionRepo } from '../../../src/repo/questions';
@@ -70,7 +73,7 @@ describe('loadQuestionPool', () => {
 
 describe('phase 19', () => {
   it('the seed pool never contains enrollment-owned questions', async () => {
-    const [{ id: senseId }] = await t.db.select({ id: dictSenses.id }).from(dictSenses).limit(1);
+    const [{ id: glossId }] = await t.db.select({ id: dictGlosses.id }).from(dictGlosses).limit(1);
     const [{ id: variantId }] = await t.db.select({ id: dictVariants.id }).from(dictVariants).limit(1);
     await withTx(t.db, (tx) =>
       createQuestionRepo(tx).insertGeneratedQuestions({
@@ -80,7 +83,7 @@ describe('phase 19', () => {
         userLanguageCode: 'he',
         questions: [
           {
-            senseId,
+            glossId,
             variantId,
             form: 'x',
             lemma: 'x',
@@ -105,16 +108,16 @@ describe('phase 19', () => {
     const context = await withTx(t.db, (tx) =>
       createQuestionRepo(tx).findGenerationContext({
         picks: [
-          { senseId: run.senseIds[0], variantId: run.variantId },
-          { senseId: 'gone', variantId: 'gone' },
-          { senseId: book.senseIds[0], variantId: book.variantId },
+          { glossId: run.glossIds[0], senseId: run.senseIds[0], variantId: run.variantId },
+          { glossId: 'gone', senseId: 'gone', variantId: 'gone' },
+          { glossId: book.glossIds[0], senseId: book.senseIds[0], variantId: book.variantId },
         ],
         sourceLanguage: 'he',
       }),
     );
     expect(context).toEqual([
-      { senseId: run.senseIds[0], variantId: run.variantId, lexemeId: run.lexemeId, form: 'sprint', lemma: 'sprint', partOfSpeech: 'noun', translation: 'ריצה', example: null, exampleTranslation: null },
-      { senseId: book.senseIds[0], variantId: book.variantId, lexemeId: book.lexemeId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', translation: 'ספר', example: null, exampleTranslation: null },
+      { glossId: run.glossIds[0], senseId: run.senseIds[0], variantId: run.variantId, lexemeId: run.lexemeId, form: 'sprint', lemma: 'sprint', partOfSpeech: 'noun', translation: 'ריצה', example: null, exampleTranslation: null },
+      { glossId: book.glossIds[0], senseId: book.senseIds[0], variantId: book.variantId, lexemeId: book.lexemeId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', translation: 'ספר', example: null, exampleTranslation: null },
     ]);
   });
 
@@ -128,7 +131,7 @@ describe('phase 19', () => {
         userLanguageCode: 'he',
         questions: [
           {
-            senseId: word.senseIds[0],
+            glossId: word.glossIds[0],
             variantId: word.variantId,
             form: 'tome',
             lemma: 'tome',
@@ -150,7 +153,7 @@ describe('phase 19', () => {
 describe('phase 23: reversed and typed questions', () => {
   it('inserts a reversed and a typed question and returns them in shape', async () => {
     const word = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'tome', translations: ['ספר'] });
-    const base = { senseId: word.senseIds[0], variantId: word.variantId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', lexemeId: word.lexemeId };
+    const base = { glossId: word.glossIds[0], variantId: word.variantId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', lexemeId: word.lexemeId };
     const [reversed, typed] = await withTx(t.db, (tx) =>
       createQuestionRepo(tx).insertGeneratedQuestions({
         userId: 'u_1',
@@ -215,7 +218,7 @@ describe('phase 23: reversed and typed questions', () => {
             userLanguageCode: 'he',
             questions: [
               {
-                senseId: word.senseIds[0],
+                glossId: word.glossIds[0],
                 variantId: word.variantId,
                 form: 'tome',
                 lemma: 'tome',
@@ -243,7 +246,7 @@ describe('phase 25: speaking questions', () => {
       ['lantern', 'פנס'],
     ]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
-      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { questions } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -276,7 +279,7 @@ describe('phase 27: meaning recall', () => {
       example,
     });
     const asked = [
-      { senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'to book', lemma: 'reserve', translation: 'להזמין' },
+      { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'to book', lemma: 'reserve', translation: 'להזמין' },
     ];
     const { questions } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -313,6 +316,7 @@ describe('phase 27: meaning recall', () => {
         meaning: 'להזמין',
         example: 'Vorrei prenotare un tavolo.',
         exampleTranslation: 'הייתי רוצה להזמין שולחן.',
+        alternatives: [],
       });
       expect(await repo.findJudgeContext('00000000-0000-0000-0000-000000000000')).toBeUndefined();
       expect(await repo.findJudgeContext('not-a-uuid')).toBeUndefined();
@@ -326,6 +330,108 @@ describe('phase 27: meaning recall', () => {
         example: null,
         exampleTranslation: null,
       });
+    });
+  });
+});
+
+// The words the meaning judge's rule accepts besides the stored meaning (spec D13):
+// the asked form's rendering lists its sense's other words in its own inflection,
+// and the gloss holds its key and lists the others, in citation form.
+describe('phase 31: findJudgeContext reads the stored alternatives (spec D13)', () => {
+  /** A meaning card for `cars`, which renders מכוניות under the gloss מכונית. */
+  async function carsSession() {
+    const car = await insertLexeme(t.db, {
+      lemma: 'car',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'vehicle' }],
+      variants: [
+        {
+          form: 'cars',
+          kind: 'word',
+          entryRank: 0,
+          translations: [
+            { senseCode: 'vehicle', rank: 0, translation: 'מכוניות', gloss: 'מכונית', alternatives: ['רכבים'], exampleSource: null, exampleTarget: null },
+          ],
+        },
+      ],
+    });
+    await t.db.update(dictGlosses).set({ alternatives: ['רכב'] }).where(eq(dictGlosses.id, car.glossIds[0]));
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked: [{ glossId: car.glossIds[0], variantId: car.variantIds[0], lexemeId: car.lexemeId, form: 'cars', lemma: 'car', translation: 'מכוניות' }],
+      types: ['typed_meaning'],
+    });
+    return { questions, car };
+  }
+
+  it("gets the rendering's other words, then the gloss's key and other words", async () => {
+    const { questions } = await carsSession();
+    await withTx(t.db, async (tx) => {
+      expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
+        form: 'cars',
+        meaning: 'מכוניות',
+        alternatives: ['רכבים', 'מכונית', 'רכב'],
+      });
+    });
+  });
+
+  it("gets the gloss's alone when no rendering is found for the form", async () => {
+    // The rendering is a left join: a card whose gloss has no member rendered by its form still has its gloss's words.
+    const { questions, car } = await carsSession();
+    await t.db.delete(dictSenseGlosses).where(eq(dictSenseGlosses.glossId, car.glossIds[0]));
+    await withTx(t.db, async (tx) => {
+      expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({
+        example: null,
+        alternatives: ['מכונית', 'רכב'],
+      });
+    });
+  });
+
+  // The list and the word page head a saved word with its gloss key (D11), so
+  // a learner asked the meaning of `fingers` may well type that citation form.
+  it('takes the gloss key, so the citation form the list shows is right by rule, with no judge call', async () => {
+    const finger = await insertLexeme(t.db, {
+      lemma: 'finger',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'body_part' }],
+      variants: [
+        {
+          form: 'fingers',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'body_part', rank: 0, translation: 'אצבעות', gloss: 'אצבע', exampleSource: null, exampleTarget: null }],
+        },
+      ],
+    });
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked: [{ glossId: finger.glossIds[0], variantId: finger.variantIds[0], lexemeId: finger.lexemeId, form: 'fingers', lemma: 'finger', translation: 'אצבעות' }],
+      types: ['typed_meaning'],
+    });
+    await withTx(t.db, async (tx) => {
+      const context = await createQuestionRepo(tx).findJudgeContext(questions[0].id);
+      expect(context).toMatchObject({ form: 'fingers', meaning: 'אצבעות', alternatives: ['אצבע'] });
+      expect(meaningRuleVerdict(context!.meaning, 'אצבע', context!.alternatives)).toBe('exact');
+    });
+  });
+
+  // A key that is the meaning itself is not another word: a lemma form's card.
+  it('leaves out a key that is the stored meaning', async () => {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'car', translations: ['מכונית'] });
+    const { questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked: [{ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'car', lemma: 'car', translation: 'מכונית' }],
+      types: ['typed_meaning'],
+    });
+    await withTx(t.db, async (tx) => {
+      expect(await createQuestionRepo(tx).findJudgeContext(questions[0].id)).toMatchObject({ meaning: 'מכונית', alternatives: [] });
     });
   });
 });
@@ -354,7 +460,7 @@ describe('phase 27 Part B: sentence cards', () => {
     gapEnd?: number;
   };
   const sentenceRow = (word: Awaited<ReturnType<typeof savedWord>>, extra: SentenceExtra) => ({
-    senseId: word.senseIds[0],
+    glossId: word.glossIds[0],
     variantId: word.variantId,
     form: 'parlavamo',
     lemma: 'parlare',
@@ -453,8 +559,8 @@ describe('phase 27 Part B: sentence cards', () => {
     const context = await withTx(t.db, (tx) =>
       createQuestionRepo(tx).findGenerationContext({
         picks: [
-          { senseId: word.senseIds[0], variantId: word.variantId },
-          { senseId: bare.senseIds[0], variantId: bare.variantId },
+          { glossId: word.glossIds[0], senseId: word.senseIds[0], variantId: word.variantId },
+          { glossId: bare.glossIds[0], senseId: bare.senseIds[0], variantId: bare.variantId },
         ],
         sourceLanguage: 'he',
       }),
@@ -481,7 +587,7 @@ describe('phase 27 Part B: sentence cards', () => {
     const typedWith = (n: number): SentenceExtra => ({ type: 'cloze_typed', alternatives: [], sentence: `Ieri parlavamo ${n}.`, gapStart: 5, gapEnd: 14 });
     const translateWith = (n: number): SentenceExtra => ({ type: 'sentence_translation', sentence: `We parlavamo ${n}.`, sentenceTranslation: `דיברנו ${n}.`, gapStart: 3, gapEnd: 12 });
 
-    it('returns, per sense, newest first, only this enrollment, only the two types, at most limit', async () => {
+    it('returns, per gloss, newest first, only this enrollment, only the two types, at most limit', async () => {
       await seedUser(t.db, 'u_2');
       const word = await savedWord();
       const enrollmentId = enrollmentOf('u_1');
@@ -491,21 +597,21 @@ describe('phase 27 Part B: sentence cards', () => {
       // A cloze_choice shows the saved example, which is not a written sentence.
       await ask(word, enrollmentId, 'u_1', [{ type: 'cloze_choice', options: generatedOptions('parlavamo', ['a', 'b', 'c']), sentence: 'Ieri parlavamo 9.' }]);
       await ask(word, enrollmentId, 'u_1', [typedWith(3)]);
-      // Another learner's question for the same sense.
+      // Another learner's question for the same gloss.
       await ask(word, enrollmentOf('u_2'), 'u_2', [typedWith(7)]);
       await ask(word, enrollmentId, 'u_1', [translateWith(2)]);
 
-      const read = (limit: number, senseIds = [word.senseIds[0], 'other']) =>
-        withTx(t.db, (tx) => createQuestionRepo(tx).findRecentSentences({ enrollmentId, senseIds, limit }));
+      const read = (limit: number, glossIds = [word.glossIds[0], 'other']) =>
+        withTx(t.db, (tx) => createQuestionRepo(tx).findRecentSentences({ enrollmentId, glossIds, limit }));
 
       const recent = await read(2);
-      expect(recent.get(word.senseIds[0])).toEqual({
+      expect(recent.get(word.glossIds[0])).toEqual({
         cloze: ['Ieri parlavamo 3.', 'Ieri parlavamo 2.'],
         // The Hebrew sentence asked, not the reference that follows the answer.
         translate: ['דיברנו 2.', 'דיברנו 1.'],
       });
-      expect((await read(10)).get(word.senseIds[0])!.cloze).toEqual(['Ieri parlavamo 3.', 'Ieri parlavamo 2.', 'Ieri parlavamo 1.']);
-      // A sense with none has no entry; no senses is an empty map.
+      expect((await read(10)).get(word.glossIds[0])!.cloze).toEqual(['Ieri parlavamo 3.', 'Ieri parlavamo 2.', 'Ieri parlavamo 1.']);
+      // A gloss with none has no entry; no glosses is an empty map.
       expect(recent.has('other')).toBe(false);
       expect((await read(2, [])).size).toBe(0);
     });

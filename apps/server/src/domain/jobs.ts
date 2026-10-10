@@ -25,7 +25,15 @@ export const PREPARE_SESSION_EXPIRY_SECONDS = (2 * SESSION_GENERATION_BUDGET_MS)
 export const PrepareSessionPayloadSchema = z.object({
   session_id: z.string().min(1),
   picks: z
-    .array(z.object({ sense_id: z.string().min(1), variant_id: z.string().min(1) }))
+    .array(
+      z.object({
+        // Phase 31. The gloss practised, and the rendering its card is built
+        // from: one member sense in one form (spec D12).
+        gloss_id: z.string().min(1),
+        sense_id: z.string().min(1),
+        variant_id: z.string().min(1),
+      }),
+    )
     .min(1)
     .max(SESSION_LENGTH),
   // Phase 24 (spec D5, D3). Absent in a job enqueued before the deploy: such a
@@ -64,6 +72,32 @@ export const LookUpImportItemPayloadSchema = z.object({
 });
 export type LookUpImportItemPayload = z.infer<typeof LookUpImportItemPayloadSchema>;
 
+/** Phase 31 (spec D7). Merges the glosses of one lexeme and language whose
+ *  lemma-form rendering names another live gloss's key. */
+export const MERGE_GLOSSES = 'merge-glosses';
+/** One transaction of a few statements: a minute is generous. */
+export const MERGE_GLOSSES_EXPIRY_SECONDS = 60;
+
+export const MergeGlossesPayloadSchema = z.object({
+  lexeme_id: z.string().min(1),
+  user_language_code: z.string().min(1),
+});
+export type MergeGlossesPayload = z.infer<typeof MergeGlossesPayloadSchema>;
+
+/** Phase 31 (spec D12). Renders one lexeme's lemma form in one learner language. */
+export const RENDER_LEMMA = 'render-lemma';
+/** Where pg-boss moves a render-lemma job once its retries are spent or it
+ *  expired. pg-boss copies the job's `data` across unchanged. */
+export const RENDER_LEMMA_FAILED = 'render-lemma-failed';
+/** A lookup's two calls and a write, each call within the lookup's 25 s. */
+export const RENDER_LEMMA_EXPIRY_SECONDS = 180;
+
+export const RenderLemmaPayloadSchema = z.object({
+  lexeme_id: z.string().min(1),
+  user_language_code: z.string().min(1),
+});
+export type RenderLemmaPayload = z.infer<typeof RenderLemmaPayloadSchema>;
+
 export type JobPayloads = {
   [PREPARE_SESSION]: PrepareSessionPayload;
   [PREPARE_SESSION_FAILED]: PrepareSessionPayload;
@@ -71,5 +105,8 @@ export type JobPayloads = {
   [READ_PHOTO_FAILED]: ReadPhotoPayload;
   [LOOK_UP_IMPORT_ITEM]: LookUpImportItemPayload;
   [LOOK_UP_IMPORT_ITEM_FAILED]: LookUpImportItemPayload;
+  [MERGE_GLOSSES]: MergeGlossesPayload;
+  [RENDER_LEMMA]: RenderLemmaPayload;
+  [RENDER_LEMMA_FAILED]: RenderLemmaPayload;
 };
 export type JobName = keyof JobPayloads;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  createFakeJobRepo,
   createFakeLlmClient,
   createFakeLogger,
   createFakeTransaction,
@@ -31,6 +32,9 @@ function serviceWith(...replies: (string | Error)[]) {
 const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
   lexemeId: 't-1',
   senseId: 's-1',
+  // Phase 31. One gloss per sense, `g-<sense id>`, its key the translation,
+  // unless a test names them. Rows of one gloss are one card.
+  glossId: `g-${over.senseId ?? 's-1'}`,
   variantId: 'v-1',
   rank: 0,
   entryRank: 0,
@@ -39,6 +43,8 @@ const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
   translation,
   exampleTarget: null,
   kind: 'word',
+  glossKey: translation,
+  alternatives: [],
   ...over,
 });
 
@@ -112,6 +118,22 @@ describe('translate', () => {
     expect(result.senses).toEqual([{ translation: 'קראתי ספר.' }]);
   });
 
+  // Phase 31. Spec D4's one translation is a word sense's rule: a sentence's
+  // comma is part of it, and splitting there answered half the sentence.
+  it("answers a sentence whole, comma and all", async () => {
+    const text = 'I want to go home, but it is already late';
+    const { service } = serviceWith(
+      reply({
+        kind: 'sentence',
+        ...oneEntry(text, [{ translation: 'אני רוצה ללכת הביתה, אבל כבר מאוחר.', sense_code: 's' }], 'verb'),
+      }),
+    );
+
+    const result = await service.translate('u1', { text, from: 'en', to: 'he' });
+
+    expect(result.senses).toEqual([{ translation: 'אני רוצה ללכת הביתה, אבל כבר מאוחר.' }]);
+  });
+
   it('treats no content as an empty result rather than a failure', async () => {
     const { service, logger } = serviceWith('');
 
@@ -180,7 +202,7 @@ describe('translate', () => {
     const result = await service.translate('u1', { text: 'ladder', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(0);
-    expect(result.senses).toEqual([{ translation: 'סולם', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'סולם', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
     expect(logger.events[0]).toEqual({
       event: 'dict_cache_hit',
       from: 'en',
@@ -263,7 +285,7 @@ describe('translate', () => {
         ],
       }),
     );
-    dict.reread = [row('לראות'), row('מסור')];
+    dict.reread = [row('לראות'), row('מסור', { senseId: 's-2' })];
 
     const result = await service.translate('u1', { text: 'saw', from: 'en', to: 'he' });
 
@@ -346,7 +368,7 @@ describe('translate', () => {
   });
 
   it('logs what it persisted', async () => {
-    const { service, logger } = serviceWith(
+    const { service, logger, dict } = serviceWith(
       reply({
         kind: 'word',
         entries: [
@@ -358,13 +380,48 @@ describe('translate', () => {
         ],
       }),
     );
+    dict.glossCounts = { created: 1, joined: 0, members: 1 };
 
     await service.translate('u1', { text: 'saw', from: 'en', to: 'he' });
 
     expect(logger.events).toEqual([
       { event: 'dict_persisted', entry_count: 1, lexemes_created: 1 },
+      { event: 'dict_glosses_assigned', from: 'en', to: 'he', created: 1, joined: 0, members: 1 },
       { event: 'translated', from: 'en', to: 'he', kind: 'word', sense_count: 1 },
     ]);
+  });
+
+  // Phase 31 (spec D7). A write whose lemma form names another gloss's key asks
+  // for the merge job, in the write's own transaction (ADR 0007).
+  it('enqueues the merge job for a lexeme the write could not rename', async () => {
+    const llm = createFakeLlmClient(
+      reply({ kind: 'word', ...oneEntry('finger', [{ translation: 'אצבע', sense_code: 'digit' }]) }),
+    );
+    const dict = createFakeDictRepo();
+    dict.mergePairs = [{ lexemeId: 't-0', userLanguageCode: 'he' }];
+    const jobs = createFakeJobRepo();
+    const service = createTranslationService({ llm, transaction: createFakeTransaction({ dict, jobs }), logger: createFakeLogger() });
+
+    await service.translate('u1', { text: 'finger', from: 'en', to: 'he' });
+
+    expect(jobs.enqueued).toEqual([{ name: 'merge-glosses', data: { lexeme_id: 't-0', user_language_code: 'he' } }]);
+  });
+
+  it('enqueues the merge job for a lexeme a repair of the lemma form could not rename', async () => {
+    const llm = createFakeLlmClient(reply({ senses: [{ sense_code: 'digit', translation: 'אצבע' }] }));
+    const dict = createFakeDictRepo();
+    dict.hit = { finger: [row('אצבע', { lexemeId: 't-1' })] };
+    dict.stale = { finger: [{ lexemeId: 't-1', variantId: 'v-1', lemma: 'finger', partOfSpeech: 'noun' }] };
+    dict.stored['finger:noun'] = [{ senseCode: 'digit', translation: 'אצבע', exampleSource: null, exampleTarget: null }];
+    dict.repairVariantRenderings = async () => ({ needsMerge: true });
+    const jobs = createFakeJobRepo();
+    const logger = createFakeLogger();
+    const service = createTranslationService({ llm, transaction: createFakeTransaction({ dict, jobs }), logger });
+
+    await service.translate('u1', { text: 'finger', from: 'en', to: 'he' });
+
+    expect(logger.events.map((event) => event.event)).toContain('dict_repaired');
+    expect(jobs.enqueued).toEqual([{ name: 'merge-glosses', data: { lexeme_id: 't-1', user_language_code: 'he' } }]);
   });
 
   // After the extraction the hit log lives in `translate` and fires for every
@@ -549,6 +606,50 @@ describe('reconciliation', () => {
       newly_named: 1,
     });
   });
+
+  // Phase 31. The rendering call answers the first call's four fields too, and
+  // the write reads them off the entry reconcile builds (renderingOf). A null is
+  // how a provider spells "none" in this answer, so its key is left off.
+  it("carries the rendering call's alternatives, citation forms and definition into the write", async () => {
+    const { service, dict } = serviceWith(
+      oneVerb,
+      reply({
+        senses: [
+          {
+            sense_code: 'prepare_food',
+            translation: 'PAST-PREPARE',
+            alternatives: ['PAST-ALT'],
+            gloss: 'INF-PREPARE',
+            gloss_alternatives: ['INF-ALT'],
+            definition: 'DEF-PREPARE',
+          },
+          {
+            sense_code: 'fabricate_accounts',
+            translation: 'PAST-FABRICATE',
+            alternatives: null,
+            gloss: null,
+            gloss_alternatives: null,
+            definition: null,
+          },
+        ],
+      }),
+    );
+    dict.stored['cook:verb'] = storedReserve;
+
+    await service.translate('u1', { text: 'cooked', from: 'en', to: 'he' });
+
+    expect(dict.persisted[0].entries[0].senses).toEqual([
+      {
+        sense_code: 'prepare_food',
+        translation: 'PAST-PREPARE',
+        alternatives: ['PAST-ALT'],
+        gloss: 'INF-PREPARE',
+        gloss_alternatives: ['INF-ALT'],
+        definition: 'DEF-PREPARE',
+      },
+      { sense_code: 'fabricate_accounts', translation: 'PAST-FABRICATE' },
+    ]);
+  });
 });
 
 describe('the stored redirect', () => {
@@ -567,7 +668,7 @@ describe('the stored redirect', () => {
     const result = await service.translate('u1', { text: 'thruot', from: 'en', to: 'he' });
 
     expect(llm.calls).toHaveLength(0);
-    expect(result.senses).toEqual([{ translation: 'גרון', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'גרון', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
     expect(result.kind).toBe('word');
     // The typed string survives in exactly two places: the response's `text`, and
     // the dict_corrections row.
@@ -592,7 +693,7 @@ describe('the stored redirect', () => {
     const result = await service.translate('u1', { text: 'throat', from: 'en', to: 'he' });
 
     expect(result.correction).toBeUndefined();
-    expect(result.senses).toEqual([{ translation: 'גרון', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'גרון', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
     expect(logger.events.map((event) => event.event)).toContain('dict_cache_hit');
   });
 
@@ -855,7 +956,7 @@ describe('the corrected-form probe', () => {
     ]);
     // The target's stored answer, unchanged, plus the correction block.
     expect(result.kind).toBe('word');
-    expect(result.senses).toEqual([{ translation: 'הזמין', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'הזמין', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
     expect(result.correction).toEqual({ corrected_form: 'booked', alternatives: [] });
     expect(logger.events.map((event) => event.event)).toContain('dict_corrected');
   });
@@ -928,7 +1029,7 @@ describe('the corrected-form probe', () => {
     // The correction block names the HOP's target, and carries the hop's own
     // alternatives — the model's described `throte`, which nothing is written for.
     expect(result.correction).toEqual({ corrected_form: 'throat', alternatives: ['throaty'] });
-    expect(result.senses).toEqual([{ translation: 'גרון', sense_id: 's-1', variant_id: 'v-1' }]);
+    expect(result.senses).toEqual([{ translation: 'גרון', gloss_id: 'g-s-1', variant_id: 'v-1' }]);
   });
 
   // One hop, no further. A chain AND a truncated dictionary: accepted, and it

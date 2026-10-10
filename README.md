@@ -126,13 +126,14 @@ enforced.
 | [0008](docs/adr/adr-0008-access-grants.md) | Access grants — a role on a grant, one permission map, one check, the signed-in user as actor; `repo/grants.ts` is the only reader of the table |
 | [0009](docs/adr/adr-0009-sign-in.md) | Sign-in with Better Auth, behind one seam — one import site per app, the session becomes an actor in `routes/actor.ts` only, exact version pins |
 | [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
+| [0011](docs/adr/adr-0011-learner-unit-is-the-gloss.md) | The learner's unit is the gloss — the learner's tables hold gloss ids rather than sense ids, senses stay the dictionary's, and no table outside the `dict_` prefix references `dict_senses` or `dict_var_translations` |
 
-All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 = 62 checks, grep only, no deps,
+All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 = 64 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
 
-Twenty-three tables, all in `apps/server/src/db/schema.ts`, whose comments describe every
+Twenty-six tables, all in `apps/server/src/db/schema.ts`, whose comments describe every
 one. These are the ones the rest of this README leans on:
 
 | Table | Holds |
@@ -145,12 +146,21 @@ one. These are the ones the rest of this README leans on:
 | `users` | One row per learner: a unique `username` (a handle, not a login), a `display_name`, an `age`, and their native/target language pair. The id is the learner's `auth_users` id, taken from the session, never from a client. |
 | `dict_lexemes` | A **lexeme**: a lemma in a language together with its part of speech, unique per `(language_code, lemma, part_of_speech)`. `book` is therefore two rows — the noun and the verb — which is what lets `booked` attach to the verb alone. The id is issued by the database. |
 | `dict_variants` | A surface form somebody actually queried — `run`, `running`, `saw` — with the language it is in and `entry_rank`, this lexeme's position among the readings the model returned *for that form*. `UNIQUE(language_code, lower(form), entry_rank)` is both the lookup index and the guarantee that no two lexemes claim one reading. |
-| `dict_senses` | A distinct meaning of a lexeme, and nothing else: `UNIQUE(lexeme_id, sense_code)` is the whole row's purpose, because that code is how a later form's translations attach to senses the lexeme already has. A sense has no part of speech (that is on the lexeme), no rank and no example (those are on the translation, because they belong to the form that was typed). |
-| `dict_var_translations` | How **one form** renders **one sense** in a learner's native language — the translation, both halves of the example, and `rank` — one row per `(variant, sense, user_language_code)`. Keyed by the variant, so `booked` stores `הזמין` where `book` stores `להזמין` for the very same sense. |
-| `questions` | A generated multiple-choice question: a sense, a prompt variant, and its shuffled `options` (jsonb). |
+| `dict_senses` | A distinct meaning of a lexeme, and nothing else: `UNIQUE(lexeme_id, sense_code)` is the whole row's purpose, because that code is how a later form's translations attach to senses the lexeme already has. A sense has no part of speech (that is on the lexeme), no rank and no example (those are on the translation, because they belong to the form that was typed). Since phase 31 it has a `definition` in the headword's language, stored and never shown, which a learner language with no renderings yet reconciles against. |
+| `dict_var_translations` | How **one form** renders **one sense** in a learner's native language — the translation, both halves of the example, and `rank` — one row per `(variant, sense, user_language_code)`. Keyed by the variant, so `booked` stores `הזמין` where `book` stores `להזמין` for the very same sense. Since phase 31 the translation is one translation, never a list: the rest go to `alternatives`, in the form's inflection, and `gloss` holds the citation form the model gave this rendering. |
+| `dict_glosses` | A **gloss** (phase 31): one target word of one lexeme in one learner language — its `key`, the citation form, and its `alternatives`, also in citation form. `mouse` is one Hebrew gloss, עכבר, over two senses. A live key is unique per `(lexeme_id, user_language_code, gloss_key(key))`; a merged gloss stays, with `merged_into` naming the survivor, so an old id still resolves. |
+| `dict_sense_glosses` | Which gloss a sense belongs to, one row per `(sense, user_language_code)`. Written by the lookup and the repair, before the renderings; a row is only ever added, or moved to the survivor when its gloss is merged. |
+| `dict_lemma_renders` | Each `(lexeme, learner language)` whose lemma form a background job was asked to render, so a word saved from `fingers` gets `finger` rendered once rather than on every save and start. A render whose retries are spent gives its row back, so the next save or start asks again. |
+| `questions` | A generated multiple-choice question: a gloss, a prompt variant, and its shuffled `options` (jsonb). |
 | `sessions` | One learner's attempt at a ten-question run; `completed_at IS NULL` means still in progress. |
 | `session_questions` | The ten questions assigned to a session, in order, with the per-session option shuffle. |
 | `answers` | The option the learner picked for one `(session, position)`, constrained to reference a question actually assigned there. |
+
+Since phase 31 the learner's tables hold gloss ids rather than sense ids (ADR 0011): a saved
+word in `vocabulary_entries`, its levels in `gloss_progress` (once `sense_progress`), a
+session's results in `session_progress`, a card's `questions` row and a photo import's
+`photo_import_items`. So a learner who knows עכבר saves it once and has one level for it,
+whichever of `mouse`'s senses a card asked about.
 
 Since phase 10 the dictionary tables **are** written at request time: `POST
 /api/translations` writes every entry the model returned, and the next lookup of that
@@ -419,6 +429,34 @@ was used — `data/backfill/en-he/corrections.jsonl` by default, or beside a cus
 `--export-dict` path — and `dict:restore` reads it back the same way, reporting zero
 restored corrections rather than failing when the sibling file is absent.
 
+**A restore carries no gloss merge.** The file holds each form's renderings, not which
+gloss each sense belongs to, so a restore rebuilds the glosses from the renderings, form by
+form, and two glosses `dict:glosses:merge` had merged come back apart. After a restore, run
+the merge tool on the same database, tier 1 and then tier 2:
+
+```bash
+npm run dict:glosses:merge                            # tier 1: the merge job's signal, no model call
+npm run dict:glosses:merge -- --model                 # tier 2: one model call per headword with more than one gloss
+npm run dict:glosses:merge -- --model --definitions   # optional: also one per headword with an undefined sense
+```
+
+What a run costs: tier 1 calls no model. `--model` asks the model once per headword (a
+lexeme in one learner language) that has more than one gloss, which forms of one word they
+are, and fills those headwords' missing definitions on the way. `--definitions` extends
+tier 2 to every headword with a sense that has no definition, one call each; after phase
+31's migration that is nearly the whole dictionary, so it is optional, and without it such a
+definition waits for the next lookup whose model call names its sense (spec D9). Tier 2
+prints how many headwords it will ask before the first call, then one line per headword as
+it goes.
+
+Each run prints its plan and changes nothing; run it again with `--yes` added (`-- --yes`,
+`-- --model --yes`, `-- --model --definitions --yes`) to apply it. That run plans again
+before it applies, as `lane:clean` does, so it pays tier 2's calls a second time. Even the
+dry run migrates the database first, as `dict:restore` does. `--model` reads
+`GEMINI_API_KEY` and `GEMINI_MODEL` the way the server does; tier 1 needs neither. The tool
+runs wherever `DATABASE_URL` points, so a production restore (`docs/runbooks/hosting.md`) is
+followed by the same commands with `DATABASE_URL="$PROD_DB"` in front.
+
 > **`data/backfill/en-he/dictionary.jsonl` predates migration `0005` and will not restore.**
 > Its entries carry no `part_of_speech`, and the renderings it holds were stored per meaning
 > rather than per form, so restoring it would reintroduce both defects phase 12 fixes. The
@@ -544,7 +582,7 @@ npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container) — grep only, no deps, no database
+npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container, 0011 learner unit) — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go

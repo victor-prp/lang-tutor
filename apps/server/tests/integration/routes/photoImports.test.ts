@@ -67,7 +67,7 @@ async function word(lemma: string, translations: [string, string]): Promise<Phot
       },
     ],
   });
-  return ids.senseIds.map((senseId, index) => ({ sense_id: senseId, variant_id: ids.variantIds[0], translation: translations[index] }));
+  return ids.glossIds.map((glossId, index) => ({ gloss_id: glossId, variant_id: ids.variantIds[0], translation: translations[index] }));
 }
 
 describe('POST /api/enrollments/{id}/photo-imports', () => {
@@ -103,7 +103,7 @@ describe('GET', () => {
     const id = await seedPhotoImport(t.db, { enrollmentId: IT, status: 'read', items: [{ text: 'gatto', hebrew: 'חתול', options }] });
     const body = (await (await send('GET', `/photo-imports/${id}`)).json()) as { status: string; items: unknown[] };
     expect(body.status).toBe('ready');
-    expect(body.items).toEqual([expect.objectContaining({ text: 'gatto', hebrew: 'חתול', chosen_sense_id: options[0].sense_id, ticked: true })]);
+    expect(body.items).toEqual([expect.objectContaining({ text: 'gatto', hebrew: 'חתול', chosen_gloss_id: options[0].gloss_id, ticked: true })]);
     expect((await send('GET', '/photo-imports/00000000-0000-0000-0000-000000000000')).status).toBe(404);
     expect((await send('GET', '/photo-imports/nope')).status).toBe(404);
   });
@@ -113,12 +113,12 @@ describe('PATCH /api/photo-imports/{id}/items/{position}', () => {
   it('switches a sense and unticks', async () => {
     const options = await word('casa', ['בית', 'משפחה']);
     const id = await seedPhotoImport(t.db, { enrollmentId: IT, status: 'read', items: [{ text: 'casa', options }] });
-    const res = await send('PATCH', `/photo-imports/${id}/items/0`, { sense_id: options[1].sense_id, ticked: false });
+    const res = await send('PATCH', `/photo-imports/${id}/items/0`, { gloss_id: options[1].gloss_id, ticked: false });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ chosen_sense_id: options[1].sense_id, ticked: false });
+    expect(await res.json()).toMatchObject({ chosen_gloss_id: options[1].gloss_id, ticked: false });
   });
 
-  it('answers 400 for an empty body, a foreign sense, and a tick on a row with no options', async () => {
+  it('answers 400 for an empty body, a foreign gloss, and a tick on a row with no options', async () => {
     const options = await word('casa', ['בית', 'משפחה']);
     const id = await seedPhotoImport(t.db, {
       enrollmentId: IT,
@@ -126,7 +126,7 @@ describe('PATCH /api/photo-imports/{id}/items/{position}', () => {
       items: [{ text: 'casa', options }, { text: 'la casa è grande', status: 'ready', options: [] }],
     });
     expect((await send('PATCH', `/photo-imports/${id}/items/0`, {})).status).toBe(400);
-    expect((await send('PATCH', `/photo-imports/${id}/items/0`, { sense_id: 'other' })).status).toBe(400);
+    expect((await send('PATCH', `/photo-imports/${id}/items/0`, { gloss_id: 'other' })).status).toBe(400);
     expect((await send('PATCH', `/photo-imports/${id}/items/1`, { ticked: true })).status).toBe(400);
   });
 
@@ -154,12 +154,12 @@ describe('save and discard', () => {
       status: 'read',
       items: [{ text: 'casa', options: casa }, { text: 'gatto', options: gatto }],
     });
-    await send('PATCH', `/photo-imports/${id}/items/0`, { sense_id: casa[1].sense_id });
+    await send('PATCH', `/photo-imports/${id}/items/0`, { gloss_id: casa[1].gloss_id });
     await send('PATCH', `/photo-imports/${id}/items/1`, { ticked: false });
 
     const res = await send('POST', `/photo-imports/${id}/save`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ saved_sense_ids: [casa[1].sense_id] });
+    expect(await res.json()).toEqual({ saved_gloss_ids: [casa[1].gloss_id] });
     const page = await deps.vocabulary.listWords('u_1', IT, {});
     expect(page.items.map((item) => item.lemma)).toEqual(['casa']);
     // Phase 28. The list's owner photographed it, so the owner added it.
@@ -167,7 +167,7 @@ describe('save and discard', () => {
 
     const again = await send('POST', `/photo-imports/${id}/save`);
     expect(again.status).toBe(200);
-    expect(await again.json()).toEqual({ saved_sense_ids: [casa[1].sense_id] });
+    expect(await again.json()).toEqual({ saved_gloss_ids: [casa[1].gloss_id] });
     expect((await (await send('GET', `/enrollments/${IT}/photo-imports`)).json()) as unknown[]).toEqual([]);
   });
 
@@ -184,8 +184,8 @@ describe('save and discard', () => {
       send('POST', `/photo-imports/${id}/save`),
     ]);
     expect([200, 409]).toContain(patch.status);
-    const ids = ((await saved.json()) as { saved_sense_ids: string[] }).saved_sense_ids;
-    expect(ids.includes(casa[0].sense_id)).toBe(patch.status === 409);
+    const ids = ((await saved.json()) as { saved_gloss_ids: string[] }).saved_gloss_ids;
+    expect(ids.includes(casa[0].gloss_id)).toBe(patch.status === 409);
   });
 
   it('lets exactly one of a save and a discard win (Review Focus 3)', async () => {

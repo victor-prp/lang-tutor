@@ -1,10 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
-import { loadConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
+import { createGlossTools } from '../composition';
+import { loadConfig, loadGeminiConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
+import { createConsoleLogger } from '../logger';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, listLaneDatabases } from './lanes';
+import { requestLemmaRenders, requestLemmaRendersOnStart } from './lemmaRenders';
 import { runMigrations } from './migrate';
 import { createAuthRepo } from '../repo/auth';
 import { recomputeProgress } from './progressRecompute';
@@ -219,6 +222,67 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Phase 31 (plan item 3). On demand, after migrating: `npm run dict:lemmas:render`.
+    if (process.argv.includes('--render-lemmas')) {
+      const { requested } = await requestLemmaRenders(db);
+      console.log(`asked for ${requested} lemma renders in ${shownUrl}`);
+      return;
+    }
+
+    // Phase 31 (spec D7). `npm run dict:glosses:merge -- --model --definitions
+    // --yes`, every flag optional: prints the plan, and changes nothing without
+    // --yes, as lane:clean does; --yes plans again before applying, model calls
+    // included. Tier 1 calls no model. --model adds tier 2, one model call per
+    // headword with more than one gloss; --definitions extends it to every
+    // headword with a sense that has no definition, one call each. The
+    // database is named by its redacted URL only.
+    if (process.argv.includes('--merge-glosses')) {
+      const model = process.argv.includes('--model');
+      const definitions = process.argv.includes('--definitions');
+      if (definitions && !model) {
+        console.error('usage: npm run dict:glosses:merge -- --model --definitions [--yes]: --definitions extends the model tier');
+        process.exitCode = 1;
+        return;
+      }
+      const tools = createGlossTools({
+        db,
+        logger: createConsoleLogger(),
+        fetch: globalThis.fetch,
+        // Tier 1 needs no model, so the Gemini settings are read only for --model.
+        gemini: model ? loadGeminiConfig(process.env) : null,
+        timeoutMs: 60_000,
+      });
+      const plan = await tools.planMerges({
+        model,
+        definitions,
+        // What tier 2 is about to cost, then each headword as its call ends.
+        onProgress: (progress) =>
+          console.log(
+            progress.kind === 'asking'
+              ? `tier 2 asks the model about ${progress.headwords} headwords, one call each`
+              : `  ${progress.done}/${progress.of} ${progress.lemma}, ${progress.partOfSpeech} (${progress.userLanguageCode}): ` +
+                  (progress.skipped
+                    ? 'skipped, no readable answer'
+                    : `${progress.merges} merges, ${progress.definitions} definitions`),
+          ),
+      });
+      for (const merge of plan.merges) console.log(`tier ${merge.tier}  ${merge.lemma}: ${merge.otherKey} → ${merge.survivorKey}`);
+      for (const suggestion of plan.suggestions) console.log(`suggestion, not merged: ${suggestion.lemma}: ${suggestion.keys.join(' ↔ ')}`);
+      const counts = [`${plan.merges.length} merges`, `${plan.definitions.length} definitions to fill`];
+      // Tier 2's headwords whose call failed or was unreadable: logged above, asked again next run.
+      if (model) counts.push(`${plan.skipped} skipped (no readable model answer)`);
+      console.log(`${counts.join(', ')} in ${shownUrl}`);
+      if (!process.argv.includes('--yes')) {
+        // Every flag given, again: a bare --yes after a --model plan would apply tier 1 alone.
+        const flags = [...(model ? ['--model'] : []), ...(definitions ? ['--definitions'] : []), '--yes'];
+        console.log(`Nothing changed. Run again with -- ${flags.join(' ')} to apply.`);
+        return;
+      }
+      const done = await tools.applyMerges(plan);
+      console.log(`merged ${done.merged}, filled ${done.definitions} definitions in ${shownUrl}`);
+      return;
+    }
+
     if (importFrom) {
       const records = fromJsonl(readFileSync(importFrom, 'utf8'));
       console.log(`restoring ${records.length} forms from ${importFrom}`);
@@ -261,6 +325,17 @@ async function main(): Promise<void> {
       await seedContent(db);
       console.log(`migrated and seeded ${shownUrl}`);
     }
+
+    // Phase 31 (plan item 3). The words saved before glosses existed get their
+    // lemma form rendered: every deploy runs this command (ADR 0010), so this is
+    // the automatic path, while `--render-lemmas` asks on demand wherever
+    // DATABASE_URL points, production included since PR #113. A render whose
+    // retries are spent gives its claim back, so a later start asks again.
+    // Best-effort: everything above has committed, and a throw here would keep
+    // the image from starting the server. A failure is one line, with no address.
+    const lemmas = await requestLemmaRendersOnStart(db);
+    if ('failed' in lemmas) console.warn(`lemma renders not requested, the next start asks again: ${lemmas.failed}`);
+    else if (lemmas.requested > 0) console.log(`asked for ${lemmas.requested} lemma renders`);
   } finally {
     await close();
   }

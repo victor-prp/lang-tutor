@@ -142,11 +142,11 @@ describe('end', () => {
         },
       ],
     });
-    const entries = [{ sense_id: word.senseIds[0], variant_id: word.variantIds[0] }];
+    const entries = [{ gloss_id: word.glossIds[0], variant_id: word.variantIds[0] }];
     const grant = await inviteRussian();
     await grants.accept('u_student', grant.id);
     await expect(vocabulary.save('u_tutor', 'e_student_ru', entries)).resolves.toEqual({
-      saved_sense_ids: [word.senseIds[0]],
+      saved_gloss_ids: [word.glossIds[0]],
     });
     await grants.end('u_student', grant.id);
     await expect(vocabulary.save('u_tutor', 'e_student_ru', entries)).rejects.toBeInstanceOf(AccessDenied);

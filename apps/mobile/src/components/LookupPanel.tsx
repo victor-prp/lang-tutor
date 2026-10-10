@@ -14,6 +14,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { isVoiced } from '@/speech';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
+import { alsoLine } from '@/vocabulary';
 
 /** The lookup: direction, input, results and save buttons. The translate screen
  *  renders it for the learner; the student's words screen for a tutor. */
@@ -209,9 +210,9 @@ export function LookupPanel() {
               key={`${sense.translation}-${index}`}
               sense={sense}
               isTop={index === 0 && !isSentence}
-              saveState={sense.sense_id ? t.saved[sense.sense_id] : undefined}
-              pending={sense.sense_id ? Boolean(t.pending[sense.sense_id]) : false}
-              onToggle={() => sense.sense_id && t.toggleSave(sense.sense_id)}
+              saveState={sense.gloss_id ? t.saved[sense.gloss_id] : undefined}
+              pending={sense.gloss_id ? Boolean(t.pending[sense.gloss_id]) : false}
+              onToggle={() => sense.gloss_id && t.toggleSave(sense.gloss_id)}
               from={answerFrom}
               to={answerTo}
               tutor={t.mode === 'tutor'}
@@ -256,6 +257,7 @@ function SenseCard({
   const partOfSpeech = sense.part_of_speech
     ? strings.partOfSpeech(sense.part_of_speech)
     : undefined;
+  const also = alsoLine(sense.alternatives);
 
   return (
     <View testID="translate-sense" style={[styles.card, isTop && styles.cardTop]}>
@@ -270,26 +272,41 @@ function SenseCard({
         </Text>
         <SpeakButton text={sense.translation} language={to} testID="speak-translation" />
       </View>
+      {/* Phase 31 (spec D5, D11). The headline is the typed form's rendering. Beneath
+          it, when it says something else, the gloss's key, then the rendering's
+          other words. Both are in the translation's language. */}
+      {sense.key ? (
+        <Text testID="translate-key" style={[styles.partOfSpeech, { writingDirection: strings.textDirection(to) }]}>
+          {sense.key}
+        </Text>
+      ) : null}
+      {also ? (
+        <Text testID="translate-also" style={[styles.partOfSpeech, { writingDirection: strings.textDirection(to) }]}>
+          {also}
+        </Text>
+      ) : null}
       {partOfSpeech ? <Text style={styles.partOfSpeech}>{partOfSpeech}</Text> : null}
 
-      {sense.example ? (
-        <View style={styles.example}>
+      {/* Phase 31: one example per member sense. Two members may share a
+          sentence, so the React key adds the place. */}
+      {(sense.examples ?? []).map((example, index) => (
+        <View key={`${index}:${example.source}`} testID="translate-example" style={styles.example}>
           {/* An example is written in `from` then `to`; whichever half is in
               the language being learned speaks. */}
           <View style={styles.spoken}>
             <Text style={[styles.exampleSource, styles.grow, { writingDirection: strings.textDirection(from) }]}>
-              {sense.example.source}
+              {example.source}
             </Text>
-            <SpeakButton text={sense.example.source} language={from} testID="speak-example" />
+            <SpeakButton text={example.source} language={from} testID="speak-example" />
           </View>
           <View style={styles.spoken}>
             <Text style={[styles.exampleTarget, styles.grow, { writingDirection: strings.textDirection(to) }]}>
-              {sense.example.target}
+              {example.target}
             </Text>
-            <SpeakButton text={sense.example.target} language={to} testID="speak-example" />
+            <SpeakButton text={example.target} language={to} testID="speak-example" />
           </View>
         </View>
-      ) : null}
+      ))}
 
       {/* The card's own button saves it, not the card body: these cards are read
           and compared, and a tap-anywhere card turns reading into saving. */}

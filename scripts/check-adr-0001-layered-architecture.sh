@@ -41,7 +41,13 @@ r2_repo_types() { grep -rn "from '\.\./repo/" apps/server/src/services/ | grep -
 r3_imports() { grep -rnE "from '\.\./|from '(pg|drizzle-orm|hono)" apps/server/src/domain/; }
 r3_impure()  { grep -rn "Math.random\|Date.now\|new Date()" apps/server/src/domain/; }
 
-r4() { grep -rnE "from '\.\./(routes|services)/|from '\.\./(app|composition)'" apps/server/src/repo/ apps/server/src/db/; }
+# Phase 31: db/cli.ts, an entry point (R7), may import the composition root, and
+# nothing else under db/ may. The filter is anchored to that file AND to that
+# import, so db/cli.ts reaching routes/, services/ or app is still reported.
+r4() {
+  grep -rnE "from '\.\./(routes|services)/|from '\.\./(app|composition)'" apps/server/src/repo/ apps/server/src/db/ \
+    | grep -vE "^apps/server/src/db/cli\.ts:[0-9]+:.*from '\.\./composition'"
+}
 
 r5() { grep -nE "from './(db|repo)/|drizzle|from 'pg'" apps/server/src/app.ts | grep -vE '^[0-9]+:[[:space:]]*(//|\*)'; }
 

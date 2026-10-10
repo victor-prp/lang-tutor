@@ -9,8 +9,10 @@ import {
   dictVariants,
   dictLexemes,
   dictSenses,
+  dictGlosses,
+  dictSenseGlosses,
 } from '../../../src/db/schema';
-import { flattenEntries, mergeEntries, rowsToSenses } from '../../../src/domain/dictionary';
+import { flattenEntries, mergeEntries, rowsToCards } from '../../../src/domain/dictionary';
 import { assertSeedable, seedContent } from '../../../src/db/seed';
 import { createDictRepo } from '../../../src/repo/dictionary';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -43,13 +45,14 @@ describe('seedContent', () => {
         });
         // The ids are database identity, not recorded content: compare everything
         // else, and that each stored sense carries them.
-        const wire = rowsToSenses(rows);
+        const wire = rowsToCards(rows);
         for (const sense of wire) {
-          expect(sense.sense_id).toEqual(expect.any(String));
+          expect(sense.gloss_id).toEqual(expect.any(String));
           expect(sense.variant_id).toEqual(expect.any(String));
         }
-        expect(wire.map(({ sense_id, variant_id, ...rest }) => rest)).toEqual(
-          flattenEntries(mergeEntries(recorded[recordingKey(entry)].entries)),
+        const answer = recorded[recordingKey(entry)];
+        expect(wire.map(({ gloss_id, variant_id, ...rest }) => rest)).toEqual(
+          flattenEntries(mergeEntries(answer.entries), answer.kind),
         );
       }
     });
@@ -132,7 +135,7 @@ describe('seedContent', () => {
     expect(first.exampleTarget).toBe(recordedEntry.senses[0].example?.target ?? null);
   });
 
-  it('points every question at the sense and variant its own recording wrote', async () => {
+  it('points every question at the gloss and variant its own recording wrote', async () => {
     for (const entry of content) {
       const [question] = await t.db
         .select()
@@ -142,18 +145,25 @@ describe('seedContent', () => {
         .select()
         .from(dictVariants)
         .where(eq(dictVariants.id, question.promptVariantId));
-      const [sense] = await t.db
+      const [gloss] = await t.db
         .select()
-        .from(dictSenses)
-        .where(eq(dictSenses.id, question.senseId));
+        .from(dictGlosses)
+        .where(eq(dictGlosses.id, question.glossId));
+      const members = await t.db
+        .select({ senseCode: dictSenses.senseCode })
+        .from(dictSenseGlosses)
+        .innerJoin(dictSenses, eq(dictSenses.id, dictSenseGlosses.senseId))
+        .where(eq(dictSenseGlosses.glossId, question.glossId));
 
       expect(variant.form).toBe(entry.query);
-      expect(sense.lexemeId).toBe(variant.lexemeId);
+      expect(gloss.lexemeId).toBe(variant.lexemeId);
+      expect(gloss.userLanguageCode).toBe(entry.to);
       // A sense has no rank of its own now, so "entry 0, sense 0" is checked
       // where it is actually recorded: the sense_code the recording listed
-      // first, for the entry that variant belongs to.
-      const recordedEntry = recorded[recordingKey(entry)].entries.find(
-        (e) => e.senses[0].sense_code === sense.senseCode,
+      // first, for the entry that variant belongs to, is one of the gloss's
+      // members (phase 31).
+      const recordedEntry = recorded[recordingKey(entry)].entries.find((e) =>
+        members.some((member) => member.senseCode === e.senses[0].sense_code),
       );
       expect(recordedEntry).toBeDefined();
     }
@@ -176,15 +186,27 @@ describe('seedContent', () => {
         .select()
         .from(questions)
         .where(eq(questions.id, entry.question_id));
+      // Phase 31: the question names a gloss, so its sense is the member its
+      // own prompt variant renders.
       const [translation] = await t.db
-        .select()
+        .select({ translation: dictVarTranslations.translation })
         .from(dictVarTranslations)
+        .innerJoin(
+          dictSenseGlosses,
+          and(
+            eq(dictSenseGlosses.senseId, dictVarTranslations.senseId),
+            eq(dictSenseGlosses.userLanguageCode, dictVarTranslations.userLanguageCode),
+          ),
+        )
         .where(
           and(
-            eq(dictVarTranslations.senseId, question.senseId),
+            eq(dictSenseGlosses.glossId, question.glossId),
+            eq(dictVarTranslations.variantId, question.promptVariantId),
             eq(dictVarTranslations.userLanguageCode, entry.to),
           ),
-        );
+        )
+        .orderBy(dictVarTranslations.rank)
+        .limit(1);
 
       expect(translation.translation).toBe(correctAnswerFor(entry));
     }

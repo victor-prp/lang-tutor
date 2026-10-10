@@ -1,10 +1,14 @@
-import type { LlmEntry, TranslationKind, TranslationSense } from '@lang-tutor/core/api';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import type { TranslationKind, TranslationSense } from '@lang-tutor/core/api';
+import { normaliseGloss } from '@lang-tutor/core/domain';
+import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { RepairWouldDropSense } from '../errors';
 import {
   dictCorrections,
+  dictGlosses,
+  dictLemmaRenders,
+  dictSenseGlosses,
   dictVarTranslations,
   dictVariantRenderings,
   dictVariants,
@@ -13,19 +17,18 @@ import {
 } from '../db/schema';
 import {
   entriesToRows,
-  rowsToSenses,
+  rowsToCards,
   staleLexemes,
   type EntryRows,
+  type EntryToStore,
+  type Rendering,
   type SenseRow,
   type StaleLexeme,
 } from '../domain/dictionary';
-import { tidyAlternatives } from '../domain/translation';
-
-// The response cap. The database has no five limit — `see` keeps all its
-// senses and `saw` all of its — so this truncates the merge and nothing else,
-// which is why a later lookup of `see` returns its full entry rather than
-// whatever slice fitted alongside `saw`.
-const READ_LIMIT = 5;
+import { assignGlosses, type AnswerSense } from '../domain/glosses';
+import type { LanguageCode } from '../domain/languages';
+import type { GlossRendering } from '../domain/session';
+import { tidyAlternatives, type StoredSense } from '../domain/translation';
 
 export type PersistEntriesInput = {
   /** The queried string, already normalized. Stored as written; matched lower. */
@@ -33,7 +36,10 @@ export type PersistEntriesInput = {
   languageCode: string;
   userLanguageCode: string;
   kind: TranslationKind;
-  entries: LlmEntry[];
+  entries: EntryToStore[];
+  /** Phase 31 (spec D12). Where this write's entry ranks start: past the form's
+   *  existing headwords, for one added to a form already written. 0 otherwise. */
+  entryRankOffset?: number;
 };
 
 /** What one entry became. `senseIds` is this entry's senses in the order the
@@ -45,8 +51,20 @@ export type PersistedEntry = {
   lexemeId: string;
   variantId: string;
   senseIds: string[];
+  /** Phase 31. Each sense's gloss in this write's language, aligned with senseIds. */
+  glossIds: string[];
   created: boolean;
 };
+
+/** Phase 31. One lexeme in one learner language: what a merge, a lemma render
+ *  and its request are each about. */
+export type LexemeLanguage = { lexemeId: string; userLanguageCode: string };
+
+export type MergePair = LexemeLanguage;
+
+/** Phase 31 (spec D19). What a write's gloss step did, for `dict_glosses_assigned`:
+ *  glosses created, senses that joined an existing gloss, memberships written. */
+export type GlossCounts = { created: number; joined: number; members: number };
 
 /** One stored redirect. `typedForm` comes back as it was written, so a caller
  *  that echoes it shows the learner what the dictionary actually holds. */
@@ -56,14 +74,8 @@ export type CorrectionRow = {
   alternatives: string[];
 };
 
-/** One rendering a repair produces. Exported beside `PersistedEntry`. */
-export type RepairedRendering = {
-  senseId: string;
-  rank: number;
-  translation: string;
-  exampleSource: string | null;
-  exampleTarget: string | null;
-};
+/** One rendering a repair produces: what the lookup writes, by sense id. */
+export type RepairedRendering = Rendering & { senseId: string };
 
 export function createDictRepo(tx: Tx) {
   /**
@@ -83,6 +95,13 @@ export function createDictRepo(tx: Tx) {
    * senses in the same order — until its lexeme learns a new sense, at which
    * point that form re-renders and re-ranks once (phase 12, Task 13). This read is what
    * both the plain hit and the repaired hit answer with.
+   *
+   * Phase 31 (spec D15). It returns every rendering of the form, each with its
+   * gloss's key and its own alternatives: the database has no five limit, and
+   * neither has this read. The five-card cap is `rowsToCards`', applied after
+   * grouping, so a gloss can never hide behind a row cap (`stream`'s seven rows
+   * are five glosses and show five cards). A form renders a handful of senses
+   * per lexeme, so the read stays small.
    */
   const findSensesByForm = async (input: {
     form: string;
@@ -93,6 +112,7 @@ export function createDictRepo(tx: Tx) {
       .select({
         lexemeId: dictVariants.lexemeId,
         senseId: dictSenses.id,
+        glossId: dictSenseGlosses.glossId,
         variantId: dictVariants.id,
         rank: dictVarTranslations.rank,
         entryRank: dictVariants.entryRank,
@@ -104,6 +124,8 @@ export function createDictRepo(tx: Tx) {
         // back untyped from Drizzle; cast rather than widen `SenseRow.kind`,
         // since the write (below) already only ever stores a `TranslationKind`.
         kind: sql<TranslationKind>`${dictVariants.kind}`,
+        glossKey: dictGlosses.key,
+        alternatives: dictVarTranslations.alternatives,
       })
       .from(dictVariants)
       .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
@@ -116,6 +138,12 @@ export function createDictRepo(tx: Tx) {
           eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
         ),
       )
+      // Phase 31 (spec D8). Every rendered sense has its gloss in this language.
+      .innerJoin(
+        dictSenseGlosses,
+        and(eq(dictSenseGlosses.senseId, dictSenses.id), eq(dictSenseGlosses.userLanguageCode, input.userLanguageCode)),
+      )
+      .innerJoin(dictGlosses, eq(dictGlosses.id, dictSenseGlosses.glossId))
       .where(
         and(
           eq(dictVariants.languageCode, input.languageCode),
@@ -132,8 +160,7 @@ export function createDictRepo(tx: Tx) {
         asc(dictVarTranslations.rank),
         asc(dictVariants.entryRank),
         asc(dictVariants.lexemeId),
-      )
-      .limit(READ_LIMIT);
+      );
 
   /**
    * One indexed lookup on `(language_code, lower(typed_form))` — the same
@@ -277,55 +304,154 @@ export function createDictRepo(tx: Tx) {
    * `DISTINCT ON (s.id)` with `ORDER BY s.id, tr.rank, v.id` is what makes the
    * pick deterministic: the gloss from whichever form ranked that sense highest,
    * ties broken by variant id. The outer query then re-orders for the prompt.
+   *
+   * Phase 31 (spec D9). No longer INNER-joined to the learner's language: a
+   * language with no renderings yet still lists every sense, with its
+   * definition and a gloss in some other language, so the second call runs and
+   * reuses codes instead of the lexeme growing a second set of senses. The
+   * learner's own rendering is preferred where there is one.
    */
   const findSensesByLexeme = async (input: {
     lemma: string;
     partOfSpeech: string;
     languageCode: string;
     userLanguageCode: string;
-  }): Promise<
-    { senseId: string; senseCode: string; translation: string; exampleSource: string | null;
-      exampleTarget: string | null }[]
-  > => {
+  }): Promise<(StoredSense & { senseId: string })[]> => {
     // Drizzle has no first-class DISTINCT ON, so this is written as `sql`. The
     // shape is the invariant, not the spelling: one row per sense, chosen
     // deterministically, over ALL variants of the lexeme.
     const rows = await tx.execute<{
       sense_id: string;
       sense_code: string;
+      definition: string | null;
       translation: string;
+      gloss_language: string;
       example_source: string | null;
       example_target: string | null;
     }>(sql`
-      SELECT sense_id, sense_code, translation, example_source, example_target
+      SELECT sense_id, sense_code, definition, translation, gloss_language, example_source, example_target
       FROM (
         SELECT DISTINCT ON (s.id)
-               s.id          AS sense_id,
-               s.sense_code  AS sense_code,
+               s.id                   AS sense_id,
+               s.sense_code           AS sense_code,
+               s.definition           AS definition,
                tr.translation,
+               tr.user_language_code  AS gloss_language,
                tr.example_source,
                tr.example_target,
-               tr.rank       AS rank
+               tr.rank                AS rank,
+               (tr.user_language_code = ${input.userLanguageCode}) AS own
         FROM dict_lexemes l
         JOIN dict_senses s            ON s.lexeme_id = l.id
         JOIN dict_var_translations tr ON tr.sense_id = s.id
-                                     AND tr.user_language_code = ${input.userLanguageCode}
         JOIN dict_variants v          ON v.id = tr.variant_id
         WHERE l.language_code = ${input.languageCode}
           AND l.lemma = ${input.lemma}
           AND l.part_of_speech = ${input.partOfSpeech}
-        ORDER BY s.id, tr.rank, v.id
+        ORDER BY s.id, (tr.user_language_code = ${input.userLanguageCode}) DESC, tr.rank, tr.user_language_code, v.id
       ) picked
-      ORDER BY rank, sense_code
+      ORDER BY own DESC, rank, sense_code
     `);
 
     return rows.rows.map((row) => ({
       senseId: row.sense_id,
       senseCode: row.sense_code,
+      definition: row.definition,
       translation: row.translation,
+      glossLanguage: row.gloss_language as LanguageCode,
       exampleSource: row.example_source,
       exampleTarget: row.example_target,
     }));
+  };
+
+  /** Phase 31. FOR UPDATE on these lexemes, in id order, in one statement. The
+   *  lock step 1b of persistEntries takes, for the repair and the merge too, so a
+   *  lookup, a repair and a merge of one lexeme run one after the other (spec D7).
+   *  One ordered statement, for the deadlock reason step 1b gives. */
+  const lockLexemes = async (lexemeIds: string[]): Promise<void> => {
+    const ids = [...new Set(lexemeIds)];
+    if (ids.length === 0) return;
+    await tx
+      .select({ id: dictLexemes.id })
+      .from(dictLexemes)
+      .where(inArray(dictLexemes.id, ids))
+      .orderBy(asc(dictLexemes.id))
+      .for('update');
+  };
+
+  /**
+   * Phase 31 (spec D6, D8). The lexeme's live glosses and memberships in one
+   * language, the plan assignGlosses makes from them, and that plan written. Each
+   * sense's gloss id comes back in the order given. The caller holds
+   * lockLexemes, so no other writer of this lexeme is between the read and the
+   * writes.
+   */
+  const writeGlosses = async (input: {
+    lexemeId: string;
+    userLanguageCode: string;
+    lemmaForm: boolean;
+    senses: AnswerSense[];
+  }): Promise<{ glossIds: string[]; needsMerge: boolean; counts: GlossCounts }> => {
+    const glosses = await tx
+      .select({ id: dictGlosses.id, key: dictGlosses.key, alternatives: dictGlosses.alternatives })
+      .from(dictGlosses)
+      .where(
+        and(
+          eq(dictGlosses.lexemeId, input.lexemeId),
+          eq(dictGlosses.userLanguageCode, input.userLanguageCode),
+          isNull(dictGlosses.mergedInto),
+        ),
+      );
+    // Phase 31 (spec D7). A merged gloss's key still names its survivor: a sense
+    // that names it later joins the survivor rather than reviving the word.
+    const forwarded = await tx
+      .select({ key: dictGlosses.key, survivor: dictGlosses.mergedInto })
+      .from(dictGlosses)
+      .where(
+        and(
+          eq(dictGlosses.lexemeId, input.lexemeId),
+          eq(dictGlosses.userLanguageCode, input.userLanguageCode),
+          isNotNull(dictGlosses.mergedInto),
+        ),
+      );
+    const aliases = new Map(forwarded.map((row) => [normaliseGloss(row.key), row.survivor!]));
+    const members = await tx
+      .select({ senseId: dictSenseGlosses.senseId, glossId: dictSenseGlosses.glossId })
+      .from(dictSenseGlosses)
+      .where(
+        and(eq(dictSenseGlosses.lexemeId, input.lexemeId), eq(dictSenseGlosses.userLanguageCode, input.userLanguageCode)),
+      );
+    const memberships = new Map(members.map((member) => [member.senseId, member.glossId]));
+    const plan = assignGlosses({ senses: input.senses, lemmaForm: input.lemmaForm, glosses, memberships, aliases });
+
+    // Renames first, so a key a rename frees is free for a new gloss of this write.
+    for (const rename of plan.rename) {
+      await tx.update(dictGlosses).set({ key: rename.key }).where(eq(dictGlosses.id, rename.glossId));
+    }
+    for (const widened of plan.alternatives) {
+      await tx.update(dictGlosses).set({ alternatives: widened.alternatives }).where(eq(dictGlosses.id, widened.glossId));
+    }
+    const glossBySense = new Map(memberships);
+    const added: { senseId: string; glossId: string }[] = [...plan.join];
+    for (const fresh of plan.create) {
+      const [row] = await tx
+        .insert(dictGlosses)
+        .values({ lexemeId: input.lexemeId, userLanguageCode: input.userLanguageCode, key: fresh.key, alternatives: fresh.alternatives })
+        .returning({ id: dictGlosses.id });
+      for (const senseId of fresh.senseIds) added.push({ senseId, glossId: row.id });
+    }
+    for (const { senseId, glossId } of added) glossBySense.set(senseId, glossId);
+    if (added.length > 0) {
+      await tx
+        .insert(dictSenseGlosses)
+        .values(added.map(({ senseId, glossId }) => ({ senseId, glossId, lexemeId: input.lexemeId, userLanguageCode: input.userLanguageCode })))
+        .onConflictDoNothing({ target: [dictSenseGlosses.senseId, dictSenseGlosses.userLanguageCode] });
+    }
+    return {
+      glossIds: input.senses.map((sense) => glossBySense.get(sense.senseId)!),
+      needsMerge: plan.needsMerge,
+      counts: { created: plan.create.length, joined: plan.join.length, members: added.length },
+    };
   };
 
   /**
@@ -353,9 +479,11 @@ export function createDictRepo(tx: Tx) {
    */
   const persistEntries = async (
     input: PersistEntriesInput,
-  ): Promise<{ written: PersistedEntry[]; senses: TranslationSense[] }> => {
+  ): Promise<{ written: PersistedEntry[]; senses: TranslationSense[]; mergePairs: MergePair[]; glosses: GlossCounts }> => {
     const written: PersistedEntry[] = [];
-    const rows = entriesToRows(input.entries);
+    const mergePairs: MergePair[] = [];
+    const glosses: GlossCounts = { created: 0, joined: 0, members: 0 };
+    const rows = entriesToRows(input.entries, input.entryRankOffset);
 
     // 1 — every lexeme of this answer, which is the PAIR of a lemma and a part
     // of speech from phase 12 on. DO NOTHING returns no row, which is exactly
@@ -440,19 +568,7 @@ export function createDictRepo(tx: Tx) {
     // See `dictionary.stale.test.ts` for the tests that fail on the wrong
     // sense_version if this lock is removed, and with a 40P01 abort if it moves
     // back inside the loop.
-    if (resolved.length > 0) {
-      await tx
-        .select({ id: dictLexemes.id })
-        .from(dictLexemes)
-        .where(
-          inArray(
-            dictLexemes.id,
-            resolved.map((row) => row.lexemeId),
-          ),
-        )
-        .orderBy(asc(dictLexemes.id))
-        .for('update');
-    }
+    await lockLexemes(resolved.map((row) => row.lexemeId));
 
     for (const { entry, lexemeId, created } of resolved) {
       // 2 — the variant, for the queried form only. The conflict target is
@@ -496,7 +612,7 @@ export function createDictRepo(tx: Tx) {
         if (!id) {
           await tx
             .insert(dictSenses)
-            .values({ lexemeId, senseCode: sense.senseCode })
+            .values({ lexemeId, senseCode: sense.senseCode, definition: sense.definition })
             .onConflictDoNothing({ target: [dictSenses.lexemeId, dictSenses.senseCode] });
           const [row] = await tx
             .select({ id: dictSenses.id })
@@ -506,6 +622,14 @@ export function createDictRepo(tx: Tx) {
             );
           id = row.id;
           idByCode.set(sense.senseCode, id);
+        }
+        // Phase 31 (spec D9). The first definition offered stays: a sense written
+        // before the phase, or by a call that gave none, takes this one.
+        if (sense.definition !== null) {
+          await tx
+            .update(dictSenses)
+            .set({ definition: sense.definition })
+            .where(and(eq(dictSenses.id, id), isNull(dictSenses.definition)));
         }
         senseIds.push(id);
       }
@@ -532,6 +656,27 @@ export function createDictRepo(tx: Tx) {
         .from(dictLexemes)
         .where(eq(dictLexemes.id, lexemeId));
 
+      // 4c — Phase 31 (spec D6, D8). Every sense this form renders has a gloss in
+      // this language before its rendering is written: kept, joined by key, or
+      // new. Under 1b's lock, so two writers of one lexeme cannot both create a
+      // gloss for one key.
+      const { glossIds, needsMerge, counts } = await writeGlosses({
+        lexemeId,
+        userLanguageCode: input.userLanguageCode,
+        lemmaForm: input.form.toLowerCase() === entry.lemma.toLowerCase(),
+        senses: entry.senses.map((sense, i) => ({
+          senseId: senseIds[i],
+          translation: sense.translation,
+          gloss: sense.gloss,
+          glossAlternatives: sense.glossAlternatives,
+          alternatives: sense.alternatives,
+        })),
+      });
+      if (needsMerge) mergePairs.push({ lexemeId, userLanguageCode: input.userLanguageCode });
+      glosses.created += counts.created;
+      glosses.joined += counts.joined;
+      glosses.members += counts.members;
+
       // 5 — this variant's own renderings. DO NOTHING because a form written
       // twice keeps the answer it already gave: phase 10's guarantee, now held
       // at the level that actually decides an answer.
@@ -546,6 +691,8 @@ export function createDictRepo(tx: Tx) {
             // returned for it — `entriesToRows` set it from the array position.
             rank: sense.rank,
             translation: sense.translation,
+            gloss: sense.gloss,
+            alternatives: sense.alternatives,
             exampleSource: sense.exampleSource,
             exampleTarget: sense.exampleTarget,
           })),
@@ -582,6 +729,7 @@ export function createDictRepo(tx: Tx) {
         lexemeId,
         variantId: variant.id,
         senseIds,
+        glossIds,
         created,
       });
     }
@@ -591,7 +739,7 @@ export function createDictRepo(tx: Tx) {
     // was already a variant of another lexeme. One query, and the invariant
     // becomes literal: the response is always the same merge the next lookup
     // would produce.
-    const senses = rowsToSenses(
+    const senses = rowsToCards(
       await findSensesByForm({
         form: input.form,
         languageCode: input.languageCode,
@@ -599,7 +747,7 @@ export function createDictRepo(tx: Tx) {
       }),
     );
 
-    return { written, senses };
+    return { written, senses, mergePairs, glosses };
   };
 
   /**
@@ -654,10 +802,12 @@ export function createDictRepo(tx: Tx) {
    */
   const repairVariantRenderings = async (input: {
     variantId: string;
+    lexemeId: string;
     userLanguageCode: string;
     senseVersion: number;
+    lemmaForm: boolean;
     senses: RepairedRendering[];
-  }): Promise<void> => {
+  }): Promise<{ needsMerge: boolean }> => {
     const current = await tx
       .select({ senseId: dictVarTranslations.senseId })
       .from(dictVarTranslations)
@@ -671,6 +821,31 @@ export function createDictRepo(tx: Tx) {
     const keeping = new Set(input.senses.map((sense) => sense.senseId));
     const dropped = current.filter((row) => !keeping.has(row.senseId)).map((row) => row.senseId);
     if (dropped.length > 0) throw new RepairWouldDropSense(input.variantId, dropped);
+
+    // Phase 31 (spec D6, D8). The repair is the second writer of renderings: a
+    // sense it renders in this language for the first time gets its gloss here,
+    // and a repair of the lemma form may rename. The caller holds lockLexemes.
+    const { needsMerge } = await writeGlosses({
+      lexemeId: input.lexemeId,
+      userLanguageCode: input.userLanguageCode,
+      lemmaForm: input.lemmaForm,
+      senses: input.senses.map((sense) => ({
+        senseId: sense.senseId,
+        translation: sense.translation,
+        gloss: sense.gloss,
+        glossAlternatives: sense.glossAlternatives,
+        alternatives: sense.alternatives,
+      })),
+    });
+
+    // Phase 31 (spec D9). The rendering call names definitions too.
+    for (const sense of input.senses) {
+      if (sense.definition === null) continue;
+      await tx
+        .update(dictSenses)
+        .set({ definition: sense.definition })
+        .where(and(eq(dictSenses.id, sense.senseId), isNull(dictSenses.definition)));
+    }
 
     await tx
       .delete(dictVarTranslations)
@@ -688,6 +863,8 @@ export function createDictRepo(tx: Tx) {
         userLanguageCode: input.userLanguageCode,
         rank: sense.rank,
         translation: sense.translation,
+        gloss: sense.gloss,
+        alternatives: sense.alternatives,
         exampleSource: sense.exampleSource,
         exampleTarget: sense.exampleTarget,
       })),
@@ -704,16 +881,155 @@ export function createDictRepo(tx: Tx) {
         target: [dictVariantRenderings.variantId, dictVariantRenderings.userLanguageCode],
         set: { renderedSenseVersion: input.senseVersion },
       });
+
+    return { needsMerge };
+  };
+
+  /** Phase 31. One lexeme, for the render-lemma job. */
+  const findLexeme = async (
+    lexemeId: string,
+  ): Promise<{ id: string; lemma: string; languageCode: string; partOfSpeech: string } | undefined> => {
+    const [row] = await tx
+      .select({ id: dictLexemes.id, lemma: dictLexemes.lemma, languageCode: dictLexemes.languageCode, partOfSpeech: dictLexemes.partOfSpeech })
+      .from(dictLexemes)
+      .where(eq(dictLexemes.id, lexemeId));
+    return row;
+  };
+
+  /** Phase 31 (spec D12). Whether a lexeme's lemma form renders it in a language:
+   *  the condition the read and both claims below share. */
+  const LEMMA_RENDERED = (lexeme: SQL, language: SQL) => sql`
+    EXISTS (
+      SELECT 1 FROM dict_variants v
+      JOIN dict_lexemes l           ON l.id = v.lexeme_id
+      JOIN dict_var_translations tr ON tr.variant_id = v.id AND tr.user_language_code = ${language}
+      WHERE v.lexeme_id = ${lexeme} AND lower(v.form) = lower(l.lemma))`;
+
+  /** Phase 31 (spec D12). Whether this lexeme's lemma form renders it in a language. */
+  const hasLemmaRendering = async (input: LexemeLanguage): Promise<boolean> => {
+    const rows = await tx.execute<{ rendered: boolean }>(
+      sql`SELECT ${LEMMA_RENDERED(sql`${input.lexemeId}`, sql`${input.userLanguageCode}`)} AS rendered`,
+    );
+    return rows.rows[0].rendered;
+  };
+
+  /** Phase 31 (spec D12). The next free entry rank of a form, for a headword added
+   *  to a form already written: the safety net
+   *  dict_variants_form_entry_rank_key stays a safety net. */
+  const nextEntryRank = async (input: { form: string; languageCode: string }): Promise<number> => {
+    const rows = await tx.execute<{ next: number }>(sql`
+      SELECT coalesce(max(entry_rank) + 1, 0)::int AS next FROM dict_variants
+      WHERE language_code = ${input.languageCode} AND lower(form) = lower(${input.form})`);
+    return rows.rows[0].next;
+  };
+
+  /** Phase 31 (plan item 3). Records a render request for each pair whose lemma
+   *  form is unrendered and that was never requested, and returns those: the
+   *  ones to enqueue.
+   *
+   *  Both claims insert in key order, (lexeme_id, user_language_code), for
+   *  lockLexemes' reason: an insert waits on another transaction's uncommitted
+   *  row with the same key, so two saves that share two unrendered lexemes and
+   *  inserted them in opposite orders would each hold one key the other waits
+   *  for, a deadlock. In one order, the second waits for the first and then
+   *  finds the rows there. */
+  const claimLemmaRenders = async (pairs: LexemeLanguage[]): Promise<LexemeLanguage[]> => {
+    if (pairs.length === 0) return [];
+    const rows = await tx.execute<{ lexeme_id: string; user_language_code: string }>(sql`
+      INSERT INTO dict_lemma_renders (lexeme_id, user_language_code)
+      SELECT DISTINCT asked.lexeme_id, asked.user_language_code
+      FROM (VALUES ${sql.join(pairs.map((p) => sql`(${p.lexemeId}::text, ${p.userLanguageCode}::text)`), sql`, `)})
+           AS asked(lexeme_id, user_language_code)
+      WHERE NOT ${LEMMA_RENDERED(sql`asked.lexeme_id`, sql`asked.user_language_code`)}
+      ORDER BY asked.lexeme_id, asked.user_language_code
+      ON CONFLICT DO NOTHING
+      RETURNING lexeme_id, user_language_code`);
+    return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, userLanguageCode: row.user_language_code }));
+  };
+
+  /** The same for every saved gloss of every enrollment: the start-up backfill.
+   *  In key order, as claimLemmaRenders explains. */
+  const claimSavedLemmaRenders = async (): Promise<LexemeLanguage[]> => {
+    const rows = await tx.execute<{ lexeme_id: string; user_language_code: string }>(sql`
+      INSERT INTO dict_lemma_renders (lexeme_id, user_language_code)
+      SELECT DISTINCT ve.lexeme_id, e.source_language
+      FROM vocabulary_entries ve
+      JOIN enrollments e ON e.id = ve.enrollment_id
+      WHERE NOT ${LEMMA_RENDERED(sql`ve.lexeme_id`, sql`e.source_language`)}
+      ORDER BY ve.lexeme_id, e.source_language
+      ON CONFLICT DO NOTHING
+      RETURNING lexeme_id, user_language_code`);
+    return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, userLanguageCode: row.user_language_code }));
+  };
+
+  /** Phase 31 (spec D12). The render-lemma dead letter's write: gives back the
+   *  claim of a render whose retries are spent, so the next save or start asks
+   *  again. Whether there was a claim to give back. */
+  const releaseLemmaRender = async (input: LexemeLanguage): Promise<boolean> => {
+    const released = await tx
+      .delete(dictLemmaRenders)
+      .where(and(eq(dictLemmaRenders.lexemeId, input.lexemeId), eq(dictLemmaRenders.userLanguageCode, input.userLanguageCode)))
+      .returning({ lexemeId: dictLemmaRenders.lexemeId });
+    return released.length > 0;
+  };
+
+  /** Phase 31 (spec D12). Every rendering of every member of these glosses in one
+   *  learner language, with its form and its own citation form. */
+  const findGlossRenderings = async (input: { glossIds: string[]; userLanguageCode: string }): Promise<GlossRendering[]> => {
+    if (input.glossIds.length === 0) return [];
+    const rows = await tx.execute<{ gloss_id: string; sense_id: string; variant_id: string; form: string; gloss: string; rank: number }>(sql`
+      SELECT m.gloss_id, tr.sense_id, tr.variant_id, v.form, tr.gloss, tr.rank
+      FROM dict_sense_glosses m
+      JOIN dict_var_translations tr ON tr.sense_id = m.sense_id AND tr.user_language_code = m.user_language_code
+      JOIN dict_variants v          ON v.id = tr.variant_id
+      WHERE m.gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
+        AND m.user_language_code = ${input.userLanguageCode}`);
+    return rows.rows.map((row) => ({
+      glossId: row.gloss_id,
+      senseId: row.sense_id,
+      variantId: row.variant_id,
+      form: row.form,
+      gloss: row.gloss,
+      rank: row.rank,
+    }));
+  };
+
+  /** Phase 31 (spec D18). For each of these glosses, the lemmas of the other
+   *  headwords of its language pair whose live gloss has the same key: `order`
+   *  beside `book` under להזמין. Through dict_glosses_language_key_idx. */
+  const findSiblings = async (input: { glossIds: string[] }): Promise<{ glossId: string; lemma: string }[]> => {
+    if (input.glossIds.length === 0) return [];
+    const rows = await tx.execute<{ gloss_id: string; lemma: string }>(sql`
+      SELECT DISTINCT p.id AS gloss_id, l2.lemma
+      FROM dict_glosses p
+      JOIN dict_lexemes l1 ON l1.id = p.lexeme_id
+      JOIN dict_glosses s  ON s.user_language_code = p.user_language_code
+                          AND gloss_key(s.key) = gloss_key(p.key)
+                          AND s.lexeme_id <> p.lexeme_id
+                          AND s.merged_into IS NULL
+      JOIN dict_lexemes l2 ON l2.id = s.lexeme_id AND l2.language_code = l1.language_code
+      WHERE p.id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
+      ORDER BY 1, 2`);
+    return rows.rows.map((row) => ({ glossId: row.gloss_id, lemma: row.lemma }));
   };
 
   return {
+    claimLemmaRenders,
+    claimSavedLemmaRenders,
     findCorrectionByForm,
+    findGlossRenderings,
+    findLexeme,
     findSenseVersion,
     findSensesByForm,
     findSensesByLexeme,
+    findSiblings,
     findStaleLexemesByForm,
+    hasLemmaRendering,
+    lockLexemes,
+    nextEntryRank,
     persistCorrection,
     persistEntries,
+    releaseLemmaRender,
     repairVariantRenderings,
   };
 }

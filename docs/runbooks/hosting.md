@@ -91,6 +91,21 @@ proves before the next one starts.
    dictionary starts empty and fills as words are looked up. `DATABASE_URL="$PROD_DB" npm run
    dict:restore` migrates, then loads it in about two minutes, and a rerun is harmless. The next
    container start re-stamps the database comment the restore wrote from your laptop's lane.
+
+   A restore carries no gloss merge: it rebuilds the glosses from the renderings, so follow it
+   with the merge tool, tier 1 and then tier 2 (README, *Backing the dictionary up*):
+
+   ```bash
+   DATABASE_URL="$PROD_DB" npm run dict:glosses:merge               # tier 1, no model call
+   DATABASE_URL="$PROD_DB" npm run dict:glosses:merge -- --model    # tier 2, one call per headword with more than one gloss
+   ```
+
+   Each prints its plan and changes nothing until run again with `--yes` added (`-- --yes`,
+   `-- --model --yes`); that run plans again before applying, tier 2's calls included. Tier 2
+   prints how many headwords it will ask before the first call, then one line per headword.
+   Adding `--definitions` to tier 2 is optional: it also asks about every headword with a
+   sense that has no definition, one call each, which after phase 31's migration is nearly
+   the whole dictionary. Even the dry run migrates the database first, as `dict:restore` does.
 10. **The first release.** Merge, pull, test master locally, then
     `tag=v$(date +%Y.%m.%d); git tag "$tag" && git push origin "$tag"`. The Release workflow waits for CI,
     builds, pushes, applies, and checks `/health` on the service's default address (the domain
@@ -126,6 +141,11 @@ which also works by hand, as does Actions → Release → Run workflow → pick 
 the workflow applies master's `terraform/`, so the domain, the budget and every secret stay as they
 are now. Rolling back past a
 migration does not undo the migration; ADR 0010 says why additive migrations make that safe.
+
+Phase 31's release is the exception: its migrations rename `sense_progress` to `gloss_progress`
+and drop the learner tables' `sense_id` columns, so an image from before it cannot read the
+migrated database. Never roll back past the first release that carries phase 31; fix forward
+with a new tag instead.
 
 ## Reading the container's log
 

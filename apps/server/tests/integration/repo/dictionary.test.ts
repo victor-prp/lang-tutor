@@ -77,7 +77,7 @@ describe('findSensesByForm', () => {
     ]);
   });
 
-  it('caps the read at five even though the database stores every sense', async () => {
+  it("reads every rendering of the form: the card cap is the service's, after grouping (phase 31)", async () => {
     await insertLexeme(t.db, {
       lemma: 'light',
       languageCode: 'en',
@@ -87,7 +87,7 @@ describe('findSensesByForm', () => {
       variants: [variant('light', [0, 1, 2, 3, 4, 5, 6].map((n) => `t${n}`))],
     });
 
-    expect(await find('light')).toHaveLength(5);
+    expect(await find('light')).toHaveLength(7);
   });
 
   it('carries the part of speech and both halves of the example', async () => {
@@ -109,6 +109,7 @@ describe('findSensesByForm', () => {
       {
         lexemeId: expect.any(String),
         senseId: expect.any(String),
+        glossId: expect.any(String),
         variantId: expect.any(String),
         rank: 0,
         entryRank: 0,
@@ -117,7 +118,44 @@ describe('findSensesByForm', () => {
         translation: 'סולם',
         exampleTarget: 'היא טיפסה על הסולם.',
         kind: 'word',
+        glossKey: 'סולם',
+        alternatives: [],
       },
+    ]);
+  });
+
+  // The rendering here records a drifted citation form (spec D6), so only the
+  // gloss's own key can be read as `glossKey`.
+  it("carries the gloss's key, not the rendering's citation form, and the rendering's alternatives (phase 31)", async () => {
+    await insertLexeme(t.db, {
+      lemma: 'car',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: senses(1),
+      variants: [
+        variant('car', ['מכונית']),
+        {
+          form: 'cars',
+          kind: 'word',
+          entryRank: 0,
+          translations: [
+            {
+              senseCode: 's0',
+              rank: 0,
+              translation: 'מכוניות',
+              gloss: 'אוטו',
+              alternatives: ['רכבים'],
+              exampleSource: null,
+              exampleTarget: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await find('cars')).toEqual([
+      expect.objectContaining({ translation: 'מכוניות', glossKey: 'מכונית', alternatives: ['רכבים'] }),
     ]);
   });
 
@@ -247,7 +285,7 @@ describe('persistEntries', () => {
       (await find('saw')).map((row) => ({
         translation: row.translation,
         part_of_speech: row.partOfSpeech,
-        sense_id: row.senseId,
+        gloss_id: row.glossId,
         variant_id: row.variantId,
       })),
     );
@@ -640,7 +678,7 @@ describe('findSensesByLexeme', () => {
     expect(senses).toHaveLength(2);
   });
 
-  it('carries the gloss and both example halves the prompt is built from', async () => {
+  it('carries the definition, the gloss and its language, and both example halves the prompt is built from', async () => {
     await persist('cook', [
       {
         lemma: 'cook',
@@ -649,6 +687,7 @@ describe('findSensesByLexeme', () => {
           {
             sense_code: 'prepare_food',
             translation: 'לבשל',
+            definition: 'make a meal by heating food',
             example: { source: 'I cook dinner.', target: 'אני מבשל ארוחת ערב.' },
           },
         ],
@@ -661,10 +700,76 @@ describe('findSensesByLexeme', () => {
       {
         senseId: expect.any(String),
         senseCode: 'prepare_food',
+        definition: 'make a meal by heating food',
         translation: 'לבשל',
+        glossLanguage: 'he',
         exampleSource: 'I cook dinner.',
         exampleTarget: 'אני מבשל ארוחת ערב.',
       },
+    ]);
+  });
+
+  // Phase 31 (spec D9). The first Russian learner of a Hebrew headword finds it
+  // rendered for English learners only. Every sense is still listed, with its
+  // definition and its English gloss, so the second call runs; and once a sense
+  // has a rendering in the learner's language, that one is preferred over a
+  // better-ranked one in another language, and listed first.
+  it("lists a sense rendered only in another language, and prefers the learner's own rendering", async () => {
+    const write = (form: string, userLanguageCode: string, senses: LlmEntry['senses']) =>
+      withTx(t.db, (tx) =>
+        createDictRepo(tx).persistEntries({
+          form,
+          languageCode: 'he',
+          userLanguageCode,
+          kind: 'word',
+          entries: [{ lemma: 'חלון', part_of_speech: 'noun', senses }],
+        }),
+      );
+    const read = (userLanguageCode: string) =>
+      withTx(t.db, (tx) =>
+        createDictRepo(tx).findSensesByLexeme({ lemma: 'חלון', partOfSpeech: 'noun', languageCode: 'he', userLanguageCode }),
+      );
+    const glosses = async (userLanguageCode: string) =>
+      (await read(userLanguageCode)).map(({ senseCode, translation, glossLanguage }) => [senseCode, translation, glossLanguage]);
+
+    await write('חלון', 'en', [
+      { sense_code: 'wall_opening', translation: 'window', definition: 'פתח בקיר' },
+      { sense_code: 'window_of_time', translation: 'time slot' },
+    ]);
+
+    expect(await read('ru')).toEqual([
+      {
+        senseId: expect.any(String),
+        senseCode: 'wall_opening',
+        definition: 'פתח בקיר',
+        translation: 'window',
+        glossLanguage: 'en',
+        exampleSource: null,
+        exampleTarget: null,
+      },
+      {
+        senseId: expect.any(String),
+        senseCode: 'window_of_time',
+        definition: null,
+        translation: 'time slot',
+        glossLanguage: 'en',
+        exampleSource: null,
+        exampleTarget: null,
+      },
+    ]);
+
+    // The Russian form ranks window_of_time first, where the English one ranked
+    // it second. For Russian it now leads, though wall_opening ties it on rank
+    // and sorts before it by code; for English its English gloss still stands.
+    await write('חלונות', 'ru', [{ sense_code: 'window_of_time', translation: 'окна' }]);
+
+    expect(await glosses('ru')).toEqual([
+      ['window_of_time', 'окна', 'ru'],
+      ['wall_opening', 'window', 'en'],
+    ]);
+    expect(await glosses('en')).toEqual([
+      ['wall_opening', 'window', 'en'],
+      ['window_of_time', 'time slot', 'en'],
     ]);
   });
 

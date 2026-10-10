@@ -2,14 +2,15 @@ import type { PgBoss } from 'pg-boss';
 
 import { createAuth, type AuthModule, type SendCode, type SessionReader } from './auth/betterAuth';
 import type { AuthConfig, GeminiConfig } from './config';
-import type { Db } from './db/client';
+import type { Db, Tx } from './db/client';
 import { createTransaction } from './db/transaction';
 import type { Logger } from './logger';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from './providers/gemini';
 import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
 import { createAuthRepo } from './repo/auth';
+import { createGlossRepo } from './repo/glosses';
 import { createHealthRepo, type HealthRepo } from './repo/health';
-import { createJobRepo } from './repo/jobs';
+import { createJobRepo, type JobRepo } from './repo/jobs';
 import { createPhotoImportRepo } from './repo/photoImports';
 import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
@@ -20,10 +21,12 @@ import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
+import { createGlossService, type GlossService } from './services/glosses';
 import type { LlmClient, VisionClient } from './services/llm';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
 import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
+import type { Repos } from './services/transaction';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
 import { createGrantService, type GrantService } from './services/grants';
@@ -50,6 +53,10 @@ export type AppDeps = {
   vocabulary: VocabularyService;
   grants: GrantService;
   photoImports: PhotoImportService;
+  // Phase 31 (spec D7). The merge job's use case; no route reaches it. The
+  // tool's plan and apply come with the type, unused here and composed with a
+  // null model: db/cli.ts builds its own through createGlossTools.
+  glosses: GlossService;
   health: HealthRepo;
   identity: ServerIdentity;
   // Phase 30 (spec D1). Set only inside the image; app.ts serves the export from it.
@@ -65,6 +72,30 @@ export type AppDeps = {
   // Phase 29 (spec D15). The browser origins CORS admits, with credentials.
   webOrigins: string[];
 };
+
+// A tool that enqueues nothing gets a jobs repository that says so.
+const NO_JOBS: JobRepo = {
+  enqueue: async () => {
+    throw new Error('this composition enqueues no job');
+  },
+};
+
+/** Every repository bound to one transaction: what a use case receives (R8). */
+function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
+  return {
+    session: createSessionRepo(tx),
+    question: createQuestionRepo(tx),
+    user: createUserRepo(tx),
+    enrollment: createEnrollmentRepo(tx),
+    grant: createGrantRepo(tx),
+    dict: createDictRepo(tx),
+    vocabulary: createVocabularyRepo(tx),
+    progress: createProgressRepo(tx),
+    jobs: boss ? createJobRepo(tx, boss) : NO_JOBS,
+    photoImport: createPhotoImportRepo(tx),
+    gloss: createGlossRepo(tx),
+  };
+}
 
 // Assembly only: no I/O, no logic, no conditionals beyond choosing an
 // implementation. `db` and `logger` are received rather than built here because
@@ -105,18 +136,7 @@ export function createServerDeps(io: {
   // Binding the repositories to a transaction is assembly, which is what this
   // file is for. Doing it here is what lets services/ take a transaction rather
   // than a database.
-  const transaction = createTransaction(io.db, (tx) => ({
-    session: createSessionRepo(tx),
-    question: createQuestionRepo(tx),
-    user: createUserRepo(tx),
-    enrollment: createEnrollmentRepo(tx),
-    grant: createGrantRepo(tx),
-    dict: createDictRepo(tx),
-    vocabulary: createVocabularyRepo(tx),
-    progress: createProgressRepo(tx),
-    jobs: createJobRepo(tx, io.boss),
-    photoImport: createPhotoImportRepo(tx),
-  }));
+  const transaction = createTransaction(io.db, (tx) => bindRepos(tx, io.boss));
 
   // The one place in the repo that names both `createGeminiClient` and
   // `LlmClient` (ADR 0001 R11). The annotation below is what checks that the
@@ -220,6 +240,8 @@ export function createServerDeps(io: {
       now: io.now,
       logger: io.logger,
     }),
+    // No model composed here: the tool's tier 2 is built by createGlossTools.
+    glosses: createGlossService({ transaction, logger: io.logger, llm: null }),
     health: createHealthRepo(io.db, io.logger),
     identity: io.identity,
     webDistDir: io.webDistDir,
@@ -228,4 +250,30 @@ export function createServerDeps(io: {
     signedIn: { sessionOf: authModule.sessionOf },
     webOrigins: io.auth.webOrigins,
   };
+}
+
+/**
+ * Phase 31 (spec D7). The by-hand merge tool's use cases, for db/cli.ts: the
+ * glosses service with a transaction and, for tier 2, a model client, and
+ * nothing else a server needs. No I/O here (R6): the caller owns the pool.
+ * `gemini` null composes no client: tier 1 alone, which needs no Gemini settings.
+ */
+export function createGlossTools(io: {
+  db: Db;
+  logger: Logger;
+  fetch: typeof globalThis.fetch;
+  gemini: GeminiConfig | null;
+  timeoutMs: number;
+}): GlossService {
+  const transaction = createTransaction(io.db, (tx) => bindRepos(tx, null));
+  const llm: LlmClient | null = io.gemini
+    ? createGeminiClient({
+        fetch: io.fetch,
+        baseUrl: io.gemini.baseUrl,
+        apiKey: io.gemini.apiKey,
+        model: io.gemini.model,
+        timeoutMs: io.timeoutMs,
+      })
+    : null;
+  return createGlossService({ transaction, logger: io.logger, llm });
 }

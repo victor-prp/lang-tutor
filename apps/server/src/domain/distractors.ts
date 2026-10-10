@@ -79,9 +79,12 @@ export { MAX_ALTERNATIVES };
  *  from a translation. Changing the wording means changing the stubs. */
 export const DISTRACTOR_MARKER = 'three wrong answers';
 
-/** One picked sense as the generation reads it: the saved form, its lexeme,
- *  and that form's rendering of the sense in the enrollment's source language. */
+/** One picked gloss as the generation reads it: the saved form, its lexeme,
+ *  and that form's rendering of one member sense in the enrollment's source
+ *  language. */
 export type GenerationContext = {
+  /** Phase 31. The gloss the card practises; senseId and variantId name the rendering it is built from. */
+  glossId: string;
   senseId: string;
   variantId: string;
   lexemeId: string;
@@ -95,9 +98,10 @@ export type GenerationContext = {
   exampleTranslation: string | null;
 };
 
-/** Phase 27 (spec D5, D6). Per sense, the sentences its last sessions asked,
- *  newest first, so a new one is never last time's. Read by the service. */
-export type RecentSentences = Map<string /* senseId */, { cloze: string[]; translate: string[] }>;
+/** Phase 27 (spec D5, D6). Per gloss (phase 31), the sentences its last
+ *  sessions asked, newest first, so a new one is never last time's. Read by
+ *  the service. */
+export type RecentSentences = Map<string /* glossId */, { cloze: string[]; translate: string[] }>;
 
 export type DistractorItem = {
   key: string;
@@ -144,7 +148,7 @@ export type DistractorVerdict =
  *  a translation avoids the last sessions' Hebrew sentences and the saved
  *  example's Hebrew, so the example is not written back as the sentence. */
 function avoidFor(row: GenerationContext, task: Task, recent: RecentSentences): string[] {
-  const seen = recent.get(row.senseId);
+  const seen = recent.get(row.glossId);
   if (task === 'sentence') {
     return [...(row.example ? [row.example] : []), ...(seen?.cloze ?? []).slice(0, MAX_AVOID)];
   }
@@ -342,21 +346,33 @@ function badChoice(
   return null;
 }
 
-/** Never a refusal: alternatives only widen what a typed card accepts, so a
- *  bad one is dropped (empty, in the explanation language, the answer itself,
- *  a repeat) and the rest kept, up to MAX_ALTERNATIVES. */
-function cleanAlternatives(item: DistractorItem, found: string[] | undefined, explanationLetters: RegExp): string[] {
-  const seen = new Set([item.form, item.lemma].map(comparable));
+/** Alternatives for a typed card: trimmed, never empty, never the card's own
+ *  form or lemma, no two alike under `comparable`, at most MAX_ALTERNATIVES, in
+ *  the order given. `accept` adds a caller's own refusal. */
+function keepAlternatives(
+  form: string,
+  lemma: string,
+  candidates: readonly string[],
+  accept: (text: string) => boolean = () => true,
+): string[] {
+  const seen = new Set([form, lemma].map(comparable));
   const kept: string[] = [];
-  for (const raw of found ?? []) {
+  for (const raw of candidates) {
     const text = raw.trim();
     const key = comparable(text);
-    if (text === '' || explanationLetters.test(text) || seen.has(key)) continue;
+    if (text === '' || !accept(text) || seen.has(key)) continue;
     seen.add(key);
     kept.push(text);
     if (kept.length === MAX_ALTERNATIVES) break;
   }
   return kept;
+}
+
+/** Never a refusal: alternatives only widen what a typed card accepts, so a
+ *  bad one is dropped (empty, in the explanation language, the answer itself,
+ *  a repeat) and the rest kept, up to MAX_ALTERNATIVES. */
+function cleanAlternatives(item: DistractorItem, found: string[] | undefined, explanationLetters: RegExp): string[] {
+  return keepAlternatives(item.form, item.lemma, found ?? [], (text) => !explanationLetters.test(text));
 }
 
 /**
@@ -564,4 +580,26 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
       };
     }
   }
+}
+
+/** How many sibling headwords a typed or spoken card accepts before the model's alternatives. */
+const SIBLINGS_FIRST = 3;
+
+/**
+ * Phase 31 (spec D18). A typed or spoken card's right answers: up to three
+ * sibling headwords first, which are certain (`order` is right where להזמין
+ * asks for `book`), then the model's alternatives, then any remaining
+ * siblings, never the card's own form or lemma, no two alike, at most
+ * MAX_ALTERNATIVES, the column check's five. Siblings are lemmas, while the
+ * model's alternatives are inflected to the card's form, so a key with five
+ * sibling headwords must still leave room for a right inflected synonym.
+ */
+export function withSiblingAlternatives(input: {
+  form: string;
+  lemma: string;
+  siblings: readonly string[];
+  alternatives: readonly string[];
+}): string[] {
+  const first = keepAlternatives(input.form, input.lemma, input.siblings).slice(0, SIBLINGS_FIRST);
+  return keepAlternatives(input.form, input.lemma, [...first, ...input.alternatives, ...input.siblings]);
 }

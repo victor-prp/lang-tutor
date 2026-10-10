@@ -10,7 +10,7 @@ import {
   insertProgressRows,
   readProgress,
   readSnapshot,
-  saveSessionSenses,
+  saveSessionGlosses,
   setLevel,
 } from '../../support/progressRows';
 import { asChoice, insertListSession } from '../../support/questions';
@@ -22,7 +22,7 @@ import { seedSavedSenses } from '../../support/vocabularyRows';
 
 let t: TestDb;
 const E = enrollmentOf('u_1');
-let kite: { lexemeId: string; variantIds: string[]; senseIds: string[] };
+let kite: { lexemeId: string; variantIds: string[]; glossIds: string[] };
 
 beforeEach(async () => {
   t = await createTestDb();
@@ -51,10 +51,10 @@ afterEach(async () => {
 
 async function savedAt(at: string) {
   await t.db.execute(sql`
-    insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
-    values (${E}, ${kite.senseIds[0]}, ${kite.lexemeId}, (select lemma from dict_lexemes where id = ${kite.lexemeId}),
+    insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
+    values (${E}, ${kite.glossIds[0]}, ${kite.lexemeId}, (select lemma from dict_lexemes where id = ${kite.lexemeId}),
             ${kite.variantIds[0]}, ${at}::timestamptz, 'u_1')`);
-  await insertProgressRows(t.db, E, [kite.senseIds[0]]);
+  await insertProgressRows(t.db, E, [kite.glossIds[0]]);
 }
 
 /** A one-question session about kite, answered once at `at`. */
@@ -63,7 +63,7 @@ const session = (status: 'completed' | 'skipped' | 'ready', correct: boolean, at
     userId: 'u_1',
     enrollmentId: E,
     status,
-    asked: [{ senseId: kite.senseIds[0], variantId: kite.variantIds[0], translation: 'עפיפון' }],
+    asked: [{ glossId: kite.glossIds[0], variantId: kite.variantIds[0], translation: 'עפיפון' }],
     answers: [{ position: 0, correct, at }],
   });
 
@@ -77,7 +77,7 @@ describe('recomputeProgress', () => {
     const second = await session('skipped', true, '2026-01-06 10:00:00+00');
     const third = await session('completed', false, '2026-01-07 10:00:00+00');
     await session('ready', true, '2026-01-20 10:00:00+00'); // open: does not count
-    await setLevel(t.db, { enrollmentId: E, senseId: kite.senseIds[0], level: 5 }); // junk to reset
+    await setLevel(t.db, { enrollmentId: E, glossId: kite.glossIds[0], level: 5 }); // junk to reset
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 3 });
 
@@ -134,14 +134,14 @@ describe('recomputeProgress', () => {
     // seven questions are about unsaved senses and must change nothing.
     const { sessionId: completed } = await live.createNextSession('u_1', E, { listening: false, speaking: false });
     const completedRecord = await live.getSession('u_1', completed);
-    await saveSessionSenses(t.db, { sessionId: completed, enrollmentId: E, positions: [0, 1, 2] });
+    await saveSessionGlosses(t.db, { sessionId: completed, enrollmentId: E, positions: [0, 1, 2] });
     for (const [i, q] of completedRecord.questions.entries()) await answer('u_1', completed, q, i !== 1);
     expect((await live.getSession('u_1', completed)).status).toBe('completed');
 
     // Skipped: two saved senses, one answered right and one wrong, then the skip.
     const { sessionId: skipped } = await live.createNextSession('u_2', E2, { listening: false, speaking: false });
     const skippedRecord = await live.getSession('u_2', skipped);
-    await saveSessionSenses(t.db, { sessionId: skipped, enrollmentId: E2, positions: [0, 1] });
+    await saveSessionGlosses(t.db, { sessionId: skipped, enrollmentId: E2, positions: [0, 1] });
     await answer('u_2', skipped, skippedRecord.questions[0], true);
     await answer('u_2', skipped, skippedRecord.questions[1], false);
     await live.skipSession('u_2', skipped);
@@ -176,7 +176,7 @@ describe('recomputeProgress', () => {
       ['lantern', 'פנס'],
     ]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
-      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      words.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { sessionId, questions } = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked: words });
     expect(questions.map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation']);
@@ -189,14 +189,14 @@ describe('recomputeProgress', () => {
 
     const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });
     const before = await written();
-    const level = (senseId: string, dimension: string) =>
-      before.progress.find((row) => row.senseId === senseId && row.dimension === dimension)!.level;
+    const level = (glossId: string, dimension: string) =>
+      before.progress.find((row) => row.glossId === glossId && row.dimension === dimension)!.level;
     // The live path's own evidence (spec D6), so the comparison below is not
     // between two empty results.
-    expect(level(words[0].senseId, 'written_receptive')).toBe(2);
-    expect(level(words[1].senseId, 'written_productive')).toBe(2);
-    expect(level(words[2].senseId, 'written_productive')).toBe(2);
-    expect(level(words[2].senseId, 'spelling')).toBe(1);
+    expect(level(words[0].glossId, 'written_receptive')).toBe(2);
+    expect(level(words[1].glossId, 'written_productive')).toBe(2);
+    expect(level(words[2].glossId, 'written_productive')).toBe(2);
+    expect(level(words[2].glossId, 'spelling')).toBe(1);
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });
     expect(await written()).toEqual(before);
@@ -210,7 +210,7 @@ describe('recomputeProgress', () => {
       ['kettle', 'קומקום'], ['pillow', 'כרית'], ['ladder', 'סולם'], ['bucket', 'דלי'],
     ]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
-      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      words.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { sessionId, questions } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -231,15 +231,15 @@ describe('recomputeProgress', () => {
 
     const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });
     const before = await written();
-    const level = (senseId: string, dimension: string) =>
-      before.progress.find((row) => row.senseId === senseId && row.dimension === dimension)!.level;
-    expect(level(words[0].senseId, 'spoken_receptive')).toBe(2);
-    expect(level(words[1].senseId, 'written_productive')).toBe(2);
-    expect(level(words[1].senseId, 'spelling')).toBe(1);
-    expect(level(words[2].senseId, 'spoken_receptive')).toBe(2);
-    expect(level(words[2].senseId, 'spelling')).toBe(2);
-    expect(level(words[3].senseId, 'written_receptive')).toBe(2);
-    expect(level(words[4].senseId, 'written_receptive')).toBe(1);
+    const level = (glossId: string, dimension: string) =>
+      before.progress.find((row) => row.glossId === glossId && row.dimension === dimension)!.level;
+    expect(level(words[0].glossId, 'spoken_receptive')).toBe(2);
+    expect(level(words[1].glossId, 'written_productive')).toBe(2);
+    expect(level(words[1].glossId, 'spelling')).toBe(1);
+    expect(level(words[2].glossId, 'spoken_receptive')).toBe(2);
+    expect(level(words[2].glossId, 'spelling')).toBe(2);
+    expect(level(words[3].glossId, 'written_receptive')).toBe(2);
+    expect(level(words[4].glossId, 'written_receptive')).toBe(1);
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });
     expect(await written()).toEqual(before);
@@ -253,7 +253,7 @@ describe('recomputeProgress', () => {
       ['tome', 'ספר'], ['quill', 'נוצה'], ['lantern', 'פנס'],
     ]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
-      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      words.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { sessionId, questions } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -269,10 +269,10 @@ describe('recomputeProgress', () => {
 
     const written = async () => ({ progress: await readProgress(t.db, E), snapshot: await readSnapshot(t.db, sessionId) });
     const before = await written();
-    const level = (senseId: string, dimension: string) =>
-      before.progress.find((row) => row.senseId === senseId && row.dimension === dimension)!.level;
-    expect(level(words[0].senseId, 'spoken_productive')).toBe(2);
-    expect(level(words[2].senseId, 'written_productive')).toBe(2);
+    const level = (glossId: string, dimension: string) =>
+      before.progress.find((row) => row.glossId === glossId && row.dimension === dimension)!.level;
+    expect(level(words[0].glossId, 'spoken_productive')).toBe(2);
+    expect(level(words[2].glossId, 'written_productive')).toBe(2);
     expect(before.snapshot.length).toBeGreaterThan(0);
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });

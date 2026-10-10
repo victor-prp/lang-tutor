@@ -71,13 +71,13 @@ export async function seedContent(db: Db): Promise<void> {
         entries: answer.entries,
       });
 
-      // The question tests entry 0, sense 0 — the ids persistEntries just
-      // reported, rather than ids this file invented.
+      // The question tests entry 0, sense 0's gloss — the ids persistEntries
+      // just reported, rather than ids this file invented.
       rows.push({
         id: entry.question_id,
         userId: null,
         enrollmentId: null,
-        senseId: written[0].senseIds[0],
+        glossId: written[0].glossIds[0],
         promptVariantId: written[0].variantId,
         targetLanguage: entry.from,
         userLanguageCode: entry.to,

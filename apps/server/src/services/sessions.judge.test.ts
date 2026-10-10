@@ -34,7 +34,15 @@ const SENTENCE: Question = {
   answer: 'book',
 };
 const CHOICE: Question = { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 };
-const CONTEXT = { form: 'prenotare', lemma: 'prenotare', partOfSpeech: 'verb', meaning: 'להזמין', example: 'Vorrei prenotare un tavolo.', exampleTranslation: 'הייתי רוצה להזמין שולחן.' };
+const CONTEXT = {
+  form: 'prenotare',
+  lemma: 'prenotare',
+  partOfSpeech: 'verb',
+  meaning: 'להזמין',
+  example: 'Vorrei prenotare un tavolo.',
+  exampleTranslation: 'הייתי רוצה להזמין שולחן.',
+  alternatives: [] as string[],
+};
 
 const record = (questions: Question[] = [MEANING, CHOICE], answers: SessionRecord['answers'] = []): SessionRecord => ({
   user_id: 'u1',
@@ -46,7 +54,7 @@ const record = (questions: Question[] = [MEANING, CHOICE], answers: SessionRecor
   source: 'list',
 });
 
-function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRecord = record()) {
+function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRecord = record(), context: typeof CONTEXT = CONTEXT) {
   const inserted: unknown[] = [];
   const logger = createFakeLogger();
   const session = stub<SessionRepo>({
@@ -57,7 +65,7 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
     },
   });
   const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
-  const question = stub<QuestionRepo>({ findJudgeContext: async () => CONTEXT });
+  const question = stub<QuestionRepo>({ findJudgeContext: async () => context });
   const progress = stub<ProgressRepo>({ findSnapshot: async () => [] });
   // Phase 29: another learner holds no grant on the list.
   const grant = stub<GrantRepo>({ findGrantFor: async () => null });
@@ -89,6 +97,15 @@ describe('answerJudged (spec D3)', () => {
     const { service, logger } = setup(judge);
     expect((await service.answerJudged('u1', SESSION, answer('לְהַזְמִין.'))).verdict).toBe('exact');
     expect(judge.calls).toHaveLength(0);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_judged', judged_by: 'rule', verdict: 'exact' }));
+  });
+
+  it("rules one of the card's stored alternatives exact too, without a call (phase 31, spec D13)", async () => {
+    const judge = createFakeLlmClient('{"verdict":"wrong"}');
+    const { service, inserted, logger } = setup(judge, record(), { ...CONTEXT, alternatives: ['לקבוע', 'לשמור'] });
+    expect((await service.answerJudged('u1', SESSION, answer('לקבוע'))).verdict).toBe('exact');
+    expect(judge.calls).toHaveLength(0);
+    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'לקבוע', verdict: 'exact' }]]);
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_judged', judged_by: 'rule', verdict: 'exact' }));
   });
 

@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it } from '@jest/globals';
 import { DIMENSIONS } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
-import { createDb } from '../../../src/db/client';
+import { createDb, type Db } from '../../../src/db/client';
+import { splitTranslation } from '../../../src/domain/glosses';
 import { nextSource } from '../../../src/domain/session';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { runMigrations, runMigrationsFrom } from '../../../src/db/migrate';
@@ -34,6 +35,13 @@ async function emptyDatabase() {
   const handle = createDb(urlFor(name), { onError: () => {} });
   opened.push(handle);
   return handle.db;
+}
+
+/** Phase 31. Once every migration has run, a learner row names its sense's
+ *  gloss (0025): these fixtures render each sense in one learner language. */
+async function glossOfSense(db: Db, senseId: string): Promise<string> {
+  const rows = await db.execute<{ gloss_id: string }>(sql`select gloss_id from dict_sense_glosses where sense_id = ${senseId}`);
+  return rows.rows[0].gloss_id;
 }
 
 describe('0008_variant_renderings', () => {
@@ -169,14 +177,16 @@ describe('0012_sense_progress', () => {
 
     await runMigrations(db);
 
+    // Phase 31: the rows live in gloss_progress, one gloss per sense here.
     const rows = await db.execute<{
       sense_id: string;
       dimension: string;
       level: number;
       last_step_on: string | null;
       last_wrong_on: string | null;
-    }>(sql`select sense_id, dimension, level, last_step_on, last_wrong_on
-           from sense_progress order by sense_id, dimension`);
+    }>(sql`select m.sense_id, p.dimension, p.level, p.last_step_on, p.last_wrong_on
+           from gloss_progress p join dict_sense_glosses m on m.gloss_id = p.gloss_id
+           order by m.sense_id, p.dimension`);
     expect(rows.rows).toHaveLength(10);
     for (const sense of ['s1', 's2']) {
       expect(rows.rows.filter((r) => r.sense_id === sense).map((r) => r.dimension).sort()).toEqual(
@@ -211,8 +221,10 @@ describe('0013_vocabulary_entries_lemma', () => {
 
     await runMigrations(db);
 
+    // Phase 31: an entry names its gloss, one gloss per sense here.
     const rows = await db.execute<{ sense_id: string; lemma: string }>(
-      sql`select sense_id, lemma from vocabulary_entries order by sense_id`,
+      sql`select m.sense_id, ve.lemma from vocabulary_entries ve
+          join dict_sense_glosses m on m.gloss_id = ve.gloss_id order by m.sense_id`,
     );
     expect(rows.rows).toEqual([
       { sense_id: 's1', lemma: 'kite' },
@@ -372,10 +384,12 @@ describe('0017_speaking_cards', () => {
         values ('v1', 's1', 'he', 'עפיפון', 0);
     `);
     // One question of each phase 24 type.
+    // What a question names: its sense, then (0025) its gloss once every migration has run.
+    let practised = { column: sql.raw('sense_id'), id: 's1' };
     const insertQuestion = (id: string, type: string, columns: { options?: string; prompt?: string; alternatives?: string; tiles?: string }) =>
       db.execute(sql`
-        insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles)
-          values (${id}, 'u_1', 'e_1', 's1', 'v1', 'en', 'he', ${type},
+        insert into questions (id, user_id, enrollment_id, ${practised.column}, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles)
+          values (${id}, 'u_1', 'e_1', ${practised.id}, 'v1', 'en', 'he', ${type},
             ${columns.options ?? null}::jsonb, ${columns.prompt ?? null}, ${columns.alternatives ?? null}::text[], ${columns.tiles ?? null}::text[])`);
     await insertQuestion('q1', 'multiple_choice', { options });
     await insertQuestion('q2', 'reverse_choice', { options, prompt: 'עפיפון' });
@@ -404,6 +418,7 @@ describe('0017_speaking_cards', () => {
                (${session.id}, 3, 'q3', 'toy', 'alternative'), (${session.id}, 4, 'q3', 'bird', 'wrong')`);
 
     await runMigrations(db);
+    practised = { column: sql.raw('gloss_id'), id: await glossOfSense(db, 's1') };
 
     const kept = await db.execute<{ id: string; type: string }>(sql`select id, type from questions order by id`);
     expect(kept.rows.map((r) => r.type)).toEqual([
@@ -496,10 +511,12 @@ describe('0019_typed_meaning', () => {
       insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
         values ('v1', 's1', 'he', 'עפיפון', 0);
     `);
+    // What a question names: its sense, then (0025) its gloss once every migration has run.
+    let practised = { column: sql.raw('sense_id'), id: 's1' };
     const insertQuestion = (id: string, type: string, columns: { options?: string; prompt?: string; alternatives?: string; tiles?: string }) =>
       db.execute(sql`
-        insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles)
-          values (${id}, 'u_1', 'e_1', 's1', 'v1', 'en', 'he', ${type},
+        insert into questions (id, user_id, enrollment_id, ${practised.column}, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles)
+          values (${id}, 'u_1', 'e_1', ${practised.id}, 'v1', 'en', 'he', ${type},
             ${columns.options ?? null}::jsonb, ${columns.prompt ?? null}, ${columns.alternatives ?? null}::text[], ${columns.tiles ?? null}::text[])`);
     // One question of each existing type.
     await insertQuestion('q1', 'multiple_choice', { options });
@@ -525,6 +542,7 @@ describe('0019_typed_meaning', () => {
         values (${session.id}, 0, 'q3', ${hundred}, 'exact')`);
 
     await runMigrations(db);
+    practised = { column: sql.raw('gloss_id'), id: await glossOfSense(db, 's1') };
 
     const kept = await db.execute<{ type: string }>(sql`select type from questions order by id`);
     expect(kept.rows.map((r) => r.type)).toEqual([
@@ -600,11 +618,13 @@ describe('0020_sentence_cards', () => {
       gapStart?: number;
       gapEnd?: number;
     };
+    // Used once every migration has run, when a question names its gloss (0025).
+    let gloss = '';
     const insertQuestion = (id: string, type: string, c: Columns) =>
       db.execute(sql`
-        insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles,
+        insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, options, prompt, alternatives, tiles,
                                sentence, sentence_translation, gap_start, gap_end)
-          values (${id}, 'u_1', 'e_1', 's1', 'v1', 'en', 'he', ${type},
+          values (${id}, 'u_1', 'e_1', ${gloss}, 'v1', 'en', 'he', ${type},
             ${c.options ?? null}::jsonb, ${c.prompt ?? null}, ${c.alternatives ?? null}::text[], ${c.tiles ?? null}::text[],
             ${c.sentence ?? null}, ${c.translation ?? null}, ${c.gapStart ?? null}::int, ${c.gapEnd ?? null}::int)`);
     // Before 0019 the table has no sentence columns.
@@ -615,6 +635,7 @@ describe('0020_sentence_cards', () => {
                ('q3', 'u_1', 'e_1', 's1', 'v1', 'en', 'he', 'say_translation', null, 'עפיפון', '{}')`);
 
     await runMigrations(db);
+    gloss = await glossOfSense(db, 's1');
 
     const kept = await db.execute<{ type: string; sentence: string | null; gap_start: number | null }>(
       sql`select type, sentence, gap_start from questions order by id`,
@@ -747,5 +768,238 @@ describe('0023_users_auth_fk', () => {
           values ('u_orphan', 'orphan', 'Orphan', 30, 'he')
       `),
     ).rejects.toMatchObject({ cause: { code: '23503', constraint: 'users_id_auth_users_id_fk' } });
+  });
+});
+
+// Lane 0's shapes (Task 1's unit test holds their expected values): every comma
+// list, every parenthetical, a sample of compounds, and the edge cases.
+const TRANSLATION_SHAPES = [
+  'להימנע מ-, להתחמק מ-', 'שפל, נחות', 'לבסס, להשתית', 'בסיס, יסוד', 'מאוד, נורא', 'ארור, מקולל',
+  'עקוב מדם, אלים', 'מדמם, מלא דם', 'קומבינציה, צירוף', 'שילוב, צירוף', 'לשלב, לאחד', 'לשלב, להכיל',
+  'להלחין, לחבר', 'להרכיב, להוות', 'לפתח, לבנות', 'לפתח, לרכוש', 'לפתח, ליצור', 'רם, חזק', 'ראשי, עיקרי',
+  'צינור ראשי, קו ראשי', 'להורות, לפקוד', 'להשתפר, להתאושש', 'לקלוט, ללמוד', 'ראוותנות, מהומה, בלבול',
+  'לבלבל, להרשים בראוותנות', 'לזנק, לעלות בחדות', 'לקבע במסמרים, לתקוע יתד', 'לסרב, לדחות',
+  'להנמיך, להפחית', 'טוב, בסדר', 'בסיס (צבאי)', 'בסיס (כימיה)', 'אח (במסדר דתי)', 'להנחית (כדור בווֹליבול)',
+  'כבד, עשיר (בטעמים)', 'עמוק, עשיר (בגוון/צליל)', 'לסמם (משקה), להוסיף חומר (למשקה)', 'אח (חבר, רע)',
+  'בית קפה', 'בלתי אפשרי', 'to deposit', 'ha scritto', 'א, ב / ג', 'רם, רָם, חזק, חזק', '(הערה)',
+  // Not lane 0's: a no-break space after the comma, which JavaScript's \s trims and Postgres's does not.
+  'א,\u00a0ב',
+];
+
+describe('0024_glosses', () => {
+  it('cleans every rendering and gives every rendered sense one gloss per learner language', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0023_users_auth_fk'));
+    await db.execute(sql`
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values
+        ('l_mouse', 'en', 'mouse', 'noun'), ('l_car', 'en', 'car', 'noun'), ('l_finger', 'en', 'finger', 'noun'),
+        ('l_base', 'en', 'base', 'noun'), ('l_comb', 'en', 'combination', 'noun'), ('l_window', 'he', 'חלון', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values
+        ('s_rodent', 'l_mouse', 'rodent'), ('s_device', 'l_mouse', 'device'), ('s_vehicle', 'l_car', 'vehicle'),
+        ('s_body', 'l_finger', 'body_part'), ('s_military', 'l_base', 'military'), ('s_chemistry', 'l_base', 'chemistry'),
+        ('s_lock', 'l_comb', 'lock_code'), ('s_mix', 'l_comb', 'mixture'), ('s_window', 'l_window', 'opening');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank) values
+        ('v_mouse', 'l_mouse', 'en', 'mouse', 'word', 0), ('v_car', 'l_car', 'en', 'car', 'word', 0),
+        ('v_cars', 'l_car', 'en', 'cars', 'word', 0), ('v_fingers', 'l_finger', 'en', 'fingers', 'word', 0),
+        ('v_base', 'l_base', 'en', 'base', 'word', 0), ('v_comb', 'l_comb', 'en', 'combination', 'word', 0),
+        ('v_window', 'l_window', 'he', 'חלון', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank) values
+        ('v_mouse', 's_rodent', 'he', 'עכבר', 0), ('v_mouse', 's_device', 'he', 'עַכְבָּר', 1),
+        ('v_car', 's_vehicle', 'he', 'מכונית, רכב, אוטו', 1), ('v_cars', 's_vehicle', 'he', 'מכוניות, רכבים', 0),
+        ('v_fingers', 's_body', 'he', 'אצבעות', 0),
+        ('v_base', 's_military', 'he', 'בסיס (צבאי)', 0), ('v_base', 's_chemistry', 'he', 'בסיס (כימיה)', 1),
+        ('v_comb', 's_lock', 'he', 'קומבינציה, צירוף', 0), ('v_comb', 's_mix', 'he', 'שילוב, צירוף', 1),
+        ('v_window', 's_window', 'en', 'window', 0), ('v_window', 's_window', 'ru', 'окно', 0);
+    `);
+
+    await runMigrations(db);
+
+    const renderings = await db.execute<{ variant_id: string; sense_id: string; translation: string; gloss: string; alternatives: string[] }>(sql`
+      select variant_id, sense_id, translation, gloss, alternatives from dict_var_translations
+      where user_language_code = 'he' and variant_id in ('v_car', 'v_cars', 'v_base') order by variant_id, sense_id`);
+    expect(renderings.rows).toEqual([
+      { variant_id: 'v_base', sense_id: 's_chemistry', translation: 'בסיס', gloss: 'בסיס', alternatives: [] },
+      { variant_id: 'v_base', sense_id: 's_military', translation: 'בסיס', gloss: 'בסיס', alternatives: [] },
+      { variant_id: 'v_car', sense_id: 's_vehicle', translation: 'מכונית', gloss: 'מכונית', alternatives: ['רכב', 'אוטו'] },
+      { variant_id: 'v_cars', sense_id: 's_vehicle', translation: 'מכוניות', gloss: 'מכוניות', alternatives: ['רכבים'] },
+    ]);
+
+    const glosses = await db.execute<{ lemma: string; lang: string; key: string; alternatives: string[]; members: string[] }>(sql`
+      select l.lemma, g.user_language_code as lang, g.key, g.alternatives,
+             array_agg(m.sense_id order by m.sense_id) as members
+      from dict_glosses g join dict_lexemes l on l.id = g.lexeme_id
+      join dict_sense_glosses m on m.gloss_id = g.id
+      group by l.lemma, g.user_language_code, g.key, g.alternatives
+      order by l.lemma, g.user_language_code, g.key`);
+    expect(glosses.rows).toEqual([
+      // The parenthetical was the only difference: one target word, one gloss (D3).
+      { lemma: 'base', lang: 'he', key: 'בסיס', alternatives: [], members: ['s_chemistry', 's_military'] },
+      // Keyed from the lemma form, though `car` ranks the sense below `cars` does, and its
+      // alternatives kept in the rendering's order; `cars`' plural is not a citation form.
+      { lemma: 'car', lang: 'he', key: 'מכונית', alternatives: ['רכב', 'אוטו'], members: ['s_vehicle'] },
+      { lemma: 'combination', lang: 'he', key: 'קומבינציה', alternatives: ['צירוף'], members: ['s_lock'] },
+      { lemma: 'combination', lang: 'he', key: 'שילוב', alternatives: ['צירוף'], members: ['s_mix'] },
+      // Only an inflected form was ever rendered: the key is inflected until D6 renames it.
+      { lemma: 'finger', lang: 'he', key: 'אצבעות', alternatives: [], members: ['s_body'] },
+      // Spelled as the lowest-ranked member wrote it.
+      { lemma: 'mouse', lang: 'he', key: 'עכבר', alternatives: [], members: ['s_device', 's_rodent'] },
+      // One sense, two learner languages, two glosses (D1).
+      { lemma: 'חלון', lang: 'en', key: 'window', alternatives: [], members: ['s_window'] },
+      { lemma: 'חלון', lang: 'ru', key: 'окно', alternatives: [], members: ['s_window'] },
+    ]);
+
+    const counts = await db.execute<{ rendered: number; memberships: number }>(sql`
+      select (select count(distinct (sense_id, user_language_code)) from dict_var_translations)::int as rendered,
+             (select count(*) from dict_sense_glosses)::int as memberships`);
+    expect(counts.rows[0].memberships).toBe(counts.rows[0].rendered);
+  });
+
+  it("cleans lane 0's translation shapes exactly as splitTranslation does", async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0023_users_auth_fk'));
+    await db.execute(sql`
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l_shapes', 'en', 'shapes', 'noun');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v_shapes', 'l_shapes', 'en', 'shapes', 'word', 0);
+    `);
+    for (const [rank, shape] of TRANSLATION_SHAPES.entries()) {
+      await db.execute(sql`insert into dict_senses (id, lexeme_id, sense_code) values (${`s${rank}`}, 'l_shapes', ${`code_${rank}`})`);
+      await db.execute(sql`insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank)
+        values ('v_shapes', ${`s${rank}`}, 'he', ${shape}, ${rank})`);
+    }
+
+    await runMigrations(db);
+
+    const rows = await db.execute<{ sense_id: string; translation: string; alternatives: string[] }>(
+      sql`select sense_id, translation, alternatives from dict_var_translations where variant_id = 'v_shapes'`,
+    );
+    for (const [rank, shape] of TRANSLATION_SHAPES.entries()) {
+      const row = rows.rows.find((r) => r.sense_id === `s${rank}`)!;
+      expect({ shape, translation: row.translation, alternatives: row.alternatives }).toEqual({ shape, ...splitTranslation(shape) });
+    }
+  });
+});
+
+describe('0025_glosses_rekey', () => {
+  it("folds two saves of one gloss into one, keeping the earliest save and each dimension's best, and folds the sessions that asked both", async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0023_users_auth_fk'));
+    const DIMS = sql.raw(`array['written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling']`);
+    await db.execute(sql`
+      insert into auth_users (id, name, email)
+        values ('u_1', 'one', 'u_1@test.invalid'), ('u_2', 'two', 'u_2@test.invalid');
+      insert into users (id, username, display_name, age, native_language)
+        values ('u_1', 'u_1', 'one', 30, 'he'), ('u_2', 'u_2', 'two', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language)
+        values ('e_1', 'u_1', 'he', 'it'), ('e_2', 'u_2', 'he', 'it');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l_con', 'it', 'con', 'preposition');
+      insert into dict_senses (id, lexeme_id, sense_code)
+        values ('s_with', 'l_con', 'accompaniment'), ('s_by', 'l_con', 'instrument'), ('s_and', 'l_con', 'manner');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v_con', 'l_con', 'it', 'con', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank, example_source, example_target)
+        values ('v_con', 's_with', 'he', 'עם', 0, 'Vado con lei.', 'אני הולך איתה.'),
+               ('v_con', 's_by', 'he', 'עם', 1, 'Scrivo con la penna.', 'אני כותב עם העט.'),
+               ('v_con', 's_and', 'he', 'בעזרת', 2, null, null);
+      insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, added_by_user_id, created_at)
+        values ('e_1', 's_by', 'l_con', 'con', 'v_con', 'u_1', '2026-02-01'),
+               ('e_1', 's_with', 'l_con', 'con', 'v_con', 'u_1', '2026-01-01'),
+               ('e_1', 's_and', 'l_con', 'con', 'v_con', 'u_1', '2026-01-15'),
+               ('e_2', 's_by', 'l_con', 'con', 'v_con', 'u_2', '2026-03-01');
+    `);
+    await db.execute(sql`
+      insert into sense_progress (enrollment_id, sense_id, dimension)
+        select ve.enrollment_id, ve.sense_id, d from vocabulary_entries ve cross join unnest(${DIMS}) d`);
+    await db.execute(sql`
+      update sense_progress set level = 3, last_step_on = '2026-03-01'
+        where enrollment_id = 'e_1' and sense_id = 's_with' and dimension = 'written_receptive';
+      update sense_progress set level = 2, last_step_on = '2026-03-05', last_wrong_on = '2026-03-04'
+        where enrollment_id = 'e_1' and sense_id = 's_by' and dimension = 'written_receptive';
+      update sense_progress set level = 4
+        where enrollment_id = 'e_1' and sense_id = 's_by' and dimension = 'written_productive';
+      insert into sessions (id, user_id, enrollment_id, status, source, completed_at)
+        values ('00000000-0000-0000-0000-000000000031', 'u_1', 'e_1', 'completed', 'list', now());
+      insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options)
+        values ('q_with', 'u_1', 'e_1', 's_with', 'v_con', 'it', 'he', 'multiple_choice',
+                '[{"position":0,"text":"עם","is_correct":true},{"position":1,"text":"בלי","is_correct":false}]'),
+               ('q_by', 'u_1', 'e_1', 's_by', 'v_con', 'it', 'he', 'multiple_choice',
+                '[{"position":0,"text":"עם","is_correct":true},{"position":1,"text":"בלי","is_correct":false}]');
+      insert into photo_imports (id, enrollment_id, status) values ('00000000-0000-0000-0000-000000000032', 'e_1', 'read');
+      insert into photo_import_items (import_id, position, text, hebrew, status, options, suggested_sense_id, chosen_sense_id, ticked)
+        values ('00000000-0000-0000-0000-000000000032', 0, 'con', 'עם', 'ready',
+                '[{"sense_id":"s_with","variant_id":"v_con","translation":"עם","example":{"source":"Vado con lei.","target":"אני הולך איתה."}},
+                  {"sense_id":"s_by","variant_id":"v_con","translation":"עם","example":{"source":"Scrivo con la penna.","target":"אני כותב עם העט."}},
+                  {"sense_id":"s_and","variant_id":"v_con","translation":"בעזרת"}]',
+                's_with', 's_by', true);
+    `);
+    await db.execute(sql`
+      insert into session_progress (session_id, sense_id, dimension, level_before, level_after)
+        select '00000000-0000-0000-0000-000000000031', s, d,
+               case when d = 'written_receptive' and s = 's_with' then 2 else 1 end,
+               case when d = 'written_receptive' and s = 's_with' then 3 when d = 'written_receptive' then 2 else 1 end
+        from unnest(array['s_with', 's_by']) s cross join unnest(${DIMS}) d`);
+
+    await runMigrations(db);
+
+    const glossOf = async (key: string) =>
+      (await db.execute<{ id: string }>(sql`select id from dict_glosses where key = ${key}`)).rows[0].id;
+    const im = await glossOf('עם');
+    const beezrat = await glossOf('בעזרת');
+
+    const entries = await db.execute<{ enrollment_id: string; gloss_id: string; variant_id: string; added_by_user_id: string; saved: string }>(sql`
+      select enrollment_id, gloss_id, variant_id, added_by_user_id, to_char(created_at at time zone 'UTC', 'YYYY-MM-DD') as saved
+      from vocabulary_entries order by enrollment_id, saved`);
+    expect(entries.rows).toEqual([
+      { enrollment_id: 'e_1', gloss_id: im, variant_id: 'v_con', added_by_user_id: 'u_1', saved: '2026-01-01' },
+      { enrollment_id: 'e_1', gloss_id: beezrat, variant_id: 'v_con', added_by_user_id: 'u_1', saved: '2026-01-15' },
+      { enrollment_id: 'e_2', gloss_id: im, variant_id: 'v_con', added_by_user_id: 'u_2', saved: '2026-03-01' },
+    ]);
+
+    const progress = await db.execute<{ dimension: string; level: number; last_step_on: string | null; last_wrong_on: string | null }>(sql`
+      select dimension, level, last_step_on::text, last_wrong_on::text from gloss_progress
+      where enrollment_id = 'e_1' and gloss_id = ${im} order by dimension`);
+    expect(progress.rows).toEqual([
+      { dimension: 'spelling', level: 1, last_step_on: null, last_wrong_on: null },
+      { dimension: 'spoken_productive', level: 1, last_step_on: null, last_wrong_on: null },
+      { dimension: 'spoken_receptive', level: 1, last_step_on: null, last_wrong_on: null },
+      { dimension: 'written_productive', level: 4, last_step_on: null, last_wrong_on: null },
+      { dimension: 'written_receptive', level: 3, last_step_on: '2026-03-05', last_wrong_on: '2026-03-04' },
+    ]);
+    expect((await db.execute<{ n: number }>(sql`select count(*)::int as n from gloss_progress`)).rows[0].n).toBe(15);
+
+    const snapshot = await db.execute<{ gloss_id: string; dimension: string; level_before: number; level_after: number }>(sql`
+      select gloss_id, dimension, level_before, level_after from session_progress order by dimension`);
+    expect(snapshot.rows).toHaveLength(5);
+    expect(snapshot.rows.every((row) => row.gloss_id === im)).toBe(true);
+    expect(snapshot.rows.find((row) => row.dimension === 'written_receptive')).toMatchObject({ level_before: 1, level_after: 3 });
+
+    const questions = await db.execute<{ id: string; gloss_id: string }>(sql`select id, gloss_id from questions order by id`);
+    expect(questions.rows).toEqual([{ id: 'q_by', gloss_id: im }, { id: 'q_with', gloss_id: im }]);
+
+    const item = await db.execute<{ options: unknown; suggested_gloss_id: string; chosen_gloss_id: string }>(sql`
+      select options, suggested_gloss_id, chosen_gloss_id from photo_import_items`);
+    expect(item.rows[0]).toEqual({
+      options: [
+        {
+          gloss_id: im,
+          variant_id: 'v_con',
+          translation: 'עם',
+          examples: [
+            { source: 'Vado con lei.', target: 'אני הולך איתה.' },
+            { source: 'Scrivo con la penna.', target: 'אני כותב עם העט.' },
+          ],
+        },
+        { gloss_id: beezrat, variant_id: 'v_con', translation: 'בעזרת' },
+      ],
+      suggested_gloss_id: im,
+      chosen_gloss_id: im,
+    });
+
+    const gone = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from information_schema.columns
+      where (table_name = 'dict_var_translations' and column_name = 'definition_notes')
+         or column_name in ('sense_id', 'suggested_sense_id', 'chosen_sense_id') and table_name in
+            ('vocabulary_entries', 'gloss_progress', 'session_progress', 'questions', 'photo_import_items')`);
+    expect(gone.rows[0].n).toBe(0);
   });
 });

@@ -82,8 +82,8 @@ describe('translate, against a real database', () => {
       {
         translation: 'סולם',
         part_of_speech: 'verb',
-        example: { source: 'A sentence about ladder.', target: 'משפט.' },
-        sense_id: expect.any(String),
+        examples: [{ source: 'A sentence about ladder.', target: 'משפט.' }],
+        gloss_id: expect.any(String),
         variant_id: expect.any(String),
       },
     ]);
@@ -116,8 +116,8 @@ describe('translate, against a real database', () => {
       {
         translation: 'סולם',
         part_of_speech: 'verb',
-        example: { source: 'A sentence about ladder.', target: 'משפט.' },
-        sense_id: expect.any(String),
+        examples: [{ source: 'A sentence about ladder.', target: 'משפט.' }],
+        gloss_id: expect.any(String),
         variant_id: expect.any(String),
       },
     ]);
@@ -649,6 +649,23 @@ describe('translate, against a real database', () => {
       'SCAN-EXAMINE',
       'SCAN-DIGITIZE',
     ]);
+  });
+
+  it('answers at most five cards for a form with seven glosses, from the model and from the dictionary alike (phase 31)', async () => {
+    await expectGeminiJson(ns, {
+      kind: 'word',
+      entries: [
+        entry('trellis', ['סבכה', 'סורג', 'רשת', 'מסגרת'], 'noun'),
+        entry('trellis', ['להדלות', 'לתמוך', 'לשתול'], 'verb'),
+      ],
+    });
+    const service = translations();
+    const first = await service.translate('u_1', { text: 'trellis', from: 'en', to: 'he' });
+    const again = await service.translate('u_1', { text: 'trellis', from: 'en', to: 'he' });
+
+    expect(first.senses).toHaveLength(5);
+    expect(again.senses.map((card) => card.translation)).toEqual(first.senses.map((card) => card.translation));
+    expect(await countGeminiRequests(ns)).toBe(1);
   });
 });
 

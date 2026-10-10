@@ -49,7 +49,7 @@ const failure = (description: string) => ({
 const NOT_YOURS = forbidden("the enrollment, or the session's, is another learner's");
 
 const progressItem = (change: ProgressChange) => ({
-  sense_id: change.senseId,
+  gloss_id: change.glossId,
   form: change.form,
   translation: change.translation,
   level_before: change.levelBefore,
@@ -214,7 +214,7 @@ const judgedAnswerRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current card that the server judges',
   description:
-    'Takes the text answer to the current `typed_meaning` card. An empty text, or the stored meaning, is judged by rule; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`.',
+    'Takes the text answer to the current `typed_meaning` card. An empty text is judged by rule, and so is the stored meaning, the gloss key (the citation form the word list shows), or one of the stored alternatives of the card\'s rendering or of its gloss; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: JudgedAnswerRequestSchema } } },
@@ -239,7 +239,7 @@ const currentSessionRoute = createRoute({
   tags: ['sessions'],
   summary: "An enrollment's current session",
   description:
-    'The newest session while it is preparing, ready or failed; where the next one will come from; and how many senses are saved.',
+    'The newest session while it is preparing, ready or failed; where the next one will come from; and how many glosses are saved.',
   request: { params: z.object({ id: z.string() }) },
   responses: {
     200: {

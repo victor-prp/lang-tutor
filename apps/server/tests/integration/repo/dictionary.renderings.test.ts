@@ -85,14 +85,21 @@ describe('per-language rendering freshness', () => {
         languageCode: 'he',
         userLanguageCode: 'en',
       });
+      await repo.lockLexemes([lexeme.lexemeId]);
       await repo.repairVariantRenderings({
         variantId: lexeme.variantId,
+        lexemeId: lexeme.lexemeId,
         userLanguageCode: 'en',
         senseVersion,
+        lemmaForm: true,
         senses: stored.map((sense, rank) => ({
           senseId: sense.senseId,
           rank,
           translation: sense.translation,
+          alternatives: [],
+          gloss: sense.translation,
+          glossAlternatives: [],
+          definition: null,
           exampleSource: null,
           exampleTarget: null,
         })),

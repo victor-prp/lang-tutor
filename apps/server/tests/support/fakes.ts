@@ -3,7 +3,7 @@ import type { User } from '@lang-tutor/core/api';
 import type { AppDeps } from '../../src/composition';
 import {
   flattenEntries,
-  rowsToSenses,
+  rowsToCards,
   type SenseRow,
   type StaleLexeme,
 } from '../../src/domain/dictionary';
@@ -12,7 +12,7 @@ import { ProfileExists, UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
 import type { JobRepo } from '../../src/repo/jobs';
-import type { CorrectionRow, PersistEntriesInput, DictRepo } from '../../src/repo/dictionary';
+import type { CorrectionRow, PersistEntriesInput, DictRepo, GlossCounts, MergePair } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { PhotoImportService } from '../../src/services/photoImports';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
@@ -73,6 +73,8 @@ export function createFakeAppDeps(): AppDeps {
   const enrollments: EnrollmentService = { enroll: unreachable, list: unreachable };
   const translations: TranslationService = {
     translate: unreachable,
+    renderLemma: unreachable,
+    failLemmaRender: unreachable,
   };
   const vocabulary: VocabularyService = {
     save: unreachable,
@@ -101,6 +103,7 @@ export function createFakeAppDeps(): AppDeps {
     vocabulary,
     grants,
     photoImports,
+    glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
     webDistDir: null,
@@ -143,6 +146,23 @@ export function createFakeTranscriber(...replies: (string | Error)[]) {
     return next;
   };
   return Object.assign(transcriber, { calls });
+}
+
+/** Phase 31. resolveGlosses as the identity, in one learner language: no merge
+ *  happened. Records every id it was asked about. */
+export function createFakeGlossRepo(userLanguageCode = 'he') {
+  const asked: string[][] = [];
+  return {
+    asked,
+    resolveGlosses: async (ids: string[]) => {
+      asked.push(ids);
+      return new Map(ids.map((id) => [id, { id, lexemeId: `lexeme-of-${id}`, userLanguageCode }]));
+    },
+    findMergeCandidates: async () => [],
+    mergeGlosses: async () => null,
+    findMergeWork: async () => [],
+    setDefinitions: async () => 0,
+  };
 }
 
 export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown }[] };
@@ -222,6 +242,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     session: repos.session ?? unreachableRepo('session repo'),
     question: repos.question ?? unreachableRepo('question repo'),
     dict: repos.dict ?? unreachableRepo('dict repo'),
+    gloss: repos.gloss ?? unreachableRepo('gloss repo'),
     vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
     progress: repos.progress ?? unreachableRepo('progress repo'),
     jobs: repos.jobs ?? unreachableRepo('jobs repo'),
@@ -243,7 +264,9 @@ export type FakeDictRepo = DictRepo & {
   hit: Record<string, SenseRow[]>;
   /** What `findSensesByLexeme` answers with, keyed `lemma:partOfSpeech`. A
    *  lexeme absent from this map has no stored senses, which is how a test says
-   *  "this is a new lexeme, so no second model call". */
+   *  "this is a new lexeme, so no second model call". Not keyed by the learner's
+   *  language: since phase 31 the real read lists a sense rendered in any
+   *  language, and `glossLanguage` on an entry says which (spec D9). */
   stored: Record<string, StoredSense[]>;
   lexemeReads: { lemma: string; partOfSpeech: string }[];
   /** What the write's re-read answers with. Left empty, the fake answers with
@@ -269,6 +292,10 @@ export type FakeDictRepo = DictRepo & {
   /** Set to make the write throw. */
   persistError: Error | null;
   persisted: PersistEntriesInput[];
+  /** Phase 31. What the write reports as needing D7's merge job. */
+  mergePairs: MergePair[];
+  /** Phase 31. What the write reports its gloss step did (spec D19). */
+  glossCounts: GlossCounts;
   reads: { form: string; languageCode: string; userLanguageCode: string }[];
 };
 
@@ -290,6 +317,8 @@ export function createFakeDictRepo(): FakeDictRepo {
     repaired: [],
     persistError: null,
     persisted: [],
+    mergePairs: [],
+    glossCounts: { created: 0, joined: 0, members: 0 },
     reads: [],
     findSensesByForm: async (input) => {
       repo.reads.push(input);
@@ -319,8 +348,21 @@ export function createFakeDictRepo(): FakeDictRepo {
       }
     },
     findSenseVersion: async () => 0,
+    lockLexemes: async () => {},
+    // Phase 31 (spec D12). The render-lemma job's reads and the saves' claims;
+    // a lookup reaches none of them.
+    findLexeme: async () => undefined,
+    hasLemmaRendering: async () => false,
+    nextEntryRank: async () => 0,
+    claimLemmaRenders: async () => [],
+    claimSavedLemmaRenders: async () => [],
+    releaseLemmaRender: async () => false,
+    // Phase 31 (spec D12, D18). A session's reads; a lookup reaches neither.
+    findGlossRenderings: async () => [],
+    findSiblings: async () => [],
     repairVariantRenderings: async (input) => {
       repo.repaired.push({ variantId: input.variantId, senseVersion: input.senseVersion });
+      return { needsMerge: false };
     },
     persistEntries: async (input) => {
       repo.persisted.push(input);
@@ -331,9 +373,12 @@ export function createFakeDictRepo(): FakeDictRepo {
           lexemeId: `t-${index}`,
           variantId: `v-${index}`,
           senseIds: entry.senses.map((_, rank) => `s-${index}-${rank}`),
+          glossIds: entry.senses.map((_, rank) => `g-${index}-${rank}`),
           created: true,
         })),
-        senses: repo.reread.length > 0 ? rowsToSenses(repo.reread) : flattenEntries(input.entries),
+        senses: repo.reread.length > 0 ? rowsToCards(repo.reread) : flattenEntries(input.entries, input.kind),
+        mergePairs: repo.mergePairs,
+        glosses: repo.glossCounts,
       };
     },
   };

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { createApp } from '../../src/app';
 import { signUp, signUpWithProfile } from '../support/auth';
 import { createFakeLogger } from '../support/fakes';
-import { expectEmails, mailBaseUrlFor, mockNamespace } from '../support/mockServer';
+import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../support/mockServer';
 import { createTestServerDeps } from '../support/serverDeps';
 import { createTestDb, type TestDb } from '../support/testDb';
 import { testRng } from '../support/testRng';
@@ -30,6 +30,7 @@ describe('the app as production assembles it', () => {
   });
 
   afterEach(async () => {
+    await clearNamespace(ns);
     await t.close();
   });
 

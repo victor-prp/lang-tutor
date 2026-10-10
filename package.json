@@ -39,6 +39,8 @@
     "db:progress:recompute": "bash scripts/lane-env.sh npm run db:progress:recompute --workspace apps/server",
     "dict:export": "bash scripts/lane-env.sh npm run dict:export --workspace apps/server",
     "dict:restore": "bash scripts/lane-env.sh npm run dict:restore --workspace apps/server",
+    "dict:lemmas:render": "bash scripts/lane-env.sh npm run dict:lemmas:render --workspace apps/server",
+    "dict:glosses:merge": "bash scripts/lane-env.sh npm run dict:glosses:merge --workspace apps/server --",
     "eval": "npm run eval --workspace apps/server",
     "content:generate": "npm run content:generate --workspace apps/server --",
     "qa:poc": "bash nightly-qa/run.sh",

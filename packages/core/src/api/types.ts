@@ -28,6 +28,7 @@ import type {
   LlmCorrectionSchema,
   LlmDistractorsSchema,
   LlmEntrySchema,
+  LlmGlossMergeSchema,
   LlmPhotoReadingSchema,
   LlmReconciliationSchema,
   LlmRenderingSchema,
@@ -54,7 +55,7 @@ import type {
   SaveVocabularyRequestSchema,
   SaveVocabularyResponseSchema,
   ScoreSchema,
-  SenseProgressSchema,
+  GlossProgressSchema,
   SessionProgressItemSchema,
   SessionSourceSchema,
   SessionStatusSchema,
@@ -145,6 +146,7 @@ export type LlmSense = z.infer<typeof LlmSenseSchema>;
 export type LlmEntry = z.infer<typeof LlmEntrySchema>;
 export type LlmRendering = z.infer<typeof LlmRenderingSchema>;
 export type LlmReconciliation = z.infer<typeof LlmReconciliationSchema>;
+export type LlmGlossMerge = z.infer<typeof LlmGlossMergeSchema>;
 export type Enrollment = z.infer<typeof EnrollmentSchema>;
 export type CreateEnrollmentRequest = z.infer<typeof CreateEnrollmentRequestSchema>;
 export type CreateGrantRequest = z.infer<typeof CreateGrantRequestSchema>;
@@ -167,7 +169,7 @@ export type SessionView = z.infer<typeof SessionViewSchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
 export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;
 export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
-export type SenseProgress = z.infer<typeof SenseProgressSchema>;
+export type GlossProgress = z.infer<typeof GlossProgressSchema>;
 export type SessionProgressItem = z.infer<typeof SessionProgressItemSchema>;
 export type SkipSessionResponse = z.infer<typeof SkipSessionResponseSchema>;
 export type ReadAloudQuestion = z.infer<typeof ReadAloudQuestionSchema>;

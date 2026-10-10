@@ -41,21 +41,40 @@ export type SessionEvidence = {
 const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}`), sql`, `);
 
 /**
- * Phase 20. sense_progress and session_progress. Every statement is scoped to
- * one session or to one enrollment's handful of senses, on a primary key; the
+ * Phase 20. gloss_progress and session_progress. Every statement is scoped to
+ * one session or to one enrollment's handful of glosses, on a primary key; the
  * list's level aggregate lives in repo/vocabulary.ts.
  *
- * No row locks: an enrollment's progress is written only when one of its
- * sessions ends, its sessions end one at a time (the session row is locked by
- * loadSession and findState, and at most one is open), and the recompute holds
- * a table lock on sessions (lockSessions) so no session ends while it runs.
+ * No row locks on progress: an enrollment's progress is written only when one
+ * of its sessions ends, its sessions end one at a time (the session row is
+ * locked by loadSession and findState, and at most one is open), and the
+ * recompute holds a table lock on sessions (lockSessions) so no session ends
+ * while it runs. The one lock here is on the dictionary: lockSessionGlosses,
+ * which keeps a gloss merge out of a session's end (phase 31, spec D14).
  */
 export function createProgressRepo(tx: Tx) {
   return {
+    /** Phase 31 (spec D14). FOR SHARE on the lexemes of every gloss this session's
+     *  questions practise, in id order, before its evidence is read. A gloss never
+     *  changes lexeme, so this holds the right rows even while a merge re-keys
+     *  these questions; once the merge commits, the reads after this see it. */
+    lockSessionGlosses: async (sessionId: string): Promise<void> => {
+      await tx.execute(sql`
+        SELECT l.id FROM dict_lexemes l
+        WHERE l.id IN (
+          SELECT g.lexeme_id
+          FROM session_questions sq
+          JOIN questions q    ON q.id = sq.question_id
+          JOIN dict_glosses g ON g.id = q.gloss_id
+          WHERE sq.session_id = ${sessionId})
+        ORDER BY l.id
+        FOR SHARE`);
+    },
+
     findSessionEvidence: async (sessionId: string): Promise<SessionEvidence | undefined> => {
       const rows = await tx.execute<{
         enrollment_id: string;
-        sense_id: string;
+        gloss_id: string;
         type: string;
         options: QuestionOption[] | null;
         selected_option_position: number | null;
@@ -63,7 +82,7 @@ export function createProgressRepo(tx: Tx) {
         day: string;
         last_answered_at: string;
       }>(sql`
-        SELECT s.enrollment_id, q.sense_id, q.type, q.options, a.selected_option_position, a.verdict,
+        SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict,
                ((max(a.answered_at) OVER ()) AT TIME ZONE 'UTC')::date::text AS day,
                (max(a.answered_at) OVER ())::text AS last_answered_at
         FROM answers a
@@ -80,10 +99,10 @@ export function createProgressRepo(tx: Tx) {
         answers: rows.rows.map((row): AnsweredQuestion => {
           // Phase 23 and 24. A text answer carries the verdict it was shown.
           if (TEXT_TYPES.has(row.type)) {
-            return { senseId: row.sense_id, type: row.type as TextAnswerType, verdict: row.verdict as AnswerVerdict };
+            return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict: row.verdict as AnswerVerdict };
           }
           return {
-            senseId: row.sense_id,
+            glossId: row.gloss_id,
             type: row.type as ChoiceAnswerType,
             // selected_option_position is canonical (sessions.insertAnswer), and
             // question_options_valid makes positions 0..n-1.
@@ -93,33 +112,33 @@ export function createProgressRepo(tx: Tx) {
       };
     },
 
-    /** The rows of the asked senses that are saved. `savedBy` leaves out a sense
+    /** The rows of the asked glosses that are saved. `savedBy` leaves out a gloss
      *  saved after that time: the recompute's "saved by the session's last
      *  answer". The live path passes null. */
     findRows: async (input: {
       enrollmentId: string;
-      senseIds: string[];
+      glossIds: string[];
       savedBy: string | null;
     }): Promise<ProgressRow[]> => {
-      if (input.senseIds.length === 0) return [];
+      if (input.glossIds.length === 0) return [];
       const rows = await tx.execute<{
-        sense_id: string;
+        gloss_id: string;
         dimension: string;
         level: number;
         last_step_on: string | null;
         last_wrong_on: string | null;
       }>(sql`
-        SELECT p.sense_id, p.dimension, p.level,
+        SELECT p.gloss_id, p.dimension, p.level,
                p.last_step_on::text AS last_step_on, p.last_wrong_on::text AS last_wrong_on
-        FROM sense_progress p
+        FROM gloss_progress p
         JOIN vocabulary_entries ve ON ve.enrollment_id = p.enrollment_id
-                                  AND ve.sense_id = p.sense_id
+                                  AND ve.gloss_id = p.gloss_id
         WHERE p.enrollment_id = ${input.enrollmentId}
-          AND p.sense_id IN (${inList(input.senseIds)})
+          AND p.gloss_id IN (${inList(input.glossIds)})
           ${input.savedBy === null ? sql`` : sql`AND ve.created_at <= ${input.savedBy}::timestamptz`}
-        ORDER BY p.sense_id, p.dimension`);
+        ORDER BY p.gloss_id, p.dimension`);
       return rows.rows.map((row) => ({
-        senseId: row.sense_id,
+        glossId: row.gloss_id,
         dimension: row.dimension as Dimension,
         level: row.level,
         lastStepOn: row.last_step_on,
@@ -130,19 +149,19 @@ export function createProgressRepo(tx: Tx) {
     updateRows: async (input: { enrollmentId: string; rows: ProgressRow[] }): Promise<void> => {
       if (input.rows.length === 0) return;
       await tx.execute(sql`
-        UPDATE sense_progress p
+        UPDATE gloss_progress p
         SET level = v.level,
             last_step_on = v.last_step_on::date,
             last_wrong_on = v.last_wrong_on::date
         FROM (VALUES ${sql.join(
           input.rows.map(
             (row) =>
-              sql`(${row.senseId}::text, ${row.dimension}::text, ${row.level}::int, ${row.lastStepOn}::text, ${row.lastWrongOn}::text)`,
+              sql`(${row.glossId}::text, ${row.dimension}::text, ${row.level}::int, ${row.lastStepOn}::text, ${row.lastWrongOn}::text)`,
           ),
           sql`, `,
-        )}) AS v(sense_id, dimension, level, last_step_on, last_wrong_on)
+        )}) AS v(gloss_id, dimension, level, last_step_on, last_wrong_on)
         WHERE p.enrollment_id = ${input.enrollmentId}
-          AND p.sense_id = v.sense_id
+          AND p.gloss_id = v.gloss_id
           AND p.dimension = v.dimension`);
     },
 
@@ -151,7 +170,7 @@ export function createProgressRepo(tx: Tx) {
       await tx.insert(sessionProgress).values(
         input.rows.map((row) => ({
           sessionId: input.sessionId,
-          senseId: row.senseId,
+          glossId: row.glossId,
           dimension: row.dimension,
           levelBefore: row.levelBefore,
           levelAfter: row.levelAfter,
@@ -159,41 +178,40 @@ export function createProgressRepo(tx: Tx) {
       );
     },
 
-    /** The snapshot with the form and the meaning of the first question in the
-     *  session that asked each sense. Phase 23: a reversed or typed card asked
-     *  the meaning, which it stores as its prompt; today's card offers it as
-     *  its right option. Either way the results show form → meaning. */
+    /** The snapshot with, for each practised gloss, the form of the first
+     *  question in the session that asked it and the gloss's key: the results
+     *  name a saved word as the list does (phase 31, spec D11). */
     findSnapshot: async (sessionId: string): Promise<SnapshotRead[]> => {
       const rows = await tx.execute<{
-        sense_id: string;
+        gloss_id: string;
         dimension: string;
         level_before: number;
         level_after: number;
         form: string;
-        prompt: string | null;
-        options: QuestionOption[] | null;
+        key: string;
         position: number;
       }>(sql`
-        SELECT sp.sense_id, sp.dimension, sp.level_before, sp.level_after, f.form, f.prompt, f.options, f.position
+        SELECT sp.gloss_id, sp.dimension, sp.level_before, sp.level_after, f.form, g.key, f.position
         FROM session_progress sp
+        JOIN dict_glosses g ON g.id = sp.gloss_id
         JOIN LATERAL (
-          SELECT v.form, q.prompt, q.options, sq.position
+          SELECT v.form, sq.position
           FROM session_questions sq
           JOIN questions q     ON q.id = sq.question_id
           JOIN dict_variants v ON v.id = q.prompt_variant_id
           WHERE sq.session_id = sp.session_id
-            AND q.sense_id = sp.sense_id
+            AND q.gloss_id = sp.gloss_id
           ORDER BY sq.position
           LIMIT 1
         ) f ON true
         WHERE sp.session_id = ${sessionId}`);
       return rows.rows.map((row) => ({
-        senseId: row.sense_id,
+        glossId: row.gloss_id,
         dimension: row.dimension as Dimension,
         levelBefore: row.level_before,
         levelAfter: row.level_after,
         form: row.form,
-        translation: row.prompt ?? canonicalOptions(row.options!).find((option) => option.is_correct)!.text,
+        translation: row.key,
         position: row.position,
       }));
     },
@@ -207,7 +225,7 @@ export function createProgressRepo(tx: Tx) {
 
     /** Recompute only: every row back to level 1, and no session's snapshot. */
     resetAll: async (): Promise<void> => {
-      await tx.execute(sql`UPDATE sense_progress SET level = 1, last_step_on = NULL, last_wrong_on = NULL`);
+      await tx.execute(sql`UPDATE gloss_progress SET level = 1, last_step_on = NULL, last_wrong_on = NULL`);
       await tx.execute(sql`DELETE FROM session_progress`);
     },
 

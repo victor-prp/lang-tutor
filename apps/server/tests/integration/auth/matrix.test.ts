@@ -6,7 +6,7 @@ import { signUpWithProfile } from '../../support/auth';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import { addedByOf, seedGrant } from '../../support/grantRows';
-import { expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
+import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../../support/mockServer';
 import { seedPhotoImport } from '../../support/photoImportRows';
 import { countRows } from '../../support/rowCounts';
 import { createTestServerDeps } from '../../support/serverDeps';
@@ -24,6 +24,7 @@ type Doc = { paths: Record<string, Record<string, unknown>> };
 type Account = { cookie: string; userId: string };
 
 let t: TestDb;
+let ns: string;
 let app: ReturnType<typeof createApp>;
 let owner: Account;
 let stranger: Account;
@@ -34,8 +35,8 @@ let ids: {
   session: string;
   photoImport: string;
   grant: string;
-  saved: { sense_id: string; variant_id: string };
-  unsaved: { sense_id: string; variant_id: string };
+  saved: { gloss_id: string; variant_id: string };
+  unsaved: { gloss_id: string; variant_id: string };
 };
 
 const LEMMA = 'matrix';
@@ -61,7 +62,7 @@ const OWN_ONLY = new Set([
 /**
  * How a stranger aims each remaining operation at the owner's things. Every
  * body passes its route's validation, so a 400 here is a failure, not a pass.
- * A save aims at a sense the owner has not saved and an unsave at one they
+ * A save aims at a gloss the owner has not saved and an unsave at one they
  * have, so either getting through would show in the row counts as well as the
  * answer.
  */
@@ -87,8 +88,8 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
     url: `/api/enrollments/${ids.enrollment}/vocabulary`,
     body: { entries: [ids.unsaved] },
   }),
-  'delete /api/enrollments/{id}/vocabulary/senses/{sense_id}': () => ({
-    url: `/api/enrollments/${ids.enrollment}/vocabulary/senses/${ids.saved.sense_id}`,
+  'delete /api/enrollments/{id}/vocabulary/glosses/{gloss_id}': () => ({
+    url: `/api/enrollments/${ids.enrollment}/vocabulary/glosses/${ids.saved.gloss_id}`,
   }),
   'get /api/enrollments/{id}/vocabulary/word': () => ({
     url: `/api/enrollments/${ids.enrollment}/vocabulary/word?lemma=${LEMMA}`,
@@ -149,7 +150,7 @@ async function written() {
     'sessions',
     'answers',
     'session_progress',
-    'sense_progress',
+    'gloss_progress',
     'vocabulary_entries',
     'photo_imports',
     'photo_import_items',
@@ -165,7 +166,7 @@ async function written() {
 
 beforeAll(async () => {
   t = await createTestDb();
-  const ns = mockNamespace('auth-matrix');
+  ns = mockNamespace('auth-matrix');
   await expectEmails(ns);
   app = createApp(
     createTestServerDeps({ db: t.db, logger: createFakeLogger(), rng: testRng(29), mailBaseUrl: mailBaseUrlFor(ns) }),
@@ -179,8 +180,8 @@ beforeAll(async () => {
   expect(enrolled.status).toBe(201);
   const enrollment = ((await enrolled.json()) as { id: string }).id;
 
-  // Two senses of one word: the owner saves the first; the second is what the
-  // stranger and the tutor try to add.
+  // Two senses of one word, each its own gloss: the owner saves the first; the
+  // second is what the stranger and the tutor try to add.
   const word = await insertLexeme(t.db, {
     lemma: LEMMA,
     languageCode: 'en',
@@ -199,8 +200,8 @@ beforeAll(async () => {
       },
     ],
   });
-  const saved = { sense_id: word.senseIds[0], variant_id: word.variantIds[0] };
-  const unsaved = { sense_id: word.senseIds[1], variant_id: word.variantIds[0] };
+  const saved = { gloss_id: word.glossIds[0], variant_id: word.variantIds[0] };
+  const unsaved = { gloss_id: word.glossIds[1], variant_id: word.variantIds[0] };
   expect((await call('post', `/api/enrollments/${enrollment}/vocabulary`, owner.cookie, { entries: [saved] })).status).toBe(
     200,
   );
@@ -224,6 +225,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  await clearNamespace(ns);
   await t.close();
 });
 
@@ -279,7 +281,7 @@ describe('a tutor with an accepted grant', () => {
     const save = STRANGER['post /api/enrollments/{id}/vocabulary']();
     const res = await call('post', save.url, tutor.cookie, save.body);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ saved_sense_ids: [ids.unsaved.sense_id] });
+    expect(await res.json()).toEqual({ saved_gloss_ids: [ids.unsaved.gloss_id] });
     const credited = await addedByOf(t.db, ids.enrollment);
     expect(credited.sort()).toEqual([owner.userId, tutor.userId].sort());
   });

@@ -2,8 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 
 import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
-import type { SessionRecord } from '../domain/session';
-import { AnswerKindMismatch, SessionNotFound } from '../errors';
+import type { GlossRendering, SessionRecord } from '../domain/session';
+import { AnswerKindMismatch, NoSavedWords, SessionNotFound } from '../errors';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
@@ -11,6 +11,7 @@ import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
+import type { GlossRepo } from '../repo/glosses';
 import type { PhotoImportRepo } from '../repo/photoImports';
 import type { VocabularyRepo } from '../repo/vocabulary';
 import { createSessionService, type Transaction } from './sessions';
@@ -121,6 +122,9 @@ describe('repos', () => {
     findStaleLexemesByForm: () => {
       throw new Error('the session service must not read the dictionary tables');
     },
+    lockLexemes: () => {
+      throw new Error('the session service must not lock the dictionary tables');
+    },
     persistCorrection: () => {
       throw new Error('the session service must not write the dictionary tables');
     },
@@ -128,6 +132,51 @@ describe('repos', () => {
       throw new Error('the session service must not write the dictionary tables');
     },
     repairVariantRenderings: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    findLexeme: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    hasLemmaRendering: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    nextEntryRank: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    claimLemmaRenders: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    claimSavedLemmaRenders: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    releaseLemmaRender: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    // Phase 31. Read by createNextSession and prepareSession, which these cases are not.
+    findGlossRenderings: () => {
+      throw new Error('these cases must not read a gloss rendering');
+    },
+    findSiblings: () => {
+      throw new Error('these cases must not read a sibling');
+    },
+  };
+
+  // Phase 31. Bound into the same transaction, and untouched by these cases:
+  // none of them ends a session or prepares one, the two that resolve glosses.
+  const glossRepo: GlossRepo = {
+    resolveGlosses: () => {
+      throw new Error('these cases must not resolve a gloss');
+    },
+    findMergeCandidates: () => {
+      throw new Error('the session service must not merge glosses');
+    },
+    mergeGlosses: () => {
+      throw new Error('the session service must not merge glosses');
+    },
+    findMergeWork: () => {
+      throw new Error('the session service must not merge glosses');
+    },
+    setDefinitions: () => {
       throw new Error('the session service must not write the dictionary tables');
     },
   };
@@ -141,13 +190,13 @@ describe('repos', () => {
     findSaveable: forbidden,
     insertEntries: forbidden,
     deleteEntry: forbidden,
-    findSavedSenseIds: forbidden,
+    findSavedGlossIds: forbidden,
     findWordsPage: forbidden,
     findWordSummaries: forbidden,
     findLemmaLexemes: forbidden,
     findLemmaRenderings: forbidden,
     findSavedInLemma: forbidden,
-    listSavedSenses: forbidden,
+    listSavedGlosses: forbidden,
     countEntries: forbidden,
   };
 
@@ -157,6 +206,7 @@ describe('repos', () => {
     throw new Error('this case must not touch the progress tables');
   };
   const progressRepo: ProgressRepo = {
+    lockSessionGlosses: unreachableProgress,
     findSessionEvidence: unreachableProgress,
     findRows: unreachableProgress,
     updateRows: unreachableProgress,
@@ -192,6 +242,7 @@ describe('repos', () => {
         enrollment: enrollmentRepo,
         grant: grantRepo,
         dict: dictRepo,
+        gloss: glossRepo,
         vocabulary: vocabularyRepo,
         progress: progressRepo,
         photoImport: photoImportRepo,
@@ -298,7 +349,11 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
           insertPreparingSession: async () => 's1',
         }),
         vocabulary: stub<VocabularyRepo>({
-          listSavedSenses: async () => [{ senseId: 's1', variantId: 'v1', lexemeId: 'l1' }] as never,
+          listSavedGlosses: async () => [{ glossId: 'g1', key: 'עט', variantId: 'v1' }],
+        }),
+        // Phase 31 (spec D12). The saved form's rendering, agreeing with the key.
+        dict: stub<DictRepo>({
+          findGlossRenderings: async () => [{ glossId: 'g1', senseId: 's1', variantId: 'v1', form: 'ручка', gloss: 'עט', rank: 0 }],
         }),
         jobs,
       }),
@@ -312,6 +367,73 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
 
     await service.createNextSession('u1', E, { listening: true, speaking });
     expect(jobs.enqueued[0].data).toMatchObject({ listening: true, speaking, ordinal: 2 });
+  });
+});
+
+// Phase 31 (spec D12). `finger` saved from `fingers`, whose rendering gave a
+// drifted citation form: the saved form and the lemma form take turns, and a
+// member rendering that agrees with neither the key nor the saved form is never asked.
+describe('createNextSession, phase 31 (spec D12)', () => {
+  const E = 'e1';
+  const FINGERS: GlossRendering = { glossId: 'g1', senseId: 's1', variantId: 'v_fingers', form: 'fingers', gloss: 'אצבעות', rank: 0 };
+  const FINGER: GlossRendering = { glossId: 'g1', senseId: 's1', variantId: 'v_finger', form: 'finger', gloss: 'אצבע', rank: 0 };
+  const DIGITS: GlossRendering = { glossId: 'g1', senseId: 's2', variantId: 'v_digits', form: 'digits', gloss: 'ספרות', rank: 1 };
+
+  function world(seed: number, renderings: GlossRendering[]) {
+    const jobs = createFakeJobRepo();
+    const reads: unknown[] = [];
+    const service = createSessionService({
+      transaction: createFakeTransaction({
+        enrollment: stub<EnrollmentRepo>({
+          findById: async () => ({ id: E, user_id: 'u1', source_language: 'he', target_language: 'en', created_at: '' }),
+        }),
+        session: stub<SessionRepo>({
+          findLatest: async () => ({ id: 's0', status: 'completed', source: 'seed' }) as never,
+          countListSessions: async () => 0,
+          insertPreparingSession: async () => 's1',
+        }),
+        vocabulary: stub<VocabularyRepo>({
+          listSavedGlosses: async () => [{ glossId: 'g1', key: 'אצבע', variantId: 'v_fingers' }],
+        }),
+        dict: stub<DictRepo>({
+          findGlossRenderings: async (input) => {
+            reads.push(input);
+            return renderings;
+          },
+        }),
+        jobs,
+      }),
+      rng: testRng(seed),
+      logger: createFakeLogger(),
+      now: createFakeClock(0),
+      llm: createFakeLlmClient(''),
+      transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
+    });
+    return { service, jobs, reads };
+  }
+
+  it('picks one rendering per gloss among those agreeing with its key and its saved form, never a drifted one', async () => {
+    const asked = new Set<string>();
+    for (let seed = 1; seed <= 10; seed++) {
+      const { service, jobs, reads } = world(seed, [DIGITS, FINGERS, FINGER]);
+      await service.createNextSession('u1', E, { listening: false, speaking: false });
+      expect(reads).toEqual([{ glossIds: ['g1'], userLanguageCode: 'he' }]);
+      const { picks } = jobs.enqueued[0].data as { picks: { gloss_id: string; sense_id: string; variant_id: string }[] };
+      expect(picks).toHaveLength(1);
+      expect([
+        { gloss_id: 'g1', sense_id: 's1', variant_id: 'v_fingers' },
+        { gloss_id: 'g1', sense_id: 's1', variant_id: 'v_finger' },
+      ]).toContainEqual(picks[0]);
+      asked.add(picks[0].variant_id);
+    }
+    expect(asked).toEqual(new Set(['v_fingers', 'v_finger']));
+  });
+
+  it('has nothing to ask, and enqueues nothing, when no picked gloss has a rendering', async () => {
+    const { service, jobs } = world(1, []);
+    await expect(service.createNextSession('u1', E, { listening: false, speaking: false })).rejects.toBeInstanceOf(NoSavedWords);
+    expect(jobs.enqueued).toEqual([]);
   });
 });
 

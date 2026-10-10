@@ -19,7 +19,7 @@ let vocabulary: VocabularyService;
 const E = enrollmentOf('u_student'); // English
 const RU = 'e_student_ru';
 
-let kite: { senseIds: string[]; variantIds: string[] };
+let kite: { glossIds: string[]; variantIds: string[] };
 
 beforeEach(async () => {
   t = await createTestDb();
@@ -49,7 +49,7 @@ afterEach(async () => {
   await t.close();
 });
 
-const entry = () => [{ sense_id: kite.senseIds[0], variant_id: kite.variantIds[0] }];
+const entry = () => [{ gloss_id: kite.glossIds[0], variant_id: kite.variantIds[0] }];
 
 describe('save', () => {
   it('lets the owner save, recorded as theirs', async () => {
@@ -91,14 +91,14 @@ describe('unsave', () => {
   it('refuses a tutor, even an accepted one', async () => {
     await seedGrant(t.db, { enrollmentId: E, ownerUserId: 'u_student', granteeUserId: 'u_tutor', accepted: true });
     await vocabulary.save('u_tutor', E, entry());
-    await expect(vocabulary.unsave('u_tutor', E, kite.senseIds[0])).rejects.toBeInstanceOf(AccessDenied);
+    await expect(vocabulary.unsave('u_tutor', E, kite.glossIds[0])).rejects.toBeInstanceOf(AccessDenied);
     expect(await addedByOf(t.db, E)).toEqual(['u_tutor']);
   });
 
   it('lets the owner remove a word the tutor added', async () => {
     await seedGrant(t.db, { enrollmentId: E, ownerUserId: 'u_student', granteeUserId: 'u_tutor', accepted: true });
     await vocabulary.save('u_tutor', E, entry());
-    await vocabulary.unsave('u_student', E, kite.senseIds[0]);
+    await vocabulary.unsave('u_student', E, kite.glossIds[0]);
     expect(await addedByOf(t.db, E)).toEqual([]);
   });
 });

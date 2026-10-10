@@ -1,7 +1,7 @@
 # ADR 0001: Layered architecture in `apps/server`
 
 - **Status:** Accepted
-- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19); R8 note 2026-10-07 (phase 26), no rule change; R12 and R13 added 2026-10-08 (phase 29); R13's command tightened 2026-10-08 (phase 29 review): index imports, `routes/auth/`, and the flow test as a named exception
+- **Date:** 2026-08-30 (phase 4); R2/R8 revised 2026-09-06 when the transaction seam landed; R4/R8 revised 2026-09-09 (phase 10); R8 revised 2026-09-13 (phase 12); R8 revised 2026-09-15 (phase 13); R5 amended 2026-10-05 (phase 19); R8 note 2026-10-07 (phase 26), no rule change; R12 and R13 added 2026-10-08 (phase 29); R13's command tightened 2026-10-08 (phase 29 review): index imports, `routes/auth/`, and the flow test as a named exception; R4 amended 2026-10-09 (phase 31): db/cli.ts may import composition.ts
 - **Source:** [phase 4 design](../superpowers/specs/2026-08-30-lang-tutor-phase-4-postgres-design.md)
 
 ## Decision
@@ -48,7 +48,7 @@ the server's holds the session state machine only a server has (`step`, `Session
 | R1 | `routes/` | `services/` (types only), `domain/`, `errors`, `@lang-tutor/core/api*`, Hono, zod | `db/`, `repo/`, `drizzle-orm`, `pg` |
 | R2 | `services/` | `domain/`, `repo/` (**types only**), `errors`, `logger` | **anything under `db/`**, Hono, `hono/*`, `@hono/*`, HTTP status codes, `drizzle-orm`, `pg` |
 | R3 | `domain/` | `@lang-tutor/core/*` only | anything else in `apps/server/src`, `pg`, `drizzle-orm`, Hono, `Date.now`, `Math.random` |
-| R4 | `repo/` + `db/` | `drizzle-orm`, `pg`, `db/*`, **`repo/*`**, domain **types** | `routes/`, `services/`, `app.ts`, `composition.ts` |
+| R4 | `repo/` + `db/` | `drizzle-orm`, `pg`, `db/*`, **`repo/*`**, domain **types**; `db/cli.ts` alone, an entry point, also `composition.ts` (phase 31) | `routes/`, `services/`, `app.ts`, `composition.ts` (every file but `db/cli.ts`) |
 | R5 | `app.ts` | `composition` (type `AppDeps`), `routes/`, Hono and `@hono/zod-openapi`, `@lang-tutor/core/api*`, the docs UI (`@scalar/hono-api-reference`) | `db/`, `repo/`, `services/`, `drizzle-orm`, `pg` |
 | R6 | `composition.ts` | every factory it wires | nothing that performs I/O at call time (no `createDb`, no `new Pool`) |
 | R7 | anywhere | — | `console` outside `logger.ts` and `index.ts`/`db/cli.ts` |
@@ -73,6 +73,17 @@ R4's diagram draws `repo/` and `db/` as **one** layer in one box under one rule,
 only looks upward. Phase 10 added `repo/*` to the list, which makes the prose match the
 diagram rather than granting anything new. No detection command changed, because the rule
 that matters — *persistence must not reach upward* — is unaffected.
+
+**Phase 31 gives R4 one exception: `db/cli.ts` may import `composition.ts`, and nothing
+else under `db/` may.** The CLI is an entry point: R7 already treats it as one, and
+[ADR 0002](adr-0002-di-with-closures.md) names it a composition root.
+`npm run dict:glosses:merge`'s model tier needs a Gemini client, which R11 lets only
+`composition.ts` construct, so the CLI asks the composition root for `createGlossTools`
+rather than naming a provider itself. A second entry point beside `index.ts` would have
+needed R7's console exception instead. The detection command filters exactly that import,
+anchored to the file *and* to `'../composition'`: `db/cli.ts` importing `routes/`,
+`services/` or `app` is still a violation, and so is any other file under `db/` importing
+the composition root.
 
 Three rules that are not import rules:
 
@@ -182,8 +193,9 @@ grep -rn "from '\.\./repo/" apps/server/src/services/ | grep -v 'import type'
 grep -rnE "from '\.\./|from '(pg|drizzle-orm|hono)" apps/server/src/domain/
 grep -rn "Math.random\|Date.now\|new Date()" apps/server/src/domain/
 
-# R4 — persistence must not reach upward
-grep -rnE "from '\.\./(routes|services)/|from '\.\./(app|composition)'" apps/server/src/repo/ apps/server/src/db/
+# R4 — persistence must not reach upward (db/cli.ts, an entry point, may import composition)
+grep -rnE "from '\.\./(routes|services)/|from '\.\./(app|composition)'" apps/server/src/repo/ apps/server/src/db/ \
+  | grep -vE "^apps/server/src/db/cli\.ts:[0-9]+:.*from '\.\./composition'"
 
 # R5 — app.ts wires, it does not know a database exists
 grep -nE "from './(db|repo)/|drizzle|from 'pg'" apps/server/src/app.ts | grep -vE '^[0-9]+:\s*(//|\*)'

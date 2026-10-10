@@ -5,12 +5,17 @@ import {
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
   LOOK_UP_IMPORT_ITEM_FAILED,
+  MERGE_GLOSSES,
+  MERGE_GLOSSES_EXPIRY_SECONDS,
   PREPARE_SESSION,
   PREPARE_SESSION_EXPIRY_SECONDS,
   PREPARE_SESSION_FAILED,
   READ_PHOTO,
   READ_PHOTO_EXPIRY_SECONDS,
   READ_PHOTO_FAILED,
+  RENDER_LEMMA,
+  RENDER_LEMMA_EXPIRY_SECONDS,
+  RENDER_LEMMA_FAILED,
   type JobName,
 } from '../domain/jobs';
 import type { Db } from './client';
@@ -76,6 +81,26 @@ export const JOB_QUEUES: QueueDefinition[] = [
       deadLetter: LOOK_UP_IMPORT_ITEM_FAILED,
     },
   },
+  // Phase 31 (spec D7). No dead letter: a merge that keeps failing leaves two
+  // glosses, which the by-hand tool (dict:glosses:merge) also finds.
+  {
+    name: MERGE_GLOSSES,
+    options: { retryLimit: 2, retryBackoff: true, expireInSeconds: MERGE_GLOSSES_EXPIRY_SECONDS, deleteAfterSeconds: 86_400 },
+  },
+  // Phase 31 (spec D12). The dead letter releases the job's claim
+  // (dict_lemma_renders), so a render whose retries are spent is asked for again
+  // by the next save or start. The saved form serves meanwhile.
+  { name: RENDER_LEMMA_FAILED, options: { retryLimit: 2, deleteAfterSeconds: 86_400 } },
+  {
+    name: RENDER_LEMMA,
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: RENDER_LEMMA_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
+      deadLetter: RENDER_LEMMA_FAILED,
+    },
+  },
 ];
 
 /**
@@ -112,4 +137,31 @@ export async function installJobs(db: Db): Promise<void> {
     await boss.stop({ graceful: false });
   }
   if (failure) throw failure;
+}
+
+/**
+ * Phase 31. A started pg-boss on the caller's handle for the length of `run`,
+ * for an enqueue outside the server: the CLI's lemma backfill. Built as
+ * installJobs builds its own, and stopped however `run` ends.
+ */
+export async function withJobQueue<T>(db: Db, run: (boss: PgBoss) => Promise<T>): Promise<T> {
+  const boss = new PgBoss({
+    db: fromDrizzle(db, sql),
+    schema: JOB_SCHEMA,
+    migrate: false,
+    supervise: false,
+    schedule: false,
+    registerInstance: false,
+  });
+  let failure: unknown;
+  boss.on('error', (error) => {
+    failure ??= error;
+  });
+  await boss.start();
+  try {
+    return await run(boss);
+  } finally {
+    await boss.stop({ graceful: false });
+    if (failure) throw failure;
+  }
 }

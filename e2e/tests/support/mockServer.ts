@@ -125,10 +125,14 @@ export async function expectGeminiMatching(
   request: APIRequestContext,
   bodyRegex: string,
   payload: unknown,
-  opts: { delayMs?: number } = {},
+  /** `once`, as expectGemini's: a one-shot, consumed by the first call that matches.
+   *  Phase 31. `priority`: MockServer tries a higher priority first, so a stub
+   *  matched on a marker outranks one matched on the same text. */
+  opts: { delayMs?: number; once?: boolean; priority?: number } = {},
 ): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
     data: {
+      ...(opts.priority ? { priority: opts.priority } : {}),
       httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: `[\\s\\S]*${bodyRegex}[\\s\\S]*` } },
       httpResponse: {
         statusCode: 200,
@@ -136,9 +140,19 @@ export async function expectGeminiMatching(
         body: envelope(payload),
         ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
       },
+      ...(opts.once ? { times: { remainingTimes: 1, unlimited: false } } : {}),
     },
   });
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
+
+/**
+ * Phase 31. The body regex for a model call whose user part is exactly `text`.
+ * The provider sends that part as `"parts":[{"text":"…"}]`, and the system
+ * prompt's quoted words are escaped inside the JSON, so they never match.
+ */
+export function userText(text: string): string {
+  return `"text":"${text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}"`;
 }
 
 /** Phase 29. Resend, answered 200 for this lane's namespace. `clearGemini` wipes it, so every sign-in registers it again. */

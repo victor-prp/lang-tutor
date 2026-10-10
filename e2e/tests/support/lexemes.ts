@@ -85,3 +85,48 @@ export const BOARD_WORDS = [
   single('фонарь', 'פנס', 'lantern'),
   single('ящерица', 'לטאה', 'lizard'),
 ];
+
+/** Phase 31. `mouse`: two senses, one Hebrew word, so one card with two examples.
+ *  The rodent has one other word, which the lookup card and the word's page
+ *  show as their "also" line. */
+export const MOUSE = {
+  kind: 'word' as const,
+  entries: [
+    {
+      lemma: 'mouse',
+      part_of_speech: 'noun',
+      senses: [
+        { translation: 'עכבר', gloss: 'עכבר', alternatives: ['עכברון'], definition: 'a small rodent with a long tail', sense_code: 'rodent', example: { source: 'A mouse ran across the kitchen floor.', target: 'עכבר רץ על רצפת המטבח.' } },
+        { translation: 'עכבר', gloss: 'עכבר', definition: 'a hand-held device that moves a pointer', sense_code: 'computer_device', example: { source: 'Click the left mouse button.', target: 'לחץ על הכפתור השמאלי של העכבר.' } },
+      ],
+    },
+  ],
+};
+
+/** Phase 31. `fingers`, saved inflected: a plural rendering, a singular citation form. */
+export const FINGERS = {
+  kind: 'word' as const,
+  entries: [
+    {
+      lemma: 'finger',
+      part_of_speech: 'noun',
+      senses: [{ translation: 'אצבעות', gloss: 'אצבע', alternatives: [], definition: 'one of the five digits of the hand', sense_code: 'body_part', example: { source: 'He has long fingers.', target: 'יש לו אצבעות ארוכות.' } }],
+    },
+  ],
+};
+
+/** Phase 31. The render-lemma job's lookup of `finger`: the first call's answer
+ *  (a new code), then the rendering call that maps it onto the stored sense. */
+export const FINGER = {
+  kind: 'word' as const,
+  entries: [
+    {
+      lemma: 'finger',
+      part_of_speech: 'noun',
+      senses: [{ translation: 'אצבע', gloss: 'אצבע', definition: 'one of the five digits of the hand', sense_code: 'digit_of_hand', example: { source: 'She pointed with one finger.', target: 'היא הצביעה באצבע אחת.' } }],
+    },
+  ],
+};
+export const FINGER_RECONCILED = {
+  senses: [{ sense_code: 'body_part', translation: 'אצבע', gloss: 'אצבע', definition: null, example: { source: 'She pointed with one finger.', target: 'היא הצביעה באצבע אחת.' } }],
+};

@@ -257,12 +257,12 @@ describe('api/client', () => {
   });
 
   it('saveVocabulary posts the entries to the enrollment', async () => {
-    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_sense_ids: ['s1'] }) }));
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_gloss_ids: ['s1'] }) }));
     const client = buildClient(mockFetch);
-    await client.saveVocabulary('e 1', { entries: [{ sense_id: 's1', variant_id: 'v1' }] });
+    await client.saveVocabulary('e 1', { entries: [{ gloss_id: 's1', variant_id: 'v1' }] });
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/enrollments/e%201/vocabulary',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ entries: [{ sense_id: 's1', variant_id: 'v1' }] }) }),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ entries: [{ gloss_id: 's1', variant_id: 'v1' }] }) }),
     );
   });
 
@@ -271,16 +271,16 @@ describe('api/client', () => {
     const client = buildClient(mockFetch);
     await client.unsaveVocabulary('e1', 's1');
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://test.local/api/enrollments/e1/vocabulary/senses/s1',
+      'http://test.local/api/enrollments/e1/vocabulary/glosses/s1',
       expect.objectContaining({ method: 'DELETE' }),
     );
   });
 
   // Phase 29 (spec D12): the session says who is acting; no header can.
   it('names no acting user on a save', async () => {
-    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_sense_ids: ['s1'] }) }));
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ saved_gloss_ids: ['s1'] }) }));
     const client = buildClient(mockFetch);
-    await client.saveVocabulary('e1', { entries: [{ sense_id: 's1', variant_id: 'v1' }] });
+    await client.saveVocabulary('e1', { entries: [{ gloss_id: 's1', variant_id: 'v1' }] });
     expect(mockFetch).toHaveBeenCalledWith(
       'http://test.local/api/enrollments/e1/vocabulary',
       expect.objectContaining({ headers: expect.objectContaining({ 'Content-Type': 'application/json' }) }),

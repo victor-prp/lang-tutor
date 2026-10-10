@@ -40,7 +40,7 @@ export type VocabularyValue = {
   loadMore: () => void;
   loadWord: (lemma: string) => Promise<VocabularyWordDetail>;
   save: (entries: VocabularyEntryInput[]) => Promise<void>;
-  unsave: (senseId: string) => Promise<void>;
+  unsave: (glossId: string) => Promise<void>;
 };
 
 const VocabularyContext = createContext<VocabularyValue | undefined>(undefined);
@@ -120,9 +120,9 @@ export function VocabularyProvider({ api, children }: { api: ApiClient; children
     [api, active, user],
   );
   const unsave = useCallback(
-    async (senseId: string) => {
+    async (glossId: string) => {
       if (!active || !user) return;
-      await api.unsaveVocabulary(active.id, senseId);
+      await api.unsaveVocabulary(active.id, glossId);
     },
     [api, active, user],
   );

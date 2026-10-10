@@ -121,7 +121,7 @@ describe('the document as a whole', () => {
       '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/sessions/current',
       '/api/enrollments/{id}/vocabulary',
-      '/api/enrollments/{id}/vocabulary/senses/{sense_id}',
+      '/api/enrollments/{id}/vocabulary/glosses/{gloss_id}',
       '/api/enrollments/{id}/vocabulary/word',
       '/api/grants',
       '/api/grants/{id}',
@@ -343,7 +343,7 @@ describe('the vocabulary endpoints in the published document', () => {
   it.each([
     [BASE, 'post', ['200', '400', '401', '403', '404']],
     [BASE, 'get', ['200', '400', '401', '403', '404']],
-    [`${BASE}/senses/{sense_id}`, 'delete', ['204', '401', '403', '404']],
+    [`${BASE}/glosses/{gloss_id}`, 'delete', ['204', '401', '403', '404']],
     [`${BASE}/word`, 'get', ['200', '400', '401', '403', '404']],
   ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
     const doc = await openApiDocument();
@@ -386,7 +386,7 @@ describe('the 403 of an owner-only or granted route in the published document', 
   it.each([
     [VOCABULARY, 'post', /accepted grant that allows adding words/],
     [VOCABULARY, 'get', /owner, who alone may read it/],
-    [`${VOCABULARY}/senses/{sense_id}`, 'delete', /owner, who alone may remove a word/],
+    [`${VOCABULARY}/glosses/{gloss_id}`, 'delete', /owner, who alone may remove a word/],
     [`${VOCABULARY}/word`, 'get', /owner, who alone may read it/],
     ['/api/sessions', 'post', /another learner's/],
     ['/api/sessions/{id}', 'get', /another learner's/],

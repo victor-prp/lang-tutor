@@ -3,16 +3,21 @@ import type { AnswerRecord, MultipleChoiceQuestion, Question, SessionStatus, Typ
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import {
+  askableRenderings,
   currentQuestion,
   isCurrent,
   isOpen,
   missedQuestions,
   newSessionRecord,
   nextSource,
+  pickGlosses,
+  pickRendering,
   pickSenses,
   positionOf,
   sessionScore,
   step,
+  type GlossRendering,
+  type SavedGloss,
   type SessionRecord,
 } from './session';
 
@@ -228,12 +233,12 @@ describe('sessionScore and missedQuestions', () => {
 });
 
 describe('pickSenses', () => {
-  const entries = Array.from({ length: 12 }, (_, i) => ({ senseId: `s${i}` }));
+  const entries = Array.from({ length: 12 }, (_, i) => ({ glossId: `s${i}` }));
 
   it('takes at most `max`, with no repeats', () => {
     const picked = pickSenses(entries, 10, testRng(3));
     expect(picked).toHaveLength(10);
-    expect(new Set(picked.map((e) => e.senseId)).size).toBe(10);
+    expect(new Set(picked.map((e) => e.glossId)).size).toBe(10);
   });
 
   it('takes all of a shorter list', () => {
@@ -309,5 +314,45 @@ describe('phase 25 speaking cards in step', () => {
     const outcome = step(record(), 'r1', { heard: 'gatto' });
     if (outcome.status !== 'advanced') throw new Error('expected advanced');
     expect(step(outcome.record, 'r1', { heard: 'gatto' })).toMatchObject({ status: 'replayed' });
+  });
+});
+
+const saved = (glossId: string, key: string, variantId = `v-${glossId}`): SavedGloss => ({ glossId, key, variantId });
+const rendering = (glossId: string, variantId: string, gloss: string, senseId = 's1', form = variantId): GlossRendering => ({
+  glossId, senseId, variantId, form, gloss, rank: 0,
+});
+
+describe('pickGlosses (spec D18)', () => {
+  it('never picks two glosses with one key, and picks either of them', () => {
+    const list = [saved('g_book', 'להזמין'), saved('g_order', 'לְהַזְמִין'), saved('g_cat', 'חתול'), saved('g_dog', 'כלב')];
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 20; seed++) {
+      const picked = pickGlosses(list, 10, testRng(seed)).map((gloss) => gloss.glossId);
+      expect(picked.filter((id) => id === 'g_book' || id === 'g_order')).toHaveLength(1);
+      expect(picked).toHaveLength(3);
+      picked.forEach((id) => seen.add(id));
+    }
+    expect(seen).toEqual(new Set(['g_book', 'g_order', 'g_cat', 'g_dog']));
+  });
+});
+
+describe('askableRenderings (spec D12)', () => {
+  const gloss = saved('g1', 'אצבע', 'v_fingers');
+
+  it('keeps every rendering whose own citation form is the key, the lemma form among them', () => {
+    const options = askableRenderings(gloss, [rendering('g1', 'v_fingers', 'אצבע'), rendering('g1', 'v_finger', 'אצבע'), rendering('g2', 'v_toe', 'בוהן')]);
+    expect(options.map((option) => option.variantId)).toEqual(['v_finger', 'v_fingers']);
+  });
+
+  it('drops a drifted rendering, but never the saved form', () => {
+    const options = askableRenderings(gloss, [rendering('g1', 'v_fingers', 'אצבעות'), rendering('g1', 'v_digit', 'ספרה')]);
+    expect(options.map((option) => option.variantId)).toEqual(['v_fingers']);
+  });
+
+  it('takes one of them uniformly under the injected rng', () => {
+    const options = askableRenderings(gloss, [rendering('g1', 'v_fingers', 'אצבע'), rendering('g1', 'v_finger', 'אצבע')]);
+    expect(pickRendering(options, () => 0)?.variantId).toBe('v_finger');
+    expect(pickRendering(options, () => 0.99)?.variantId).toBe('v_fingers');
+    expect(pickRendering([], () => 0)).toBeUndefined();
   });
 });

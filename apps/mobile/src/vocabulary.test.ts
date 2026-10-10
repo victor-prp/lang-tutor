@@ -3,12 +3,14 @@ import type { TranslationSense, VocabularySense, VocabularyWord, VocabularyWordD
 
 import {
   addableStateOf,
+  alsoLine,
   appendPage,
   canSaveAll,
-  keepSenseOrder,
+  keepGlossOrder,
   lookupEnrollmentId,
   toggleIntent,
   partsOfSpeechLabel,
+  savedFromLine,
   savedStateOf,
   showsMark,
   toggleOptimistically,
@@ -18,10 +20,10 @@ import {
 } from './vocabulary';
 
 const SENSES: TranslationSense[] = [
-  { translation: 'a', sense_id: 's1', variant_id: 'v1', saved: false },
-  { translation: 'b', sense_id: 's2', variant_id: 'v1', saved: true },
-  { translation: 'c', sense_id: 's3', variant_id: 'v1', saved: false },
-  { translation: 'reverse', sense_id: 's4', variant_id: 'v2' },
+  { translation: 'a', gloss_id: 's1', variant_id: 'v1', saved: false },
+  { translation: 'b', gloss_id: 's2', variant_id: 'v1', saved: true },
+  { translation: 'c', gloss_id: 's3', variant_id: 'v1', saved: false },
+  { translation: 'reverse', gloss_id: 's4', variant_id: 'v2' },
   { translation: 'sentence' },
 ];
 
@@ -34,8 +36,8 @@ describe('savedStateOf', () => {
 describe('unsavedEntries and canSaveAll', () => {
   it('lists the unsaved, saveable senses', () => {
     expect(unsavedEntries(SENSES, savedStateOf(SENSES))).toEqual([
-      { sense_id: 's1', variant_id: 'v1' },
-      { sense_id: 's3', variant_id: 'v1' },
+      { gloss_id: 's1', variant_id: 'v1' },
+      { gloss_id: 's3', variant_id: 'v1' },
     ]);
   });
 
@@ -106,9 +108,9 @@ describe('toggleOptimistically', () => {
 const word = (lemma: string, over: Partial<VocabularyWord> = {}): VocabularyWord => ({
   lemma,
   parts_of_speech: ['noun'],
-  headline: { sense_id: `s-${lemma}`, translation: 't', form: lemma },
+  headline: { gloss_id: `s-${lemma}`, translation: 't', form: lemma },
   saved_count: 1,
-  sense_count: 1,
+  gloss_count: 1,
   level: 1,
   added_by: [],
   ...over,
@@ -141,18 +143,20 @@ describe('partsOfSpeechLabel', () => {
 
 describe('showsMark', () => {
   it('marks a word with more than one sense', () => {
-    expect(showsMark(word('a', { sense_count: 2 }))).toBe(true);
-    expect(showsMark(word('a', { sense_count: 1 }))).toBe(false);
+    expect(showsMark(word('a', { gloss_count: 2 }))).toBe(true);
+    expect(showsMark(word('a', { gloss_count: 1 }))).toBe(false);
   });
 });
 
-describe('keepSenseOrder', () => {
-  const sense = (sense_id: string, saved: boolean, level?: number): VocabularySense => ({
-    sense_id,
+describe('keepGlossOrder', () => {
+  const sense = (gloss_id: string, saved: boolean, level?: number): VocabularySense => ({
+    gloss_id,
     variant_id: 'v1',
     form: 'прочитала',
-    translation: `tr-${sense_id}`,
+    translation: `tr-${gloss_id}`,
+    alternatives: [],
     part_of_speech: 'verb',
+    examples: [],
     saved,
     ...(level === undefined
       ? {}
@@ -180,20 +184,20 @@ describe('keepSenseOrder', () => {
   it('takes the fresh word but keeps the senses in the order on screen', () => {
     const shown = detail(2, [sense('a', true, 2), sense('b', false)]);
     const fresh = detail(1, [sense('b', true, 1), sense('a', false)]);
-    expect(keepSenseOrder(shown, fresh)).toEqual(detail(1, [sense('a', false), sense('b', true, 1)]));
+    expect(keepGlossOrder(shown, fresh)).toEqual(detail(1, [sense('a', false), sense('b', true, 1)]));
   });
 
   it('puts a sense the screen did not show last, and drops one the server no longer has', () => {
     const shown = detail(1, [sense('a', true, 1), sense('gone', false)]);
     const fresh = detail(1, [sense('new', false), sense('a', true, 1)]);
-    expect(keepSenseOrder(shown, fresh).senses.map((s) => s.sense_id)).toEqual(['a', 'new']);
+    expect(keepGlossOrder(shown, fresh).senses.map((s) => s.gloss_id)).toEqual(['a', 'new']);
   });
 });
 
 describe('addableStateOf (phase 28, tutor mode)', () => {
   const sense = (id: string | undefined, variant: string | undefined): TranslationSense => ({
     translation: 't',
-    sense_id: id,
+    gloss_id: id,
     variant_id: variant,
   });
 
@@ -229,5 +233,22 @@ describe('toggleIntent', () => {
   it('unsaves for a learner and never for a tutor', () => {
     expect(toggleIntent('learner', true)).toBe('unsave');
     expect(toggleIntent('tutor', true)).toBe('none');
+  });
+});
+
+describe('gloss card lines (phase 31)', () => {
+  it('says "also …" only when there are alternatives', () => {
+    expect(alsoLine(['רכב', 'אוטו'])).toBe('גם: רכב, אוטו');
+    expect(alsoLine([])).toBeNull();
+    expect(alsoLine(undefined)).toBeNull();
+  });
+
+  it('names the form a gloss was saved from, with its rendering', () => {
+    const card = {
+      gloss_id: 'g1', variant_id: 'v1', form: 'fingers', translation: 'אצבע', alternatives: [], part_of_speech: 'noun',
+      examples: [], saved: true, saved_from: { form: 'fingers', translation: 'אצבעות' },
+    };
+    expect(savedFromLine(card)).toBe('נשמר מתוך ⁨fingers⁩: אצבעות');
+    expect(savedFromLine({ ...card, saved_from: undefined })).toBeNull();
   });
 });

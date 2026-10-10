@@ -11,7 +11,7 @@ import {
   readProgress,
   readSnapshot,
 } from '../../support/progressRows';
-import { insertListSession, type AskedSense } from '../../support/questions';
+import { insertListSession, type AskedGloss } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -19,7 +19,7 @@ import { withTx } from '../../support/withTx';
 
 let t: TestDb;
 const E = enrollmentOf('u_1');
-let kite: { lexemeId: string; variantIds: string[]; senseIds: string[] };
+let kite: { lexemeId: string; variantIds: string[]; glossIds: string[] };
 
 beforeEach(async () => {
   t = await createTestDb();
@@ -54,15 +54,15 @@ const repo = <T>(fn: (r: ReturnType<typeof createProgressRepo>) => Promise<T>) =
 async function saveAt(at: string, senseIndexes: number[]) {
   for (const i of senseIndexes) {
     await t.db.execute(sql`
-      insert into vocabulary_entries (enrollment_id, sense_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
-      values (${E}, ${kite.senseIds[i]}, ${kite.lexemeId}, (select lemma from dict_lexemes where id = ${kite.lexemeId}),
+      insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, lemma, variant_id, created_at, added_by_user_id)
+      values (${E}, ${kite.glossIds[i]}, ${kite.lexemeId}, (select lemma from dict_lexemes where id = ${kite.lexemeId}),
               ${kite.variantIds[0]}, ${at}::timestamptz, 'u_1')`);
   }
-  await insertProgressRows(t.db, E, senseIndexes.map((i) => kite.senseIds[i]));
+  await insertProgressRows(t.db, E, senseIndexes.map((i) => kite.glossIds[i]));
 }
 
 const asked = (i: number, translation: string) => ({
-  senseId: kite.senseIds[i],
+  glossId: kite.glossIds[i],
   variantId: kite.variantIds[0],
   translation,
 });
@@ -84,8 +84,8 @@ describe('findSessionEvidence', () => {
       day: '2026-10-05',
       lastAnsweredAt: expect.any(String),
       answers: [
-        { senseId: kite.senseIds[0], type: 'multiple_choice', correct: true },
-        { senseId: kite.senseIds[1], type: 'multiple_choice', correct: false },
+        { glossId: kite.glossIds[0], type: 'multiple_choice', correct: true },
+        { glossId: kite.glossIds[1], type: 'multiple_choice', correct: false },
       ],
     });
   });
@@ -129,23 +129,23 @@ describe('findRows and updateRows', () => {
   it('finds the five rows of each saved sense, and none for an unsaved one', async () => {
     await saveAt('2026-10-01 00:00:00+00', [0]);
     const rows = await repo((r) =>
-      r.findRows({ enrollmentId: E, senseIds: [kite.senseIds[0], kite.senseIds[1]], savedBy: null }),
+      r.findRows({ enrollmentId: E, glossIds: [kite.glossIds[0], kite.glossIds[1]], savedBy: null }),
     );
     expect(rows.map((row) => row.dimension).sort()).toEqual([...DIMENSIONS].sort());
-    expect(rows.every((row) => row.senseId === kite.senseIds[0] && row.level === 1)).toBe(true);
+    expect(rows.every((row) => row.glossId === kite.glossIds[0] && row.level === 1)).toBe(true);
     expect(rows.every((row) => row.lastStepOn === null && row.lastWrongOn === null)).toBe(true);
   });
 
   it('leaves out a sense saved after `savedBy`', async () => {
     await saveAt('2026-10-05 12:00:00+00', [0]);
     const find = (savedBy: string) =>
-      repo((r) => r.findRows({ enrollmentId: E, senseIds: [kite.senseIds[0]], savedBy }));
+      repo((r) => r.findRows({ enrollmentId: E, glossIds: [kite.glossIds[0]], savedBy }));
     expect(await find('2026-10-05 11:59:59+00')).toEqual([]);
     expect(await find('2026-10-05 12:00:00+00')).toHaveLength(5);
   });
 
   it('answers nothing for no senses, without a query', async () => {
-    expect(await repo((r) => r.findRows({ enrollmentId: E, senseIds: [], savedBy: null }))).toEqual([]);
+    expect(await repo((r) => r.findRows({ enrollmentId: E, glossIds: [], savedBy: null }))).toEqual([]);
   });
 
   it('writes the named rows and no others', async () => {
@@ -154,13 +154,13 @@ describe('findRows and updateRows', () => {
       r.updateRows({
         enrollmentId: E,
         rows: [
-          { senseId: kite.senseIds[0], dimension: 'written_receptive', level: 3, lastStepOn: '2026-10-06', lastWrongOn: '2026-10-04' },
+          { glossId: kite.glossIds[0], dimension: 'written_receptive', level: 3, lastStepOn: '2026-10-06', lastWrongOn: '2026-10-04' },
         ],
       }),
     );
     const stored = await readProgress(t.db, E);
-    expect(stored.find((row) => row.senseId === kite.senseIds[0] && row.dimension === 'written_receptive')).toEqual({
-      senseId: kite.senseIds[0],
+    expect(stored.find((row) => row.glossId === kite.glossIds[0] && row.dimension === 'written_receptive')).toEqual({
+      glossId: kite.glossIds[0],
       dimension: 'written_receptive',
       level: 3,
       lastStepOn: '2026-10-06',
@@ -183,12 +183,12 @@ describe('insertSnapshot and findSnapshot', () => {
     await repo((r) =>
       r.insertSnapshot({
         sessionId,
-        rows: [{ senseId: kite.senseIds[0], dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 }],
+        rows: [{ glossId: kite.glossIds[0], dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 }],
       }),
     );
     expect(await repo((r) => r.findSnapshot(sessionId))).toEqual([
       {
-        senseId: kite.senseIds[0],
+        glossId: kite.glossIds[0],
         dimension: 'written_receptive',
         levelBefore: 1,
         levelAfter: 2,
@@ -204,11 +204,11 @@ describe('insertSnapshot and findSnapshot', () => {
 // store their meaning in their own shape; the results read form → meaning.
 describe('findSnapshot over the phase 24 types', () => {
   it('reads form and meaning for listen_choice, dictation, letter_tiles and matching questions', async () => {
-    const words: AskedSense[] = [];
+    const words: AskedGloss[] = [];
     const pairs = [['tome', 'ספר'], ['quill', 'נוצה'], ['lantern', 'פנס'], ['kettle', 'קומקום'], ['anvil', 'סדן'], ['rope', 'חבל'], ['cart', 'עגלה']];
     for (const [lemma, translation] of pairs) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
-      words.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      words.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { sessionId } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -219,13 +219,56 @@ describe('findSnapshot over the phase 24 types', () => {
     await repo((r) =>
       r.insertSnapshot({
         sessionId,
-        rows: words.map((word) => ({ senseId: word.senseId, dimension: 'written_receptive' as const, levelBefore: 1, levelAfter: 2 })),
+        rows: words.map((word) => ({ glossId: word.glossId, dimension: 'written_receptive' as const, levelBefore: 1, levelAfter: 2 })),
       }),
     );
     const read = await repo((r) => r.findSnapshot(sessionId));
     expect(read.map((row) => [row.position, row.form, row.translation]).sort((a, b) => Number(a[0]) - Number(b[0]))).toEqual(
       pairs.map(([form, translation], position) => [position, form, translation]),
     );
+  });
+});
+
+describe('findSnapshot names a gloss by its key (phase 31, spec D11)', () => {
+  it("reads the form the session asked beside the gloss's key, not that form's rendering", async () => {
+    const finger = await insertLexeme(t.db, {
+      lemma: 'finger',
+      languageCode: 'en',
+      partOfSpeech: 'noun',
+      userLanguageCode: 'he',
+      senses: [{ senseCode: 'digit' }],
+      variants: [
+        {
+          form: 'finger',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבע', exampleSource: null, exampleTarget: null }],
+        },
+        {
+          form: 'fingers',
+          kind: 'word',
+          entryRank: 0,
+          translations: [{ senseCode: 'digit', rank: 0, translation: 'אצבעות', gloss: 'אצבע', exampleSource: null, exampleTarget: null }],
+        },
+      ],
+    });
+    const sessionId = await insertAnsweredSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      status: 'completed',
+      asked: [{ glossId: finger.glossIds[0], variantId: finger.variantIds[1], translation: 'אצבעות' }],
+      answers: [],
+    });
+    await repo((r) =>
+      r.insertSnapshot({
+        sessionId,
+        rows: [{ glossId: finger.glossIds[0], dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 }],
+      }),
+    );
+
+    expect(await repo((r) => r.findSnapshot(sessionId))).toEqual([
+      expect.objectContaining({ glossId: finger.glossIds[0], form: 'fingers', translation: 'אצבע' }),
+    ]);
   });
 });
 
@@ -242,11 +285,11 @@ describe("the recompute's reads", () => {
     await repo((r) =>
       r.insertSnapshot({
         sessionId,
-        rows: [{ senseId: kite.senseIds[0], dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 }],
+        rows: [{ glossId: kite.glossIds[0], dimension: 'written_receptive', levelBefore: 1, levelAfter: 2 }],
       }),
     );
     await t.db.execute(
-      sql`update sense_progress set level = 4, last_step_on = '2026-10-02', last_wrong_on = '2026-10-01'`,
+      sql`update gloss_progress set level = 4, last_step_on = '2026-10-02', last_wrong_on = '2026-10-01'`,
     );
     expect(await readSnapshot(t.db, sessionId)).toHaveLength(1);
 
@@ -303,7 +346,7 @@ describe('phase 23: reversed and typed questions', () => {
       ['lantern', 'פנס'],
     ]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
-      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { sessionId, questions } = await insertListSession(t.db, { userId: 'u_1', enrollmentId: E, asked });
     await withTx(t.db, async (tx) => {
@@ -319,9 +362,9 @@ describe('phase 23: reversed and typed questions', () => {
     const { sessionId, asked } = await mixedSession();
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
     expect(evidence!.answers).toEqual([
-      { senseId: asked[0].senseId, type: 'multiple_choice', correct: true },
-      { senseId: asked[1].senseId, type: 'reverse_choice', correct: false },
-      { senseId: asked[2].senseId, type: 'typed_translation', verdict: 'near_miss' },
+      { glossId: asked[0].glossId, type: 'multiple_choice', correct: true },
+      { glossId: asked[1].glossId, type: 'reverse_choice', correct: false },
+      { glossId: asked[2].glossId, type: 'typed_translation', verdict: 'near_miss' },
     ]);
   });
 
@@ -330,7 +373,7 @@ describe('phase 23: reversed and typed questions', () => {
     await withTx(t.db, (tx) =>
       createProgressRepo(tx).insertSnapshot({
         sessionId,
-        rows: asked.map((sense) => ({ senseId: sense.senseId, dimension: 'written_receptive', levelBefore: 1, levelAfter: 1 })),
+        rows: asked.map((sense) => ({ glossId: sense.glossId, dimension: 'written_receptive', levelBefore: 1, levelAfter: 1 })),
       }),
     );
     const read = await withTx(t.db, (tx) => createProgressRepo(tx).findSnapshot(sessionId));
@@ -350,7 +393,7 @@ describe('phase 25: spoken answers as evidence', () => {
       ['lantern', 'פנס'],
     ]) {
       const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
-      asked.push({ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+      asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
     }
     const { sessionId, questions } = await insertListSession(t.db, {
       userId: 'u_1',
@@ -366,8 +409,8 @@ describe('phase 25: spoken answers as evidence', () => {
     });
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
     expect(evidence!.answers).toEqual([
-      { senseId: asked[0].senseId, type: 'read_aloud', verdict: 'understood' },
-      { senseId: asked[1].senseId, type: 'say_translation', verdict: 'skipped' },
+      { glossId: asked[0].glossId, type: 'read_aloud', verdict: 'understood' },
+      { glossId: asked[1].glossId, type: 'say_translation', verdict: 'skipped' },
     ]);
   });
 });
@@ -375,7 +418,7 @@ describe('phase 25: spoken answers as evidence', () => {
 describe('phase 27: a judged answer as evidence', () => {
   it('reads a typed_meaning answer by its verdict (phase 27)', async () => {
     const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'tome', translations: ['ספר'] });
-    const asked = [{ senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' }];
+    const asked = [{ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' }];
     const { sessionId, questions } = await insertListSession(t.db, {
       userId: 'u_1',
       enrollmentId: E,
@@ -384,12 +427,12 @@ describe('phase 27: a judged answer as evidence', () => {
     });
     await withTx(t.db, (tx) => createSessionRepo(tx).insertAnswer(sessionId, 0, questions[0].id, { text: 'ספר', verdict: 'exact' }));
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
-    expect(evidence!.answers).toEqual([{ senseId: asked[0].senseId, type: 'typed_meaning', verdict: 'exact' }]);
+    expect(evidence!.answers).toEqual([{ glossId: asked[0].glossId, type: 'typed_meaning', verdict: 'exact' }]);
   });
 
   it('reads the sentence cards: a choice by its option, the two typed ones by their verdict (phase 27 Part B)', async () => {
     const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'tome', translations: ['ספר'] });
-    const sense = { senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' };
+    const sense = { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' };
     const { sessionId, questions } = await insertListSession(t.db, {
       userId: 'u_1',
       enrollmentId: E,
@@ -404,9 +447,9 @@ describe('phase 27: a judged answer as evidence', () => {
     });
     const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
     expect(evidence!.answers).toEqual([
-      { senseId: sense.senseId, type: 'cloze_choice', correct: true },
-      { senseId: sense.senseId, type: 'cloze_typed', verdict: 'exact' },
-      { senseId: sense.senseId, type: 'sentence_translation', verdict: 'wrong' },
+      { glossId: sense.glossId, type: 'cloze_choice', correct: true },
+      { glossId: sense.glossId, type: 'cloze_typed', verdict: 'exact' },
+      { glossId: sense.glossId, type: 'sentence_translation', verdict: 'wrong' },
     ]);
   });
 });

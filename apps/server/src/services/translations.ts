@@ -1,6 +1,6 @@
 import type {
   LanguageCode,
-  LlmEntry,
+  LlmRendering,
   PartOfSpeech,
   TranslationKind,
   TranslationRequest,
@@ -8,6 +8,7 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { MERGE_GLOSSES, RenderLemmaPayloadSchema } from '../domain/jobs';
 import { guardScript } from '../domain/languages';
 import {
   buildPrompt,
@@ -24,8 +25,11 @@ import {
   kindForForm,
   mergeEntries,
   normalizeForm,
-  rowsToSenses,
+  renderingOf,
+  rowsToCards,
+  type EntryToStore,
   type SenseRow,
+  type SenseToStore,
   type StaleLexeme,
 } from '../domain/dictionary';
 import { coversPair, markSaved } from '../domain/vocabulary';
@@ -35,6 +39,21 @@ import type { RepairedRendering } from '../repo/dictionary';
 import { authorizeEnrollment } from './access';
 import type { LlmClient } from './llm';
 import type { Transaction } from './transaction';
+
+/** One rendering of the second call as the entry it becomes: the model's fields,
+ *  passed through for the write (renderingOf), the citation alternatives only
+ *  this call asks for among them. */
+function entrySense(rendering: LlmRendering & { translation: string }): SenseToStore {
+  return {
+    sense_code: rendering.sense_code,
+    translation: rendering.translation,
+    ...(rendering.example ? { example: rendering.example } : {}),
+    ...(rendering.alternatives ? { alternatives: rendering.alternatives } : {}),
+    ...(rendering.gloss ? { gloss: rendering.gloss } : {}),
+    ...(rendering.gloss_alternatives ? { gloss_alternatives: rendering.gloss_alternatives } : {}),
+    ...(rendering.definition ? { definition: rendering.definition } : {}),
+  };
+}
 
 /**
  * The second model call, per entry that names a lexeme already in the
@@ -58,10 +77,10 @@ async function reconcile(input: {
   form: string;
   from: LanguageCode;
   to: LanguageCode;
-  entries: LlmEntry[];
+  entries: EntryToStore[];
   stored: StoredSense[][];
   logger: Logger;
-}): Promise<LlmEntry[]> {
+}): Promise<EntryToStore[]> {
   let reused = 0;
   let newlyNamed = 0;
   let reconciledEntries = 0;
@@ -91,7 +110,7 @@ async function reconcile(input: {
       reconciledEntries += 1;
       const known = new Set(storedSenses.map((sense) => sense.senseCode));
       const seen = new Set<string>();
-      const senses: LlmEntry['senses'] = [];
+      const senses: SenseToStore[] = [];
 
       for (const rendering of parsed.senses) {
         // `translation: null` is the model saying this form does not admit that
@@ -111,11 +130,8 @@ async function reconcile(input: {
         if (known.has(rendering.sense_code)) reused += 1;
         else newlyNamed += 1;
 
-        senses.push({
-          sense_code: rendering.sense_code,
-          translation: rendering.translation,
-          ...(rendering.example ? { example: rendering.example } : {}),
-        });
+        // The spread restates the narrowing the null filter above made.
+        senses.push(entrySense({ ...rendering, translation: rendering.translation }));
       }
 
       // An answer that reconciled to nothing at all is not an answer. Falling
@@ -232,10 +248,8 @@ async function repairForm({
           senseId: idByCode.get(rendering.sense_code)!,
           // Re-sequenced from 0 and contiguous, never the model's index:
           // UNIQUE(variant_id, user_language_code, rank) rejects a hole.
-          rank: senses.length,
-          translation: rendering.translation,
-          exampleSource: rendering.example?.source ?? null,
-          exampleTarget: rendering.example?.target ?? null,
+          // The spread restates the narrowing the null filter above made.
+          ...renderingOf({ ...rendering, translation: rendering.translation }, senses.length),
         });
       }
 
@@ -252,20 +266,83 @@ async function repairForm({
   // re-read — the same shape `persistEntries` uses, and what keeps the answer
   // identical to what the next lookup would produce.
   return transaction(async (repos) => {
+    // Phase 31. The lexemes' FOR UPDATE lock, in id order, before any gloss is
+    // written: the lock persistEntries takes, so a repair and a lookup of one
+    // lexeme cannot both create a gloss for one key (spec D7).
+    await repos.dict.lockLexemes(rendered.map(({ lexeme }) => lexeme.lexemeId));
+    const needsMerge = new Set<string>();
     for (const { lexeme, senseVersion, senses } of rendered) {
-      await repos.dict.repairVariantRenderings({
+      const repaired = await repos.dict.repairVariantRenderings({
         variantId: lexeme.variantId,
+        lexemeId: lexeme.lexemeId,
         userLanguageCode: to,
         // The version read above, before the model call — never re-read here.
         senseVersion,
+        lemmaForm: form.toLowerCase() === lexeme.lemma.toLowerCase(),
         senses,
       });
+      if (repaired.needsMerge) needsMerge.add(lexeme.lexemeId);
     }
-    return repos.dict.findSensesByForm({
-      form,
+    // Phase 31 (spec D7). A rename another gloss's key blocked: the merge job
+    // decides, in its own transaction, under the lexeme's lock.
+    for (const lexemeId of needsMerge) {
+      await repos.jobs.enqueue(MERGE_GLOSSES, { lexeme_id: lexemeId, user_language_code: to });
+    }
+    return repos.dict.findSensesByForm({ form, languageCode: from, userLanguageCode: to });
+  });
+}
+
+/**
+ * Phase 31 (spec D12). The lemma form is already a hit, without this headword:
+ * the scoped rendering call names this lexeme's senses for the form, and the
+ * write adds the lexeme to the form at the next free entry rank, as a lookup
+ * would have listed it. Reuses buildRenderingPrompt, which is eval-scored.
+ */
+async function addHeadwordToForm({
+  llm,
+  transaction,
+  lexeme,
+  to,
+  kind,
+}: {
+  llm: LlmClient;
+  transaction: Transaction;
+  lexeme: { lemma: string; languageCode: string; partOfSpeech: string };
+  to: LanguageCode;
+  kind: TranslationKind;
+}): Promise<void> {
+  const from = lexeme.languageCode as LanguageCode;
+  const partOfSpeech = lexeme.partOfSpeech as PartOfSpeech;
+  const stored = await transaction((repos) =>
+    repos.dict.findSensesByLexeme({ lemma: lexeme.lemma, partOfSpeech, languageCode: from, userLanguageCode: to }),
+  );
+  if (stored.length === 0) return;
+  const raw = await llm(
+    buildRenderingPrompt({ form: lexeme.lemma, from, to, lemma: lexeme.lemma, partOfSpeech, storedSenses: stored }),
+  );
+  const parsed = parseLlmReconciliation(raw);
+  if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
+  const seen = new Set<string>();
+  const senses: SenseToStore[] = [];
+  for (const rendering of parsed.senses) {
+    if (rendering.translation === null || seen.has(rendering.sense_code)) continue;
+    seen.add(rendering.sense_code);
+    senses.push(entrySense({ ...rendering, translation: rendering.translation }));
+  }
+  if (senses.length === 0) return;
+  await transaction(async (repos) => {
+    const entryRankOffset = await repos.dict.nextEntryRank({ form: lexeme.lemma, languageCode: from });
+    const { mergePairs } = await repos.dict.persistEntries({
+      form: lexeme.lemma,
       languageCode: from,
       userLanguageCode: to,
+      kind,
+      entries: [{ lemma: lexeme.lemma, part_of_speech: partOfSpeech, senses }],
+      entryRankOffset,
     });
+    for (const pair of mergePairs) {
+      await repos.jobs.enqueue(MERGE_GLOSSES, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+    }
   });
 }
 
@@ -360,7 +437,7 @@ async function serveForm({
   // returns. `kind` is read, never guessed: it is written by the persisting call
   // onto the entry_rank 0 variant and read back by `kindForForm`, so a hit answers
   // with what was actually stored rather than a re-derived guess that can disagree.
-  return { kind: kindForForm(answerRows), senses: rowsToSenses(answerRows), rows: answerRows };
+  return { kind: kindForForm(answerRows), senses: rowsToCards(answerRows), rows: answerRows };
 }
 
 /**
@@ -610,8 +687,8 @@ export function createTranslationService({
       }
     }
 
-    let entries = mergeEntries(parsed.entries);
-    let flattened = normalizeSenses(kind, flattenEntries(entries));
+    let entries: EntryToStore[] = mergeEntries(parsed.entries);
+    let flattened = normalizeSenses(kind, flattenEntries(entries, kind));
 
     // A sentence is not a vocabulary item, and caching "no translation" would
     // freeze a transient answer into a permanent dictionary. Both keep
@@ -653,11 +730,11 @@ export function createTranslationService({
       entries = await reconcile({ llm, form: effectiveForm, from, to, entries, stored, logger });
       // Both return paths below read `flattened`; a stale one would serve the
       // un-reconciled renderings on the failed-write path only.
-      flattened = normalizeSenses(kind, flattenEntries(entries));
+      flattened = normalizeSenses(kind, flattenEntries(entries, kind));
     }
 
     try {
-      const { written, senses } = await transaction(async (repos) => {
+      const { written, senses, glosses } = await transaction(async (repos) => {
         const result = await repos.dict.persistEntries({
           form: effectiveForm,
           languageCode: from,
@@ -665,6 +742,11 @@ export function createTranslationService({
           kind,
           entries,
         });
+        // Phase 31 (spec D7). A rename another gloss's key blocked: the merge job
+        // decides, in its own transaction, under the lexeme's lock.
+        for (const pair of result.mergePairs) {
+          await repos.jobs.enqueue(MERGE_GLOSSES, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
+        }
         // Step 9, in the SAME transaction as step 8. These two are DEPENDENT —
         // a redirect must not point at a form with no rows — which is what makes
         // phase 12's fail-closed rule cover this phase for free: a failed
@@ -686,6 +768,7 @@ export function createTranslationService({
         entry_count: written.length,
         lexemes_created: written.filter((entry) => entry.created).length,
       });
+      logger.info({ event: 'dict_glosses_assigned', from, to, created: glosses.created, joined: glosses.joined, members: glosses.members });
       if (correction) {
         logger.info({
           event: 'dict_corrected',
@@ -742,12 +825,86 @@ export function createTranslationService({
       const response = await lookup(input);
       if (!enrollment || input.from !== enrollment.target_language) return response;
 
-      const senseIds = response.senses.flatMap((sense) => (sense.sense_id ? [sense.sense_id] : []));
-      if (senseIds.length === 0) return response;
+      const glossIds = response.senses.flatMap((sense) => (sense.gloss_id ? [sense.gloss_id] : []));
+      if (glossIds.length === 0) return response;
       const saved = await transaction((repos) =>
-        repos.vocabulary.findSavedSenseIds({ enrollmentId: enrollment.id, senseIds }),
+        repos.vocabulary.findSavedGlossIds({ enrollmentId: enrollment.id, glossIds }),
       );
       return { ...response, senses: markSaved(response.senses, new Set(saved)) };
+    },
+
+    /**
+     * Phase 31 (spec D12). The render-lemma job: renders a saved word's lemma form
+     * for its lexeme in one learner language, so a session can ask the standard
+     * form. A lemma form nobody has looked up runs the ordinary lookup, which
+     * writes every headword of the form: a form with renderings is a hit, and a
+     * hit only repairs the headwords already on it, so a lemma written for one
+     * headword alone would stay partial for every learner (`spike` without its
+     * noun). A form already a hit without this headword gets the scoped call.
+     * No session waits on this; the saved form serves until it lands.
+     *
+     * The job has no actor (phase 29): it calls the lookup above directly, with
+     * no enrollment, so nothing of anyone's is read and there is nothing to
+     * authorize.
+     */
+    renderLemma: async (data: unknown): Promise<void> => {
+      const { lexeme_id: lexemeId, user_language_code: language } = RenderLemmaPayloadSchema.parse(data);
+      const to = language as LanguageCode;
+      const skip = (reason: string) =>
+        logger.info({ event: 'lemma_render_skipped', lexeme_id: lexemeId, user_language_code: to, reason });
+      const state = await transaction(async (repos) => {
+        const lexeme = await repos.dict.findLexeme(lexemeId);
+        if (!lexeme) return null;
+        if (await repos.dict.hasLemmaRendering({ lexemeId, userLanguageCode: to })) return { lexeme, rendered: true, rows: [] };
+        const rows = await repos.dict.findSensesByForm({ form: lexeme.lemma, languageCode: lexeme.languageCode, userLanguageCode: to });
+        return { lexeme, rendered: false, rows };
+      });
+      if (!state) return skip('lexeme_gone');
+      if (state.rendered) return skip('already_rendered');
+      const path = state.rows.length === 0 ? 'lookup' : 'scoped';
+      try {
+        if (path === 'lookup') {
+          const response = await lookup({ text: state.lexeme.lemma, from: state.lexeme.languageCode as LanguageCode, to });
+          if (response.correction) return skip('corrected');
+          // A failed write still answers 200 (dict_persist_failed): retry it. A
+          // sentence is never written, by design, so it is no failure: the
+          // no_entry check below skips it.
+          if (
+            response.kind !== 'sentence' &&
+            response.senses.length > 0 &&
+            response.senses.every((card) => card.gloss_id === undefined)
+          ) {
+            throw new Error('the lemma lookup answered without writing');
+          }
+        } else {
+          await addHeadwordToForm({ llm, transaction, lexeme: state.lexeme, to, kind: kindForForm(state.rows) });
+        }
+      } catch (error) {
+        logger.info({
+          event: 'lemma_render_failed',
+          lexeme_id: lexemeId,
+          user_language_code: to,
+          path,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+      const rendered = await transaction((repos) => repos.dict.hasLemmaRendering({ lexemeId, userLanguageCode: to }));
+      if (!rendered) return skip('no_entry');
+      logger.info({ event: 'lemma_rendered', lexeme_id: lexemeId, user_language_code: to, path });
+    },
+
+    /**
+     * Phase 31 (spec D12). The render-lemma job's dead letter: its retries are
+     * spent, or it expired. The claim is released, so the next save of the word
+     * or the next start asks again: a provider outage during a deploy's
+     * backfill must not lose every render it touched. A skipped render is no
+     * failure, never reaches here, and keeps its claim.
+     */
+    failLemmaRender: async (data: unknown): Promise<void> => {
+      const { lexeme_id: lexemeId, user_language_code: userLanguageCode } = RenderLemmaPayloadSchema.parse(data);
+      const released = await transaction((repos) => repos.dict.releaseLemmaRender({ lexemeId, userLanguageCode }));
+      logger.info({ event: 'lemma_render_released', lexeme_id: lexemeId, user_language_code: userLanguageCode, released });
     },
   };
 }
