@@ -320,7 +320,8 @@ meaning.
   - Each run asserts the five outcomes:
     1. While the limit allows, every session has a `NEW` pick.
     2. Every word met before the last session has a rung-2 pick in a later session.
-    3. Every miss before the last session is followed by a later pick of that word.
+    3. Every miss before the last session is followed by a later pick of that word,
+       unless the word has made its `RETURNS_PER_DAY` returns.
     4. Every session without a `DONE` pick has an SK pick.
     5. In a session with a `DONE` pick, the other picks are exactly what `chooseWords` picks with
        the done words removed.
