@@ -100,7 +100,7 @@ async function main(): Promise<void> {
     wordsFor: (profile) => loadWords(profile.language, words),
     synthesize: createSynthesizer(),
     log: (line) => console.log(line),
-    afterDay: weeklyIssue({ profiles, store, sink, reporter, log: (line) => console.log(line) }),
+    ...weeklyIssue({ profiles, store, sink, reporter, log: (line) => console.log(line) }),
   });
 
   const failed = played.filter(({ line }) => line.failed > 0);

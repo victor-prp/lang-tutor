@@ -21,6 +21,9 @@ import type { BotState } from './state.ts';
 /** One per bot in the roster: a week's reports, and no more. */
 export const MAX_REPORTS_PER_RUN = 6;
 
+/** One report call, at most: six of them must leave most of the job's 30 minutes to the day's play. */
+export const REPORT_TIMEOUT_MS = 2 * 60_000;
+
 /** Runs the CLI with these arguments and gives back its stdout; rejects on a non-zero exit. */
 export type CommandRunner = (args: readonly string[]) => Promise<string>;
 
@@ -45,7 +48,7 @@ export function commandRunner(command: string, opts: { cwd?: string; timeoutMs?:
  * hooks reach the call, which has no tools anyway. Authenticates by CLAUDE_CODE_OAUTH_TOKEN.
  */
 export function claudeRunner(): CommandRunner {
-  return commandRunner('claude', { cwd: mkdtempSync(join(tmpdir(), 'bots-report-')), timeoutMs: 5 * 60_000 });
+  return commandRunner('claude', { cwd: mkdtempSync(join(tmpdir(), 'bots-report-')), timeoutMs: REPORT_TIMEOUT_MS });
 }
 
 /** D20: Sonnet, no tools, three turns at most, JSON out. */

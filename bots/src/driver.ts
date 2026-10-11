@@ -32,9 +32,15 @@ export type RunOptions = {
   synthesize: Synthesize;
   log: (line: string) => void;
   poll?: Poll;
+  /** Before each simulated day is played, with every bot's state as the last day left it:
+   *  closing a week its last run did not finish closing (D20–D22). */
+  beforeDay?: (next: DayNext) => Promise<void>;
   /** After each simulated day, with every bot's state: the weekly issue and reports (D20–D22). */
   afterDay?: (done: DayDone) => Promise<void>;
 };
+
+/** The simulated day a run is about to play, and every bot's state before it. */
+export type DayNext = { day: number; states: ReadonlyMap<string, BotState> };
 
 /** A simulated day the run finished: its number, every bot's state, and the bot days it played. */
 export type DayDone = { day: number; states: ReadonlyMap<string, BotState>; played: { name: string; line: DayLine }[] };
@@ -57,6 +63,7 @@ export async function runDays(opts: RunOptions): Promise<{ name: string; line: D
     const states = new Map<string, BotState>();
     for (const profile of opts.profiles) states.set(profile.name, await opts.store.load(profile.name));
     const day = Math.min(...[...states.values()].map((s) => s.day)) + 1;
+    if (opts.beforeDay) await opts.beforeDay({ day, states });
     opts.log(`--- day ${day} (${dateOf(day)})`);
     const today: { name: string; line: DayLine }[] = [];
     for (const profile of opts.profiles) {

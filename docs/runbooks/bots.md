@@ -88,6 +88,13 @@ gh issue list --label bots --state all
   the Claude CLI's install. A report is never paid for twice: a bot's numbers and report are
   committed to its state as soon as they are made, and a rerun skips them. A report call that
   fails shows as "No report: …" in the closing comment, and is not retried.
+- **A week left open** (the week's last run died mid-close: a `gh` error, the job's timeout, or
+  the six report calls running out) recovers by itself: every run first closes any finished
+  week whose issue is still open or whose numbers or reports are missing, before it plays its
+  day. Nothing to do but let the next run happen, or start it now with `gh workflow run
+  bots.yml`. Its closing comment opens with "Closed by a later run". If later days were played
+  before it closed (the bots were stopped or every run failed), its (e) shows –, since the
+  memory at its end is gone; the other numbers come from the log and are unaffected.
 
 ## Rerun a day
 

@@ -181,8 +181,11 @@ export type WeekNumbers = {
   c: Intervals;
   /** Difficulty fits the level: low is good. */
   d: number | null;
-  /** The bot remembers more. */
+  /** The bot remembers more. Null when the week was closed after later days were played: the
+   *  memory at its end is gone. */
   e: number | null;
+  /** Closed after later days were played (a run that failed to close it). */
+  late?: true;
 };
 
 /**

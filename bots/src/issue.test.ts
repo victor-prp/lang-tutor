@@ -131,6 +131,21 @@ test('the closing comment: the five numbers against earlier weeks, the reports, 
   );
 });
 
+test('a week closed by a later run says so', () => {
+  const late = closingComment(1, [{ name: 'b', weeks: [numbers(1, { e: null, late: true })], reports: [] }], { late: true });
+  assert.equal(
+    late.split('\n').slice(0, 4).join('\n'),
+    [
+      '## Week 1 closed',
+      '',
+      "_Closed by a later run: the week's last run did not finish closing it. A (e) of – is a week closed after later days were played, when the memory at its end was gone._",
+      '',
+    ].join('\n'),
+  );
+  assert.ok(late.includes('| b | 1 | 40 | 1.42 | 0.50 | 1 / 2.5 / – | 0.10 | – |'));
+  assert.ok(!closingComment(1, []).includes('Closed by a later run'));
+});
+
 test('gh: the week\'s issue is created with its label when no issue has its title', async () => {
   const gh = fakeGh((args) =>
     args[1] === 'list'

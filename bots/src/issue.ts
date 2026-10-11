@@ -70,17 +70,22 @@ const usd = (v: number) => `$${v.toFixed(4)}`;
 export type ClosingBot = { name: string; weeks: readonly WeekNumbers[]; reports: readonly ReportRecord[] };
 
 /** D22's closing comment for `week`: the numbers against every earlier week, the reports, the spend. */
-export function closingComment(week: number, bots: readonly ClosingBot[]): string {
-  const out = [
-    `## Week ${week} closed`,
-    '',
+export function closingComment(week: number, bots: readonly ClosingBot[], opts: { late?: boolean } = {}): string {
+  const out = [`## Week ${week} closed`, ''];
+  if (opts.late) {
+    out.push(
+      "_Closed by a later run: the week's last run did not finish closing it. A (e) of – is a week closed after later days were played, when the memory at its end was gone._",
+      '',
+    );
+  }
+  out.push(
     '### The five numbers',
     '',
     "(a) weak words' share of cards over their share of the list: above 1 is the aim. (b) cards testing a word's weakest dimension. (c) median days between reviews right in a row, 2nd / 3rd / 4th+: rising is the aim. (d) cards off the rung that level and R imply: low is the aim. (e) mean true recall at the week's end: steady or rising is the aim.",
     '',
     '| Bot | Week | Cards | a | b | c | d | e |',
     '|---|---:|---:|---:|---:|---|---:|---:|',
-  ];
+  );
   for (const bot of bots) {
     for (const n of [...bot.weeks].filter((n) => n.week <= week).sort((x, y) => x.week - y.week)) {
       out.push(
