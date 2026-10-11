@@ -5,6 +5,7 @@ import {
   STUB_GAP,
   STUB_GAP_LEMMA,
   STUB_SENTENCE,
+  STUB_SENTENCE_HEBREW,
   answerChoice,
   answerTyped,
   generationStubFor,
@@ -13,7 +14,7 @@ import {
 } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { skipListSession, tapUntil } from './support/interactions';
-import { clearGemini, expectGeminiMatching, expectGeminiPayload, expectJudge, userText } from './support/mockServer';
+import { clearGemini, expectContext, expectGeminiMatching, expectGeminiPayload, expectJudge, userText } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
@@ -43,6 +44,8 @@ const WORDS = [
   word('варежка', 'כפפה', 'mitten', 'Варежка лежит на полу.', 'הכפפה שוכבת על הרצפה.'),
 ];
 const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.meaning, w.form]));
+/** Phase 34 (spec D8). STUB_GAP's word in STUB_SENTENCE_HEBREW, which a sentence card marks. */
+const MARKED = 'קראה';
 const FORMS = WORDS.map((w) => w.form);
 
 /** Past a skipped seed, the six words looked up and saved through the API. */
@@ -100,7 +103,9 @@ async function buildWord(page: Page, letters: string) {
  *   4 (s3) tier 0, run 1, prefers 2                 -> typed_meaning
  *   5 (s4) tier 1, run 1, prefers 2                 -> letter_tiles
  *   6 (s5) tier 2, run 1, prefers 2 dictation       -> sentence_translation
- * The model is asked at 2 (gap), 3 (sentence) and 6 (translate).
+ * The model is asked at 2 (gap), 3 (sentence) and 6 (translate). Phase 34
+ * (spec D8): the context call names the practised word in the Hebrew of 3 and
+ * 6, the stub sentence's קראה, which the cards mark.
  */
 async function reachSentenceSession(page: Page, request: APIRequestContext, username: string) {
   page.on('dialog', (dialog) => void dialog.accept());
@@ -112,6 +117,10 @@ async function reachSentenceSession(page: Page, request: APIRequestContext, user
 
   await clearGemini(request);
   await expectGeminiPayload(request, generationStubFor({ 2: 'gap', 3: 'sentence', 6: 'translate' }));
+  await expectContext(request, [
+    { key: 'q3', sentence_word: MARKED },
+    { key: 'q6', sentence_word: MARKED },
+  ]);
   // Past a skipped seed the home screen offers create, not start, so openApp's default landing does not fit.
   await openApp(page, 'create-button');
   await page.getByTestId('create-button').click();
@@ -152,6 +161,8 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
   await expect(page.getByText('השלימו את המילה החסרה ברוסית')).toBeVisible();
   expect(stripIsolates(await page.getByTestId('sentence-gap').textContent())).toBe('Вчера она _____ эту книгу');
   await expect(page.getByTestId('sentence-translation')).toBeVisible();
+  // Phase 34 (spec D8): the Hebrew names the word the gap wants.
+  await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
   await answerTyped(page, STUB_GAP);
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
@@ -168,6 +179,9 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
   // 6: translate the Hebrew sentence; a different order is the judge's to accept.
   await readCard(page, 6, 6, 'translate');
   await expect(page.getByText('תרגמו לרוסית')).toBeVisible();
+  // Phase 34 (spec D8): the sentence marks the practised word.
+  await expect(page.getByTestId('sentence-translation')).toHaveText(STUB_SENTENCE_HEBREW);
+  await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
   await expect(page.getByTestId('translation-reference')).toHaveCount(0);
   await expectJudge(request, 'right');
   await answerTyped(page, 'Она прочитала эту книгу вчера');

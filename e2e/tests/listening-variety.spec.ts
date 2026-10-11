@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerTyped, generationStubFor, readCard, type Card } from './support/cards';
+import { answerTyped, boardWords, generationStubFor, readCard, type Card } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { skipListSession, tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
@@ -104,7 +104,9 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
 
   // 4–7: the board. One wrong pairing for the first word, then every word right.
   await readCard(page, 4, 10, 'board');
-  const words = await Promise.all([0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`board-word-${i}`).textContent())));
+  const words = await boardWords(page);
+  // Phase 34 (spec D10): each word says its part of speech, all nouns here.
+  for (const i of [0, 1, 2, 3]) await expect(page.getByTestId(`board-word-${i}-note`)).toHaveText('שם עצם');
   const meanings = await Promise.all(
     [0, 1, 2, 3, 4].map(async (i) => stripIsolates(await page.getByTestId(`board-meaning-${i}`).textContent())),
   );

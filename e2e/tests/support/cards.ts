@@ -79,6 +79,19 @@ export async function readCard(
   return { kind, prompt, options };
 }
 
+/** The words on a board, in order. Phase 34 (spec D10): each button also shows
+ *  the word's part of speech under it, `board-word-<i>-note`, which is not the word. */
+export async function boardWords(page: Page): Promise<string[]> {
+  return Promise.all(
+    [0, 1, 2, 3].map(async (i) => {
+      const text = stripIsolates(await page.getByTestId(`board-word-${i}`).textContent());
+      const note = page.getByTestId(`board-word-${i}-note`);
+      const part = (await note.count()) > 0 ? stripIsolates(await note.textContent()) : '';
+      return text.endsWith(part) ? text.slice(0, text.length - part.length).trim() : text;
+    }),
+  );
+}
+
 /** Phase 27 Part B. The one sentence every stubbed `sentence` and `translate`
  *  answer uses, in Russian with its Hebrew: it holds `STUB_GAP` once, and
  *  whichever saved word a position asks, a gap is any word of the sentence

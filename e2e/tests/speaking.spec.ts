@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerTyped, generationStubFor, readCard, speak } from './support/cards';
+import { answerChoice, answerTyped, boardWords, generationStubFor, readCard, speak } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { skipListSession, tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
@@ -113,7 +113,7 @@ test("speaking: read aloud, say the translation, and can't speak now", async ({ 
   await page.getByTestId('continue-button').click();
 
   await readCard(page, 4, 10, 'board');
-  const words = await Promise.all([0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`board-word-${i}`).textContent())));
+  const words = await boardWords(page);
   const meanings = await Promise.all(
     [0, 1, 2, 3, 4].map(async (i) => stripIsolates(await page.getByTestId(`board-meaning-${i}`).textContent())),
   );
