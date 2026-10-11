@@ -738,8 +738,9 @@ the newest tag is no longer live, so name the tag for the next. Everything else,
 first apply to reading the container's log, is in the
 [hosting runbook](docs/runbooks/hosting.md).
 
-Since phase 32 a release also ships the Android app, in a last job, `android`, after `apply`.
-See *The Android app* below.
+Since phase 32 a release also ships the Android app, in a job `android` after `apply`, and
+since phase 36 the iPhone and iPad app, in a job `ios` beside it. See *The Android app* and
+*The iPhone and iPad app* below.
 
 ### The Android app
 
@@ -755,6 +756,18 @@ is `on`, and otherwise skips, green.
 A change that breaks older clients raises `API_LEVEL` in `packages/core/src/apiLevel.ts` by one,
 in the same PR: an installed app can be a day or two behind the server, and the server answers it
 426 so it shows "update required".
+
+### The iPhone and iPad app
+
+Friends on iPhone or iPad install **WordsPal** from TestFlight, invited to an external testing
+group. It updates itself the same way: JavaScript over the air, native changes as a new
+TestFlight build. On an iPad, and in a wide browser window, every screen sits in a centred
+column at most 640 points wide
+([phase 36 design](docs/superpowers/specs/2026-10-11-lang-tutor-phase-36-ios-app-design.md)).
+The repository variable `IOS_RELEASE` switches the `ios` job, as `ANDROID_RELEASE` does
+`android`. A TestFlight build expires after 90 days, so the job rebuilds at 80, and a release
+is due at least that often. Running it in the iOS simulator, the one-time Apple setup and what
+each release prints are in the [iOS runbook](docs/runbooks/ios.md).
 
 ## End-to-end test
 

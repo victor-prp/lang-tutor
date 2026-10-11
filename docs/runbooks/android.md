@@ -1,8 +1,8 @@
 # Android runbook
 
 Friends install **WordsPal** (`ai.wordspal.app`) from Google Play's internal testing track,
-limited to a tester list. Every release ships the app from the Release workflow's last job,
-`android`. If native code is unchanged, the job publishes an over-the-air update that phones
+limited to a tester list. Every release ships the app from the Release workflow's `android`
+job, which runs after the server is live, beside `ios`. If native code is unchanged, the job publishes an over-the-air update that phones
 take within minutes. If native code changed, it uploads a new build to Play, which installs it
 within a day or so. Design:
 [phase 32](../superpowers/specs/2026-10-11-lang-tutor-phase-32-android-app-design.md),
@@ -183,7 +183,7 @@ proves before the next one starts.
 
 ## What a release prints
 
-The `android` job runs `scripts/android-release.sh` from the tag's checkout:
+The `android` job runs `scripts/native-release.sh android` from the tag's checkout:
 
 | It prints | It did |
 |---|---|
