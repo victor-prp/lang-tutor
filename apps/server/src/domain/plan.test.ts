@@ -321,6 +321,15 @@ describe('planCards: same-day returns (phase 37 D6)', () => {
     expect(plan.order).toEqual([0, 2, 1]);
   });
 
+  it('asks every return as recall past the per-type limit, and counts them toward it for the other cards', () => {
+    // Nine words met in one session come back in the next: written receptive's one
+    // recall type takes them all. A due word's typed meaning then falls back.
+    const list = [pick(0), ...Array.from({ length: 9 }, (_, i) => back(i + 1, WR)), at(10, WR, 2)];
+    const types = typesByPick(list);
+    expect(types.slice(1, 10)).toEqual(Array(9).fill('typed_meaning'));
+    expect(types[10]).toBe('multiple_choice');
+  });
+
   it('keeps a return off the board, which still forms from the new words', () => {
     // A return with no memory falls back to a multiple choice, which the board must not take.
     const list = [back(0, WR, { r: null }), pick(1), pick(2), pick(3), pick(4), at(5, WP, 2), back(6, WP)];

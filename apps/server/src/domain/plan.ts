@@ -127,7 +127,9 @@ type Choice = Card & { chosen: boolean };
 
 /** Spec D6. The eligible type of the rung whose chance is nearest CARD_TARGET;
  *  a tie goes to the type used least, then to the table's order. Null when the
- *  rung has no eligible type left. */
+ *  rung has no eligible type left. A return (phase 37 D6) is not held to
+ *  MAX_PER_TYPE: written receptive has one recall type, and a word met today
+ *  would otherwise be settled by a multiple choice, never recalled. */
 function bestIn(
   rung: 1 | 2,
   pick: PlanPick,
@@ -138,7 +140,7 @@ function bestIn(
   let best: (Card & { distance: number; uses: number }) | null = null;
   for (const type of RUNGS[pick.dimension][rung - 1]) {
     const uses = used.get(type) ?? 0;
-    if (uses >= MAX_PER_TYPE || !eligible(type, pick, listening, speaking)) continue;
+    if ((uses >= MAX_PER_TYPE && !pick.step) || !eligible(type, pick, listening, speaking)) continue;
     // The exponent is the rung the type sits in, also when it is the fallback rung.
     const p = expectedSuccess(pick.r, FOUR_OPTION.has(type), rung);
     const distance = Math.abs(p - CARD_TARGET);
