@@ -52,6 +52,7 @@ expect "android runs after apply" 0 android '^[[:space:]]+needs: apply$'
 expect "android ships the tag, not master" 1 android 'ref:'
 expect "android passes --rollback on a dispatch" 0 android "workflow_dispatch' && '--rollback'"
 expect "android hands the job the ANDROID_RELEASE variable" 0 android 'ANDROID_RELEASE: \$\{\{ vars\.ANDROID_RELEASE \}\}'
+expect "android runs native-release.sh for android" 0 android 'scripts/native-release\.sh android '
 
 echo
 if [ "$status" -ne 0 ]; then

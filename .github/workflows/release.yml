@@ -145,7 +145,7 @@ jobs:
   # Phase 32 (spec D4–D7). The Android app, after the server answers /health
   # with the tag, so new app code never calls a server that is not live yet.
   # The tag's checkout (the default ref), like build-push: what ships is the
-  # tag's app. scripts/android-release.sh decides between an over-the-air
+  # tag's app. scripts/native-release.sh decides between an over-the-air
   # update and a new Play build by fingerprint. It skips, green, unless the
   # repository variable ANDROID_RELEASE is exactly "on", until the one-time
   # setup is done (no EXPO_TOKEN, or no EAS project id), and when the tag
@@ -174,4 +174,4 @@ jobs:
           packager: npm
           token: ${{ secrets.EXPO_TOKEN }}
       # A dispatch is a rollback (npm run rollback): it may update, never build.
-      - run: ./scripts/android-release.sh ${{ github.event_name == 'workflow_dispatch' && '--rollback' || '' }}
+      - run: ./scripts/native-release.sh android ${{ github.event_name == 'workflow_dispatch' && '--rollback' || '' }}
