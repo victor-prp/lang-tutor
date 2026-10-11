@@ -1,6 +1,15 @@
-import type { MissedQuestion, NextStepResponse, PendingRetry, Question, Score, SessionProgressItem, SessionView } from '@lang-tutor/core/api';
+import type {
+  MissedQuestion,
+  NextStepRequest,
+  NextStepResponse,
+  PendingRetry,
+  Question,
+  Score,
+  SessionProgressItem,
+  SessionView,
+} from '@lang-tutor/core/api';
 
-import type { CardAnswer } from '@/feedback';
+import { opensRetry, type CardAnswer } from '@/feedback';
 import type { JudgeAttempt } from '@/judging';
 import { IDLE_ATTEMPT, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 
@@ -106,4 +115,83 @@ export function retried<T extends object>(request: T, retry: PendingRetry | null
  *  retry by an answer or by "show the answer", never by a skip. */
 export function passFor(kind: 'skip' | 'show_answer', retry: PendingRetry | null): 'skip' | 'show_answer' {
   return retry === null ? kind : 'show_answer';
+}
+
+/** Phase 34 (spec D9). The next-step request for an answer to the card on
+ *  screen: on a second try it carries `retry: true`, and a pass is the give-up. */
+export function nextStepRequest(
+  questionId: string,
+  input: { option_index: number } | { text: string } | { pass: 'skip' | 'show_answer' },
+  retry: PendingRetry | null,
+): NextStepRequest {
+  const request = 'pass' in input ? { question_id: questionId, pass: passFor(input.pass, retry) } : { question_id: questionId, ...input };
+  return retried(request, retry);
+}
+
+/** Phase 34 (spec D9). How an answer the phone judges goes out. `banner`: its
+ *  banner shows at once and its response is queued for Continue, as before.
+ *  `server`: the card waits for the response first. That is another accepted
+ *  word, which holds the card for a second try whose banner must not name the
+ *  saved word; and any answer after a failed check, since the server may hold
+ *  a first answer already, and only its response says whether this answer is
+ *  that card's second try (`settle`). A second try's banner shows at once. */
+export function answerRoute(
+  state: Pick<QuizState, 'retry' | 'judging'>,
+  question: Question,
+  answer: { option_index: number } | { text: string },
+): 'banner' | 'server' {
+  if (state.retry !== null) return 'banner';
+  return state.judging === 'failed' || opensRetry(question, answer) ? 'server' : 'banner';
+}
+
+/** What a sent answer came back as: the answer the card shows, and the step. */
+export type Sent = { answer: CardAnswer; next: NextStepResponse };
+
+/** Phase 34 (spec D9). A sent answer once settled: `met` is the hold it met and
+ *  resolved as that card's second try (see metHold), or null. */
+export type Settled = Sent & { met: PendingRetry | null };
+
+/** Phase 34 (spec D9). Whether an answer may be what opened the hold its own
+ *  response carries. A pass or an empty text never opens one; a judged text
+ *  may, and only the server knows; a clip or a board is never sent twice. */
+function mayOpen(question: Question, answer: CardAnswer): boolean {
+  if ('pass' in answer) return false;
+  if ('judged' in answer) return answer.text.trim() !== '';
+  if ('heard' in answer || 'board' in answer) return true;
+  return opensRetry(question, answer);
+}
+
+/** Phase 34 (spec D9). The hold a first answer's response carries when that
+ *  answer could not have opened it: an earlier answer was recorded and held,
+ *  its response was lost, and the server replayed the hold. This answer, a
+ *  "show the answer" above all, is then the card's second try. Null when the
+ *  answer was already a second try, may have opened the hold, or met none. */
+export function metHold(question: Question, answer: CardAnswer, retry: PendingRetry | null, next: NextStepResponse): PendingRetry | null {
+  if (retry !== null || next.complete || next.pending_retry === null) return null;
+  return mayOpen(question, answer) ? null : next.pending_retry;
+}
+
+/** Phase 34 (spec D9). Sends an answer through `send`, which builds the request
+ *  for a retry state. A response holding the card for an answer recorded
+ *  before this one (metHold) sends it again, as the second try, with
+ *  `retry: true`: a "show the answer" must not reveal the saved word and leave
+ *  the card open for it. */
+export async function settle(
+  question: Question,
+  retry: PendingRetry | null,
+  send: (retry: PendingRetry | null) => Promise<Sent>,
+): Promise<Settled> {
+  const first = await send(retry);
+  const met = metHold(question, first.answer, retry, first.next);
+  return met === null ? { ...first, met } : { ...(await send(met)), met };
+}
+
+/** Phase 34 (spec D9). The card once its answer's response lands. A hold opens
+ *  the second try at once, with no banner to continue from. Otherwise the card
+ *  is answered and the next step queued; `met` is a hold this answer resolved,
+ *  kept with a second try's own so the banner is a second try's (ruling R16). */
+export function landed(current: QuizState, answer: CardAnswer, next: NextStepResponse, met: PendingRetry | null): QuizState {
+  const queued = queuedFrom(next);
+  if (holds(queued)) return applyQueued(current, queued);
+  return { ...current, judging: 'idle', speech: IDLE_ATTEMPT, answer, queued, retry: met ?? current.retry };
 }

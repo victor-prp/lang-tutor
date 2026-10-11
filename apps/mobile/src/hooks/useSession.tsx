@@ -1,5 +1,5 @@
 import type { MissedQuestion, NextStepResponse, PendingRetry, Question, SessionProgressItem } from '@lang-tutor/core/api';
-import { SESSION_LENGTH, type AnswerInput } from '@lang-tutor/core/domain';
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { router } from 'expo-router';
 import {
   createContext,
@@ -15,9 +15,9 @@ import { Alert } from 'react-native';
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { opensRetry, type CardAnswer } from '@/feedback';
+import type { CardAnswer } from '@/feedback';
 import type { Clip } from '@/recording';
-import { applyQueued, holds, passFor, queuedFrom, resumed, retried, type QuizState } from '@/quiz';
+import { answerRoute, applyQueued, landed, nextStepRequest, queuedFrom, resumed, retried, settle, type QuizState, type Settled } from '@/quiz';
 import { canJudge, judgedAnswer, type JudgeAttempt } from '@/judging';
 import { IDLE_ATTEMPT, passesUnseen, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
@@ -157,14 +157,17 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
 
   // What a next-step response becomes once it lands: queued for Continue, or
   // applied at once when Continue was already tapped. Shared by a single
-  // answer and a board's last one.
-  const queueResponse = useCallback((sessionId: string, call: Promise<NextStepResponse>) => {
+  // answer and a board's last one. Phase 34 (spec D9, ruling R16): an answer
+  // that resolved a hold it met (see settle) keeps that hold, so its banner is
+  // a second try's.
+  const queueResponse = useCallback((sessionId: string, call: Promise<Settled>) => {
     void call
-      .then((response) => {
-        const queued = queuedFrom(response);
+      .then(({ next, met }) => {
+        const queued = queuedFrom(next);
         setState((latest) => {
           if (!latest || latest.sessionId !== sessionId) return latest;
-          return latest.advanceRequested ? applyQueued(latest, queued) : { ...latest, queued };
+          const current = met === null ? latest : { ...latest, retry: met };
+          return current.advanceRequested ? applyQueued(current, queued) : { ...current, queued };
         });
       })
       .catch(() => {
@@ -175,23 +178,19 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   }, []);
 
   // Phase 27 (spec D13), widened in phase 34. An answer whose banner waits for
-  // the server: a judged card's, and a typed card's that opens a second try
-  // (spec D9). In flight, the card is locked; failed, it keeps its text for
-  // "try again", which sends the same request. The response either holds the
-  // card for its second try, at once and with no banner, or answers it and
-  // queues the next step, as a judged card always did.
+  // the server: a judged card's, and a typed card's on the `server` route
+  // (answerRoute). In flight, the card is locked; failed, it keeps its text for
+  // "try again", which sends the same request. The response lands by `landed`:
+  // a hold opens the second try at once, with no banner; anything else answers
+  // the card and queues the next step, as a judged card always did.
   const checkWith = useCallback(
-    (sessionId: string, questionId: string, call: Promise<{ answer: CardAnswer; next: NextStepResponse }>) => {
+    (sessionId: string, questionId: string, call: Promise<Settled>) => {
       const mine = (latest: QuizState | null) =>
         latest !== null && latest.sessionId === sessionId && latest.question?.id === questionId && latest.answer === null && latest.judging === 'checking';
       setState((current) => (current ? { ...current, judging: 'checking' } : current));
       void call
-        .then(({ answer, next }) => {
-          setState((latest) => {
-            if (!latest || !mine(latest)) return latest;
-            const queued = queuedFrom(next);
-            return holds(queued) ? applyQueued(latest, queued) : { ...latest, judging: 'idle', answer, queued };
-          });
+        .then(({ answer, next, met }) => {
+          setState((latest) => (latest && mine(latest) ? landed(latest, answer, next, met) : latest));
         })
         .catch(() => {
           setState((latest) => (latest && mine(latest) ? { ...latest, judging: 'failed' } : latest));
@@ -209,17 +208,19 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // Phase 23: one path for a chosen option and a typed text. The guard on
   // `state.answer` is what makes a second tap, or Return then Check, a no-op.
   const answerWith = useCallback(
-    (input: Exclude<AnswerInput, { heard: string }>) => {
+    (input: { option_index: number } | { text: string }) => {
       if (!state || state.answer !== null || !state.question || state.judging === 'checking') return;
       const { sessionId, question, retry } = state;
-      // Phase 34 (spec D9): the second try at a held card says so.
-      const request = retried({ question_id: question.id, ...input }, retry);
+      // Phase 34 (spec D9): the second try at a held card carries retry: true,
+      // and an answer meeting a hold it could not have opened goes again as one.
+      const call = settle(question, retry, (as) =>
+        api.nextStep(sessionId, nextStepRequest(question.id, input, as)).then((next) => ({ answer: input, next })),
+      );
 
-      // Phase 34 (spec D9). Another accepted word holds the card for a second
-      // try, and today's banner would name the saved word: the card waits for
-      // the server's hold instead. Only a first answer opens one.
-      if (retry === null && opensRetry(question, input)) {
-        checkWith(sessionId, question.id, api.nextStep(sessionId, request).then((next) => ({ answer: input, next })));
+      // Phase 34 (spec D9). Another accepted word, or any answer after a failed
+      // check, waits for the server before its banner (answerRoute).
+      if (answerRoute(state, question, input) === 'server') {
+        checkWith(sessionId, question.id, call);
         return;
       }
 
@@ -229,7 +230,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       // the moment this returns (feedbackFor runs the server's own evaluate),
       // so this call only has to register the answer server-side and fetch
       // what's next before Continue is tapped.
-      queueResponse(sessionId, api.nextStep(sessionId, request));
+      queueResponse(sessionId, call);
     },
     [state, api, queueResponse, checkWith],
   );
@@ -254,7 +255,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
             response = await api.nextStep(sessionId, { question_id: id, option_index: firstAttempts[index] });
           }
           if (!response) throw new Error('a board with no words to answer');
-          return response;
+          return { answer: { board: firstAttempts }, next: response, met: null };
         })(),
       );
     },
@@ -285,11 +286,9 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
             if (response.verdict === 'unheard' || !response.next) {
               return { ...latest, speech: { phase: 'unheard', heard: response.heard } };
             }
-            const queued = queuedFrom(response.next);
             // Phase 34 (spec D9): another right word holds the card, and the
             // microphone is offered again.
-            if (holds(queued)) return applyQueued(latest, queued);
-            return { ...latest, speech: IDLE_ATTEMPT, answer: { heard: response.heard, verdict: response.verdict }, queued };
+            return landed(latest, { heard: response.heard, verdict: response.verdict }, response.next, null);
           });
         })
         .catch(() => {
@@ -309,9 +308,11 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       checkWith(
         sessionId,
         question.id,
-        api
-          .judgeAnswer(sessionId, retried({ question_id: question.id, text }, retry))
-          .then((response) => ({ answer: judgedAnswer(text, response), next: response.next })),
+        settle(question, retry, (as) =>
+          api
+            .judgeAnswer(sessionId, retried({ question_id: question.id, text }, as))
+            .then((response) => ({ answer: judgedAnswer(text, response), next: response.next })),
+        ),
       );
     },
     [state, api, checkWith],
@@ -327,7 +328,12 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
         current ? { ...current, answer: { pass: kind }, speech: IDLE_ATTEMPT, advanceRequested: kind === 'skip' } : current,
       );
       // Phase 34 (spec D9): on a second try, a skip is sent as the give-up.
-      queueResponse(sessionId, api.nextStep(sessionId, retried({ question_id: question.id, pass: passFor(kind, retry) }, retry)));
+      queueResponse(
+        sessionId,
+        settle(question, retry, (as) =>
+          api.nextStep(sessionId, nextStepRequest(question.id, { pass: kind }, as)).then((next) => ({ answer: { pass: kind }, next })),
+        ),
+      );
     },
     [state, api, queueResponse],
   );

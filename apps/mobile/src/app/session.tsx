@@ -104,7 +104,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           instruction={strings.questionInstructionTyped(language)}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           onSubmit={session.submitText}
           direction="ltr"
           checking={session.judging === 'checking'}
@@ -131,7 +131,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           instruction={strings.questionInstructionClozeTyped(language)}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           onSubmit={session.submitText}
           direction="ltr"
           checking={session.judging === 'checking'}
@@ -147,7 +147,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           instruction={strings.questionInstructionTranslate(language)}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           direction="ltr"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
@@ -163,7 +163,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           instruction={strings.questionInstructionMeaning}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           direction="rtl"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
@@ -188,7 +188,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           instruction={strings.questionInstructionDictation(language)}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           onSubmit={session.submitText}
           direction="ltr"
           checking={false}
@@ -202,7 +202,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           question={question}
           instruction={strings.questionInstructionTiles(language)}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           onSubmit={session.submitText}
         />
       );
@@ -245,7 +245,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
               instruction={strings.questionInstructionTyped(language)}
               language={language}
               answered={session.answered}
-              verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+              verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
               onSubmit={session.submitText}
               direction="ltr"
               checking={session.judging === 'checking'}
@@ -366,7 +366,7 @@ export default function SessionScreen() {
       </KeyboardAvoidingView>
 
       {session.answer && !isSkip(session.answer) ? (
-        <FeedbackBanner feedback={feedbackFor(question, session.answer)} onContinue={session.next} />
+        <FeedbackBanner feedback={feedbackFor(question, session.answer, session.retry)} onContinue={session.next} />
       ) : null}
     </SafeAreaView>
   );

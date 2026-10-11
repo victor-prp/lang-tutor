@@ -27,7 +27,7 @@ const typed: Question = {
 
 describe('feedbackFor', () => {
   it('a right choice is correct, with no line', () => {
-    expect(feedbackFor(choice, { option_index: 0 })).toEqual({
+    expect(feedbackFor(choice, { option_index: 0 }, null)).toEqual({
       tone: 'correct',
       title: 'נכון!',
       line: null,
@@ -36,7 +36,7 @@ describe('feedbackFor', () => {
   });
 
   it('a wrong choice shows the right answer', () => {
-    expect(feedbackFor(choice, { option_index: 1 })).toEqual({
+    expect(feedbackFor(choice, { option_index: 1 }, null)).toEqual({
       tone: 'wrong',
       title: 'התשובה הנכונה:',
       line: 'בית',
@@ -45,7 +45,7 @@ describe('feedbackFor', () => {
   });
 
   it('an exact typed answer is correct, with no line', () => {
-    expect(feedbackFor(typed, { text: 'Finestra' })).toEqual({
+    expect(feedbackFor(typed, { text: 'Finestra' }, null)).toEqual({
       tone: 'correct',
       title: 'נכון!',
       line: null,
@@ -54,7 +54,7 @@ describe('feedbackFor', () => {
   });
 
   it('a near miss is correct and shows the spelling', () => {
-    expect(feedbackFor(typed, { text: 'finestar' })).toEqual({
+    expect(feedbackFor(typed, { text: 'finestar' }, null)).toEqual({
       tone: 'correct',
       title: 'כמעט! כך כותבים:',
       line: 'finestra',
@@ -63,7 +63,7 @@ describe('feedbackFor', () => {
   });
 
   it('an alternative is correct and names the practised word', () => {
-    expect(feedbackFor(typed, { text: 'vetrata' })).toEqual({
+    expect(feedbackFor(typed, { text: 'vetrata' }, null)).toEqual({
       tone: 'correct',
       title: 'נכון! המילה שתרגלנו:',
       line: 'finestra',
@@ -72,7 +72,7 @@ describe('feedbackFor', () => {
   });
 
   it('an empty answer ("show the answer") is wrong and shows the answer', () => {
-    expect(feedbackFor(typed, { text: '' })).toEqual({
+    expect(feedbackFor(typed, { text: '' }, null)).toEqual({
       tone: 'wrong',
       title: 'התשובה הנכונה:',
       line: 'finestra',
@@ -90,17 +90,17 @@ describe('feedbackFor, phase 24', () => {
   };
 
   it('counts a board by first tries, correct only at all of them', () => {
-    expect(feedbackFor(board, { board: [4, 1, 2, 3] })).toEqual({
+    expect(feedbackFor(board, { board: [4, 1, 2, 3] }, null)).toEqual({
       tone: 'wrong', title: 'בניסיון הראשון: 3 מתוך 4', line: null, verdict: null,
     });
-    expect(feedbackFor(board, { board: [0, 1, 2, 3] }).tone).toBe('correct');
+    expect(feedbackFor(board, { board: [0, 1, 2, 3] }, null).tone).toBe('correct');
   });
 
   it('names the heard form after a wrong dictation, and the meaning after a wrong listening card', () => {
     const dictation: Question = { id: 'd', type: 'dictation', vocab_term_id: 'l', question: 'parlo', meaning: 'מדבר' };
-    expect(feedbackFor(dictation, { text: 'parlare' })).toMatchObject({ tone: 'wrong', line: 'parlo' });
+    expect(feedbackFor(dictation, { text: 'parlare' }, null)).toMatchObject({ tone: 'wrong', line: 'parlo' });
     const listen: Question = { id: 'l', type: 'listen_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, part_of_speech: 'noun' };
-    expect(feedbackFor(listen, { option_index: 1 })).toMatchObject({ tone: 'wrong', line: 'בית' });
+    expect(feedbackFor(listen, { option_index: 1 }, null)).toMatchObject({ tone: 'wrong', line: 'בית' });
   });
 });
 
@@ -118,7 +118,7 @@ describe('phase 25 banners', () => {
     context: null,
   };
   it('names what was heard when understood', () => {
-    expect(feedbackFor(READ, { heard: 'il gatto', verdict: 'understood' })).toEqual({
+    expect(feedbackFor(READ, { heard: 'il gatto', verdict: 'understood' }, null)).toEqual({
       tone: 'correct',
       title: strings.feedbackHeard,
       line: 'il gatto',
@@ -126,7 +126,7 @@ describe('phase 25 banners', () => {
     });
   });
   it('names the practised word for an alternative', () => {
-    expect(feedbackFor(SAY, { heard: 'dico', verdict: 'alternative' })).toEqual({
+    expect(feedbackFor(SAY, { heard: 'dico', verdict: 'alternative' }, null)).toEqual({
       tone: 'correct',
       title: strings.feedbackAlternative,
       line: 'parlo',
@@ -135,27 +135,27 @@ describe('phase 25 banners', () => {
   });
   it('takes the banner from the server verdict, never from its own judge', () => {
     // The app's judgeSpoken calls this unheard; the server said understood.
-    expect(feedbackFor(READ, { heard: 'zzzz', verdict: 'understood' })).toEqual({
+    expect(feedbackFor(READ, { heard: 'zzzz', verdict: 'understood' }, null)).toEqual({
       tone: 'correct',
       title: strings.feedbackHeard,
       line: 'zzzz',
       verdict: 'understood',
     });
-    expect(feedbackFor(SAY, { heard: 'zzzz', verdict: 'alternative' })).toMatchObject({ title: strings.feedbackAlternative });
+    expect(feedbackFor(SAY, { heard: 'zzzz', verdict: 'alternative' }, null)).toMatchObject({ title: strings.feedbackAlternative });
   });
   it('shows the answer for show the answer, and judges a typed form as typed', () => {
-    expect(feedbackFor(SAY, { pass: 'show_answer' })).toMatchObject({ tone: 'wrong', title: strings.feedbackWrong, line: 'parlo' });
-    expect(feedbackFor(SAY, { text: 'parlare' })).toMatchObject({ tone: 'correct', verdict: 'exact' });
+    expect(feedbackFor(SAY, { pass: 'show_answer' }, null)).toMatchObject({ tone: 'wrong', title: strings.feedbackWrong, line: 'parlo' });
+    expect(feedbackFor(SAY, { text: 'parlare' }, null)).toMatchObject({ tone: 'correct', verdict: 'exact' });
   });
 });
 
 describe('typed_meaning banners (phase 27 D12)', () => {
   const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין', context: null };
   it('a right answer as stored is just right', () => {
-    expect(feedbackFor(MEANING, { text: 'לְהַזְמִין', judged: 'exact' })).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: 'exact' });
+    expect(feedbackFor(MEANING, { text: 'לְהַזְמִין', judged: 'exact' }, null)).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: 'exact' });
   });
   it('a right answer in other words shows the stored meaning', () => {
-    expect(feedbackFor(MEANING, { text: 'לשריין', judged: 'exact' })).toEqual({
+    expect(feedbackFor(MEANING, { text: 'לשריין', judged: 'exact' }, null)).toEqual({
       tone: 'correct',
       title: 'נכון! הפירוש השמור:',
       line: 'להזמין',
@@ -163,7 +163,7 @@ describe('typed_meaning banners (phase 27 D12)', () => {
     });
   });
   it('another sense names the meaning practised', () => {
-    expect(feedbackFor(MEANING, { text: 'ספר', judged: 'alternative' })).toEqual({
+    expect(feedbackFor(MEANING, { text: 'ספר', judged: 'alternative' }, null)).toEqual({
       tone: 'correct',
       title: 'נכון, אבל כאן תרגלנו:',
       line: 'להזמין',
@@ -171,7 +171,7 @@ describe('typed_meaning banners (phase 27 D12)', () => {
     });
   });
   it('a wrong answer shows the meaning', () => {
-    expect(feedbackFor(MEANING, { text: '', judged: 'wrong' })).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'להזמין', verdict: 'wrong' });
+    expect(feedbackFor(MEANING, { text: '', judged: 'wrong' }, null)).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'להזמין', verdict: 'wrong' });
   });
 });
 
@@ -212,36 +212,36 @@ describe('sentence cards (phase 27 D5, D6)', () => {
   };
 
   it('a cloze choice is worded as a choice', () => {
-    expect(feedbackFor(CHOICE, { option_index: 0 })).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: null });
-    expect(feedbackFor(CHOICE, { option_index: 1 })).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'parlavamo', verdict: null });
+    expect(feedbackFor(CHOICE, { option_index: 0 }, null)).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: null });
+    expect(feedbackFor(CHOICE, { option_index: 1 }, null)).toEqual({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'parlavamo', verdict: null });
   });
 
   it('a typed cloze is judged on the gap word', () => {
-    expect(feedbackFor(TYPED, { text: 'parlavamo' }).title).toBe('נכון!');
-    expect(feedbackFor(TYPED, { text: 'parlavano' })).toMatchObject({ tone: 'correct', title: 'כמעט! כך כותבים:', line: 'parlavamo', verdict: 'near_miss' });
-    expect(feedbackFor(TYPED, { text: 'parlare' })).toMatchObject({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'parlavamo' });
+    expect(feedbackFor(TYPED, { text: 'parlavamo' }, null).title).toBe('נכון!');
+    expect(feedbackFor(TYPED, { text: 'parlavano' }, null)).toMatchObject({ tone: 'correct', title: 'כמעט! כך כותבים:', line: 'parlavamo', verdict: 'near_miss' });
+    expect(feedbackFor(TYPED, { text: 'parlare' }, null)).toMatchObject({ tone: 'wrong', title: 'התשובה הנכונה:', line: 'parlavamo' });
   });
 
   it('a judged translation is worded per verdict, naming the practised word', () => {
-    expect(feedbackFor(TRANSLATE, { text: 'Ieri parlavamo per ore.', judged: 'exact' })).toEqual({
+    expect(feedbackFor(TRANSLATE, { text: 'Ieri parlavamo per ore.', judged: 'exact' }, null)).toEqual({
       tone: 'correct',
       title: 'נכון!',
       line: null,
       verdict: 'exact',
     });
-    expect(feedbackFor(TRANSLATE, { text: 'Ieri parlavmo per ore.', judged: 'near_miss' })).toEqual({
+    expect(feedbackFor(TRANSLATE, { text: 'Ieri parlavmo per ore.', judged: 'near_miss' }, null)).toEqual({
       tone: 'correct',
       title: 'כמעט! כך כותבים:',
       line: 'parlavamo',
       verdict: 'near_miss',
     });
-    expect(feedbackFor(TRANSLATE, { text: 'Ieri dicevamo per ore.', judged: 'alternative' })).toEqual({
+    expect(feedbackFor(TRANSLATE, { text: 'Ieri dicevamo per ore.', judged: 'alternative' }, null)).toEqual({
       tone: 'correct',
       title: 'נכון! המילה שתרגלנו:',
       line: 'parlavamo',
       verdict: 'alternative',
     });
-    expect(feedbackFor(TRANSLATE, { text: 'boh', judged: 'wrong' })).toEqual({
+    expect(feedbackFor(TRANSLATE, { text: 'boh', judged: 'wrong' }, null)).toEqual({
       tone: 'wrong',
       title: 'התשובה הנכונה:',
       line: 'parlavamo',
@@ -324,19 +324,51 @@ describe('a second try (phase 34 D9)', () => {
     expect(opensRetry(dictation, { text: 'parlo' })).toBe(false);
   });
 
-  it('giving up on it shows the saved word, as the banner after show the answer does', () => {
-    // Typed and the typed form of say the translation: empty text with retry.
-    expect(feedbackFor(typed, { text: '' })).toMatchObject({ tone: 'wrong', title: strings.feedbackWrong, line: 'finestra' });
-    expect(feedbackFor(SAY, { text: '' })).toMatchObject({ tone: 'wrong', line: 'parlo' });
+  // Ruling R16. A second try given up or wrong leaves the card where its first
+  // answer put it: right, another accepted word. Its banner is that answer's,
+  // with the saved word, never "the right answer was".
+  const PENDING_WORD = { answer: 'vetrata', wording: 'word' } as const;
+  const PENDING_MEANING = { answer: 'ספר', wording: 'meaning' } as const;
+  const OTHER_WORD = { tone: 'correct', title: strings.feedbackAlternative, verdict: 'alternative' } as const;
+
+  it('giving it up shows the banner of another accepted word, with the saved word', () => {
+    // Typed cards, and the typed form of say the translation: empty text with retry.
+    expect(feedbackFor(typed, { text: '' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'finestra' });
+    expect(feedbackFor(CLOZE, { text: '' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'parlavamo' });
+    expect(feedbackFor(SAY, { text: '' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'parlo' });
     // Spoken: show the answer with retry.
-    expect(feedbackFor(SAY, { pass: 'show_answer' })).toMatchObject({ tone: 'wrong', line: 'parlo' });
-    // Judged: the server reports a given-up retry as wrong (ruling R15).
-    expect(feedbackFor(MEANING, { text: '', judged: 'wrong' })).toMatchObject({ tone: 'wrong', line: 'להזמין' });
-    expect(feedbackFor(TRANSLATE, { text: '', judged: 'wrong' })).toMatchObject({ tone: 'wrong', line: 'Uniamo' });
+    expect(feedbackFor(SAY, { pass: 'show_answer' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'parlo' });
+    // Judged: the server reports a given-up retry as wrong (ruling R15). A
+    // translation names the practised word, a meaning card the meaning.
+    expect(feedbackFor(TRANSLATE, { text: '', judged: 'wrong' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'Uniamo' });
+    expect(feedbackFor(MEANING, { text: '', judged: 'wrong' }, PENDING_MEANING)).toEqual({
+      tone: 'correct',
+      title: strings.feedbackOtherSense,
+      line: 'להזמין',
+      verdict: 'alternative',
+    });
   });
 
-  it('the saved word found on it is just right', () => {
-    expect(feedbackFor(typed, { text: 'finestra' })).toMatchObject({ tone: 'correct', title: strings.feedbackCorrect, line: null });
-    expect(feedbackFor(SAY, { heard: 'parlo', verdict: 'understood' })).toMatchObject({ tone: 'correct', verdict: 'understood' });
+  it('a wrong second try shows the same banner, so the input is not marked wrong', () => {
+    expect(feedbackFor(typed, { text: 'porta' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'finestra' });
+    expect(feedbackFor(TRANSLATE, { text: 'Andiamo.', judged: 'wrong' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'Uniamo' });
+    expect(feedbackFor(MEANING, { text: 'לקרוא', judged: 'wrong' }, PENDING_MEANING)).toMatchObject({
+      tone: 'correct',
+      title: strings.feedbackOtherSense,
+      verdict: 'alternative',
+    });
   });
+
+  it('the saved word found on it gets the banner that answer gets today', () => {
+    expect(feedbackFor(typed, { text: 'finestra' }, PENDING_WORD)).toEqual({ tone: 'correct', title: strings.feedbackCorrect, line: null, verdict: 'exact' });
+    expect(feedbackFor(typed, { text: 'finestar' }, PENDING_WORD)).toEqual({ tone: 'correct', title: strings.feedbackNearMiss, line: 'finestra', verdict: 'near_miss' });
+    expect(feedbackFor(SAY, { heard: 'parlo', verdict: 'understood' }, PENDING_WORD)).toEqual({
+      tone: 'correct',
+      title: strings.feedbackHeard,
+      line: 'parlo',
+      verdict: 'understood',
+    });
+    expect(feedbackFor(MEANING, { text: 'להזמין', judged: 'exact' }, PENDING_MEANING)).toEqual({ tone: 'correct', title: strings.feedbackCorrect, line: null, verdict: 'exact' });
+  });
+
 });
