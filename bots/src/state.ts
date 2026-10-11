@@ -76,12 +76,23 @@ export type DayLine = {
   listWeak?: number;
 };
 
+/** What the attempts so far at an unfinished day did, so the next attempt goes on from there. */
+export type DayProgress = {
+  day: number;
+  /** Words of the day's lookups already looked up (and saved, when there was a sense to save). */
+  lookups: number;
+  /** The day's sessions already played to the end. */
+  sessions: number;
+};
+
 export type BotState = {
   name: string;
   /** The last simulated day the bot finished; 0 before its first. */
   day: number;
   /** Failed attempts at day + 1 so far. */
   attempts: number;
+  /** Progress through day + 1 when an attempt at it ended part-way; absent otherwise. */
+  progress?: DayProgress;
   /** The next word of its list to look up. */
   position: number;
   saved: SavedEntry[];

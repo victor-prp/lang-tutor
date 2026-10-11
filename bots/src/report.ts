@@ -222,7 +222,8 @@ export function weekSummary(state: BotState, week: number, memory: BotMemory): W
   const sum = (pick: (d: (typeof days)[number]) => number | undefined) => days.reduce((s, d) => s + (pick(d) ?? 0), 0);
   return {
     week,
-    daysPlayed: days.filter((d) => d.played).length,
+    // A day an attempt left unfinished has a line per attempt: count the day once.
+    daysPlayed: new Set(days.filter((d) => d.played).map((d) => d.day)).size,
     sessions: sum((d) => d.sessions),
     cards: cards.length,
     right: cards.filter((c) => c.correct).length,

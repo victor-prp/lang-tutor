@@ -15,10 +15,17 @@ export { dateOf } from './play.ts';
  *
  * A failed request (ApiError) ends that bot's day: the failure is counted and logged, the bot
  * keeps its old day, and the run goes on with the next bot. What the bot did before the
- * failure is kept: the server has those answers too. The day is played again by the next run,
- * at most MAX_DAY_ATTEMPTS times in all, after which it is counted as done all the same, so a
- * bot that always fails cannot hold every other bot on one day. Anything else thrown is a bug
- * in the driver, and the run fails with it (D19).
+ * failure is kept: the server has those answers too. The next run attempts the day again from
+ * where this attempt stopped (play.ts: words already looked up and sessions already played are
+ * not repeated), at most MAX_DAY_ATTEMPTS times in all, after which it is counted as done all
+ * the same, so a bot that always fails cannot hold every other bot on one day. Anything else
+ * thrown is a bug in the driver, and the run fails with it (D19), but only after the bot's state
+ * is saved: the server has the crashed attempt's answers, so its cards, traces and saved words
+ * must not be lost. The state is also saved after every session, for a run killed outright (the
+ * job's timeout), which no `finally` sees.
+ *
+ * Each attempt has its own line in `state.days`, pushed as it starts and saved with every
+ * checkpoint; the lines of a day's attempts add up to the day.
  */
 export const MAX_DAY_ATTEMPTS = 3;
 
@@ -73,7 +80,6 @@ export async function runDays(opts: RunOptions): Promise<{ name: string; line: D
         continue;
       }
       const line = await playBot(opts, profile, state, day);
-      await opts.store.save(state, `${profile.name}: day ${day} ${line.completed ? 'done' : 'failed'}`);
       opts.log(formatLine(profile.name, line));
       played.push({ name: profile.name, line });
       today.push({ name: profile.name, line });
@@ -85,26 +91,47 @@ export async function runDays(opts: RunOptions): Promise<{ name: string; line: D
 
 async function playBot(opts: RunOptions, profile: Profile, state: BotState, day: number): Promise<DayLine> {
   const line = newLine(day);
+  state.days.push(line);
+  const checkpoint = (what: string) => opts.store.save(state, `${profile.name}: day ${day}, ${what}`);
   let api: BotApi | undefined;
+  let crashed = false;
   try {
-    api = opts.apiFor(await opts.route.signIn(profile.name));
-    await opts.route.setDay(profile.name, dateOf(day));
-    await playDay({ api, profile, state, words: opts.wordsFor(profile), synthesize: opts.synthesize, log: opts.log, poll: opts.poll, line, day });
-    line.completed = true;
+    try {
+      api = opts.apiFor(await opts.route.signIn(profile.name));
+      await opts.route.setDay(profile.name, dateOf(day));
+      await playDay({ api, profile, state, words: opts.wordsFor(profile), synthesize: opts.synthesize, log: opts.log, poll: opts.poll, line, day, checkpoint });
+      line.completed = true;
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      line.failed += 1;
+      opts.log(`${profile.name}: ${error.message}`);
+    } finally {
+      // A bot session lasts a day; ending it keeps session rows from piling up (Task 7).
+      if (api) {
+        await api.signOut().catch((error: unknown) => {
+          if (!(error instanceof ApiError)) throw error;
+          opts.log(`${profile.name}: sign-out failed: ${error.message}`);
+        });
+      }
+    }
   } catch (error) {
-    if (!(error instanceof ApiError)) throw error;
-    line.failed += 1;
-    opts.log(`${profile.name}: ${error.message}`);
+    crashed = true;
+    throw error;
   } finally {
-    // A bot session lasts a day; ending it keeps session rows from piling up (Task 7).
-    if (api) {
-      await api.signOut().catch((error: unknown) => {
-        if (!(error instanceof ApiError)) throw error;
-        opts.log(`${profile.name}: sign-out failed: ${error.message}`);
-      });
+    settle(opts, profile, state, day, line);
+    const outcome = line.completed ? 'done' : crashed ? 'crashed' : 'failed';
+    if (crashed) {
+      // The crash is what the run reports; a save that fails as well is only logged.
+      await checkpoint(outcome).catch((error: unknown) => opts.log(`${profile.name}: saving after the crash failed: ${String(error)}`));
+    } else {
+      await checkpoint(outcome);
     }
   }
+  return line;
+}
 
+/** After an attempt: a finished day moves the bot on; an unfinished one counts an attempt. */
+function settle(opts: RunOptions, profile: Profile, state: BotState, day: number, line: DayLine): void {
   if (line.completed) {
     state.day = day;
     state.attempts = 0;
@@ -113,6 +140,5 @@ async function playBot(opts: RunOptions, profile: Profile, state: BotState, day:
     state.day = day;
     state.attempts = 0;
   }
-  state.days.push(line);
-  return line;
+  if (state.day >= day) delete state.progress;
 }

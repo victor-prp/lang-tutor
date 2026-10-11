@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { runDays, dateOf } from './driver.ts';
 import { FakeServer } from './fakeServer.ts';
 import { ROSTER, type Profile } from './roster.ts';
-import { memoryStore } from './state.ts';
+import { memoryStore, type BotState, type StateStore } from './state.ts';
 
 /** A bot whose day is fixed: plays, saves two words, one session. */
 function bot(name: string, overrides: Partial<Profile> = {}): Profile {
@@ -141,6 +141,85 @@ test('a run that dies after bot 2 leaves the rest on the old day, and the next r
     await Promise.all(profiles.map(async (p) => (await store.load(p.name)).day)),
     [1, 1, 1, 1],
   );
+});
+
+/** A memory store that also keeps a copy of every save, with its message. */
+function recordingStore(): StateStore & { saves: { message: string; state: BotState }[] } {
+  const inner = memoryStore();
+  const saves: { message: string; state: BotState }[] = [];
+  return {
+    saves,
+    load: (name) => inner.load(name),
+    save: async (state, message) => {
+      saves.push({ message, state: JSON.parse(JSON.stringify(state)) as BotState });
+      await inner.save(state, message);
+    },
+  };
+}
+
+test('a crash in session 2 of 2 keeps session 1, and the next run plays only what is left', async () => {
+  const store = recordingStore();
+  const profiles = [bot('steady-en', { sessions: [2, 2] })];
+  // create-session runs three times: the seed, session 1, then session 2, which crashes.
+  let creates = 0;
+  const server = new FakeServer({ crashOn: (call) => call === 'steady-en create-session' && ++creates === 3 });
+  await assert.rejects(runDays(options(server, store, profiles)), /crash on steady-en create-session/);
+
+  // Saved after the words, after session 1, and once more in the crash's finally.
+  assert.deepEqual(store.saves.map((s) => s.message), [
+    'steady-en: day 1, words saved',
+    'steady-en: day 1, session 1 of 2',
+    'steady-en: day 1, crashed',
+  ]);
+  // A run killed outright stops at the session-1 checkpoint: it already holds session 1.
+  const killed = store.saves[1].state;
+  assert.equal(killed.log.length, 2);
+  assert.deepEqual(killed.progress, { day: 1, lookups: 2, sessions: 1 });
+
+  const crashed = await store.load('steady-en');
+  assert.equal(crashed.day, 0, 'the day is not finished');
+  assert.equal(crashed.attempts, 1);
+  assert.deepEqual(crashed.progress, { day: 1, lookups: 2, sessions: 1 });
+  assert.deepEqual(crashed.saved.map((w) => w.form), ['alpha', 'beta'], 'words saved in the crashed attempt');
+  assert.equal(crashed.log.length, 2, 'session 1 is in the log');
+  assert.ok(Object.keys((crashed.memory as { traces: object }).traces).length > 0, 'and in the traces');
+  assert.deepEqual(crashed.days.map((d) => [d.day, d.completed, d.sessions, d.newWords]), [[1, false, 1, 2]]);
+
+  // The next run, on the same server: no lookups, one session, then the day is done.
+  const before = server.calls.length;
+  creates = 99;
+  await runDays(options(server, store, profiles));
+  const next = server.calls.slice(before);
+  assert.ok(!next.some((c) => c.includes('translate') || c.endsWith(' save')), next.join('\n'));
+  assert.equal(next.filter((c) => c.endsWith('create-session')).length, 1);
+  const done = await store.load('steady-en');
+  assert.equal(done.day, 1);
+  assert.equal(done.attempts, 0);
+  assert.equal(done.progress, undefined);
+  assert.equal(done.position, 2);
+  assert.equal(done.log.length, 4);
+  assert.deepEqual(done.days.map((d) => [d.day, d.completed, d.sessions, d.newWords]), [
+    [1, false, 1, 2],
+    [1, true, 1, 0],
+  ]);
+});
+
+test('a failed request in session 2 is retried from session 2, not from the start', async () => {
+  const store = memoryStore();
+  const profiles = [bot('steady-en', { sessions: [2, 2] })];
+  let creates = 0;
+  const server = new FakeServer({ failOn: (call) => call === 'steady-en create-session' && ++creates === 3 });
+  await runDays(options(server, store, profiles));
+  const failed = await store.load('steady-en');
+  assert.equal(failed.day, 0);
+  assert.deepEqual(failed.progress, { day: 1, lookups: 2, sessions: 1 });
+
+  const before = server.calls.length;
+  await runDays(options(server, store, profiles));
+  const next = server.calls.slice(before);
+  assert.ok(!next.some((c) => c.includes('translate')));
+  assert.equal(next.filter((c) => c.endsWith('create-session')).length, 1);
+  assert.equal((await store.load('steady-en')).day, 1);
 });
 
 test('days run one after another, every bot on the same day', async () => {
