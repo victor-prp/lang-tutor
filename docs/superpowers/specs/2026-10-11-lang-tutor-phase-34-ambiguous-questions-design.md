@@ -174,6 +174,11 @@ An unreadable checker answer fails the batch like an unreadable generation does.
 - **Generated per question**, in the session's batch, not copied from the saved example, so it
   can be checked (D5) and varies between sessions. Victor's call: a fixed sentence can be
   memorised and cannot be fixed.
+- **Multiple choice keeps it, and keeps its credit.** The sentence adds some reading to the card,
+  and the card still credits written recognition as today. Victor's call: the sentence is short
+  and in the language being learned, so reading it is the same skill, and it is the only hint that
+  separates `saw` the tool from the past of *see*. Showing it only on words with several senses
+  or a homograph would miss every reading the dictionary does not hold.
 - **Generated in pairs.** The model writes both halves: the sentence the card shows and its
   translation, which is never shown and goes to the judge (D7).
 - **Rules:** a Hebrew sentence never contains the target-language answer. The sentence differs
