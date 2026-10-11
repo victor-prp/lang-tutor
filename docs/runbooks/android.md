@@ -1,0 +1,170 @@
+# Android runbook
+
+Friends install **WordsPal** (`ai.wordspal.app`) from Google Play's internal testing track,
+limited to a tester list. Every release ships the app from the Release workflow's last job,
+`android`. If native code is unchanged, the job publishes an over-the-air update that phones
+take within minutes. If native code changed, it uploads a new build to Play, which installs it
+within a day or so. Design:
+[phase 32](../superpowers/specs/2026-10-11-lang-tutor-phase-32-android-app-design.md),
+[ADR 0012](../adr/adr-0012-native-client-releases.md).
+
+Until steps 2–4 below are done, the `android` job prints a `::notice::` and skips, green.
+Releases keep working in the meantime.
+
+## Go-live, once
+
+Run from the main checkout on `master`, after phase 32 has merged. Each step says what it
+proves before the next one starts.
+
+1. **Play Console.**
+   1. At [play.google.com/console](https://play.google.com/console), create a developer
+      account. It costs a one-time $25, and Google verifies your identity, which can take a few
+      days.
+   2. *Create app*: name **WordsPal**, default language Hebrew, App, Free.
+   3. *Testing → Internal testing → Testers*: create an email list with your friends'
+      Google-account addresses, and your own. Keep the opt-in link it shows: friends open it
+      once before installing.
+   4. *App content*. Fill in every item it lists:
+      - **Privacy policy:** `https://app.wordspal.ai/privacy.html`. Read the page first. Its
+        deletion contact is `code@wordspal.ai`; if that address does not receive mail, change it
+        in `apps/mobile/public/privacy.html` and release before citing the page.
+      - **Data safety:** the answers in [Data safety](#data-safety) below.
+      - **Content rating:** the questionnaire. It is an education app with no violence, no user
+        chat and no purchases.
+      - **Target audience:** 13 and over.
+      - **Ads:** no ads.
+
+   *Proves:* the app exists. Its package name is not set yet: Play takes it from the first
+   upload, and after that it can never change.
+
+2. **Expo account and project.** Create an account at [expo.dev](https://expo.dev), then:
+
+   ```bash
+   cd apps/mobile
+   npx eas-cli@24.8.0 login
+   npx eas-cli@24.8.0 init                 # writes extra.eas.projectId into app.json
+   npx eas-cli@24.8.0 update:configure     # writes updates.url into app.json
+   npx eas-cli@24.8.0 channel:create production
+   git diff app.json                       # the project id and the updates URL, nothing else
+   ```
+
+   Commit the `app.json` change on a branch and merge it through a PR. Neither value is a
+   secret. Do not merge anything else in `app.json` that these commands changed: the name,
+   package, runtime version and plugins are already right.
+
+   *Proves:* `npx eas-cli@24.8.0 channel:list` shows `production`.
+
+3. **Play service account**, which lets EAS upload builds:
+   1. In [Google Cloud Console](https://console.cloud.google.com), create a project (or reuse
+      one). Enable the **Google Play Android Developer API**, then *IAM → Service accounts →
+      Create*, and create a JSON key for it.
+   2. In Play Console, *Users and permissions → Invite new users*: the service account's email,
+      with *Release apps to testing tracks* for WordsPal.
+   3. Hand the key to EAS, then delete the local file:
+
+      ```bash
+      cd apps/mobile
+      npx eas-cli@24.8.0 credentials   # Android → production → Google Service Account → upload the JSON key
+      ```
+
+   *Proves:* `npx eas-cli@24.8.0 credentials` shows the service account under Android.
+
+4. **The GitHub secret.** At expo.dev, *Account settings → Access tokens*, create a **robot**
+   token, then:
+
+   ```bash
+   /opt/homebrew/bin/gh secret set EXPO_TOKEN    # paste the token when asked
+   ```
+
+   *Proves:* `gh secret list` shows `EXPO_TOKEN`.
+
+5. **The first release.** `npm run release`. The `android` job finds no build, so it builds
+   (about 15–20 minutes), submits the build to the internal track, then publishes the
+   update. EAS creates the app's signing key on this first build.
+
+   A Play app that has never had a release rolled out may accept only drafts through the API. If
+   the submit step fails with *"Only releases with status draft may be created on draft app"*:
+   1. Download the `.aab` from the build page the job's log links (expo.dev → the build →
+      *Download*).
+   2. In Play Console, *Internal testing → Create new release*: upload it, *Save*, *Review
+      release*, *Start rollout*.
+   3. **Do not rerun the job.** It would submit the same build again, and Play refuses a version
+      code twice. Instead, publish its first update by hand, from the tag's checkout, with the
+      tag and the build id from the job's log:
+
+      ```bash
+      git checkout <tag>
+      cd apps/mobile
+      EXPO_PUBLIC_APP_VERSION=<tag> npx eas-cli@24.8.0 update --branch production --platform android \
+        --environment production --message "<tag> for build <build id>"
+      git checkout master
+      ```
+
+      That message is the marker later releases look for: an update naming the newest build means
+      the build reached Play. From then on, releases publish over the air on their own.
+
+   *Proves:* Play Console's internal track shows the release, and the build is listed as
+   *Available to internal testers*.
+
+6. **Back up the upload key.** Losing it means asking Google to reset it, which takes days.
+
+   ```bash
+   cd apps/mobile
+   npx eas-cli@24.8.0 credentials   # Android → production → Keystore → Download
+   ```
+
+   Store the keystore and its passwords in your password manager, not in the repo.
+
+7. **Check it on your phone** (the phase's done-means 1–4):
+   1. Open the opt-in link, accept, and install WordsPal from Play. Sign in and finish a session
+      with your laptop off. The profile screen's version row shows the release tag.
+   2. Release a JavaScript-only change. Close the app fully and open it: within a minute of the
+      job going green, the version row shows the new tag.
+   3. Release a native change, such as an Expo SDK patch. The job's log says it is building.
+      Within a day Play updates the app by itself, or tap *Update* on its Play page.
+   4. Answer a speaking question by voice, and import a photo of a word list.
+
+8. **Invite friends.** Add their emails to the tester list (step 1.3) and send them the opt-in
+   link. They need nothing else, ever: updates arrive by themselves.
+
+## What a release prints
+
+The `android` job runs `scripts/android-release.sh` from the tag's checkout:
+
+| It prints | It did |
+|---|---|
+| `Same native layer as build …: publishing … over the air.` | `eas update`. Phones take it on their next open, or after 30 minutes away |
+| `Build … has no update yet, so it never reached Play: submitting it first.` | A rerun after a failed submit: `eas submit`, then `eas update`. Every update's message names its build (`<tag> for build <id>`), and that is how the job tells |
+| `The native layer changed: building, submitting …` | `eas build`, then `eas submit` to the internal track, then `eas update`. Play installs it within a day or so |
+| a `::warning::` about the native layer, on a rollback | Nothing. Play cannot downgrade an installed app. If the newer app is broken against the older server, release a fix forward |
+| a `::notice::` that it skipped | Steps 2–4 are not done, or the tag predates phase 32 |
+
+A failure in `android` leaves the server release standing, and friends keep their current app.
+Rerun that job alone (*Actions → Release → the run → Re-run failed jobs*). Expo's free tier can
+queue a build long enough to hit the job's 60-minute timeout; the rerun picks up the finished
+build.
+
+## Breaking older clients
+
+An installed app can be a day or two behind the server. A change that breaks older clients
+must raise `API_LEVEL` in `packages/core/src/apiLevel.ts` by one, in the same PR. A breaking
+change removes or renames a response field, adds a required request field, or changes a
+meaning. Older apps then get 426, and show "a new version is available". That screen tries an
+over-the-air update first and offers Play and "check again".
+
+## Data safety
+
+What the app sends, for Play Console's *Data safety* form:
+
+| Data type | Collected | Shared | Why | Optional |
+|---|---|---|---|---|
+| Email address | yes | no | account management | no |
+| Name (display name), other info (age) | yes | no | app functionality | no |
+| App activity: in-app actions (saved words, answers) | yes | no | app functionality | no |
+| Audio: voice recordings | yes, processed and not stored | no | app functionality | yes |
+| Photos | yes, deleted once read | no | app functionality | yes |
+
+- All of it is encrypted in transit.
+- Users can ask for deletion by email.
+- Gemini, Resend and AWS process data on WordsPal's behalf. Play counts them as service
+  providers, not as sharing.
