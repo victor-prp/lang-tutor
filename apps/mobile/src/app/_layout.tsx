@@ -36,7 +36,7 @@ import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { createPhotoPicker, type PhotoAsset } from '@/photos';
 import { createRecorder, type RecordPermission } from '@/recording';
 import { createSpeaker } from '@/speech';
-import { colors } from '@/theme';
+import { colors, layout } from '@/theme';
 
 // Read directly off process.env.EXPO_PUBLIC_API_URL (not via an indirection)
 // so Metro's build-time inlining for EXPO_PUBLIC_* variables recognizes and
@@ -210,9 +210,11 @@ export default function RootLayout() {
                     <VocabularyProvider api={api}>
                       <PhotoImportsProvider api={api} picker={photoPicker}>
                         <View style={styles.root} {...rtlProps}>
-                          <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} version={appVersion}>
-                            <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-                          </AppUpdatesProvider>
+                          <View style={styles.column} testID="content-column">
+                            <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} version={appVersion}>
+                              <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                            </AppUpdatesProvider>
+                          </View>
                         </View>
                       </PhotoImportsProvider>
                     </VocabularyProvider>
@@ -234,5 +236,8 @@ const styles = StyleSheet.create({
     // Native-only: a valid Yoga style there, deleted with an error on web.
     ...Platform.select({ web: null, default: { direction: 'rtl' as const } }),
   },
+  // A phone is narrower than the cap and sees no change; anything wider gets
+  // the app's background on either side (phase 36, spec D8).
+  column: { flex: 1, width: '100%', maxWidth: layout.maxContentWidth, alignSelf: 'center' },
   content: { backgroundColor: colors.background },
 });

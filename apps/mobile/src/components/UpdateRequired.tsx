@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { AppUpdates } from '@/appUpdates';
+import { storeLink } from '@/storeLink';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
-// Phase 32 (spec D9). The app's package on Play, where the newer build is.
-const STORE_URL = 'market://details?id=ai.wordspal.app';
+// Phase 32 (spec D9); phase 36 (spec D9): TestFlight on iOS, Play otherwise.
+const store = storeLink(Platform.OS);
 
 /**
  * Shown in place of every screen once the server has answered 426. An
  * over-the-air update for this build may already fix it, so that is tried
  * first and reloads the app when it lands. Otherwise the fix is a newer build,
- * which only Play can install. "Check again" retries the first step: a release
+ * which only the store can install: Play, or TestFlight on iOS. "Check again" retries the first step: a release
  * that raises the API level answers 426 as soon as the server is live, minutes
  * before its over-the-air update is published.
  */
@@ -50,10 +51,10 @@ export function UpdateRequired({ updates }: { updates: AppUpdates }) {
           <Pressable
             accessibilityRole="button"
             testID="update-required-store"
-            onPress={() => void Linking.openURL(STORE_URL)}
+            onPress={() => void Linking.openURL(store.url)}
             style={styles.button}
           >
-            <Text style={styles.buttonLabel}>{strings.updateRequiredButton}</Text>
+            <Text style={styles.buttonLabel}>{store.label}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"

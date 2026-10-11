@@ -21,3 +21,7 @@ export const fontSizes = { sm: 14, md: 17, lg: 20, xl: 28, xxl: 40 } as const;
 // Hebrew has no capitals and a different vertical rhythm from Latin script, so
 // line heights are deliberately generous. Tune these during the play-test.
 export const lineHeights = { sm: 22, md: 27, lg: 30, xl: 38, xxl: 50 } as const;
+
+// Phase 36 (spec D8). Wider than a phone (an iPad, a desktop browser), every
+// screen sits in one centred column this wide instead of stretching.
+export const layout = { maxContentWidth: 640 } as const;
