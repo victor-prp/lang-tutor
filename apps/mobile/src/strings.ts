@@ -167,6 +167,12 @@ export const strings = {
   profileTitle: 'הפרופיל שלי',
   profileNameLabel: 'שם',
   profileAgeLabel: 'גיל',
+  // Phase 32 (spec D9, D10). The update-required screen, and the version row.
+  appVersionLabel: 'גרסה',
+  updateChecking: 'בודקים אם יש גרסה חדשה…',
+  updateRequiredTitle: 'יש גרסה חדשה',
+  updateRequiredBody: 'הגרסה הזו של האפליקציה כבר לא עובדת מול השרת. צריך לעדכן אותה כדי להמשיך.',
+  updateRequiredButton: 'לעדכון ב‑Google Play',
   back: 'חזרה',
   // Phase 23. The speaker button's accessibility label.
   speak: 'השמעה',

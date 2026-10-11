@@ -16,6 +16,8 @@ function buildClient(mockFetch: jest.Mock, extra: Partial<ApiClientDeps> = {}) {
     sessionHeaders: async () => ({ cookie: 'better-auth.session_token=abc' }),
     credentials: 'omit',
     onUnauthorized: () => {},
+    appHeaders: {},
+    onUpdateRequired: () => {},
     ...extra,
   });
 }
@@ -39,6 +41,33 @@ describe('api/client', () => {
     const mockFetch = jest.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: 'not signed in' }) }));
     await expect(buildClient(mockFetch, { onUnauthorized }).me()).rejects.toEqual(new ApiError(401, 'not signed in'));
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  // Phase 32 (spec D9). The native app's API level rides on every call.
+  it('sends the app headers it is given on every call', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => [] }));
+    await buildClient(mockFetch, { appHeaders: { 'X-Api-Level': '7' } }).listEnrollments();
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/enrollments',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'X-Api-Level': '7', cookie: 'better-auth.session_token=abc' }),
+      }),
+    );
+  });
+
+  it('reports a 426 as update required and still throws it', async () => {
+    const onUpdateRequired = jest.fn();
+    const onUnauthorized = jest.fn();
+    const mockFetch = jest.fn(async () => ({
+      ok: false,
+      status: 426,
+      json: async () => ({ error: 'app_update_required' }),
+    }));
+    await expect(buildClient(mockFetch, { onUpdateRequired, onUnauthorized }).me()).rejects.toEqual(
+      new ApiError(426, 'app_update_required'),
+    );
+    expect(onUpdateRequired).toHaveBeenCalledTimes(1);
+    expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
   it('does not report other failures as signed out', async () => {
@@ -331,6 +360,8 @@ describe('api/client', () => {
           sessionHeaders: async () => ({}),
           credentials: 'omit',
           onUnauthorized: () => {},
+          appHeaders: {},
+          onUpdateRequired: () => {},
         });
     const request = { question_id: 'q', mime_type: 'audio/aac' as const, audio: 'QUJD' };
     expect(await api.answerBySpeech('s 1', request)).toEqual({ heard: 'gatto', verdict: 'unheard' });
@@ -351,6 +382,8 @@ describe('api/client', () => {
           sessionHeaders: async () => ({}),
           credentials: 'omit',
           onUnauthorized: () => {},
+          appHeaders: {},
+          onUpdateRequired: () => {},
         });
       const pending = api.answerBySpeech('s1', { question_id: 'q', mime_type: 'audio/aac', audio: 'QUJD' });
       const outcome = expect(pending).rejects.toThrow('aborted');
@@ -374,6 +407,8 @@ describe('api/client', () => {
           sessionHeaders: async () => ({}),
           credentials: 'omit',
           onUnauthorized: () => {},
+          appHeaders: {},
+          onUpdateRequired: () => {},
         }) };
     };
     const emptyList = JSON.stringify({ tutors: [], students: [] });
@@ -426,6 +461,8 @@ describe('api/client', () => {
           sessionHeaders: async () => ({}),
           credentials: 'omit',
           onUnauthorized: () => {},
+          appHeaders: {},
+          onUpdateRequired: () => {},
         });
     const request = { question_id: 'q', text: 'להזמין' };
     expect(await api.judgeAnswer('s 1', request)).toEqual(body);
@@ -446,6 +483,8 @@ describe('api/client', () => {
           sessionHeaders: async () => ({}),
           credentials: 'omit',
           onUnauthorized: () => {},
+          appHeaders: {},
+          onUpdateRequired: () => {},
         });
       const pending = api.judgeAnswer('s1', { question_id: 'q', text: 'x' });
       const outcome = expect(pending).rejects.toThrow('aborted');
@@ -496,6 +535,8 @@ describe('photo imports', () => {
           sessionHeaders: async () => ({}),
           credentials: 'omit',
           onUnauthorized: () => {},
+          appHeaders: {},
+          onUpdateRequired: () => {},
         });
       const pending = api.createPhotoImport('e1', { mime_type: 'image/jpeg', image: 'QUJD' });
       const outcome = expect(pending).rejects.toThrow('aborted');
