@@ -55,7 +55,14 @@ export function retrievability(state: MemoryState, day: string): number {
 
 const initialDifficulty = (w: readonly number[], grade: number) => w[4] - Math.exp(w[5] * (grade - 1)) + 1;
 
-/** Applies one graded review. `state` null is the row's first review. */
+/**
+ * Applies one graded review. `state` null is the row's first review.
+ *
+ * Difficulty mean-reverts toward D0(Easy), the initial difficulty of an Easy first review
+ * (grade 4), taken unclamped (about −4.77 with the defaults), as py-fsrs does; only the result
+ * is clamped to 1–10 (ruling 12). Easy is never a grade here, but it is the reversion target.
+ * Stability is floored at STABILITY_MIN after every update.
+ */
 export function review(state: MemoryState | null, grade: Grade, day: string): MemoryState {
   const w = paramsFor(state?.params ?? FSRS6_DEFAULT.id);
   if (state === null) {
