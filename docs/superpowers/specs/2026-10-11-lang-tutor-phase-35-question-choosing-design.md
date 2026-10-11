@@ -15,7 +15,7 @@
 - **Touches:** a migration (a memory table, a profile kind, a bot day, a session's day). Pure
   domain modules for the model, grading, word choosing and card choosing, replacing the tier
   rotation. One bot-only route. The recompute script. A new top-level `bots/` workspace and a
-  `bots.yml` workflow. ADR 0012 and its check script. The e2e specs that assume the rotation.
+  `bots.yml` workflow. ADR 0013 and its check script. The e2e specs that assume the rotation.
 
 ---
 
@@ -41,7 +41,7 @@ in production on a clock where one run, about an hour, is one day, and report on
    simulated week, D20.)
 3. Their sessions are analysed. (Settled: five numbers per bot per simulated week, shown as
    trends with no pass marks, D21. Pass marks are a later phase, set from this data.)
-4. `npm test`, `npm run test:all`, `npm run lint:arch` and `npm run e2e` pass. ADR 0012's check
+4. `npm test`, `npm run test:all`, `npm run lint:arch` and `npm run e2e` pass. ADR 0013's check
    reports a planted violation. `npm run eval` is untouched: no prompt changes.
 
 Items 1–3 are observed after release, because the bots run against production (D9). The PR
@@ -63,7 +63,7 @@ delivers everything they need, and its body says what Victor runs to start them.
 - a Claude-written weekly report per bot, its spend tagged by bot, week and run;
 - a weekly GitHub issue with daily lines, the five numbers as trends, the reports and the spend;
 - the recompute script rebuilding memory from stored answers;
-- ADR 0012 and its check.
+- ADR 0013 and its check.
 
 **Out:**
 - new card types: the picker chooses among the thirteen that exist;
@@ -127,16 +127,22 @@ first:     S = w[G−1];  D = clamp(w4 − e^(w5·(G−1)) + 1, 1, 10)
 t ≥ 1, G ≥ 2:  S' = S·(1 + e^w8·(11−D)·S^(−w9)·(e^(w10·(1−R)) − 1)·(G = 2 ? w15 : 1))
 t ≥ 1, G = 1:  S' = min(w11·D^(−w12)·((S+1)^w13 − 1)·e^(w14·(1−R)),  S / e^(w17·w18))
 t = 0:         S' = S·m,  m = e^(w17·(G − 3 + w18))·S^(−w19),  m ≥ 1 when G ≥ 2
-always:        D' = clamp(w7·D0(Good) + (1−w7)·(D − w6·(G−3)·(10−D)/9), 1, 10)
+always:        D' = clamp(w7·D0(Easy) + (1−w7)·(D − w6·(G−3)·(10−D)/9), 1, 10)
+               D0(Easy) = w4 − e^(w5·3) + 1, unclamped (≈ −4.77)
+               S' is floored at 0.001
 ```
+
+Difficulty mean-reverts toward D0(Easy), taken unclamped, and stability is floored at 0.001
+after every update, as py-fsrs does (ruling 12).
 
 `t` is whole days since `last_day`. Reviews are applied in answer order. Within one day, the first
 review of a row uses the long-term rule and any later one uses `t = 0`. Same-day R is never used
 to rank anything: R(0) is 1, and FSRS-6 predicts same-day reviews poorly.
 
-What the defaults do, as a test fixture: a first Good gives S = 2.3, and Good at each due date
-then gives intervals of 2, 11, 46 and 163 days. Hard instead of Good from S = 2.3 gives 8.1
-rather than 11.9, and Again gives 0.6.
+What the defaults do, as a test fixture: a first Good gives S = 2.3065, and Good at each due
+date, reviewed at round(S) days (Anki's interval at retention 0.9), then gives intervals of 2,
+11, 46 and 163 days. From S = 2.3065 reviewed at t = 2 whole days, Hard gives 7.51, Good 10.96
+and Again 0.608 (ruling 10).
 
 **Written here, not imported.** The formulas are about a hundred lines in
 `packages/core/src/domain/memory.ts`, where the server and the FSRS control bot both import them. The TypeScript library works in timestamps and fractional
@@ -210,7 +216,7 @@ for each saved gloss g:
   else:
     weak(g) = the dimension in LIVE with a row and the lowest R(today − last_day, S)
     need(g) = R of weak(g)
-    if need(g) < R_TARGET:                      class DUE
+    if need(g) <= R_TARGET:                     class DUE    # ruling 11: back on day ceil(S)
     elif some dimension in LIVE has no row:     class EXPAND   # introduce the next one in ORDER
     else:                                       class NOT_DUE
 
@@ -271,8 +277,9 @@ The rungs respect the level caps by construction: a capped card is rung 1, and r
 only below level 3 or at low R.
 
 **Order.** The highest-`p` card comes first. No type appears twice in a row where it can be
-avoided. When at least four picks have multiple choice and their forms and meanings all differ,
-four of them become a matching board, reusing `boardPicks`. Otherwise the session has no board.
+avoided. When the session has at least `BOARD_MIN_PICKS` (7) picks, as today (ruling 18), and at
+least four picks have multiple choice and their forms and meanings all differ, four of them
+become a matching board, reusing `boardPicks`. Otherwise the session has no board.
 
 Choosing the card is about aiming: the evidence is for effortful but successful retrieval
 (Pyc & Rawson 2009), and recall was best at thresholds of 0.86–0.94, with 0.98 and 0.40 both
@@ -327,7 +334,7 @@ Today the level rule's day is derived in SQL from the latest `answered_at` of a 
 
 - `services/learnerDay.ts` exports `learnerDay(repos, userId, now)`. It returns the UTC date of
   `now` for a learner, and the profile's `bot_day` for a bot. It is the only place a progress day
-  is computed (ADR 0012).
+  is computed (ADR 0013).
 - `sessions.practice_day` (date, null until the session ends) is set from `learnerDay` in the
   transaction that ends the session. The level rule, the memory update and the recompute all read
   it. The migration backfills ended sessions with the day today's SQL derives, so nothing moves.
@@ -338,7 +345,8 @@ Today the level rule's day is derived in SQL from the latest `answered_at` of a 
 
 `users.kind` is `'learner' | 'bot'`, default `'learner'`, with a check. `users.bot_day` is a
 nullable date, set for bots only (a check: non-null exactly when the kind is bot). Bot profiles
-are created only by the server command `npm run db:bots:create`, run by Victor against production
+are created only by the server command `npm run db:bots:create -- --day <date> <names>`, whose
+`--day` is required (ruling 21: ADR 0013 R1 keeps "today" in `learnerDay`), run by Victor against production
 (§4), because ADR 0009 R6 keeps `insert(users)` in `repo/users.ts`. It creates
 each auth identity and profile with `kind = 'bot'` and a `.invalid` email that no mail can reach.
 Nothing in the app's sign-up path can create one. Anything that later counts learners filters
@@ -361,7 +369,9 @@ Both operations have the same guards:
   never sign anyone in as a learner;
 - one `bot_route` log line per call, with the operation and the name.
 
-`BOT_SECRET` lives in production's Secrets Manager and in the repository's GitHub secrets.
+`BOT_SECRET` lives in production's Secrets Manager, which reaches the container through
+`secret_env_names` in `terraform/prod/variables.tf` (ruling 28), and in the repository's GitHub
+secrets.
 Writing it is Victor's (§4). Both operations are declared with `createRoute`, with their schemas
 in `packages/core` (ADR 0003 R1, R2). They appear in the OpenAPI document only where the route
 is mounted.
@@ -397,11 +407,14 @@ Each ACT-R bot keeps, per word and dimension, the times of its practice traces (
 2003, 2005):
 
 ```
-activation      m = ln Σ_j t_j^(−d_j)          t_j: simulated time since trace j
+activation      m = ln Σ_j t_j^(−d_j)          t_j: simulated time since trace j, in seconds
 decay of trace  d_j = c·e^(m_(j−1)) + a         a = 0.167, c = 0.232
 recall          P = 1 / (1 + e^((τ − m)/s))     s = 0.252, τ = −0.669
 between-session time is scaled by h = 0.031
 ```
+
+Ages are in seconds, the unit the parameters are fit to (ruling 30); the bot's clock runs in
+simulated hours and converts. In hours the same parameters barely forget.
 
 What the bots add to that:
 - **Hidden difficulty.** A per-word, per-bot shift of τ, drawn once and never visible to the
@@ -466,7 +479,7 @@ done. Production never sees what a bot really knows.
 `.github/workflows/bots.yml`, separate from `ci.yml`:
 - runs at `17 * * * *` and on manual dispatch;
 - `concurrency: bots`, with no cancel, so a late run queues behind the one before;
-- `timeout-minutes: 30`;
+- `timeout-minutes: 55` (30 as first written; under the hourly cadence, a long run only queues the next);
 - skipped on forks;
 - skipped unless the repository variable `BOTS_ENABLED` is `true`, so Victor can stop it without
   a code change.
@@ -477,7 +490,8 @@ For each bot, a run:
 3. plays the day;
 4. commits the state.
 
-All bots share one day number. A bot whose run fails keeps its old day and repeats it next run.
+All bots share one day number. A bot whose run fails keeps its old day, and the next run goes
+on with that day from where it stopped (ruling 31).
 GitHub's hourly schedule drifts and sometimes skips, so the bots average somewhat under 24 days
 per real day. Nothing breaks: a skipped run is a slower week, never a lost day.
 
@@ -591,14 +605,14 @@ That needs nothing new from Victor. Issues created with that token trigger no fu
 
 - `.github/workflows/bots.yml` (D18).
 - `ci.yml` runs the `bots/` unit tests in the existing unit job.
-- `docs/adr/adr-0012-learner-day.md` and `scripts/check-adr-0012-learner-day.sh` (D23).
+- `docs/adr/adr-0013-learner-day.md` and `scripts/check-adr-0013-learner-day.sh` (D23).
 - `docs/runbooks/bots.md`: start, stop, read the issue, rerun a day, reset a bot.
 
 ---
 
 ## 6. Testing
 
-### D23. ADR 0012: a learner's day comes from one place
+### D23. ADR 0013: a learner's day comes from one place
 
 The ADR has three rules, each enforced by the check script:
 - **R1.** Only `services/learnerDay.ts` computes a progress day. In any other non-test file under
@@ -659,18 +673,22 @@ nothing, and makes no Claude call.
 
 These go, with exact commands, in the PR body. In order:
 
-1. Generate `BOT_SECRET` and write it to production's Secrets Manager and to the repository's
-   GitHub secrets.
-2. Merge and release as usual.
-3. Run the memory recompute against production.
-4. Run `npm run db:bots:create` against production to create the six bot profiles.
-5. Set the repository variable `BOTS_ENABLED` to `true`.
+1. Delete the test incident's `bots-state` branch, before `BOTS_ENABLED` is ever set (ruling 27).
+2. Generate `BOT_SECRET` and write it to production's Secrets Manager and to the repository's
+   GitHub secrets; set the repository variable `BOTS_API_URL`.
+3. Merge and release as usual (the release applies `terraform/prod`, which passes `BOT_SECRET`).
+4. Run the memory recompute against production.
+5. Run `npm run db:bots:create -- --day 2026-01-01 <names>` against production to create the six
+   bot profiles.
+6. Set the repository variable `BOTS_ENABLED` to `true`.
+
+`docs/runbooks/bots.md` (*Start*) has the exact commands.
 
 The first weekly issue appears about seven hours later.
 
 ## Build order
 
-1. Migration, `learnerDay`, `practice_day` with its backfill; the level rule reads it. ADR 0012
+1. Migration, `learnerDay`, `practice_day` with its backfill; the level rule reads it. ADR 0013
    and its check.
 2. `memory.ts`, `memoryGrades.ts`, the memory write at session end, the recompute.
 3. `choose.ts` and the new card choice, replacing the rotation; the e2e specs.
@@ -704,3 +722,36 @@ The first weekly issue appears about seven hours later.
   address's code for the route to return. That is the same secret behind the same guards.
 - **Subscription use.** About twenty report calls a real day, capped per run. If it competes
   with Victor's sessions, the reports can move to every second week with one constant.
+
+## As built
+
+Controller rulings made during the build that changed or pinned down the design above. The text
+above is corrected where a ruling contradicted it; the rest refine it.
+
+- **Ruling 1.** ADR 0013 R2 exempts `db/schema.ts` and `db/migrations/`, which must declare `bot_day`.
+- **Ruling 3.** One `expectedSuccess(r, fourOption, rung)` in `domain/choose.ts`; HARD_CAP uses the rung's best card.
+- **Ruling 4.** A bot's auth identity is inserted in `repo/auth.ts` and its profile in `repo/users.ts`, in one transaction.
+- **Ruling 5.** The CI dry run reuses the e2e job's server and MockServer namespace, after e2e.
+- **Ruling 7.** The learner-day ADR is 0013 (0012 was taken on master); corrected throughout.
+- **Ruling 9.** ADR 0013 does not scan test files, and R3 scans `apps/server/src/routes` only.
+- **Ruling 10.** D2's fixture reviews at round(S) days; whole-day Hard/Good/Again from S = 2.3065 at t = 2 are 7.51 / 10.96 / 0.608.
+- **Ruling 11.** DUE is need ≤ R_TARGET, so a word returns on day ceil(S).
+- **Ruling 12.** Difficulty reverts toward D0(Easy), unclamped, and stability is floored at 0.001, as py-fsrs does.
+- **Ruling 14.** Two NEW slots are held when NEW exists and the cap allows; caps defer rather than drop; "new today" counts glosses first answered today.
+- **Ruling 15.** NEW glosses past DAY_NEW_CAP fill a session as a last resort, so it is never short while saved glosses remain.
+- **Ruling 16.** Read aloud is offered only while SK is below level 2.
+- **Ruling 17.** Multiple choice forced on NEW glosses and fallbacks does not count toward the four-per-type cap.
+- **Ruling 18.** A board needs at least BOARD_MIN_PICKS (7) picks.
+- **Ruling 19.** The board takes its position by p, the highest of its four.
+- **Ruling 20.** e2e seeds memory by gloss key, not form.
+- **Ruling 21.** `db:bots:create` takes a required `--day`; bot names are `[a-z0-9-]{3,30}`; a bot session lasts one day; `claimAccount` refuses bots.
+- **Ruling 22.** The raw `app.all('/api/bots/*')` 404 is an accepted exception to ADR 0003 R1.
+- **Ruling 23.** The bot knobs D13 leaves open are documented choices in `bots/src/roster.ts`.
+- **Ruling 24.** A bot learns from the server's verdict, not from what it meant to answer.
+- **Ruling 25.** The word lists drop contraction fragments, number words and function words.
+- **Ruling 26.** All bots play the lowest finished day + 1; a bot day failing three times counts as played; a saved word also matches by lemma and gloss key.
+- **Ruling 27.** Deleting the test incident's `bots-state` comes before `BOTS_ENABLED` is set.
+- **Ruling 28.** `BOT_SECRET` is in `terraform/prod`'s `secret_env_names`.
+- **Ruling 29.** Analysis (d) infers the dimension from the card type and counts fallbacks as rung disagreements.
+- **Ruling 30.** ACT-R ages are in seconds; `forgetful-it` became a = 0.2, τ = −0.6 so it still learns.
+- **Ruling 31, final fix wave.** DUE words left after the NEW reservation are offered before EXPAND; a bot day saves its state after every session and on a crash, and a later attempt resumes it rather than replaying it; a tracker failure before a day is logged and the day is played (the run still ends red); a gloss merge folds memory, keeping the larger stability per dimension; the job's timeout is 55 minutes; the bots' audio cap is 200,000 bytes.
