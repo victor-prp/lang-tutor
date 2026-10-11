@@ -4,9 +4,12 @@ import {
   CreateEnrollmentRequestSchema,
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
+  LlmCheckSchema,
   LlmCorrectionSchema,
+  LlmContextSchema,
   LlmDistractorsSchema,
   LlmEntrySchema,
+  MatchingBoardSchema,
   JudgedAnswerRequestSchema,
   LlmMeaningJudgeSchema,
   LlmTranslationJudgeSchema,
@@ -43,6 +46,7 @@ import {
 import type {
   MissedQuestion,
   NextStepResponse,
+  PendingRetry,
   Position,
   Question,
   Score,
@@ -56,6 +60,7 @@ const QUESTION: Question = {
   question: 'dog',
   options: ['כלב', 'חתול', 'סוס', 'דג'],
   correct_option: 0,
+  context: null,
 };
 
 // The two request schemas moved here from apps/server/src/routes/schemas.ts.
@@ -119,13 +124,13 @@ describe('QuestionSchema', () => {
     expect(
       QuestionSchema.parse({
         id: 'q2', type: 'reverse_choice', vocab_term_id: 'l1', question: 'כלב', part_of_speech: 'noun',
-        options: ['dog', 'cat'], correct_option: 0,
+        options: ['dog', 'cat'], correct_option: 0, context: null,
       }).type,
     ).toBe('reverse_choice');
     expect(
       QuestionSchema.parse({
         id: 'q3', type: 'typed_translation', vocab_term_id: 'l1', question: 'כלב', part_of_speech: 'noun',
-        answer: 'dog', lemma: 'dog', alternatives: ['hound'],
+        answer: 'dog', lemma: 'dog', alternatives: ['hound'], context: null,
       }).type,
     ).toBe('typed_translation');
   });
@@ -150,10 +155,115 @@ describe('LlmDistractorsSchema', () => {
     ).toBe(true);
   });
 
-  it('rejects a fourth wrong option', () => {
-    expect(
-      LlmDistractorsSchema.safeParse({ items: [{ key: 'q1', distractors: ['a', 'b', 'c', 'd'] }] }).success,
-    ).toBe(false);
+  // Phase 34 (spec D4, D4a): six wrong options asked, and six is the ceiling the
+  // live API was measured to accept alongside the context fields.
+  it('accepts six wrong options and rejects a seventh', () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'];
+    expect(LlmDistractorsSchema.safeParse({ items: [{ key: 'q1', distractors: six }] }).success).toBe(true);
+    expect(LlmDistractorsSchema.safeParse({ items: [{ key: 'q1', distractors: [...six, 'g'] }] }).success).toBe(false);
+  });
+
+  // Phase 34 (ruling R8). The four context strings made the non-streaming call
+  // hang; they left the batch for a call of their own (LlmContextSchema).
+  it('carries no context field: the context sentences have their own call', () => {
+    expect(Object.keys(LlmDistractorsSchema.shape.items.element.shape)).toEqual([
+      'key', 'distractors', 'alternatives', 'sentence', 'gap', 'translation',
+    ]);
+    const parsed = LlmDistractorsSchema.parse({ items: [{ key: 'q1', distractors: ['a', 'b', 'c'], context: 'Il campo.' }] });
+    expect(parsed.items[0]).toEqual({ key: 'q1', distractors: ['a', 'b', 'c'] });
+  });
+});
+
+// Phase 34 (spec D6, D7, D8, ruling R8). The context call's answer: per item, a
+// sentence and its other half, the marked word, or the practised word in a
+// Hebrew sentence. Every field optional, so a model that leaves one out fails
+// nothing but that item's sentence.
+describe('LlmContextSchema', () => {
+  it('reads every field, and requires none but the key', () => {
+    const item = {
+      key: 'q1',
+      context: 'Il contadino lavora nel campo.',
+      context_translation: 'האיכר עובד בשדה.',
+      context_word: 'campo',
+      sentence_word: 'בשדה',
+    };
+    expect(LlmContextSchema.parse({ items: [item] }).items[0]).toEqual(item);
+    expect(LlmContextSchema.safeParse({ items: [{ key: 'q1' }] }).success).toBe(true);
+    expect(LlmContextSchema.safeParse({ items: [{ context: 'x' }] }).success).toBe(false);
+  });
+
+  it('holds at most ten items, a session', () => {
+    const items = (n: number) => Array.from({ length: n }, (_, i) => ({ key: `q${i + 1}` }));
+    expect(LlmContextSchema.safeParse({ items: items(10) }).success).toBe(true);
+    expect(LlmContextSchema.safeParse({ items: items(11) }).success).toBe(false);
+  });
+});
+
+// Phase 34 (spec D5). The checker's answer: per item, which options are also
+// right, which fit a gap, what a context's marked word means or which words fit
+// it, and a sentence's natural translation. Every field optional and uncapped:
+// the server checks each list against what it asked (domain/check.ts).
+describe('LlmCheckSchema', () => {
+  it('reads every field, and requires none but the key', () => {
+    const item = {
+      key: 'q1',
+      options: [true, false, false],
+      gap_fits: [false, true],
+      context_meaning: 'לנסר',
+      context_words: ['download', 'get'],
+      natural_translation: "Let's join forces.",
+    };
+    expect(LlmCheckSchema.parse({ items: [item] }).items[0]).toEqual(item);
+    expect(LlmCheckSchema.safeParse({ items: [{ key: 'q1c' }] }).success).toBe(true);
+    expect(LlmCheckSchema.safeParse({ items: [{ options: [true] }] }).success).toBe(false);
+    expect(LlmCheckSchema.safeParse({ items: [{ key: 'q1', options: ['yes'] }] }).success).toBe(false);
+  });
+
+  it('caps nothing: a session of every kind of card fits, and the server counts what it asked', () => {
+    const items = Array.from({ length: 24 }, (_, i) => ({ key: `q${i + 1}`, options: Array.from({ length: 6 }, () => false) }));
+    expect(LlmCheckSchema.safeParse({ items }).success).toBe(true);
+  });
+});
+
+// Phase 34 (spec D6, D8, D10). What a card shows beside a bare word or a sentence.
+describe('phase 34 question shapes', () => {
+  const context = { text: 'He saws the planks every morning.', mark: { start: 3, end: 7 } };
+  const cards = {
+    multiple_choice: { id: 'q', type: 'multiple_choice', vocab_term_id: 'l', question: 'saw', options: ['לנסר', 'לשבור'], correct_option: 0 },
+    reverse_choice: { id: 'q', type: 'reverse_choice', vocab_term_id: 'l', question: 'לנסר', part_of_speech: 'verb', options: ['saw', 'drill'], correct_option: 0 },
+    typed_translation: { id: 'q', type: 'typed_translation', vocab_term_id: 'l', question: 'להוריד', part_of_speech: 'verb', answer: 'download', lemma: 'download', alternatives: [] },
+    say_translation: { id: 'q', type: 'say_translation', vocab_term_id: 'l', question: 'להוריד', part_of_speech: 'verb', answer: 'download', lemma: 'download', alternatives: [] },
+    typed_meaning: { id: 'q', type: 'typed_meaning', vocab_term_id: 'l', question: 'saw', part_of_speech: 'verb', meaning: 'לנסר' },
+  };
+
+  it('gives the five bare-word cards a context, marked or not, or null', () => {
+    for (const card of Object.values(cards)) {
+      expect(QuestionSchema.safeParse({ ...card, context }).success).toBe(true);
+      expect(QuestionSchema.safeParse({ ...card, context: { ...context, mark: null } }).success).toBe(true);
+      expect(QuestionSchema.safeParse({ ...card, context: null }).success).toBe(true);
+      expect(QuestionSchema.safeParse(card).success).toBe(false);
+    }
+  });
+
+  it('marks the practised word in the Hebrew of a sentence card, or does not', () => {
+    const gap = { start: 6, end: 13 };
+    const cloze = { id: 'a', type: 'cloze_typed', vocab_term_id: 'l', sentence: "Let's combine forces.", gap, translation: 'בואו נשלב כוחות.', meaning: 'לשלב', answer: 'combine', alternatives: [] };
+    const translate = { id: 'a', type: 'sentence_translation', vocab_term_id: 'l', question: 'בואו נשלב כוחות.', meaning: 'לשלב', sentence: "Let's combine forces.", gap, answer: 'combine' };
+    for (const card of [cloze, translate]) {
+      expect(QuestionSchema.safeParse({ ...card, mark: { start: 5, end: 9 } }).success).toBe(true);
+      expect(QuestionSchema.safeParse({ ...card, mark: null }).success).toBe(true);
+      expect(QuestionSchema.safeParse(card).success).toBe(false);
+    }
+  });
+
+  it('gives a listen card and each word of a board its part of speech', () => {
+    const listen = { id: 'l', type: 'listen_choice', vocab_term_id: 'v', question: 'saw', options: ['לנסר', 'לשבור'], correct_option: 0 };
+    expect(QuestionSchema.safeParse({ ...listen, part_of_speech: 'verb' }).success).toBe(true);
+    expect(QuestionSchema.safeParse(listen).success).toBe(false);
+    const board = { question_ids: ['m1', 'm2'], words: ['saw', 'main'], parts_of_speech: ['noun', 'adjective'], correct_options: [0, 1] };
+    const word = { id: 'm1', type: 'matching', vocab_term_id: 'v', question: 'saw', part_of_speech: 'noun', options: ['מסור', 'ראשי'], correct_option: 0 };
+    expect(QuestionSchema.safeParse({ ...word, board }).success).toBe(true);
+    expect(MatchingBoardSchema.safeParse({ ...board, parts_of_speech: undefined }).success).toBe(false);
   });
 });
 
@@ -168,8 +278,17 @@ describe('NextStepResponseSchema', () => {
       question: QUESTION,
       position,
       complete: false,
+      pending_retry: null,
     });
     expect(parsed.success).toBe(true);
+  });
+
+  // Phase 34 (spec D9). The card just answered, held for its second try.
+  it('parses a step held for a second try, and refuses one that does not say', () => {
+    const held = { session_id: 's1', question: QUESTION, position, complete: false };
+    expect(NextStepResponseSchema.safeParse({ ...held, pending_retry: { answer: 'abitazione', wording: 'word' } }).success).toBe(true);
+    expect(NextStepResponseSchema.safeParse({ ...held, pending_retry: { answer: 'abitazione', wording: 'sense' } }).success).toBe(false);
+    expect(NextStepResponseSchema.safeParse(held).success).toBe(false);
   });
 
   it('parses a completed step and narrows on `complete`', () => {
@@ -232,7 +351,7 @@ type Exact<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ?
 
 const nextStepShapeIsPinned: Exact<
   NextStepResponse,
-  | { session_id: string; question: Question; position: Position; complete: false }
+  | { session_id: string; question: Question; position: Position; complete: false; pending_retry: PendingRetry | null }
   | {
       session_id: string;
       question: null;
@@ -808,6 +927,7 @@ describe('phase 25 wire shapes', () => {
         answer: 'gatto',
         lemma: 'gatto',
         alternatives: [],
+        context: null,
       }).type,
     ).toBe('say_translation');
   });
@@ -900,7 +1020,7 @@ describe('phase 26 photo import schemas', () => {
 
 describe('phase 27 Part A schemas', () => {
   it('parses a typed_meaning question', () => {
-    const q = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'parlare', part_of_speech: 'verb', meaning: 'לדבר' };
+    const q = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'parlare', part_of_speech: 'verb', meaning: 'לדבר', context: null };
     expect(QuestionSchema.parse(q)).toEqual(q);
   });
   it('bounds a judged answer at 300 characters and needs ids', () => {
@@ -931,11 +1051,11 @@ describe('phase 27 Part B shapes', () => {
     expect(
       ClozeTypedQuestionSchema.safeParse({
         id: 'a', type: 'cloze_typed', vocab_term_id: 'l', sentence: 's', gap, translation: 't', meaning: 'm',
-        answer: 'x', alternatives: [],
+        answer: 'x', alternatives: [], mark: null,
       }).success,
     ).toBe(true);
     const translation = {
-      id: 'a', type: 'sentence_translation', vocab_term_id: 'l', question: 'q', meaning: 'm', sentence: 's', gap, answer: 'x',
+      id: 'a', type: 'sentence_translation', vocab_term_id: 'l', question: 'q', meaning: 'm', sentence: 's', gap, answer: 'x', mark: null,
     };
     expect(SentenceTranslationQuestionSchema.safeParse(translation).success).toBe(true);
     expect(QuestionSchema.safeParse(translation).success).toBe(true);

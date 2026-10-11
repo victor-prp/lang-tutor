@@ -18,9 +18,33 @@ export const PREPARE_SESSION_FAILED = 'prepare-session-failed';
  *  Victor's cap. The environment may lower it (config.ts); tests do. */
 export const SESSION_GENERATION_BUDGET_MS = 300_000;
 
-/** Twice the budget, phase 19's rule: a worker that crashed mid-call expires
- *  and is retried, and a healthy call is never cut off. */
-export const PREPARE_SESSION_EXPIRY_SECONDS = (2 * SESSION_GENERATION_BUDGET_MS) / 1000;
+/** Phase 34 (spec D6, D8, ruling R12). The most the context call may take, the
+ *  call after the batch. A minute: measured at about 7 s for a full session, and
+ *  a call that runs out costs only the sentences (ruling R11), never the
+ *  session. The environment may lower it (config.ts); tests do. */
+export const CONTEXT_CALL_BUDGET_MS = 60_000;
+
+/** Phase 34 (spec D5, ruling R12). The most the checker may take, the call after
+ *  the context call. A minute, as the context call's: a full session's checks
+ *  are one short answer (the measurement is above LlmCheckSchema). Unlike the
+ *  context call, a checker that runs out fails the attempt, and pg-boss retries
+ *  it. The environment may lower it (config.ts); tests do. */
+export const CHECKER_CALL_BUDGET_MS = 60_000;
+
+/** Phase 34 (ruling R12). Every model call one prepare-session attempt makes, in
+ *  order, each at most its budget: the batch, the context call, the checker. A
+ *  call added to the attempt adds its budget here. */
+export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
+  SESSION_GENERATION_BUDGET_MS,
+  CONTEXT_CALL_BUDGET_MS,
+  CHECKER_CALL_BUDGET_MS,
+];
+
+/** Twice the sum of the calls' budgets, phase 19's rule: a worker that crashed
+ *  mid-call expires and is retried, and a healthy attempt, every call of which
+ *  stays inside its own budget, is never cut off. */
+export const PREPARE_SESSION_EXPIRY_SECONDS =
+  (2 * PREPARE_SESSION_CALL_BUDGETS_MS.reduce((sum, budget) => sum + budget, 0)) / 1000;
 
 export const PrepareSessionPayloadSchema = z.object({
   session_id: z.string().min(1),
@@ -109,6 +133,28 @@ export const RenderLemmaPayloadSchema = z.object({
 });
 export type RenderLemmaPayload = z.infer<typeof RenderLemmaPayloadSchema>;
 
+/** Phase 34 (spec D1, D2). Asks the model once for every right answer to one
+ *  rendering and the form that agrees with it, and stores both. */
+export const ACCEPT_RENDERING = 'accept-rendering';
+/** Where pg-boss moves an accept job once its retries are spent or it expired.
+ *  pg-boss copies the job's `data` across unchanged. */
+export const ACCEPT_RENDERING_FAILED = 'accept-rendering-failed';
+/** One call within a lookup's 25 s, and two short transactions. */
+export const ACCEPT_RENDERING_EXPIRY_SECONDS = 120;
+
+export const AcceptRenderingPayloadSchema = z.object({
+  variant_id: z.string().min(1),
+  sense_id: z.string().min(1),
+  user_language_code: z.string().min(1),
+});
+export type AcceptRenderingPayload = z.infer<typeof AcceptRenderingPayloadSchema>;
+
+/** Phase 34 (spec D1). One accept job per rendering at a time: the singleton key
+ *  its queue's `exclusive` policy holds while a job is queued, retrying or active,
+ *  so a burst of sessions picking one rendering pays for one call. */
+export const acceptRenderingKey = (payload: AcceptRenderingPayload): string =>
+  `${payload.variant_id}:${payload.sense_id}:${payload.user_language_code}`;
+
 export type JobPayloads = {
   [PREPARE_SESSION]: PrepareSessionPayload;
   [PREPARE_SESSION_FAILED]: PrepareSessionPayload;
@@ -119,5 +165,7 @@ export type JobPayloads = {
   [MERGE_GLOSSES]: MergeGlossesPayload;
   [RENDER_LEMMA]: RenderLemmaPayload;
   [RENDER_LEMMA_FAILED]: RenderLemmaPayload;
+  [ACCEPT_RENDERING]: AcceptRenderingPayload;
+  [ACCEPT_RENDERING_FAILED]: AcceptRenderingPayload;
 };
 export type JobName = keyof JobPayloads;

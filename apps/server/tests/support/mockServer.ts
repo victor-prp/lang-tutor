@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
-import type { LlmEntry, LlmRendering, TranslationKind } from '@lang-tutor/core/api';
+import type { LlmContext, LlmEntry, LlmRendering, TranslationKind } from '@lang-tutor/core/api';
 
+import { ACCEPT_MARKER } from '../../src/domain/accept';
+import { CHECK_MARKER } from '../../src/domain/check';
+import { CONTEXT_MARKER } from '../../src/domain/context';
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
 import { JUDGE_MARKER } from '../../src/domain/judge';
 import { PHOTO_READING_MARKER } from '../../src/domain/photoReading';
 import { SENSE_MATCH_MARKER } from '../../src/domain/senseMatching';
 import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
-import { geminiResponse } from './geminiResponse';
+import { geminiBlockedResponse, geminiResponse } from './geminiResponse';
 
 // tests/support/ is the test composition root, so naming a concrete URL and
 // reading the environment is what this file is for (ADR 0001, ADR 0004 R6).
@@ -309,27 +312,13 @@ export const STUB_SENTENCE = 'Tome sprint lantern kettle pillow ladder bucket vi
 export const STUB_SENTENCE_HEBREW = 'אני רואה ספר ופנס בבית';
 export const STUB_GAP = 'lantern';
 
-export async function expectDistractors(ns: string, opts: { delayMs?: number; tasks?: Task[] } = {}): Promise<void> {
-  const items = (opts.tasks ?? CYCLE_TASKS).map((task, i) => {
-    const key = `q${i + 1}`;
-    switch (task) {
-      case 'meaning':
-        return { key, distractors: STUB_WRONG_HEBREW };
-      case 'word':
-        return { key, distractors: STUB_WRONG_ENGLISH };
-      case 'typed':
-        return { key, distractors: [], alternatives: [STUB_ALTERNATIVE] };
-      case 'gap':
-        return { key, distractors: STUB_WRONG_ENGLISH };
-      // Phase 27 Part B. One sentence holds every word the tests save, once, so
-      // whichever word a position asks, `gap` is a word of it. The sentence
-      // is English (the enrollment's target), its translation Hebrew.
-      case 'sentence':
-        return { key, distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] };
-      case 'translate':
-        return { key, distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE };
-    }
-  });
+export async function expectDistractors(
+  ns: string,
+  /** `alternatives`: what a typed item's alternatives are (phase 34), `STUB_ALTERNATIVE` alone by default.
+   *  `overrides`: per key, fields that replace the task's stub answer (phase 34). */
+  opts: { delayMs?: number; tasks?: Task[]; alternatives?: string[]; overrides?: Record<string, Record<string, unknown>> } = {},
+): Promise<void> {
+  const items = (opts.tasks ?? CYCLE_TASKS).map((task, i) => ({ ...stubItem(task, `q${i + 1}`, opts), ...opts.overrides?.[`q${i + 1}`] }));
   await expectation(ns, {
     match: { body: { type: 'REGEX', regex: `[\\s\\S]*${DISTRACTOR_MARKER}[\\s\\S]*` } },
     action: {
@@ -339,6 +328,92 @@ export async function expectDistractors(ns: string, opts: { delayMs?: number; ta
         body: JSON.stringify(geminiResponse({ items })),
         ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
       },
+    },
+  });
+}
+
+/** One key's stub answer for its task. */
+function stubItem(task: Task, key: string, opts: { alternatives?: string[] }) {
+  switch (task) {
+    case 'meaning':
+      return { key, distractors: STUB_WRONG_HEBREW };
+    case 'word':
+      return { key, distractors: STUB_WRONG_ENGLISH };
+    case 'typed':
+      return { key, distractors: [], alternatives: opts.alternatives ?? [STUB_ALTERNATIVE] };
+    case 'gap':
+      return { key, distractors: STUB_WRONG_ENGLISH };
+    // Phase 27 Part B. One sentence holds every word the tests save, once, so
+    // whichever word a position asks, `gap` is a word of it. The sentence
+    // is English (the enrollment's target), its translation Hebrew.
+    case 'sentence':
+      return { key, distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] };
+    case 'translate':
+      return { key, distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE };
+  }
+}
+
+/**
+ * Phase 34 (spec D6, D8; ruling R8). The context call's answer, matched on
+ * CONTEXT_MARKER and ranked above a broader stub, so the distractor batch's
+ * stub never answers it. Without one the call finds no expectation, fails, and
+ * the session is prepared on the fallbacks (ruling R11). `status` makes it a
+ * failed call; '' is the provider's "no content"; `delayMs` holds the answer
+ * back, past the call's budget if a test wants it to time out (ruling R12).
+ */
+export async function expectContext(
+  ns: string,
+  answer: LlmContext['items'] | '',
+  opts: { status?: number; delayMs?: number } = {},
+): Promise<void> {
+  const failed = opts.status !== undefined && opts.status !== 200;
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${CONTEXT_MARKER}[\\s\\S]*` } },
+    action: {
+      priority: 10,
+      httpResponse: failed
+        ? { statusCode: opts.status, body: '{"error":{"message":"upstream"}}' }
+        : {
+            statusCode: 200,
+            headers: { 'content-type': ['application/json'] },
+            body: JSON.stringify(answer === '' ? geminiBlockedResponse() : geminiResponse({ items: answer })),
+            ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
+          },
+    },
+  });
+}
+
+/**
+ * Phase 34 (spec D5). The checker's answer, matched on CHECK_MARKER and ranked
+ * above a broader stub. One static answer serves any session of up to ten
+ * cards: every key q1 to q10 calls each of its `options` (three, as
+ * expectDistractors writes them) wrong, as an option and as a gap filler, and
+ * translates a sentence card's Hebrew as STUB_SENTENCE, which uses STUB_GAP, so
+ * the stub's sentence cards are kept. It says nothing of a context sentence
+ * (q1c to q10c), which the server then drops to its fallback: a test that
+ * stubs the context call says, in `overrides`, how the checker reads each one.
+ * Without this stub the checker finds no expectation, and the attempt fails.
+ * `status` makes it a failed call; '' is the provider's "no content".
+ */
+export async function expectCheck(
+  ns: string,
+  opts: { options?: number; overrides?: Record<string, Record<string, unknown>>; status?: number } = {},
+): Promise<void> {
+  const wrong = Array.from({ length: opts.options ?? 3 }, () => false);
+  const items = [
+    ...Array.from({ length: 10 }, (_, i) => ({ key: `q${i + 1}`, options: wrong, gap_fits: wrong, natural_translation: STUB_SENTENCE })),
+    ...Object.keys(opts.overrides ?? {})
+      .filter((key) => !/^q([1-9]|10)$/.test(key))
+      .map((key) => ({ key })),
+  ].map((item) => ({ ...item, ...opts.overrides?.[item.key] }));
+  const failed = opts.status !== undefined && opts.status !== 200;
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${CHECK_MARKER}[\\s\\S]*` } },
+    action: {
+      priority: 10,
+      httpResponse: failed
+        ? { statusCode: opts.status, body: '{"error":{"message":"upstream"}}' }
+        : { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: JSON.stringify(geminiResponse({ items })) },
     },
   });
 }
@@ -378,6 +453,42 @@ export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' |
       },
       times: { remainingTimes: 1, unlimited: false },
       priority: 10,
+    },
+  });
+}
+
+/**
+ * Phase 34 (spec D1, D2). The accept call's answer, matched on ACCEPT_MARKER and
+ * ranked above a broader stub, so neither a lookup's nor the distractor batch's
+ * stub answers it. `matchText` narrows it to one rendering (the call's user part
+ * is the rendering); `status` makes it a failed call; `delayMs` holds it back,
+ * so a test can change the rendering while the call is in flight.
+ */
+export async function expectAccept(
+  ns: string,
+  answer: { answers: string[]; answer_form: string | null } | '',
+  opts: { matchText?: string; status?: number; delayMs?: number } = {},
+): Promise<void> {
+  const failed = opts.status !== undefined && opts.status !== 200;
+  // '' is the provider's "no content": a safety block, which the client reads as ''.
+  const body = JSON.stringify(answer === '' ? geminiBlockedResponse() : geminiResponse(answer));
+  await expectation(ns, {
+    match: {
+      body: {
+        type: 'REGEX',
+        regex: `[\\s\\S]*${ACCEPT_MARKER}${opts.matchText ? `[\\s\\S]*${opts.matchText}` : ''}[\\s\\S]*`,
+      },
+    },
+    action: {
+      priority: 10,
+      httpResponse: failed
+        ? { statusCode: opts.status, body: '{"error":{"message":"upstream"}}' }
+        : {
+            statusCode: 200,
+            headers: { 'content-type': ['application/json'] },
+            body,
+            ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
+          },
     },
   });
 }

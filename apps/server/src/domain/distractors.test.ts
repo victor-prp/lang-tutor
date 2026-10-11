@@ -3,8 +3,10 @@ import { describe, expect, it } from '@jest/globals';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
 import {
+  ASKED_DISTRACTORS,
   DISTRACTOR_MARKER,
   MAX_ALTERNATIVES,
+  MAX_CARD_ALTERNATIVES,
   NOTHING_GENERATED,
   NO_EXTRAS,
   boardMeanings,
@@ -17,21 +19,27 @@ import {
   tasksFor,
   validateDistractors,
   withSiblingAlternatives,
+  knownWords,
+  nothingKnown,
   type GenerationContext,
+  type KnownRight,
   type RecentSentences,
 } from './distractors';
 import type { SessionPlan } from './plan';
 
 const NO_RECENT: RecentSentences = new Map();
-const NO_SENTENCE = { sentence: null, sentenceTranslation: null, gapStart: null, gapEnd: null };
+/** Phase 34 (spec D3). A batch the dictionary knows nothing more about. */
+const NONE = nothingKnown();
+// A card of any type but the six that ask for an answer form (phase 34) has neither a sentence nor one.
+const NO_SENTENCE = { sentence: null, sentenceTranslation: null, gapStart: null, gapEnd: null, answerForm: null };
 
 /** Items for today's card only, as every batch was before phase 23. */
 const meaningItems = (context: GenerationContext[]) =>
   distractorItems(context, context.map((): QuestionType => 'multiple_choice').map(taskFor), NO_RECENT);
 
 const CONTEXT: GenerationContext[] = [
-  { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
-  { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
+  { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+  { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
 ];
 const ITEMS = meaningItems(CONTEXT);
 
@@ -96,7 +104,9 @@ describe('parseLlmDistractors', () => {
 
   it('answers null for junk and for the wrong shape', () => {
     expect(parseLlmDistractors('not json')).toBeNull();
-    expect(parseLlmDistractors(JSON.stringify({ items: [{ key: 'q1', distractors: ['a', 'b', 'c', 'd'] }] }))).toBeNull();
+    expect(
+      parseLlmDistractors(JSON.stringify({ items: [{ key: 'q1', distractors: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }] })),
+    ).toBeNull();
     expect(parseLlmDistractors(JSON.stringify({ items: [{ distractors: [] }] }))).toBeNull();
   });
 
@@ -116,6 +126,21 @@ describe('parseLlmDistractors', () => {
   });
 });
 
+// Phase 34 (spec D4a; ruling R8). Six wrong options are read; the context fields
+// left the batch for their own call, so an answer that still carries them keeps
+// its options and loses only those fields.
+describe('parseLlmDistractors with the phase 34 shape', () => {
+  it('reads six wrong options', () => {
+    const item = { key: 'q1', distractors: ['a', 'b', 'c', 'd', 'e', 'f'] };
+    expect(parseLlmDistractors(JSON.stringify({ items: [item] }))).toEqual({ items: [item] });
+  });
+
+  it('drops a context field instead of failing the batch', () => {
+    const raw = { items: [{ key: 'q1', distractors: ['a', 'b', 'c'], context: 'Parlo con mia madre.', context_word: null, sentence_word: 'מדבר' }] };
+    expect(parseLlmDistractors(JSON.stringify(raw))).toEqual({ items: [{ key: 'q1', distractors: ['a', 'b', 'c'] }] });
+  });
+});
+
 describe('validateDistractors', () => {
   const answer = (q1: string[], q2: string[] = ['קשת', 'שום', 'גזר']) => ({
     items: [
@@ -125,7 +150,7 @@ describe('validateDistractors', () => {
   });
 
   it('accepts three distinct wrong answers per item, trimmed', () => {
-    const verdict = validateDistractors(ITEMS, answer([' כתבה', 'שמעה', 'ראתה ']), 'he', [], 'ru');
+    const verdict = validateDistractors(ITEMS, answer([' כתבה', 'שמעה', 'ראתה ']), 'he', [], 'ru', NONE);
     expect(verdict).toEqual({
       ok: true,
       byKey: new Map([
@@ -138,58 +163,58 @@ describe('validateDistractors', () => {
   it('ignores keys nobody asked for', () => {
     const verdict = validateDistractors(ITEMS, {
       items: [...answer(['כתבה', 'שמעה', 'ראתה']).items, { key: 'q9', distractors: ['x', 'y', 'z'] }],
-    }, 'he', [], 'ru');
+    }, 'he', [], 'ru', NONE);
     expect(verdict.ok).toBe(true);
   });
 
   it('refuses an item with no answer', () => {
-    const verdict = validateDistractors(ITEMS, { items: [{ key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] }] }, 'he', [], 'ru');
+    const verdict = validateDistractors(ITEMS, { items: [{ key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] }] }, 'he', [], 'ru', NONE);
     expect(verdict).toEqual({ ok: false, reason: 'no answer for q2' });
   });
 
   it('refuses fewer than three wrong answers on a choice item', () => {
-    expect(validateDistractors(ITEMS, answer(['כתבה', 'שמעה']), 'he', [], 'ru').ok).toBe(false);
+    expect(validateDistractors(ITEMS, answer(['כתבה', 'שמעה']), 'he', [], 'ru', NONE).ok).toBe(false);
   });
 
   it('refuses an empty distractor', () => {
-    expect(validateDistractors(ITEMS, answer(['כתבה', '  ', 'ראתה']), 'he', [], 'ru').ok).toBe(false);
+    expect(validateDistractors(ITEMS, answer(['כתבה', '  ', 'ראתה']), 'he', [], 'ru', NONE).ok).toBe(false);
   });
 
   // Review Focus 4: the right answer in disguise.
   it.each([['קראה'], ['קראה '], ['קראה.']])('refuses the correct answer as a distractor: %j', (disguised) => {
-    expect(validateDistractors(ITEMS, answer(['כתבה', disguised, 'ראתה']), 'he', [], 'ru').ok).toBe(false);
+    expect(validateDistractors(ITEMS, answer(['כתבה', disguised, 'ראתה']), 'he', [], 'ru', NONE).ok).toBe(false);
   });
 
   it('refuses two equal distractors', () => {
-    expect(validateDistractors(ITEMS, answer(['כתבה', 'כתבה', 'ראתה']), 'he', [], 'ru').ok).toBe(false);
+    expect(validateDistractors(ITEMS, answer(['כתבה', 'כתבה', 'ראתה']), 'he', [], 'ru', NONE).ok).toBe(false);
   });
 
   // The comparison is the validator's own: a multi-word answer keeps its mark
   // in a dictionary key, but here "the same option" ignores it, and nikud.
   describe('multi-word answers and pointed copies', () => {
     const phrase = meaningItems([
-      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'большое спасибо', lemma: 'спасибо', partOfSpeech: 'phrase', translation: 'תודה רבה', example: null, exampleTranslation: null },
+      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'большое спасибо', lemma: 'спасибо', partOfSpeech: 'phrase', translation: 'תודה רבה', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
     ]);
     const one = (distractors: string[]) => ({ items: [{ key: 'q1', distractors }] });
 
     it.each([['תודה רבה.'], ['תודה רבה!'], ['תודה  רבה'], ['תודה רבה…'], ['תודה רבה?!']])(
       'refuses the multi-word answer in disguise: %j',
       (disguised) => {
-        expect(validateDistractors(phrase, one(['כתבה', disguised, 'ראתה']), 'he', [], 'ru').ok).toBe(false);
+        expect(validateDistractors(phrase, one(['כתבה', disguised, 'ראתה']), 'he', [], 'ru', NONE).ok).toBe(false);
       },
     );
 
     it('accepts a different multi-word option', () => {
-      expect(validateDistractors(phrase, one(['בבקשה רבה', 'להתראות', 'ערב טוב']), 'he', [], 'ru').ok).toBe(true);
+      expect(validateDistractors(phrase, one(['בבקשה רבה', 'להתראות', 'ערב טוב']), 'he', [], 'ru', NONE).ok).toBe(true);
     });
 
     it('refuses a pointed copy of the answer', () => {
-      expect(validateDistractors(ITEMS, answer(['כתבה', 'קָרָאָה', 'ראתה']), 'he', [], 'ru').ok).toBe(false);
+      expect(validateDistractors(ITEMS, answer(['כתבה', 'קָרָאָה', 'ראתה']), 'he', [], 'ru', NONE).ok).toBe(false);
     });
 
     it('counts two distractors that differ only in points, marks or spacing as equal', () => {
-      expect(validateDistractors(phrase, one(['כתבה', 'כָּתְבָה', 'כתבה.']), 'he', [], 'ru').ok).toBe(false);
-      expect(validateDistractors(phrase, one(['שמעה רבה', 'שמעה  רבה!', 'ראתה']), 'he', [], 'ru').ok).toBe(false);
+      expect(validateDistractors(phrase, one(['כתבה', 'כָּתְבָה', 'כתבה.']), 'he', [], 'ru', NONE).ok).toBe(false);
+      expect(validateDistractors(phrase, one(['שמעה רבה', 'שמעה  רבה!', 'ראתה']), 'he', [], 'ru', NONE).ok).toBe(false);
     });
   });
 
@@ -197,9 +222,9 @@ describe('validateDistractors', () => {
   // same form twice. One sense's translation is a right answer on the other.
   describe('another saved meaning of the same word', () => {
     const polysemy = meaningItems([
-      { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
-      { glossId: 'g-s2', senseId: 's2', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'קשת', example: null, exampleTranslation: null },
-      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'хлеб', lemma: 'хлеб', partOfSpeech: 'noun', translation: 'לחם', example: null, exampleTranslation: null },
+      { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+      { glossId: 'g-s2', senseId: 's2', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'קשת', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'хлеб', lemma: 'хлеб', partOfSpeech: 'noun', translation: 'לחם', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
     ]);
     const batch = (q1: string[], q3: string[] = ['חלב', 'גבינה', 'ביצה']) => ({
       items: [
@@ -211,14 +236,14 @@ describe('validateDistractors', () => {
 
     it('refuses a distractor that is the other sense’s translation, even in disguise', () => {
       for (const offered of ['קשת', 'קשת.', 'קֶשֶׁת']) {
-        const verdict = validateDistractors(polysemy, batch(['חציל', offered, 'מלפפון']), 'he', [], 'ru');
+        const verdict = validateDistractors(polysemy, batch(['חציל', offered, 'מלפפון']), 'he', [], 'ru', NONE);
         expect(verdict.ok).toBe(false);
         if (!verdict.ok) expect(verdict.reason).toContain('q1');
       }
     });
 
     it('accepts the same text on an item of a different word', () => {
-      expect(validateDistractors(polysemy, batch(['חציל', 'מלפפון', 'עגבניה'], ['קשת', 'חלב', 'ביצה']), 'he', [], 'ru').ok).toBe(true);
+      expect(validateDistractors(polysemy, batch(['חציל', 'מלפפון', 'עגבניה'], ['קשת', 'חלב', 'ביצה']), 'he', [], 'ru', NONE).ok).toBe(true);
     });
   });
 });
@@ -228,15 +253,15 @@ describe('validateDistractors', () => {
 // in English gets Hebrew options and English prompts.
 describe('a learner of Hebrew explained in English', () => {
   const HEBREW_WORDS: GenerationContext[] = [
-    { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'ספר', lemma: 'ספר', partOfSpeech: 'noun', translation: 'book', example: null, exampleTranslation: null },
-    { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'חלון', lemma: 'חלון', partOfSpeech: 'noun', translation: 'window', example: null, exampleTranslation: null },
+    { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'ספר', lemma: 'ספר', partOfSpeech: 'noun', translation: 'book', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+    { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'חלון', lemma: 'חלון', partOfSpeech: 'noun', translation: 'window', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
   ];
   const items = distractorItems(HEBREW_WORDS, (['reverse_choice', 'typed_translation'] as QuestionType[]).map(taskFor), NO_RECENT);
 
   it('accepts Hebrew wrong words and refuses English ones', () => {
     const reply = (q1: string[]) => ({ items: [{ key: 'q1', distractors: q1 }, { key: 'q2', distractors: [] }] });
-    expect(validateDistractors(items, reply(['עט', 'דף', 'שולחן']), 'en', [], 'ru').ok).toBe(true);
-    expect(validateDistractors(items, reply(['עט', 'pen', 'שולחן']), 'en', [], 'ru').ok).toBe(false);
+    expect(validateDistractors(items, reply(['עט', 'דף', 'שולחן']), 'en', [], 'ru', NONE).ok).toBe(true);
+    expect(validateDistractors(items, reply(['עט', 'pen', 'שולחן']), 'en', [], 'ru', NONE).ok).toBe(false);
   });
 
   it('keeps Hebrew alternatives and drops English ones', () => {
@@ -246,6 +271,7 @@ describe('a learner of Hebrew explained in English', () => {
       'en',
       [],
       'ru',
+      NONE,
     );
     expect(verdict.ok && verdict.byKey.get('q2')!.alternatives).toEqual(['אשנב']);
   });
@@ -266,7 +292,7 @@ describe('optionsFor', () => {
 describe('three tasks', () => {
   const CONTEXT3: GenerationContext[] = [
     ...CONTEXT,
-    { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
+    { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
   ];
   const TYPES: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation'];
   const MIXED = distractorItems(CONTEXT3, TYPES.map(taskFor), NO_RECENT);
@@ -293,22 +319,22 @@ describe('three tasks', () => {
   });
 
   it('accepts three target-language wrong words on a word item', () => {
-    const verdict = validateDistractors(MIXED, reply(['чеснок', 'морковь', 'капуста']), 'he', [], 'ru');
+    const verdict = validateDistractors(MIXED, reply(['чеснок', 'морковь', 'капуста']), 'he', [], 'ru', NONE);
     expect(verdict.ok).toBe(true);
     if (verdict.ok) expect(verdict.byKey.get('q2')).toEqual({ ...NOTHING_GENERATED, distractors: ['чеснок', 'морковь', 'капуста'] });
   });
 
   it('refuses Hebrew, or the word itself, among a word item’s wrong options', () => {
-    expect(validateDistractors(MIXED, reply(['чеснок', 'בצל', 'капуста']), 'he', [], 'ru').ok).toBe(false);
-    expect(validateDistractors(MIXED, reply(['чеснок', 'лук', 'капуста']), 'he', [], 'ru').ok).toBe(false);
-    expect(validateDistractors(MIXED, reply(['чеснок', 'Лук.', 'капуста']), 'he', [], 'ru').ok).toBe(false);
+    expect(validateDistractors(MIXED, reply(['чеснок', 'בצל', 'капуста']), 'he', [], 'ru', NONE).ok).toBe(false);
+    expect(validateDistractors(MIXED, reply(['чеснок', 'лук', 'капуста']), 'he', [], 'ru', NONE).ok).toBe(false);
+    expect(validateDistractors(MIXED, reply(['чеснок', 'Лук.', 'капуста']), 'he', [], 'ru', NONE).ok).toBe(false);
   });
 
   it('refuses, on a word item, another item’s word that has the same meaning', () => {
     const same = distractorItems(
       [
-        { glossId: 'g-a', senseId: 'a', variantId: 'va', lexemeId: 'la', form: 'bella', lemma: 'bello', partOfSpeech: 'adjective', translation: 'יפה', example: null, exampleTranslation: null },
-        { glossId: 'g-b', senseId: 'b', variantId: 'vb', lexemeId: 'lb', form: 'carina', lemma: 'carino', partOfSpeech: 'adjective', translation: 'יפה', example: null, exampleTranslation: null },
+        { glossId: 'g-a', senseId: 'a', variantId: 'va', lexemeId: 'la', form: 'bella', lemma: 'bello', partOfSpeech: 'adjective', translation: 'יפה', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+        { glossId: 'g-b', senseId: 'b', variantId: 'vb', lexemeId: 'lb', form: 'carina', lemma: 'carino', partOfSpeech: 'adjective', translation: 'יפה', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
       ],
       ['word', 'word'],
       NO_RECENT,
@@ -318,13 +344,13 @@ describe('three tasks', () => {
         { key: 'q1', distractors: ['brutta', 'carina', 'alta'] },
         { key: 'q2', distractors: ['brutta', 'bassa', 'alta'] },
       ],
-    }, 'he', [], 'ru');
+    }, 'he', [], 'ru', NONE);
     expect(verdict.ok).toBe(false);
   });
 
   // Review Focus 4: alternatives may be missing or messy; never fail a session.
   it('accepts a typed item with no alternatives key, and ignores its distractors', () => {
-    const verdict = validateDistractors(MIXED, reply(['чеснок', 'морковь', 'капуста'], { distractors: ['a', 'b', 'c'] }), 'he', [], 'ru');
+    const verdict = validateDistractors(MIXED, reply(['чеснок', 'морковь', 'капуста'], { distractors: ['a', 'b', 'c'] }), 'he', [], 'ru', NONE);
     expect(verdict.ok).toBe(true);
     if (verdict.ok) expect(verdict.byKey.get('q3')).toEqual(NOTHING_GENERATED);
   });
@@ -338,6 +364,7 @@ describe('three tasks', () => {
       'he',
       [],
       'ru',
+      NONE,
     );
     expect(verdict.ok).toBe(true);
     if (verdict.ok) {
@@ -396,13 +423,13 @@ describe('phase 24 generation (spec D2, D10)', () => {
   });
 
   const row = (form: string, translation: string): GenerationContext => ({
-    glossId: `g-s-${form}-${translation}`, senseId: `s-${form}-${translation}`, variantId: `v-${form}`, lexemeId: `l-${form}`, form, lemma: form, partOfSpeech: 'noun', translation, example: null, exampleTranslation: null,
+    glossId: `g-s-${form}-${translation}`, senseId: `s-${form}-${translation}`, variantId: `v-${form}`, lexemeId: `l-${form}`, form, lemma: form, partOfSpeech: 'noun', translation, example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null,
   });
 
   it("takes a board's fifth meaning from the first wrong one that is none of its four", () => {
     const board = [row('a', 'בית'), row('b', 'דלי'), row('c', 'עץ'), row('d', 'סיר')];
-    expect(boardMeanings(board, board, ['דלי', 'שולחן', 'כיסא'])).toEqual(['בית', 'דלי', 'עץ', 'סיר', 'שולחן']);
-    expect(boardMeanings(board, board, ['בית ', 'דלי', 'עץ'])).toBeNull();
+    expect(boardMeanings(board, board, ['דלי', 'שולחן', 'כיסא'], NONE)).toEqual(['בית', 'דלי', 'עץ', 'סיר', 'שולחן']);
+    expect(boardMeanings(board, board, ['בית ', 'דלי', 'עץ'], NONE)).toBeNull();
   });
 
   // Review (final), reproduction (b): a board word's other saved meaning is
@@ -410,8 +437,8 @@ describe('phase 24 generation (spec D2, D10)', () => {
   it("never takes a board word's other saved meaning as the fifth meaning", () => {
     const board = [row('замок', 'טירה'), row('b', 'דלי'), row('c', 'עץ'), row('d', 'סיר')];
     const session = [...board, row('замок', 'מנעול')];
-    expect(boardMeanings(board, session, ['מנעול', 'שולחן', 'כיסא'])).toEqual(['טירה', 'דלי', 'עץ', 'סיר', 'שולחן']);
-    expect(boardMeanings(board, session, ['מנעול', 'מנעול.', 'טירה'])).toBeNull();
+    expect(boardMeanings(board, session, ['מנעול', 'שולחן', 'כיסא'], NONE)).toEqual(['טירה', 'דלי', 'עץ', 'סיר', 'שולחן']);
+    expect(boardMeanings(board, session, ['מנעול', 'מנעול.', 'טירה'], NONE)).toBeNull();
   });
 
   it('stores each new type in its shape (spec D15)', () => {
@@ -438,7 +465,7 @@ describe('phase 24 generation (spec D2, D10)', () => {
 // tiles card, a board's later words) are still in the session.
 describe('rows that ask the model nothing', () => {
   const castle = distractorItems(
-    [{ glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'замок', lemma: 'замок', partOfSpeech: 'noun', translation: 'טירה', example: null, exampleTranslation: null }],
+    [{ glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'замок', lemma: 'замок', partOfSpeech: 'noun', translation: 'טירה', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null }],
     ['meaning'],
     NO_RECENT,
   );
@@ -446,20 +473,20 @@ describe('rows that ask the model nothing', () => {
   const LOCK = [{ form: 'замок', translation: 'מנעול' }];
 
   it("refuses another meaning of the item's word that a dictation holds (reproduction a)", () => {
-    const verdict = validateDistractors(castle, reply(['מנעול', 'שולחן', 'כיסא']), 'he', LOCK, 'ru');
+    const verdict = validateDistractors(castle, reply(['מנעול', 'שולחן', 'כיסא']), 'he', LOCK, 'ru', NONE);
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.reason).toContain('another meaning of the same word');
-    expect(validateDistractors(castle, reply(['מנעול', 'שולחן', 'כיסא']), 'he', [], 'ru').ok).toBe(true);
-    expect(validateDistractors(castle, reply(['שולחן', 'כיסא', 'עט']), 'he', LOCK, 'ru').ok).toBe(true);
+    expect(validateDistractors(castle, reply(['מנעול', 'שולחן', 'כיסא']), 'he', [], 'ru', NONE).ok).toBe(true);
+    expect(validateDistractors(castle, reply(['שולחן', 'כיסא', 'עט']), 'he', LOCK, 'ru', NONE).ok).toBe(true);
   });
 
   it('refuses, on a word item, the word of another row with the same meaning', () => {
     const word = distractorItems(
-      [{ glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null }],
+      [{ glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null }],
       ['word'],
       NO_RECENT,
     );
-    const verdict = validateDistractors(word, reply(['чеснок', 'морковь', 'репка']), 'he', [{ form: 'репка', translation: 'בצל' }], 'ru');
+    const verdict = validateDistractors(word, reply(['чеснок', 'морковь', 'репка']), 'he', [{ form: 'репка', translation: 'בצל' }], 'ru', NONE);
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.reason).toContain('same meaning');
   });
@@ -496,7 +523,7 @@ describe('rows that ask the model nothing', () => {
 });
 
 describe('phase 25 generation', () => {
-  const row = { glossId: 'g-s', senseId: 's', variantId: 'v', lexemeId: 'l', form: 'gatto', lemma: 'gatto', partOfSpeech: 'noun', translation: 'חתול', example: null, exampleTranslation: null };
+  const row = { glossId: 'g-s', senseId: 's', variantId: 'v', lexemeId: 'l', form: 'gatto', lemma: 'gatto', partOfSpeech: 'noun', translation: 'חתול', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null };
   it('asks the typed task for say the translation, and nothing for read aloud', () => {
     expect(taskFor('say_translation')).toBe('typed');
     expect(taskFor('read_aloud')).toBeNull();
@@ -538,6 +565,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
   const ROW: GenerationContext = {
     glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'parlare', lemma: 'parlare', partOfSpeech: 'verb', translation: 'לדבר',
     example: 'Mi piace parlare con te.', exampleTranslation: 'אני אוהב לדבר איתך.',
+    acceptedAnswers: [], answerForm: null, acceptedAt: null,
   };
 
   it('asks the three new types for gap, sentence and translate', () => {
@@ -560,7 +588,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(distractorItems([{ ...ROW, example: null }], ['sentence'], NO_RECENT)[0].avoid).toEqual([]);
     });
     it('avoids the three newest recent translations on a translate item', () => {
-      expect(distractorItems([{ ...ROW, exampleTranslation: null }], ['translate'], recent)[0].avoid).toEqual(['אחת', 'שתיים', 'שלוש']);
+      expect(distractorItems([{ ...ROW, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null }], ['translate'], recent)[0].avoid).toEqual(['אחת', 'שתיים', 'שלוש']);
     });
     it('also avoids the saved example\'s Hebrew on a translate item', () => {
       expect(distractorItems([ROW], ['translate'], recent)[0].avoid).toEqual(['אני אוהב לדבר איתך.', 'אחת', 'שתיים', 'שלוש']);
@@ -615,23 +643,23 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
     const gapItem = distractorItems([ROW], ['gap'], NO_RECENT);
     const gapReply = (wrong: string[]) => ({ items: [{ key: 'q1', distractors: wrong }] });
     it('takes a gap item as three wrong target words', () => {
-      const verdict = validateDistractors(gapItem, gapReply(['parlai', 'parlato', 'parlò']), 'he', [], 'it');
+      const verdict = validateDistractors(gapItem, gapReply(['parlai', 'parlato', 'parlò']), 'he', [], 'it', NONE);
       expect(verdict.ok && verdict.byKey.get('q1')).toEqual({
-        distractors: ['parlai', 'parlato', 'parlò'], alternatives: [], sentence: null, translate: null, degraded: null,
+        distractors: ['parlai', 'parlato', 'parlò'], spares: [], alternatives: [], sentence: null, translate: null, degraded: null,
       });
     });
     it('refuses a gap item that offers the form, the lemma, a Hebrew word or too few', () => {
-      expect(validateDistractors(gapItem, gapReply(['parlai', 'Parlare', 'parlò']), 'he', [], 'it').ok).toBe(false);
-      expect(validateDistractors(gapItem, gapReply(['parlai', 'דיבר', 'parlò']), 'he', [], 'it').ok).toBe(false);
-      expect(validateDistractors(gapItem, gapReply(['parlai', 'parlò']), 'he', [], 'it').ok).toBe(false);
+      expect(validateDistractors(gapItem, gapReply(['parlai', 'Parlare', 'parlò']), 'he', [], 'it', NONE).ok).toBe(false);
+      expect(validateDistractors(gapItem, gapReply(['parlai', 'דיבר', 'parlò']), 'he', [], 'it', NONE).ok).toBe(false);
+      expect(validateDistractors(gapItem, gapReply(['parlai', 'parlò']), 'he', [], 'it', NONE).ok).toBe(false);
     });
     it('refuses a gap item that offers its own form when the example blanks another one', () => {
       const inflected = distractorItems([{ ...ROW, form: 'parlavamo', lemma: 'parlare', example: 'Ieri parlavamo per ore.' }], ['gap'], NO_RECENT);
-      expect(validateDistractors(inflected, gapReply(['parlai', 'parlavamo', 'parlò']), 'he', [], 'it').ok).toBe(false);
+      expect(validateDistractors(inflected, gapReply(['parlai', 'parlavamo', 'parlò']), 'he', [], 'it', NONE).ok).toBe(false);
     });
     it('refuses a gap item that offers the lemma when the blank is an inflected form', () => {
       const inflected = distractorItems([{ ...ROW, form: 'parlavamo', lemma: 'parlare', example: 'Ieri parlavamo per ore.' }], ['gap'], NO_RECENT);
-      expect(validateDistractors(inflected, gapReply(['parlai', 'parlare', 'parlò']), 'he', [], 'it').ok).toBe(false);
+      expect(validateDistractors(inflected, gapReply(['parlai', 'parlare', 'parlò']), 'he', [], 'it', NONE).ok).toBe(false);
     });
 
     const SENTENCE = distractorItems([ROW], ['sentence'], NO_RECENT);
@@ -639,16 +667,16 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
     it('keeps the validated content of a sentence item', () => {
       const verdict = validateDistractors(SENTENCE, {
         items: [{ key: 'q1', distractors: [], sentence: 'Ieri parlavamo per ore.', gap: 'parlavamo', translation: 'אתמול דיברנו שעות.' }],
-      }, 'he', [], 'it');
+      }, 'he', [], 'it', NONE);
       expect(verdict.ok && verdict.byKey.get('q1')).toEqual({
-        distractors: [], alternatives: [], degraded: null, translate: null,
+        distractors: [], spares: [], alternatives: [], degraded: null, translate: null,
         sentence: { sentence: 'Ieri parlavamo per ore.', translation: 'אתמול דיברנו שעות.', gap: { start: 5, end: 14 }, alternatives: [] },
       });
     });
     it('never refuses for a sentence or translate item: it degrades with the reason', () => {
       const verdict = validateDistractors([...SENTENCE, ...TRANSLATE.map((item) => ({ ...item, key: 'q2' }))], {
         items: [{ key: 'q1', distractors: [] }, { key: 'q2', distractors: [], sentence: 'אנא', translation: 'x', gap: 'y' }],
-      }, 'he', [], 'it');
+      }, 'he', [], 'it', NONE);
       expect(verdict.ok).toBe(true);
       const byKey = verdict.ok ? verdict.byKey : new Map();
       expect(byKey.get('q1')).toMatchObject({ sentence: null, translate: null, degraded: expect.any(String) });
@@ -657,16 +685,16 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
     it('keeps the validated content of a translate item', () => {
       const verdict = validateDistractors(TRANSLATE, {
         items: [{ key: 'q1', distractors: [], sentence: 'דיברנו שעות רבות', translation: 'Abbiamo parlato per ore.', gap: 'parlato' }],
-      }, 'he', [], 'it');
+      }, 'he', [], 'it', NONE);
       expect(verdict.ok && verdict.byKey.get('q1')).toMatchObject({
         sentence: null, degraded: null,
         translate: { hebrew: 'דיברנו שעות רבות', reference: 'Abbiamo parlato per ore.', gap: { start: 8, end: 15 } },
       });
     });
     it('degrades an item the model did not answer at all, but still refuses the batch for a choice item', () => {
-      const none = validateDistractors(SENTENCE, { items: [] }, 'he', [], 'it');
+      const none = validateDistractors(SENTENCE, { items: [] }, 'he', [], 'it', NONE);
       expect(none.ok && none.byKey.get('q1')?.degraded).toEqual(expect.any(String));
-      expect(validateDistractors(gapItem, { items: [] }, 'he', [], 'it').ok).toBe(false);
+      expect(validateDistractors(gapItem, { items: [] }, 'he', [], 'it', NONE).ok).toBe(false);
     });
   });
 
@@ -725,7 +753,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
 });
 
 describe('withSiblingAlternatives (spec D18)', () => {
-  it('accepts the sibling headwords first, never the card’s own word, at most five', () => {
+  it('accepts the sibling headwords first, never the card’s own word, then the model’s alternatives', () => {
     expect(
       withSiblingAlternatives({
         form: 'booked',
@@ -733,10 +761,10 @@ describe('withSiblingAlternatives (spec D18)', () => {
         siblings: ['order', 'reserve', 'book'],
         alternatives: ['reserved', 'Order', 'arranged', 'scheduled', 'set up'],
       }),
-    ).toEqual(['order', 'reserve', 'reserved', 'arranged', 'scheduled']);
+    ).toEqual(['order', 'reserve', 'reserved', 'arranged', 'scheduled', 'set up']);
   });
 
-  it('keeps three siblings and both of the model’s alternatives when five or more siblings share the key', () => {
+  it('keeps three siblings first, then the model’s alternatives, then the other siblings, up to ten', () => {
     expect(
       withSiblingAlternatives({
         form: 'booked',
@@ -744,7 +772,15 @@ describe('withSiblingAlternatives (spec D18)', () => {
         siblings: ['arrange', 'charter', 'hire', 'order', 'reserve', 'schedule'],
         alternatives: ['reserved', 'ordered'],
       }),
-    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered']);
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered', 'order', 'reserve', 'schedule']);
+    expect(
+      withSiblingAlternatives({
+        form: 'booked',
+        lemma: 'book',
+        siblings: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8'],
+        alternatives: ['reserved', 'ordered', 'hired', 'chartered', 'scheduled'],
+      }),
+    ).toEqual(['a1', 'a2', 'a3', 'reserved', 'ordered', 'hired', 'chartered', 'scheduled', 'a4', 'a5']);
   });
 
   it('lets more siblings in after the model’s alternatives when the model gave few', () => {
@@ -755,7 +791,7 @@ describe('withSiblingAlternatives (spec D18)', () => {
         siblings: ['arrange', 'charter', 'hire', 'order', 'reserve'],
         alternatives: ['reserved'],
       }),
-    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'order']);
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'order', 'reserve']);
     expect(
       withSiblingAlternatives({ form: 'booked', lemma: 'book', siblings: ['arrange', 'charter', 'hire', 'order', 'reserve'], alternatives: [] }),
     ).toEqual(['arrange', 'charter', 'hire', 'order', 'reserve']);
@@ -769,6 +805,214 @@ describe('withSiblingAlternatives (spec D18)', () => {
         siblings: ['Book', 'arrange', 'Arrange', 'charter', 'hire', 'order'],
         alternatives: ['reserved', 'ordered', 'set up'],
       }),
-    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered']);
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered', 'set up', 'order']);
+  });
+
+  // Phase 34 (spec D1). The rendering's stored list is the certain part, and
+  // comes before everything a session's model wrote.
+  describe('with the rendering’s stored accepted answers', () => {
+    it('puts the stored list first, then three siblings, then the session’s alternatives, deduped', () => {
+      expect(
+        withSiblingAlternatives({
+          form: 'booked',
+          lemma: 'book',
+          accepted: ['reserved', 'ordered'],
+          siblings: ['arrange', 'charter', 'hire', 'order'],
+          alternatives: ['Reserved', 'hired', 'set up'],
+        }),
+      ).toEqual(['reserved', 'ordered', 'arrange', 'charter', 'hire', 'hired', 'set up', 'order']);
+    });
+
+    it('never drops a stored answer for what a session wrote when the cap is hit', () => {
+      const accepted = Array.from({ length: 10 }, (_, i) => `stored${i}`);
+      const kept = withSiblingAlternatives({
+        form: 'booked',
+        lemma: 'book',
+        accepted,
+        siblings: ['order'],
+        alternatives: ['reserved', 'ordered'],
+      });
+      expect(kept).toEqual(accepted);
+      expect(kept).toHaveLength(MAX_CARD_ALTERNATIVES);
+    });
+
+    it('keeps the card’s own form and lemma out of the stored list, as out of the rest', () => {
+      expect(
+        withSiblingAlternatives({ form: 'ore', lemma: 'ora', accepted: ['ore', 'Ora', 'molte ore'], siblings: [], alternatives: [] }),
+      ).toEqual(['molte ore']);
+    });
+
+    it('with no stored list is what it was before phase 34', () => {
+      const input = { form: 'booked', lemma: 'book', siblings: ['order', 'reserve'], alternatives: ['reserved'] };
+      expect(withSiblingAlternatives({ ...input, accepted: [] })).toEqual(withSiblingAlternatives(input));
+    });
+  });
+});
+
+// Phase 34 (spec D2, D12). A card whose rendering has an answer form asks for it:
+// the typed and spoken answer, the tiles, and the choice cards' shown form. The
+// answer form is stored on the question, so a later change alters no asked card.
+describe('the answer form (phase 34, spec D2, D12)', () => {
+  // The audit's card 2260df83: ora, saved from its plural rendering שעות.
+  const ORA: GenerationContext = {
+    glossId: 'g-hours', senseId: 's-hours', variantId: 'v-ora', lexemeId: 'l-ora', form: 'ora', lemma: 'ora', partOfSpeech: 'noun',
+    translation: 'שעות', example: 'Ho aspettato per ore.', exampleTranslation: 'חיכיתי שעות.',
+    acceptedAnswers: ['ore'], answerForm: 'ore', acceptedAt: new Date('2026-10-11T10:00:00Z'),
+  };
+  const generated = { ...NOTHING_GENERATED, distractors: ['a', 'b', 'c'], alternatives: ['x'] };
+
+  it('stores the answer form on each of the six cards that ask for it', () => {
+    for (const type of ['multiple_choice', 'listen_choice', 'reverse_choice', 'typed_translation', 'say_translation'] as const) {
+      expect(generatedContent(ORA, type, generated, NO_EXTRAS).answerForm).toBe('ore');
+    }
+    expect(generatedContent(ORA, 'letter_tiles', generated, { ...NO_EXTRAS, tiles: ['o', 'r', 'e', 'x', 'z'] }).answerForm).toBe('ore');
+  });
+
+  it('puts the answer form, not the saved form, among a reversed card’s options, and leaves a choice’s meaning alone', () => {
+    expect(generatedContent(ORA, 'reverse_choice', generated, NO_EXTRAS).options).toEqual(optionsFor('ore', ['a', 'b', 'c']));
+    expect(generatedContent(ORA, 'multiple_choice', generated, NO_EXTRAS).options).toEqual(optionsFor('שעות', ['a', 'b', 'c']));
+  });
+
+  it('stores nothing for a card with no answer form, as before', () => {
+    const plain = { ...ORA, answerForm: null };
+    expect(generatedContent(plain, 'typed_translation', generated, NO_EXTRAS).answerForm).toBeNull();
+    expect(generatedContent(plain, 'reverse_choice', generated, NO_EXTRAS).options).toEqual(optionsFor('ora', ['a', 'b', 'c']));
+  });
+
+  it('stores it on no other card: a dictation, a read-aloud, a meaning card, a board word or a sentence card', () => {
+    const sentence = { sentence: 'Ieri ho aspettato per ore.', translation: 'אתמול חיכיתי שעות.', gap: { start: 14, end: 22 }, alternatives: [] };
+    const translate = { hebrew: 'חיכיתי שעות', reference: 'Ho aspettato per ore.', gap: { start: 3, end: 12 } };
+    for (const type of ['dictation', 'read_aloud', 'typed_meaning'] as const) {
+      expect(generatedContent(ORA, type, generated, NO_EXTRAS).answerForm).toBeNull();
+    }
+    expect(generatedContent(ORA, 'matching', generated, { ...NO_EXTRAS, board: { meanings: ['שעות', 'a', 'b', 'c', 'd'], own: 0 } }).answerForm).toBeNull();
+    expect(generatedContent(ORA, 'cloze_choice', generated, { ...NO_EXTRAS, gap: { start: 0, end: 3 } }).answerForm).toBeNull();
+    expect(generatedContent(ORA, 'cloze_typed', { ...NOTHING_GENERATED, sentence }, NO_EXTRAS).answerForm).toBeNull();
+    expect(generatedContent(ORA, 'sentence_translation', { ...NOTHING_GENERATED, translate }, NO_EXTRAS).answerForm).toBeNull();
+  });
+
+  it('carries the answer form into the item, so a wrong word is never the card’s own answer', () => {
+    const [item] = distractorItems([ORA], ['word'], NO_RECENT);
+    expect(item.answerForm).toBe('ore');
+    // The model sees the saved form and writes `ore` among the wrong words of a card whose right option is `ore`.
+    const verdict = validateDistractors([item], { items: [{ key: 'q1', distractors: ['tempo', 'ore', 'giorno'] }] }, 'he', [], 'it', NONE);
+    expect(verdict.ok).toBe(false);
+    const fine = validateDistractors([item], { items: [{ key: 'q1', distractors: ['tempo', 'minuto', 'giorno'] }] }, 'he', [], 'it', NONE);
+    expect(fine.ok).toBe(true);
+  });
+});
+
+// Phase 34 (spec D3, D4). A wrong option is never one the dictionary already
+// knows to be right, and a choice item asks for six to keep three. The audit's
+// cards, rebuilt: c49ddbec, 0fa3fc06, the saw homograph (a7d6bdb4), 1d268882.
+describe('phase 34: the known-right set and the spares (spec D3, D4)', () => {
+  const english = (over: Partial<GenerationContext> & Pick<GenerationContext, 'form' | 'lemma' | 'translation' | 'lexemeId'>): GenerationContext => ({
+    glossId: `g-${over.lexemeId}`, senseId: `s-${over.lexemeId}`, variantId: `v-${over.lexemeId}`, partOfSpeech: 'verb',
+    example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null, ...over,
+  });
+  const known = (over: Partial<KnownRight>): KnownRight => ({ ...nothingKnown(), ...over });
+  const one = (key: string, distractors: string[]) => ({ items: [{ key, distractors }] });
+  const kept = (verdict: ReturnType<typeof validateDistractors>, key = 'q1') => (verdict.ok ? verdict.byKey.get(key) : verdict.reason);
+
+  // c49ddbec: `pick up`, stored as לענות (the phone), offered להרים, its own other sense.
+  const PICK_UP = english({ lexemeId: 'l-pick-up', form: 'pick up', lemma: 'pick up', translation: 'לענות' });
+  const pickUpItems = distractorItems([PICK_UP], ['meaning'], NO_RECENT);
+  const PICK_UP_KNOWN = known({ meaningsByLexeme: new Map([['l-pick-up', ['לענות', 'להרים', 'לאסוף']]]) });
+
+  it('category A (c49ddbec): refuses להרים on the card for pick up, and a spare takes its place', () => {
+    const offered = ['להרים', 'לכתוב', 'לשיר', 'לרקוד', 'לבשל', 'לישון'];
+    expect(kept(validateDistractors(pickUpItems, one('q1', offered), 'he', [], 'en', PICK_UP_KNOWN))).toEqual({
+      ...NOTHING_GENERATED,
+      distractors: ['לכתוב', 'לשיר', 'לרקוד'],
+      spares: ['לבשל', 'לישון'],
+    });
+    // Without the dictionary's other sense, להרים would be shown: the set is what refuses it.
+    expect(kept(validateDistractors(pickUpItems, one('q1', offered), 'he', [], 'en', NONE))).toMatchObject({ distractors: ['להרים', 'לכתוב', 'לשיר'] });
+  });
+
+  it('category A (the saw homograph, a7d6bdb4’s word): refuses ראה on a card for saw, the meaning of its homograph see', () => {
+    const saw = distractorItems([english({ lexemeId: 'l-saw', form: 'saw', lemma: 'saw', translation: 'לנסר' })], ['meaning'], NO_RECENT);
+    // The read lists see's meanings under saw's lexeme: see has a variant spelled saw.
+    const homograph = known({ meaningsByLexeme: new Map([['l-saw', ['לנסר', 'מסור', 'ראה', 'לראות']]]) });
+    const verdict = validateDistractors(saw, one('q1', ['ראה', 'לשייף', 'לקדוח', 'לשבור', 'לצבוע']), 'he', [], 'en', homograph);
+    expect(kept(verdict)).toMatchObject({ distractors: ['לשייף', 'לקדוח', 'לשבור'], spares: ['לצבוע'] });
+    // Under comparable: pointed, or with a full stop, it is the same word.
+    expect(kept(validateDistractors(saw, one('q1', ['רָאָה.', 'לשייף', 'לקדוח', 'לשבור']), 'he', [], 'en', homograph))).toMatchObject({
+      distractors: ['לשייף', 'לקדוח', 'לשבור'],
+    });
+  });
+
+  it('category A (0fa3fc06): refuses presto on the reversed card for תכף, an answer the accept job stored for that Hebrew', () => {
+    const tekhef = distractorItems(
+      [english({ lexemeId: 'l-ora', form: 'ora', lemma: 'ora', partOfSpeech: 'adverb', translation: 'תכף' })],
+      ['word'],
+      NO_RECENT,
+    );
+    // Keyed by the rendering's own text, pointed here: the rule compares under comparable.
+    const accepted = known({ wordsByPrompt: new Map([['תֵּכֶף', ['presto', 'subito', 'ora']]]) });
+    const offered = ['presto', 'sempre', 'mai', 'ieri', 'lontano', 'spesso'];
+    expect(kept(validateDistractors(tekhef, one('q1', offered), 'he', [], 'it', accepted))).toMatchObject({
+      distractors: ['sempre', 'mai', 'ieri'],
+      spares: ['lontano', 'spesso'],
+    });
+    expect(kept(validateDistractors(tekhef, one('q1', offered), 'he', [], 'it', NONE))).toMatchObject({ distractors: ['presto', 'sempre', 'mai'] });
+  });
+
+  it('keeps the first three usable of six when two are refused, and fails only under three', () => {
+    // Two refused: the answer itself and a known meaning.
+    const two = ['לענות', 'לכתוב', 'להרים', 'לשיר', 'לרקוד', 'לבשל'];
+    expect(kept(validateDistractors(pickUpItems, one('q1', two), 'he', [], 'en', PICK_UP_KNOWN))).toMatchObject({
+      distractors: ['לכתוב', 'לשיר', 'לרקוד'],
+      spares: ['לבשל'],
+    });
+    // Four refused: two known meanings, the answer, and a repeat. Two usable is a failed batch.
+    const four = ['להרים', 'לאסוף', 'לענות', 'לכתוב', 'לכתוב.', 'לשיר'];
+    const failed = validateDistractors(pickUpItems, one('q1', four), 'he', [], 'en', PICK_UP_KNOWN);
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.reason).toBe('q1 offers להרים, which the dictionary knows is a meaning of pick up (2 of 6 usable, 3 needed)');
+    // Exactly three usable is enough, with no spare.
+    const three = ['להרים', 'לאסוף', 'לענות', 'לכתוב', 'לשיר', 'לרקוד'];
+    expect(kept(validateDistractors(pickUpItems, one('q1', three), 'he', [], 'en', PICK_UP_KNOWN))).toMatchObject({
+      distractors: ['לכתוב', 'לשיר', 'לרקוד'],
+      spares: [],
+    });
+  });
+
+  // Review, fix round 1: the checker numbers what it is asked, and a miscount
+  // fails the attempt, so it is never asked more than the six the prompt asks for.
+  it('keeps at most six usable wrong options, three shown and three spares, whatever the model returns', () => {
+    const eight = ['לכתוב', 'לשיר', 'לרקוד', 'לבשל', 'לישון', 'לקרוא', 'לצייר', 'לשחות'];
+    // Past the parser, which already refuses a seventh (LlmDistractorsSchema).
+    expect(kept(validateDistractors(pickUpItems, one('q1', eight), 'he', [], 'en', NONE))).toEqual({
+      ...NOTHING_GENERATED,
+      distractors: ['לכתוב', 'לשיר', 'לרקוד'],
+      spares: ['לבשל', 'לישון', 'לקרוא'],
+    });
+    expect(ASKED_DISTRACTORS).toBe(6);
+  });
+
+  it('asks for six wrong answers, best first', () => {
+    const prompt = buildDistractorPrompt({ items: pickUpItems, from: 'en', to: 'he', others: [] });
+    expect(DISTRACTOR_MARKER).toBe('six wrong answers');
+    expect(prompt.system).toContain('Write six wrong answers in Hebrew as distractors');
+    expect(prompt.system).toContain('Put the best first');
+  });
+
+  it('category A (1d268882): never takes poi’s own אחר כך as the fifth meaning of a board where poi means אז', () => {
+    const row = (lexemeId: string, form: string, translation: string) => english({ lexemeId, form, lemma: form, translation });
+    const board = [row('l-poi', 'poi', 'אז'), row('l-casa', 'casa', 'בית'), row('l-cane', 'cane', 'כלב'), row('l-mare', 'mare', 'ים')];
+    const poi = known({ meaningsByLexeme: new Map([['l-poi', ['אז', 'אחר כך', 'לאחר מכן']]]) });
+    expect(boardMeanings(board, board, ['אחר כך', 'לאחר מכן', 'מחר'], poi)).toEqual(['אז', 'בית', 'כלב', 'ים', 'מחר']);
+    expect(boardMeanings(board, board, ['אחר כך', 'לאחר מכן'], poi)).toBeNull();
+    // A known meaning of any of the four, not only the first word's.
+    const sea = known({ meaningsByLexeme: new Map([['l-mare', ['ים', 'אוקיינוס']]]) });
+    expect(boardMeanings(board, board, ['אוקיינוס', 'מחר'], sea)).toEqual(['אז', 'בית', 'כלב', 'ים', 'מחר']);
+    expect(boardMeanings(board, board, ['אחר כך', 'מחר'], NONE)).toEqual(['אז', 'בית', 'כלב', 'ים', 'אחר כך']);
+  });
+
+  it('reads the known words for a prompt under comparable, and none for another prompt', () => {
+    const words = known({ wordsByPrompt: new Map([['תֵּכֶף.', ['presto']], ['תכף', ['subito']], ['מיד', ['subito', 'immediatamente']]]) });
+    expect(knownWords(words, 'תכף')).toEqual(['presto', 'subito']);
+    expect(knownWords(words, 'עכשיו')).toEqual([]);
   });
 });

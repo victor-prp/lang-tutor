@@ -9,8 +9,13 @@
  * Raise API_LEVEL by one, in the same PR, when a change breaks older clients:
  * a removed or renamed field, a new required request field, a changed meaning.
  * Most PRs never touch it.
+ *
+ * 2: phase 34 (spec D9). An answer that is right but not the saved word holds
+ * its card for a second try, and the response carries that card again. An
+ * older app shows it as the next card and answers it without `retry`, which
+ * replays, so it would be stuck on the card.
  */
-export const API_LEVEL = 1;
+export const API_LEVEL = 2;
 
 /** Written here and nowhere else (ADR 0012 R3). */
 export const API_LEVEL_HEADER = 'X-Api-Level';

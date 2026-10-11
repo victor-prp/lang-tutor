@@ -17,7 +17,8 @@ export const TRANSLATE_MAX_WORDS = 10;
 export const SENTENCE_MIN_WORDS = 3;
 /** Spec D5, D6: how many recent sentences a prompt is told to avoid, per sense and card. */
 export const MAX_AVOID = 3;
-/** The most alternatives a typed or gap card keeps (questions_shape_valid; spec D5). */
+/** The most alternatives the model is asked for, and a typed cloze keeps (spec D5). A
+ *  typed or spoken translation card keeps up to MAX_CARD_ALTERNATIVES (phase 34, spec D1). */
 export const MAX_ALTERNATIVES = 5;
 
 /** Spec D5: a gap's size is the saved form's, so a one-word form never gets a compound tense. */

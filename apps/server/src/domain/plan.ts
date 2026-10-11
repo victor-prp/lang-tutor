@@ -18,7 +18,9 @@ import { READ_ALOUD_MAX_LEVEL } from './progress';
  *  `clozeGap`: its saved example holds the form exactly once, so it can be
  *  blanked (phase 27 D7). `dimension`, `rung`, `level` and `r` come from the
  *  word choice (D5): `r` is null for a dimension with no memory yet. `step`: a
- *  same-day return (phase 37 D1), asked after every other card (D6). */
+ *  same-day return (phase 37 D1), asked after every other card (D6).
+ *  `meanings`: phase 34 (spec D3), every meaning the dictionary knows for its
+ *  word and the word's homographs; none when absent. */
 export type PlanPick = {
   form: string;
   translation: string;
@@ -30,6 +32,7 @@ export type PlanPick = {
   level: number;
   r: number | null;
   step: boolean;
+  meanings?: readonly string[];
 };
 
 /** `listening`: the app said its device has a voice for the target (phase 24 D5).
@@ -106,6 +109,14 @@ function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaki
 // do not make two words different.
 const key = comparable;
 
+/** Phase 34 (spec D3). Two board words overlap when either's meaning on the
+ *  board is one the dictionary knows for the other: then both pairings of that
+ *  meaning are right (`main` on מרכזי, which `mainstream` reaches too). */
+const overlaps = (a: PlanPick, b: PlanPick): boolean =>
+  key(a.translation) === key(b.translation) ||
+  (b.meanings ?? []).some((meaning) => key(meaning) === key(a.translation)) ||
+  (a.meanings ?? []).some((meaning) => key(meaning) === key(b.translation));
+
 /** The first four of `candidates` (indices into `picks`) whose forms and
  *  meanings all differ: two senses of one word, or two words with one meaning,
  *  would each make two pairings right. Null when four cannot be found. */
@@ -113,9 +124,7 @@ function boardPicks(picks: readonly PlanPick[], candidates: readonly number[]): 
   const taken: number[] = [];
   for (const i of candidates) {
     if (taken.length === BOARD_SIZE) break;
-    const clash = taken.some(
-      (j) => key(picks[j].form) === key(picks[i].form) || key(picks[j].translation) === key(picks[i].translation),
-    );
+    const clash = taken.some((j) => key(picks[j].form) === key(picks[i].form) || overlaps(picks[j], picks[i]));
     if (!clash) taken.push(i);
   }
   return taken.length === BOARD_SIZE ? taken : null;

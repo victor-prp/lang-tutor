@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
 import type {
   LanguageCode,
+  LlmAccept,
+  LlmCheck,
+  LlmContext,
   TypedVerdict,
   LlmDistractors,
   LlmEntry,
@@ -15,6 +18,9 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { buildAcceptPrompt, parseAccept, validateAccept, type AcceptInput } from '../../src/domain/accept';
+import { buildCheckPrompt, parseCheck, type CheckItem } from '../../src/domain/check';
+import { buildContextPrompt, parseLlmContext, type ContextItem } from '../../src/domain/context';
 import {
   buildDistractorPrompt,
   parseLlmDistractors,
@@ -179,4 +185,46 @@ export async function askJudge(
   kase: { context: MeaningJudgeContext; answer: string },
 ): Promise<TypedVerdict | null> {
   return parseMeaningJudge(await llm(buildMeaningJudgePrompt(kase.context, kase.answer)));
+}
+
+/** Phase 34 (spec D1, D2). The real accept prompt, parser and validation, as the
+ *  accept job uses them, minus the database. `raw` is the answer as the model
+ *  wrote it, which the placeholder check reads; `answers` and `answerForm` are
+ *  what the server would store. An empty answer is the provider's "no content",
+ *  stored as an empty list; an unreadable one throws, and tier 1 records it. */
+export async function askAccept(
+  llm: LlmClient,
+  input: AcceptInput,
+): Promise<{ raw: LlmAccept; answers: string[]; answerForm: string | null }> {
+  const text = await llm(buildAcceptPrompt(input));
+  const raw = text === '' ? { answers: [], answer_form: null } : parseAccept(text);
+  if (!raw) throw new Error(`unreadable accept answer: ${text.slice(0, 200)}`);
+  return { raw, ...validateAccept(input, raw) };
+}
+
+/** Phase 34 (spec D6, D8; ruling R8). The real context prompt and parser, as
+ *  prepareSession sends them after the batch, minus the database. Throws on an
+ *  empty or unreadable answer: tier 1 then records it as a failed call (the
+ *  session would go on without it, ruling R11, but the prompt has failed). */
+export async function askContext(
+  llm: LlmClient,
+  input: { from: LanguageCode; to: LanguageCode; items: ContextItem[] },
+): Promise<LlmContext> {
+  const raw = await llm(buildContextPrompt(input));
+  const answer = raw === '' ? null : parseLlmContext(raw);
+  if (!answer) throw new Error(`unreadable context answer: ${raw.slice(0, 200)}`);
+  return answer;
+}
+
+/** Phase 34 (spec D5). The real checker prompt and parser, as prepareSession
+ *  sends them after the context call, minus the database. Throws on an empty or
+ *  unreadable answer: the session would fail the attempt on it too. */
+export async function askCheck(
+  llm: LlmClient,
+  input: { from: LanguageCode; to: LanguageCode; items: CheckItem[] },
+): Promise<LlmCheck> {
+  const raw = await llm(buildCheckPrompt(input.items, input.from, input.to));
+  const answer = raw === '' ? null : parseCheck(raw);
+  if (!answer) throw new Error(`unreadable checker answer: ${raw.slice(0, 200)}`);
+  return answer;
 }

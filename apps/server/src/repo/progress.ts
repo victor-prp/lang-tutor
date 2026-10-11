@@ -1,5 +1,5 @@
 import type { AnswerVerdict } from '@lang-tutor/core/api';
-import type { Dimension } from '@lang-tutor/core/domain';
+import { evidenceVerdict, type Dimension } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
@@ -43,14 +43,17 @@ export type AnswerRow = {
   options: QuestionOption[] | null;
   selected_option_position: number | null;
   verdict: string | null;
+  retry_verdict: string | null;
 };
 
 /** A stored answer as the rules read it: a text answer carries the verdict it was
- *  shown (phases 23 and 24); a choice is right when its option is. Phase 37 reads
- *  today's answers with this too, so the returns and the evidence never disagree. */
+ *  shown (phases 23 and 24), or its retry's when the retry resolved right (phase 34,
+ *  spec D9); a choice is right when its option is. Phase 37 reads today's answers
+ *  with this too, so the returns and the evidence never disagree. */
 export function decodeAnswer(row: AnswerRow): AnsweredQuestion {
   if (TEXT_TYPES.has(row.type)) {
-    return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict: row.verdict as AnswerVerdict };
+    const verdict = evidenceVerdict(row.verdict as AnswerVerdict, row.retry_verdict as AnswerVerdict | null);
+    return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict };
   }
   return {
     glossId: row.gloss_id,
@@ -104,10 +107,11 @@ export function createProgressRepo(tx: Tx) {
         options: QuestionOption[] | null;
         selected_option_position: number | null;
         verdict: string | null;
+        retry_verdict: string | null;
         day: string;
         last_answered_at: string;
       }>(sql`
-        SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict,
+        SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict,
                s.practice_day::text AS day,
                (max(a.answered_at) OVER ())::text AS last_answered_at
         FROM answers a

@@ -43,6 +43,7 @@ const mc: Card = {
   question: 'cat',
   options: ['כלב', 'חתול', 'בית', 'סוס'],
   correct_option: 1,
+  context: null,
 };
 
 test('a choice card answered right picks the correct option', () => {
@@ -86,6 +87,7 @@ test('a typed card has no floor: recall 0 is always wrong', () => {
     answer: 'cat',
     lemma: 'cat',
     alternatives: [],
+    context: null,
   };
   assert.equal(decide(typed, memory(0), saved, always(0.01), calm).detail.outcome, 'wrong');
 });
@@ -99,6 +101,7 @@ test('typed right gives the form, near miss on a slip draw', () => {
     answer: 'cat',
     lemma: 'cat',
     alternatives: [],
+    context: null,
   };
   const right = decide(typed, memory(1), saved, always(0.01), calm);
   assert.deepEqual(right.kind === 'text' && right.text, 'cat');
@@ -118,6 +121,7 @@ test('typed wrong gives another saved word, or an empty answer when it gives up'
     answer: 'cat',
     lemma: 'cat',
     alternatives: [],
+    context: null,
   };
   const wrong = decide(typed, memory(0), saved, always(0.5), calm);
   assert.equal(wrong.detail.outcome, 'wrong');
@@ -135,6 +139,7 @@ test('reverse choice matches by the Hebrew prompt and tests both written dimensi
     part_of_speech: 'noun',
     options: ['cat', 'dog', 'house', 'horse'],
     correct_option: 1,
+    context: null,
   };
   const m = memory(1);
   const d = decide(card, m, saved, always(0.01), calm);
@@ -158,6 +163,7 @@ test('the weakest tested dimension decides', () => {
     answer: 'cat',
     lemma: 'cat',
     alternatives: [],
+    context: null,
   };
   const d = decide(card, m, saved, always(0.5), calm);
   assert.equal(d.detail.p, 0);
@@ -180,7 +186,7 @@ test('cloze cards match by the marked word, and dictation and listening by the s
   assert.equal(matchCard(clozeFilled, saved)?.form, 'dog');
   const dictation: Card = { ...base, type: 'dictation', question: 'house', meaning: 'בית' };
   assert.equal(matchCard(dictation, saved)?.form, 'house');
-  const listen: Card = { ...base, type: 'listen_choice', question: 'Dog', options: ['כלב', 'חתול', 'בית', 'סוס'], correct_option: 0 };
+  const listen: Card = { ...base, type: 'listen_choice', question: 'Dog', part_of_speech: 'noun', options: ['כלב', 'חתול', 'בית', 'סוס'], correct_option: 0 };
   assert.equal(matchCard(listen, saved)?.form, 'dog');
   const st: Card = {
     ...base,
@@ -190,6 +196,7 @@ test('cloze cards match by the marked word, and dictation and listening by the s
     sentence: 'The cat sleeps.',
     gap: { start: 4, end: 7 },
     answer: 'cat',
+    mark: null,
   };
   assert.equal(matchCard(st, saved)?.form, 'cat');
 });
@@ -206,9 +213,15 @@ test('a matching card answers its own word', () => {
     ...base,
     type: 'matching',
     question: 'dog',
+    part_of_speech: 'noun',
     options: ['חתול', 'כלב', 'בית', 'סוס', 'עץ'],
     correct_option: 1,
-    board: { question_ids: ['a', 'b', 'c', 'd'], words: ['cat', 'dog', 'house', 'horse'], correct_options: [0, 1, 2, 3] },
+    board: {
+      question_ids: ['a', 'b', 'c', 'd'],
+      words: ['cat', 'dog', 'house', 'horse'],
+      parts_of_speech: ['noun', 'noun', 'noun', 'noun'],
+      correct_options: [0, 1, 2, 3],
+    },
   };
   const d = decide(card, memory(1), saved, always(0.01), calm);
   assert.equal(d.kind === 'option' && d.index, 1);
@@ -224,6 +237,7 @@ test('speaking: right says the word, wrong says another, gave up asks to see the
     answer: 'cat',
     lemma: 'cat',
     alternatives: [],
+    context: null,
   };
   const right = decide(card, memory(1), saved, always(0.01), calm);
   assert.deepEqual(right.kind === 'speak' && right.word, 'cat');
@@ -244,7 +258,7 @@ test('read aloud says the word and needs no recall', () => {
 });
 
 test('typed meaning types the saved Hebrew meaning', () => {
-  const card: Card = { ...base, type: 'typed_meaning', question: 'cat', part_of_speech: 'noun', meaning: 'חתול' };
+  const card: Card = { ...base, type: 'typed_meaning', question: 'cat', part_of_speech: 'noun', meaning: 'חתול', context: null };
   const d = decide(card, memory(1), saved, always(0.01), { slip: 1, gaveUp: 0 });
   assert.deepEqual(d.kind === 'text' && d.text, 'חתול');
 });
@@ -258,7 +272,7 @@ test('an unmatchable card is marked unmatched and answered at random', () => {
   assert.equal(d.detail.outcome, 'unmatched');
   assert.equal(d.kind, 'option');
   assert.equal(m.asked.length, 0);
-  const typed: Card = { ...base, type: 'typed_translation', question: 'זברה', part_of_speech: 'noun', answer: 'zebra', lemma: 'zebra', alternatives: [] };
+  const typed: Card = { ...base, type: 'typed_translation', question: 'זברה', part_of_speech: 'noun', answer: 'zebra', lemma: 'zebra', alternatives: [], context: null };
   const t = decide(typed, memory(1), saved, always(0.5), calm);
   assert.equal(t.detail.unmatched, true);
   assert.equal(t.kind, 'text');
@@ -274,8 +288,8 @@ test('a card that shows the lemma or the gloss key matches the word saved from a
   // Seen in the lane's dry run: хочешь was saved, and the cards asked хотеть / לרצות.
   const inflected: SavedWord[] = [{ form: 'хочешь', meaning: 'רוצה', lemma: 'хотеть', key: 'לרצות' }];
   const base = { id: 'q', vocab_term_id: 'g', options: ['לרצות', 'לדעת', 'ללכת', 'לאהוב'], correct_option: 0 };
-  const listen: Card = { ...base, type: 'listen_choice', question: 'хотеть' };
+  const listen: Card = { ...base, type: 'listen_choice', question: 'хотеть', part_of_speech: 'verb' };
   assert.equal(matchCard(listen, inflected)?.form, 'хочешь');
-  const reverse: Card = { ...base, type: 'reverse_choice', question: 'לרצות', part_of_speech: 'verb', options: ['хотеть', 'мочь', 'знать', 'думать'] };
+  const reverse: Card = { ...base, type: 'reverse_choice', question: 'לרצות', part_of_speech: 'verb', options: ['хотеть', 'мочь', 'знать', 'думать'], context: null };
   assert.equal(matchCard(reverse, inflected)?.form, 'хочешь');
 });

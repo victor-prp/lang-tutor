@@ -1,4 +1,4 @@
-import type { AnswerVerdict, Question } from '@lang-tutor/core/api';
+import type { AnswerVerdict, PendingRetry, Question } from '@lang-tutor/core/api';
 import { evaluate, normaliseHebrew, rightAnswer, type AnswerInput } from '@lang-tutor/core/domain';
 
 import { strings } from '@/strings';
@@ -23,8 +23,30 @@ export type CardAnswer =
 /**
  * Phase 23. The banner after an answer. It runs the same `evaluate` the server
  * runs, so what the learner is told is what the server records (spec D9).
+ *
+ * Phase 34 (spec D9, ruling R16). `retry` is the hold a second try answers, and
+ * null for every other answer. A second try given up or wrong leaves the card
+ * where its first answer put it: right, with another accepted word. So its
+ * banner is that answer's, which names the saved word, never "the right answer
+ * was", and the input it colours is not marked wrong either.
  */
-export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
+export function feedbackFor(question: Question, answer: CardAnswer, retry: PendingRetry | null): Feedback {
+  const feedback = answerFeedback(question, answer);
+  return retry !== null && feedback.tone === 'wrong' ? alternativeFeedback(question) : feedback;
+}
+
+/** Today's banner for another accepted word on this card: another sense on a
+ *  meaning card; elsewhere the practised word, which on a translation is the
+ *  word and not the whole sentence (phase 27 D6). */
+function alternativeFeedback(question: Question): Feedback {
+  if (question.type === 'typed_meaning') {
+    return { tone: 'correct', title: strings.feedbackOtherSense, line: question.meaning, verdict: 'alternative' };
+  }
+  const word = question.type === 'sentence_translation' ? question.answer : rightAnswer(question);
+  return { tone: 'correct', title: strings.feedbackAlternative, line: word, verdict: 'alternative' };
+}
+
+function answerFeedback(question: Question, answer: CardAnswer): Feedback {
   if ('board' in answer) {
     if (question.type !== 'matching') throw new Error(`a board answer for a ${question.type} card`);
     const start = question.board.question_ids.indexOf(question.id);
@@ -39,9 +61,7 @@ export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
   // Phase 25 (spec D7). The server's verdict is the answer's: this never
   // re-judges the transcript, so a skewed bundle cannot disagree with it.
   if ('heard' in answer) {
-    if (answer.verdict === 'alternative') {
-      return { tone: 'correct', title: strings.feedbackAlternative, line: rightAnswer(question), verdict: 'alternative' };
-    }
+    if (answer.verdict === 'alternative') return alternativeFeedback(question);
     return { tone: 'correct', title: strings.feedbackHeard, line: answer.heard, verdict: 'understood' };
   }
   // Phase 27 (spec D12). A judged card's verdict is the server's: the app
@@ -53,13 +73,13 @@ export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
       const word = question.answer;
       if (answer.judged === 'wrong') return { tone: 'wrong', title: strings.feedbackWrong, line: word, verdict: 'wrong' };
       if (answer.judged === 'near_miss') return { tone: 'correct', title: strings.feedbackNearMiss, line: word, verdict: 'near_miss' };
-      if (answer.judged === 'alternative') return { tone: 'correct', title: strings.feedbackAlternative, line: word, verdict: 'alternative' };
+      if (answer.judged === 'alternative') return alternativeFeedback(question);
       return { tone: 'correct', title: strings.feedbackCorrect, line: null, verdict: answer.judged };
     }
     if (question.type !== 'typed_meaning') throw new Error(`a judged answer for a ${question.type} card`);
     const meaning = question.meaning;
     if (answer.judged === 'wrong') return { tone: 'wrong', title: strings.feedbackWrong, line: meaning, verdict: 'wrong' };
-    if (answer.judged === 'alternative') return { tone: 'correct', title: strings.feedbackOtherSense, line: meaning, verdict: 'alternative' };
+    if (answer.judged === 'alternative') return alternativeFeedback(question);
     return normaliseHebrew(answer.text) === normaliseHebrew(meaning)
       ? { tone: 'correct', title: strings.feedbackCorrect, line: null, verdict: answer.judged }
       : { tone: 'correct', title: strings.feedbackSavedMeaning, line: meaning, verdict: answer.judged };
@@ -69,6 +89,31 @@ export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
   const right = rightAnswer(question);
   if (!record.is_correct) return { tone: 'wrong', title: strings.feedbackWrong, line: right, verdict };
   if (verdict === 'near_miss') return { tone: 'correct', title: strings.feedbackNearMiss, line: right, verdict };
-  if (verdict === 'alternative') return { tone: 'correct', title: strings.feedbackAlternative, line: right, verdict };
+  if (verdict === 'alternative') return alternativeFeedback(question);
   return { tone: 'correct', title: strings.feedbackCorrect, line: null, verdict };
+}
+
+/** Phase 34 (spec D9). What a card held for its second try says: the first
+ *  answer was right, and another saved word, or on a typed meaning another
+ *  meaning, is there to find. */
+export function retryNotice(pending: PendingRetry): { right: string; again: string } {
+  return {
+    right: strings.retryRight(pending.answer),
+    again: pending.wording === 'meaning' ? strings.retryAnotherMeaning : strings.retryAnotherWord,
+  };
+}
+
+/** Phase 34 (spec D9). What the input holds on a second try: nothing, except
+ *  on a sentence translation, which keeps the first sentence so the learner
+ *  only changes the word. */
+export function retryText(type: Question['type'], pending: PendingRetry | null): string {
+  return pending !== null && type === 'sentence_translation' ? pending.answer : '';
+}
+
+/** Phase 34 (spec D9). Whether an answer the phone judges opens a second try.
+ *  Its banner would name the saved word, so the card waits for the server to
+ *  hold it instead. The `evaluate` the server runs decides, as for the banner. */
+export function opensRetry(question: Question, answer: CardAnswer): boolean {
+  if ('board' in answer || 'heard' in answer || 'judged' in answer) return false;
+  return evaluate(question, answer).retry_state === 'pending';
 }

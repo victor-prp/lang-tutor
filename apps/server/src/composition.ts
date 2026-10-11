@@ -125,6 +125,12 @@ export function createServerDeps(io: {
   // Phase 19. The budget of one distractor call: a session's whole batch is one
   // long answer, so it gets its own, longer than a lookup's.
   sessionGenerationTimeoutMs: number;
+  // Phase 34 (ruling R12). The budget of the context call after the batch: its
+  // own and short, so a hang costs the sentences, not the batch's five minutes.
+  contextCallTimeoutMs: number;
+  // Phase 34 (spec D5, ruling R12). The checker's budget, after the context call:
+  // its own, so its wait is bounded apart from the batch's five minutes.
+  checkerCallTimeoutMs: number;
   // Phase 25 (spec D13). One transcription's budget: short, because a learner
   // is waiting on a card.
   speechTimeoutMs: number;
@@ -166,6 +172,27 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     timeoutMs: io.sessionGenerationTimeoutMs,
+  });
+
+  // Phase 34 (spec D6, D8, ruling R12). The same provider for the context call,
+  // with its own budget: the call degrades on a timeout (ruling R11).
+  const contextLlm: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.contextCallTimeoutMs,
+  });
+
+  // Phase 34 (spec D5, ruling R12). The same provider for the checker, with its
+  // own budget. Unlike the context call, a checker that times out fails the
+  // attempt, which pg-boss retries.
+  const checkerLlm: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.checkerCallTimeoutMs,
   });
 
   // Phase 25. The same provider over audio. Named here and nowhere else
@@ -220,7 +247,7 @@ export function createServerDeps(io: {
     logger: io.logger,
   });
 
-  const translations = createTranslationService({ llm, transaction, logger: io.logger });
+  const translations = createTranslationService({ llm, transaction, logger: io.logger, now: io.now });
   // Phase 35 (spec D12). The one place that hands Better Auth's session minting
   // to the use case that needs it (ADR 0001 R13).
   const mintSession: MintSession = authModule.mintSession;
@@ -232,6 +259,8 @@ export function createServerDeps(io: {
       now: io.now,
       logger: io.logger,
       llm: sessionLlm,
+      contextLlm,
+      checkerLlm,
       transcriber,
       judge,
     }),

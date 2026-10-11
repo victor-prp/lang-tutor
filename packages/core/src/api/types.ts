@@ -28,6 +28,9 @@ import type {
   KnowledgeDimensionSchema,
   LanguageCodeSchema,
   LevelSchema,
+  LlmAcceptSchema,
+  LlmCheckSchema,
+  LlmContextSchema,
   LlmCorrectionSchema,
   LlmDistractorsSchema,
   LlmEntrySchema,
@@ -63,6 +66,7 @@ import type {
   SessionSourceSchema,
   SessionStatusSchema,
   SessionViewSchema,
+  PendingRetrySchema,
   SkipSessionResponseSchema,
   TypedTranslationQuestionSchema,
   ListenChoiceQuestionSchema,
@@ -86,6 +90,8 @@ import type {
   LlmMeaningJudgeSchema,
   LlmTranslationJudgeSchema,
   GapSchema,
+  MarkSchema,
+  ContextSchema,
   ClozeChoiceQuestionSchema,
   ClozeTypedQuestionSchema,
   SentenceTranslationQuestionSchema,
@@ -150,6 +156,7 @@ export type LlmEntry = z.infer<typeof LlmEntrySchema>;
 export type LlmRendering = z.infer<typeof LlmRenderingSchema>;
 export type LlmReconciliation = z.infer<typeof LlmReconciliationSchema>;
 export type LlmGlossMerge = z.infer<typeof LlmGlossMergeSchema>;
+export type LlmAccept = z.infer<typeof LlmAcceptSchema>;
 export type Enrollment = z.infer<typeof EnrollmentSchema>;
 export type CreateEnrollmentRequest = z.infer<typeof CreateEnrollmentRequestSchema>;
 export type CreateGrantRequest = z.infer<typeof CreateGrantRequestSchema>;
@@ -168,7 +175,10 @@ export type VocabularyWordQuery = z.infer<typeof VocabularyWordQuerySchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type SessionSource = z.infer<typeof SessionSourceSchema>;
 export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;
+export type LlmContext = z.infer<typeof LlmContextSchema>;
+export type LlmCheck = z.infer<typeof LlmCheckSchema>;
 export type SessionView = z.infer<typeof SessionViewSchema>;
+export type PendingRetry = z.infer<typeof PendingRetrySchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
 export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;
 export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
@@ -190,6 +200,8 @@ export type JudgedAnswerResponse = z.infer<typeof JudgedAnswerResponseSchema>;
 export type LlmMeaningJudge = z.infer<typeof LlmMeaningJudgeSchema>;
 export type LlmTranslationJudge = z.infer<typeof LlmTranslationJudgeSchema>;
 export type Gap = z.infer<typeof GapSchema>;
+export type Mark = z.infer<typeof MarkSchema>;
+export type Context = z.infer<typeof ContextSchema>;
 export type ClozeChoiceQuestion = z.infer<typeof ClozeChoiceQuestionSchema>;
 export type ClozeTypedQuestion = z.infer<typeof ClozeTypedQuestionSchema>;
 export type SentenceTranslationQuestion = z.infer<typeof SentenceTranslationQuestionSchema>;

@@ -1,7 +1,10 @@
 import { sql } from 'drizzle-orm';
-import { PgBoss, fromDrizzle } from 'pg-boss';
+import { PgBoss, fromDrizzle, type QueuePolicy } from 'pg-boss';
 
 import {
+  ACCEPT_RENDERING,
+  ACCEPT_RENDERING_EXPIRY_SECONDS,
+  ACCEPT_RENDERING_FAILED,
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
   LOOK_UP_IMPORT_ITEM_FAILED,
@@ -29,6 +32,9 @@ export const JOB_SCHEMA = 'pgboss';
 
 type QueueDefinition = {
   name: JobName;
+  // Phase 34. Set at creation only: pg-boss refuses to change a queue's policy,
+  // so a changed one means a new queue. Absent is pg-boss's `standard`.
+  policy?: QueuePolicy;
   // The subset that both createQueue and updateQueue accept, so one definition
   // serves a fresh install and a changed one.
   options: {
@@ -52,8 +58,9 @@ export const JOB_QUEUES: QueueDefinition[] = [
     options: {
       retryLimit: 2,
       retryBackoff: true,
-      // Twice the generation budget (domain/jobs.ts, spec D16): a worker that
-      // crashed mid-call expires, and the expiry counts as a failed attempt.
+      // Twice the sum of the attempt's call budgets (domain/jobs.ts,
+      // PREPARE_SESSION_CALL_BUDGETS_MS; spec D16, phase 34 ruling R12): a worker
+      // that crashed mid-call expires, and the expiry counts as a failed attempt.
       expireInSeconds: PREPARE_SESSION_EXPIRY_SECONDS,
       deleteAfterSeconds: 86_400,
       deadLetter: PREPARE_SESSION_FAILED,
@@ -101,6 +108,23 @@ export const JOB_QUEUES: QueueDefinition[] = [
       deadLetter: RENDER_LEMMA_FAILED,
     },
   },
+  // Phase 34 (spec D1). `exclusive`: one job per rendering queued, retrying or
+  // active, so every session that picks the rendering meanwhile, and the
+  // backfill, asks for the call it is already waiting on. The dead letter
+  // writes nothing: the rendering stays unstamped, and the next session that
+  // picks it asks again.
+  { name: ACCEPT_RENDERING_FAILED, options: { retryLimit: 2, deleteAfterSeconds: 86_400 } },
+  {
+    name: ACCEPT_RENDERING,
+    policy: 'exclusive',
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: ACCEPT_RENDERING_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
+      deadLetter: ACCEPT_RENDERING_FAILED,
+    },
+  },
 ];
 
 /**
@@ -131,7 +155,7 @@ export async function installJobs(db: Db): Promise<void> {
   try {
     for (const queue of JOB_QUEUES) {
       if (await boss.getQueue(queue.name)) await boss.updateQueue(queue.name, queue.options);
-      else await boss.createQueue(queue.name, queue.options);
+      else await boss.createQueue(queue.name, { ...queue.options, ...(queue.policy ? { policy: queue.policy } : {}) });
     }
   } finally {
     await boss.stop({ graceful: false });

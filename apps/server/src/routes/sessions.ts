@@ -20,6 +20,7 @@ import type { ProgressChange } from '../domain/progress';
 import {
   currentQuestion,
   missedQuestions,
+  pendingRetryOf,
   positionOf,
   sessionScore,
 } from '../domain/session';
@@ -72,11 +73,14 @@ function buildNextStepResponse(
       progress: result.progress.map(progressItem),
     };
   }
+  // Phase 34 (spec D9): while a card is held for its second try, it is the
+  // current one, and the response says so.
   return {
     session_id: sessionId,
     question: currentQuestion(result)!,
     position: positionOf(result),
     complete: false,
+    pending_retry: pendingRetryOf(result),
   };
 }
 
@@ -87,6 +91,7 @@ function sessionView(sessionId: string, result: SessionResult): z.infer<typeof S
     source: result.source,
     position: positionOf(result),
     question: result.status === 'ready' ? (currentQuestion(result) ?? null) : null,
+    pending_retry: result.status === 'ready' ? pendingRetryOf(result) : null,
     progress: result.progress.map(progressItem),
   };
 }
@@ -126,7 +131,7 @@ const getSessionRoute = createRoute({
   tags: ['sessions'],
   summary: 'Read a session',
   description:
-    'Its status, position, and the current question while it is ready. A completed session also carries `progress`: each practised saved word with its level before and after. Serves resume and the poll.',
+    'Its status, position, and the current question while it is ready. `pending_retry` is set while that question is held for its second try, so a resumed session opens on it. A completed session also carries `progress`: each practised saved word with its level before and after. Serves resume and the poll.',
   request: { params: sessionIdParam },
   responses: {
     200: { content: { 'application/json': { schema: SessionViewSchema } }, description: 'The session.' },
@@ -142,7 +147,7 @@ const skipSessionRoute = createRoute({
   tags: ['sessions'],
   summary: 'Skip a session',
   description:
-    'Ends a preparing or ready session. The answers given before the skip count toward progress. Skipping a skipped session is a no-op.',
+    'Ends a preparing or ready session. The answers given before the skip count toward progress; a card held for its second try is given up first. Skipping a skipped session is a no-op.',
   request: { params: sessionIdParam },
   responses: {
     200: { content: { 'application/json': { schema: SkipSessionResponseSchema } }, description: 'The session is skipped.' },
@@ -159,7 +164,7 @@ const nextStepRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current question',
   description:
-    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`.',
+    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`. An answer that is right but is not the saved word (`alternative`) on a `typed_translation`, `say_translation` or `cloze_typed` card holds the card for one second try: the response carries the same card as `question`, with `pending_retry`, and the session does not move on or complete until the same card is answered again with `retry: true`, judged as the first answer was. An empty text, or a `pass` (`show_answer` or `skip`), with `retry: true` gives up. Without `retry`, an answer to the held card replays the first one.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
@@ -168,14 +173,14 @@ const nextStepRoute = createRoute({
     200: {
       content: { 'application/json': { schema: NextStepResponseSchema } },
       description:
-        'The answer was recorded. `complete: false` carries the next question; `complete: true` carries the score and the missed questions. The completing response also carries `progress`: each practised saved word with its level before and after, and the dimensions that rose.',
+        'The answer was recorded. `complete: false` carries the next question, or the card held for its second try with `pending_retry` set; `complete: true` carries the score and the missed questions. The completing response also carries `progress`: each practised saved word with its level before and after, and the dimensions that rose.',
     },
     400: failure(
       'The request body did not validate, `option_index` is out of range, or the answer is not the kind its question takes (`text` for a choice, `option_index` for a typed question).',
     ),
     404: failure('No session has this id.'),
     409: failure(
-      "`question_id` is not the session's current question, or the session is not ready (`session_not_ready`).",
+      "`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`).",
     ),
     ...learnerResponses,
     403: NOT_YOURS,
@@ -188,7 +193,7 @@ const speechRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current speaking card by voice',
   description:
-    'Takes one recorded attempt at the current `read_aloud` or `say_translation` card, as base64 audio (`audio/aac`, `audio/mp4` or `audio/webm`, at most 200 KB). The server transcribes it with a language model, which costs money on every call, and judges the transcript. `understood` and `alternative` record the answer and carry `next`, the next-step response. `unheard` records nothing: the card stays current and may be tried again. Re-sending an attempt that was recorded replays it without a model call.',
+    'Takes one recorded attempt at the current `read_aloud` or `say_translation` card, as base64 audio (`audio/aac`, `audio/mp4` or `audio/webm`, at most 200 KB). The server transcribes it with a language model, which costs money on every call, and judges the transcript. `understood` and `alternative` record the answer and carry `next`, the next-step response. `unheard` records nothing: the card stays current and may be tried again. Re-sending an attempt that was recorded replays it without a model call. An `alternative` on a `say_translation` card holds the card for one second try (`next.pending_retry`): a clip sent with `retry: true` is that try, transcribed and judged as the first, and one sent without it replays the first.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: SpeechAnswerRequestSchema } } },
@@ -200,7 +205,7 @@ const speechRoute = createRoute({
     },
     400: failure('The request body did not validate, or the current card is not a speaking card.'),
     404: failure('No session has this id.'),
-    409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
+    409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`)."),
     413: failure('The body is over 300 KB.'),
     502: failure('The transcription failed or timed out; the card may be tried again.'),
     ...learnerResponses,
@@ -214,7 +219,7 @@ const judgedAnswerRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current card that the server judges',
   description:
-    'Takes the text answer to the current `typed_meaning` card. An empty text is judged by rule, and so is the stored meaning, the gloss key (the citation form the word list shows), or one of the stored alternatives of the card\'s rendering or of its gloss; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`.',
+    'Takes the text answer to the current `typed_meaning` card. An empty text is judged by rule, and so is the stored meaning, the gloss key (the citation form the word list shows), or one of the stored alternatives of the card\'s rendering or of its gloss; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`. An `alternative` (another sense of a `typed_meaning` card, another word in a `sentence_translation`) holds the card for one second try (`next.pending_retry`): a text sent with `retry: true` is that try, judged as the first, and an empty one gives up, answered `wrong`; one sent without it replays the first.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: JudgedAnswerRequestSchema } } },
@@ -226,7 +231,7 @@ const judgedAnswerRoute = createRoute({
     },
     400: failure('The request body did not validate, or the current card is not one the server judges.'),
     404: failure('No session has this id.'),
-    409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
+    409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`)."),
     502: failure('The judge failed or timed out; nothing was recorded, and the answer may be sent again.'),
     ...learnerResponses,
     403: NOT_YOURS,
@@ -313,7 +318,7 @@ export function createSessionsRouter(sessions: SessionService) {
     const answer =
       'text' in body ? { text: body.text } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index };
     try {
-      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer);
+      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer, { retry: body.retry ?? false });
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
@@ -346,6 +351,7 @@ export function createSessionsRouter(sessions: SessionService) {
         questionId: body.question_id,
         audio: body.audio,
         mimeType: body.mime_type,
+        retry: body.retry ?? false,
       });
       return c.json(
         {
@@ -372,7 +378,7 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
     try {
-      const result = await sessions.answerJudged(c.var.actor, id, { questionId: body.question_id, text: body.text });
+      const result = await sessions.answerJudged(c.var.actor, id, { questionId: body.question_id, text: body.text, retry: body.retry ?? false });
       return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);

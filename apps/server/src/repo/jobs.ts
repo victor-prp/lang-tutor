@@ -15,8 +15,13 @@ import type { JobName, JobPayloads } from '../domain/jobs';
  */
 export function createJobRepo(tx: Tx, boss: PgBoss) {
   return {
-    enqueue: async <N extends JobName>(name: N, data: JobPayloads[N]): Promise<void> => {
-      await boss.send(name, data, { db: fromDrizzle(tx, sql) });
+    /**
+     * Phase 34. `singletonKey` holds only on a queue whose policy names it (an
+     * `exclusive` queue keeps one job per key queued or active); a second send
+     * while one is there is a no-op.
+     */
+    enqueue: async <N extends JobName>(name: N, data: JobPayloads[N], options?: { singletonKey: string }): Promise<void> => {
+      await boss.send(name, data, { db: fromDrizzle(tx, sql), ...(options ? { singletonKey: options.singletonKey } : {}) });
     },
   };
 }

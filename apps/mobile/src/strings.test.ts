@@ -55,3 +55,12 @@ describe('meaning-recall strings (phase 27 D12)', () => {
     expect(strings.feedbackOtherSense).toBe('נכון, אבל כאן תרגלנו:');
   });
 });
+
+describe('second-try strings (phase 34 D9)', () => {
+  it('words both lines exactly, the first answer isolated inside the Hebrew line', () => {
+    // FSI/PDI, as heardLine's: a target word or a whole sentence inside a Hebrew line.
+    expect(strings.retryRight('vetrata')).toBe('✓ נכון, ⁨vetrata⁩ מתאים כאן.');
+    expect(strings.retryAnotherWord).toBe('יש מילה נוספת ששמרת — נסו שוב');
+    expect(strings.retryAnotherMeaning).toBe('יש פירוש נוסף — נסו שוב');
+  });
+});

@@ -1,10 +1,13 @@
-import type { ReadAloudQuestion, SayTranslationQuestion } from '@lang-tutor/core/api';
+import type { PendingRetry, ReadAloudQuestion, SayTranslationQuestion } from '@lang-tutor/core/api';
 import { rightAnswer } from '@lang-tutor/core/domain';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ContextLine } from '@/components/ContextLine';
+import { RetryNotice } from '@/components/RetryNotice';
 import { SpeakButton } from '@/components/SpeakButton';
 import { answerStyles } from '@/components/TypedAnswerView';
+import { contextLanguage } from '@/context';
 import type { CardAnswer } from '@/feedback';
 import { useRecorder } from '@/hooks/useRecording';
 import { MAX_RECORDING_SECONDS, secondsLeft, type Clip } from '@/recording';
@@ -25,6 +28,9 @@ type Props = {
   onCantSpeak: (reason: 'chosen' | 'no_mic') => void;
   /** The recorder could not start. */
   onRecordFailed: () => void;
+  /** Phase 34 (spec D9). Held for a second try: the card says why, and the
+   *  microphone is offered again. */
+  retry: PendingRetry | null;
 };
 
 /**
@@ -32,7 +38,7 @@ type Props = {
  * the clip is checked the button is disabled. An attempt that was not
  * understood says what was heard, in neutral colours: it is not wrong.
  */
-export function SpeakingCardView({ question, instruction, language, answer, speech, onClip, onRetry, onPass, onCantSpeak, onRecordFailed }: Props) {
+export function SpeakingCardView({ question, instruction, language, answer, speech, onClip, onRetry, onPass, onCantSpeak, onRecordFailed, retry }: Props) {
   const recorder = useRecorder();
   const [recording, setRecording] = useState(false);
   const [left, setLeft] = useState(MAX_RECORDING_SECONDS);
@@ -151,6 +157,7 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
               {strings.partOfSpeech(question.part_of_speech)}
             </Text>
           ) : null}
+          {question.context ? <ContextLine context={question.context} language={contextLanguage(question.type, language)} /> : null}
         </>
       )}
 
@@ -175,6 +182,7 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
 
       {answered ? null : (
         <>
+          {retry !== null ? <RetryNotice retry={retry} /> : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.record}

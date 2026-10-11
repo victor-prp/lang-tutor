@@ -3,6 +3,8 @@ import { sql } from 'drizzle-orm';
 
 import { installJobs, JOB_SCHEMA } from '../../../src/db/jobs';
 import {
+  ACCEPT_RENDERING,
+  ACCEPT_RENDERING_FAILED,
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_FAILED,
   PREPARE_SESSION,
@@ -53,7 +55,9 @@ describe('installJobs', () => {
     expect(prepare).toMatchObject({
       retry_limit: 2,
       retry_backoff: true,
-      expire_seconds: 600,
+      // Phase 34 (ruling R12): twice the sum of the batch's 300 s, the context
+      // call's 60 s and the checker's 60 s.
+      expire_seconds: 840,
       deletion_seconds: 86_400,
       dead_letter: PREPARE_SESSION_FAILED,
     });
@@ -88,6 +92,34 @@ describe('installJobs', () => {
       deletion_seconds: 86_400,
       dead_letter: LOOK_UP_IMPORT_ITEM_FAILED,
     });
+  });
+
+  // Phase 34 (spec D1). `exclusive` is what makes the singleton key hold: one
+  // accept job per rendering queued or active.
+  it('creates the accept queues, the job queue exclusive, and installs again without touching its policy', async () => {
+    const read = async () =>
+      (
+        await t.db.execute<QueueRow & { policy: string }>(
+          sql.raw(
+            `select name, policy, retry_limit, retry_backoff, expire_seconds, deletion_seconds, dead_letter
+               from ${JOB_SCHEMA}.queue
+              where name in ('${ACCEPT_RENDERING}', '${ACCEPT_RENDERING_FAILED}')
+              order by name`,
+          ),
+        )
+      ).rows;
+    const rows = await read();
+    expect(rows.map((row) => row.name)).toEqual([ACCEPT_RENDERING, ACCEPT_RENDERING_FAILED]);
+    expect(rows[0]).toMatchObject({
+      policy: 'exclusive',
+      retry_limit: 2,
+      retry_backoff: true,
+      expire_seconds: 120,
+      deletion_seconds: 86_400,
+      dead_letter: ACCEPT_RENDERING_FAILED,
+    });
+    await installJobs(t.db);
+    expect(await read()).toEqual(rows);
   });
 
   it('is idempotent: a second install changes nothing', async () => {

@@ -10,7 +10,13 @@ import {
   maintenanceUrlFor,
   redactDatabaseUrl,
 } from './config';
-import { PREPARE_SESSION_EXPIRY_SECONDS } from './domain/jobs';
+import {
+  CHECKER_CALL_BUDGET_MS,
+  CONTEXT_CALL_BUDGET_MS,
+  PREPARE_SESSION_CALL_BUDGETS_MS,
+  PREPARE_SESSION_EXPIRY_SECONDS,
+  SESSION_GENERATION_BUDGET_MS,
+} from './domain/jobs';
 
 // Literal env objects in, Config out. No process.env is read or written here —
 // which is the whole point of taking `env` as a parameter.
@@ -23,6 +29,8 @@ describe('loadConfig', () => {
       poolMax: 5,
       translationTimeoutMs: 25_000,
       sessionGenerationTimeoutMs: 300_000,
+      contextCallTimeoutMs: 60_000,
+      checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
@@ -69,6 +77,8 @@ describe('loadConfig', () => {
       poolMax: 20,
       translationTimeoutMs: 12_000,
       sessionGenerationTimeoutMs: 300_000,
+      contextCallTimeoutMs: 60_000,
+      checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
@@ -88,15 +98,39 @@ describe('loadConfig', () => {
     expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '5000' }).sessionGenerationTimeoutMs).toBe(5_000);
   });
 
-  // Victor's cap: the job's expiry is twice the budget and depends on it.
+  // Victor's cap: the job's expiry is twice the sum of the budgets and depends on it.
   it('never lets SESSION_GENERATION_TIMEOUT_MS raise the budget above five minutes', () => {
     expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '600000' }).sessionGenerationTimeoutMs).toBe(300_000);
   });
 
   // Phase 24 (spec D16): expiry detects a crashed worker and must never cut a
   // healthy call off. The two numbers used to agree only through a comment.
-  it('expires a prepare-session job no sooner than twice the default budget', () => {
-    expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(2 * loadConfig({}).sessionGenerationTimeoutMs);
+  // Phase 34 (ruling R12): an attempt makes its calls one after another, so the
+  // expiry covers their sum.
+  it('expires a prepare-session job no sooner than twice the sum of its calls’ default budgets', () => {
+    const config = loadConfig({});
+    expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(
+      2 * (config.sessionGenerationTimeoutMs + config.contextCallTimeoutMs + config.checkerCallTimeoutMs),
+    );
+  });
+
+  it('expires a prepare-session job at exactly twice the batch’s, the context call’s and the checker’s budgets (ruling R12)', () => {
+    expect(PREPARE_SESSION_CALL_BUDGETS_MS).toEqual([SESSION_GENERATION_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, CHECKER_CALL_BUDGET_MS]);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (300_000 + 60_000 + 60_000)) / 1000);
+  });
+
+  it('defaults the checker’s budget to a minute, reads CHECKER_CALL_TIMEOUT_MS, and never above a minute', () => {
+    expect(loadConfig({}).checkerCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: '2000' }).checkerCallTimeoutMs).toBe(2_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: '300000' }).checkerCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: 'nonsense' }).checkerCallTimeoutMs).toBe(60_000);
+  });
+
+  it('defaults the context call’s budget to a minute, reads CONTEXT_CALL_TIMEOUT_MS, and never above a minute', () => {
+    expect(loadConfig({}).contextCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CONTEXT_CALL_TIMEOUT_MS: '2000' }).contextCallTimeoutMs).toBe(2_000);
+    expect(loadConfig({ CONTEXT_CALL_TIMEOUT_MS: '300000' }).contextCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CONTEXT_CALL_TIMEOUT_MS: 'nonsense' }).contextCallTimeoutMs).toBe(60_000);
   });
 
   it('caps the photo read budget at two minutes, and defaults to it', () => {

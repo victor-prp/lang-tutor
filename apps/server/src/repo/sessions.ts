@@ -112,7 +112,7 @@ export function createSessionRepo(tx: Tx) {
      *  each in its positions' order. */
     findAnswersOn: async (enrollmentId: string, day: string): Promise<DayAnswer[]> => {
       const rows = await tx.execute<AnswerRow & { session_id: string }>(sql`
-        SELECT s.id AS session_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict
+        SELECT s.id AS session_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict
         FROM answers a
         JOIN sessions s            ON s.id = a.session_id
         JOIN questions q           ON q.id = a.question_id
@@ -256,12 +256,17 @@ export function createSessionRepo(tx: Tx) {
           selectedOptionPosition: answers.selectedOptionPosition,
           typedText: answers.typedText,
           verdict: answers.verdict,
+          retryState: answers.retryState,
+          retryText: answers.retryText,
+          retryVerdict: answers.retryVerdict,
         })
         .from(answers)
         .where(eq(answers.sessionId, sessionId))
         .orderBy(asc(answers.position));
 
       // answers_kind_valid: an answer is an option or a text with its verdict.
+      // Phase 34 (spec D9): answers_retry_*, a retry only on a text's
+      // `alternative`, with its text and verdict once resolved.
       const answerRecords: AnswerRecord[] = answerRows.map((answer) => {
         if (answer.typedText !== null) {
           const verdict = answer.verdict as AnswerVerdict;
@@ -270,6 +275,9 @@ export function createSessionRepo(tx: Tx) {
             is_correct: verdictCorrect(verdict),
             answer_string: answer.typedText,
             verdict,
+            retry_state: answer.retryState as AnswerRecord['retry_state'],
+            retry_answer_string: answer.retryText,
+            retry_verdict: answer.retryVerdict as AnswerVerdict | null,
           };
         }
         const chosen = canonicalOptions(questionRows[answer.position].options!)[answer.selectedOptionPosition!];
@@ -277,6 +285,9 @@ export function createSessionRepo(tx: Tx) {
           question_id: answer.questionId,
           is_correct: chosen.is_correct,
           answer_string: chosen.text,
+          retry_state: null,
+          retry_answer_string: null,
+          retry_verdict: null,
         };
       });
 
@@ -299,13 +310,14 @@ export function createSessionRepo(tx: Tx) {
      * a transaction that is already holding this session's row. A typed answer
      * (phase 23) is stored as its text and the verdict the learner was shown. A spoken
      * answer (phase 25) is stored the same way: the transcript, or '' for a
-     * pass, and its verdict.
+     * pass, and its verdict. Phase 34 (spec D9): `pending` holds it for its
+     * second try.
      */
     insertAnswer: async (
       sessionId: string,
       position: number,
       questionId: string,
-      answer: { displayIndex: number } | { text: string; verdict: AnswerVerdict },
+      answer: { displayIndex: number } | { text: string; verdict: AnswerVerdict; pending?: true },
     ): Promise<void> => {
       if ('text' in answer) {
         await tx.insert(answers).values({
@@ -314,6 +326,7 @@ export function createSessionRepo(tx: Tx) {
           questionId,
           typedText: answer.text,
           verdict: answer.verdict,
+          retryState: answer.pending ? 'pending' : null,
         });
         return;
       }
@@ -332,6 +345,31 @@ export function createSessionRepo(tx: Tx) {
         questionId,
         selectedOptionPosition: row.optionOrder[answer.displayIndex],
       });
+    },
+
+    /** Phase 34 (spec D9). The pending answer at `position` takes its retry's
+     *  text and verdict, and is resolved. Only a pending one: the session row is
+     *  locked (loadSession), so finding none is a caller's mistake, not a race. */
+    resolveRetry: async (
+      sessionId: string,
+      position: number,
+      retry: { text: string; verdict: AnswerVerdict },
+    ): Promise<void> => {
+      const rows = await tx
+        .update(answers)
+        .set({ retryState: 'resolved', retryText: retry.text, retryVerdict: retry.verdict })
+        .where(and(eq(answers.sessionId, sessionId), eq(answers.position, position), eq(answers.retryState, 'pending')))
+        .returning({ position: answers.position });
+      if (rows.length === 0) throw new Error(`session ${sessionId} has no pending answer at position ${position}`);
+    },
+
+    /** Phase 34 (spec D9). Resolves the session's pending answer, if it has one,
+     *  with `retry`: a skip ends the card as "show the answer" would. */
+    resolvePendingRetry: async (sessionId: string, retry: { text: string; verdict: AnswerVerdict }): Promise<void> => {
+      await tx
+        .update(answers)
+        .set({ retryState: 'resolved', retryText: retry.text, retryVerdict: retry.verdict })
+        .where(and(eq(answers.sessionId, sessionId), eq(answers.retryState, 'pending')));
     },
 
     completeSession: (sessionId: string, practiceDay: string): Promise<unknown> =>

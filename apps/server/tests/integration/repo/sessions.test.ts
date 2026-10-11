@@ -19,6 +19,9 @@ import { createProgressRepo } from '../../../src/repo/progress';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { createVocabularyRepo } from '../../../src/repo/vocabulary';
 
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
+
 let t: TestDb;
 
 beforeEach(async () => {
@@ -105,6 +108,7 @@ describe('insertAnswer', () => {
           question_id: question.id,
           is_correct: true,
           answer_string: question.options[displayIndex],
+          ...NO_RETRY,
         },
       ]);
     });
@@ -192,7 +196,7 @@ describe('phase 23: typed answers', () => {
       const loaded = await sessionRepo.loadSession(sessionId);
       expect(loaded!.questions).toEqual([typed]);
       expect(loaded!.answers).toEqual([
-        { question_id: typed.id, is_correct: true, answer_string: 'tomb', verdict: 'near_miss' },
+        { question_id: typed.id, is_correct: true, answer_string: 'tomb', verdict: 'near_miss', ...NO_RETRY },
       ]);
     });
   });
@@ -347,6 +351,7 @@ describe('phase 24: boards', () => {
         question_id: ids[0],
         is_correct: false,
         answer_string: first.options[2],
+        ...NO_RETRY,
       });
     });
   });
@@ -456,6 +461,28 @@ describe('phase 37: answers and introductions on a day', () => {
     expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual(evidence!.answers.map((answer) => ({ ...answer, sessionId })));
   });
 
+  it("reads a held answer by its retry, as the session's evidence does (phase 34, spec D9)", async () => {
+    const a = await savedWord('apple', 'תפוח');
+    const b = await savedWord('bread', 'לחם');
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [a, b],
+      types: ['typed_translation', 'typed_translation'],
+    });
+    await withTx(t.db, async (tx) => {
+      const repo = createSessionRepo(tx);
+      await repo.insertAnswer(sessionId, 0, questions[0].id, { text: 'x', verdict: 'alternative', pending: true });
+      await repo.resolveRetry(sessionId, 0, { text: 'apple', verdict: 'exact' });
+      await repo.insertAnswer(sessionId, 1, questions[1].id, { text: 'x', verdict: 'alternative', pending: true });
+    });
+    // The first resolved right, so it reads as its retry; the second is still pending.
+    expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual([
+      { glossId: a.glossId, sessionId, type: 'typed_translation', verdict: 'exact' },
+      { glossId: b.glossId, sessionId, type: 'typed_translation', verdict: 'alternative' },
+    ]);
+  });
+
   it('names the glosses first answered while saved on that day, an open session counting as it', async () => {
     const a = await savedWord('apple', 'תפוח');
     const b = await savedWord('bread', 'לחם');
@@ -494,9 +521,70 @@ describe('phase 25: spoken answers', () => {
       await repo.insertAnswer(sessionId, 0, questions[0].id, { text: 'tome', verdict: 'understood' });
       await repo.insertAnswer(sessionId, 1, questions[1].id, { text: '', verdict: 'skipped' });
       expect((await repo.loadSession(sessionId))!.answers).toEqual([
-        { question_id: questions[0].id, is_correct: true, answer_string: 'tome', verdict: 'understood' },
-        { question_id: questions[1].id, is_correct: false, answer_string: '', verdict: 'skipped' },
+        { question_id: questions[0].id, is_correct: true, answer_string: 'tome', verdict: 'understood', ...NO_RETRY },
+        { question_id: questions[1].id, is_correct: false, answer_string: '', verdict: 'skipped', ...NO_RETRY },
       ]);
+    });
+  });
+});
+
+// Phase 34 (spec D9). A pending answer, its retry, and a skip's give-up.
+describe('phase 34: the second try', () => {
+  async function typedSession() {
+    const asked = [];
+    for (const [lemma, translation] of [
+      ['tome', 'ספר'],
+      ['lantern', 'פנס'],
+    ]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma, translations: [translation] });
+      asked.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    return insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: enrollmentOf('u_1'),
+      asked,
+      alternatives: ['lamp'],
+      types: ['typed_translation', 'typed_translation'],
+    });
+  }
+
+  it('stores an answer pending, resolves it with its retry, and reads both back', async () => {
+    const { sessionId, questions } = await typedSession();
+    await withTx(t.db, async (tx) => {
+      const repo = createSessionRepo(tx);
+      await repo.insertAnswer(sessionId, 0, questions[0].id, { text: 'lamp', verdict: 'alternative', pending: true });
+      expect((await repo.loadSession(sessionId))!.answers).toEqual([
+        { question_id: questions[0].id, is_correct: true, answer_string: 'lamp', verdict: 'alternative', retry_state: 'pending', retry_answer_string: null, retry_verdict: null },
+      ]);
+      await repo.resolveRetry(sessionId, 0, { text: 'tome', verdict: 'exact' });
+      expect((await repo.loadSession(sessionId))!.answers[0]).toMatchObject({ retry_state: 'resolved', retry_answer_string: 'tome', retry_verdict: 'exact' });
+    });
+  });
+
+  it('refuses to resolve an answer that is not pending', async () => {
+    const { sessionId, questions } = await typedSession();
+    await expect(
+      withTx(t.db, async (tx) => {
+        const repo = createSessionRepo(tx);
+        await repo.insertAnswer(sessionId, 0, questions[0].id, { text: 'tome', verdict: 'exact' });
+        await repo.resolveRetry(sessionId, 0, { text: 'tome', verdict: 'exact' });
+      }),
+    ).rejects.toThrow('has no pending answer at position 0');
+  });
+
+  it("gives up a session's pending answer, and leaves every other one alone", async () => {
+    const { sessionId, questions } = await typedSession();
+    await withTx(t.db, async (tx) => {
+      const repo = createSessionRepo(tx);
+      await repo.insertAnswer(sessionId, 0, questions[0].id, { text: 'tome', verdict: 'exact' });
+      await repo.insertAnswer(sessionId, 1, questions[1].id, { text: 'lamp', verdict: 'alternative', pending: true });
+      await repo.resolvePendingRetry(sessionId, { text: '', verdict: 'gave_up' });
+      const [first, second] = (await repo.loadSession(sessionId))!.answers;
+      expect(first).toMatchObject(NO_RETRY);
+      expect(second).toMatchObject({ retry_state: 'resolved', retry_answer_string: '', retry_verdict: 'gave_up' });
+      // Nothing pending: nothing to do.
+      await repo.resolvePendingRetry(sessionId, { text: 'x', verdict: 'exact' });
+      expect((await repo.loadSession(sessionId))!.answers[1]).toMatchObject({ retry_answer_string: '', retry_verdict: 'gave_up' });
     });
   });
 });

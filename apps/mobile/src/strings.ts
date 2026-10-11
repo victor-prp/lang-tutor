@@ -108,6 +108,12 @@ export const strings = {
   // Phase 23. Both count as correct (spec D9).
   feedbackNearMiss: 'כמעט! כך כותבים:',
   feedbackAlternative: 'נכון! המילה שתרגלנו:',
+  // Phase 34 (spec D9). A card held for its second try: the first answer, then
+  // what is left to find. FSI/PDI around the answer, as in heardLine: a target
+  // word, or a whole sentence, inside a Hebrew line.
+  retryRight: (answer: string) => `✓ נכון, ⁨${answer}⁩ מתאים כאן.`,
+  retryAnotherWord: 'יש מילה נוספת ששמרת — נסו שוב',
+  retryAnotherMeaning: 'יש פירוש נוסף — נסו שוב',
   resultsHeadlineGreat: 'מצוין!',
   resultsHeadlineGood: 'עבודה טובה!',
   resultsHeadlineKeepPractising: 'ממשיכים לתרגל',

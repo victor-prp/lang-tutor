@@ -11,6 +11,7 @@ import {
   newSessionRecord,
   nextSource,
   pickRendering,
+  pendingRetryOf,
   shuffle,
   positionOf,
   sessionScore,
@@ -28,6 +29,7 @@ function makeQuestion(n: number): MultipleChoiceQuestion {
     question: `word ${n}`,
     options: [`a${n}`, `b${n}`, `c${n}`, `d${n}`],
     correct_option: 0,
+    context: null,
   };
 }
 
@@ -43,6 +45,9 @@ function testRng(seed: number): () => number {
 }
 
 const POOL: Question[] = Array.from({ length: 16 }, (_, i) => makeQuestion(i));
+
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
 
 function makeRecord(questions: Question[], answers: AnswerRecord[] = []): SessionRecord {
   return {
@@ -74,7 +79,7 @@ describe('positionOf', () => {
     const q0 = makeQuestion(0);
     const done = makeRecord(
       [q0],
-      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
+      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option], ...NO_RETRY }],
     );
     expect(positionOf(done)).toEqual({ position: 1, total: 1 });
   });
@@ -91,6 +96,7 @@ describe('step', () => {
       question_id: q0.id,
       is_correct: true,
       answer_string: q0.options[q0.correct_option],
+      ...NO_RETRY,
     });
     expect(outcome.record.complete).toBe(false);
     expect(outcome.justCompleted).toBe(false);
@@ -111,7 +117,7 @@ describe('step', () => {
     const [q0, q1] = [makeQuestion(0), makeQuestion(1)];
     const answered = makeRecord(
       [q0, q1],
-      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
+      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option], ...NO_RETRY }],
     );
     const outcome = step(answered, q0.id, { option_index: q0.correct_option });
     expect(outcome).toEqual({ status: 'replayed', record: answered, justCompleted: false });
@@ -121,7 +127,7 @@ describe('step', () => {
     const q0 = makeQuestion(0);
     const done = makeRecord(
       [q0],
-      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
+      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option], ...NO_RETRY }],
     );
     expect(done.complete).toBe(true);
     const outcome = step(done, q0.id, { option_index: q0.correct_option });
@@ -138,7 +144,7 @@ describe('step', () => {
     const q0 = makeQuestion(0);
     const done = makeRecord(
       [q0],
-      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
+      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option], ...NO_RETRY }],
     );
     const outcome = step(done, 'not-a-real-id', { option_index: 0 });
     expect(outcome).toEqual({ status: 'invalid_question' });
@@ -160,7 +166,7 @@ describe('step', () => {
     const [q0, q1] = [makeQuestion(0), makeQuestion(1)];
     const answered = makeRecord(
       [q0, q1],
-      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option] }],
+      [{ question_id: q0.id, is_correct: true, answer_string: q0.options[q0.correct_option], ...NO_RETRY }],
     );
     expect(step(answered, q0.id, { option_index: 99 })).toEqual({
       status: 'replayed',
@@ -181,6 +187,7 @@ function typedQuestion(id: string): TypedTranslationQuestion {
     answer: 'finestra',
     lemma: 'finestra',
     alternatives: [],
+    context: null,
   };
 }
 
@@ -195,6 +202,7 @@ describe('step, typed', () => {
       is_correct: true,
       answer_string: 'finestar',
       verdict: 'near_miss',
+      ...NO_RETRY,
     });
   });
 
@@ -219,9 +227,9 @@ describe('sessionScore and missedQuestions', () => {
     const record = makeRecord(
       [q0, q1, q2],
       [
-        { question_id: q0.id, is_correct: true, answer_string: q0.options[0] },
-        { question_id: q1.id, is_correct: false, answer_string: q1.options[1] },
-        { question_id: q2.id, is_correct: true, answer_string: q2.options[0] },
+        { question_id: q0.id, is_correct: true, answer_string: q0.options[0], ...NO_RETRY },
+        { question_id: q1.id, is_correct: false, answer_string: q1.options[1], ...NO_RETRY },
+        { question_id: q2.id, is_correct: true, answer_string: q2.options[0], ...NO_RETRY },
       ],
     );
     expect(sessionScore(record)).toEqual({ correct: 2, total: 3 });
@@ -282,7 +290,7 @@ describe('phase 25 speaking cards in step', () => {
     user_id: 'u1',
     questions: [
       { id: 'r1', type: 'read_aloud', vocab_term_id: 'l1', question: 'gatto', meaning: 'חתול' },
-      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null },
     ],
     answers: [],
     complete: false,
@@ -336,5 +344,137 @@ describe('askableRenderings (spec D12)', () => {
     expect(pickRendering(options, () => 0)?.variantId).toBe('v_finger');
     expect(pickRendering(options, () => 0.99)?.variantId).toBe('v_fingers');
     expect(pickRendering([], () => 0)).toBeUndefined();
+  });
+});
+
+// Phase 34 (spec D9). An alternative holds the card open for one more try.
+describe('step, the second try', () => {
+  const card = (id: string): TypedTranslationQuestion => ({ ...typedQuestion(id), alternatives: ['vetrata'] });
+  const [t1, t2] = [card('t1'), card('t2')];
+  const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'finestra', part_of_speech: 'noun', meaning: 'חלון', context: null };
+  const SAY: Question = { ...card('s1'), type: 'say_translation' };
+
+  function pendingOn(questions: Question[], questionId: string, text = 'vetrata'): SessionRecord {
+    const outcome = step(makeRecord(questions), questionId, { text });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    return outcome.record;
+  }
+
+  it('records an alternative as pending and holds the session on its card', () => {
+    const outcome = step(makeRecord([t1, t2]), 't1', { text: 'vetrata' });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.recorded).toBe('answer');
+    expect(outcome.record.answers[0]).toMatchObject({ verdict: 'alternative', is_correct: true, retry_state: 'pending' });
+    expect(currentQuestion(outcome.record)).toBe(t1);
+    expect(positionOf(outcome.record)).toEqual({ position: 1, total: 2 });
+    expect(pendingRetryOf(outcome.record)).toEqual({ answer: 'vetrata', wording: 'word' });
+  });
+
+  it('does not complete the session on a pending last card', () => {
+    const outcome = step(makeRecord([t1]), 't1', { text: 'vetrata' });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.justCompleted).toBe(false);
+    expect(outcome.record).toMatchObject({ complete: false, status: 'ready' });
+    expect(currentQuestion(outcome.record)).toBe(t1);
+  });
+
+  // Review Focus 1: a network retry of the first answer re-opens the second try.
+  it('replays the first answer sent again, pending flag and all', () => {
+    const pending = pendingOn([t1, t2], 't1');
+    expect(step(pending, 't1', { text: 'vetrata' })).toEqual({ status: 'replayed', record: pending, justCompleted: false });
+    expect(step(pending, 't1', { text: 'anything at all' })).toEqual({ status: 'replayed', record: pending, justCompleted: false });
+  });
+
+  it('resolves the retry as the first answer was judged, and moves on', () => {
+    const outcome = step(pendingOn([t1, t2], 't1'), 't1', { text: 'finestra' }, { retry: true });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.recorded).toBe('retry');
+    expect(outcome.record.answers).toHaveLength(1);
+    expect(outcome.record.answers[0]).toEqual({
+      question_id: 't1',
+      is_correct: true,
+      answer_string: 'vetrata',
+      verdict: 'alternative',
+      retry_state: 'resolved',
+      retry_answer_string: 'finestra',
+      retry_verdict: 'exact',
+    });
+    expect(currentQuestion(outcome.record)).toBe(t2);
+    expect(positionOf(outcome.record)).toEqual({ position: 2, total: 2 });
+    expect(pendingRetryOf(outcome.record)).toBeNull();
+    expect(outcome.justCompleted).toBe(false);
+  });
+
+  // Review Focus 2: the last card completes only when its retry resolves.
+  it("completes the session when the last card's retry resolves", () => {
+    const outcome = step(pendingOn([t1], 't1'), 't1', { text: 'finestar' }, { retry: true });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.justCompleted).toBe(true);
+    expect(outcome.record).toMatchObject({ complete: true, status: 'completed' });
+    expect(outcome.record.answers[0]).toMatchObject({ retry_state: 'resolved', retry_verdict: 'near_miss' });
+  });
+
+  it('records an empty retry, and show the answer, as given up', () => {
+    const typed = step(pendingOn([t1, t2], 't1'), 't1', { text: '' }, { retry: true });
+    if (typed.status !== 'advanced') throw new Error(typed.status);
+    expect(typed.record.answers[0]).toMatchObject({ is_correct: true, retry_answer_string: '', retry_verdict: 'gave_up' });
+    const spoken = step(pendingOn([SAY, t2], 's1'), 's1', { pass: 'show_answer' }, { retry: true });
+    if (spoken.status !== 'advanced') throw new Error(spoken.status);
+    expect(spoken.record.answers[0]).toMatchObject({ retry_answer_string: '', retry_verdict: 'gave_up' });
+  });
+
+  it("takes a spoken card's retry by voice or typed, and an unheard retry records nothing", () => {
+    const pending = step(makeRecord([SAY, t2]), 's1', { heard: 'vetrata' });
+    if (pending.status !== 'advanced') throw new Error(pending.status);
+    expect(pending.record.answers[0]).toMatchObject({ verdict: 'alternative', retry_state: 'pending' });
+    expect(step(pending.record, 's1', { heard: 'cane' }, { retry: true })).toEqual({ status: 'unheard' });
+    expect(step(pending.record, 's1', { heard: 'la finestra' }, { retry: true })).toMatchObject({ status: 'advanced', recorded: 'retry' });
+    const typed = step(pending.record, 's1', { text: 'finestra' }, { retry: true });
+    if (typed.status !== 'advanced') throw new Error(typed.status);
+    expect(typed.record.answers[0]).toMatchObject({ retry_answer_string: 'finestra', retry_verdict: 'exact' });
+  });
+
+  it('checks the kind of a retry as of a first answer', () => {
+    expect(step(pendingOn([t1, t2], 't1'), 't1', { option_index: 0 }, { retry: true })).toEqual({ status: 'wrong_answer_kind' });
+  });
+
+  it('replays a retry sent again, and a first answer sent after it, without judging either', () => {
+    const resolved = step(pendingOn([t1, t2], 't1'), 't1', { text: 'finestra' }, { retry: true });
+    if (resolved.status !== 'advanced') throw new Error(resolved.status);
+    expect(step(resolved.record, 't1', { text: 'porta' }, { retry: true })).toEqual({ status: 'replayed', record: resolved.record, justCompleted: false });
+    expect(step(resolved.record, 't1', { text: 'vetrata' })).toEqual({ status: 'replayed', record: resolved.record, justCompleted: false });
+  });
+
+  it("replays a completed session's resolved last card, and refuses a retry where none was resolved", () => {
+    const done = step(pendingOn([t1], 't1'), 't1', { text: 'finestra' }, { retry: true });
+    if (done.status !== 'advanced') throw new Error(done.status);
+    expect(step(done.record, 't1', { text: 'x' }, { retry: true })).toMatchObject({ status: 'replayed' });
+    const plain = step(makeRecord([t1]), 't1', { text: 'finestra' });
+    if (plain.status !== 'advanced') throw new Error(plain.status);
+    expect(step(plain.record, 't1', { text: 'x' }, { retry: true })).toEqual({ status: 'invalid_question' });
+  });
+
+  it('refuses a retry where nothing is pending, and any other card while one is', () => {
+    expect(step(makeRecord([t1, t2]), 't1', { text: 'finestra' }, { retry: true })).toEqual({ status: 'invalid_question' });
+    const answered = step(makeRecord([t1, t2]), 't1', { text: 'finestra' });
+    if (answered.status !== 'advanced') throw new Error(answered.status);
+    expect(step(answered.record, 't1', { text: 'finestra' }, { retry: true })).toEqual({ status: 'invalid_question' });
+    const pending = pendingOn([t1, t2], 't1');
+    expect(step(pending, 't2', { text: 'finestra' })).toEqual({ status: 'invalid_question' });
+    expect(step(pending, 't2', { text: 'finestra' }, { retry: true })).toEqual({ status: 'invalid_question' });
+  });
+
+  it('asks for the other meaning on a typed meaning card, and the other word elsewhere', () => {
+    const outcome = step(makeRecord([MEANING]), 'm1', { text: 'שמשה', judged: 'alternative' });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(pendingRetryOf(outcome.record)).toEqual({ answer: 'שמשה', wording: 'meaning' });
+    expect(pendingRetryOf(makeRecord([t1]))).toBeNull();
+  });
+
+  it('scores the first answer, whatever the retry came to', () => {
+    const wrong = step(pendingOn([t1], 't1'), 't1', { text: 'porta' }, { retry: true });
+    if (wrong.status !== 'advanced') throw new Error(wrong.status);
+    expect(sessionScore(wrong.record)).toEqual({ correct: 1, total: 1 });
+    expect(missedQuestions(wrong.record)).toEqual([]);
   });
 });

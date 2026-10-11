@@ -55,6 +55,10 @@ type FlatRow = {
   // Phase 31 (spec D5). The other words of the sense's gloss in the export's
   // learner language; null only if the sense had no membership there.
   glossAlternatives: string[] | null;
+  // Phase 34 (spec D1, D2). What the accept job stored for the rendering.
+  acceptedAnswers: string[];
+  answerForm: string | null;
+  acceptedAt: Date | null;
 };
 
 /**
@@ -97,6 +101,13 @@ function groupRows(rows: FlatRow[]): DictRecord[] {
     if (row.gloss !== row.translation) sense.gloss = row.gloss;
     if (row.glossAlternatives && row.glossAlternatives.length > 0) sense.gloss_alternatives = row.glossAlternatives;
     if (row.definition !== null) sense.definition = row.definition;
+    // Phase 34 (spec D1, D2), each only when present as well: a rendering the accept
+    // job has not reached exports as it did before, and a stamp alone says "ran,
+    // found nothing more" so a restore does not pay for the job again. ISO text,
+    // to the millisecond, which is all a JSON file keeps of a timestamp.
+    if (row.acceptedAnswers.length > 0) sense.accepted_answers = row.acceptedAnswers;
+    if (row.answerForm !== null) sense.answer_form = row.answerForm;
+    if (row.acceptedAt !== null) sense.accepted_at = row.acceptedAt.toISOString();
     entry.senses[row.rank] = sense;
   }
 
@@ -149,6 +160,9 @@ export async function exportDictionary(
       gloss: dictVarTranslations.gloss,
       definition: dictSenses.definition,
       glossAlternatives: dictGlosses.alternatives,
+      acceptedAnswers: dictVarTranslations.acceptedAnswers,
+      answerForm: dictVarTranslations.answerForm,
+      acceptedAt: dictVarTranslations.acceptedAt,
     })
     .from(dictVariants)
     .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))

@@ -16,7 +16,10 @@ import { unfence } from './translation';
 export const JUDGE_MARKER = "judge the learner's answer";
 
 /** What the meaning judge is told about the card: the word, and the sense its
- *  saved example pins. The example is absent for a saved sense without one. */
+ *  example pins. The example is absent for a saved sense without one. Phase 34
+ *  (spec D7): `example` and `exampleTranslation` are the sentence the card
+ *  showed and its hidden other half (findJudgeContext), so the judge sees what the
+ *  learner saw; the saved example only when the card fell back on it. */
 export type MeaningJudgeContext = {
   language: LanguageCode;
   /** The enrollment's source language: the one the learner reads and types in. */

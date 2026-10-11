@@ -23,16 +23,19 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
-import { comparable, distractorItems, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
+import { comparable, distractorItems, nothingKnown, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
-import { judgeSpoken, normaliseGloss } from '@lang-tutor/core/domain';
-import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
+import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
+import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
+import { askAccept, askCheck, askContext, askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
+  ACCEPT_CASES,
   CASES,
+  CHECK_CASES,
+  CONTEXT_CASES,
   DISTRACTOR_CASES,
   GAP_CASES,
   JUDGE_CASES,
@@ -41,6 +44,9 @@ import {
   TRANSCRIPTION_CASES,
   TRANSLATE_CASES,
   TRANSLATION_JUDGE_CASES,
+  type AcceptCase,
+  type CheckCase,
+  type ContextCase,
   type DistractorCase,
   type EvalCase,
   type JudgeCase,
@@ -50,6 +56,8 @@ import {
   type TranslationJudgeCase,
 } from './cases';
 import { askPhoto, askSenseMatch } from './askPhoto';
+import { checkTier1, checkTier2, checkWritten } from './checkChecks';
+import { contextItemOf, contextTier1, contextTier2, contextWritten } from './contextChecks';
 import { MATCH_CASES, PHOTO_CASES, type MatchCase, type PhotoCase } from './photoCases';
 
 const TIER2_THRESHOLD = 0.85;
@@ -84,6 +92,8 @@ type Row = {
   rendering?: LlmReconciliation;
   /** Set on a distractor row, the third call's answer. */
   distractors?: LlmDistractors;
+  /** Phase 34. Set on an accept row: the answer as written, and what the server keeps. */
+  accept?: { raw: LlmAccept; answers: string[]; answerForm: string | null };
   /** Set on a transcription row: what the model heard. */
   heard?: string;
   /** Set on a photo row: what the reading found. */
@@ -547,6 +557,56 @@ function renderingTier2(kase: RenderingCase, answer: LlmReconciliation): Check[]
   return checks;
 }
 
+/** Phase 34 (spec D1). Invariants of an accept answer, whatever it lists: it
+ *  parses (or the row records the failed call), and every answer as written is
+ *  in the target language's script, so never in the explanation's. */
+function acceptTier1(kase: AcceptCase, answer: { raw: LlmAccept }): Check[] {
+  const outside = answer.raw.answers.filter((text) => !isInScript(text, kase.target));
+  return [
+    {
+      name: `every answer is in ${kase.target} script`,
+      ok: outside.length === 0,
+      detail: outside.length ? outside.join(' | ') : undefined,
+    },
+  ];
+}
+
+/** Phase 34 (spec D1, D2). The scored axes: the right answers a card refused
+ *  before the list existed are kept, placeholders are written out, and the
+ *  answer form agrees with the rendering. */
+function acceptTier2(kase: AcceptCase, answer: { raw: LlmAccept; answers: string[]; answerForm: string | null }): Check[] {
+  const checks: Check[] = [];
+  // Scored as the card will judge it: the typed judge over the kept list, so a
+  // kept `to lose my temper` accepts a typed `lose my temper`, as it would.
+  const target = { answer: kase.form, lemma: kase.lemma, alternatives: answer.answers };
+  for (const word of kase.expectAnswers ?? []) {
+    checks.push({
+      name: `accepts ${word}`,
+      ok: ['exact', 'alternative'].includes(judgeTyped(target, word)),
+      detail: answer.answers.join(' | ') || 'none',
+    });
+  }
+  if (kase.rejectSubstrings) {
+    const offenders = answer.raw.answers.filter((text) =>
+      kase.rejectSubstrings!.some((placeholder) => text.toLowerCase().includes(placeholder)),
+    );
+    checks.push({
+      name: 'writes every placeholder out',
+      ok: offenders.length === 0,
+      detail: offenders.length ? offenders.join(' | ') : undefined,
+    });
+  }
+  if (kase.expectAnswerForm !== undefined) {
+    const expected = kase.expectAnswerForm;
+    checks.push({
+      name: expected === null ? 'keeps the form, no answer form' : `answer form ${expected}`,
+      ok: expected === null ? answer.answerForm === null : answer.answerForm !== null && comparable(answer.answerForm) === comparable(expected),
+      detail: `answer_form=${answer.raw.answer_form ?? 'null'}`,
+    });
+  }
+  return checks;
+}
+
 const taskOf = (item: DistractorCase['items'][number]): Task => item.task ?? 'meaning';
 
 /** Phase 19. The items as prepareSession builds them, keyed q1, q2, …. Phase
@@ -564,6 +624,9 @@ function itemsOf(kase: DistractorCase) {
       translation: item.translation,
       example: null,
       exampleTranslation: null,
+      acceptedAnswers: [],
+      answerForm: null,
+      acceptedAt: null,
     })),
     kase.items.map(taskOf),
     new Map(),
@@ -574,7 +637,7 @@ const answeredItem = (kase: DistractorCase, answer: LlmDistractors, index: numbe
   answer.items.find((answered) => answered.key === itemsOf(kase)[index].key);
 
 function distractorTier1(kase: DistractorCase, answer: LlmDistractors): Check[] {
-  const verdict = validateDistractors(itemsOf(kase), answer, kase.to, [], kase.from as LanguageCode);
+  const verdict = validateDistractors(itemsOf(kase), answer, kase.to, [], kase.from as LanguageCode, nothingKnown());
   const checks: Check[] = [
     { name: 'every item answered as its task asks', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
   ];
@@ -642,6 +705,9 @@ function sentenceItemsOf(kase: SentenceCase) {
       translation: item.translation,
       example: item.example,
       exampleTranslation: item.exampleTranslation,
+      acceptedAnswers: [],
+      answerForm: null,
+      acceptedAt: null,
     })),
     kase.items.map(() => kase.task),
     recent,
@@ -654,7 +720,7 @@ const wordsOf = (text: string): Set<string> =>
 
 function sentenceTier1(kase: SentenceCase, answer: LlmDistractors): Check[] {
   const items = sentenceItemsOf(kase);
-  const verdict = validateDistractors(items, answer, 'he', [], kase.from as LanguageCode);
+  const verdict = validateDistractors(items, answer, 'he', [], kase.from as LanguageCode, nothingKnown());
   if (!verdict.ok) return [{ name: 'every item answered as its task asks', ok: false, detail: verdict.reason }];
   if (kase.task === 'gap') {
     return [
@@ -771,6 +837,7 @@ async function main(): Promise<void> {
   const renderingCases = RENDERING_CASES.filter((kase) =>
     matches(kase.label, kase.form, kase.lemma),
   );
+  const acceptCases = ACCEPT_CASES.filter((kase) => matches(kase.label, kase.form, kase.rendering));
   const distractorCases = DISTRACTOR_CASES.filter((kase) =>
     matches(kase.label, ...kase.items.map((item) => item.form)),
   );
@@ -786,11 +853,14 @@ async function main(): Promise<void> {
   const sentenceCases = SENTENCE_CASES.filter((kase) => matches(kase.label));
   const translateCases = TRANSLATE_CASES.filter((kase) => matches(kase.label));
   const tjudgeCases = TRANSLATION_JUDGE_CASES.filter((kase) => matches(kase.label));
+  const contextCases = CONTEXT_CASES.filter((kase) => matches(kase.label));
+  const checkCases = CHECK_CASES.filter((kase) => matches(kase.label));
   if (filter) console.log(`filter "${filter}"`);
   if (
-    cases.length + renderingCases.length + distractorCases.length + transcriptionCases.length +
+    cases.length + renderingCases.length + acceptCases.length + distractorCases.length + transcriptionCases.length +
       photoCases.length + matchCases.length + judgeCases.length +
-      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length === 0
+      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + contextCases.length +
+      checkCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
@@ -879,6 +949,32 @@ async function main(): Promise<void> {
       return {
         label: kase.label,
         text: `${kase.form} \u2190 ${kase.lemma}/${kase.partOfSpeech}`,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  /** Phase 34. The same contract, for the accept call. */
+  const scoreAccept = async (kase: AcceptCase): Promise<Row> => {
+    const text = `${kase.rendering} \u2192 ${kase.form}`;
+    try {
+      const answer = await askAccept(llm, {
+        form: kase.form,
+        lemma: kase.lemma,
+        partOfSpeech: kase.partOfSpeech,
+        rendering: kase.rendering,
+        example: kase.example,
+        exampleTranslation: kase.exampleTranslation,
+        target: kase.target,
+        explanation: kase.explanation ?? 'he',
+      });
+      return { label: kase.label, text, tier1: acceptTier1(kase, answer), tier2: acceptTier2(kase, answer), accept: answer };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
         tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
         tier2: [],
         error: (error as Error).message,
@@ -1015,16 +1111,52 @@ async function main(): Promise<void> {
     }
   };
 
+  /** Phase 34. The same contract, for the context call. */
+  const scoreContext = async (kase: ContextCase): Promise<Row> => {
+    const text = `${kase.form} (${kase.type})`;
+    try {
+      const answer = await askContext(llm, { from: kase.target, to: 'he', items: [contextItemOf(kase)] });
+      return { label: kase.label, text, tier1: contextTier1(kase, answer), tier2: contextTier2(kase, answer), written: contextWritten(kase, answer) };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  /** Phase 34 (spec D5). The same contract, for the checker. */
+  const scoreCheck = async (kase: CheckCase): Promise<Row> => {
+    const text = `${kase.item.task} ${'word' in kase.item ? kase.item.word : kase.item.sentence}`;
+    try {
+      const answer = await askCheck(llm, { from: kase.target, to: 'he', items: [kase.item] });
+      return { label: kase.label, text, tier1: checkTier1(kase, answer), tier2: checkTier2(kase, answer), written: checkWritten(kase, answer) };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   // Every call site of the provider, scored in one run and one scorecard. They
   // share the concurrency budget rather than each taking their own: the quota
   // they compete for is the same one.
   const started = Date.now();
   const [
-    translationRows, renderingRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
-    gapRows, sentenceRows, translateRows, tjudgeRows,
+    translationRows, renderingRows, acceptRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows,
   ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
+    // Phase 34. Pooled into tier 2 with the translation and rendering rows.
+    mapWithConcurrency(acceptCases, CONCURRENCY, scoreAccept),
     mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
     mapWithConcurrency(transcriptionCases, CONCURRENCY, scoreTranscription),
     mapWithConcurrency(photoCases, CONCURRENCY, scorePhoto),
@@ -1034,10 +1166,12 @@ async function main(): Promise<void> {
     mapWithConcurrency(sentenceCases, CONCURRENCY, scoreSentences),
     mapWithConcurrency(translateCases, CONCURRENCY, scoreSentences),
     mapWithConcurrency(tjudgeCases, CONCURRENCY, scoreTranslationJudge),
+    mapWithConcurrency(contextCases, CONCURRENCY, scoreContext),
+    mapWithConcurrency(checkCases, CONCURRENCY, scoreCheck),
   ]);
   const rows = [
-    ...translationRows, ...renderingRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
-    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows,
+    ...translationRows, ...renderingRows, ...acceptRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
+    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows,
   ];
   const elapsedMs = Date.now() - started;
 
@@ -1064,6 +1198,11 @@ async function main(): Promise<void> {
     { name: 'gap', rows: gapRows, passed: 0, total: 0 },
     { name: 'sentence', rows: [...sentenceRows, ...translateRows], passed: 0, total: 0 },
     { name: 'translation judge', rows: tjudgeRows, passed: 0, total: 0 },
+    // Phase 34. The context call, a line of its own like the others.
+    { name: 'context', rows: contextRows, passed: 0, total: 0 },
+    // Phase 34 (spec D5). The checker, a line of its own: a checker that says
+    // yes to everything must fail here, not hide in the pooled score.
+    { name: 'checker', rows: checkRows, passed: 0, total: 0 },
   ];
 
   for (const row of rows) {
@@ -1123,6 +1262,12 @@ async function main(): Promise<void> {
         }`,
       );
     }
+    if (row.accept) {
+      console.log(
+        `       answers=${row.accept.raw.answers.join(' | ') || '(none)'} answer_form=${row.accept.raw.answer_form ?? 'null'}` +
+          ` kept=${row.accept.answers.join(' | ') || '(none)'}`,
+      );
+    }
     if (row.distractors) {
       console.log(
         `       ${row.distractors.items
@@ -1159,9 +1304,10 @@ async function main(): Promise<void> {
             `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n`,
         )
         .join('') +
-      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ` +
+      `${cases.length} translation + ${renderingCases.length} rendering + ${acceptCases.length} accept + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ` +
       `${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge + ` +
-      `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge cases in ` +
+      `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge + ` +
+      `${contextCases.length} context + ${checkCases.length} checker cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -1183,6 +1329,8 @@ async function main(): Promise<void> {
         gapScore: groupScore(groups[0]),
         sentenceScore: groupScore(groups[1]),
         translationJudgeScore: groupScore(groups[2]),
+        contextScore: groupScore(groups[3]),
+        checkerScore: groupScore(groups[4]),
         rows,
       },
       null,

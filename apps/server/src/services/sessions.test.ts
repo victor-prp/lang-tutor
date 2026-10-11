@@ -39,6 +39,9 @@ describe('repos', () => {
       findLatest: notStubbed,
       findAnswersOn: notStubbed,
       findIntroducedOn: notStubbed,
+      // Phase 34 (spec D9).
+      resolveRetry: notStubbed,
+      resolvePendingRetry: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
       findEnrollmentId: async () => 'e1',
       ...overrides,
@@ -54,6 +57,9 @@ describe('repos', () => {
     },
     findRecentSentences: () => {
       throw new Error('submitAnswer must not read recent sentences');
+    },
+    findRecentContexts: () => {
+      throw new Error('submitAnswer must not read recent contexts');
     },
     insertGeneratedQuestions: () => {
       throw new Error('submitAnswer must not write generated questions');
@@ -172,6 +178,21 @@ describe('repos', () => {
     findSiblings: () => {
       throw new Error('these cases must not read a sibling');
     },
+    // Phase 34 (spec D3). Read by prepareSession, which these cases are not.
+    findKnownRight: () => {
+      throw new Error('these cases must not read what the dictionary knows to be right');
+    },
+    // Phase 34. The accept job's and the backfill's: the session service writes
+    // no accepted answers (spec D1).
+    findRenderingForAccept: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    storeAccepted: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    findUnacceptedSavedRenderings: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
   };
 
   // Phase 31. Bound into the same transaction, and untouched by these cases:
@@ -283,6 +304,8 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -305,8 +328,9 @@ describe('repos', () => {
         answer: 'finestra',
         lemma: 'finestra',
         alternatives: [],
+        context: null,
       },
-      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null },
     ],
     answers: [],
     complete: false,
@@ -330,6 +354,8 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -346,6 +372,8 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -429,6 +457,8 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
       logger: createFakeLogger(),
       now: createFakeClock(Date.parse(`${TODAY}T10:00:00Z`)),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -483,6 +513,8 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -531,6 +563,8 @@ describe('createNextSession, phase 31 (spec D12)', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });

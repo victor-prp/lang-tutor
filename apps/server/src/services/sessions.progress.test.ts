@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import type { Enrollment, MultipleChoiceQuestion } from '@lang-tutor/core/api';
+import type { Enrollment, MultipleChoiceQuestion, TypedTranslationQuestion } from '@lang-tutor/core/api';
 import { DIMENSIONS } from '@lang-tutor/core/domain';
 
 import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
@@ -23,10 +23,11 @@ const question = (n: number): MultipleChoiceQuestion => ({
   question: `word${n}`,
   options: [`right${n}`, 'a', 'b', 'c'],
   correct_option: 0,
+  context: null,
 });
 const QUESTIONS = Array.from({ length: 10 }, (_, i) => question(i));
 const answered = (count: number) =>
-  QUESTIONS.slice(0, count).map((q) => ({ question_id: q.id, is_correct: true, answer_string: q.options[0] }));
+  QUESTIONS.slice(0, count).map((q) => ({ question_id: q.id, is_correct: true, answer_string: q.options[0], retry_state: null, retry_answer_string: null, retry_verdict: null }));
 const record = (count: number): SessionRecord => ({
   user_id: 'u1',
   questions: QUESTIONS,
@@ -96,6 +97,13 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
       return true;
     },
     findEnrollmentId: async () => 'e1',
+    // Phase 34 (spec D9).
+    resolveRetry: async () => {
+      calls.steps.push('resolve');
+    },
+    resolvePendingRetry: async () => {
+      calls.steps.push('give up');
+    },
   });
   const progress = stub<ProgressRepo>({
     lockSessionGlosses: async () => {
@@ -136,6 +144,8 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     logger: createFakeLogger(),
     now: createFakeClock(0),
     llm: createFakeLlmClient(''),
+    contextLlm: createFakeLlmClient(''),
+    checkerLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
   });
@@ -209,5 +219,63 @@ describe('progress when a session ends', () => {
   it('getSession answers a completed session with its change, and any other with none', async () => {
     expect((await world({ record: record(10) }).service.getSession('u1', SESSION)).progress).toEqual(CHANGE);
     expect((await world({ record: record(4) }).service.getSession('u1', SESSION)).progress).toEqual([]);
+  });
+});
+
+// Phase 34 (spec D9). Review Focus 2: a pending last card holds the session's
+// end, and with it the progress, until its retry resolves; a skip gives the retry
+// up and writes progress once.
+describe('progress and the second try', () => {
+  const TYPED: TypedTranslationQuestion = {
+    id: 'q9',
+    type: 'typed_translation',
+    vocab_term_id: 'l9',
+    question: 'פנס',
+    part_of_speech: 'noun',
+    answer: 'lantern',
+    lemma: 'lantern',
+    alternatives: ['lamp'],
+    context: null,
+  };
+  const questions = [...QUESTIONS.slice(0, 9), TYPED];
+  const nine = (): SessionRecord => ({ ...record(9), questions });
+  const pendingLast = (): SessionRecord => ({
+    ...nine(),
+    answers: [
+      ...answered(9),
+      { question_id: 'q9', is_correct: true, answer_string: 'lamp', verdict: 'alternative', retry_state: 'pending', retry_answer_string: null, retry_verdict: null },
+    ],
+  });
+
+  it('an alternative on the last card completes nothing and writes no progress', async () => {
+    const { service, calls } = world({ record: nine() });
+    const result = await service.submitAnswer('u1', SESSION, 'q9', { text: 'lamp' });
+    expect(calls.completed).toBe(0);
+    expect(calls.evidence).toBe(0);
+    expect(result).toMatchObject({ complete: false, status: 'ready', progress: [] });
+  });
+
+  it('the first answer sent again on a pending last card writes nothing either', async () => {
+    const { service, calls } = world({ record: pendingLast() });
+    await service.submitAnswer('u1', SESSION, 'q9', { text: 'lamp' });
+    expect(calls.completed).toBe(0);
+    expect(calls.evidence).toBe(0);
+  });
+
+  it("the last card's retry completes the session and writes its progress, once", async () => {
+    const { service, calls } = world({ record: pendingLast() });
+    const result = await service.submitAnswer('u1', SESSION, 'q9', { text: 'lantern' }, { retry: true });
+    expect(calls.completed).toBe(1);
+    expect(calls.steps).toEqual(['resolve', 'lock', 'evidence']);
+    expect(calls.snapshots).toHaveLength(1);
+    expect(result).toMatchObject({ complete: true, status: 'completed' });
+  });
+
+  it('a skip gives a pending retry up before it reads the evidence, and writes progress once', async () => {
+    const { service, calls } = world({ record: pendingLast() });
+    await service.skipSession('u1', SESSION);
+    expect(calls.steps).toEqual(['give up', 'lock', 'evidence']);
+    expect(calls.updated).toHaveLength(1);
+    expect(calls.snapshots).toHaveLength(1);
   });
 });

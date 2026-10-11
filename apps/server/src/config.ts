@@ -1,4 +1,4 @@
-import { PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
+import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
 
 // A pure function of its argument: it reads no global, so a test hands it a
 // literal object rather than mutating the process environment.
@@ -9,6 +9,8 @@ export type Config = {
   poolMax: number;
   translationTimeoutMs: number;
   sessionGenerationTimeoutMs: number;
+  contextCallTimeoutMs: number;
+  checkerCallTimeoutMs: number;
   speechTimeoutMs: number;
   judgeTimeoutMs: number;
   photoReadTimeoutMs: number;
@@ -49,11 +51,22 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     poolMax: Number(env.PG_POOL_MAX) || 5,
     translationTimeoutMs: Number(env.TRANSLATION_TIMEOUT_MS) || DEFAULT_TRANSLATION_TIMEOUT_MS,
     // Victor's cap: five minutes at most. The prepare-session job expires at
-    // twice SESSION_GENERATION_BUDGET_MS, so a longer call would be cut off by
-    // the expiry rather than by its own timeout.
+    // twice the sum of its calls' budgets (PREPARE_SESSION_CALL_BUDGETS_MS), so
+    // a call longer than its budget would be cut off by the expiry rather than
+    // by its own timeout: each is capped at its budget, never above.
     sessionGenerationTimeoutMs: Math.min(
       Number(env.SESSION_GENERATION_TIMEOUT_MS) || SESSION_GENERATION_BUDGET_MS,
       SESSION_GENERATION_BUDGET_MS,
+    ),
+    // Phase 34 (ruling R12). The context call after the batch, capped the same way.
+    contextCallTimeoutMs: Math.min(
+      Number(env.CONTEXT_CALL_TIMEOUT_MS) || CONTEXT_CALL_BUDGET_MS,
+      CONTEXT_CALL_BUDGET_MS,
+    ),
+    // Phase 34 (spec D5, ruling R12). The checker after the context call, capped the same way.
+    checkerCallTimeoutMs: Math.min(
+      Number(env.CHECKER_CALL_TIMEOUT_MS) || CHECKER_CALL_BUDGET_MS,
+      CHECKER_CALL_BUDGET_MS,
     ),
     speechTimeoutMs: Number(env.SPEECH_TIMEOUT_MS) || DEFAULT_SPEECH_TIMEOUT_MS,
     judgeTimeoutMs: Number(env.JUDGE_TIMEOUT_MS) || DEFAULT_JUDGE_TIMEOUT_MS,

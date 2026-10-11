@@ -46,9 +46,15 @@ export type CardEntry = {
   outcome: Outcome;
   /** What it sent: the option's index, the text, `pass:<kind>`, or `spoke:<text>`. */
   answer: string;
-  /** The server's verdict, which the bot learns from (ruling 24); absent on a choice. */
+  /** The server's verdict, which the bot learns from (ruling 24); absent on a choice. On a
+   *  card held for a second try (phase 34, spec D9), the one the server keeps for progress and
+   *  memory: the retry's when it was right, the first answer's otherwise. */
   verdict?: AnswerVerdict;
+  /** The first answer's: the session's score counts it, never the retry. */
   correct: boolean;
+  /** Phase 34 (spec D9). The second try at a card the server held: what was sent, as `answer`
+   *  is, and its own verdict. Absent when the card was not held. */
+  retry?: { answer: string; verdict?: AnswerVerdict };
   /** On a speaking card: what became of the attempt. */
   heard?: 'heard' | 'unheard' | 'no_voice';
 };

@@ -106,6 +106,10 @@ describe('POST /api/sessions/:id/speech', () => {
       await postJson(app, `/api/sessions/${sessionId}/speech`, { question_id: questions[1].id, mime_type: 'audio/aac', audio: AUDIO })
     ).json();
     expect(said).toMatchObject({ verdict: 'alternative' });
+    // Phase 34 (spec D9): the alternative holds the card for its second try; show the answer gives it up.
+    expect(said.next).toMatchObject({ question: { id: questions[1].id }, pending_retry: { answer: 'lamp' } });
+    const shown = await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[1].id, pass: 'show_answer', retry: true });
+    expect(shown.status).toBe(200);
     const done = await (
       await postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id: questions[2].id, option_index: 0 })
     ).json();

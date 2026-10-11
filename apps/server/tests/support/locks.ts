@@ -37,6 +37,34 @@ export function holdMergeOpen(db: Db, input: { lexemeId: string; survivorId: str
   });
 }
 
+/**
+ * Phase 34. The stale-form repair of one variant's single rendering, held open
+ * under its lexeme's lock: what a lookup's repair does, paused. `translation`
+ * unchanged is a repair that keeps the words; changed, one that rewords them.
+ */
+export function holdRepairOpen(
+  db: Db,
+  input: { lexemeId: string; variantId: string; senseId: string; translation: string },
+) {
+  return holdOpen(db, async (tx) => {
+    const dict = createDictRepo(tx);
+    await dict.lockLexemes([input.lexemeId]);
+    await dict.repairVariantRenderings({
+      variantId: input.variantId,
+      lexemeId: input.lexemeId,
+      userLanguageCode: 'he',
+      senseVersion: await dict.findSenseVersion({ lexemeId: input.lexemeId }),
+      lemmaForm: true,
+      senses: [
+        {
+          senseId: input.senseId, rank: 0, translation: input.translation, gloss: input.translation,
+          alternatives: [], glossAlternatives: [], definition: null, exampleSource: null, exampleTarget: null,
+        },
+      ],
+    });
+  });
+}
+
 /** Polls until some session of this database waits on a lock. */
 export async function waitForBlockedQuery(db: Db, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

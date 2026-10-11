@@ -14,6 +14,7 @@ const SAY: Question = {
   answer: 'gatto',
   lemma: 'gatto',
   alternatives: [],
+  context: null,
 };
 
 describe('attemptNotice (spec D7)', () => {

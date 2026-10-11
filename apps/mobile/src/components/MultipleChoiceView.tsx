@@ -3,9 +3,11 @@ import type { ChoiceQuestion } from '@lang-tutor/core/domain';
 import { useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { ContextLine } from '@/components/ContextLine';
 import { ListenPrompt } from '@/components/ListenPrompt';
 import { OptionButton, type OptionVisualState } from '@/components/OptionButton';
 import { SpeakButton } from '@/components/SpeakButton';
+import { contextLanguage } from '@/context';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
@@ -30,7 +32,10 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
   const reversed = question.type === 'reverse_choice';
   // The options are target words on a reversed or gap card: left to right.
   const optionsLtr = reversed || question.type === 'cloze_choice';
-  const partOfSpeech = question.type === 'reverse_choice' ? strings.partOfSpeech(question.part_of_speech) : undefined;
+  // Phase 34 (spec D10): a listening card shows it too, since a written
+  // sentence would spell out the word being heard.
+  const partOfSpeech =
+    question.type === 'reverse_choice' || question.type === 'listen_choice' ? strings.partOfSpeech(question.part_of_speech) : undefined;
   // All four buttons match the tallest, so a wrapped phrase does not leave the
   // set visually ragged. Reset on every new question.
   const [maxHeight, setMaxHeight] = useState(0);
@@ -67,6 +72,10 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
         <Text style={styles.partOfSpeech} testID="question-part-of-speech">
           {partOfSpeech}
         </Text>
+      ) : null}
+      {/* Phase 34 (spec D6): the sentence that pins the prompt's sense. */}
+      {'context' in question && question.context ? (
+        <ContextLine context={question.context} language={contextLanguage(question.type, language)} />
       ) : null}
       <View style={styles.options}>
         {question.options.map((option, index) => (

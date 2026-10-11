@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { FakeServer, choiceCard, readCard, sayCard } from './fakeServer.ts';
+import { FakeServer, choiceCard, meaningCard, readCard, sayCard, typedCard } from './fakeServer.ts';
 import { newLine, playDay } from './play.ts';
 import { ROSTER, type Profile } from './roster.ts';
 import { newState } from './state.ts';
@@ -34,7 +34,14 @@ async function play(server: FakeServer, synthesize: (text: string) => Promise<Bu
     line,
     day: 1,
   });
-  return { state, line, notes, steps: server.bodies.filter((b) => b.call.endsWith('next-step')).map((b) => b.body) };
+  return {
+    state,
+    line,
+    notes,
+    steps: server.bodies.filter((b) => b.call.endsWith('next-step')).map((b) => b.body),
+    judged: server.bodies.filter((b) => b.call.endsWith(' judged')).map((b) => b.body),
+    spoken: server.bodies.filter((b) => b.call.endsWith(' speech')).map((b) => b.body),
+  };
 }
 
 const speaking = () => [sayCard('q1', 'alpha'), readCard('q2', 'beta')];
@@ -110,4 +117,71 @@ test('a card the bot cannot match is answered at random and counted', async () =
   assert.equal(line.unmatched, 1);
   assert.equal(state.log[0].word, null);
   assert.equal(state.log[0].shown, 'stranger');
+});
+
+// Phase 34 (spec D9). A right answer that is not the saved word holds the card
+// for one second try: the response carries `pending_retry` and the same card.
+// The bot answers again with `retry`, as the app does, and logs and learns the
+// verdict the server keeps for progress and memory: the retry's when it was
+// right, else the first answer's. Before this, a bot sent the held card's
+// answer again without `retry`, got the hold replayed, and looped to MAX_CARDS.
+// Its recall of a word it has never practised is 0, so it answers alpha's card
+// with beta, its other saved word.
+
+test('a typed card held for its second try is answered again with retry, and the day goes on', async () => {
+  // beta is another word alpha's card accepts: an alternative, judged as the server judges it.
+  const server = new FakeServer({ cardsFor: () => [typedCard('q1', 'alpha', ['beta']), choiceCard('q2', 'beta')] });
+  const { steps, state, line } = await play(server, async () => null);
+
+  assert.deepEqual(steps.slice(0, 2), [
+    { question_id: 'q1', text: 'beta' },
+    { question_id: 'q1', text: 'beta', retry: true },
+  ]);
+  assert.equal(line.sessions, 1);
+  assert.equal(line.cards, 2);
+  // The score counts the first answer, which was right; the second try was another
+  // alternative, so the server keeps the first verdict.
+  assert.deepEqual(
+    state.log.map((c) => [c.card, c.verdict, c.correct, c.retry]),
+    [
+      ['q1', 'alternative', true, { answer: 'text:beta', verdict: 'alternative' }],
+      ['q2', undefined, state.log[1].correct, undefined],
+    ],
+  );
+});
+
+test('a judged card held for its second try is retried there, and the bot learns the retry it got right', async () => {
+  const server = new FakeServer({
+    cardsFor: () => [meaningCard('q1', 'alpha')],
+    judgedVerdict: (_text, retry) => (retry ? 'exact' : 'alternative'),
+  });
+  const { judged, state } = await play(server, async () => null);
+
+  assert.deepEqual(judged, [
+    { question_id: 'q1', text: 'משמעות-beta' },
+    { question_id: 'q1', text: 'משמעות-beta', retry: true },
+  ]);
+  assert.deepEqual(
+    state.log.map((c) => [c.verdict, c.correct, c.retry]),
+    [['exact', true, { answer: 'text:משמעות-beta', verdict: 'exact' }]],
+  );
+});
+
+test('a spoken card held for its second try is spoken again, and an unheard second try gives up with retry', async () => {
+  const server = new FakeServer({
+    cardsFor: () => [sayCard('q1', 'alpha'), choiceCard('q2', 'beta')],
+    speechVerdict: (retry) => (retry ? 'unheard' : 'alternative'),
+  });
+  const { spoken, steps, state, line } = await play(server, async () => Buffer.from('webm'));
+
+  assert.deepEqual(spoken, [
+    { question_id: 'q1', mime_type: 'audio/webm' },
+    { question_id: 'q1', mime_type: 'audio/webm', retry: true },
+  ]);
+  assert.deepEqual(steps[0], { question_id: 'q1', pass: 'show_answer', retry: true });
+  assert.equal(line.unheard, 1);
+  assert.equal(line.sessions, 1);
+  assert.deepEqual(state.log[0].retry, { answer: 'pass:show_answer', verdict: 'gave_up' });
+  // A second try given up leaves the first answer where it was: right, and the verdict kept.
+  assert.deepEqual([state.log[0].verdict, state.log[0].correct], ['alternative', true]);
 });

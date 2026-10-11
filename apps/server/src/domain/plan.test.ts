@@ -246,6 +246,26 @@ describe('planCards: the board (spec D6, D10)', () => {
     expect(plan.order.slice(start, start + 4)).toEqual([0, 2, 4, 5]);
   });
 
+  // Phase 34 (spec D3). 282213b7: main sat on board f8ccaf3d as מרכזי beside
+  // mainstream, which the dictionary also knows as מרכזי. Either pairing was right.
+  it('category A (282213b7): never puts main and mainstream on one board when mainstream is also מרכזי', () => {
+    const main = pick(0, { form: 'main', translation: 'מרכזי', meanings: ['מרכזי', 'ראשי', 'ים פתוח'] });
+    const mainstream = pick(1, { form: 'mainstream', translation: 'מיינסטרימי', meanings: ['מיינסטרימי', 'מרכזי'] });
+    const rest = [2, 3, 4, 5, 6].map((n) => pick(n));
+    const boardOf = (list: PlanPick[]) => {
+      const plan = planCards(list, ALL);
+      const start = plan.board!.start;
+      return plan.order.slice(start, start + 4);
+    };
+    // Seven new words, each a multiple choice: the board is main and the next
+    // three; mainstream stays a multiple choice of its own.
+    expect(boardOf([main, mainstream, ...rest])).toEqual([0, 2, 3, 4]);
+    // Either way round: the clash is found from the later word's meanings too.
+    expect(boardOf([mainstream, main, ...rest])).toEqual([0, 2, 3, 4]);
+    // Without what the dictionary knows, the two share the board, as on lane 0.
+    expect(boardOf([main, mainstream, ...rest].map(({ meanings: _, ...other }) => other))).toEqual([0, 1, 2, 3]);
+  });
+
   it('has no board when four distinct words cannot be found', () => {
     const list = Array.from({ length: 8 }, (_, i) => pick(i, { form: i < 3 ? `w${i}` : 'w0' }));
     const plan = planCards(list, ALL);

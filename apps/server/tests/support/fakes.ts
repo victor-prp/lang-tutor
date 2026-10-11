@@ -76,6 +76,8 @@ export function createFakeAppDeps(): AppDeps {
     translate: unreachable,
     renderLemma: unreachable,
     failLemmaRender: unreachable,
+    acceptRendering: unreachable,
+    failAcceptRendering: unreachable,
   };
   const vocabulary: VocabularyService = {
     save: unreachable,
@@ -129,9 +131,10 @@ export function createFakeBots(): NonNullable<AppDeps['bots']> {
  * Replies in order; the last reply repeats once the queue is down to one, so a
  * test that calls twice does not have to say so. An Error in the queue is
  * thrown rather than returned, which is how a provider failure is simulated
- * without a socket.
+ * without a socket. Phase 34: a function in the queue answers from the request,
+ * for a call whose answer must name what it was asked (the checker's).
  */
-export function createFakeLlmClient(...replies: (string | Error)[]) {
+export function createFakeLlmClient(...replies: (string | Error | ((request: LlmJsonRequest) => string))[]) {
   const calls: LlmJsonRequest[] = [];
   const queue = [...replies];
 
@@ -139,7 +142,7 @@ export function createFakeLlmClient(...replies: (string | Error)[]) {
     calls.push(request);
     const next = queue.length > 1 ? queue.shift()! : queue[0];
     if (next instanceof Error) throw next;
-    return next;
+    return typeof next === 'function' ? next(request) : next;
   };
 
   return Object.assign(client, { calls });
@@ -176,16 +179,17 @@ export function createFakeGlossRepo(userLanguageCode = 'he') {
   };
 }
 
-export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown }[] };
+export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown; options?: { singletonKey: string } }[] };
 
 /** Records what a use case enqueued. No queue behind it: a unit test asserts
- *  the call, the integration suite asserts the job row. */
+ *  the call, the integration suite asserts the job row. Options are recorded
+ *  only when given (phase 34). */
 export function createFakeJobRepo(): FakeJobRepo {
-  const enqueued: { name: string; data: unknown }[] = [];
+  const enqueued: FakeJobRepo['enqueued'] = [];
   return {
     enqueued,
-    enqueue: async (name, data) => {
-      enqueued.push({ name, data });
+    enqueue: async (name, data, options) => {
+      enqueued.push({ name, data, ...(options ? { options } : {}) });
     },
   };
 }
@@ -377,9 +381,15 @@ export function createFakeDictRepo(): FakeDictRepo {
     claimLemmaRenders: async () => [],
     claimSavedLemmaRenders: async () => [],
     releaseLemmaRender: async () => false,
+    // Phase 34 (spec D1, D13). The accept job's read and write, and the
+    // backfill's; a lookup reaches none of them.
+    findRenderingForAccept: async () => undefined,
+    storeAccepted: async () => false,
+    findUnacceptedSavedRenderings: async () => [],
     // Phase 31 (spec D12, D18). A session's reads; a lookup reaches neither.
     findGlossRenderings: async () => [],
     findSiblings: async () => [],
+    findKnownRight: async () => ({ meaningsByLexeme: new Map(), meaningsByGloss: new Map(), wordsByPrompt: new Map() }),
     repairVariantRenderings: async (input) => {
       repo.repaired.push({ variantId: input.variantId, senseVersion: input.senseVersion });
       return { needsMerge: false };

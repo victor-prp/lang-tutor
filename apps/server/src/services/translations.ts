@@ -8,7 +8,8 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
-import { MERGE_GLOSSES, RenderLemmaPayloadSchema } from '../domain/jobs';
+import { buildAcceptPrompt, parseAccept, validateAccept } from '../domain/accept';
+import { AcceptRenderingPayloadSchema, MERGE_GLOSSES, RenderLemmaPayloadSchema } from '../domain/jobs';
 import { guardScript } from '../domain/languages';
 import {
   buildPrompt,
@@ -33,7 +34,7 @@ import {
   type StaleLexeme,
 } from '../domain/dictionary';
 import { coversPair, markSaved } from '../domain/vocabulary';
-import { PairNotEnrolled, TranslationUnreadable } from '../errors';
+import { LlmUnavailable, PairNotEnrolled, TranslationUnreadable } from '../errors';
 import type { Logger } from '../logger';
 import type { RepairedRendering } from '../repo/dictionary';
 import { authorizeEnrollment } from './access';
@@ -474,10 +475,13 @@ export function createTranslationService({
   llm,
   transaction,
   logger,
+  now,
 }: {
   llm: LlmClient;
   transaction: Transaction;
   logger: Logger;
+  // Phase 34. Stamps the accept job's write (spec D1).
+  now: () => number;
 }) {
   const lookup = async (input: TranslationRequest): Promise<TranslationResponse> => {
     // The schema already trimmed this, but the service must not depend on the
@@ -905,6 +909,90 @@ export function createTranslationService({
       const { lexeme_id: lexemeId, user_language_code: userLanguageCode } = RenderLemmaPayloadSchema.parse(data);
       const released = await transaction((repos) => repos.dict.releaseLemmaRender({ lexemeId, userLanguageCode }));
       logger.info({ event: 'lemma_render_released', lexeme_id: lexemeId, user_language_code: userLanguageCode, released });
+    },
+
+    /**
+     * Phase 34 (spec D1, D2). The accept job: asks the model once for every right
+     * answer to one rendering and the form that agrees with it, and stores both
+     * with the stamp that says it ran. Read, call, write, each step its own: no
+     * transaction is held across the call (ADR 0001 R8). An answer with no
+     * other words is an answer: the rendering is stamped with an empty list and
+     * never paid for again. An empty reply, the provider's "no content", is no
+     * answer at all, so it is a failed attempt like an unreadable one: stamped,
+     * it would settle for good that the rendering has no other answers. Any
+     * throw is a failed attempt, which pg-boss retries and then dead-letters,
+     * unstamped, so the next session that picks the rendering asks again.
+     *
+     * The write takes the lexeme lock the stale-form repair's caller takes, and
+     * lands only on the rendering text it asked about: a repair that reworded it
+     * meanwhile wins, and the next session asks again for the new words.
+     */
+    acceptRendering: async (data: unknown): Promise<void> => {
+      const payload = AcceptRenderingPayloadSchema.parse(data);
+      const key = { variantId: payload.variant_id, senseId: payload.sense_id, userLanguageCode: payload.user_language_code };
+      const skip = (reason: string) => logger.info({ event: 'accept_skipped', ...payload, reason });
+      const rendering = await transaction((repos) => repos.dict.findRenderingForAccept(key));
+      if (!rendering) return skip('rendering_gone');
+      // Two requests for one rendering can only follow one another (the queue
+      // keeps one per key); the second finds the first's stamp.
+      if (rendering.acceptedAt !== null) return skip('already_accepted');
+
+      const target = rendering.languageCode as LanguageCode;
+      const explanation = rendering.userLanguageCode as LanguageCode;
+      const started = now();
+      let answers: string[];
+      let answerForm: string | null;
+      try {
+        const raw = await llm(
+          buildAcceptPrompt({
+            form: rendering.form,
+            lemma: rendering.lemma,
+            partOfSpeech: rendering.partOfSpeech,
+            rendering: rendering.rendering,
+            example: rendering.example,
+            exampleTranslation: rendering.exampleTranslation,
+            target,
+            explanation,
+          }),
+        );
+        if (raw === '') throw new LlmUnavailable('the model returned no content');
+        const answer = parseAccept(raw);
+        if (!answer) throw new TranslationUnreadable(raw.slice(0, 200));
+        ({ answers, answerForm } = validateAccept({ form: rendering.form, lemma: rendering.lemma, target, explanation }, answer));
+      } catch (error) {
+        logger.info({
+          event: 'accept_attempt_failed',
+          ...payload,
+          model_ms: now() - started,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+      const modelMs = now() - started;
+
+      const stored = await transaction(async (repos) => {
+        await repos.dict.lockLexemes([rendering.lexemeId]);
+        return repos.dict.storeAccepted({ ...key, translation: rendering.rendering, answers, answerForm, at: new Date(now()) });
+      });
+      if (!stored) return skip('rendering_changed');
+      logger.info({
+        event: 'accept_stored',
+        ...payload,
+        answer_count: answers.length,
+        has_answer_form: answerForm !== null,
+        model_ms: modelMs,
+      });
+    },
+
+    /**
+     * Phase 34 (spec D1). The accept job's dead letter: its retries are spent, or
+     * it expired. Nothing to write: the rendering stays unstamped, so the next
+     * session that picks it asks again, and its cards fall back on the session's
+     * own alternatives meanwhile.
+     */
+    failAcceptRendering: async (data: unknown): Promise<void> => {
+      const payload = AcceptRenderingPayloadSchema.parse(data);
+      logger.info({ event: 'accept_failed', ...payload });
     },
   };
 }
