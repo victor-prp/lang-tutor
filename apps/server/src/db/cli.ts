@@ -6,7 +6,7 @@ import { loadConfig, loadGeminiConfig, maintenanceUrlFor, redactDatabaseUrl } fr
 import { createConsoleLogger } from '../logger';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
-import { dropLaneDatabases, listLaneDatabases } from './lanes';
+import { dropLaneDatabases, findOrphans, listLaneDatabases } from './lanes';
 import { requestLemmaRenders, requestLemmaRendersOnStart } from './lemmaRenders';
 import { runMigrations } from './migrate';
 import { createAuthRepo } from '../repo/auth';
@@ -114,6 +114,45 @@ async function printLanes(databaseUrl: string): Promise<void> {
   }
 }
 
+/**
+ * `lane:list -- --orphans`: only the lanes whose worktree is gone, and the
+ * databases nothing claims. `--names` is the form scripts/lane-clean.sh reads,
+ * one tab-separated record per line, so the rule stays in findOrphans alone.
+ */
+async function printOrphans(databaseUrl: string, forScript: boolean): Promise<void> {
+  const admin = createDb(maintenanceUrlFor(databaseUrl), { max: 1, onError: () => {} });
+  try {
+    const { orphans, unowned } = findOrphans(await listLaneDatabases(admin.db), existsSync);
+    if (forScript) {
+      for (const { lane, databases } of orphans) {
+        console.log(`orphan\t${lane}\t${databases.join(' ')}`);
+      }
+      for (const name of unowned) console.log(`unowned\t${name}`);
+      return;
+    }
+
+    if (orphans.length === 0) {
+      console.log('No orphan lanes.');
+    } else {
+      console.log('Orphan lanes (every database points at a worktree that is gone):');
+      for (const { lane, databases } of orphans) {
+        console.log(`  ${lane.padEnd(30)} ${databases.join(', ')}`);
+      }
+    }
+    if (unowned.length > 0) {
+      console.log('\nNo lane stamp, so nothing says who owns them (never dropped automatically):');
+      for (const name of unowned) console.log(`  ${name}`);
+    }
+    if (orphans.length > 0) {
+      console.log(
+        '\nTo drop the orphan lanes: npm run lane:clean -- --orphans    (a plan; add --yes to act)',
+      );
+    }
+  } finally {
+    await admin.close();
+  }
+}
+
 async function dropLane(databaseUrl: string, lane: string): Promise<void> {
   const admin = createDb(maintenanceUrlFor(databaseUrl), { max: 1, onError: () => {} });
   try {
@@ -140,7 +179,11 @@ async function main(): Promise<void> {
   // migrate anything — `--lane-down` in particular is about to drop the very
   // database ensureDatabase would otherwise make.
   if (process.argv.includes('--lane-list')) {
-    await printLanes(databaseUrl);
+    if (process.argv.includes('--orphans')) {
+      await printOrphans(databaseUrl, process.argv.includes('--names'));
+    } else {
+      await printLanes(databaseUrl);
+    }
     return;
   }
   const downTarget = laneDownTarget(lane);

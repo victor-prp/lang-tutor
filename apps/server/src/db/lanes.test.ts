@@ -5,7 +5,14 @@ import { findOrphans, type LaneDatabaseRow } from './lanes';
 function stamped(name: string, lane: string, root: string): LaneDatabaseRow {
   return {
     name,
-    comment: `lane=${lane} | slot=3 | port=4001 | branch=b | stamped=2026-10-01T00:00:00.000Z | root=${root}`,
+    comment: [
+      `lane=${lane}`,
+      'slot=3',
+      'port=4001',
+      'branch=b',
+      'stamped=2026-10-01T00:00:00.000Z',
+      `root=${root}`,
+    ].join(' | '),
   };
 }
 
@@ -31,7 +38,10 @@ describe('findOrphans', () => {
 
   // lane:down drops every database of a lane, so one live stamp protects them all.
   it('leaves a lane when any of its databases points at a worktree that exists', () => {
-    const rows = [stamped('lang_tutor_mixed', 'mixed', GONE), stamped('lang_tutor_e2e_mixed', 'mixed', LIVE)];
+    const rows = [
+      stamped('lang_tutor_mixed', 'mixed', GONE),
+      stamped('lang_tutor_e2e_mixed', 'mixed', LIVE),
+    ];
     expect(findOrphans(rows, exists).orphans).toEqual([]);
   });
 

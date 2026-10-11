@@ -25,6 +25,7 @@ const MADE = [
 // A per-test database of a different lane, `lanes_probe_x`, whose name extends
 // this one's. A prefix match on `t_lanes_probe_` would take it.
 const NEIGHBOUR = `t_${LANE}_x_test_a_0badc0de`;
+const ALL = [...MADE, NEIGHBOUR];
 
 const STAMP = {
   lane: LANE,
@@ -54,10 +55,10 @@ async function createAll(): Promise<void> {
     // An anchored alternation rather than `= any($1)`: drizzle expands a JS array
     // into a parameter tuple, which is not what ANY wants on its right side.
     const present = await db.execute<{ datname: string }>(
-      sql`select datname from pg_database where datname ~ ${`^(${[...MADE, NEIGHBOUR].join('|')})$`}`,
+      sql`select datname from pg_database where datname ~ ${`^(${ALL.join('|')})$`}`,
     );
     const have = new Set(present.rows.map((row) => row.datname));
-    for (const name of [...MADE.slice(1), NEIGHBOUR]) {
+    for (const name of ALL.slice(1)) {
       if (!have.has(name)) await db.execute(sql.raw(`create database ${name}`));
     }
   });
@@ -67,7 +68,7 @@ async function createAll(): Promise<void> {
 // dropping these four in an afterEach, twenty times over this file, is what made
 // it fail roughly one run in three.
 beforeAll(createAll, DROP_TIMEOUT_MS);
-afterAll(() => dropDatabases([...MADE, NEIGHBOUR]), DROP_TIMEOUT_MS);
+afterAll(() => dropDatabases(ALL), DROP_TIMEOUT_MS);
 
 describe('listLaneDatabases', () => {
   it('reports each lane database with the stamp that says who owns it', async () => {

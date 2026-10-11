@@ -28,7 +28,7 @@
     "lint:arch": "bash scripts/check-adrs.sh",
     "release": "bash scripts/release.sh",
     "rollback": "bash scripts/release.sh --rollback",
-    "lane:list": "bash scripts/lane-env.sh npm run lane:list --workspace apps/server",
+    "lane:list": "bash scripts/lane-env.sh npm run lane:list --workspace apps/server --",
     "lane:down": "bash scripts/lane-env.sh npm run lane:down --workspace apps/server --",
     "lane:clean": "bash scripts/lane-clean.sh",
     "lane:abandon": "bash scripts/lane-abandon.sh",
