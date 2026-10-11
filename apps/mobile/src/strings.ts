@@ -173,6 +173,7 @@ export const strings = {
   updateRequiredTitle: 'יש גרסה חדשה',
   updateRequiredBody: 'הגרסה הזו של האפליקציה כבר לא עובדת מול השרת. צריך לעדכן אותה כדי להמשיך.',
   updateRequiredButton: 'לעדכון ב‑Google Play',
+  updateCheckAgain: 'לבדוק שוב',
   back: 'חזרה',
   // Phase 23. The speaker button's accessibility label.
   speak: 'השמעה',

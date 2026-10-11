@@ -13,10 +13,13 @@ const STORE_URL = 'market://details?id=ai.wordspal.app';
  * Shown in place of every screen once the server has answered 426. An
  * over-the-air update for this build may already fix it, so that is tried
  * first and reloads the app when it lands. Otherwise the fix is a newer build,
- * which only Play can install.
+ * which only Play can install. "Check again" retries the first step: a release
+ * that raises the API level answers 426 as soon as the server is live, minutes
+ * before its over-the-air update is published.
  */
 export function UpdateRequired({ updates }: { updates: AppUpdates }) {
   const [checking, setChecking] = useState(true);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
@@ -26,7 +29,12 @@ export function UpdateRequired({ updates }: { updates: AppUpdates }) {
     return () => {
       live = false;
     };
-  }, [updates]);
+  }, [updates, attempt]);
+
+  function checkAgain() {
+    setChecking(true);
+    setAttempt((n) => n + 1);
+  }
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']} testID="update-required">
@@ -46,6 +54,14 @@ export function UpdateRequired({ updates }: { updates: AppUpdates }) {
             style={styles.button}
           >
             <Text style={styles.buttonLabel}>{strings.updateRequiredButton}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            testID="update-required-check-again"
+            onPress={checkAgain}
+            style={styles.secondary}
+          >
+            <Text style={styles.secondaryLabel}>{strings.updateCheckAgain}</Text>
           </Pressable>
         </View>
       )}
@@ -71,4 +87,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonLabel: { color: colors.onPrimary, fontSize: fontSizes.md, lineHeight: lineHeights.md, fontWeight: '700' },
+  secondary: { paddingVertical: spacing.sm, alignItems: 'center' },
+  secondaryLabel: { color: colors.primary, fontSize: fontSizes.md, fontWeight: '700' },
 });
