@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { findOrphans, type LaneDatabaseRow } from './lanes';
+import { findOrphans, liveWorktreesOf, type LaneDatabaseRow } from './lanes';
 
 function stamped(name: string, lane: string, root: string): LaneDatabaseRow {
   return {
@@ -68,5 +68,26 @@ describe('findOrphans', () => {
   it('sorts orphan lanes by name', () => {
     const rows = [stamped('lang_tutor_b', 'b', GONE), stamped('lang_tutor_a', 'a', GONE)];
     expect(findOrphans(rows, exists).orphans.map((o) => o.lane)).toEqual(['a', 'b']);
+  });
+});
+
+describe('liveWorktreesOf', () => {
+  it("names the lane's worktree when it still exists, once per path", () => {
+    const rows = [
+      stamped('lang_tutor_x', 'x', LIVE),
+      stamped('lang_tutor_e2e_x', 'x', LIVE),
+      stamped('lang_tutor_y', 'y', LIVE),
+    ];
+    expect(liveWorktreesOf(rows, 'x', exists)).toEqual([LIVE]);
+  });
+
+  // `lane:down -- <orphan>` is what lane:list's ORPHAN line tells you to run.
+  it('names nothing when the worktree is gone', () => {
+    expect(liveWorktreesOf([stamped('lang_tutor_x', 'x', GONE)], 'x', exists)).toEqual([]);
+  });
+
+  it('names nothing for unstamped databases or another lane', () => {
+    const rows = [{ name: 'lang_tutor_x', comment: null }, stamped('lang_tutor_y', 'y', LIVE)];
+    expect(liveWorktreesOf(rows, 'x', exists)).toEqual([]);
   });
 });

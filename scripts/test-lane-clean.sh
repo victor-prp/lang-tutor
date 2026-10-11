@@ -184,6 +184,7 @@ oapply=$(cd "$MAIN" && PATH="$STUB_PATH" bash ./scripts/lane-clean.sh --yes --or
 calls=$(cat "$NPM_LOG")
 expect_contains "--yes drops the first orphan lane"          "lane:down -- gone_one" "$calls"
 expect_contains "and the second"                             "lane:down -- gone_two" "$calls"
+expect_contains "and asks it not to mention the worktree"    "gone_two --no-worktree-hint" "$calls"
 expect_absent   "and never an unstamped database"            "mystery" "$(printf '%s' "$calls" | grep lane:down)"
 expect_contains "and reports what it did"                    "Dropped 2 orphan lanes" "$oapply"
 checks=$((checks + 1))
