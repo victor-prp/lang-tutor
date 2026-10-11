@@ -63,6 +63,7 @@ import type {
   SessionSourceSchema,
   SessionStatusSchema,
   SessionViewSchema,
+  PendingRetrySchema,
   SkipSessionResponseSchema,
   TypedTranslationQuestionSchema,
   ListenChoiceQuestionSchema,
@@ -174,6 +175,7 @@ export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;
 export type LlmContext = z.infer<typeof LlmContextSchema>;
 export type LlmCheck = z.infer<typeof LlmCheckSchema>;
 export type SessionView = z.infer<typeof SessionViewSchema>;
+export type PendingRetry = z.infer<typeof PendingRetrySchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
 export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;
 export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;

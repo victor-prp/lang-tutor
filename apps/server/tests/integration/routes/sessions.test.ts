@@ -232,11 +232,16 @@ describe('POST /api/sessions/:id/next-step, phase 23', () => {
       context: null,
     });
 
-    const done = await step(questions[2].id, { text: 'lamp' });
+    // Phase 34 (spec D9): an alternative holds the card for its second try, and
+    // an empty retry gives it up.
+    const held = await (await step(questions[2].id, { text: 'lamp' })).json();
+    expect(held).toMatchObject({ complete: false, question: { id: questions[2].id }, pending_retry: { answer: 'lamp', wording: 'word' } });
+    const done = await step(questions[2].id, { text: '', retry: true });
     expect(done.status).toBe(200);
     const body = await done.json();
     expect(body).toMatchObject({ complete: true, score: { correct: 3, total: 3 }, missed_questions: [] });
-    // An alternative is right but says nothing about this sense: nothing rose.
+    // An alternative is right but says nothing about this sense, and a retry
+    // given up adds nothing: nothing rose.
     const lantern = body.progress.find((item: { form: string }) => item.form === 'lantern');
     expect(lantern).toMatchObject({ translation: 'פנס', raised: [] });
     const quill = body.progress.find((item: { form: string }) => item.form === 'quill');

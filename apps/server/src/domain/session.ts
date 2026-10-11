@@ -1,8 +1,18 @@
-import type { AnswerRecord, MissedQuestion, Position, Question, Score, SessionSource, SessionStatus } from '@lang-tutor/core/api';
+import type {
+  AnswerRecord,
+  MissedQuestion,
+  PendingRetry,
+  Position,
+  Question,
+  Score,
+  SessionSource,
+  SessionStatus,
+} from '@lang-tutor/core/api';
 import {
   SESSION_LENGTH,
   answerFits,
   evaluate,
+  evaluateRetry,
   isChoice,
   isSpeaking,
   missed,
@@ -41,15 +51,74 @@ export function newSessionRecord(
   };
 }
 
+/** Phase 34 (spec D9). The answer the session is held on for its second try:
+ *  the last one, while its retry is pending. Nothing is recorded after it until
+ *  the retry resolves it. */
+export function pendingAnswer(record: SessionRecord): AnswerRecord | undefined {
+  const last = record.answers[record.answers.length - 1];
+  return last?.retry_state === 'pending' ? last : undefined;
+}
+
+/** How many cards are behind the learner. A card held for its second try is
+ *  still in front of them: it is the current one. */
+function settled(record: SessionRecord): number {
+  return record.answers.length - (pendingAnswer(record) ? 1 : 0);
+}
+
 export function currentQuestion(record: SessionRecord): Question | undefined {
-  return record.questions[record.answers.length];
+  return record.questions[settled(record)];
 }
 
 export function positionOf(record: SessionRecord): Position {
   return {
-    position: Math.min(record.answers.length + 1, record.questions.length),
+    position: Math.min(settled(record) + 1, record.questions.length),
     total: record.questions.length,
   };
+}
+
+/** Phase 34 (spec D9). What the client needs to open the second try on the
+ *  current card: the first answer, and which line the card shows. Another sense
+ *  on a typed meaning card is another meaning; everywhere else, another word
+ *  the learner saved. Null when no retry is pending. */
+export function pendingRetryOf(record: SessionRecord): PendingRetry | null {
+  const pending = pendingAnswer(record);
+  const question = currentQuestion(record);
+  if (!pending || !question) return null;
+  return { answer: pending.answer_string, wording: question.type === 'typed_meaning' ? 'meaning' : 'word' };
+}
+
+/**
+ * Phase 34 (spec D9). What a request for `questionId` is, decided before anything
+ * is judged, so a route that pays for a model call makes it only for a fresh
+ * answer or a fresh retry:
+ * - `answer`: the first answer to the current card;
+ * - `retry`: the one retry of the card held for it, sent with `retry`;
+ * - `replay`: a request already recorded. Without `retry`, the first answer to
+ *   the card answered last, pending or not, which re-opens the second try a lost
+ *   response would have shown. With `retry`, that card's resolved retry;
+ * - `desync`: anything else. A retry where none was pending, and any other card
+ *   while one is.
+ */
+export type Attempt =
+  | { kind: 'answer'; question: Question }
+  | { kind: 'retry'; question: Question; pending: AnswerRecord }
+  | { kind: 'replay'; answer: AnswerRecord; of: 'answer' | 'retry' }
+  | { kind: 'desync' };
+
+export function attemptOf(record: SessionRecord, questionId: string, retry: boolean): Attempt {
+  const last = record.answers[record.answers.length - 1];
+  if (last && last.question_id === questionId) {
+    if (last.retry_state === 'pending') {
+      return retry
+        ? { kind: 'retry', question: record.questions[record.answers.length - 1], pending: last }
+        : { kind: 'replay', answer: last, of: 'answer' };
+    }
+    if (!retry) return { kind: 'replay', answer: last, of: 'answer' };
+    return last.retry_state === 'resolved' ? { kind: 'replay', answer: last, of: 'retry' } : { kind: 'desync' };
+  }
+  if (retry || pendingAnswer(record) || record.complete) return { kind: 'desync' };
+  const current = currentQuestion(record);
+  return current && current.id === questionId ? { kind: 'answer', question: current } : { kind: 'desync' };
 }
 
 export type StepOutcome =
@@ -57,7 +126,10 @@ export type StepOutcome =
   | { status: 'out_of_range' }
   | { status: 'wrong_answer_kind' }
   | { status: 'unheard' }
-  | { status: 'advanced' | 'replayed'; record: SessionRecord; justCompleted: boolean };
+  | { status: 'replayed'; record: SessionRecord; justCompleted: false }
+  // Phase 34 (spec D9): `recorded` says whether a new answer was appended or the
+  // pending one's retry resolved, which the caller writes differently.
+  | { status: 'advanced'; record: SessionRecord; justCompleted: boolean; recorded: 'answer' | 'retry' };
 
 // Records the answer to `questionId` if it is the session's current question,
 // advancing to the next one. If `questionId` is instead the question that was
@@ -72,45 +144,62 @@ export type StepOutcome =
 // reason a text sent to a choice, or an index sent to a typed card, is
 // `wrong_answer_kind` (phase 23). A replay ignores the answer entirely: the
 // record comes back unchanged, so there is nothing to judge.
-export function step(record: SessionRecord, questionId: string, answer: AnswerInput): StepOutcome {
-  if (record.complete) {
-    const lastQuestion = record.questions[record.questions.length - 1];
-    return questionId === lastQuestion.id
-      ? { status: 'replayed', record, justCompleted: false }
-      : { status: 'invalid_question' };
-  }
-
-  const expected = currentQuestion(record);
-  if (expected && questionId === expected.id) {
-    if (!answerFits(expected, answer)) return { status: 'wrong_answer_kind' };
-    // Phase 25 (spec D5). A transcript that is not the word records nothing:
-    // a recogniser's reject is no evidence and never wrong (phase 20).
-    if ('heard' in answer && isSpeaking(expected) && spokenVerdict(expected, answer.heard) === 'unheard') {
-      return { status: 'unheard' };
+//
+// Phase 34 (spec D9). An answer that opens a second try is recorded pending and
+// holds the session on its card: the card stays current, and the session does
+// not complete on it. `retry` resolves it, judged by the same rule as the first
+// answer and checked the same way. attemptOf decides which a request is.
+export function step(
+  record: SessionRecord,
+  questionId: string,
+  answer: AnswerInput,
+  { retry = false }: { retry?: boolean } = {},
+): StepOutcome {
+  const attempt = attemptOf(record, questionId, retry);
+  switch (attempt.kind) {
+    case 'desync':
+      return { status: 'invalid_question' };
+    case 'replay':
+      return { status: 'replayed', record, justCompleted: false };
+    case 'answer':
+    case 'retry': {
+      const refused = refusal(attempt.question, answer);
+      if (refused) return refused;
+      if (attempt.kind === 'answer') return advanced(record, [...record.answers, evaluate(attempt.question, answer)], 'answer');
+      const { answer_string, verdict } = evaluateRetry(attempt.question, answer);
+      const resolved: AnswerRecord = { ...attempt.pending, retry_state: 'resolved', retry_answer_string: answer_string, retry_verdict: verdict };
+      return advanced(record, [...record.answers.slice(0, -1), resolved], 'retry');
     }
-    if ('option_index' in answer && isChoice(expected)) {
-      if (answer.option_index < 0 || answer.option_index >= expected.options.length) {
-        return { status: 'out_of_range' };
-      }
+  }
+}
+
+/** Why `answer` cannot be recorded for `question`, or null when it can. */
+function refusal(question: Question, answer: AnswerInput): StepOutcome | null {
+  if (!answerFits(question, answer)) return { status: 'wrong_answer_kind' };
+  // Phase 25 (spec D5). A transcript that is not the word records nothing:
+  // a recogniser's reject is no evidence and never wrong (phase 20).
+  if ('heard' in answer && isSpeaking(question) && spokenVerdict(question, answer.heard) === 'unheard') {
+    return { status: 'unheard' };
+  }
+  if ('option_index' in answer && isChoice(question)) {
+    if (answer.option_index < 0 || answer.option_index >= question.options.length) {
+      return { status: 'out_of_range' };
     }
-    const answers = [...record.answers, evaluate(expected, answer)];
-    const complete = answers.length === record.questions.length;
-    const updated: SessionRecord = {
-      ...record,
-      answers,
-      complete,
-      status: complete ? 'completed' : record.status,
-    };
-    return { status: 'advanced', record: updated, justCompleted: complete };
   }
+  return null;
+}
 
-  const previouslyAnswered =
-    record.answers.length > 0 ? record.questions[record.answers.length - 1] : undefined;
-  if (previouslyAnswered && questionId === previouslyAnswered.id) {
-    return { status: 'replayed', record, justCompleted: false };
-  }
-
-  return { status: 'invalid_question' };
+/** The record with `answers`, complete once every card is answered and none is
+ *  held for its second try. */
+function advanced(record: SessionRecord, answers: AnswerRecord[], recorded: 'answer' | 'retry'): StepOutcome {
+  const complete = answers.length === record.questions.length && answers[answers.length - 1].retry_state !== 'pending';
+  const updated: SessionRecord = {
+    ...record,
+    answers,
+    complete,
+    status: complete ? 'completed' : record.status,
+  };
+  return { status: 'advanced', record: updated, justCompleted: complete, recorded };
 }
 
 export function sessionScore(record: SessionRecord): Score {

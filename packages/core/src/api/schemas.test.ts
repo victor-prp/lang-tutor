@@ -46,6 +46,7 @@ import {
 import type {
   MissedQuestion,
   NextStepResponse,
+  PendingRetry,
   Position,
   Question,
   Score,
@@ -277,8 +278,17 @@ describe('NextStepResponseSchema', () => {
       question: QUESTION,
       position,
       complete: false,
+      pending_retry: null,
     });
     expect(parsed.success).toBe(true);
+  });
+
+  // Phase 34 (spec D9). The card just answered, held for its second try.
+  it('parses a step held for a second try, and refuses one that does not say', () => {
+    const held = { session_id: 's1', question: QUESTION, position, complete: false };
+    expect(NextStepResponseSchema.safeParse({ ...held, pending_retry: { answer: 'abitazione', wording: 'word' } }).success).toBe(true);
+    expect(NextStepResponseSchema.safeParse({ ...held, pending_retry: { answer: 'abitazione', wording: 'sense' } }).success).toBe(false);
+    expect(NextStepResponseSchema.safeParse(held).success).toBe(false);
   });
 
   it('parses a completed step and narrows on `complete`', () => {
@@ -341,7 +351,7 @@ type Exact<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ?
 
 const nextStepShapeIsPinned: Exact<
   NextStepResponse,
-  | { session_id: string; question: Question; position: Position; complete: false }
+  | { session_id: string; question: Question; position: Position; complete: false; pending_retry: PendingRetry | null }
   | {
       session_id: string;
       question: null;

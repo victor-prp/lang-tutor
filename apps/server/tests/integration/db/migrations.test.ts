@@ -18,6 +18,9 @@ import { migrationsUpTo } from '../../support/migrations';
  * inserts rows the old schema allowed, then runs the rest. The name comes from
  * testDbName, so globalSetup's sweep reclaims it.
  */
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
+
 const opened: { close: () => Promise<void> }[] = [];
 
 afterEach(async () => {
@@ -284,13 +287,14 @@ describe('0015_question_types', () => {
       const before = await repo.loadSession(session.id);
       expect(before!.questions.map((q) => q.type)).toEqual(['multiple_choice', 'multiple_choice']);
       expect(before!.questions[0]).toMatchObject({ question: 'kite', options: ['ב', 'עפיפון', 'ג', 'א'], correct_option: 1 });
-      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון' }]);
+      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון', ...NO_RETRY }]);
 
       await repo.insertAnswer(session.id, 1, 'q2', { displayIndex: 2 });
       expect((await repo.loadSession(session.id))!.answers[1]).toEqual({
         question_id: 'q2',
         is_correct: false,
         answer_string: 'ב',
+        ...NO_RETRY,
       });
     });
   });
@@ -347,7 +351,7 @@ describe('0016_listening_variety', () => {
       const repo = createSessionRepo(tx);
       const before = await repo.loadSession(session.id);
       expect(before!.questions.map((q) => q.type)).toEqual(['multiple_choice', 'typed_translation']);
-      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון' }]);
+      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון', ...NO_RETRY }]);
 
       await repo.insertAnswer(session.id, 1, 'q2', { text: 'kite', verdict: 'exact' });
       expect((await repo.loadSession(session.id))!.answers[1]).toMatchObject({ question_id: 'q2', is_correct: true });
@@ -466,19 +470,20 @@ describe('0017_speaking_cards', () => {
       const repo = createSessionRepo(tx);
       const before = await repo.loadSession(session.id);
       expect(before!.answers.slice(0, 5)).toEqual([
-        { question_id: 'q1', is_correct: true, answer_string: 'עפיפון' },
-        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact' },
-        { question_id: 'q3', is_correct: true, answer_string: 'kyte', verdict: 'near_miss' },
-        { question_id: 'q3', is_correct: true, answer_string: 'toy', verdict: 'alternative' },
-        { question_id: 'q3', is_correct: false, answer_string: 'bird', verdict: 'wrong' },
+        { question_id: 'q1', is_correct: true, answer_string: 'עפיפון', ...NO_RETRY },
+        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact', ...NO_RETRY },
+        { question_id: 'q3', is_correct: true, answer_string: 'kyte', verdict: 'near_miss', ...NO_RETRY },
+        // Phase 34 (spec D9): an alternative stored before the second try holds nothing.
+        { question_id: 'q3', is_correct: true, answer_string: 'toy', verdict: 'alternative', ...NO_RETRY },
+        { question_id: 'q3', is_correct: false, answer_string: 'bird', verdict: 'wrong', ...NO_RETRY },
       ]);
 
       await repo.insertAnswer(session.id, 5, 'q1', { displayIndex: 1 });
       await repo.insertAnswer(session.id, 6, 'q3', { text: 'kite', verdict: 'exact' });
       const after = await repo.loadSession(session.id);
       expect(after!.answers.slice(5, 7)).toEqual([
-        { question_id: 'q1', is_correct: false, answer_string: 'א' },
-        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact' },
+        { question_id: 'q1', is_correct: false, answer_string: 'א', ...NO_RETRY },
+        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact', ...NO_RETRY },
       ]);
     });
   });

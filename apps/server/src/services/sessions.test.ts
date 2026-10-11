@@ -37,6 +37,9 @@ describe('repos', () => {
       transition: notStubbed,
       findLatest: notStubbed,
       countListSessions: notStubbed,
+      // Phase 34 (spec D9).
+      resolveRetry: notStubbed,
+      resolvePendingRetry: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
       findEnrollmentId: async () => 'e1',
       ...overrides,

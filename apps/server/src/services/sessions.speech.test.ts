@@ -24,6 +24,9 @@ const READ: Question = { id: 'r1', type: 'read_aloud', vocab_term_id: 'l1', ques
 const CHOICE: Question = { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null };
 const AUDIO = 'A'.repeat(2_000);
 
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
+
 const record = (answers: SessionRecord['answers'] = []): SessionRecord => ({
   user_id: 'u1',
   questions: [READ, CHOICE],
@@ -36,12 +39,16 @@ const record = (answers: SessionRecord['answers'] = []): SessionRecord => ({
 
 function setup(transcriber: ReturnType<typeof createFakeTranscriber>, loaded: SessionRecord = record()) {
   const inserted: unknown[] = [];
+  const resolved: unknown[] = [];
   const logger = createFakeLogger();
   const session = stub<SessionRepo>({
     loadSession: async () => loaded,
     findEnrollmentId: async () => 'e1',
     insertAnswer: async (...args) => {
       inserted.push(args);
+    },
+    resolveRetry: async (...args) => {
+      resolved.push(args);
     },
   });
   const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
@@ -58,7 +65,7 @@ function setup(transcriber: ReturnType<typeof createFakeTranscriber>, loaded: Se
     transcriber,
     judge: createFakeLlmClient(''),
   });
-  return { service, inserted, logger };
+  return { service, inserted, resolved, logger };
 }
 
 const attempt = { questionId: 'r1', audio: AUDIO, mimeType: 'audio/aac' };
@@ -96,14 +103,14 @@ describe('answerBySpeech (spec D5)', () => {
     // Phase 29: another learner's session is refused, not hidden as an unknown one.
     await expect(service.answerBySpeech('u2', SESSION, attempt)).rejects.toBeInstanceOf(AccessDenied);
     await expect(service.answerBySpeech('u1', SESSION, { ...attempt, questionId: 'c2' })).rejects.toBeInstanceOf(QuestionDesynced);
-    const atChoice = setup(transcriber, record([{ question_id: 'r1', is_correct: true, answer_string: 'gatto', verdict: 'understood' }]));
+    const atChoice = setup(transcriber, record([{ question_id: 'r1', is_correct: true, answer_string: 'gatto', verdict: 'understood', ...NO_RETRY }]));
     await expect(atChoice.service.answerBySpeech('u1', SESSION, { ...attempt, questionId: 'c2' })).rejects.toBeInstanceOf(AnswerKindMismatch);
     expect(transcriber.calls).toHaveLength(0);
   });
 
   it('replays an answered speaking card without a model call', async () => {
     const transcriber = createFakeTranscriber('{"heard":"gatto"}');
-    const answered = record([{ question_id: 'r1', is_correct: true, answer_string: 'gatto', verdict: 'understood' }]);
+    const answered = record([{ question_id: 'r1', is_correct: true, answer_string: 'gatto', verdict: 'understood', ...NO_RETRY }]);
     const { service, inserted } = setup(transcriber, answered);
     expect(await service.answerBySpeech('u1', SESSION, attempt)).toMatchObject({ heard: 'gatto', verdict: 'understood' });
     expect(transcriber.calls).toHaveLength(0);
@@ -112,7 +119,7 @@ describe('answerBySpeech (spec D5)', () => {
 
   it('treats a recorded pass as a stale upload, without a model call (ruling R1)', async () => {
     const transcriber = createFakeTranscriber('{"heard":"gatto"}');
-    const passed = record([{ question_id: 'r1', is_correct: false, answer_string: '', verdict: 'skipped' }]);
+    const passed = record([{ question_id: 'r1', is_correct: false, answer_string: '', verdict: 'skipped', ...NO_RETRY }]);
     const { service } = setup(transcriber, passed);
     await expect(service.answerBySpeech('u1', SESSION, attempt)).rejects.toBeInstanceOf(QuestionDesynced);
     expect(transcriber.calls).toHaveLength(0);
@@ -202,5 +209,85 @@ describe('a pass (spec D5, D8)', () => {
     const result = await service.submitAnswer('u1', SESSION, 'r1', { pass: 'skip' });
     expect(inserted).toEqual([[SESSION, 0, 'r1', { text: '', verdict: 'skipped' }]]);
     expect(result.answers[0]).toMatchObject({ is_correct: false, verdict: 'skipped' });
+  });
+});
+
+// Phase 34 (spec D9). Another right word holds say the translation open for one more try.
+describe('answerBySpeech, the second try', () => {
+  const SAY: Question = {
+    id: 's1',
+    type: 'say_translation',
+    vocab_term_id: 'l1',
+    question: 'פנס',
+    part_of_speech: 'noun',
+    answer: 'lantern',
+    lemma: 'lantern',
+    alternatives: ['lamp'],
+    context: null,
+  };
+  const first = { question_id: 's1', is_correct: true, answer_string: 'lamp', verdict: 'alternative' as const };
+  const at = (answers: SessionRecord['answers']): SessionRecord => ({ ...record(answers), questions: [SAY, CHOICE] });
+  const pending = () => at([{ ...first, retry_state: 'pending', retry_answer_string: null, retry_verdict: null }]);
+  const resolvedAs = (text: string, verdict: 'understood' | 'gave_up') =>
+    at([{ ...first, retry_state: 'resolved', retry_answer_string: text, retry_verdict: verdict }]);
+  const clip = { questionId: 's1', audio: AUDIO, mimeType: 'audio/aac' };
+
+  it('records another right word as pending, and holds the session on the card', async () => {
+    const { service, inserted } = setup(createFakeTranscriber('{"heard":"lamp"}'), at([]));
+    const result = await service.answerBySpeech('u1', SESSION, clip);
+    expect(result).toMatchObject({ heard: 'lamp', verdict: 'alternative' });
+    expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'lamp', verdict: 'alternative', pending: true }]]);
+    expect(result.session?.answers[0]).toMatchObject({ retry_state: 'pending' });
+  });
+
+  // Review Focus 1.
+  it('replays the first clip sent again while pending, without a call', async () => {
+    const transcriber = createFakeTranscriber('{"heard":"lantern"}');
+    const { service, inserted, resolved } = setup(transcriber, pending());
+    const result = await service.answerBySpeech('u1', SESSION, clip);
+    expect(result).toMatchObject({ heard: 'lamp', verdict: 'alternative' });
+    expect(result.session?.answers[0]).toMatchObject({ retry_state: 'pending' });
+    expect(transcriber.calls).toHaveLength(0);
+    expect(inserted).toEqual([]);
+    expect(resolved).toEqual([]);
+  });
+
+  it('transcribes a retry once more, judges it as the first was, and resolves the card', async () => {
+    const transcriber = createFakeTranscriber('{"heard":"the lantern"}');
+    const { service, resolved } = setup(transcriber, pending());
+    const result = await service.answerBySpeech('u1', SESSION, { ...clip, retry: true });
+    expect(result).toMatchObject({ heard: 'the lantern', verdict: 'understood' });
+    expect(transcriber.calls).toHaveLength(1);
+    expect(resolved).toEqual([[SESSION, 0, { text: 'the lantern', verdict: 'understood' }]]);
+  });
+
+  it('records nothing for a retry that was not understood: the card stays open', async () => {
+    const { service, resolved } = setup(createFakeTranscriber('{"heard":"cane"}'), pending());
+    expect(await service.answerBySpeech('u1', SESSION, { ...clip, retry: true })).toEqual({ heard: 'cane', verdict: 'unheard', session: null });
+    expect(resolved).toEqual([]);
+  });
+
+  it('replays a retry sent again without a call, and treats one after a give-up as stale', async () => {
+    const transcriber = createFakeTranscriber('{"heard":"lamp"}');
+    const again = await setup(transcriber, resolvedAs('the lantern', 'understood')).service.answerBySpeech('u1', SESSION, { ...clip, retry: true });
+    expect(again).toMatchObject({ heard: 'the lantern', verdict: 'understood' });
+    await expect(
+      setup(transcriber, resolvedAs('', 'gave_up')).service.answerBySpeech('u1', SESSION, { ...clip, retry: true }),
+    ).rejects.toBeInstanceOf(QuestionDesynced);
+    expect(transcriber.calls).toHaveLength(0);
+  });
+
+  it('refuses another card while one is pending, and a retry where none is, without a call', async () => {
+    const transcriber = createFakeTranscriber('{"heard":"lantern"}');
+    await expect(setup(transcriber, pending()).service.answerBySpeech('u1', SESSION, { ...clip, questionId: 'c2' })).rejects.toBeInstanceOf(QuestionDesynced);
+    await expect(setup(transcriber, at([])).service.answerBySpeech('u1', SESSION, { ...clip, retry: true })).rejects.toBeInstanceOf(QuestionDesynced);
+    expect(transcriber.calls).toHaveLength(0);
+  });
+
+  it('gives up on a retry with show the answer, through next-step', async () => {
+    const { service, resolved } = setup(createFakeTranscriber(''), pending());
+    const result = await service.submitAnswer('u1', SESSION, 's1', { pass: 'show_answer' }, { retry: true });
+    expect(resolved).toEqual([[SESSION, 0, { text: '', verdict: 'gave_up' }]]);
+    expect(result.answers[0]).toMatchObject({ is_correct: true, retry_state: 'resolved', retry_verdict: 'gave_up' });
   });
 });

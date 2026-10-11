@@ -16,6 +16,8 @@ import {
   SESSION_LENGTH,
   answerFits,
   evaluate,
+  evaluateRetry,
+  evidenceVerdict,
   isChoice,
   isJudged,
   missed,
@@ -41,6 +43,9 @@ function makeQuestion(n: number): MultipleChoiceQuestion {
 }
 
 const POOL: MultipleChoiceQuestion[] = Array.from({ length: 16 }, (_, i) => makeQuestion(i));
+
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
 
 describe('pickQuestions', () => {
   it('returns exactly the requested number of questions', () => {
@@ -83,6 +88,7 @@ describe('evaluate', () => {
       question_id: 'q1',
       is_correct: true,
       answer_string: 'a1',
+      ...NO_RETRY,
     });
   });
 
@@ -92,6 +98,7 @@ describe('evaluate', () => {
       question_id: 'q2',
       is_correct: false,
       answer_string: 'd2',
+      ...NO_RETRY,
     });
   });
 });
@@ -156,6 +163,7 @@ describe('evaluate, typed', () => {
       is_correct: true,
       answer_string: 'casa',
       verdict: 'exact',
+      ...NO_RETRY,
     });
     expect(evaluate(typed, { text: 'abitazione' })).toMatchObject({ is_correct: true, verdict: 'alternative' });
     expect(evaluate(typed, { text: '' })).toMatchObject({ is_correct: false, verdict: 'wrong' });
@@ -215,7 +223,7 @@ describe('phase 24 types', () => {
     expect(evaluate(dictation, { text: 'parlare' })).toMatchObject({ is_correct: false, verdict: 'wrong' });
     expect(evaluate(dictation, { text: 'parlo' })).toMatchObject({ is_correct: true, verdict: 'exact' });
     expect(evaluate(tiles, { text: 'casa' })).toMatchObject({ is_correct: true, verdict: 'exact' });
-    expect(evaluate(listen, { option_index: 1 })).toEqual({ question_id: 'l1', is_correct: false, answer_string: 'דלת' });
+    expect(evaluate(listen, { option_index: 1 })).toEqual({ question_id: 'l1', is_correct: false, answer_string: 'דלת', ...NO_RETRY });
   });
 
   it('names the right answer: the meaning, the heard form, the built word', () => {
@@ -280,6 +288,7 @@ describe('phase 25 speaking cards', () => {
       is_correct: true,
       answer_string: 'il gatto',
       verdict: 'understood',
+      ...NO_RETRY,
     });
     expect(evaluate(SAY, { heard: 'parlare' })).toMatchObject({ is_correct: true, verdict: 'understood' });
     expect(evaluate(SAY, { heard: 'dico' })).toMatchObject({ is_correct: true, verdict: 'alternative' });
@@ -301,8 +310,8 @@ describe('phase 25 speaking cards', () => {
   });
 
   it('a skip is neither right nor counted; show the answer is a failure', () => {
-    expect(evaluate(READ, { pass: 'skip' })).toEqual({ question_id: 'r1', is_correct: false, answer_string: '', verdict: 'skipped' });
-    expect(evaluate(SAY, { pass: 'show_answer' })).toEqual({ question_id: 's1', is_correct: false, answer_string: '', verdict: 'gave_up' });
+    expect(evaluate(READ, { pass: 'skip' })).toEqual({ question_id: 'r1', is_correct: false, answer_string: '', verdict: 'skipped', ...NO_RETRY });
+    expect(evaluate(SAY, { pass: 'show_answer' })).toEqual({ question_id: 's1', is_correct: false, answer_string: '', verdict: 'gave_up', ...NO_RETRY });
   });
 
   it('a typed answer to say the translation is judged as a typed card', () => {
@@ -354,6 +363,7 @@ describe('typed_meaning (phase 27 D3)', () => {
       is_correct: true,
       answer_string: 'לשוחח',
       verdict: 'exact',
+      ...NO_RETRY,
     });
     expect(evaluate(MEANING, { text: 'ספר', judged: 'alternative' })).toMatchObject({ is_correct: true, verdict: 'alternative' });
     expect(evaluate(MEANING, { text: 'לאכול', judged: 'wrong' })).toMatchObject({ is_correct: false, verdict: 'wrong' });
@@ -444,5 +454,68 @@ describe('phase 27 Part B cards', () => {
       context: null,
     };
     expect(answerFits(say, { text: 'parlare', judged: 'exact' })).toBe(false);
+  });
+});
+
+// Phase 34 (spec D9). A right answer that is not the saved word earns one more try.
+describe('the second try (phase 34, spec D9)', () => {
+  it('marks an alternative pending on the five cards that offer a second try', () => {
+    expect(evaluate(typed, { text: 'abitazione' })).toEqual({
+      question_id: 't1',
+      is_correct: true,
+      answer_string: 'abitazione',
+      verdict: 'alternative',
+      retry_state: 'pending',
+      retry_answer_string: null,
+      retry_verdict: null,
+    });
+    expect(evaluate(SAY, { heard: 'dico' })).toMatchObject({ verdict: 'alternative', retry_state: 'pending' });
+    expect(evaluate(SAY, { text: 'dico' })).toMatchObject({ verdict: 'alternative', retry_state: 'pending' });
+    expect(evaluate(MEANING, { text: 'לשוחח', judged: 'alternative' })).toMatchObject({ retry_state: 'pending' });
+    expect(evaluate(CLOZE_TYPED, { text: 'chiacchieravamo' })).toMatchObject({ retry_state: 'pending' });
+    expect(evaluate(TRANSLATION, { text: 'Voglio riservare un tavolo', judged: 'alternative' })).toMatchObject({ retry_state: 'pending' });
+  });
+
+  it('opens none on any other verdict, and none on a choice or a dictation', () => {
+    expect(evaluate(typed, { text: 'casa' })).toMatchObject({ retry_state: null, retry_answer_string: null, retry_verdict: null });
+    expect(evaluate(typed, { text: 'porta' })).toMatchObject({ retry_state: null });
+    expect(evaluate(SAY, { pass: 'show_answer' })).toMatchObject({ retry_state: null });
+    expect(evaluate(makeQuestion(1), { option_index: 0 })).toEqual({
+      question_id: 'q1',
+      is_correct: true,
+      answer_string: 'a1',
+      retry_state: null,
+      retry_answer_string: null,
+      retry_verdict: null,
+    });
+    expect(evaluate(dictation, { text: 'parlo' })).toMatchObject({ verdict: 'exact', retry_state: null });
+  });
+
+  it('judges a retry as the first answer was, and takes an empty text or show the answer as giving up', () => {
+    expect(evaluateRetry(typed, { text: 'casa' })).toEqual({ answer_string: 'casa', verdict: 'exact' });
+    expect(evaluateRetry(typed, { text: 'porta' })).toEqual({ answer_string: 'porta', verdict: 'wrong' });
+    expect(evaluateRetry(typed, { text: '  ' })).toEqual({ answer_string: '  ', verdict: 'gave_up' });
+    expect(evaluateRetry(SAY, { heard: 'parlo' })).toEqual({ answer_string: 'parlo', verdict: 'understood' });
+    expect(evaluateRetry(SAY, { pass: 'show_answer' })).toEqual({ answer_string: '', verdict: 'gave_up' });
+    expect(evaluateRetry(MEANING, { text: 'לדבר', judged: 'exact' })).toEqual({ answer_string: 'לדבר', verdict: 'exact' });
+    // The judged route's rule calls an empty text wrong; as a retry it is a give-up.
+    expect(evaluateRetry(MEANING, { text: '', judged: 'wrong' })).toEqual({ answer_string: '', verdict: 'gave_up' });
+  });
+
+  it('scores the first answer, whatever its retry came to', () => {
+    const first = evaluate(typed, { text: 'abitazione' });
+    const resolved = { ...first, retry_state: 'resolved' as const, retry_answer_string: 'porta', retry_verdict: 'wrong' as const };
+    expect(score([typed], [resolved])).toEqual({ correct: 1, total: 1 });
+    expect(missed([typed], [resolved])).toEqual([]);
+  });
+
+  it("counts the retry for progress when it resolved right, and the first answer otherwise", () => {
+    expect(evidenceVerdict('alternative', 'exact')).toBe('exact');
+    expect(evidenceVerdict('alternative', 'near_miss')).toBe('near_miss');
+    expect(evidenceVerdict('alternative', 'understood')).toBe('understood');
+    for (const retry of ['wrong', 'gave_up', 'alternative', 'skipped'] as const) {
+      expect(evidenceVerdict('alternative', retry)).toBe('alternative');
+    }
+    expect(evidenceVerdict('exact', null)).toBe('exact');
   });
 });

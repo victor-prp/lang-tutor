@@ -57,12 +57,16 @@ const record = (questions: Question[] = [MEANING, CHOICE], answers: SessionRecor
 
 function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRecord = record(), context: typeof CONTEXT = CONTEXT) {
   const inserted: unknown[] = [];
+  const resolved: unknown[] = [];
   const logger = createFakeLogger();
   const session = stub<SessionRepo>({
     loadSession: async () => loaded,
     findEnrollmentId: async () => 'e1',
     insertAnswer: async (...args) => {
       inserted.push(args);
+    },
+    resolveRetry: async (...args) => {
+      resolved.push(args);
     },
   });
   const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
@@ -81,10 +85,13 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
     transcriber: createFakeTranscriber(''),
     judge,
   });
-  return { service, inserted, logger };
+  return { service, inserted, resolved, logger };
 }
 
 const answer = (text: string) => ({ questionId: 'm1', text });
+
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
 
 describe('answerJudged (spec D3)', () => {
   it('rules an empty answer wrong, without a call', async () => {
@@ -147,7 +154,7 @@ describe('answerJudged (spec D3)', () => {
 
   it('replays a judged answer without a model call', async () => {
     const judge = createFakeLlmClient('{"verdict":"wrong"}');
-    const answered = record([MEANING, CHOICE], [{ question_id: 'm1', is_correct: true, answer_string: 'לשריין', verdict: 'exact' }]);
+    const answered = record([MEANING, CHOICE], [{ question_id: 'm1', is_correct: true, answer_string: 'לשריין', verdict: 'exact', ...NO_RETRY }]);
     const { service, inserted } = setup(judge, answered);
     const result = await service.answerJudged('u1', SESSION, answer('לשריין'));
     expect(result.verdict).toBe('exact');
@@ -157,7 +164,7 @@ describe('answerJudged (spec D3)', () => {
 
   it('reports the stored verdict when an overlapping request was recorded first', async () => {
     const judge = createFakeLlmClient('{"verdict":"right"}');
-    const stored = record([MEANING, CHOICE], [{ question_id: 'm1', is_correct: false, answer_string: 'ספר', verdict: 'wrong' }]);
+    const stored = record([MEANING, CHOICE], [{ question_id: 'm1', is_correct: false, answer_string: 'ספר', verdict: 'wrong', ...NO_RETRY }]);
     let loads = 0;
     const session = stub<SessionRepo>({
       loadSession: async () => (++loads === 1 ? record() : stored),
@@ -187,7 +194,7 @@ describe('answerJudged (spec D3)', () => {
   it('replays a completed session\'s last answer, and refuses any other card, without a call', async () => {
     const judge = createFakeLlmClient('{"verdict":"right"}');
     const done: SessionRecord = {
-      ...record([CHOICE, MEANING], [{ question_id: 'm1', is_correct: true, answer_string: 'לשריין', verdict: 'exact' }]),
+      ...record([CHOICE, MEANING], [{ question_id: 'm1', is_correct: true, answer_string: 'לשריין', verdict: 'exact', ...NO_RETRY }]),
       complete: true,
       completed_at: 1_000,
       status: 'completed',
@@ -236,5 +243,72 @@ describe('answerJudged (spec D3)', () => {
       expect((await service.answerJudged('u1', SESSION, sentence('I want to bok a table'))).verdict).toBe('near_miss');
       expect(inserted).toEqual([[SESSION, 0, 's1', { text: 'I want to bok a table', verdict: 'near_miss' }]]);
     });
+  });
+});
+
+// Phase 34 (spec D9). Another sense holds a meaning card open for one more try.
+describe('answerJudged, the second try', () => {
+  const first = { question_id: 'm1', is_correct: true, answer_string: 'ספר', verdict: 'alternative' as const };
+  const pending = () => record([MEANING, CHOICE], [{ ...first, retry_state: 'pending', retry_answer_string: null, retry_verdict: null }]);
+  const resolved = (retry: 'exact' | 'gave_up') =>
+    record([MEANING, CHOICE], [{ ...first, retry_state: 'resolved', retry_answer_string: retry === 'exact' ? 'לשריין' : '', retry_verdict: retry }]);
+  const retry = (text: string) => ({ questionId: 'm1', text, retry: true });
+
+  it('records another sense as pending, and holds the session on the card', async () => {
+    const { service, inserted } = setup(createFakeLlmClient('{"verdict":"other_sense"}'));
+    const result = await service.answerJudged('u1', SESSION, answer('ספר'));
+    expect(result.verdict).toBe('alternative');
+    expect(inserted).toEqual([[SESSION, 0, 'm1', { text: 'ספר', verdict: 'alternative', pending: true }]]);
+    expect(result.session.answers[0]).toMatchObject({ retry_state: 'pending' });
+  });
+
+  // Review Focus 1.
+  it('replays the first answer sent again while pending, without a call', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const { service, inserted, resolved: written } = setup(judge, pending());
+    const result = await service.answerJudged('u1', SESSION, answer('ספר'));
+    expect(result.verdict).toBe('alternative');
+    expect(result.session.answers[0]).toMatchObject({ retry_state: 'pending' });
+    expect(judge.calls).toHaveLength(0);
+    expect(inserted).toEqual([]);
+    expect(written).toEqual([]);
+  });
+
+  it('judges the retry with one more call, as the first answer was, and resolves the card', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const { service, inserted, resolved: written } = setup(judge, pending());
+    const result = await service.answerJudged('u1', SESSION, retry('לשריין'));
+    expect(result.verdict).toBe('exact');
+    expect(judge.calls).toHaveLength(1);
+    expect(JSON.parse(judge.calls[0].user)).toMatchObject({ saved_meaning: 'להזמין', answer: 'לשריין' });
+    expect(inserted).toEqual([]);
+    expect(written).toEqual([[SESSION, 0, { text: 'לשריין', verdict: 'exact' }]]);
+    expect(result.session.answers[0]).toMatchObject({ retry_state: 'resolved', retry_verdict: 'exact' });
+  });
+
+  it('gives up on an empty retry without a call, and answers it wrong as an empty text is', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const { service, resolved: written } = setup(judge, pending());
+    expect((await service.answerJudged('u1', SESSION, retry(''))).verdict).toBe('wrong');
+    expect(judge.calls).toHaveLength(0);
+    expect(written).toEqual([[SESSION, 0, { text: '', verdict: 'gave_up' }]]);
+  });
+
+  it('replays a retry sent again, without a call', async () => {
+    const judge = createFakeLlmClient('{"verdict":"wrong"}');
+    expect((await setup(judge, resolved('exact')).service.answerJudged('u1', SESSION, retry('x'))).verdict).toBe('exact');
+    expect((await setup(judge, resolved('gave_up')).service.answerJudged('u1', SESSION, retry(''))).verdict).toBe('wrong');
+    // And the first answer sent after it: its own verdict.
+    expect((await setup(judge, resolved('exact')).service.answerJudged('u1', SESSION, answer('ספר'))).verdict).toBe('alternative');
+    expect(judge.calls).toHaveLength(0);
+  });
+
+  it('refuses another card while one is pending, and a retry where none is, without a call', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    await expect(setup(judge, pending()).service.answerJudged('u1', SESSION, { ...answer('x'), questionId: 'c2' })).rejects.toBeInstanceOf(QuestionDesynced);
+    await expect(setup(judge).service.answerJudged('u1', SESSION, retry('לשריין'))).rejects.toBeInstanceOf(QuestionDesynced);
+    const exact = record([MEANING, CHOICE], [{ question_id: 'm1', is_correct: true, answer_string: 'להזמין', verdict: 'exact', ...NO_RETRY }]);
+    await expect(setup(judge, exact).service.answerJudged('u1', SESSION, retry('לשריין'))).rejects.toBeInstanceOf(QuestionDesynced);
+    expect(judge.calls).toHaveLength(0);
   });
 });

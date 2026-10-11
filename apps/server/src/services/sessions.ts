@@ -1,4 +1,4 @@
-import type { Enrollment, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
+import type { AnswerRecord, Enrollment, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
   LIVE_DIMENSIONS,
@@ -69,7 +69,7 @@ import type { SessionRecord, SessionSummary } from '../domain/session';
 import {
   SESSION_LENGTH,
   askableRenderings,
-  currentQuestion,
+  attemptOf,
   isCurrent,
   isOpen,
   newSessionRecord,
@@ -176,6 +176,19 @@ async function authorizeSession(
   const enrollmentId = await repos.session.findEnrollmentId(sessionId);
   if (!enrollmentId) throw new SessionNotFound(sessionId);
   return authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
+}
+
+/**
+ * Phase 34 (spec D9). The verdict a judged answer was answered with: its first
+ * answer's, or its retry's. A retry given up was an empty text, which a judged
+ * card answers `wrong`, as on a first answer; it is stored as `gave_up`. Null
+ * when the stored answer is not one this route gave.
+ */
+function judgedVerdictOf(answer: AnswerRecord, of: 'answer' | 'retry'): TypedVerdict | null {
+  const stored = of === 'retry' ? answer.retry_verdict : answer.verdict;
+  if (of === 'retry' && stored === 'gave_up') return 'wrong';
+  const parsed = TypedVerdictSchema.safeParse(stored);
+  return parsed.success ? parsed.data : null;
 }
 
 /** What a completed session did, as badges. Empty for any other status. */
@@ -319,7 +332,8 @@ export function createSessionService({
      * Ends a preparing or ready session. Idempotent on `skipped`. A job still
      * generating for it finds the status changed at its final, conditional
      * write and writes nothing. A skip counts the answers given before it toward
-     * progress.
+     * progress. Phase 34 (spec D9): a card held for its second try is given up
+     * first, as "show the answer" would, so the skip writes progress as before.
      */
     skipSession: async (actorUserId: string, sessionId: string): Promise<void> => {
       const skipped = await transaction(async (repos) => {
@@ -330,7 +344,10 @@ export function createSessionService({
         if (!isOpen(state.status)) throw new SessionNotSkippable(sessionId, state.status);
         const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped');
         // Phase 20. The answers given before the skip are real answers.
-        if (changed) await recordProgress(repos, sessionId);
+        if (changed) {
+          await repos.session.resolvePendingRetry(sessionId, { text: '', verdict: 'gave_up' });
+          await recordProgress(repos, sessionId);
+        }
         return changed;
       });
       if (skipped) logger.info({ event: 'session_skipped', session_id: sessionId });
@@ -338,12 +355,14 @@ export function createSessionService({
 
     /** `answer` is an option index for a choice and the typed text for a
      *  typed card (phase 23). A typed answer is judged here, by the same
-     *  judgeTyped the app ran for its feedback, and stored with its verdict. */
+     *  judgeTyped the app ran for its feedback, and stored with its verdict.
+     *  Phase 34 (spec D9): `retry` is the second try at a card held for one. */
     submitAnswer: async (
       actorUserId: string,
       sessionId: string,
       questionId: string,
       answer: AnswerInput,
+      { retry = false }: { retry?: boolean } = {},
     ): Promise<SessionResult> => {
       // The transaction returns its outcome and the log fires after it resolves:
       // a commit that fails after completeSession must not leave a log claiming a
@@ -361,7 +380,7 @@ export function createSessionService({
 
         // Four failure modes, four domain outcomes, four errors — the domain
         // decides what is wrong, this layer only names it.
-        const outcome = step(loaded, questionId, answer);
+        const outcome = step(loaded, questionId, answer, { retry });
         if (outcome.status === 'invalid_question') throw new QuestionDesynced(questionId);
         if (outcome.status === 'wrong_answer_kind') throw new AnswerKindMismatch(questionId);
         if (outcome.status === 'out_of_range') {
@@ -376,15 +395,25 @@ export function createSessionService({
           return { result: { ...outcome.record, progress }, justCompleted: false };
         }
 
-        const recorded = outcome.record.answers[loaded.answers.length];
-        await repos.session.insertAnswer(
-          sessionId,
-          loaded.answers.length,
-          questionId,
-          'option_index' in answer
-            ? { displayIndex: answer.option_index }
-            : { text: recorded.answer_string, verdict: recorded.verdict! },
-        );
+        // Phase 34 (spec D9). A retry resolves the pending answer in its place; a
+        // first answer is a new row, held for its second try when it opens one.
+        // Either may complete the session: the last card's answer only when it
+        // opens none, since a pending answer never completes one.
+        if (outcome.recorded === 'retry') {
+          const position = loaded.answers.length - 1;
+          const resolved = outcome.record.answers[position];
+          await repos.session.resolveRetry(sessionId, position, { text: resolved.retry_answer_string!, verdict: resolved.retry_verdict! });
+        } else {
+          const recorded = outcome.record.answers[loaded.answers.length];
+          await repos.session.insertAnswer(
+            sessionId,
+            loaded.answers.length,
+            questionId,
+            'option_index' in answer
+              ? { displayIndex: answer.option_index }
+              : { text: recorded.answer_string, verdict: recorded.verdict!, ...(recorded.retry_state === 'pending' ? { pending: true as const } : {}) },
+          );
+        }
 
         if (outcome.justCompleted) {
           await repos.session.completeSession(sessionId);
@@ -409,12 +438,18 @@ export function createSessionService({
      * understood answer is recorded through submitAnswer, exactly as a
      * next-step is. A transcript that is not the word writes nothing.
      * Another learner's session is refused before all of it (phase 29).
+     *
+     * Phase 34 (spec D9). A clip with `retry` at a card held for its second
+     * try is the retry, transcribed and judged as the first clip was. Without
+     * it, a clip there replays the first answer, pending, as a network retry of
+     * the first clip must. So the model is called at most twice per card.
      */
     answerBySpeech: async (
       actorUserId: string,
       sessionId: string,
-      input: { questionId: string; audio: string; mimeType: string },
+      input: { questionId: string; audio: string; mimeType: string; retry?: boolean },
     ): Promise<SpeechResult> => {
+      const retry = input.retry ?? false;
       type Checked = { replay: SpeechResult } | { current: SpeakingQuestion; language: LanguageCode };
       const checked = await transaction(async (repos): Promise<Checked> => {
         const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
@@ -423,26 +458,27 @@ export function createSessionService({
         if (loaded.status !== 'ready' && loaded.status !== 'completed') {
           throw new SessionNotReady(sessionId, loaded.status);
         }
-        // A retry of an attempt already recorded: the stored answer, no call.
-        const last = loaded.answers[loaded.answers.length - 1];
-        if (last && last.question_id === input.questionId) {
+        const attempt = attemptOf(loaded, input.questionId, retry);
+        if (attempt.kind === 'desync') throw new QuestionDesynced(input.questionId);
+        // An attempt already recorded: the stored answer, or its retry, no call.
+        if (attempt.kind === 'replay') {
+          const { answer, of } = attempt;
+          const verdict = of === 'retry' ? answer.retry_verdict : answer.verdict;
           // Ruling R1: only a recorded spoken answer is replayed; any other
           // answer to this card means this upload is stale.
-          if (last.verdict !== 'understood' && last.verdict !== 'alternative') {
+          if (verdict !== 'understood' && verdict !== 'alternative') {
             throw new QuestionDesynced(input.questionId);
           }
           const progress = await progressOf(repos, sessionId, loaded);
           const replay: SpeechResult = {
-            heard: last.answer_string,
-            verdict: last.verdict === 'alternative' ? 'alternative' : 'understood',
+            heard: (of === 'retry' ? answer.retry_answer_string : answer.answer_string) ?? '',
+            verdict,
             session: { ...loaded, progress },
           };
           return { replay };
         }
-        const current = currentQuestion(loaded);
-        if (!current || current.id !== input.questionId) throw new QuestionDesynced(input.questionId);
-        if (!isSpeaking(current)) throw new AnswerKindMismatch(input.questionId);
-        return { current, language: enrolled.target_language as LanguageCode };
+        if (!isSpeaking(attempt.question)) throw new AnswerKindMismatch(input.questionId);
+        return { current: attempt.question, language: enrolled.target_language as LanguageCode };
       });
       if ('replay' in checked) return checked.replay;
 
@@ -490,9 +526,11 @@ export function createSessionService({
         ...(transcribed ? { transcribe_ms: transcribeMs } : {}),
         bytes: Math.floor((input.audio.length * 3) / 4),
         mime_type: input.mimeType,
+        // Phase 34 (spec D9): a second try's call, the one more a card may cost.
+        ...(retry ? { retry: true } : {}),
       });
       const session =
-        verdict === 'unheard' ? null : await service.submitAnswer(actorUserId, sessionId, input.questionId, { heard });
+        verdict === 'unheard' ? null : await service.submitAnswer(actorUserId, sessionId, input.questionId, { heard }, { retry });
       return { heard, verdict, session };
     },
 
@@ -504,12 +542,18 @@ export function createSessionService({
      * transaction (ADR 0001 R8); and the verdict is recorded through
      * submitAnswer, exactly as a next-step is. Another learner's session is
      * refused before all of it (phase 29).
+     *
+     * Phase 34 (spec D9). A text with `retry` at a card held for its second try
+     * is the retry, judged as the first answer was; an empty one gives up, by
+     * rule. Without it, a text there replays the first answer, pending. So the
+     * judge is called at most twice per card.
      */
     answerJudged: async (
       actorUserId: string,
       sessionId: string,
-      input: { questionId: string; text: string },
+      input: { questionId: string; text: string; retry?: boolean },
     ): Promise<JudgedResult> => {
+      const retry = input.retry ?? false;
       type Checked =
         | { replay: JudgedResult }
         | { current: JudgedQuestion; context: JudgeContext };
@@ -520,16 +564,16 @@ export function createSessionService({
         if (loaded.status !== 'ready' && loaded.status !== 'completed') {
           throw new SessionNotReady(sessionId, loaded.status);
         }
-        // A retry of an answer already recorded: the stored verdict, no call.
+        const attempt = attemptOf(loaded, input.questionId, retry);
+        if (attempt.kind === 'desync') throw new QuestionDesynced(input.questionId);
+        // An answer already recorded, or its retry: the stored verdict, no call.
         // Only this endpoint answers a judged card, so any typed verdict is one.
-        const last = loaded.answers[loaded.answers.length - 1];
-        if (last && last.question_id === input.questionId) {
-          const verdict = TypedVerdictSchema.safeParse(last.verdict);
-          if (!verdict.success) throw new QuestionDesynced(input.questionId);
-          return { replay: { verdict: verdict.data, session: { ...loaded, progress: await progressOf(repos, sessionId, loaded) } } };
+        if (attempt.kind === 'replay') {
+          const verdict = judgedVerdictOf(attempt.answer, attempt.of);
+          if (verdict === null) throw new QuestionDesynced(input.questionId);
+          return { replay: { verdict, session: { ...loaded, progress: await progressOf(repos, sessionId, loaded) } } };
         }
-        const current = currentQuestion(loaded);
-        if (!current || current.id !== input.questionId) throw new QuestionDesynced(input.questionId);
+        const current = attempt.question;
         if (!isJudged(current)) throw new AnswerKindMismatch(input.questionId);
         const found = await repos.question.findJudgeContext(current.id);
         if (!found) throw new SessionNotFound(sessionId);
@@ -567,12 +611,14 @@ export function createSessionService({
         judged_by: judgedBy,
         ...(judgedBy === 'model' ? { judge_ms: now() - started } : {}),
         chars: text.length,
+        // Phase 34 (spec D9): a second try's verdict, the one more a card may cost.
+        ...(retry ? { retry: true } : {}),
       });
-      const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, { text, judged: verdict });
+      const session = await service.submitAnswer(actorUserId, sessionId, input.questionId, { text, judged: verdict }, { retry });
       // Two overlapping requests may both have paid for a call; step replayed
       // the first, so report the verdict stored for this card, not our own.
-      const stored = TypedVerdictSchema.safeParse(session.answers.find((a) => a.question_id === input.questionId)?.verdict);
-      return { verdict: stored.success ? stored.data : verdict, session };
+      const stored = session.answers.find((a) => a.question_id === input.questionId);
+      return { verdict: (stored && judgedVerdictOf(stored, retry ? 'retry' : 'answer')) ?? verdict, session };
     },
 
     /**

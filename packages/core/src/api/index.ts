@@ -79,6 +79,7 @@ export type {
   SessionSource,
   SessionStatus,
   SessionView,
+  PendingRetry,
   SkipSessionResponse,
   SpeechAnswerRequest,
   SpeechAnswerResponse,

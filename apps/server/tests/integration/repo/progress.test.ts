@@ -453,3 +453,45 @@ describe('phase 27: a judged answer as evidence', () => {
     ]);
   });
 });
+
+// Phase 34 (spec D9). Progress reads the retry when it resolved right, and the
+// first answer otherwise.
+describe('phase 34: a resolved retry as evidence', () => {
+  async function retried(retry: { text: string; verdict: 'exact' | 'near_miss' | 'wrong' | 'gave_up' } | null) {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'lantern', translations: ['פנס'] });
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [{ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'lantern', lemma: 'lantern', translation: 'פנס' }],
+      alternatives: ['lamp'],
+      types: ['typed_translation'],
+    });
+    await withTx(t.db, async (tx) => {
+      const sessions = createSessionRepo(tx);
+      await sessions.insertAnswer(sessionId, 0, questions[0].id, { text: 'lamp', verdict: 'alternative', pending: true });
+      if (retry) await sessions.resolveRetry(sessionId, 0, retry);
+    });
+    const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
+    return evidence!.answers.map((answer) => ('verdict' in answer ? answer.verdict : null));
+  }
+
+  it('reads a retry resolved right as its own verdict', async () => {
+    expect(await retried({ text: 'lantern', verdict: 'exact' })).toEqual(['exact']);
+  });
+
+  it('reads a retry resolved as a near miss as its own verdict', async () => {
+    expect(await retried({ text: 'lantren', verdict: 'near_miss' })).toEqual(['near_miss']);
+  });
+
+  it('reads a retry given up as the first answer', async () => {
+    expect(await retried({ text: '', verdict: 'gave_up' })).toEqual(['alternative']);
+  });
+
+  it('reads a wrong retry as the first answer', async () => {
+    expect(await retried({ text: 'kettle', verdict: 'wrong' })).toEqual(['alternative']);
+  });
+
+  it('reads a pending answer as the first answer', async () => {
+    expect(await retried(null)).toEqual(['alternative']);
+  });
+});

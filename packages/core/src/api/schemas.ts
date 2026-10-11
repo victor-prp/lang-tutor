@@ -262,6 +262,13 @@ export const AnswerRecordSchema = z.object({
   answer_string: z.string(),
   // Phase 23. Present for a typed answer; phase 25, for a spoken one too.
   verdict: AnswerVerdictSchema.optional(),
+  // Phase 34 (spec D9). A right answer that is not the saved word holds its card
+  // for one more try: `pending` until the retry comes, then `resolved` with the
+  // retry's text and verdict. Null on every other answer. The score reads the
+  // first answer; progress reads the retry when it was right.
+  retry_state: z.enum(['pending', 'resolved']).nullable(),
+  retry_answer_string: z.string().nullable(),
+  retry_verdict: AnswerVerdictSchema.nullable(),
 });
 
 export const ScoreSchema = z.object({
@@ -344,6 +351,15 @@ export const CreateSessionResponseSchema = z.object({
   source: SessionSourceSchema,
 });
 
+// Phase 34 (spec D9). The current card is held for its second try: `answer` is
+// the first answer, which was right but is not the saved word, and `wording`
+// which line the card shows, another saved word or (typed meaning) another
+// meaning. The retry is sent with `retry: true`.
+export const PendingRetrySchema = z.object({
+  answer: z.string(),
+  wording: z.enum(['word', 'meaning']),
+});
+
 // Phase 19. One session as resume and the poll read it. `question` is the
 // current one while the session is ready and unfinished, and null otherwise.
 export const SessionViewSchema = z.object({
@@ -352,26 +368,36 @@ export const SessionViewSchema = z.object({
   source: SessionSourceSchema,
   position: PositionSchema,
   question: QuestionSchema.nullable(),
+  // Phase 34 (spec D9). Set while `question` is held for its second try, so a
+  // resumed session opens on it; null otherwise.
+  pending_retry: PendingRetrySchema.nullable(),
   // Phase 20. What a completed session did to the saved words; empty otherwise.
   progress: z.array(SessionProgressItemSchema),
 });
 
 // Phase 23. A choice is answered by index, a typed card by its text. Empty
 // text is "show me the answer", which is wrong.
+//
+// Phase 34 (spec D9). `retry: true` is the second try at a card held for one:
+// judged as the first answer was, except that an empty text or `show_answer`
+// gives up. Absent, a request for the held card replays its first answer.
 export const NextStepRequestSchema = z.union([
   z.object({
     question_id: z.string().min(1),
     option_index: z.number().int().nonnegative(),
+    retry: z.boolean().optional(),
   }),
   z.object({
     question_id: z.string().min(1),
     text: z.string().max(100),
+    retry: z.boolean().optional(),
   }),
   // Phase 25 (spec D5). A speaking card answered without audio: passed, or
   // "show me the answer".
   z.object({
     question_id: z.string().min(1),
     pass: z.enum(['skip', 'show_answer']),
+    retry: z.boolean().optional(),
   }),
 ]);
 
@@ -384,6 +410,9 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     question: QuestionSchema,
     position: PositionSchema,
     complete: z.literal(false),
+    // Phase 34 (spec D9). Set when `question` is the card just answered, held
+    // for its second try; null when it is the next card.
+    pending_retry: PendingRetrySchema.nullable(),
   }),
   z.object({
     session_id: z.string(),
@@ -407,6 +436,9 @@ export const SpeechAnswerRequestSchema = z.object({
   question_id: z.string().min(1),
   mime_type: SpeechMimeTypeSchema,
   audio: z.string().min(1).max(270_000),
+  // Phase 34 (spec D9). The second try at a card held for one. Absent, a clip
+  // for the held card replays its first answer.
+  retry: z.boolean().optional(),
 });
 
 // How an attempt was judged. `unheard` records nothing (spec D5).
@@ -427,6 +459,9 @@ export const SpeechAnswerResponseSchema = z.object({
 export const JudgedAnswerRequestSchema = z.object({
   question_id: z.string().min(1),
   text: z.string().max(300),
+  // Phase 34 (spec D9). The second try at a card held for one; an empty text
+  // gives up. Absent, a text for the held card replays its first answer.
+  retry: z.boolean().optional(),
 });
 
 export const JudgedAnswerResponseSchema = z.object({

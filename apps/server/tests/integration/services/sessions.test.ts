@@ -40,6 +40,9 @@ import {
 // The other half of this file's tests is src/services/sessions.test.ts, which
 // covers the cases the repository-factory seam makes reachable without Postgres.
 
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
+
 let t: TestDb;
 let logger: FakeLogger;
 let service: SessionService;
@@ -229,6 +232,7 @@ describe('submitAnswer', () => {
       question_id: question.id,
       is_correct: true,
       answer_string: question.options[question.correct_option],
+      ...NO_RETRY,
     });
     expect(after.complete).toBe(false);
   });

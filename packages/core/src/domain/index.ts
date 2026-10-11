@@ -4,6 +4,8 @@ export {
   SESSION_LENGTH,
   answerFits,
   evaluate,
+  evaluateRetry,
+  evidenceVerdict,
   isChoice,
   isJudged,
   isSpeaking,

@@ -1,5 +1,5 @@
 import type { AnswerVerdict } from '@lang-tutor/core/api';
-import type { Dimension } from '@lang-tutor/core/domain';
+import { evidenceVerdict, type Dimension } from '@lang-tutor/core/domain';
 import { sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
@@ -79,10 +79,11 @@ export function createProgressRepo(tx: Tx) {
         options: QuestionOption[] | null;
         selected_option_position: number | null;
         verdict: string | null;
+        retry_verdict: string | null;
         day: string;
         last_answered_at: string;
       }>(sql`
-        SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict,
+        SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict,
                ((max(a.answered_at) OVER ()) AT TIME ZONE 'UTC')::date::text AS day,
                (max(a.answered_at) OVER ())::text AS last_answered_at
         FROM answers a
@@ -98,8 +99,10 @@ export function createProgressRepo(tx: Tx) {
         lastAnsweredAt: first.last_answered_at,
         answers: rows.rows.map((row): AnsweredQuestion => {
           // Phase 23 and 24. A text answer carries the verdict it was shown.
+          // Phase 34 (spec D9): its retry's, when the retry resolved right.
           if (TEXT_TYPES.has(row.type)) {
-            return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict: row.verdict as AnswerVerdict };
+            const verdict = evidenceVerdict(row.verdict as AnswerVerdict, row.retry_verdict as AnswerVerdict | null);
+            return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict };
           }
           return {
             glossId: row.gloss_id,
