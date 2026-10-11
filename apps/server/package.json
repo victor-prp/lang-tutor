@@ -33,6 +33,7 @@
     "build": "node scripts/build.mjs",
     "test": "jest --selectProjects unit",
     "db:claim-account": "tsx src/db/cli.ts --claim-account",
+    "db:bots:create": "tsx src/db/cli.ts --create-bots",
     "test:integration": "jest --selectProjects integration && jest --selectProjects integration-serial",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

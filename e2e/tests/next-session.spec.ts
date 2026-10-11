@@ -4,8 +4,8 @@ import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
-import { answerChoice, generationStub, readCard, rightOption } from './support/cards';
-import { clearGemini, expectGeminiPayload } from './support/mockServer';
+import { answerChoice, expectGeneration, readCard, rightOption } from './support/cards';
+import { clearGemini } from './support/mockServer';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -41,7 +41,7 @@ test('past the seed, a session is built from the saved words', async ({ page, re
 
   // 4. Create questions. The job turns the session ready, and home's poll sees it.
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStub());
+  await expectGeneration(request);
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('start-button')).toHaveText('התחל');
@@ -50,10 +50,10 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   await tapUntil(page, 'start-button', 'progress-label');
   const words: string[] = [];
   for (let position = 1; position <= 4; position++) {
-    // Ordinal 0, no voices, speaking off: 1 choice, 2 reverse, 3 typed, and 4 a
-    // meaning card (run 1 prefers listen_choice, which falls through past
-    // read_aloud to typed_meaning).
-    const card = await readCard(page, position, 4, position === 4 ? 'meaning' : undefined);
+    // Whatever type each card is: four words new to the memory model all take
+    // a choice of meanings today (phase 35, spec D6), but this test is about
+    // the words, not the types.
+    const card = await readCard(page, position, 4);
     if (card.kind === 'choice' || card.kind === 'meaning') {
       words.push(card.prompt);
       if (card.kind === 'choice') await answerChoice(page, card, true);

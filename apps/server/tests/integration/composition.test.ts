@@ -52,6 +52,7 @@ describe('createServerDeps', () => {
       photoReadTimeoutMs: 120_000,
       identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
       webDistDir: null,
+      botSecret: null,
       boss: unstartedBoss(t.db),
     });
     expect(deps.logger).toBe(logger);

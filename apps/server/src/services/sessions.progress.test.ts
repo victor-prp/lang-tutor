@@ -7,8 +7,11 @@ import { testRng } from '../../tests/support/testRng';
 import type { ProgressRow, SnapshotRead } from '../domain/progress';
 import type { SessionRecord, SessionState } from '../domain/session';
 import type { EnrollmentRepo } from '../repo/enrollments';
+import type { MemoryRow } from '../domain/memoryUpdate';
+import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo, SessionEvidence } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
+import type { UserRepo } from '../repo/users';
 import { createSessionService } from './sessions';
 
 const SESSION = '22222222-2222-2222-2222-222222222222';
@@ -69,21 +72,29 @@ const CHANGE = [
 function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null; rows?: ProgressRow[] }) {
   const calls = {
     completed: 0,
+    // Phase 35. The practice_day each ending wrote.
+    endedOn: [] as string[],
     evidence: 0,
     asked: [] as string[][],
     updated: [] as ProgressRow[][],
     snapshots: [] as unknown[][],
+    // Phase 35. The memory rows each ending upserted.
+    memory: [] as MemoryRow[][],
     // Phase 31. The order of the share lock and the evidence read.
     steps: [] as string[],
   };
   const session = stub<SessionRepo>({
     loadSession: async () => opts.record,
     insertAnswer: async () => {},
-    completeSession: async () => {
+    completeSession: async (_id, day) => {
       calls.completed += 1;
+      calls.endedOn.push(day);
     },
     findState: async () => READY,
-    transition: async () => true,
+    transition: async (_id, _from, _to, day) => {
+      if (day !== undefined) calls.endedOn.push(day);
+      return true;
+    },
     findEnrollmentId: async () => 'e1',
   });
   const progress = stub<ProgressRepo>({
@@ -107,10 +118,18 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     },
     findSnapshot: async () => SNAPSHOT,
   });
+  const memory = stub<MemoryRepo>({
+    findRows: async () => [],
+    upsertRows: async (input) => {
+      calls.memory.push(input.rows);
+    },
+  });
   const service = createSessionService({
     transaction: createFakeTransaction({
       session,
       progress,
+      memory,
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' }) }),
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
     }),
     rng: testRng(7),
@@ -128,11 +147,17 @@ describe('progress when a session ends', () => {
     const { service, calls } = world({ record: record(9) });
     const result = await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
     expect(calls.completed).toBe(1);
+    expect(calls.endedOn).toEqual(['1970-01-01']);
     expect(calls.asked).toEqual([['s1', 'sX']]);
     expect(calls.updated).toEqual([
       [{ glossId: 's1', dimension: 'written_receptive', level: 2, lastStepOn: DAY, lastWrongOn: null }],
     ]);
     expect(calls.snapshots[0]).toHaveLength(5);
+    // Phase 35. Memory for the saved gloss only: sX has no progress rows.
+    expect(calls.memory).toHaveLength(1);
+    expect(calls.memory[0].map((row) => [row.glossId, row.dimension, row.state.lastDay])).toEqual([
+      ['s1', 'written_receptive', DAY],
+    ]);
     expect(result.progress).toEqual(CHANGE);
   });
 

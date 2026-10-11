@@ -13,6 +13,7 @@ import {
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
 
+import { chooseWords } from '../domain/choose';
 import { findGap } from '../domain/cloze';
 import {
   NOTHING_GENERATED,
@@ -26,11 +27,13 @@ import {
   validateDistractors,
   withSiblingAlternatives,
   type DistractorVerdict,
+  type GenerationContext,
 } from '../domain/distractors';
 import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
-import { BOARD_SIZE, planSession } from '../domain/plan';
+import { BOARD_SIZE, planCards } from '../domain/plan';
+import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
 import type { SessionRecord, SessionSummary } from '../domain/session';
 import {
@@ -41,7 +44,6 @@ import {
   isOpen,
   newSessionRecord,
   nextSource,
-  pickGlosses,
   pickRendering,
   sessionScore,
   step,
@@ -65,6 +67,7 @@ import {
 } from '../errors';
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
+import { learnerDay } from './learnerDay';
 import type { LlmClient } from './llm';
 import type { SpeechTranscriber } from './speech';
 import type { Repos, Transaction } from './transaction';
@@ -122,6 +125,17 @@ async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
   const outcome = evaluateSession(rows, evidence.answers, evidence.day);
   await repos.progress.updateRows({ enrollmentId: evidence.enrollmentId, rows: outcome.changed });
   await repos.progress.insertSnapshot({ sessionId, rows: outcome.snapshot });
+
+  // Phase 35 (spec D4). The same answers, as memory. `rows` exist only for saved
+  // glosses, so an answer about an unsaved one counts for nothing here too.
+  const saved = new Set(rows.map((row) => row.glossId));
+  const before = await repos.memory.findRows({ enrollmentId: evidence.enrollmentId, glossIds: [...saved] });
+  const memory = applySession(
+    before,
+    evidence.answers.filter((answer) => saved.has(answer.glossId)),
+    evidence.day,
+  );
+  await repos.memory.upsertRows({ enrollmentId: evidence.enrollmentId, rows: memory });
 }
 
 /**
@@ -217,30 +231,48 @@ export function createSessionService({
 
         const saved = await vocabulary.listSavedGlosses(enrollmentId);
         if (saved.length === 0) throw new NoSavedWords(enrollmentId);
-        // Phase 31 (spec D18). At most one gloss per key, across headwords.
-        const picked = pickGlosses(saved, SESSION_LENGTH, rng);
+        // Phase 35 (spec D5, D10). The words, each with a dimension and a rung,
+        // from what the learner knows: memory and levels, on the owner's day,
+        // with what that day already asked and introduced. At most one gloss per
+        // key, across headwords (phase 31 D18), is chooseWords' rule now.
+        const glossIds = saved.map((gloss) => gloss.glossId);
+        const today = await learnerDay(repos, enrolled.user_id, now());
+        const memory = await repos.memory.findRows({ enrollmentId, glossIds });
+        const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
+        const askedToday = new Set(await session.findGlossesAnsweredOn(enrollmentId, today));
+        const newToday = await session.countNewOn(enrollmentId, today);
+        const chosen = chooseWords({
+          saved,
+          memory,
+          levels,
+          today,
+          askedToday,
+          newToday,
+          listening: options.listening,
+          speaking: options.speaking,
+          rng,
+        });
         // Spec D12. One rendering per gloss, uniformly over every form of every
         // member that agrees with the gloss, the saved form always among them.
         // No model call: a lemma form not yet rendered joins once its job lands.
         const renderings = await dict.findGlossRenderings({
-          glossIds: picked.map((gloss) => gloss.glossId),
+          glossIds: chosen.map((choice) => choice.glossId),
           userLanguageCode: enrolled.source_language,
         });
-        const picks = picked.flatMap((gloss) => {
-          const rendering = pickRendering(askableRenderings(gloss, renderings), rng);
-          return rendering ? [{ gloss_id: gloss.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId }] : [];
+        const savedById = new Map(saved.map((gloss) => [gloss.glossId, gloss]));
+        const picks = chosen.flatMap((choice) => {
+          const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
+          if (!rendering) return [];
+          const { dimension, rung, level, r } = choice;
+          return [{ gloss_id: choice.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId, dimension, rung, level, r }];
         });
         if (picks.length === 0) throw new NoSavedWords(enrollmentId);
-        // Phase 24 (spec D3): the rotation's step is how many list sessions came
-        // before this one. Read before the insert, so it does not count itself.
-        const ordinal = await session.countListSessions(enrollmentId);
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
         await jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,
           picks,
           listening: options.listening,
           speaking: options.speaking,
-          ordinal,
         });
         return { sessionId, status: 'preparing' as const, source: 'list' as const };
       }),
@@ -278,12 +310,13 @@ export function createSessionService({
      */
     skipSession: async (actorUserId: string, sessionId: string): Promise<void> => {
       const skipped = await transaction(async (repos) => {
-        await authorizeSession(repos, logger, actorUserId, sessionId);
+        const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const state = await repos.session.findState(sessionId);
         if (!state) throw new SessionNotFound(sessionId);
         if (state.status === 'skipped') return false;
         if (!isOpen(state.status)) throw new SessionNotSkippable(sessionId, state.status);
-        const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped');
+        const day = await learnerDay(repos, enrolled.user_id, now());
+        const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped', day);
         // Phase 20. The answers given before the skip are real answers.
         if (changed) await recordProgress(repos, sessionId);
         return changed;
@@ -304,7 +337,7 @@ export function createSessionService({
       // a commit that fails after completeSession must not leave a log claiming a
       // session the database never recorded.
       const { result, justCompleted } = await transaction(async (repos) => {
-        await authorizeSession(repos, logger, actorUserId, sessionId);
+        const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const loaded = await repos.session.loadSession(sessionId);
         if (!loaded) throw new SessionNotFound(sessionId);
 
@@ -342,7 +375,7 @@ export function createSessionService({
         );
 
         if (outcome.justCompleted) {
-          await repos.session.completeSession(sessionId);
+          await repos.session.completeSession(sessionId, await learnerDay(repos, enrolled.user_id, now()));
           await recordProgress(repos, sessionId);
         }
 
@@ -557,14 +590,25 @@ export function createSessionService({
           (pick) => (resolved.get(pick.gloss_id)?.userLanguageCode ?? enrolled.source_language) !== enrolled.source_language,
         );
         if (foreign) throw new GlossLanguageMismatch(foreign.gloss_id);
+        const asked = payload.picks.map((pick) => ({
+          glossId: resolved.get(pick.gloss_id)?.id ?? pick.gloss_id,
+          senseId: pick.sense_id,
+          variantId: pick.variant_id,
+          pick,
+        }));
         const context = await question.findGenerationContext({
-          picks: payload.picks.map((pick) => ({
-            glossId: resolved.get(pick.gloss_id)?.id ?? pick.gloss_id,
-            senseId: pick.sense_id,
-            variantId: pick.variant_id,
-          })),
+          picks: asked.map(({ glossId, senseId, variantId }) => ({ glossId, senseId, variantId })),
           sourceLanguage: enrolled.source_language,
         });
+        // Each row's pick. The rows come in the picks' order, a pick whose
+        // rendering is gone having none, and name the rendering asked for.
+        let next = 0;
+        const pickOf = (row: GenerationContext) => {
+          const at = asked.findIndex((a, i) => i >= next && a.senseId === row.senseId && a.variantId === row.variantId);
+          if (at < 0) throw new Error(`no pick asked for the rendering ${row.senseId}/${row.variantId}`);
+          next = at + 1;
+          return asked[at].pick;
+        };
         // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
         const recent = await question.findRecentSentences({
           enrollmentId: state.enrollmentId,
@@ -573,7 +617,7 @@ export function createSessionService({
         });
         // Phase 31 (spec D18): the other headwords with each card's key.
         const siblings = await dict.findSiblings({ glossIds: context.map((row) => row.glossId) });
-        return { state, enrolled, context, recent, siblings };
+        return { state, enrolled, context, picked: context.map(pickOf), recent, siblings };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -583,19 +627,27 @@ export function createSessionService({
         throw new InvalidDistractors(sessionId, 'none of the picked senses is in the dictionary any more');
       }
 
-      // Phase 24 (spec D3, D4). The plan decides each position's type and the
-      // order of the picks, before the model is asked anything.
+      // Phase 35 (spec D6). The plan chooses each pick's card from its dimension,
+      // rung, level and R, and the order of the picks, before the model is asked
+      // anything.
       const target = read.enrolled.target_language as LanguageCode;
-      const plan = planSession(
-        read.context.map((row) => ({
-          form: row.form,
-          translation: row.translation,
-          tiles: tileEligible(row.form),
-          speakable: speakable(row.form),
-          // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
-          clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
-        })),
-        { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
+      const plan = planCards(
+        read.context.map((row, index) => {
+          const { dimension, rung, level, r } = read.picked[index];
+          return {
+            form: row.form,
+            translation: row.translation,
+            tiles: tileEligible(row.form),
+            speakable: speakable(row.form),
+            // Phase 27 (spec D7): a cloze choice needs the form, or its lemma, once in the saved example.
+            clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
+            dimension,
+            rung,
+            level,
+            r,
+          };
+        }),
+        { listening: payload.listening, speaking: payload.speaking },
       );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor(plan);

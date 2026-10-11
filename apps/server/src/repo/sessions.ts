@@ -102,14 +102,40 @@ export function createSessionRepo(tx: Tx) {
 
     insertSessionQuestions,
 
-    /** Phase 24 (spec D3). How many list sessions an enrollment has had, of any
-     *  status: the planner's rotation step for the next one. */
-    countListSessions: async (enrollmentId: string): Promise<number> => {
-      const [row] = await tx
-        .select({ count: sql<number>`count(*)::int` })
-        .from(sessions)
-        .where(and(eq(sessions.enrollmentId, enrollmentId), eq(sessions.source, 'list')));
-      return row.count;
+    /** Phase 35 (spec D5, D10). The glosses answered in this enrollment's
+     *  sessions that count for `day`, and in an open one, which counts as today.
+     *  The picker asks them last. Sorted. */
+    findGlossesAnsweredOn: async (enrollmentId: string, day: string): Promise<string[]> => {
+      const rows = await tx.execute<{ gloss_id: string }>(sql`
+        SELECT DISTINCT q.gloss_id
+        FROM answers a
+        JOIN sessions s  ON s.id = a.session_id
+        JOIN questions q ON q.id = a.question_id
+        WHERE s.enrollment_id = ${enrollmentId}
+          AND (s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))
+        ORDER BY q.gloss_id`);
+      return rows.rows.map((row) => row.gloss_id);
+    },
+
+    /** Phase 35 (spec D5, D10). How many glosses `day` introduced: saved glosses
+     *  whose first answer given while saved is in a session counting for `day`,
+     *  an open session counting as it. An answer from before the save is no
+     *  introduction, as it writes no memory (D4). */
+    countNewOn: async (enrollmentId: string, day: string): Promise<number> => {
+      const rows = await tx.execute<{ n: number }>(sql`
+        SELECT count(*)::int AS n FROM (
+          SELECT q.gloss_id
+          FROM answers a
+          JOIN sessions s            ON s.id = a.session_id
+          JOIN questions q           ON q.id = a.question_id
+          JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = q.gloss_id
+          WHERE s.enrollment_id = ${enrollmentId}
+            AND a.answered_at >= ve.created_at
+            AND (s.practice_day IS NOT NULL OR s.status IN ('preparing', 'ready'))
+          GROUP BY q.gloss_id
+          HAVING min(coalesce(s.practice_day, ${day}::date)) = ${day}::date
+        ) introduced`);
+      return rows.rows[0].n;
     },
 
     /** Phase 29 (spec D13). Whose list a session belongs to, so a use case
@@ -145,16 +171,18 @@ export function createSessionRepo(tx: Tx) {
     },
 
     /** A conditional status change: true when the row was in one of `from`.
-     *  Conditional so a job finishing after a skip changes nothing. */
+     *  Conditional so a job finishing after a skip changes nothing. A change
+     *  that ends the session names its `practiceDay` (phase 35, D10). */
     transition: async (
       sessionId: string,
       from: SessionStatus[],
       to: SessionStatus,
+      practiceDay?: string,
     ): Promise<boolean> => {
       if (!UUID_RE.test(sessionId)) return false;
       const rows = await tx
         .update(sessions)
-        .set({ status: to })
+        .set(practiceDay === undefined ? { status: to } : { status: to, practiceDay })
         .where(and(eq(sessions.id, sessionId), inArray(sessions.status, from)))
         .returning({ id: sessions.id });
       return rows.length > 0;
@@ -300,10 +328,10 @@ export function createSessionRepo(tx: Tx) {
       });
     },
 
-    completeSession: (sessionId: string): Promise<unknown> =>
+    completeSession: (sessionId: string, practiceDay: string): Promise<unknown> =>
       tx
         .update(sessions)
-        .set({ completedAt: sql`now()`, status: 'completed' })
+        .set({ completedAt: sql`now()`, status: 'completed', practiceDay })
         .where(eq(sessions.id, sessionId)),
   };
 }

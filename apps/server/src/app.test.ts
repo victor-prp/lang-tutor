@@ -126,6 +126,7 @@ function depsWithPing(ok: boolean): AppDeps {
     auth: createFakeAppDeps().auth,
     signedIn: createFakeAppDeps().signedIn,
     webOrigins: createFakeAppDeps().webOrigins,
+    bots: null,
   };
 }
 

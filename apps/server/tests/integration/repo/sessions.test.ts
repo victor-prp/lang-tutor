@@ -6,6 +6,7 @@ import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { asChoice, insertListSession } from '../../support/questions';
 import { testRng } from '../../support/testRng';
+import { insertLexeme } from '../../support/dictRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { withTx } from '../../support/withTx';
 import type { Tx } from '../../../src/db/client';
@@ -14,6 +15,7 @@ import { answers, sessionQuestions, sessions } from '../../../src/db/schema';
 import { SessionOpen } from '../../../src/errors';
 import { createQuestionRepo } from '../../../src/repo/questions';
 import { createSessionRepo } from '../../../src/repo/sessions';
+import { createVocabularyRepo } from '../../../src/repo/vocabulary';
 
 let t: TestDb;
 
@@ -232,7 +234,7 @@ describe('completeSession', () => {
   it('sets completed_at, which loadSession reports as complete', async () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
-      await sessionRepo.completeSession(sessionId);
+      await sessionRepo.completeSession(sessionId, '2026-03-04');
 
       const loaded = await sessionRepo.loadSession(sessionId);
       expect(loaded!.complete).toBe(true);
@@ -249,7 +251,7 @@ describe('completeSession', () => {
   it('keeps the row after completion — there is no stale sweep', async () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
-      await sessionRepo.completeSession(sessionId);
+      await sessionRepo.completeSession(sessionId, '2026-03-04');
       expect(await sessionRepo.loadSession(sessionId)).toBeDefined();
     });
   });
@@ -348,18 +350,82 @@ describe('phase 24: boards', () => {
   });
 });
 
-describe('countListSessions', () => {
-  it('counts every list session the enrollment has had, whatever its status', async () => {
-    const E = enrollmentOf('u_1');
+// Phase 35 (spec D5, D10). What the picker reads about today: the glosses asked
+// in sessions counting for it (an open session counts as today), and how many
+// glosses were first answered, while saved, on it.
+describe('phase 35: asked and new on a day', () => {
+  const E = enrollmentOf('u_1');
+  const D1 = '2026-10-10';
+  const D2 = '2026-10-11';
+  type Word = { glossId: string; variantId: string; lexemeId: string; form: string; lemma: string; translation: string };
+
+  async function savedWord(lemma: string, translation: string): Promise<Word> {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+    return { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation };
+  }
+
+  async function unsavedWord(lemma: string, translation: string): Promise<Word> {
+    const word = await insertLexeme(t.db, {
+      lemma, languageCode: 'en', partOfSpeech: 'noun', userLanguageCode: 'he', senses: [{ senseCode: 'x' }],
+      variants: [{ form: lemma, kind: 'word', entryRank: 0, translations: [{ senseCode: 'x', rank: 0, translation, exampleSource: null, exampleTarget: null }] }],
+    });
+    return { glossId: word.glossIds[0], variantId: word.variantIds[0], lexemeId: word.lexemeId, form: lemma, lemma, translation };
+  }
+
+  const save = (word: Word) =>
+    withTx(t.db, (tx) =>
+      createVocabularyRepo(tx).insertEntries({
+        enrollmentId: E,
+        addedByUserId: 'u_1',
+        entries: [{ glossId: word.glossId, variantId: word.variantId, lexemeId: word.lexemeId, lemma: word.lemma }],
+      }),
+    );
+
+  /** A session asking `asked`, the first `answered` of them answered, then
+   *  skipped on `day` or left open. */
+  async function play(asked: Word[], day: string | 'open', answered = asked.length, enrollmentId = E, userId = 'u_1') {
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId,
+      enrollmentId,
+      asked,
+      types: asked.map(() => 'multiple_choice' as const),
+    });
     await withTx(t.db, async (tx) => {
       const repo = createSessionRepo(tx);
-      expect(await repo.countListSessions(E)).toBe(0);
-      const failed = await repo.insertPreparingSession('u_1', E);
-      await repo.transition(failed, ['preparing'], 'failed');
-      const skipped = await repo.insertPreparingSession('u_1', E);
-      await repo.transition(skipped, ['preparing'], 'skipped');
-      expect(await repo.countListSessions(E)).toBe(2);
+      for (const [i, question] of questions.slice(0, answered).entries()) await repo.insertAnswer(sessionId, i, question.id, { displayIndex: 0 });
+      if (day !== 'open') await repo.transition(sessionId, ['ready'], 'skipped', day);
     });
+  }
+
+  const read = <T>(run: (repo: ReturnType<typeof createSessionRepo>) => Promise<T>) => withTx(t.db, (tx) => run(createSessionRepo(tx)));
+
+  it("names the glosses answered in that day's sessions and in an open one, and no other enrollment's", async () => {
+    const a = await savedWord('apple', 'תפוח');
+    const b = await savedWord('bread', 'לחם');
+    const c = await savedWord('cheese', 'גבינה');
+    const d = await savedWord('dates', 'תמרים');
+    await play([a, b], D1, 1);
+    await play([c], D2);
+    await play([d], 'open');
+    expect(await read((repo) => repo.findGlossesAnsweredOn(E, D2))).toEqual([c.glossId, d.glossId].sort());
+    expect(await read((repo) => repo.findGlossesAnsweredOn(E, D1))).toEqual([a.glossId, d.glossId].sort());
+    await seedUser(t.db, 'u_2');
+    expect(await read((repo) => repo.findGlossesAnsweredOn(enrollmentOf('u_2'), D2))).toEqual([]);
+  });
+
+  it('counts the glosses first answered while saved on that day, an open session counting as it', async () => {
+    const a = await savedWord('apple', 'תפוח');
+    const b = await savedWord('bread', 'לחם');
+    const c = await savedWord('cheese', 'גבינה');
+    const late = await unsavedWord('lemon', 'לימון');
+    await play([a, late], D1);
+    await save(late);
+    expect(await read((repo) => repo.countNewOn(E, D1))).toBe(1);
+    // `a` is from D1. `late` was answered on D1 before it was saved, which introduced nothing.
+    await play([a, b, late], D2);
+    expect(await read((repo) => repo.countNewOn(E, D2))).toBe(2);
+    await play([c, a], 'open');
+    expect(await read((repo) => repo.countNewOn(E, D2))).toBe(3);
   });
 });
 

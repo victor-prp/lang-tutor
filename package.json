@@ -5,7 +5,8 @@
     "apps/*",
     "packages/*",
     "e2e",
-    "nightly-qa"
+    "nightly-qa",
+    "bots"
   ],
   "dependencies": {
     "zod": "^4.4.3"
@@ -21,6 +22,7 @@
     "test": "npm run test:unit && echo '' && echo 'Note: unit tests only. Run npm run test:all before pushing - database-backed tests did not run.'",
     "test:unit": "npm test --workspaces --if-present",
     "db:claim-account": "bash scripts/lane-env.sh npm run db:claim-account --workspace apps/server --",
+    "db:bots:create": "bash scripts/lane-env.sh npm run db:bots:create --workspace apps/server --",
     "test:integration": "bash scripts/lane-env.sh npm run test:integration --workspaces --if-present",
     "test:all": "npm run test:unit && npm run test:integration",
     "test:lanes": "bash scripts/test-lane-env.sh && bash scripts/test-lane-clean.sh && bash scripts/test-lane-abandon.sh",
@@ -43,6 +45,8 @@
     "dict:glosses:merge": "bash scripts/lane-env.sh npm run dict:glosses:merge --workspace apps/server --",
     "eval": "npm run eval --workspace apps/server",
     "content:generate": "npm run content:generate --workspace apps/server --",
+    "bots:dry": "bash scripts/lane-env.sh tsx bots/run.ts --dry-run",
+    "bots:ci": "bash scripts/lane-env.sh tsx e2e/botsDryRun.ts",
     "qa:poc": "bash nightly-qa/run.sh",
     "qa:file": "tsx nightly-qa/src/file.ts nightly-qa/.out/findings.json nightly-qa/.out/known-issues.json",
     "qa:categorise": "bash nightly-qa/triage/run.sh && tsx nightly-qa/src/apply.ts nightly-qa/.out/triage",

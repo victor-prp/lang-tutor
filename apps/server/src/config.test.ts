@@ -4,6 +4,7 @@ import {
   assertDatabaseIdentifier,
   databaseNameFrom,
   loadAuthConfig,
+  loadBotSecret,
   loadConfig,
   loadGeminiConfig,
   maintenanceUrlFor,
@@ -279,5 +280,23 @@ describe('loadAuthConfig', () => {
 
   it('throws when WEB_ORIGINS holds no origin', () => {
     expect(() => loadAuthConfig({ ...authEnv, WEB_ORIGINS: ' , ' })).toThrow('WEB_ORIGINS');
+  });
+});
+
+// Phase 35 (spec D12). The bot route is mounted only when this is set.
+describe('loadBotSecret', () => {
+  it('is null when BOT_SECRET is unset or blank, as on every lane', () => {
+    expect(loadBotSecret({})).toBeNull();
+    expect(loadBotSecret({ BOT_SECRET: '   ' })).toBeNull();
+  });
+
+  it('reads it, trimmed', () => {
+    const secret = 'x'.repeat(32);
+    expect(loadBotSecret({ BOT_SECRET: ` ${secret} ` })).toBe(secret);
+  });
+
+  it('refuses a secret shorter than 32 characters, naming the variable but not the value', () => {
+    expect(() => loadBotSecret({ BOT_SECRET: 'short-secret' })).toThrow(/BOT_SECRET/);
+    expect(() => loadBotSecret({ BOT_SECRET: 'short-secret' })).not.toThrow(/short-secret/);
   });
 });

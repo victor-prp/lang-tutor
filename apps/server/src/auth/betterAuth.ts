@@ -2,6 +2,7 @@ import { expo } from '@better-auth/expo';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
+import { makeSignature } from 'better-auth/crypto';
 import { emailOTP } from 'better-auth/plugins';
 
 import type { Db } from '../db/client';
@@ -191,6 +192,31 @@ export function createAuth(deps: {
   return {
     paths: AUTH_PATHS,
     handler: (request: Request): Promise<Response> => auth.handler(request),
+    /**
+     * Phase 35 (spec D12). A session for a user Better Auth already knows, as
+     * the `Cookie` header value that carries it, exactly what Better Auth's own
+     * sign-in sets for a "don't remember me" session (`setSessionCookie` with
+     * `dontRememberMe`): its `internalAdapter.createSession` writes the row (and
+     * runs the `signed_in` hook), and each cookie is signed as better-call's
+     * `signCookieValue` signs it, `encodeURIComponent(value + '.' + base64
+     * HMAC-SHA256(value, ctx.secret))`, which is better-auth's `makeSignature`,
+     * under the names in `ctx.authCookies`. Only the bot route calls it, for a
+     * profile it has checked is a bot.
+     *
+     * One day rather than ninety, which outlasts any bot run, so a leaked bot
+     * cookie is short-lived; the `dont_remember` cookie keeps get-session from
+     * sliding it to ninety, as it does for a browser session.
+     */
+    mintSession: async (userId: string): Promise<string> => {
+      const ctx = await auth.$context;
+      const session = await ctx.internalAdapter.createSession(userId, true);
+      const signed = async (name: string, value: string): Promise<string> =>
+        `${name}=${encodeURIComponent(`${value}.${await makeSignature(value, ctx.secret)}`)}`;
+      return [
+        await signed(ctx.authCookies.sessionToken.name, session.token),
+        await signed(ctx.authCookies.dontRememberToken.name, 'true'),
+      ].join('; ');
+    },
     sessionOf: async (headers: Headers): Promise<SignedInUser | null> => {
       // Read only. Better Auth slides a session (row and cookie together) in its
       // get-session endpoint; here there is no response to carry a new cookie,

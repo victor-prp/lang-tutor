@@ -10,6 +10,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   unique,
@@ -121,8 +122,15 @@ export const users = pgTable(
     // lives on their enrollments, and nothing on the learning path reads this.
     nativeLanguage: varchar('native_language', { length: 10 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Phase 35 (spec D11). A bot is a profile that plays on a clock of its own:
+    // `bot_day` is its day, set for bots only. Read and written in repo/users.ts
+    // alone (ADR 0013 R2).
+    kind: text('kind').notNull().default('learner'),
+    botDay: date('bot_day', { mode: 'string' }),
   },
   (t) => [
+    check('users_kind_known', sql`${t.kind} in ('learner', 'bot')`),
+    check('users_bot_day_iff_bot', sql`(${t.kind} = 'bot') = (${t.botDay} is not null)`),
     // Mirrors UsernameSchema in packages/core exactly. Two enforcement points
     // for one rule is deliberate: the schema gives a 400 with a good message,
     // the constraint is what actually holds when something bypasses the route.
@@ -712,6 +720,42 @@ export const glossProgress = pgTable(
   ],
 );
 
+/**
+ * Phase 35 (spec D2). What the memory model holds per gloss and dimension:
+ * FSRS stability and difficulty, the day of the last review, and the parameter
+ * set that produced them. A dimension with no row is unintroduced.
+ */
+export const glossMemory = pgTable(
+  'gloss_memory',
+  {
+    enrollmentId: text('enrollment_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    dimension: text('dimension').notNull(),
+    stability: real('stability').notNull(),
+    difficulty: real('difficulty').notNull(),
+    lastDay: date('last_day', { mode: 'string' }).notNull(),
+    reps: integer('reps').notNull(),
+    lapses: integer('lapses').notNull(),
+    params: text('params').notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'gloss_memory_pkey', columns: [t.enrollmentId, t.glossId, t.dimension] }),
+    foreignKey({
+      name: 'gloss_memory_entry_fk',
+      columns: [t.enrollmentId, t.glossId],
+      foreignColumns: [vocabularyEntries.enrollmentId, vocabularyEntries.glossId],
+    })
+      .onDelete('cascade')
+      .onUpdate('cascade'),
+    check(
+      'gloss_memory_dimension_known',
+      sql`${t.dimension} in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')`,
+    ),
+    check('gloss_memory_stability_positive', sql`${t.stability} > 0`),
+    check('gloss_memory_difficulty_range', sql`${t.difficulty} between 1 and 10`),
+  ],
+);
+
 export const questions = pgTable(
   'questions',
   {
@@ -827,6 +871,9 @@ export const sessions = pgTable(
     // Phase 19. Where the questions came from: the shared seed, or the
     // enrollment's saved glosses.
     source: text('source').notNull(),
+    // Phase 35 (spec D10). The learner's day the session counts for, set from
+    // services/learnerDay.ts in the transaction that ends it; null until then.
+    practiceDay: date('practice_day', { mode: 'string' }),
   },
   (t) => [
     foreignKey({

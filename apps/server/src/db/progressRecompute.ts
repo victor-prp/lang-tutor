@@ -1,4 +1,6 @@
+import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession } from '../domain/progress';
+import { createMemoryRepo } from '../repo/memory';
 import { createProgressRepo } from '../repo/progress';
 import type { Db } from './client';
 import { createTransaction } from './transaction';
@@ -15,7 +17,7 @@ import { createTransaction } from './transaction';
  * reads and row locks are unaffected, so the app keeps answering meanwhile.
  *
  * Here rather than in services/ because db/cli.ts is the command's composition
- * root, and ADR 0001 R4 forbids db/ from importing services/. The four calls
+ * root, and ADR 0001 R4 forbids db/ from importing services/. The calls
  * below repeat recordProgress in services/sessions.ts; this file's integration
  * test is what keeps the two in step.
  *
@@ -29,10 +31,14 @@ import { createTransaction } from './transaction';
  * the live path wrote.
  */
 export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
-  const inTransaction = createTransaction(db, (tx) => createProgressRepo(tx));
-  return inTransaction(async (progress) => {
+  const inTransaction = createTransaction(db, (tx) => ({
+    progress: createProgressRepo(tx),
+    memory: createMemoryRepo(tx),
+  }));
+  return inTransaction(async ({ progress, memory }) => {
     await progress.lockSessions();
     await progress.resetAll();
+    await memory.deleteAll();
     const ended = await progress.listEndedSessions();
     for (const sessionId of ended) {
       const evidence = await progress.findSessionEvidence(sessionId);
@@ -46,6 +52,16 @@ export async function recomputeProgress(db: Db): Promise<{ sessions: number }> {
       const outcome = evaluateSession(rows, evidence.answers, evidence.day);
       await progress.updateRows({ enrollmentId: evidence.enrollmentId, rows: outcome.changed });
       await progress.insertSnapshot({ sessionId, rows: outcome.snapshot });
+
+      // Phase 35 (spec D8). Memory replays the same answers with the stored day.
+      const saved = new Set(rows.map((row) => row.glossId));
+      const before = await memory.findRows({ enrollmentId: evidence.enrollmentId, glossIds: [...saved] });
+      const next = applySession(
+        before,
+        evidence.answers.filter((answer) => saved.has(answer.glossId)),
+        evidence.day,
+      );
+      await memory.upsertRows({ enrollmentId: evidence.enrollmentId, rows: next });
     }
     return { sessions: ended.length };
   });

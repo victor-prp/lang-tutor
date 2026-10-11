@@ -1,27 +1,29 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerMeaning, answerTyped, generationStubFor, readCard } from './support/cards';
+import { answerChoice, answerMeaning, expectGeneration, readCard } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
-import { clearGemini, expectGeminiPayload, expectJudge } from './support/mockServer';
+import { seedMemory } from './support/memory';
+import { clearGemini, expectJudge } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
 test.setTimeout(180_000);
 
-// The saved form of each meaning, for reversed and typed cards.
-const FORM_OF: Record<string, string> = { קראה: 'прочитала', הקריאה: 'прочитала', בצל: 'лук', קשת: 'лук' };
 // The saved meanings of each form: a meaning card shows the form and asks for one of them.
 const MEANINGS_OF: Record<string, string[]> = { прочитала: ['קראה', 'הקריאה'], лук: ['בצל', 'קשת'] };
 // Hebrew that is no saved meaning of either word, so only the judge can accept it.
 const SYNONYM = 'מילה';
 
-/** Past the seed, four saved senses of two words, positions 1-3 answered right,
- *  and the session on its fourth card: with no voices and speaking off, ordinal 0
- *  and run 1 prefer listen_choice, which falls through to typed_meaning (D9). */
+/** Past the seed, four saved senses of two words, and the session on its
+ *  meaning card, every card before it answered right. Phase 35 (spec D5, D6):
+ *  בצל is due on written recognition, WR at R 0.85 (S 10, 19 days) and level 3,
+ *  so it is asked by recall, a typed meaning; the other three are new words, a
+ *  choice of meanings each. The order follows each card's chance of success,
+ *  so the meaning card is found by its type. */
 async function reachMeaningCard(page: Page, request: APIRequestContext, username: string, report: () => string) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
@@ -39,28 +41,36 @@ async function reachMeaningCard(page: Page, request: APIRequestContext, username
   await lookUp(page, request, 'лук', LUK);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
   await page.getByTestId('translate-back').click();
+  await seedMemory(username, [{ gloss: 'בצל', dimension: 'written_receptive', stability: 10, daysAgo: 19, level: 3 }]);
 
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStubFor({ 1: 'meaning', 2: 'word', 3: 'typed' }));
+  await expectGeneration(request);
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
-  await answerChoice(page, await readCard(page, 1, 4, 'choice'), true);
-  await page.getByTestId('continue-button').click();
-  await answerChoice(page, await readCard(page, 2, 4, 'reverse'), true);
-  await page.getByTestId('continue-button').click();
-  const typed = await readCard(page, 3, 4, 'typed');
-  await answerTyped(page, FORM_OF[typed.prompt]);
-  await page.getByTestId('continue-button').click();
+  for (let position = 1; position <= 4; position++) {
+    const card = await readCard(page, position, 4);
+    if (card.kind === 'meaning') return { card, position };
+    expect(card.kind, `position ${position}`).toBe('choice');
+    await answerChoice(page, card, true);
+    await page.getByTestId('continue-button').click();
+  }
+  throw new Error('the session asked no meaning card');
+}
 
-  return readCard(page, 4, 4, 'meaning');
+/** The rest of the session after the meaning card: choices, answered right. */
+async function finishSession(page: Page, after: number) {
+  for (let position = after + 1; position <= 4; position++) {
+    await answerChoice(page, await readCard(page, position, 4, 'choice'), true);
+    await page.getByTestId('continue-button').click();
+  }
 }
 
 test('a meaning card: a synonym is judged right, and the saved meaning is shown', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
-  const card = await reachMeaningCard(page, request, 'e2e_meaning_ru', report);
+  const { card, position } = await reachMeaningCard(page, request, 'e2e_meaning_ru', report);
 
   await expect(page.getByText('כתבו את הפירוש בעברית')).toBeVisible();
   expect(Object.keys(MEANINGS_OF)).toContain(card.prompt);
@@ -75,6 +85,7 @@ test('a meaning card: a synonym is judged right, and the saved meaning is shown'
   const saved = stripIsolates(await page.getByTestId('feedback-line').textContent());
   expect(MEANINGS_OF[card.prompt]).toContain(saved);
   await page.getByTestId('continue-button').click();
+  await finishSession(page, position);
 
   // Results: the word is listed with its saved meaning.
   await expect(page.getByTestId('results-score')).toBeVisible();
@@ -87,7 +98,7 @@ test('a meaning card: a synonym is judged right, and the saved meaning is shown'
 test('a meaning card: a failed check keeps the text, and trying again can still succeed', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);
-  const card = await reachMeaningCard(page, request, 'e2e_meaning_fail_ru', report);
+  const { card } = await reachMeaningCard(page, request, 'e2e_meaning_fail_ru', report);
 
   await expectJudge(request, 'right', { status: 500 });
   await answerMeaning(page, SYNONYM);

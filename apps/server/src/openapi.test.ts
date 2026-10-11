@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { tmpdir } from 'node:os';
 
 import { createApp } from './app';
-import { createFakeAppDeps } from '../tests/support/fakes';
+import { createFakeAppDeps, createFakeBots } from '../tests/support/fakes';
 
 // The "documentation cannot drift" proof, and a unit test: after phase 5
 // createApp accepts fakes, so generating the document needs no database.
@@ -141,6 +141,39 @@ describe('the document as a whole', () => {
       '/api/users',
       '/health',
     ]);
+  });
+});
+
+// Phase 35 (spec D12). The bot route is published only where it is mounted.
+describe('the bot route in the published document', () => {
+  const withBots = async () => {
+    const res = await createApp({ ...createFakeAppDeps(), bots: createFakeBots() }).request('/openapi.json');
+    return await res.json();
+  };
+
+  it('is absent where BOT_SECRET is unset', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths).filter((p) => p.startsWith('/api/bots'))).toEqual([]);
+    expect(doc.components?.securitySchemes?.botSecret).toBeUndefined();
+  });
+
+  it('adds exactly its two paths where it is mounted', async () => {
+    const plain = Object.keys((await openApiDocument()).paths);
+    const doc = await withBots();
+    expect(Object.keys(doc.paths).sort()).toEqual([...plain, '/api/bots/day', '/api/bots/sign-in'].sort());
+  });
+
+  it('declares the bearer secret, not the session, and every status each can return', async () => {
+    const doc = await withBots();
+    expect(doc.components.securitySchemes.botSecret).toMatchObject({ type: 'http', scheme: 'bearer' });
+    const signIn = doc.paths['/api/bots/sign-in'].post;
+    const day = doc.paths['/api/bots/day'].put;
+    expect(signIn.security).toEqual([{ botSecret: [] }]);
+    expect(day.security).toEqual([{ botSecret: [] }]);
+    expect(Object.keys(signIn.responses).sort()).toEqual(['200', '400', '401', '404']);
+    expect(Object.keys(day.responses).sort()).toEqual(['204', '400', '401', '404']);
+    expect(signIn.requestBody.content['application/json'].schema.required).toEqual(['name']);
+    expect(day.requestBody.content['application/json'].schema.required.sort()).toEqual(['day', 'name']);
   });
 });
 
