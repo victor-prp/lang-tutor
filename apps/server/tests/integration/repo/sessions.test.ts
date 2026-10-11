@@ -440,6 +440,14 @@ describe('phase 37: answers and introductions on a day', () => {
     expect(await read((repo) => repo.findAnswersOn(enrollmentOf('u_2'), D2))).toEqual([]);
   });
 
+  it('leaves out an answer given before its gloss was saved, as the memory does', async () => {
+    const a = await savedWord('apple', 'תפוח');
+    const late = await unsavedWord('lemon', 'לימון');
+    await playTyped([a, late], D2, ['exact', 'wrong']);
+    await save(late);
+    expect((await read((repo) => repo.findAnswersOn(E, D2))).map((answer) => answer.glossId)).toEqual([a.glossId]);
+  });
+
   it("decodes a choice answer as the session's evidence does", async () => {
     const a = await savedWord('apple', 'תפוח');
     const b = await savedWord('bread', 'לחם');

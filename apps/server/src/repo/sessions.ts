@@ -104,17 +104,21 @@ export function createSessionRepo(tx: Tx) {
 
     insertSessionQuestions,
 
-    /** Phase 37 (spec D7). Every answer in this enrollment's sessions that count
-     *  for `day`, and in an open one, which counts as today, decoded as a session's
-     *  evidence is. In answer order: sessions as they were created (one is open
-     *  at a time), each in its positions' order. */
+    /** Phase 37 (spec D7). Every answer about a saved gloss, given while it was
+     *  saved, in this enrollment's sessions that count for `day`, and in an open
+     *  one, which counts as today; decoded as a session's evidence is. An answer
+     *  from before the save is no evidence, as it writes no memory (phase 35 D4).
+     *  In answer order: sessions as they were created (one is open at a time),
+     *  each in its positions' order. */
     findAnswersOn: async (enrollmentId: string, day: string): Promise<DayAnswer[]> => {
       const rows = await tx.execute<AnswerRow & { session_id: string }>(sql`
         SELECT s.id AS session_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict
         FROM answers a
-        JOIN sessions s  ON s.id = a.session_id
-        JOIN questions q ON q.id = a.question_id
+        JOIN sessions s            ON s.id = a.session_id
+        JOIN questions q           ON q.id = a.question_id
+        JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = q.gloss_id
         WHERE s.enrollment_id = ${enrollmentId}
+          AND a.answered_at >= ve.created_at
           AND (s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))
         ORDER BY s.created_at, s.id, a.position`);
       return rows.rows.map((row) => ({ ...decodeAnswer(row), sessionId: row.session_id }));
