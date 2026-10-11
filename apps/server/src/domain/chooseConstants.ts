@@ -28,3 +28,7 @@ export const PER_DIMENSION_CAP = 4;
 
 /** Research's choice. Picks whose best card has an expected success below 0.6, at most. */
 export const HARD_CAP = 4;
+
+/** Phase 37 (spec D1). A word met or missed today comes back in later sessions until it is
+ *  answered right, at most this many times a day; the memory model brings it back tomorrow. */
+export const RETURNS_PER_DAY = 3;
