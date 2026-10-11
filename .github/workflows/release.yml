@@ -141,3 +141,35 @@ jobs:
           done
           echo "::error::$url never reported $TAG with ok: true"
           exit 1
+
+  # Phase 32 (spec D4–D7). The Android app, after the server answers /health
+  # with the tag, so new app code never calls a server that is not live yet.
+  # The tag's checkout (the default ref), like build-push: what ships is the
+  # tag's app. scripts/android-release.sh decides between an over-the-air
+  # update and a new Play build by fingerprint, and skips, green, until the
+  # one-time setup is done (no EXPO_TOKEN, or no EAS project id) or when the tag
+  # predates this job. A failure here leaves the server release standing;
+  # rerunning this job alone finishes what is missing.
+  android:
+    needs: apply
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: expo/expo-github-action@v9
+        if: env.EXPO_TOKEN != ''
+        with:
+          eas-version: 24.8.0
+          packager: npm
+          token: ${{ secrets.EXPO_TOKEN }}
+      # A dispatch is a rollback (npm run rollback): it may update, never build.
+      - run: ./scripts/android-release.sh ${{ github.event_name == 'workflow_dispatch' && '--rollback' || '' }}
