@@ -246,7 +246,9 @@ export function createSessionService({
           memory,
           levels,
           today,
-          askedToday,
+          // Until the returns are read (phase 37 D7), what was asked today is done.
+          steps: [],
+          done: askedToday,
           newToday,
           listening: options.listening,
           speaking: options.speaking,

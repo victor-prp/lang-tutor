@@ -438,13 +438,13 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
       levels: { enrollmentId: E, glossIds: ['g_asked', 'g_due', 'g_new'], savedBy: null },
     });
     const { picks } = jobs.enqueued[0].data as { picks: Record<string, unknown>[] };
-    // DUE, then NEW, then what was asked today.
+    // Phase 37 (spec D3): NEW, then DUE, then what was asked today.
     expect(picks).toEqual([
-      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number) },
       { gloss_id: 'g_new', sense_id: 's2', variant_id: 'v_new', dimension: 'written_receptive', rung: 1, level: 1, r: null },
+      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number) },
       { gloss_id: 'g_asked', sense_id: 's0', variant_id: 'v_asked', dimension: 'written_receptive', rung: 1, level: 1, r: null },
     ]);
-    expect(picks[0].r).toBeLessThan(0.75);
+    expect(picks[1].r).toBeLessThan(0.75);
   });
 });
 
