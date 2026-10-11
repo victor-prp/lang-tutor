@@ -74,17 +74,19 @@ tag's checkout and `latest` the newest finished production build:
 
 | Situation | Action |
 |---|---|
-| `fp` = `latest`'s runtime, and the branch `production` has an update for `fp` | `eas update` |
-| `fp` = `latest`'s runtime, no update for `fp` yet | `eas submit` that build, then `eas update` |
+| `fp` = `latest`'s runtime, and `fp`'s newest update on `production` names `latest` | `eas update` |
+| `fp` = `latest`'s runtime, no such update yet | `eas submit` that build, then `eas update` |
 | `fp` ≠ `latest`'s runtime (or no build yet), a release | `eas build`, `eas submit`, `eas update` |
 | `fp` ≠ `latest`'s runtime, a rollback | publish nothing, `::warning::` |
 
 The update published after a submit is the marker that the build reached Play *(ruling: EAS
 records no "this build is on Play" state the CLI can read, and the update is published only after
 `eas submit --wait` succeeds)*. So a rerun after a failed submit submits again rather than
-skipping the build forever. Comparing against the *newest* build, not any build with `fp`, means
+skipping the build forever. Each update's message is `<tag> for build <id>`, and only an update
+naming the newest build counts: after a reverted native change, an older build of the same
+runtime has updates of its own *(ruling, from the final review)*. Comparing against the *newest* build, not any build with `fp`, means
 reverting a native change builds again instead of publishing an update no phone can take. Every
-update's message is the tag, and `EXPO_PUBLIC_APP_VERSION` carries it into the bundle.
+update carries the tag in its message, and `EXPO_PUBLIC_APP_VERSION` carries it into the bundle.
 
 **D6. Rollback.** `npm run rollback` dispatches `release.yml`; the job passes `--rollback` on a
 `workflow_dispatch`. A matching fingerprint publishes the old tag's JavaScript as a new update, so
@@ -112,7 +114,8 @@ unparsable header passes. The rule: **a change that breaks older clients raises 
 in the same PR.** In the app, `api/client.ts` reports a 426 through `onUpdateRequired`, beside
 `onUnauthorized`. The root layout then renders one screen in place of the navigator. That screen
 first tries an over-the-air update (a newer bundle for this build may fix it) and reloads if one
-arrives. Otherwise it offers a button to `market://details?id=ai.wordspal.app`. Better Auth's own
+arrives. Otherwise it offers a button to `market://details?id=ai.wordspal.app`, and a "check again" button that retries
+the update: a release that raises the level answers 426 minutes before its update is published. Better Auth's own
 calls do not pass through the client and are not gated; the first API call after sign-in is.
 
 **D10. Version line.** The profile screen's last row shows `EXPO_PUBLIC_APP_VERSION`. It is set to
@@ -145,11 +148,11 @@ and `--json` where it reads output. Its commands, so a reader can check them by 
 
 - newest build: `eas build:list --platform android --build-profile production --status finished --limit 1 --json`
 - update marker: `eas update:list --branch production --runtime-version <fp> --limit 1 --json`
-  (`currentPage` non-empty)
+  (the newest group's message contains `for build <newest id>`)
 - build: `eas build --platform android --profile production --wait --json` → the build id
 - submit: `eas submit --platform android --profile production --id <id> --wait`
-- update: `eas update --branch production --platform android --message <tag>`, with
-  `EXPO_PUBLIC_APP_VERSION=<tag>`
+- update: `eas update --branch production --platform android --environment production
+  --message "<tag> for build <id>"`, with `EXPO_PUBLIC_APP_VERSION=<tag>`
 
 `eas.json`: `cli.appVersionSource: remote`; build profile `production` with `channel: production`,
 `android.buildType: app-bundle`, `autoIncrement: true`; submit profile `production` with
@@ -213,7 +216,9 @@ R1–R4, and each rule is planted once to see it fire.
 5. The first release after that takes the build path. A new Play app accepts only a draft release
    through the API until its first release is rolled out by hand, so if the submit fails with
    "Only releases with status draft may be created on draft app", upload that AAB once in Play
-   Console's internal track, roll it out, and rerun the job.
+   Console's internal track and roll it out. Then publish its first update by hand, with the
+   message `<tag> for build <id>`. Rerunning the job would submit the build again, which Play
+   refuses (from the final review).
 6. Download the upload-key backup: `eas credentials` → Android → production → download keystore.
 
 The README's release section gains the runbook: these steps, what each D5 row prints, and rollback

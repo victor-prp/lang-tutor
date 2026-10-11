@@ -755,7 +755,7 @@ path it took:
 | It prints | It did |
 |---|---|
 | `Same native layer as build …: publishing … over the air.` | `eas update`; phones take it on their next open, or after 30 minutes away |
-| `Build … has no update yet, so it never reached Play: submitting it first.` | a rerun after a failed submit: `eas submit`, then `eas update` |
+| `Build … has no update yet, so it never reached Play: submitting it first.` | a rerun after a failed submit: `eas submit`, then `eas update`. Every update's message names its build, `<tag> for build <id>`, and that is how the job tells |
 | `The native layer changed: building, submitting …` | `eas build`, `eas submit` to the internal track, `eas update`; Play installs it on friends' phones within a day or so |
 | a `::warning::` about the native layer, on a rollback | nothing: Play cannot downgrade an app. Release a fix forward |
 | a `::notice::` that it skipped | the setup below is not done, or the tag predates phase 32 |
@@ -785,7 +785,13 @@ an over-the-air update, then offers Play.
 5. **The first release after that builds.** A Play app that has never been rolled out accepts
    only draft releases through the API. If the submit fails with "Only releases with status draft
    may be created on draft app", download the AAB from the EAS build page and upload it once in
-   *Internal testing → Create new release*. Roll it out, then rerun the `android` job.
+   *Internal testing → Create new release* and roll it out. Do **not** rerun the job: it would
+   submit that build again and Play refuses a version code twice. Publish its first update by hand
+   instead, from `apps/mobile` in a checkout of the tag, naming the tag and the build id from the
+   job's log:
+   `EXPO_PUBLIC_APP_VERSION=<tag> npx eas-cli@24.8.0 update --branch production --platform android --environment production --message "<tag> for build <build id>"`.
+   That update is the marker later releases look for (an update whose message names the newest
+   build), so from then on they publish over the air.
 6. **Keep the upload key:** `npx eas-cli@24.8.0 credentials` → Android → production → download
    the keystore, and store it somewhere safe.
 
