@@ -379,8 +379,10 @@ export const SessionViewSchema = z.object({
 // text is "show me the answer", which is wrong.
 //
 // Phase 34 (spec D9). `retry: true` is the second try at a card held for one:
-// judged as the first answer was, except that an empty text or `show_answer`
-// gives up. Absent, a request for the held card replays its first answer.
+// judged as the first answer was, except that an empty text, `show_answer` or
+// a skip gives up (D9 ends a second try with an answer or a give-up, so a skip
+// there is never stored as skipped). Absent, a request for the held card
+// replays its first answer.
 export const NextStepRequestSchema = z.union([
   z.object({
     question_id: z.string().min(1),
@@ -459,8 +461,9 @@ export const SpeechAnswerResponseSchema = z.object({
 export const JudgedAnswerRequestSchema = z.object({
   question_id: z.string().min(1),
   text: z.string().max(300),
-  // Phase 34 (spec D9). The second try at a card held for one; an empty text
-  // gives up. Absent, a text for the held card replays its first answer.
+  // Phase 34 (spec D9). The second try at a card held for one. An empty text is
+  // this route's give-up, as an empty text, `show_answer` or a skip is
+  // next-step's. Absent, a text for the held card replays its first answer.
   retry: z.boolean().optional(),
 });
 
