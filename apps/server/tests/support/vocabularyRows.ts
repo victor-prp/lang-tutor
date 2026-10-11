@@ -19,6 +19,8 @@ export async function seedSavedSenses(
     translations: string[];
     form?: string;
     languageCode?: string;
+    /** Phase 34. The lexeme's part of speech; a noun when omitted. */
+    partOfSpeech?: string;
     /** Who saved them; the enrollment's owner when omitted. */
     addedByUserId?: string;
     /** Phase 27: the saved example of the first sense's rendering. */
@@ -28,7 +30,7 @@ export async function seedSavedSenses(
   const word = await insertLexeme(db, {
     lemma: input.lemma,
     languageCode: input.languageCode ?? 'en',
-    partOfSpeech: 'noun',
+    partOfSpeech: input.partOfSpeech ?? 'noun',
     userLanguageCode: 'he',
     senses: input.translations.map((_, i) => ({ senseCode: `s${i}` })),
     variants: [

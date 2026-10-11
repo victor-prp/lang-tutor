@@ -13,6 +13,7 @@ import {
   stub,
 } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
+import { CONTEXT_MARKER, type RecentContexts } from '../domain/context';
 import type { GenerationContext, RecentSentences } from '../domain/distractors';
 import type { SessionState } from '../domain/session';
 import { GlossLanguageMismatch, InvalidDistractors } from '../errors';
@@ -57,12 +58,21 @@ function world(opts: {
   gloss?: GlossRepo;
   /** Phase 31 (spec D18). What findSiblings answers: other headwords with a card's key. */
   siblings?: { glossId: string; lemma: string }[];
+  /** Phase 34 (spec D6, D8). The context call's answer, the model's second call;
+   *  without one it gets `reply` again, which names no sentence. */
+  contextReply?: string | Error;
+  /** Phase 34 (spec D6). What findRecentContexts answers. */
+  recentContexts?: RecentContexts;
+  enrollment?: Enrollment;
+  /** The clock's ticks; 1 000 then 1 250 by default. */
+  clock?: number[];
 }) {
   const calls = {
     transitions: [] as string[],
     generated: [] as unknown[],
     sessionQuestions: [] as Question[][],
     recentAsked: [] as unknown[],
+    recentContextsAsked: [] as unknown[],
     contextAsked: [] as unknown[],
     siblingsAsked: [] as unknown[],
   };
@@ -76,7 +86,7 @@ function world(opts: {
       calls.sessionQuestions.push(picked);
     },
   });
-  const enrollment = stub<EnrollmentRepo>({ findById: async () => ENROLLMENT });
+  const enrollment = stub<EnrollmentRepo>({ findById: async () => opts.enrollment ?? ENROLLMENT });
   const question = stub<QuestionRepo>({
     findGenerationContext: async (input) => {
       calls.contextAsked.push(input);
@@ -85,6 +95,10 @@ function world(opts: {
     findRecentSentences: async (input) => {
       calls.recentAsked.push(input);
       return opts.recent ?? new Map();
+    },
+    findRecentContexts: async (input) => {
+      calls.recentContextsAsked.push(input);
+      return opts.recentContexts ?? new Map();
     },
     insertGeneratedQuestions: async (input) => {
       calls.generated.push(input);
@@ -95,6 +109,7 @@ function world(opts: {
       const board = {
         question_ids: onBoard.map((i) => `g${i}`),
         words: onBoard.map((i) => input.questions[i].form),
+        parts_of_speech: onBoard.map((i) => input.questions[i].partOfSpeech),
         correct_options: onBoard.map((i) => correct(input.questions[i])),
       };
       return input.questions.map((q, i): Question => {
@@ -102,37 +117,42 @@ function world(opts: {
         const gap = { start: q.gapStart ?? 0, end: q.gapEnd ?? 0 };
         const gapText = (q.sentence ?? '').slice(gap.start, gap.end);
         const choice = () => ({ options: q.options!.map((o) => o.text), correct_option: correct(q) });
+        // Phase 34 (spec D6, D8): the stored context and marks, as questionFrom reads them.
+        const markOf = (start?: number | null, end?: number | null) => (start != null && end != null ? { start, end } : null);
+        const context = q.context ? { text: q.context, mark: markOf(q.contextMarkStart, q.contextMarkEnd) } : null;
+        const mark = markOf(q.sentenceMarkStart, q.sentenceMarkEnd);
         switch (q.type) {
           case 'typed_translation':
-            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives! };
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives!, context };
           case 'dictation':
             return { ...base, type: q.type, question: q.form, meaning: q.prompt! };
           case 'letter_tiles':
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, tiles: q.tiles! };
           case 'reverse_choice':
-            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, ...choice() };
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, ...choice(), context };
           case 'matching':
-            return { ...base, type: q.type, question: q.form, ...choice(), board };
+            return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, ...choice(), board };
           case 'multiple_choice':
+            return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice(), context };
           case 'listen_choice':
-            return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice() };
+            return { ...base, type: q.type, question: q.answerForm ?? q.form, part_of_speech: q.partOfSpeech, ...choice() };
           case 'read_aloud':
             return { ...base, type: q.type, question: q.form, meaning: q.prompt! };
           case 'say_translation':
-            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives! };
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives!, context };
           case 'typed_meaning':
-            return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt! };
+            return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt!, context };
           case 'cloze_choice':
             return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, ...choice() };
           case 'cloze_typed':
-            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives! };
+            return { ...base, type: q.type, sentence: q.sentence!, gap, translation: q.sentenceTranslation!, meaning: q.prompt!, answer: gapText, alternatives: q.alternatives!, mark };
           case 'sentence_translation':
-            return { ...base, type: q.type, question: q.sentenceTranslation!, meaning: q.prompt!, sentence: q.sentence!, gap, answer: gapText };
+            return { ...base, type: q.type, question: q.sentenceTranslation!, meaning: q.prompt!, sentence: q.sentence!, gap, answer: gapText, mark };
         }
       });
     },
   });
-  const llm = createFakeLlmClient(opts.reply ?? GOOD);
+  const llm = createFakeLlmClient(opts.reply ?? GOOD, ...(opts.contextReply !== undefined ? [opts.contextReply] : []));
   const logger = createFakeLogger();
   // Phase 34 (spec D1). What the read asked the accept job for.
   const jobs = createFakeJobRepo();
@@ -152,7 +172,7 @@ function world(opts: {
     }),
     rng: testRng(7),
     logger,
-    now: createFakeClock(1_000, 1_250),
+    now: createFakeClock(...(opts.clock ?? [1_000, 1_250])),
     llm,
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
@@ -173,7 +193,8 @@ describe('prepareSession', () => {
   it('generates every pick, flips the session to ready, and writes its questions', async () => {
     const { service, calls, llm } = world({});
     await service.prepareSession(PAYLOAD);
-    expect(llm.calls).toHaveLength(1);
+    // The batch, then (phase 34, ruling R8) the context sentences' own call.
+    expect(llm.calls.map((call) => call.system.includes(CONTEXT_MARKER))).toEqual([false, true]);
     expect(calls.transitions).toEqual(['preparing→ready']);
     const [input] = calls.generated as { questions: { options: { text: string; is_correct: boolean }[] }[] }[];
     expect(input.questions[0].options).toEqual([
@@ -925,5 +946,208 @@ describe('prepareSession, phase 34 (spec D1, D2, D12)', () => {
       await expect(service.prepareSession(payloadOf(unstamped))).rejects.toThrow();
       expect(jobs.enqueued.map((job) => (job.options as { singletonKey: string }).singletonKey)).toEqual(['va:s1:he', 'vm:s1:he', 'vz:s1:he']);
     });
+  });
+});
+
+// Phase 34 (spec D6, D7, D8, D10; rulings R8, R11). After the batch, one call asks
+// for the sentences that pin each card's sense: a context sentence beside a bare
+// word, and the practised word in a sentence card's Hebrew. The audit's cards,
+// rebuilt: d388f738 (C), 71b0b407 (E), a7d6bdb4 (H), eb95d246 (F).
+describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', () => {
+  const ENGLISH: Enrollment = { ...ENROLLMENT, target_language: 'en' };
+  const STAMP = new Date('2026-10-11T10:00:00Z');
+  const row = (over: Partial<GenerationContext> & Pick<GenerationContext, 'form' | 'lemma' | 'translation'>, n: number): GenerationContext => ({
+    glossId: `g-c${n}`, senseId: `sc${n}`, variantId: `vc${n}`, lexemeId: `lc${n}`, partOfSpeech: 'noun',
+    example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: STAMP, ...over,
+  });
+  const SAW = row({
+    form: 'saw', lemma: 'saw', partOfSpeech: 'verb', translation: 'לנסר',
+    example: 'He will saw the branch off.', exampleTranslation: 'הוא ינסר את הענף.',
+  }, 1);
+  const TABLE = row({ form: 'table', lemma: 'table', translation: 'שולחן' }, 2);
+  const DOWNLOAD = row({
+    form: 'download', lemma: 'download', partOfSpeech: 'verb', translation: 'להוריד', acceptedAnswers: ['get'],
+    example: 'I need to download the file first.', exampleTranslation: 'אני צריך להוריד את הקובץ קודם.',
+  }, 3);
+  const LAMP = row({ form: 'lamp', lemma: 'lamp', translation: 'מנורה' }, 4);
+  const COMBINE = row({ form: 'combine', lemma: 'combine', partOfSpeech: 'verb', translation: 'לשלב' }, 5);
+  const pickOf = (r: GenerationContext) => ({ gloss_id: r.glossId, sense_id: r.senseId, variant_id: r.variantId });
+  const payloadOf = (rows: GenerationContext[], ordinal: number) => ({ ...PAYLOAD, picks: rows.map(pickOf), ordinal });
+
+  type Inserted = {
+    type: string; context?: string | null; contextTranslation?: string | null; contextMarkStart?: number | null; contextMarkEnd?: number | null;
+    sentenceMarkStart?: number | null; sentenceMarkEnd?: number | null; sentenceTranslation?: string | null;
+  };
+  const insertedOf = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: Inserted[] }).questions;
+  const contextCall = (llm: { calls: { system: string; user: string }[] }) => llm.calls.find((call) => call.system.includes(CONTEXT_MARKER));
+
+  // Ordinal 0, three picks: a multiple choice, a reversed card and a typed translation.
+  const CHOICES = [SAW, TABLE, DOWNLOAD];
+  const CHOICES_BATCH = JSON.stringify({
+    items: [
+      { key: 'q1', distractors: ['לשייף', 'לקדוח', 'לשבור'] },
+      { key: 'q2', distractors: ['chair', 'door', 'wall'] },
+      { key: 'q3', distractors: [], alternatives: ['fetch'] },
+    ],
+  });
+  const CHOICES_CONTEXT = JSON.stringify({
+    items: [
+      { key: 'q1', context: 'Please saw the plank in half.', context_translation: 'בבקשה תנסר את הקרש לשניים.', context_word: 'saw' },
+      { key: 'q2', context: 'השולחן במטבח עשוי מעץ.', context_translation: 'The kitchen table is made of wood.', context_word: 'השולחן' },
+      { key: 'q3', context: 'אני רוצה להוריד את המשחק החדש הלילה.', context_translation: 'I want to download the new game tonight.', context_word: 'להוריד' },
+    ],
+  });
+
+  // Ordinal 2, three picks: a typed meaning, a tiles card and a sentence translation.
+  const SENTENCES = [SAW, LAMP, COMBINE];
+  const SENTENCES_BATCH = JSON.stringify({
+    items: [{ key: 'q3', distractors: [], sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces.", gap: 'combine' }],
+  });
+  const SENTENCES_CONTEXT = JSON.stringify({
+    items: [
+      { key: 'q1', context: 'Please saw the plank in half.', context_translation: 'בבקשה תנסר את הקרש לשניים.', context_word: 'saw' },
+      { key: 'q3', sentence_word: 'נשלב' },
+    ],
+  });
+
+  it('category C (d388f738): the typed card for להוריד shows a Hebrew sentence, its word marked, and keeps the other half', async () => {
+    const { service, calls } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT });
+    await service.prepareSession(payloadOf(CHOICES, 0));
+    const typed = insertedOf(calls)[2];
+    expect(typed).toMatchObject({
+      type: 'typed_translation',
+      context: 'אני רוצה להוריד את המשחק החדש הלילה.',
+      contextTranslation: 'I want to download the new game tonight.',
+      contextMarkStart: 9,
+      contextMarkEnd: 15,
+    });
+    // As the card shows it.
+    expect(calls.sessionQuestions[0][2]).toMatchObject({ context: { text: 'אני רוצה להוריד את המשחק החדש הלילה.', mark: { start: 9, end: 15 } } });
+  });
+
+  it('category H (a7d6bdb4): the multiple choice for saw shows a sentence in English with saw marked', async () => {
+    const { service, calls } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT });
+    await service.prepareSession(payloadOf(CHOICES, 0));
+    expect(insertedOf(calls)[0]).toMatchObject({
+      type: 'multiple_choice',
+      context: 'Please saw the plank in half.',
+      contextTranslation: 'בבקשה תנסר את הקרש לשניים.',
+      contextMarkStart: 7,
+      contextMarkEnd: 10,
+    });
+    expect(insertedOf(calls)[1]).toMatchObject({ type: 'reverse_choice', context: 'השולחן במטבח עשוי מעץ.', contextMarkStart: 0, contextMarkEnd: 6 });
+  });
+
+  it('asks the context call after the batch, once, with what each card needs and no item for a card that shows none', async () => {
+    const { service, llm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT });
+    await service.prepareSession(payloadOf(SENTENCES, 2));
+    expect(llm.calls).toHaveLength(2);
+    expect(llm.calls[1]).toBe(contextCall(llm));
+    const items = JSON.parse(contextCall(llm)!.user).items;
+    // The tiles card at q2 shows no sentence (spec D6: the letters pin the word).
+    expect(items.map((item: { key: string; task: string }) => `${item.key}:${item.task}`)).toEqual(['q1:target', 'q3:mark']);
+    expect(items[1]).toMatchObject({ word: 'combine', sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces." });
+  });
+
+  it('category E (71b0b407): the typed meaning for saw shows a sentence with saw in the sense of לנסר, and keeps its Hebrew for the judge', async () => {
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT });
+    await service.prepareSession(payloadOf(SENTENCES, 2));
+    expect(insertedOf(calls)[0]).toMatchObject({
+      type: 'typed_meaning',
+      context: 'Please saw the plank in half.',
+      contextTranslation: 'בבקשה תנסר את הקרש לשניים.',
+      contextMarkStart: 7,
+      contextMarkEnd: 10,
+    });
+  });
+
+  it('category F (eb95d246): the sentence card for combine marks נשלב in בואו נשלב כוחות', async () => {
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT });
+    await service.prepareSession(payloadOf(SENTENCES, 2));
+    expect(insertedOf(calls)[2]).toMatchObject({
+      type: 'sentence_translation', sentenceTranslation: 'בואו נשלב כוחות.', sentenceMarkStart: 5, sentenceMarkEnd: 9, context: null,
+    });
+    expect(calls.sessionQuestions[0][2]).toMatchObject({ question: 'בואו נשלב כוחות.', mark: { start: 5, end: 9 } });
+  });
+
+  // Review Focus 4.
+  it('keeps a sentence card unmarked when its word cannot be found in the Hebrew', async () => {
+    const reply = SENTENCES_CONTEXT.replace('"sentence_word":"נשלב"', '"sentence_word":"לשלב"');
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: reply });
+    await service.prepareSession(payloadOf(SENTENCES, 2));
+    expect(insertedOf(calls)[2]).toMatchObject({ type: 'sentence_translation', sentenceTranslation: 'בואו נשלב כוחות.', sentenceMarkStart: null, sentenceMarkEnd: null });
+  });
+
+  // Ruling R11: a hint missing is today's card; a failed session is worse.
+  it('prepares the session when the context call fails: each card falls back on its saved example, unmarked, and the failure is logged', async () => {
+    const { service, calls, logger } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: new Error('provider down') });
+    await service.prepareSession(payloadOf(SENTENCES, 2));
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    const [meaning, , translation] = insertedOf(calls);
+    expect(meaning).toMatchObject({ context: 'He will saw the branch off.', contextTranslation: 'הוא ינסר את הענף.', contextMarkStart: null });
+    expect(translation).toMatchObject({ sentenceMarkStart: null, sentenceMarkEnd: null });
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_call_failed', session_id: SESSION, item_count: 2, reason: 'provider down' }));
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared' }));
+  });
+
+  it('treats an unreadable context answer as a failed call, not a failed session', async () => {
+    const { service, calls, logger } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: 'nope' });
+    await service.prepareSession(payloadOf(SENTENCES, 2));
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_call_failed', reason: expect.stringContaining('unreadable') }));
+  });
+
+  it('logs a card left with no sentence, when the model wrote none and the sense has no saved example', async () => {
+    const rows = [{ ...SAW, example: null, exampleTranslation: null }, TABLE, DOWNLOAD];
+    const reply = JSON.stringify({ items: JSON.parse(CHOICES_CONTEXT).items.filter((item: { key: string }) => item.key !== 'q1') });
+    const { service, calls, logger } = world({ enrollment: ENGLISH, context: rows, reply: CHOICES_BATCH, contextReply: reply });
+    await service.prepareSession(payloadOf(rows, 0));
+    expect(insertedOf(calls)[0]).toMatchObject({ type: 'multiple_choice', context: null });
+    expect(logger.events).toContainEqual({ event: 'context_missing', session_id: SESSION, position: 0, type: 'multiple_choice' });
+  });
+
+  it('reads the recent contexts in the read step, and drops a sentence one of them showed for the saved example', async () => {
+    const recentContexts: RecentContexts = new Map([[DOWNLOAD.glossId, { typed_translation: ['אני רוצה להוריד את המשחק החדש הלילה'] }]]);
+    const { service, calls, logger, llm } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, recentContexts });
+    await service.prepareSession(payloadOf(CHOICES, 0));
+    expect(calls.recentContextsAsked).toEqual([{ enrollmentId: 'e1', glossIds: CHOICES.map((r) => r.glossId), limit: 3 }]);
+    // Told to the model as a sentence to avoid.
+    expect(JSON.parse(contextCall(llm)!.user).items[2].avoid).toContain('אני רוצה להוריד את המשחק החדש הלילה');
+    expect(insertedOf(calls)[2]).toMatchObject({ context: 'אני צריך להוריד את הקובץ קודם.', contextTranslation: 'I need to download the file first.', contextMarkStart: null });
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_dropped', position: 2, type: 'typed_translation', reason: expect.stringContaining('recent') }));
+  });
+
+  it('refuses a Hebrew sentence that holds an answer the card accepts, even one only this session listed', async () => {
+    const reply = CHOICES_CONTEXT.replace('אני רוצה להוריד את המשחק החדש הלילה.', 'תעשה fetch למשחק החדש הלילה.');
+    const { service, calls, logger } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: reply });
+    await service.prepareSession(payloadOf(CHOICES, 0));
+    expect(insertedOf(calls)[2]).toMatchObject({ context: 'אני צריך להוריד את הקובץ קודם.' });
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_dropped', reason: expect.stringContaining('fetch') }));
+  });
+
+  it('asks no context call when no card shows a sentence', async () => {
+    // One pick at ordinal 1 with listening on: a listen choice, which shows none (spec D10).
+    const { service, llm, calls } = world({
+      enrollment: ENGLISH, context: [SAW], reply: JSON.stringify({ items: [{ key: 'q1', distractors: ['לשייף', 'לקדוח', 'לשבור'] }] }),
+    });
+    await service.prepareSession({ ...payloadOf([SAW], 1), listening: true });
+    expect(insertedOf(calls)[0]).toMatchObject({ type: 'listen_choice' });
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it('logs how long the context call took', async () => {
+    const { service, logger } = world({
+      enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, clock: [1_000, 1_250, 2_000, 2_400],
+    });
+    await service.prepareSession(payloadOf(CHOICES, 0));
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', model_ms: 250, context_ms: 400 }));
+  });
+
+  it('gives a listen card and each word of a board its part of speech (spec D10)', async () => {
+    const { service, calls } = world({ context: TEN, reply: TEN_REPLY });
+    await service.prepareSession(TEN_PAYLOAD);
+    const shown = calls.sessionQuestions[0];
+    expect(shown.find((q) => q.type === 'listen_choice')).toMatchObject({ part_of_speech: 'noun' });
+    expect(shown.find((q) => q.type === 'matching')).toMatchObject({ part_of_speech: 'noun', board: { parts_of_speech: ['noun', 'noun', 'noun', 'noun'] } });
   });
 });

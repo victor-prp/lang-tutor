@@ -26,6 +26,7 @@ import type {
   LanguageCodeSchema,
   LevelSchema,
   LlmAcceptSchema,
+  LlmContextSchema,
   LlmCorrectionSchema,
   LlmDistractorsSchema,
   LlmEntrySchema,
@@ -84,6 +85,8 @@ import type {
   LlmMeaningJudgeSchema,
   LlmTranslationJudgeSchema,
   GapSchema,
+  MarkSchema,
+  ContextSchema,
   ClozeChoiceQuestionSchema,
   ClozeTypedQuestionSchema,
   SentenceTranslationQuestionSchema,
@@ -167,6 +170,7 @@ export type VocabularyWordQuery = z.infer<typeof VocabularyWordQuerySchema>;
 export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type SessionSource = z.infer<typeof SessionSourceSchema>;
 export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;
+export type LlmContext = z.infer<typeof LlmContextSchema>;
 export type SessionView = z.infer<typeof SessionViewSchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
 export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;
@@ -189,6 +193,8 @@ export type JudgedAnswerResponse = z.infer<typeof JudgedAnswerResponseSchema>;
 export type LlmMeaningJudge = z.infer<typeof LlmMeaningJudgeSchema>;
 export type LlmTranslationJudge = z.infer<typeof LlmTranslationJudgeSchema>;
 export type Gap = z.infer<typeof GapSchema>;
+export type Mark = z.infer<typeof MarkSchema>;
+export type Context = z.infer<typeof ContextSchema>;
 export type ClozeChoiceQuestion = z.infer<typeof ClozeChoiceQuestionSchema>;
 export type ClozeTypedQuestion = z.infer<typeof ClozeTypedQuestionSchema>;
 export type SentenceTranslationQuestion = z.infer<typeof SentenceTranslationQuestionSchema>;

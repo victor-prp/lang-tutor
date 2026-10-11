@@ -53,6 +53,9 @@ describe('repos', () => {
     findRecentSentences: () => {
       throw new Error('submitAnswer must not read recent sentences');
     },
+    findRecentContexts: () => {
+      throw new Error('submitAnswer must not read recent contexts');
+    },
     insertGeneratedQuestions: () => {
       throw new Error('submitAnswer must not write generated questions');
     },
@@ -296,8 +299,9 @@ describe('repos', () => {
         answer: 'finestra',
         lemma: 'finestra',
         alternatives: [],
+        context: null,
       },
-      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null },
     ],
     answers: [],
     complete: false,

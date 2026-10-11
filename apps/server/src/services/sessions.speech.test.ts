@@ -21,7 +21,7 @@ import { createSessionService } from './sessions';
 const SESSION = '22222222-2222-2222-2222-222222222222';
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'it', created_at: '' };
 const READ: Question = { id: 'r1', type: 'read_aloud', vocab_term_id: 'l1', question: 'gatto', meaning: 'חתול' };
-const CHOICE: Question = { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 };
+const CHOICE: Question = { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null };
 const AUDIO = 'A'.repeat(2_000);
 
 const record = (answers: SessionRecord['answers'] = []): SessionRecord => ({

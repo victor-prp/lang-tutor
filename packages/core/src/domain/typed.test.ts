@@ -12,6 +12,7 @@ const q = (answer: string, lemma = answer, alternatives: string[] = []): TypedTr
   answer,
   lemma,
   alternatives,
+  context: null,
 });
 
 describe('normaliseTyped', () => {

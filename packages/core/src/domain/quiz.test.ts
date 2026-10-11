@@ -36,6 +36,7 @@ function makeQuestion(n: number): MultipleChoiceQuestion {
     question: `word ${n}`,
     options: [`a${n}`, `b${n}`, `c${n}`, `d${n}`],
     correct_option: 0,
+    context: null,
   };
 }
 
@@ -145,6 +146,7 @@ const typed: Question = {
   answer: 'casa',
   lemma: 'casa',
   alternatives: ['abitazione'],
+  context: null,
 };
 
 describe('evaluate, typed', () => {
@@ -187,16 +189,18 @@ describe('rightAnswer and shuffleOptions', () => {
 const listen: ListenChoiceQuestion = {
   id: 'l1', type: 'listen_choice', vocab_term_id: 'v', question: 'casa',
   options: ['בית', 'דלת', 'קיר', 'גג'], correct_option: 0,
+  part_of_speech: 'noun',
 };
 const dictation: DictationQuestion = { id: 'd1', type: 'dictation', vocab_term_id: 'v', question: 'parlo', meaning: 'מדבר' };
 const tiles: LetterTilesQuestion = {
   id: 't1', type: 'letter_tiles', vocab_term_id: 'v', question: 'בית', part_of_speech: 'noun',
   answer: 'casa', tiles: ['s', 'a', 'c', 'x', 'a', 'q'],
 };
-const BOARD = { question_ids: ['m1', 'm2'], words: ['casa', 'gatto'], correct_options: [0, 1] };
+const BOARD = { question_ids: ['m1', 'm2'], words: ['casa', 'gatto'], parts_of_speech: ['noun', 'noun'], correct_options: [0, 1] };
 const word = (id: string, form: string, correct: number): MatchingQuestion => ({
   id, type: 'matching', vocab_term_id: 'v', question: form,
   options: ['בית', 'חתול', 'כלב'], correct_option: correct, board: BOARD,
+  part_of_speech: 'noun',
 });
 
 describe('phase 24 types', () => {
@@ -254,6 +258,7 @@ const SAY: SayTranslationQuestion = {
   answer: 'parlo',
   lemma: 'parlare',
   alternatives: ['dico'],
+  context: null,
 };
 
 describe('phase 25 speaking cards', () => {
@@ -329,13 +334,14 @@ const MEANING: Question = {
   question: 'parlare',
   part_of_speech: 'verb',
   meaning: 'לדבר',
+  context: null,
 };
 
 describe('typed_meaning (phase 27 D3)', () => {
   it('is judged, not a choice and not speaking', () => {
     expect(isJudged(MEANING)).toBe(true);
     expect(isChoice(MEANING)).toBe(false);
-    expect(isJudged({ ...MEANING, type: 'typed_translation', answer: 'x', lemma: 'x', alternatives: [] } as Question)).toBe(false);
+    expect(isJudged({ ...MEANING, type: 'typed_translation', answer: 'x', lemma: 'x', alternatives: [], context: null } as Question)).toBe(false);
   });
   it('takes only a judged text', () => {
     expect(answerFits(MEANING, { text: 'לדבר', judged: 'exact' })).toBe(true);
@@ -357,7 +363,7 @@ describe('typed_meaning (phase 27 D3)', () => {
     expect(evaluate(MEANING, { text: long, judged: 'wrong' }).answer_string).toHaveLength(MAX_JUDGED_TEXT);
   });
   it('a typed card still refuses a judged answer', () => {
-    const typed: Question = { id: 't1', type: 'typed_translation', vocab_term_id: 'l1', question: 'לדבר', part_of_speech: 'verb', answer: 'parlare', lemma: 'parlare', alternatives: [] };
+    const typed: Question = { id: 't1', type: 'typed_translation', vocab_term_id: 'l1', question: 'לדבר', part_of_speech: 'verb', answer: 'parlare', lemma: 'parlare', alternatives: [], context: null };
     expect(answerFits(typed, { text: 'parlare', judged: 'exact' })).toBe(false);
   });
   it('its right answer is the meaning, and it is missed like any card', () => {
@@ -388,6 +394,7 @@ const CLOZE_TYPED: Question = {
   meaning: 'לדבר',
   answer: 'parlavamo',
   alternatives: ['chiacchieravamo'],
+  mark: null,
 };
 const TRANSLATION: Question = {
   id: 'st',
@@ -398,6 +405,7 @@ const TRANSLATION: Question = {
   sentence: 'Voglio prenotare un tavolo.',
   gap: { start: 7, end: 16 },
   answer: 'prenotare',
+  mark: null,
 };
 
 describe('phase 27 Part B cards', () => {
@@ -433,6 +441,7 @@ describe('phase 27 Part B cards', () => {
       answer: 'parlare',
       lemma: 'parlare',
       alternatives: [],
+      context: null,
     };
     expect(answerFits(say, { text: 'parlare', judged: 'exact' })).toBe(false);
   });

@@ -5,7 +5,21 @@ import { z } from 'zod';
 // inferred from it in ./types. Plain Zod 4 on purpose: core must not depend on
 // a Hono adapter, and Zod 4's native JSON Schema output is what lets the
 // adapter document these without one.
+// Phase 34 (spec D6, D8). A marked word: JavaScript string indices, [start,
+// end), into the sentence it marks, as GapSchema's are.
+export const MarkSchema = z.object({ start: z.number().int(), end: z.number().int() });
+
+// Phase 34 (spec D6). The sentence a card that shows a bare word shows with it,
+// so the word has one sense: Hebrew on a typed translation, say the translation
+// and reverse choice; in the target language on a typed meaning and multiple
+// choice. `mark` is the word in it, or null when the server could not find it
+// (a Hebrew verb inflects), and the sentence is then shown unmarked. Its other
+// half is never sent: it goes to the judge (D7).
+export const ContextSchema = z.object({ text: z.string(), mark: MarkSchema.nullable() });
+
 // Today's card: the target word, four meanings in the learner's language.
+// Phase 34: with its context sentence (spec D6), or null for a saved sense
+// without an example.
 export const MultipleChoiceQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('multiple_choice'),
@@ -13,6 +27,7 @@ export const MultipleChoiceQuestionSchema = z.object({
   question: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 23. The same card turned round: the meaning, four target words.
@@ -25,6 +40,7 @@ export const ReverseChoiceQuestionSchema = z.object({
   part_of_speech: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 23. The meaning; the learner types the target word. The client holds
@@ -39,16 +55,20 @@ export const TypedTranslationQuestionSchema = z.object({
   answer: z.string(),
   lemma: z.string(),
   alternatives: z.array(z.string()),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 24. Hear the word, pick its meaning: today's card with its prompt
 // spoken rather than shown. `question` is the form the app speaks, and shows
-// once the card is answered (spec D6).
+// once the card is answered (spec D6). Phase 34 (spec D10): with the part of
+// speech the reverse card shows, since a written sentence would spell out the
+// word being heard.
 export const ListenChoiceQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('listen_choice'),
   vocab_term_id: z.string(),
   question: z.string(),
+  part_of_speech: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
 });
@@ -65,9 +85,11 @@ export const DictationQuestionSchema = z.object({
 
 // Phase 24 (spec D10). A matching board, as each of its words carries it: every
 // word's question id, the word, and its right option among the shared options.
+// Phase 34 (spec D10): and each word's part of speech, shown under it.
 export const MatchingBoardSchema = z.object({
   question_ids: z.array(z.string()),
   words: z.array(z.string()),
+  parts_of_speech: z.array(z.string()),
   correct_options: z.array(z.number().int()),
 });
 
@@ -79,6 +101,7 @@ export const MatchingQuestionSchema = z.object({
   type: z.literal('matching'),
   vocab_term_id: z.string(),
   question: z.string(),
+  part_of_speech: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
   board: MatchingBoardSchema,
@@ -119,6 +142,7 @@ export const SayTranslationQuestionSchema = z.object({
   answer: z.string(),
   lemma: z.string(),
   alternatives: z.array(z.string()),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 27 (spec D2, D11). The form, written; the learner types its Hebrew
@@ -131,6 +155,7 @@ export const TypedMeaningQuestionSchema = z.object({
   question: z.string(),
   part_of_speech: z.string(),
   meaning: z.string(),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 27 (spec D7, D11). Where a word sits in a sentence: JavaScript string
@@ -157,6 +182,8 @@ export const ClozeChoiceQuestionSchema = z.object({
 // Phase 27 (spec D5). A sentence written for this session, the word blanked in
 // whatever form it needs, and the whole sentence in Hebrew. `answer` is the
 // gap's text: the client judges locally against it and `alternatives`.
+// Phase 34 (spec D8): `mark` is the practised word in `translation`, the Hebrew,
+// or null when the server could not find it there.
 export const ClozeTypedQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('cloze_typed'),
@@ -167,11 +194,14 @@ export const ClozeTypedQuestionSchema = z.object({
   meaning: z.string(),
   answer: z.string(),
   alternatives: z.array(z.string()),
+  mark: MarkSchema.nullable(),
 });
 
 // Phase 27 (spec D6). A Hebrew sentence to translate, judged by the server.
 // `sentence` is a reference translation, `gap` and `answer` the practised word
-// in it: shown after the answer.
+// in it: shown after the answer. Phase 34 (spec D8): `mark` is the practised
+// word in `question`, the Hebrew sentence (נשלב in בואו נשלב כוחות), or null
+// when the server could not find it there.
 export const SentenceTranslationQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('sentence_translation'),
@@ -181,6 +211,7 @@ export const SentenceTranslationQuestionSchema = z.object({
   sentence: z.string(),
   gap: GapSchema,
   answer: z.string(),
+  mark: MarkSchema.nullable(),
 });
 
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
@@ -967,31 +998,35 @@ export const LlmTranslationJudgeSchema = z.object({
 // LlmTranslationSchema.alternatives gives: a missing or surplus list must never
 // fail a session the model otherwise answered.
 //
-// Phase 34 (spec D4, D4a, D6, D8). An item gains `context`, `context_translation`
-// and `context_word` (the sentence a bare-word card shows, its hidden other half,
-// and the marked word as it appears in `context`) and `sentence_word` (the
-// practised word as it appears in the Hebrew sentence), and `distractors` goes
-// from three to six, of which the domain keeps three. That is the same trade as
-// `entries` above, so it was measured against the live API before anything was
-// built on it: this schema travels as `responseSchema`, where array caps
-// multiply, and MockServer, which never validates a schema, cannot show a 400.
-// `npx tsx tests/eval/measureSchema.ts` (in apps/server) sends the batch at full
-// size, ten items of every task kind through the real prompt and client, and
-// prints `accepted` or the provider's reason; its flags measure the variants
-// below. gemini-2.5-flash, 2026-10-11, the user message asking for every field:
+// Phase 34 (spec D4, D4a). `distractors` goes from three to six, of which the
+// domain keeps three. That is the same trade as `entries` above, so it was
+// measured against the live API before anything was built on it: this schema
+// travels as `responseSchema`, where array caps multiply, and MockServer, which
+// never validates a schema, cannot show a 400. `npx tsx tests/eval/measureSchema.ts`
+// (in apps/server) sends the batch at full size, ten items of every task kind
+// through the real prompt and client, and prints `accepted` or the provider's
+// reason; its flags measure the variants below. gemini-2.5-flash, 2026-10-11,
+// with the four context strings below still in the item:
 //
-//   accepted  today's shape (3 distractors, no context fields),
-//             the shape below: 6 distractors, and also 7 or 8 of them,
-//             6 distractors and one more optional string
-//   refused   9 distractors, 10, 12, 20; 6 distractors and two more optional
-//             strings, or three; 8 distractors and one more optional string;
-//             the shape below twice over (20 distractors, every field doubled)
+//   accepted  3 distractors and no context strings (the phase 27 shape),
+//             6 distractors and the four context strings, and also 7 or 8,
+//             6 distractors, the four context strings and one more
+//   refused   9 distractors, 10, 12, 20; 6 distractors, the four context
+//             strings and two more optional strings, or three; 8 distractors
+//             and one more optional string; all of it twice over (20
+//             distractors, every field doubled)
 //
-// So the context fields stay in the batch and need no call of their own
-// (`LlmContextSchema` was the fallback, and was not built), and the six stay six.
-// The headroom is one optional string, or two wrong options, not both: a new
-// field here, or a larger cap, means measuring first. A 400 fails every list
-// session, with nothing in the diff to say so.
+// Accepted is not answered, though (ruling R8). The batch first carried four
+// optional strings for spec D6 and D8 (`context`, `context_translation`,
+// `context_word`, `sentence_word`), and with them the non-streaming call hung:
+// a probe of 75 live calls, 30 s budget, timed out 8 of 8 `translate it` and 2
+// of 5 `sentence en` batches, while 6 distractors alone never did (0 of 14), and
+// a call asking only for the context answered in 1.8 to 7.4 s. The hang is on
+// the non-streaming path and only with those strings; measureSchema.ts cannot
+// see it, because it waits production's 300 s. So the four strings left this
+// schema for LlmContextSchema's call (spec D4a's first fallback), and six stays
+// six. A new field here, or a larger cap, means measuring first, for a 400 and
+// for the wait: a 400 fails every list session, with nothing in the diff to say so.
 export const LlmDistractorsSchema = z.object({
   items: z
     .array(
@@ -1003,7 +1038,32 @@ export const LlmDistractorsSchema = z.object({
         sentence: z.string().optional(),
         gap: z.string().optional(),
         translation: z.string().optional(),
-        // Phase 34 (spec D6, D7, D8).
+      }),
+    )
+    .max(10),
+});
+
+// Phase 34 (spec D6, D7, D8, ruling R8). The context call's answer, one item per
+// card that needs one, keyed as the batch is (q1, q2, …). A bare-word card's
+// item has `context` (the sentence the card shows), `context_translation` (its
+// other half, never shown, which goes to the judge) and `context_word` (the
+// marked word as written in `context`); a sentence card's has `sentence_word`
+// (the practised word as written in its Hebrew sentence). Every string optional,
+// for the reason Phase 23 gives above: a missing one costs that card its
+// sentence or its mark, never the session (ruling R11). Optional rather than
+// nullable: Gemini refuses a bare nullable string (LlmAcceptSchema). Measured
+// with `npx tsx tests/eval/measureSchema.ts --context` (in apps/server): ten
+// items, every kind (four target sentences, three Hebrew ones, three marks),
+// through the real prompt and client, gemini-2.5-flash, 2026-10-11, production's
+// 300 s budget, thinking on. Accepted on all four runs, no 400, answered in
+// 7.3, 7.1, 7.4 and 7.0 s, every item answered and kept by D6's rules. The batch beside it,
+// without the four strings, answered in 13.6 s the same day. A field more here
+// means measuring again, for a 400 and for the wait.
+export const LlmContextSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        key: z.string(),
         context: z.string().optional(),
         context_translation: z.string().optional(),
         context_word: z.string().optional(),

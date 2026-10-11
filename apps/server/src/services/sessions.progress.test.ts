@@ -20,6 +20,7 @@ const question = (n: number): MultipleChoiceQuestion => ({
   question: `word${n}`,
   options: [`right${n}`, 'a', 'b', 'c'],
   correct_option: 0,
+  context: null,
 });
 const QUESTIONS = Array.from({ length: 10 }, (_, i) => question(i));
 const answered = (count: number) =>

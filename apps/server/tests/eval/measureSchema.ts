@@ -22,12 +22,16 @@
  *                      It exists to prove the script can report a refusal: a check
  *                      that cannot fail proves nothing.
  *   --distractors N    cap `distractors` at N (the fallback ladder is 6, 5, 4).
- *   --omit-context     drop the four context fields from the sent schema.
  *   --extra N          add N more optional string fields: the headroom left.
+ *   --context          measure the context call instead (LlmContextSchema, ruling
+ *                      R8): ten items of every kind through buildContextPrompt, and
+ *                      how each would be kept. Run it several times: the batch's
+ *                      context strings hung the call without a 400 (see the comment
+ *                      above LlmDistractorsSchema), so the wait is a measurement too.
  *
- * The prompt is the production one. Only the user message gains an `also` block
- * that asks for the fields the prompt does not ask for yet, so the model fills
- * them and the answer is as long as a real one; the wording is a measurement's,
+ * The prompt is the production one. Only the batch's user message gains an
+ * `also` block that asks for the six wrong answers the prompt does not ask for
+ * yet, so the answer is as long as a real one; the wording is a measurement's,
  * not the product's.
  *
  * Exit status: 0 accepted, 1 refused (a 400), 2 any other provider failure (the
@@ -35,12 +39,22 @@
  */
 import { z, type ZodType } from 'zod';
 
-import { LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
+import type { QuestionType } from '@lang-tutor/core/domain';
+import { LlmContextSchema, LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import {
+  buildContextPrompt,
+  contextItemFor,
+  markFor,
+  parseLlmContext,
+  resolveContext,
+  type ContextItem,
+} from '../../src/domain/context';
+import {
   buildDistractorPrompt,
   distractorItems,
+  keyOf,
   parseLlmDistractors,
   type GenerationContext,
   type RecentSentences,
@@ -51,7 +65,7 @@ import { createGeminiClient, toGeminiSchema } from '../../src/providers/gemini';
 /** The session batch's production budget (composition.ts: sessionGenerationTimeoutMs). */
 const TIMEOUT_MS = 300_000;
 
-/** The four fields spec D6 and D8 add to an item. */
+/** The context call's fields (spec D6, D8). */
 const CONTEXT_FIELDS = ['context', 'context_translation', 'context_word', 'sentence_word'] as const;
 
 let next = 0;
@@ -95,18 +109,23 @@ const ROWS: { row: GenerationContext; task: Task }[] = [
   { task: 'translate', row: row('parla', 'parlare', 'verb', 'לדבר', 'Lei parla tre lingue.', 'היא מדברת בשלוש שפות.') },
 ];
 
-/** What the production prompt does not ask for yet (Tasks 5 and 6 write that wording). */
+/** What the production prompt does not ask for yet (Task 6 writes that wording). */
 const ALSO = {
   wrong_answers: 'For a "meaning", "word" or "gap" item write six wrong answers in distractors instead of three.',
-  context_for_meaning:
-    'For a "meaning" item also write context: a short, natural everyday sentence in the learned language that uses the word in the meaning given by correct; context_word: the word exactly as it appears in context; context_translation: the whole sentence in natural Hebrew.',
-  context_for_word_and_typed:
-    'For a "word" or "typed" item also write context: a short, natural everyday Hebrew sentence that uses the meaning in correct; context_word: the Hebrew word exactly as it appears in context; context_translation: the whole sentence in the learned language.',
-  sentence_word:
-    'For a "sentence" or "translate" item also write sentence_word: the practised word exactly as it appears in the Hebrew sentence (translation for a "sentence" item, sentence for a "translate" item).',
 };
 
-type Args = { oversized: boolean; distractors: number | null; omitContext: boolean; extra: number };
+/** The card each row's context item is for, with --context: every kind the call
+ *  answers, a target sentence, a Hebrew one and a sentence card's mark. */
+const CONTEXT_TYPES: Record<Task, QuestionType> = {
+  meaning: 'multiple_choice',
+  word: 'reverse_choice',
+  typed: 'typed_translation',
+  gap: 'typed_meaning',
+  sentence: 'cloze_typed',
+  translate: 'sentence_translation',
+};
+
+type Args = { oversized: boolean; distractors: number | null; extra: number; context: boolean };
 
 function parseArgs(argv: string[]): Args {
   const number = (flag: string): number | null => {
@@ -119,22 +138,18 @@ function parseArgs(argv: string[]): Args {
   return {
     oversized: argv.includes('--oversized'),
     distractors: number('--distractors'),
-    omitContext: argv.includes('--omit-context'),
     extra: number('--extra') ?? 0,
+    context: argv.includes('--context'),
   };
 }
 
 /** The schema actually sent: the repo's own, or a variant derived from it so it keeps tracking the repo's. */
 function schemaFor(args: Args): { schema: ZodType; label: string } {
-  if (!args.oversized && args.distractors === null && !args.omitContext && args.extra === 0) {
+  if (!args.oversized && args.distractors === null && args.extra === 0) {
     return { schema: LlmDistractorsSchema, label: 'LlmDistractorsSchema as it stands' };
   }
   const shape: Record<string, ZodType> = { ...LlmDistractorsSchema.shape.items.element.shape };
   const notes: string[] = [];
-  if (args.omitContext) {
-    for (const field of CONTEXT_FIELDS) delete shape[field];
-    notes.push('without the context fields');
-  }
   if (args.distractors !== null) {
     shape.distractors = z.array(z.string()).max(args.distractors);
     notes.push(`distractors capped at ${args.distractors}`);
@@ -158,6 +173,7 @@ async function main(): Promise<number> {
     );
   }
   const args = parseArgs(process.argv.slice(2));
+  if (args.context) return measureContext(gemini);
   const { schema, label } = schemaFor(args);
 
   const recent: RecentSentences = new Map();
@@ -228,8 +244,76 @@ async function main(): Promise<number> {
     }).length;
   console.log(`parse     ok, ${answer.items.length} items`);
   console.log(`distractors per item  ${answer.items.map((item) => item.distractors.length).join(' ')}`);
-  for (const field of ['alternatives', 'sentence', 'gap', 'translation', ...CONTEXT_FIELDS]) {
+  for (const field of ['alternatives', 'sentence', 'gap', 'translation']) {
     console.log(`filled    ${field.padEnd(20)} ${filled(field)} of ${answer.items.length}`);
+  }
+  return 0;
+}
+
+/** Ruling R8. The context call at full size: one item per row, as prepareSession
+ *  builds them, the sentence cards marking the saved example's Hebrew. Prints the
+ *  wait, whether the schema was refused, and how each item would be kept. */
+async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Promise<number> {
+  const items: ContextItem[] = ROWS.map(({ row, task }, index) =>
+    contextItemFor({
+      key: keyOf(index),
+      type: CONTEXT_TYPES[task],
+      row,
+      alternatives: [],
+      recent: [],
+      sentence: { hebrew: row.exampleTranslation!, target: row.example!, word: row.form },
+    })!,
+  );
+  const prompt = buildContextPrompt({ items, from: 'it', to: 'he' });
+  const llm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    timeoutMs: TIMEOUT_MS,
+  });
+  console.log(`model     ${gemini.model}`);
+  console.log(`schema    LlmContextSchema (${JSON.stringify(toGeminiSchema(LlmContextSchema)).length} characters of responseSchema)`);
+  console.log(`request   ${items.length} items: ${items.map((item) => item.task).join(' ')}`);
+  const started = Date.now();
+  let raw: string;
+  try {
+    raw = await llm(prompt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`after     ${Date.now() - started} ms`);
+    if (/responded 400$/.test(message)) {
+      console.log(`refused   ${message}`);
+      return 1;
+    }
+    console.log(`failed    ${message} (inconclusive)`);
+    return 2;
+  }
+  console.log(`after     ${Date.now() - started} ms`);
+  console.log('accepted');
+  const answer = parseLlmContext(raw);
+  if (!answer) {
+    console.log(`parse     FAILED: ${raw.slice(0, 300)}`);
+    return 3;
+  }
+  console.log(`parse     ok, ${answer.items.length} items`);
+  const found = new Map(answer.items.map((item) => [item.key, item]));
+  for (const item of items) {
+    const got = found.get(item.key);
+    if (item.task === 'mark') {
+      const mark = markFor(item, got);
+      console.log(`${item.key} mark        ${got?.sentence_word ?? '(none)'} -> ${mark ? item.sentence.slice(mark.start, mark.end) : 'unmarked'}`);
+      continue;
+    }
+    const outcome = resolveContext(item, got, { target: 'it', explanation: 'he' });
+    const mark = outcome.context?.mark;
+    console.log(
+      `${item.key} ${item.task.padEnd(11)} ${outcome.dropped ? `DROPPED (${outcome.dropped})` : 'kept'}: ${got?.context ?? '(none)'}` +
+        ` [${got?.context_word ?? ''}${mark && outcome.context ? ` -> ${outcome.context.text.slice(mark.start, mark.end)}` : ''}] = ${got?.context_translation ?? ''}`,
+    );
+  }
+  for (const field of CONTEXT_FIELDS) {
+    console.log(`filled    ${field.padEnd(20)} ${answer.items.filter((item) => (item as Record<string, unknown>)[field]).length} of ${answer.items.length}`);
   }
   return 0;
 }

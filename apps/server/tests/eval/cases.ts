@@ -1,4 +1,5 @@
 import type { LanguageCode, PartOfSpeech, SentenceTranslationQuestion, TranslationKind } from '@lang-tutor/core/api';
+import type { QuestionType } from '@lang-tutor/core/domain';
 
 import type { Task } from '../../src/domain/distractors';
 import type { JudgeContext, MeaningJudgeContext } from '../../src/domain/judge';
@@ -1137,6 +1138,12 @@ const enBank = {
   example: 'I went to the bank to take out money.', translation: 'הלכתי לבנק למשוך כסף.',
 };
 
+// Phase 34 (spec D7). A generated pair, as findJudgeContext now gives it.
+const enSawCard = {
+  form: 'saw', pos: 'verb' as const, meaning: 'לנסר',
+  example: 'Can you saw this wood for me?', translation: 'האם תוכל לנסר את העץ הזה בשבילי?',
+};
+
 export const JUDGE_CASES: JudgeCase[] = [
   judge('it', itPrenotare, 'לשריין', 'exact', 'synonym'),
   judge('it', itComprare, 'לרכוש', 'exact', 'synonym'),
@@ -1194,6 +1201,12 @@ export const JUDGE_CASES: JudgeCase[] = [
   judge('it', itParla, 'parla', 'wrong', 'the word typed back'),
   judge('ru', ruKniga, 'книга', 'wrong', 'the word typed back'),
   judge('en', enBook, 'book', 'wrong', 'the word typed back'),
+
+  // Phase 34 (spec D7). The judge is given the sentence the card showed and its
+  // hidden Hebrew, not the saved example: this pair is the one the context call
+  // wrote for 71b0b407's `saw` on 2026-10-11 (CONTEXT_CASES' first case).
+  judge('en', enSawCard, 'מנסר', 'exact', 'other form, on the card’s generated sentence'),
+  judge('en', enSawCard, 'לשבור', 'wrong', 'unrelated, on the card’s generated sentence'),
 ];
 
 /**
@@ -1389,6 +1402,7 @@ const tjudge = (
       sentence: sentence.reference,
       gap: { start, end: start + sentence.gap.length },
       answer: sentence.gap,
+      mark: null,
     },
     context: {
       language,
@@ -1532,5 +1546,68 @@ export const ACCEPT_CASES: AcceptCase[] = [
     example: "La lezione dura un'ora.",
     exampleTranslation: 'השיעור נמשך שעה.',
     expectAnswerForm: null,
+  },
+];
+
+/**
+ * Phase 34 (spec D6, D8; ruling R3). The context call, one card each, as
+ * prepareSession asks it. Scored on structure alone: tier 1 that the sentence
+ * and its other half are in the right scripts; tier 2 that the server's own
+ * rules keep the sentence (contextItemFor and resolveContext, so a target
+ * sentence shows the card's form and a Hebrew one holds no answer), that the
+ * marked word is a form of the card's word and none of `notWords`, and that a
+ * sentence card's word is found in its Hebrew. Whether the sentence means the
+ * right sense is the checker's to say (Task 6's checker-based case).
+ */
+export type ContextCase = {
+  label: string;
+  target: LanguageCode;
+  /** The card the sentence is for. */
+  type: QuestionType;
+  form: string;
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  /** The rendering, in Hebrew. */
+  translation: string;
+  example: string | null;
+  exampleTranslation: string | null;
+  acceptedAnswers?: string[];
+  /** A bare-word card: context_word must begin like one of these. */
+  formsOf?: string[];
+  /** A bare-word card: context_word must be none of these (another word's forms). */
+  notWords?: string[];
+  /** A sentence card: its Hebrew, its target sentence and the practised word,
+   *  and the Hebrew word that stands for it. */
+  sentence?: { hebrew: string; target: string; word: string; marked: string };
+};
+
+export const CONTEXT_CASES: ContextCase[] = [
+  // E, 71b0b407: `saw` is the tool's verb here, never the past of see.
+  {
+    label: 'context E: saw/לנסר in a sentence that shows saw, never see',
+    target: 'en', type: 'typed_meaning', form: 'saw', lemma: 'saw', partOfSpeech: 'verb', translation: 'לנסר',
+    example: 'He will saw the branch off the tree.', exampleTranslation: 'הוא ינסר את הענף מהעץ.',
+    formsOf: ['saw'], notWords: ['see', 'seen', 'sees', 'seeing'],
+  },
+  // H, a7d6bdb4: the same word on a multiple choice, with no saved example to lean on.
+  {
+    label: 'context H: saw/לנסר on a multiple choice, no saved example',
+    target: 'en', type: 'multiple_choice', form: 'saw', lemma: 'saw', partOfSpeech: 'verb', translation: 'לנסר',
+    example: null, exampleTranslation: null,
+    formsOf: ['saw'], notWords: ['see', 'seen', 'sees', 'seeing'],
+  },
+  // C, d388f738: a Hebrew sentence for להוריד that holds no English word.
+  {
+    label: 'context C: להוריד/download in a Hebrew sentence with no English word',
+    target: 'en', type: 'typed_translation', form: 'download', lemma: 'download', partOfSpeech: 'verb', translation: 'להוריד',
+    example: 'I need to download the file before the meeting.', exampleTranslation: 'אני צריך להוריד את הקובץ לפני הפגישה.',
+    acceptedAnswers: ['get'],
+  },
+  // F, eb95d246: the practised word, named in the sentence the card shows.
+  {
+    label: 'context F: combine named in בואו נשלב כוחות',
+    target: 'en', type: 'sentence_translation', form: 'combine', lemma: 'combine', partOfSpeech: 'verb', translation: 'לשלב',
+    example: null, exampleTranslation: null,
+    sentence: { hebrew: 'בואו נשלב כוחות.', target: "Let's combine forces.", word: 'combine', marked: 'נשלב' },
   },
 ];

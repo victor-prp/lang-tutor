@@ -22,7 +22,7 @@ import { createSessionService } from './sessions';
 
 const SESSION = '22222222-2222-2222-2222-222222222222';
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'it', created_at: '' };
-const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין' };
+const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין', context: null };
 const SENTENCE: Question = {
   id: 's1',
   type: 'sentence_translation',
@@ -32,8 +32,9 @@ const SENTENCE: Question = {
   sentence: 'I want to book a table.',
   gap: { start: 10, end: 14 },
   answer: 'book',
+  mark: null,
 };
-const CHOICE: Question = { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 };
+const CHOICE: Question = { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null };
 const CONTEXT = {
   form: 'prenotare',
   lemma: 'prenotare',

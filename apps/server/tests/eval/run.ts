@@ -23,17 +23,19 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
+import { contextItemFor, markFor, resolveContext, type ContextItem } from '../../src/domain/context';
 import { comparable, distractorItems, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
-import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
+import type { LlmAccept, LlmContext, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askAccept, askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
+import { askAccept, askContext, askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
   ACCEPT_CASES,
   CASES,
+  CONTEXT_CASES,
   DISTRACTOR_CASES,
   GAP_CASES,
   JUDGE_CASES,
@@ -43,6 +45,7 @@ import {
   TRANSLATE_CASES,
   TRANSLATION_JUDGE_CASES,
   type AcceptCase,
+  type ContextCase,
   type DistractorCase,
   type EvalCase,
   type JudgeCase,
@@ -776,6 +779,70 @@ const writtenBy = (kase: SentenceCase, answer: LlmDistractors): string[] => {
   });
 };
 
+/** Phase 34 (spec D6, D8). The one item a context case asks, as prepareSession builds it. */
+function contextItemOf(kase: ContextCase): ContextItem {
+  const item = contextItemFor({
+    key: 'q1',
+    type: kase.type,
+    row: {
+      glossId: 'g-c', senseId: 's-c', variantId: 'v-c', lexemeId: 'l-c',
+      form: kase.form, lemma: kase.lemma, partOfSpeech: kase.partOfSpeech, translation: kase.translation,
+      example: kase.example, exampleTranslation: kase.exampleTranslation,
+      acceptedAnswers: kase.acceptedAnswers ?? [], answerForm: null, acceptedAt: null,
+    },
+    alternatives: [],
+    recent: [],
+    sentence: kase.sentence ? { hebrew: kase.sentence.hebrew, target: kase.sentence.target, word: kase.sentence.word } : null,
+  });
+  if (!item) throw new Error(`${kase.label}: the ${kase.type} card asks no context`);
+  return item;
+}
+
+/** Ruling R3: the scripts, which a sentence that is no context at all would break. */
+function contextTier1(kase: ContextCase, answer: LlmContext): Check[] {
+  const item = contextItemOf(kase);
+  const got = answer.items.find((answered) => answered.key === item.key);
+  if (item.task === 'mark') {
+    return [{ name: 'the practised word is named', ok: Boolean(got?.sentence_word?.trim()), detail: got?.sentence_word }];
+  }
+  const own = item.task === 'target' ? kase.target : 'he';
+  const other = item.task === 'target' ? 'he' : kase.target;
+  const text = got?.context ?? '';
+  const translation = got?.context_translation ?? '';
+  return [
+    { name: `the sentence is in ${own} script`, ok: text.trim() !== '' && isInScript(text, own), detail: text || '(none)' },
+    { name: `its other half is in ${other} script`, ok: translation.trim() !== '' && isInScript(translation, other), detail: translation || '(none)' },
+  ];
+}
+
+/** Ruling R3: kept by the server's rules, the marked word a form of the card's word and none of the others. */
+function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
+  const item = contextItemOf(kase);
+  const got = answer.items.find((answered) => answered.key === item.key);
+  if (item.task === 'mark') {
+    const mark = markFor(item, got);
+    const marked = mark ? item.sentence.slice(mark.start, mark.end) : null;
+    return [{ name: `${kase.sentence!.marked} is marked`, ok: marked !== null && comparable(marked) === comparable(kase.sentence!.marked), detail: marked ?? `${got?.sentence_word ?? '(none)'} not found` }];
+  }
+  const outcome = resolveContext(item, got, { target: kase.target, explanation: 'he' });
+  const word = comparable(got?.context_word ?? '');
+  const checks: Check[] = [{ name: 'the server keeps the sentence', ok: outcome.dropped === null, detail: outcome.dropped ?? undefined }];
+  if (kase.formsOf) {
+    checks.push({ name: `context_word is a form of ${kase.formsOf.join('/')}`, ok: kase.formsOf.some((form) => word.startsWith(comparable(form))), detail: got?.context_word ?? '(none)' });
+  }
+  if (kase.notWords) {
+    checks.push({ name: `context_word is not ${kase.notWords.join('/')}`, ok: word !== '' && !kase.notWords.some((other) => comparable(other) === word), detail: got?.context_word ?? '(none)' });
+  }
+  return checks;
+}
+
+const contextWritten = (kase: ContextCase, answer: LlmContext): string[] =>
+  answer.items.map((got) =>
+    contextItemOf(kase).task === 'mark'
+      ? `${kase.form}: ${kase.sentence?.hebrew ?? ''} [${got.sentence_word ?? '(none)'}]`
+      : `${kase.form}: ${got.context ?? '(none)'} [${got.context_word ?? ''}] = ${got.context_translation ?? '(none)'}`,
+  );
+
 const sameText = (a: string, b: string) =>
   stripStress(a).replace(/\s+/g, ' ').trim().toLowerCase() === stripStress(b).replace(/\s+/g, ' ').trim().toLowerCase();
 
@@ -847,11 +914,12 @@ async function main(): Promise<void> {
   const sentenceCases = SENTENCE_CASES.filter((kase) => matches(kase.label));
   const translateCases = TRANSLATE_CASES.filter((kase) => matches(kase.label));
   const tjudgeCases = TRANSLATION_JUDGE_CASES.filter((kase) => matches(kase.label));
+  const contextCases = CONTEXT_CASES.filter((kase) => matches(kase.label));
   if (filter) console.log(`filter "${filter}"`);
   if (
     cases.length + renderingCases.length + acceptCases.length + distractorCases.length + transcriptionCases.length +
       photoCases.length + matchCases.length + judgeCases.length +
-      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length === 0
+      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + contextCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
@@ -1102,13 +1170,30 @@ async function main(): Promise<void> {
     }
   };
 
+  /** Phase 34. The same contract, for the context call. */
+  const scoreContext = async (kase: ContextCase): Promise<Row> => {
+    const text = `${kase.form} (${kase.type})`;
+    try {
+      const answer = await askContext(llm, { from: kase.target, to: 'he', items: [contextItemOf(kase)] });
+      return { label: kase.label, text, tier1: contextTier1(kase, answer), tier2: contextTier2(kase, answer), written: contextWritten(kase, answer) };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   // Every call site of the provider, scored in one run and one scorecard. They
   // share the concurrency budget rather than each taking their own: the quota
   // they compete for is the same one.
   const started = Date.now();
   const [
     translationRows, renderingRows, acceptRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
-    gapRows, sentenceRows, translateRows, tjudgeRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows,
   ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
@@ -1123,10 +1208,11 @@ async function main(): Promise<void> {
     mapWithConcurrency(sentenceCases, CONCURRENCY, scoreSentences),
     mapWithConcurrency(translateCases, CONCURRENCY, scoreSentences),
     mapWithConcurrency(tjudgeCases, CONCURRENCY, scoreTranslationJudge),
+    mapWithConcurrency(contextCases, CONCURRENCY, scoreContext),
   ]);
   const rows = [
     ...translationRows, ...renderingRows, ...acceptRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
-    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows,
+    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows,
   ];
   const elapsedMs = Date.now() - started;
 
@@ -1153,6 +1239,8 @@ async function main(): Promise<void> {
     { name: 'gap', rows: gapRows, passed: 0, total: 0 },
     { name: 'sentence', rows: [...sentenceRows, ...translateRows], passed: 0, total: 0 },
     { name: 'translation judge', rows: tjudgeRows, passed: 0, total: 0 },
+    // Phase 34. The context call, a line of its own like the others.
+    { name: 'context', rows: contextRows, passed: 0, total: 0 },
   ];
 
   for (const row of rows) {
@@ -1256,7 +1344,8 @@ async function main(): Promise<void> {
         .join('') +
       `${cases.length} translation + ${renderingCases.length} rendering + ${acceptCases.length} accept + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ` +
       `${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge + ` +
-      `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge cases in ` +
+      `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge + ` +
+      `${contextCases.length} context cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -1278,6 +1367,7 @@ async function main(): Promise<void> {
         gapScore: groupScore(groups[0]),
         sentenceScore: groupScore(groups[1]),
         translationJudgeScore: groupScore(groups[2]),
+        contextScore: groupScore(groups[3]),
         rows,
       },
       null,

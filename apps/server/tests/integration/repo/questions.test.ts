@@ -198,6 +198,7 @@ describe('phase 23: reversed and typed questions', () => {
       answer: 'tome',
       lemma: 'tome',
       alternatives: ['book', 'volume'],
+      context: null,
     });
   });
 
@@ -281,6 +282,7 @@ describe('phase 25: speaking questions', () => {
       answer: 'lantern',
       lemma: 'lantern',
       alternatives: ['lamp'],
+      context: null,
     });
   });
 });
@@ -315,6 +317,7 @@ describe('phase 27: meaning recall', () => {
       question: 'to book',
       part_of_speech: 'noun',
       meaning: 'להזמין',
+      context: null,
     });
   });
 
@@ -530,6 +533,7 @@ describe('phase 27 Part B: sentence cards', () => {
       meaning: 'לדבר',
       answer: 'parlavamo',
       alternatives: ['parlammo'],
+      mark: null,
     });
     expect(translation).toEqual({
       id: translation.id,
@@ -540,6 +544,7 @@ describe('phase 27 Part B: sentence cards', () => {
       sentence: 'Yesterday we talked for hours.',
       gap: { start: 13, end: 19 },
       answer: 'talked',
+      mark: null,
     });
 
     // loadSession reads the same shapes from the stored rows.
@@ -708,5 +713,163 @@ describe('phase 34: the answer form a card asks for', () => {
     const record = (await withTx(t.db, (tx) => createSessionRepo(tx).loadSession(sessionId)))!;
     expect(record.questions.find((q) => q.type === 'typed_translation')).toMatchObject({ answer: 'ore' });
     expect(record.questions.find((q) => q.type === 'multiple_choice')).toMatchObject({ question: 'ore' });
+  });
+});
+
+// Phase 34 (spec D6, D7, D8, D10, D12). A question stores the sentence its card
+// showed beside the word, that sentence's other half, the marked words, and the
+// card reads them back; the meaning judge reads the card's pair.
+describe('phase 34: context sentences, marks and part of speech', () => {
+  const FIVE: QuestionType[] = ['multiple_choice', 'reverse_choice', 'typed_translation', 'say_translation', 'typed_meaning'];
+  const SAW_SENTENCE = 'Please saw the plank in half.';
+  const SAW_HEBREW = 'בבקשה תנסר את הקרש לשניים.';
+
+  async function savedSaw(example?: { source: string; target: string }) {
+    return seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'saw', languageCode: 'en', partOfSpeech: 'verb', translations: ['לנסר'], example });
+  }
+  type Saved = Awaited<ReturnType<typeof savedSaw>>;
+  const base = (word: Saved, type: QuestionType) => ({
+    glossId: word.glossIds[0],
+    variantId: word.variantId,
+    form: 'saw',
+    lemma: 'saw',
+    partOfSpeech: 'verb',
+    lexemeId: word.lexemeId,
+    type,
+    prompt: type === 'multiple_choice' || type === 'listen_choice' || type === 'matching' ? null : 'לנסר',
+    options: ['multiple_choice', 'reverse_choice', 'listen_choice', 'matching'].includes(type) ? generatedOptions(type === 'reverse_choice' ? 'saw' : 'לנסר', ['a', 'b', 'c']) : null,
+    alternatives: type === 'typed_translation' || type === 'say_translation' || type === 'cloze_typed' ? [] : null,
+    tiles: null,
+  });
+
+  async function inSession(rows: Parameters<ReturnType<typeof createQuestionRepo>['insertGeneratedQuestions']>[0]['questions']) {
+    return withTx(t.db, async (tx) => {
+      const made = await createQuestionRepo(tx).insertGeneratedQuestions({
+        userId: 'u_1', enrollmentId: enrollmentOf('u_1'), targetLanguage: 'en', userLanguageCode: 'he', questions: rows,
+      });
+      const sessions = createSessionRepo(tx);
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'));
+      await sessions.insertSessionQuestions(id, made);
+      await sessions.transition(id, ['preparing'], 'ready');
+      return { sessionId: id, made };
+    });
+  }
+  const load = async (sessionId: string) => (await withTx(t.db, (tx) => createSessionRepo(tx).loadSession(sessionId)))!.questions;
+
+  it('stores a context, its other half and its mark on the five cards, and each card shows the sentence and its mark (spec D6, D12)', async () => {
+    const word = await savedSaw();
+    const { sessionId, made } = await inSession(
+      FIVE.map((type) => ({
+        ...base(word, type),
+        context: SAW_SENTENCE, contextTranslation: SAW_HEBREW, contextMarkStart: 7, contextMarkEnd: 10,
+      })),
+    );
+    for (const question of [...made, ...(await load(sessionId))]) {
+      expect(question).toMatchObject({ context: { text: SAW_SENTENCE, mark: { start: 7, end: 10 } } });
+    }
+    // The other half is the judge's, never the wire's.
+    expect(JSON.stringify(made)).not.toContain(SAW_HEBREW);
+    const stored = await t.db.execute<{ context_translation: string }>(sql`select context_translation from questions where enrollment_id = ${enrollmentOf('u_1')}`);
+    expect(stored.rows.map((row) => row.context_translation)).toEqual(Array(5).fill(SAW_HEBREW));
+  });
+
+  it('shows an unmarked context, and null where there is none', async () => {
+    const word = await savedSaw();
+    const { sessionId } = await inSession([
+      { ...base(word, 'typed_meaning'), context: SAW_SENTENCE, contextTranslation: null },
+      { ...base(word, 'multiple_choice') },
+    ]);
+    const [unmarked, none] = await load(sessionId);
+    expect(unmarked).toMatchObject({ context: { text: SAW_SENTENCE, mark: null } });
+    expect(none).toMatchObject({ context: null });
+  });
+
+  it('marks the practised word in a sentence card’s Hebrew, or not (spec D8)', async () => {
+    const word = await savedSaw();
+    const sentence = { sentence: "Let's combine forces.", sentenceTranslation: 'בואו נשלב כוחות.', gapStart: 6, gapEnd: 13 };
+    const { sessionId } = await inSession([
+      { ...base(word, 'cloze_typed'), ...sentence, sentenceMarkStart: 5, sentenceMarkEnd: 9 },
+      { ...base(word, 'sentence_translation'), ...sentence, sentenceMarkStart: 5, sentenceMarkEnd: 9 },
+      { ...base(word, 'sentence_translation'), ...sentence },
+    ]);
+    const [cloze, translation, unmarked] = await load(sessionId);
+    expect(cloze).toMatchObject({ type: 'cloze_typed', translation: 'בואו נשלב כוחות.', mark: { start: 5, end: 9 } });
+    expect(translation).toMatchObject({ type: 'sentence_translation', question: 'בואו נשלב כוחות.', mark: { start: 5, end: 9 } });
+    expect(unmarked).toMatchObject({ mark: null });
+  });
+
+  it('gives a listen card and every word of a board its part of speech (spec D10)', async () => {
+    const word = await savedSaw();
+    const main = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'main', languageCode: 'en', partOfSpeech: 'adjective', translations: ['ראשי'] });
+    const { sessionId } = await inSession([
+      { ...base(word, 'listen_choice') },
+      { ...base(word, 'matching'), options: generatedOptions('לנסר', ['ראשי', 'c', 'd', 'e']) },
+      { ...base(main, 'matching'), form: 'main', lemma: 'main', partOfSpeech: 'adjective', options: [{ position: 0, text: 'לנסר', is_correct: false }, { position: 1, text: 'ראשי', is_correct: true }, { position: 2, text: 'c', is_correct: false }, { position: 3, text: 'd', is_correct: false }, { position: 4, text: 'e', is_correct: false }] },
+    ]);
+    const [listen, first, second] = await load(sessionId);
+    expect(listen).toMatchObject({ type: 'listen_choice', part_of_speech: 'verb' });
+    expect(first).toMatchObject({ part_of_speech: 'verb', board: { words: ['saw', 'main'], parts_of_speech: ['verb', 'adjective'] } });
+    expect(second).toMatchObject({ part_of_speech: 'adjective', board: { parts_of_speech: ['verb', 'adjective'] } });
+  });
+
+  it('refuses a context on a card that shows none, and a mark outside its sentence', async () => {
+    const word = await savedSaw();
+    const insert = (row: ReturnType<typeof base> & Record<string, unknown>) =>
+      withTx(t.db, (tx) =>
+        createQuestionRepo(tx).insertGeneratedQuestions({ userId: 'u_1', enrollmentId: enrollmentOf('u_1'), targetLanguage: 'en', userLanguageCode: 'he', questions: [row] }),
+      );
+    await expect(insert({ ...base(word, 'listen_choice'), context: SAW_SENTENCE })).rejects.toThrow();
+    await expect(insert({ ...base(word, 'typed_meaning'), context: SAW_SENTENCE, contextMarkStart: 7, contextMarkEnd: 99 })).rejects.toThrow();
+  });
+
+  describe('findRecentContexts', () => {
+    it('returns, per gloss and card type, the sentences shown, newest first, only this enrollment, at most limit', async () => {
+      await seedUser(t.db, 'u_2');
+      const word = await savedSaw();
+      const ask = (enrollmentId: string, userId: string, type: QuestionType, context: string | null) =>
+        withTx(t.db, (tx) =>
+          createQuestionRepo(tx).insertGeneratedQuestions({
+            userId, enrollmentId, targetLanguage: 'en', userLanguageCode: 'he',
+            questions: [{ ...base(word, type), context }],
+          }),
+        );
+      const mine = enrollmentOf('u_1');
+      await ask(mine, 'u_1', 'typed_meaning', 'Saw one.');
+      await ask(mine, 'u_1', 'multiple_choice', 'Saw it in two.');
+      await ask(mine, 'u_1', 'typed_meaning', 'Saw two.');
+      await ask(enrollmentOf('u_2'), 'u_2', 'typed_meaning', 'Saw elsewhere.');
+      await ask(mine, 'u_1', 'typed_meaning', 'Saw three.');
+      await ask(mine, 'u_1', 'typed_translation', 'נסר אחת.');
+      // A card that showed no sentence (a sense with no example) is no recent sentence.
+      await ask(mine, 'u_1', 'typed_meaning', null);
+
+      const read = (limit: number, glossIds = [word.glossIds[0], 'other']) =>
+        withTx(t.db, (tx) => createQuestionRepo(tx).findRecentContexts({ enrollmentId: mine, glossIds, limit }));
+      const recent = await read(2);
+      expect(recent.get(word.glossIds[0])).toEqual({
+        typed_meaning: ['Saw three.', 'Saw two.'],
+        multiple_choice: ['Saw it in two.'],
+        typed_translation: ['נסר אחת.'],
+      });
+      expect(recent.has('other')).toBe(false);
+      expect((await read(2, [])).size).toBe(0);
+    });
+  });
+
+  // Spec D7: the judge sees what the learner saw.
+  it('category E (71b0b407): findJudgeContext gives the meaning judge the sentence the card showed, and its other half', async () => {
+    const word = await savedSaw({ source: 'He will saw the branch off.', target: 'הוא ינסר את הענף.' });
+    const { made } = await inSession([
+      { ...base(word, 'typed_meaning'), context: SAW_SENTENCE, contextTranslation: SAW_HEBREW, contextMarkStart: 7, contextMarkEnd: 10 },
+      { ...base(word, 'typed_meaning') },
+    ]);
+    await withTx(t.db, async (tx) => {
+      const repo = createQuestionRepo(tx);
+      expect(await repo.findJudgeContext(made[0].id)).toMatchObject({ example: SAW_SENTENCE, exampleTranslation: SAW_HEBREW });
+      // A card with no sentence of its own falls back on the saved example, as before phase 34.
+      expect(await repo.findJudgeContext(made[1].id)).toMatchObject({
+        example: 'He will saw the branch off.', exampleTranslation: 'הוא ינסר את הענף.',
+      });
+    });
   });
 });

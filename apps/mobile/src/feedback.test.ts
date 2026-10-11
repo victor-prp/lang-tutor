@@ -11,6 +11,7 @@ const choice: Question = {
   question: 'casa',
   options: ['בית', 'דלת'],
   correct_option: 0,
+  context: null,
 };
 const typed: Question = {
   id: 't',
@@ -21,6 +22,7 @@ const typed: Question = {
   answer: 'finestra',
   lemma: 'finestra',
   alternatives: ['vetrata'],
+  context: null,
 };
 
 describe('feedbackFor', () => {
@@ -83,7 +85,8 @@ describe('feedbackFor, phase 24', () => {
   const board: Question = {
     id: 'm1', type: 'matching', vocab_term_id: 'l', question: 'casa',
     options: ['בית', 'חתול', 'כלב', 'עץ', 'דלת'], correct_option: 0,
-    board: { question_ids: ['m1', 'm2', 'm3', 'm4'], words: ['casa', 'gatto', 'cane', 'albero'], correct_options: [0, 1, 2, 3] },
+    board: { question_ids: ['m1', 'm2', 'm3', 'm4'], words: ['casa', 'gatto', 'cane', 'albero'], parts_of_speech: ['noun', 'noun', 'noun', 'noun'], correct_options: [0, 1, 2, 3] },
+    part_of_speech: 'noun',
   };
 
   it('counts a board by first tries, correct only at all of them', () => {
@@ -96,7 +99,7 @@ describe('feedbackFor, phase 24', () => {
   it('names the heard form after a wrong dictation, and the meaning after a wrong listening card', () => {
     const dictation: Question = { id: 'd', type: 'dictation', vocab_term_id: 'l', question: 'parlo', meaning: 'מדבר' };
     expect(feedbackFor(dictation, { text: 'parlare' })).toMatchObject({ tone: 'wrong', line: 'parlo' });
-    const listen: Question = { id: 'l', type: 'listen_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 };
+    const listen: Question = { id: 'l', type: 'listen_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, part_of_speech: 'noun' };
     expect(feedbackFor(listen, { option_index: 1 })).toMatchObject({ tone: 'wrong', line: 'בית' });
   });
 });
@@ -112,6 +115,7 @@ describe('phase 25 banners', () => {
     answer: 'parlo',
     lemma: 'parlare',
     alternatives: ['dico'],
+    context: null,
   };
   it('names what was heard when understood', () => {
     expect(feedbackFor(READ, { heard: 'il gatto', verdict: 'understood' })).toEqual({
@@ -146,7 +150,7 @@ describe('phase 25 banners', () => {
 });
 
 describe('typed_meaning banners (phase 27 D12)', () => {
-  const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין' };
+  const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין', context: null };
   it('a right answer as stored is just right', () => {
     expect(feedbackFor(MEANING, { text: 'לְהַזְמִין', judged: 'exact' })).toEqual({ tone: 'correct', title: 'נכון!', line: null, verdict: 'exact' });
   });
@@ -193,6 +197,7 @@ describe('sentence cards (phase 27 D5, D6)', () => {
     meaning: 'לדבר',
     answer: 'parlavamo',
     alternatives: [],
+    mark: null,
   };
   const TRANSLATE: Question = {
     id: 'st',
@@ -203,6 +208,7 @@ describe('sentence cards (phase 27 D5, D6)', () => {
     sentence: 'Ieri parlavamo per ore.',
     gap: { start: 5, end: 14 },
     answer: 'parlavamo',
+    mark: null,
   };
 
   it('a cloze choice is worded as a choice', () => {

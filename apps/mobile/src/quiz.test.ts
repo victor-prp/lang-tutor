@@ -32,7 +32,7 @@ describe('applyQueued (spec D9, Review Focus 3)', () => {
   });
 
   it('a new card starts with no judging in flight or failed (phase 27 D13)', () => {
-    const q = { id: 'm', type: 'typed_meaning', vocab_term_id: 'l', question: 'x', part_of_speech: 'verb', meaning: 'y' } as const;
+    const q = { id: 'm', type: 'typed_meaning', vocab_term_id: 'l', question: 'x', part_of_speech: 'verb', meaning: 'y', context: null } as const;
     expect(applyQueued(BASE, { complete: false, question: q, position: 2 }).judging).toBe('idle');
   });
 });

@@ -16,6 +16,17 @@ import {
 import { usableAnswerForm } from '../domain/answerForm';
 import { findGap } from '../domain/cloze';
 import {
+  buildContextPrompt,
+  contextColumns,
+  contextItemFor,
+  fallbackContext,
+  markFor,
+  parseLlmContext,
+  resolveContext,
+  type ContextItem,
+  type StoredContext,
+} from '../domain/context';
+import {
   NOTHING_GENERATED,
   boardMeanings,
   buildDistractorPrompt,
@@ -27,6 +38,7 @@ import {
   validateDistractors,
   withSiblingAlternatives,
   type DistractorVerdict,
+  type Generated,
 } from '../domain/distractors';
 import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { ACCEPT_RENDERING, PREPARE_SESSION, PrepareSessionPayloadSchema, acceptRenderingKey } from '../domain/jobs';
@@ -48,6 +60,7 @@ import {
   step,
 } from '../domain/session';
 import { MAX_AVOID } from '../domain/sentences';
+import type { Mark } from '../domain/marks';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
@@ -591,13 +604,19 @@ export function createSessionService({
           glossIds: context.map((row) => row.glossId),
           limit: MAX_AVOID,
         });
+        // Phase 34 (spec D6): the context sentences the last sessions showed, likewise.
+        const recentContexts = await question.findRecentContexts({
+          enrollmentId: state.enrollmentId,
+          glossIds: context.map((row) => row.glossId),
+          limit: MAX_AVOID,
+        });
         // Phase 31 (spec D18): the other headwords with each card's key.
         const siblings = await dict.findSiblings({ glossIds: context.map((row) => row.glossId) });
         // Phase 34 (spec D2, ruling R6). A stored answer form is a model's word:
         // a card asks for it only when it is plausibly a form of its own word,
         // and as the card will show it. Everything below reads this one value.
         const asked = context.map((row) => ({ ...row, answerForm: usableAnswerForm(row.answerForm, row.form, row.lemma) }));
-        return { state, enrolled, context: asked, recent, siblings };
+        return { state, enrolled, context: asked, recent, recentContexts, siblings };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -683,10 +702,122 @@ export function createSessionService({
         throw error;
       }
 
+      // Spec D5, D6 (phase 27): a sentence card the model did not make usable is
+      // a typed translation, with nothing generated for it. Decided before the
+      // context call, which asks each card by the type it ends up with.
+      const cards = ordered.map((row, index) => {
+        const made = verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED;
+        const planned = plan.types[index];
+        const degraded =
+          (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate);
+        const type = degraded ? 'typed_translation' : planned;
+        const content = degraded ? NOTHING_GENERATED : made;
+        // Spec D18, phase 34 (spec D1). A typed or spoken card accepts the
+        // rendering's stored list, a sibling headword, and this session's own
+        // alternatives, none written back. A typed cloze is judged against the
+        // form its sentence needs, so it keeps its sentence's alternatives alone.
+        const answered: Generated =
+          type === 'typed_translation' || type === 'say_translation'
+            ? {
+                ...content,
+                alternatives: withSiblingAlternatives({
+                  form: row.answerForm ?? row.form,
+                  lemma: row.lemma,
+                  accepted: row.acceptedAnswers,
+                  siblings: siblingsOf(row.glossId),
+                  alternatives: content.alternatives,
+                }),
+              }
+            : content;
+        return { row, index, planned, type, answered, degraded, degradedReason: made.degraded };
+      });
+
+      // Phase 34 (spec D6, D7, D8; rulings R8, R11). One more call, after the
+      // batch's answer is validated (a sentence card's mark needs its Hebrew)
+      // and with no transaction open (ADR 0001 R8): the sentence each bare-word
+      // card shows, and the practised word in each sentence card's Hebrew. It
+      // never fails the session: without its answer every card falls back on
+      // its saved example, unmarked, and a sentence card is unmarked.
+      const sentenceOf = (answered: Generated) => {
+        if (answered.sentence) {
+          const { sentence, translation, gap } = answered.sentence;
+          return { hebrew: translation, target: sentence, word: sentence.slice(gap.start, gap.end) };
+        }
+        if (answered.translate) {
+          const { hebrew, reference, gap } = answered.translate;
+          return { hebrew, target: reference, word: reference.slice(gap.start, gap.end) };
+        }
+        return null;
+      };
+      const contextItems = new Map<number, ContextItem>();
+      for (const card of cards) {
+        const item = contextItemFor({
+          key: keyOf(card.index),
+          type: card.type,
+          row: card.row,
+          alternatives: card.answered.alternatives,
+          recent: read.recentContexts.get(card.row.glossId)?.[card.type] ?? [],
+          sentence: sentenceOf(card.answered),
+        });
+        if (item) contextItems.set(card.index, item);
+      }
+      let contextMs = 0;
+      let contextAnswer: ReturnType<typeof parseLlmContext> = null;
+      if (contextItems.size > 0) {
+        const contextStarted = now();
+        let failure: string | null = null;
+        try {
+          const raw = await llm(
+            buildContextPrompt({ items: [...contextItems.values()], from: target, to: read.enrolled.source_language }),
+          );
+          contextAnswer = raw === '' ? null : parseLlmContext(raw);
+          if (!contextAnswer) failure = raw === '' ? 'the model returned no content' : 'the context answer was unreadable';
+        } catch (error) {
+          failure = error instanceof Error ? error.message : String(error);
+        }
+        contextMs = now() - contextStarted;
+        // Logged where it happens: the call was paid for, and the session goes on without it.
+        if (failure) {
+          logger.info({
+            event: 'context_call_failed',
+            session_id: sessionId,
+            item_count: contextItems.size,
+            context_ms: contextMs,
+            reason: failure,
+          });
+        }
+      }
+      const found = new Map((contextAnswer?.items ?? []).map((item) => [item.key, item]));
+      const languages = { target, explanation: read.enrolled.source_language as LanguageCode };
+
       // Logged once the session is written, not on an attempt a failed insert or a retry repeats.
-      let degradedEvents: Record<string, unknown>[] = [];
+      const events: Record<string, unknown>[] = [];
+      const shown = cards.map((card) => {
+        if (card.degraded) {
+          events.push({ event: 'sentence_degraded', session_id: sessionId, position: card.index, type: card.planned, reason: card.degradedReason });
+        }
+        const item = contextItems.get(card.index);
+        let context: StoredContext | null = null;
+        let sentence: { text: string; mark: Mark | null } | null = null;
+        if (item?.task === 'mark') {
+          sentence = { text: item.sentence, mark: contextAnswer ? markFor(item, found.get(item.key)) : null };
+        } else if (item) {
+          if (contextAnswer) {
+            const outcome = resolveContext(item, found.get(item.key), languages);
+            context = outcome.context;
+            if (outcome.dropped) {
+              events.push({ event: 'context_dropped', session_id: sessionId, position: card.index, type: card.type, reason: outcome.dropped });
+            }
+          } else {
+            context = fallbackContext(card.row, item.task);
+          }
+          // Spec D6: a sense saved without an example has nothing to fall back on.
+          if (!context) events.push({ event: 'context_missing', session_id: sessionId, position: card.index, type: card.type });
+        }
+        return { ...card, context, sentence };
+      });
+
       const written = await transaction(async ({ session, question, gloss }) => {
-        degradedEvents = [];
         // Conditional: a skip that landed during the model call wins, and this
         // transaction then writes nothing at all.
         if (!(await session.transition(sessionId, ['preparing'], 'ready'))) return false;
@@ -698,56 +829,22 @@ export function createSessionService({
           enrollmentId: read.state.enrollmentId,
           targetLanguage: target,
           userLanguageCode: read.enrolled.source_language,
-          questions: ordered.map((row, index) => {
-            const made = verdict.byKey.get(keyOf(index)) ?? NOTHING_GENERATED;
-            // Spec D5, D6: a sentence card the model did not make usable is a
-            // typed translation, with nothing generated for it.
-            const planned = plan.types[index];
-            const degraded =
-              (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate);
-            if (degraded) {
-              degradedEvents.push({
-                event: 'sentence_degraded',
-                session_id: sessionId,
-                position: index,
-                type: planned,
-                reason: made.degraded,
-              });
-            }
-            const type = degraded ? 'typed_translation' : planned;
-            const content = degraded ? NOTHING_GENERATED : made;
-            // Spec D18, phase 34 (spec D1). A typed or spoken card accepts the
-            // rendering's stored list, a sibling headword, and this session's own
-            // alternatives, none written back. A typed cloze is judged against the
-            // form its sentence needs, so it keeps its sentence's alternatives alone.
-            const answered =
-              type === 'typed_translation' || type === 'say_translation'
-                ? {
-                    ...content,
-                    alternatives: withSiblingAlternatives({
-                      form: row.answerForm ?? row.form,
-                      lemma: row.lemma,
-                      accepted: row.acceptedAnswers,
-                      siblings: siblingsOf(row.glossId),
-                      alternatives: content.alternatives,
-                    }),
-                  }
-                : content;
-            return {
-              glossId: survivors.get(row.glossId)?.id ?? row.glossId,
-              variantId: row.variantId,
-              form: row.form,
-              lemma: row.lemma,
-              partOfSpeech: row.partOfSpeech,
-              lexemeId: row.lexemeId,
-              type,
-              ...generatedContent(row, type, answered, {
-                tiles: type === 'letter_tiles' ? tilesFor(row.answerForm ?? row.form, LANGUAGES[target].alphabet, rng) : null,
-                board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
-                gap: gaps[index],
-              }),
-            };
-          }),
+          questions: shown.map(({ row, index, type, answered, context, sentence }) => ({
+            glossId: survivors.get(row.glossId)?.id ?? row.glossId,
+            variantId: row.variantId,
+            form: row.form,
+            lemma: row.lemma,
+            partOfSpeech: row.partOfSpeech,
+            lexemeId: row.lexemeId,
+            type,
+            ...generatedContent(row, type, answered, {
+              tiles: type === 'letter_tiles' ? tilesFor(row.answerForm ?? row.form, LANGUAGES[target].alphabet, rng) : null,
+              board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
+              gap: gaps[index],
+            }),
+            // Phase 34 (spec D6, D8, D12): stored as shown.
+            ...contextColumns(type, context, sentence),
+          })),
         });
         // Each choice shuffled on its own, a board's words once together; the
         // question order is the plan's and is not shuffled.
@@ -755,13 +852,14 @@ export function createSessionService({
         return true;
       });
 
-      if (written) for (const event of degradedEvents) logger.info(event);
+      if (written) for (const event of events) logger.info(event);
       logger.info({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
         session_id: sessionId,
         question_count: written ? read.context.length : 0,
         item_count: items.length,
         model_ms: modelMs,
+        context_ms: contextMs,
         ...(written ? {} : { stage: 'write' }),
       });
     },

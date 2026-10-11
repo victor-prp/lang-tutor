@@ -92,8 +92,9 @@ const QUESTION = {
   sentence: 'I want to book a table.',
   gap: { start: 10, end: 14 },
   answer: 'book',
+  mark: null,
 };
-const MEANING_Q = { id: 'm1', type: 'typed_meaning' as const, vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין' };
+const MEANING_Q = { id: 'm1', type: 'typed_meaning' as const, vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין', context: null };
 
 describe('translationRuleVerdict', () => {
   it('is wrong for an empty answer', () => {

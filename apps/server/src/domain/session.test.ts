@@ -29,6 +29,7 @@ function makeQuestion(n: number): MultipleChoiceQuestion {
     question: `word ${n}`,
     options: [`a${n}`, `b${n}`, `c${n}`, `d${n}`],
     correct_option: 0,
+    context: null,
   };
 }
 
@@ -182,6 +183,7 @@ function typedQuestion(id: string): TypedTranslationQuestion {
     answer: 'finestra',
     lemma: 'finestra',
     alternatives: [],
+    context: null,
   };
 }
 
@@ -286,7 +288,7 @@ describe('phase 25 speaking cards in step', () => {
     user_id: 'u1',
     questions: [
       { id: 'r1', type: 'read_aloud', vocab_term_id: 'l1', question: 'gatto', meaning: 'חתול' },
-      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null },
     ],
     answers: [],
     complete: false,

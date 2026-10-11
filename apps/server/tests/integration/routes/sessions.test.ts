@@ -229,6 +229,7 @@ describe('POST /api/sessions/:id/next-step, phase 23', () => {
       answer: 'lantern',
       lemma: 'lantern',
       alternatives: ['lamp'],
+      context: null,
     });
 
     const done = await step(questions[2].id, { text: 'lamp' });

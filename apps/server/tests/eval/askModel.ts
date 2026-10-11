@@ -5,6 +5,7 @@ import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
 import type {
   LanguageCode,
   LlmAccept,
+  LlmContext,
   TypedVerdict,
   LlmDistractors,
   LlmEntry,
@@ -17,6 +18,7 @@ import type {
 } from '@lang-tutor/core/api';
 
 import { buildAcceptPrompt, parseAccept, validateAccept, type AcceptInput } from '../../src/domain/accept';
+import { buildContextPrompt, parseLlmContext, type ContextItem } from '../../src/domain/context';
 import {
   buildDistractorPrompt,
   parseLlmDistractors,
@@ -196,4 +198,18 @@ export async function askAccept(
   const raw = text === '' ? { answers: [], answer_form: null } : parseAccept(text);
   if (!raw) throw new Error(`unreadable accept answer: ${text.slice(0, 200)}`);
   return { raw, ...validateAccept(input, raw) };
+}
+
+/** Phase 34 (spec D6, D8; ruling R8). The real context prompt and parser, as
+ *  prepareSession sends them after the batch, minus the database. Throws on an
+ *  empty or unreadable answer: tier 1 then records it as a failed call (the
+ *  session would go on without it, ruling R11, but the prompt has failed). */
+export async function askContext(
+  llm: LlmClient,
+  input: { from: LanguageCode; to: LanguageCode; items: ContextItem[] },
+): Promise<LlmContext> {
+  const raw = await llm(buildContextPrompt(input));
+  const answer = raw === '' ? null : parseLlmContext(raw);
+  if (!answer) throw new Error(`unreadable context answer: ${raw.slice(0, 200)}`);
+  return answer;
 }
