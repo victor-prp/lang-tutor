@@ -14,6 +14,8 @@
 #     which is a rollback, passes --rollback so it can never build;
 #   - the job reads the ANDROID_RELEASE repository variable; without it the
 #     script would skip every release, green, and nobody would notice.
+#   - (phase 36) the ios job holds the same three facts with IOS_RELEASE, and
+#     each job passes its own platform to scripts/native-release.sh.
 
 set -u
 
@@ -53,6 +55,11 @@ expect "android ships the tag, not master" 1 android 'ref:'
 expect "android passes --rollback on a dispatch" 0 android "workflow_dispatch' && '--rollback'"
 expect "android hands the job the ANDROID_RELEASE variable" 0 android 'ANDROID_RELEASE: \$\{\{ vars\.ANDROID_RELEASE \}\}'
 expect "android runs native-release.sh for android" 0 android 'scripts/native-release\.sh android '
+expect "ios runs after apply" 0 ios '^[[:space:]]+needs: apply$'
+expect "ios ships the tag, not master" 1 ios 'ref:'
+expect "ios passes --rollback on a dispatch" 0 ios "workflow_dispatch' && '--rollback'"
+expect "ios hands the job the IOS_RELEASE variable" 0 ios 'IOS_RELEASE: \$\{\{ vars\.IOS_RELEASE \}\}'
+expect "ios runs native-release.sh for ios" 0 ios 'scripts/native-release\.sh ios '
 
 echo
 if [ "$status" -ne 0 ]; then

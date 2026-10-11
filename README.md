@@ -127,7 +127,7 @@ enforced.
 | [0009](docs/adr/adr-0009-sign-in.md) | Sign-in with Better Auth, behind one seam — one import site per app, the session becomes an actor in `routes/actor.ts` only, exact version pins |
 | [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 | [0011](docs/adr/adr-0011-learner-unit-is-the-gloss.md) | The learner's unit is the gloss — the learner's tables hold gloss ids rather than sense ids, senses stay the dictionary's, and no table outside the `dict_` prefix references `dict_senses` or `dict_var_translations` |
-| [0012](docs/adr/adr-0012-native-client-releases.md) | The Android app ships with every release, after the server, by fingerprint — an update lands only on a matching build, builds go to Play's internal track, and `X-Api-Level` is named only in `packages/core` |
+| [0012](docs/adr/adr-0012-native-client-releases.md) | The Android and iOS apps ship with every release, after the server, by fingerprint — an update lands only on a matching build, builds go to Play's internal track and TestFlight, and `X-Api-Level` is named only in `packages/core` |
 | [0013](docs/adr/adr-0013-learner-day.md) | A learner's day comes from one place — only `services/learnerDay.ts` computes a progress day, `bot_day` is read and written only in `repo/users.ts`, and `routes/bots.ts` is the only route file naming the bot kind or its secret |
 
 All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 + 3 = 71 checks, grep only, no deps,
