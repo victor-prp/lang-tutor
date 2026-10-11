@@ -68,6 +68,12 @@ worktree: locked
 their own. For each lane it does clean, it drops the databases *before* removing the
 worktree — the only order in which `lane:down` can still find them.
 
+A lane whose worktree is already gone is invisible to that walk.
+`npm run lane:list -- --orphans` lists those lanes — every database stamped by a worktree
+that no longer exists — and `npm run lane:clean -- --orphans` plans dropping them, acting
+only with `--yes` added. A database with no lane stamp is listed for a human to judge and
+never dropped.
+
 Giving up on a lane is a different command, on purpose. `npm run lane:abandon -- <name>`
 destroys exactly what `lane:clean` protects — uncommitted work and unmerged commits — so it
 takes one named lane, never `--all`, refuses a locked one, and prints what it will delete
