@@ -36,6 +36,34 @@ export type SessionEvidence = {
   answers: AnsweredQuestion[];
 };
 
+/** A stored answer as its question and answer rows give it. */
+export type AnswerRow = {
+  gloss_id: string;
+  type: string;
+  options: QuestionOption[] | null;
+  selected_option_position: number | null;
+  verdict: string | null;
+  retry_verdict: string | null;
+};
+
+/** A stored answer as the rules read it: a text answer carries the verdict it was
+ *  shown (phases 23 and 24), or its retry's when the retry resolved right (phase 34,
+ *  spec D9); a choice is right when its option is. Phase 37 reads today's answers
+ *  with this too, so the returns and the evidence never disagree. */
+export function decodeAnswer(row: AnswerRow): AnsweredQuestion {
+  if (TEXT_TYPES.has(row.type)) {
+    const verdict = evidenceVerdict(row.verdict as AnswerVerdict, row.retry_verdict as AnswerVerdict | null);
+    return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict };
+  }
+  return {
+    glossId: row.gloss_id,
+    type: row.type as ChoiceAnswerType,
+    // selected_option_position is canonical (sessions.insertAnswer), and
+    // question_options_valid makes positions 0..n-1.
+    correct: canonicalOptions(row.options!)[row.selected_option_position!].is_correct,
+  };
+}
+
 // `IN (...)` from a list. `IN ()` is a syntax error: the caller guards an empty
 // list first (findRows does) or passes a list that is never empty.
 const inList = (values: string[]) => sql.join(values.map((value) => sql`${value}`), sql`, `);
@@ -97,21 +125,7 @@ export function createProgressRepo(tx: Tx) {
         enrollmentId: first.enrollment_id,
         day: first.day,
         lastAnsweredAt: first.last_answered_at,
-        answers: rows.rows.map((row): AnsweredQuestion => {
-          // Phase 23 and 24. A text answer carries the verdict it was shown.
-          // Phase 34 (spec D9): its retry's, when the retry resolved right.
-          if (TEXT_TYPES.has(row.type)) {
-            const verdict = evidenceVerdict(row.verdict as AnswerVerdict, row.retry_verdict as AnswerVerdict | null);
-            return { glossId: row.gloss_id, type: row.type as TextAnswerType, verdict };
-          }
-          return {
-            glossId: row.gloss_id,
-            type: row.type as ChoiceAnswerType,
-            // selected_option_position is canonical (sessions.insertAnswer), and
-            // question_options_valid makes positions 0..n-1.
-            correct: canonicalOptions(row.options!)[row.selected_option_position!].is_correct,
-          };
-        }),
+        answers: rows.rows.map(decodeAnswer),
       };
     },
 

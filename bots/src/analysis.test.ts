@@ -132,6 +132,16 @@ test('(c) the median gap in days, for the 2nd, 3rd and 4th-or-later reviews righ
   assert.deepEqual(weekNumbers(state, 2, noMemory, WRITTEN).c, { second: 3, third: null, later: 4 });
 });
 
+test('(c) counts only the first review of a day: a same-day return is learning, not an interval', () => {
+  const log = [
+    card(1, 'multiple_choice', 'x', true, {}, { session: 's1' }),
+    // Phase 37 (spec D8): met in s1, so owed a return later that day.
+    card(1, 'typed_meaning', 'x', true, {}, { session: 's1b', verdict: 'exact' }),
+    card(3, 'multiple_choice', 'x', true),
+  ];
+  assert.deepEqual(weekNumbers(stateWith(log), 1, noMemory, WRITTEN).c, { second: 2, third: null, later: null });
+});
+
 test('the server view replays memory and levels from the log, session by session', () => {
   const log = [
     card(1, 'multiple_choice', 'x', true),
@@ -142,9 +152,10 @@ test('the server view replays memory and levels from the log, session by session
   const view = serverView(log);
   // Day 1: no memory, level 1: recognition.
   assert.deepEqual(view[0], { dimension: WR, rung: 1, level: 1, r: null, implied: 1 });
-  // Day 2: one Good review on day 1, level 2 after day 1's step.
+  // Day 2: one Good review on day 1, level 2 after day 1's step. Memory at R above
+  // RUNG_R implies recall whatever the level (phase 37 D2).
   const afterDay1 = review(null, 3, dateOf(1));
-  assert.deepEqual(view[1], { dimension: WR, rung: 1, level: 2, r: retrievability(afterDay1, dateOf(2)), implied: 1 });
+  assert.deepEqual(view[1], { dimension: WR, rung: 1, level: 2, r: retrievability(afterDay1, dateOf(2)), implied: 2 });
   // Day 3: level 3 a day after day 2's step, and R well above RUNG_R: recall is due.
   const afterDay2 = review(afterDay1, 3, dateOf(2));
   const r3 = retrievability(afterDay2, dateOf(3));
@@ -165,14 +176,28 @@ test('a card that serves two dimensions is put on the one the picker would have 
   assert.equal(serverView([card(1, 'multiple_choice', null, true)])[0], null);
 });
 
-test('(d) the share of cards whose rung is not the one level and R imply', () => {
+test('the server view puts a same-day return on its owed dimension, at recall', () => {
+  // Phase 37 (spec D1, D8): met in s1 and missed, x is owed a written receptive return in a
+  // later session that day; a dictation there would otherwise read as spelling at rung 1.
   const log = [
-    card(1, 'multiple_choice', 'x', true), // rung 1, implied 1
-    card(1, 'typed_meaning', 'x', true, {}, { verdict: 'exact' }), // rung 2, implied 1
-    card(2, 'multiple_choice', 'x', true), // rung 1, implied 1 (level 2)
-    card(3, 'multiple_choice', 'x', true), // rung 1, implied 2 (level 3, high R)
+    card(1, 'multiple_choice', 'x', false, {}, { session: 's1' }),
+    card(1, 'typed_meaning', 'x', true, {}, { session: 's1b', verdict: 'exact' }),
+    card(1, 'listen_choice', 'y', false, {}, { session: 's1' }),
+    card(1, 'dictation', 'y', true, {}, { session: 's1b', verdict: 'exact' }),
   ];
-  assert.equal(weekNumbers(stateWith(log), 1, noMemory, WRITTEN).d, 0.5);
+  const view = serverView(log);
+  assert.deepEqual(view[1], { dimension: WR, rung: 2, level: 1, r: 1, implied: 2 });
+  assert.deepEqual(view[3], { dimension: SR, rung: 2, level: 1, r: 1, implied: 2 });
+});
+
+test('(d) the share of cards whose rung is not the one memory implies (phase 37 D2)', () => {
+  const log = [
+    card(1, 'multiple_choice', 'x', true, {}, { session: 's1' }), // no memory: rung 1, implied 1
+    card(1, 'typed_meaning', 'x', true, {}, { session: 's1b', verdict: 'exact' }), // a return: rung 2, implied 2
+    card(2, 'typed_meaning', 'x', true, {}, { verdict: 'exact' }), // R above RUNG_R at level 2: rung 2, implied 2
+    card(3, 'multiple_choice', 'x', true), // R above RUNG_R: rung 1, implied 2
+  ];
+  assert.equal(weekNumbers(stateWith(log), 1, noMemory, WRITTEN).d, 0.25);
 });
 
 test('(e) the mean true recall over every saved word and live dimension', () => {

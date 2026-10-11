@@ -12,8 +12,9 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 
-// Phase 35 (spec D5, D10). A list session is chosen from what the learner knows,
-// on the learner's day: a second session the same day asks other words first.
+// Phase 35 (spec D5, D10), phase 37 (D1, D3). A list session is chosen from what
+// the learner knows, on the learner's day: a second session the same day brings
+// back what the first missed, and asks words already done that day last.
 
 const E = enrollmentOf('u_1');
 const DAY = '2026-03-04';
@@ -50,8 +51,9 @@ async function savedWords(count = LEMMAS.length): Promise<Word[]> {
   return words;
 }
 
-/** A multiple-choice session over `words`, every card answered right: it completes. */
-async function playRight(words: Word[]) {
+/** A multiple-choice session over `words`, every card answered, right unless
+ *  `wrong` names its word: it completes. */
+async function play(words: Word[], wrong: Word[] = []) {
   const service = sessions();
   const { sessionId, questions } = await insertListSession(t.db, {
     userId: 'u_1',
@@ -59,11 +61,13 @@ async function playRight(words: Word[]) {
     asked: words,
     types: words.map(() => 'multiple_choice' as const),
   });
-  for (const question of questions) {
+  for (const [i, question] of questions.entries()) {
     const q = question as unknown as { id: string; correct_option: number };
-    await service.submitAnswer('u_1', sessionId, q.id, { option_index: q.correct_option });
+    const option = wrong.includes(words[i]) ? (q.correct_option + 1) % 4 : q.correct_option;
+    await service.submitAnswer('u_1', sessionId, q.id, { option_index: option });
   }
 }
+const playRight = (words: Word[]) => play(words);
 
 async function nextPicks(): Promise<PrepareSessionPayload['picks']> {
   const service = sessions();
@@ -74,44 +78,33 @@ async function nextPicks(): Promise<PrepareSessionPayload['picks']> {
 }
 
 describe('createNextSession chooses the words (spec D5)', () => {
-  it('asks the words not asked today first, and the ones asked today last, even when due', async () => {
+  it('brings back the word missed today as a recall card, after the new words and before the due ones, and asks the words done today last', async () => {
     const words = await savedWords(8);
-    // A month ago, words 0 to 5 were met in both written dimensions: all are due now,
-    // written receptive the weaker.
-    const monthAgo = '2026-02-02';
-    await insertGlossMemory(
-      t.db,
-      words.slice(0, 6).flatMap((word) =>
-        (['written_receptive', 'written_productive'] as const).map((dimension) => ({
-          enrollmentId: E,
-          glossId: word.glossId,
-          dimension,
-          stability: dimension === 'written_receptive' ? 1 : 2,
-          difficulty: 5,
-          lastDay: monthAgo,
-          reps: 1,
-          lapses: 0,
-          params: 'fsrs6-default',
-        })),
-      ),
-    );
-    // Today, words 0 to 3 were asked by multiple choice: written receptive only.
-    await playRight(words.slice(0, 4));
+    // A month ago, words 0 to 5 were met: their written receptive is due now.
+    const today = clock;
+    clock = Date.parse('2026-02-02T10:00:00Z');
+    await playRight(words.slice(0, 6));
+    clock = today;
+    // Today, words 0 to 3 were asked again, and word 2 was missed.
+    await play(words.slice(0, 4), [words[2]]);
 
     const picks = await nextPicks();
     const ids = (from: Word[]) => from.map((word) => word.glossId).sort();
     expect(picks).toHaveLength(8);
-    // Due and not asked today (4, 5), then new (6, 7)...
-    expect(picks.slice(0, 2).map((pick) => pick.gloss_id).sort()).toEqual(ids(words.slice(4, 6)));
-    for (const pick of picks.slice(0, 2)) expect(pick).toMatchObject({ dimension: 'written_receptive', rung: 1, level: 1 });
-    expect(picks.slice(2, 4).map((pick) => pick.gloss_id)).toEqual([words[7].glossId, words[6].glossId]);
-    for (const pick of picks.slice(2, 4)) expect(pick).toMatchObject({ dimension: 'written_receptive', rung: 1, level: 1, r: null });
-    // ...and last, the words asked today, whose written productive is still due.
-    expect(picks.slice(4).map((pick) => pick.gloss_id).sort()).toEqual(ids(words.slice(0, 4)));
-    for (const pick of picks.slice(4)) {
-      expect(pick.dimension).toBe('written_productive');
-      expect(pick.r).toBeLessThan(0.9);
+    // The new words (the reserve), newest first...
+    expect(picks.slice(0, 2).map((pick) => pick.gloss_id)).toEqual([words[7].glossId, words[6].glossId]);
+    for (const pick of picks.slice(0, 2)) expect(pick).toMatchObject({ dimension: 'written_receptive', rung: 1, r: null, step: false });
+    // ...the missed word, owed a return: recall, though met a month ago...
+    expect(picks[2]).toMatchObject({ gloss_id: words[2].glossId, dimension: 'written_receptive', rung: 2, r: 1, step: true });
+    // ...the words due and not asked today...
+    expect(picks.slice(3, 5).map((pick) => pick.gloss_id).sort()).toEqual(ids(words.slice(4, 6)));
+    for (const pick of picks.slice(3, 5)) {
+      expect(pick).toMatchObject({ dimension: 'written_receptive', rung: 1, step: false });
+      expect(pick.r).toBeLessThan(0.75);
     }
+    // ...and last the words answered right today, in the dimension they would expand into.
+    expect(picks.slice(5).map((pick) => pick.gloss_id).sort()).toEqual(ids([words[0], words[1], words[3]]));
+    for (const pick of picks.slice(5)) expect(pick).toMatchObject({ dimension: 'written_productive', rung: 1, r: null, step: false });
   });
 
   it('on the next day, expands the words introduced yesterday into their next dimension', async () => {

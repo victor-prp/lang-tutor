@@ -85,7 +85,7 @@ const statusOf = async (sessionId: string) => (await deps.sessions.getSession('u
 // enqueue the job with picks that name their cards; a pick with none of them
 // is a new word, multiple choice. sessionsChoose.test.ts covers how a created
 // session's picks get theirs.
-type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r'>>;
+type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r' | 'step'>>;
 const RECOGNISE: Card = { dimension: 'written_receptive', rung: 1, level: 1, r: 0.81 }; // multiple choice, p 0.925
 const PICK_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.5 }; // reverse or cloze choice, p 0.78
 const BUILD_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.81 }; // letter tiles, p 0.9
@@ -107,6 +107,7 @@ async function enqueueSession(words: Record<string, string>, cards: Card[], opts
       rung: 1,
       level: 1,
       r: null,
+      step: false,
       ...cards[i],
     });
   }

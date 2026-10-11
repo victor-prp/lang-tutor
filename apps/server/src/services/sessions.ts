@@ -65,6 +65,7 @@ import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../doma
 import { ACCEPT_RENDERING, PREPARE_SESSION, PrepareSessionPayloadSchema, acceptRenderingKey } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planCards } from '../domain/plan';
+import { dayState } from '../domain/today';
 import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
 import type { SessionRecord, SessionSummary } from '../domain/session';
@@ -296,15 +297,18 @@ export function createSessionService({
         const today = await learnerDay(repos, enrolled.user_id, now());
         const memory = await repos.memory.findRows({ enrollmentId, glossIds });
         const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
-        const askedToday = new Set(await session.findGlossesAnsweredOn(enrollmentId, today));
-        const newToday = await session.countNewOn(enrollmentId, today);
+        // Phase 37 (spec D1, D7). Today's answers leave the returns owed and the
+        // words done for the day.
+        const introduced = await session.findIntroducedOn(enrollmentId, today);
+        const { steps, done } = dayState(await session.findAnswersOn(enrollmentId, today), new Set(introduced));
         const chosen = chooseWords({
           saved,
           memory,
           levels,
           today,
-          askedToday,
-          newToday,
+          steps,
+          done,
+          newToday: introduced.length,
           listening: options.listening,
           speaking: options.speaking,
           rng,
@@ -321,7 +325,8 @@ export function createSessionService({
           const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
           if (!rendering) return [];
           const { dimension, rung, level, r } = choice;
-          return [{ gloss_id: choice.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId, dimension, rung, level, r }];
+          const step = choice.cls === 'STEP';
+          return [{ gloss_id: choice.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId, dimension, rung, level, r, step }];
         });
         if (picks.length === 0) throw new NoSavedWords(enrollmentId);
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
@@ -764,7 +769,7 @@ export function createSessionService({
       const target = read.enrolled.target_language as LanguageCode;
       const plan = planCards(
         read.context.map((row, index) => {
-          const { dimension, rung, level, r } = read.picked[index];
+          const { dimension, rung, level, r, step } = read.picked[index];
           return {
             form: row.form,
             translation: row.translation,
@@ -780,6 +785,7 @@ export function createSessionService({
             rung,
             level,
             r,
+            step,
           };
         }),
         { listening: payload.listening, speaking: payload.speaking },

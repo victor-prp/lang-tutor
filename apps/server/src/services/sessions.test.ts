@@ -37,8 +37,8 @@ describe('repos', () => {
       findState: notStubbed,
       transition: notStubbed,
       findLatest: notStubbed,
-      findGlossesAnsweredOn: notStubbed,
-      countNewOn: notStubbed,
+      findAnswersOn: notStubbed,
+      findIntroducedOn: notStubbed,
       // Phase 34 (spec D9).
       resolveRetry: notStubbed,
       resolvePendingRetry: notStubbed,
@@ -382,17 +382,18 @@ describe('repos', () => {
   });
 });
 
-// Phase 35 (spec D5, D10). What createNextSession reads for chooseWords, for a
-// list with no history: no memory, no levels, nothing asked or new today.
+// Phase 35 (spec D5, D10), phase 37 (D7). What createNextSession reads for
+// chooseWords, for a list with no history: no memory, no levels, nothing
+// answered or introduced today.
 const SAVED_AT = '2026-10-01T09:00:00.000000Z';
-const nothingToday: Pick<SessionRepo, 'findGlossesAnsweredOn' | 'countNewOn'> = { findGlossesAnsweredOn: async () => [], countNewOn: async () => 0 };
+const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn'> = { findAnswersOn: async () => [], findIntroducedOn: async () => [] };
 const noHistory = {
   user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const }) }),
   memory: stub<MemoryRepo>({ findRows: async () => [] }),
   progress: stub<ProgressRepo>({ findRows: async () => [] }),
 };
 
-describe('createNextSession, phase 35 (spec D5, D10)', () => {
+describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () => {
   const E = 'e1';
   const TODAY = '2026-10-11';
   const saved = [
@@ -401,8 +402,10 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
     { glossId: 'g_new', key: 'חתול', variantId: 'v_new', savedAt: '2026-10-10T08:00:00.000000Z' },
   ];
   const DUE_STATE = { stability: 1, difficulty: 5, lastDay: '2026-09-01', reps: 1, lapses: 0, params: 'fsrs6-default' };
+  // Met this morning and missed: an Again leaves stability under a day.
+  const MISSED_STATE = { stability: 0.212, difficulty: 6.4, lastDay: TODAY, reps: 1, lapses: 1, params: 'fsrs6-default' };
 
-  it("chooses from memory, levels and the learner's day, and carries each pick's dimension, rung, level and R", async () => {
+  it("chooses from memory, levels, today's answers and the learner's day, and carries each pick's dimension, rung, level, R and return", async () => {
     const jobs = createFakeJobRepo();
     const reads: Record<string, unknown> = {};
     const service = createSessionService({
@@ -419,20 +422,23 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
         session: stub<SessionRepo>({
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'list' }) as never,
           insertPreparingSession: async () => 's1',
-          findGlossesAnsweredOn: async (enrollmentId, day) => {
-            reads.asked = [enrollmentId, day];
-            return ['g_asked'];
+          findAnswersOn: async (enrollmentId, day) => {
+            reads.answers = [enrollmentId, day];
+            return [{ glossId: 'g_asked', sessionId: 's0', type: 'multiple_choice', correct: false }];
           },
-          countNewOn: async (enrollmentId, day) => {
-            reads.newOn = [enrollmentId, day];
-            return 0;
+          findIntroducedOn: async (enrollmentId, day) => {
+            reads.introduced = [enrollmentId, day];
+            return ['g_asked'];
           },
         }),
         vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => saved }),
         memory: stub<MemoryRepo>({
           findRows: async (input) => {
             reads.memory = input;
-            return [{ glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE }];
+            return [
+              { glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE },
+              { glossId: 'g_asked', dimension: 'written_receptive', state: MISSED_STATE },
+            ];
           },
         }),
         progress: stub<ProgressRepo>({
@@ -462,19 +468,20 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
     // The day is the learner's (ADR 0013), and every read is over the saved list.
     expect(reads).toEqual({
       dayOf: 'u1',
-      asked: [E, TODAY],
-      newOn: [E, TODAY],
+      answers: [E, TODAY],
+      introduced: [E, TODAY],
       memory: { enrollmentId: E, glossIds: ['g_asked', 'g_due', 'g_new'] },
       levels: { enrollmentId: E, glossIds: ['g_asked', 'g_due', 'g_new'], savedBy: null },
     });
     const { picks } = jobs.enqueued[0].data as { picks: Record<string, unknown>[] };
-    // DUE, then NEW, then what was asked today.
+    // Phase 37 (spec D3): the new word, then the word missed today as a return,
+    // at recall, then the due word.
     expect(picks).toEqual([
-      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number) },
-      { gloss_id: 'g_new', sense_id: 's2', variant_id: 'v_new', dimension: 'written_receptive', rung: 1, level: 1, r: null },
-      { gloss_id: 'g_asked', sense_id: 's0', variant_id: 'v_asked', dimension: 'written_receptive', rung: 1, level: 1, r: null },
+      { gloss_id: 'g_new', sense_id: 's2', variant_id: 'v_new', dimension: 'written_receptive', rung: 1, level: 1, r: null, step: false },
+      { gloss_id: 'g_asked', sense_id: 's0', variant_id: 'v_asked', dimension: 'written_receptive', rung: 2, level: 1, r: 1, step: true },
+      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number), step: false },
     ]);
-    expect(picks[0].r).toBeLessThan(0.75);
+    expect(picks[2].r).toBeLessThan(0.75);
   });
 });
 
