@@ -518,3 +518,26 @@ sections above, it is listed here with its reason; everything else was built as 
   every clear, an `accept` answer that stamps the rendering (so no job retries in the background
   and takes a later spec's one-shot stub), a context answer with no sentence, and a checker that
   keeps every stubbed card; a spec ranks its own answer above them.
+- **An empty `accept` reply is a failed attempt** (final review). The provider's "no content" is
+  no answer, so pg-boss retries it and finally dead-letters it unstamped, and the next session
+  asks again. A reply that names no other word is still an answer, and is stamped.
+
+**Merged after phase 35**
+
+Phase 35 (question choosing, PR #132) reached master while this branch was in its final review,
+and the branch merged it (ruling R19: phase 35 is binding once merged).
+
+- **The migration is `0028_ambiguous_questions`,** regenerated on top of phase 35's
+  `0027_learner_day_and_memory`. The SQL is the same.
+- **Phase 35's planner chooses the card types,** by each pick's dimension and rung, where §2
+  assumed phase 24's rotation. Phase 34 hands it its inputs: tiles are built from the answer
+  form, a card is speakable only when the saved form and the answer form both are, and each pick
+  carries the meanings the dictionary knows, which the board's overlap rule (D3) reads. The
+  tests that named a card by its position in the rotation name it by the pick's memory instead.
+- **D9's rule also feeds phase 35's memory.** The update at a session's end and the recompute
+  read the same session evidence as the levels: the retry's verdict when it was `exact`,
+  `near_miss` or `understood`, the first answer's otherwise. A session that the last card's
+  retry completes records its learner day, as ADR 0013 asks.
+- **The bots answer the second try.** A card held for one is decided again and sent with
+  `retry`, or given up with an empty text or "show the answer" and `retry`; the bot learns the
+  verdict the server keeps.
