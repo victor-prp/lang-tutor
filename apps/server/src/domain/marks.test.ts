@@ -47,6 +47,19 @@ describe('findMark (phase 34, spec D6, D8)', () => {
     expect(marked('קָרָא בַּסֵּפֶר', 'ספר')).toBe('בַּסֵּפֶר');
   });
 
+  // Paseq, sof pasuq and nun hafukha sit among the points but are punctuation:
+  // a sentence's closing sof pasuq is no part of its last word.
+  it('keeps Hebrew punctuation out of the mark: a closing sof pasuq stays outside it', () => {
+    const SOF_PASUQ = '\u05C3';
+    const PASEQ = '\u05C0';
+    const sentence = `בואו נשלב כוחות${SOF_PASUQ}`;
+    expect(findMark(sentence, 'כוחות')).toEqual({ start: 10, end: 15 });
+    expect(marked(sentence, 'כוחות')).toBe('כוחות');
+    expect(marked(`קָרָא ${PASEQ} בַּסֵּפֶר`, 'קרא')).toBe('קָרָא');
+    // As punctuation it is no word character either: the word before it is whole.
+    expect(findMark(`ספר${SOF_PASUQ}`, 'ספר')).toEqual({ start: 0, end: 3 });
+  });
+
   it('ignores a Russian stress mark', () => {
     expect(marked('Молоко́ стоит на столе.', 'молоко')).toBe('Молоко́');
   });

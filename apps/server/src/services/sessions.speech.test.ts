@@ -53,6 +53,7 @@ function setup(transcriber: ReturnType<typeof createFakeTranscriber>, loaded: Se
     now: createFakeClock(1_000, 2_500),
     logger,
     llm: createFakeLlmClient(''),
+    contextLlm: createFakeLlmClient(''),
     transcriber,
     judge: createFakeLlmClient(''),
   });
@@ -184,6 +185,7 @@ describe('answerBySpeech (spec D5)', () => {
       now: createFakeClock(1_000, 2_500),
       logger,
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber('{"heard":"gatto"}'),
       judge: createFakeLlmClient(''),
     });

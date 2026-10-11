@@ -174,6 +174,7 @@ export function createSessionService({
   now,
   logger,
   llm,
+  contextLlm,
   transcriber,
   judge,
 }: {
@@ -182,6 +183,9 @@ export function createSessionService({
   now: () => number;
   logger: Logger;
   llm: LlmClient;
+  /** Phase 34 (ruling R12). The context call's client: the batch's provider
+   *  with a short budget of its own, so a hang costs the sentences only. */
+  contextLlm: LlmClient;
   transcriber: SpeechTranscriber;
   judge: LlmClient;
 }) {
@@ -767,7 +771,7 @@ export function createSessionService({
         const contextStarted = now();
         let failure: string | null = null;
         try {
-          const raw = await llm(
+          const raw = await contextLlm(
             buildContextPrompt({ items: [...contextItems.values()], from: target, to: read.enrolled.source_language }),
           );
           contextAnswer = raw === '' ? null : parseLlmContext(raw);

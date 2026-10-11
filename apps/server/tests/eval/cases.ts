@@ -1551,13 +1551,14 @@ export const ACCEPT_CASES: AcceptCase[] = [
 
 /**
  * Phase 34 (spec D6, D8; ruling R3). The context call, one card each, as
- * prepareSession asks it. Scored on structure alone: tier 1 that the sentence
- * and its other half are in the right scripts; tier 2 that the server's own
- * rules keep the sentence (contextItemFor and resolveContext, so a target
- * sentence shows the card's form and a Hebrew one holds no answer), that the
- * marked word is a form of the card's word and none of `notWords`, and that a
- * sentence card's word is found in its Hebrew. Whether the sentence means the
- * right sense is the checker's to say (Task 6's checker-based case).
+ * prepareSession asks it. Scored on structure (contextChecks.ts): tier 1 that
+ * the sentence and its other half are in the right scripts; tier 2 that the
+ * server's own rules keep the sentence (contextItemFor and resolveContext, so a
+ * target sentence shows the card's form and a Hebrew one holds no answer), that
+ * the marked word is a form of the card's word, that the hidden Hebrew holds a
+ * form of the rendering's root and none of another word's forms, and that a
+ * sentence card's word is found in its Hebrew. The checker's own reading of the
+ * sense is Task 6's case.
  */
 export type ContextCase = {
   label: string;
@@ -1574,12 +1575,20 @@ export type ContextCase = {
   acceptedAnswers?: string[];
   /** A bare-word card: context_word must begin like one of these. */
   formsOf?: string[];
-  /** A bare-word card: context_word must be none of these (another word's forms). */
-  notWords?: string[];
+  /** A bare-word card: some word of the hidden Hebrew, with or without a
+   *  one-letter prefix, matches this (a form of the rendering's root). */
+  translationRoot?: RegExp;
+  /** ...and none of them is one of these (another word's forms: ראה's for saw). */
+  translationNotWords?: string[];
   /** A sentence card: its Hebrew, its target sentence and the practised word,
    *  and the Hebrew word that stands for it. */
   sentence?: { hebrew: string; target: string; word: string; marked: string };
 };
+
+/** לנסר's root in any form: לנסר, ינסר, מנסר, נוסר, ניסר, נסרתי. */
+const SAW_ROOT = /נ[יו]?סר/u;
+/** ראה's forms, the past of see read as Hebrew. */
+const SEE_FORMS = ['ראה', 'ראיתי', 'ראית', 'ראתה', 'ראינו', 'ראיתם', 'ראו', 'רואה', 'רואים', 'רואות', 'יראה', 'תראה', 'אראה', 'לראות'];
 
 export const CONTEXT_CASES: ContextCase[] = [
   // E, 71b0b407: `saw` is the tool's verb here, never the past of see.
@@ -1587,14 +1596,14 @@ export const CONTEXT_CASES: ContextCase[] = [
     label: 'context E: saw/לנסר in a sentence that shows saw, never see',
     target: 'en', type: 'typed_meaning', form: 'saw', lemma: 'saw', partOfSpeech: 'verb', translation: 'לנסר',
     example: 'He will saw the branch off the tree.', exampleTranslation: 'הוא ינסר את הענף מהעץ.',
-    formsOf: ['saw'], notWords: ['see', 'seen', 'sees', 'seeing'],
+    formsOf: ['saw'], translationRoot: SAW_ROOT, translationNotWords: SEE_FORMS,
   },
   // H, a7d6bdb4: the same word on a multiple choice, with no saved example to lean on.
   {
     label: 'context H: saw/לנסר on a multiple choice, no saved example',
     target: 'en', type: 'multiple_choice', form: 'saw', lemma: 'saw', partOfSpeech: 'verb', translation: 'לנסר',
     example: null, exampleTranslation: null,
-    formsOf: ['saw'], notWords: ['see', 'seen', 'sees', 'seeing'],
+    formsOf: ['saw'], translationRoot: SAW_ROOT, translationNotWords: SEE_FORMS,
   },
   // C, d388f738: a Hebrew sentence for להוריד that holds no English word.
   {

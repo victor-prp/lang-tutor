@@ -277,6 +277,7 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -325,6 +326,7 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -341,6 +343,7 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -376,6 +379,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -422,6 +426,7 @@ describe('createNextSession, phase 31 (spec D12)', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });

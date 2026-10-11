@@ -16,10 +16,12 @@ export type Mark = { start: number; end: number };
 const WORD = '[\\p{L}\\p{M}\\p{N}]';
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 
-/** Hebrew points and cantillation (not the maqaf, which separates words), and a
- *  stress mark after a Cyrillic letter: reading aids, not spelling. */
-const HEBREW_POINT = /[֑-ֽֿ-ׇ]/u;
-const STRESS = '́';
+/** Hebrew points and cantillation, which a word carries: U+0591 to U+05C7
+ *  less the punctuation in that block (maqaf U+05BE, paseq U+05C0, sof pasuq
+ *  U+05C3, nun hafukha U+05C6), which separates words and stays outside a mark.
+ *  And a stress mark after a Cyrillic letter. Reading aids, not spelling. */
+const HEBREW_POINT = /[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]/u;
+const STRESS = '\u0301';
 const CYRILLIC = /\p{Script=Cyrillic}/u;
 
 /** The one-letter prefixes a Hebrew word takes: ו ה ב כ ל מ ש. */

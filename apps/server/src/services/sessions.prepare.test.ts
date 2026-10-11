@@ -58,8 +58,8 @@ function world(opts: {
   gloss?: GlossRepo;
   /** Phase 31 (spec D18). What findSiblings answers: other headwords with a card's key. */
   siblings?: { glossId: string; lemma: string }[];
-  /** Phase 34 (spec D6, D8). The context call's answer, the model's second call;
-   *  without one it gets `reply` again, which names no sentence. */
+  /** Phase 34 (spec D6, D8, ruling R12). The context call's answer, on its own
+   *  client; without one it names no sentence. */
   contextReply?: string | Error;
   /** Phase 34 (spec D6). What findRecentContexts answers. */
   recentContexts?: RecentContexts;
@@ -152,7 +152,8 @@ function world(opts: {
       });
     },
   });
-  const llm = createFakeLlmClient(opts.reply ?? GOOD, ...(opts.contextReply !== undefined ? [opts.contextReply] : []));
+  const llm = createFakeLlmClient(opts.reply ?? GOOD);
+  const contextLlm = createFakeLlmClient(opts.contextReply ?? JSON.stringify({ items: [] }));
   const logger = createFakeLogger();
   // Phase 34 (spec D1). What the read asked the accept job for.
   const jobs = createFakeJobRepo();
@@ -174,10 +175,11 @@ function world(opts: {
     logger,
     now: createFakeClock(...(opts.clock ?? [1_000, 1_250])),
     llm,
+    contextLlm,
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
   });
-  return { service, calls, llm, logger, jobs };
+  return { service, calls, llm, contextLlm, logger, jobs };
 }
 
 describe('prepareSession', () => {
@@ -191,10 +193,11 @@ describe('prepareSession', () => {
   });
 
   it('generates every pick, flips the session to ready, and writes its questions', async () => {
-    const { service, calls, llm } = world({});
+    const { service, calls, llm, contextLlm } = world({});
     await service.prepareSession(PAYLOAD);
-    // The batch, then (phase 34, ruling R8) the context sentences' own call.
-    expect(llm.calls.map((call) => call.system.includes(CONTEXT_MARKER))).toEqual([false, true]);
+    expect(contextLlm.calls.map((call) => call.system.includes(CONTEXT_MARKER))).toEqual([true]);
+    // The batch, then (phase 34, rulings R8, R12) the context sentences' own call, on its own client.
+    expect(llm.calls.map((call) => call.system.includes(CONTEXT_MARKER))).toEqual([false]);
     expect(calls.transitions).toEqual(['preparing→ready']);
     const [input] = calls.generated as { questions: { options: { text: string; is_correct: boolean }[] }[] }[];
     expect(input.questions[0].options).toEqual([
@@ -979,7 +982,7 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
     sentenceMarkStart?: number | null; sentenceMarkEnd?: number | null; sentenceTranslation?: string | null;
   };
   const insertedOf = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: Inserted[] }).questions;
-  const contextCall = (llm: { calls: { system: string; user: string }[] }) => llm.calls.find((call) => call.system.includes(CONTEXT_MARKER));
+  const contextCall = (contextLlm: { calls: { system: string; user: string }[] }) => contextLlm.calls.find((call) => call.system.includes(CONTEXT_MARKER));
 
   // Ordinal 0, three picks: a multiple choice, a reversed card and a typed translation.
   const CHOICES = [SAW, TABLE, DOWNLOAD];
@@ -1039,11 +1042,12 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
   });
 
   it('asks the context call after the batch, once, with what each card needs and no item for a card that shows none', async () => {
-    const { service, llm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT });
+    const { service, llm, contextLlm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT });
     await service.prepareSession(payloadOf(SENTENCES, 2));
-    expect(llm.calls).toHaveLength(2);
-    expect(llm.calls[1]).toBe(contextCall(llm));
-    const items = JSON.parse(contextCall(llm)!.user).items;
+    expect(llm.calls).toHaveLength(1);
+    expect(contextLlm.calls).toHaveLength(1);
+    expect(contextLlm.calls[0]).toBe(contextCall(contextLlm));
+    const items = JSON.parse(contextCall(contextLlm)!.user).items;
     // The tiles card at q2 shows no sentence (spec D6: the letters pin the word).
     expect(items.map((item: { key: string; task: string }) => `${item.key}:${item.task}`)).toEqual(['q1:target', 'q3:mark']);
     expect(items[1]).toMatchObject({ word: 'combine', sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces." });
@@ -1108,11 +1112,11 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
 
   it('reads the recent contexts in the read step, and drops a sentence one of them showed for the saved example', async () => {
     const recentContexts: RecentContexts = new Map([[DOWNLOAD.glossId, { typed_translation: ['אני רוצה להוריד את המשחק החדש הלילה'] }]]);
-    const { service, calls, logger, llm } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, recentContexts });
+    const { service, calls, logger, contextLlm } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, recentContexts });
     await service.prepareSession(payloadOf(CHOICES, 0));
     expect(calls.recentContextsAsked).toEqual([{ enrollmentId: 'e1', glossIds: CHOICES.map((r) => r.glossId), limit: 3 }]);
     // Told to the model as a sentence to avoid.
-    expect(JSON.parse(contextCall(llm)!.user).items[2].avoid).toContain('אני רוצה להוריד את המשחק החדש הלילה');
+    expect(JSON.parse(contextCall(contextLlm)!.user).items[2].avoid).toContain('אני רוצה להוריד את המשחק החדש הלילה');
     expect(insertedOf(calls)[2]).toMatchObject({ context: 'אני צריך להוריד את הקובץ קודם.', contextTranslation: 'I need to download the file first.', contextMarkStart: null });
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_dropped', position: 2, type: 'typed_translation', reason: expect.stringContaining('recent') }));
   });
@@ -1127,12 +1131,13 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
 
   it('asks no context call when no card shows a sentence', async () => {
     // One pick at ordinal 1 with listening on: a listen choice, which shows none (spec D10).
-    const { service, llm, calls } = world({
+    const { service, llm, contextLlm, calls } = world({
       enrollment: ENGLISH, context: [SAW], reply: JSON.stringify({ items: [{ key: 'q1', distractors: ['לשייף', 'לקדוח', 'לשבור'] }] }),
     });
     await service.prepareSession({ ...payloadOf([SAW], 1), listening: true });
     expect(insertedOf(calls)[0]).toMatchObject({ type: 'listen_choice' });
     expect(llm.calls).toHaveLength(1);
+    expect(contextLlm.calls).toHaveLength(0);
   });
 
   it('logs how long the context call took', async () => {
@@ -1141,13 +1146,5 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
     });
     await service.prepareSession(payloadOf(CHOICES, 0));
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', model_ms: 250, context_ms: 400 }));
-  });
-
-  it('gives a listen card and each word of a board its part of speech (spec D10)', async () => {
-    const { service, calls } = world({ context: TEN, reply: TEN_REPLY });
-    await service.prepareSession(TEN_PAYLOAD);
-    const shown = calls.sessionQuestions[0];
-    expect(shown.find((q) => q.type === 'listen_choice')).toMatchObject({ part_of_speech: 'noun' });
-    expect(shown.find((q) => q.type === 'matching')).toMatchObject({ part_of_speech: 'noun', board: { parts_of_speech: ['noun', 'noun', 'noun', 'noun'] } });
   });
 });

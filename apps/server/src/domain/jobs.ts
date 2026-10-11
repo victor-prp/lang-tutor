@@ -18,9 +18,22 @@ export const PREPARE_SESSION_FAILED = 'prepare-session-failed';
  *  Victor's cap. The environment may lower it (config.ts); tests do. */
 export const SESSION_GENERATION_BUDGET_MS = 300_000;
 
-/** Twice the budget, phase 19's rule: a worker that crashed mid-call expires
- *  and is retried, and a healthy call is never cut off. */
-export const PREPARE_SESSION_EXPIRY_SECONDS = (2 * SESSION_GENERATION_BUDGET_MS) / 1000;
+/** Phase 34 (spec D6, D8, ruling R12). The most the context call may take, the
+ *  call after the batch. A minute: measured at about 7 s for a full session, and
+ *  a call that runs out costs only the sentences (ruling R11), never the
+ *  session. The environment may lower it (config.ts); tests do. */
+export const CONTEXT_CALL_BUDGET_MS = 60_000;
+
+/** Phase 34 (ruling R12). Every model call one prepare-session attempt makes, in
+ *  order, each at most its budget: the batch, then the context call. A call
+ *  added to the attempt (the checker, Task 6) adds its budget here. */
+export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [SESSION_GENERATION_BUDGET_MS, CONTEXT_CALL_BUDGET_MS];
+
+/** Twice the sum of the calls' budgets, phase 19's rule: a worker that crashed
+ *  mid-call expires and is retried, and a healthy attempt, every call of which
+ *  stays inside its own budget, is never cut off. */
+export const PREPARE_SESSION_EXPIRY_SECONDS =
+  (2 * PREPARE_SESSION_CALL_BUDGETS_MS.reduce((sum, budget) => sum + budget, 0)) / 1000;
 
 export const PrepareSessionPayloadSchema = z.object({
   session_id: z.string().min(1),

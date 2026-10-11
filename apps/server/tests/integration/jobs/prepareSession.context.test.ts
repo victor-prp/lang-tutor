@@ -92,10 +92,11 @@ async function prepared(
   ordinal: number,
   batch: { tasks: Task[]; overrides?: Record<string, Record<string, unknown>> },
   context: Parameters<typeof expectContext>[1] | null,
+  contextOpts: Parameters<typeof expectContext>[2] = {},
 ) {
   await clearNamespace(ns);
   await expectDistractors(ns, batch);
-  if (context !== null) await expectContext(ns, context);
+  if (context !== null) await expectContext(ns, context, contextOpts);
   const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN));
   await deps.sessions.prepareSession({ session_id: sessionId, picks, listening: false, speaking: false, ordinal });
   const record = await deps.sessions.getSession('u_1', sessionId);
@@ -185,6 +186,20 @@ describe('context sentences and marks, through the database', () => {
     expect(stored[2]).toMatchObject({ context_translation: 'I need to download the file first.' });
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_call_failed' }));
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_missing', position: 1, type: 'reverse_choice' }));
+  });
+
+  // Ruling R12: the context call has its own short budget, so a hang costs the
+  // sentences (R11), never the session, and never the batch's five minutes.
+  it('falls back, and prepares the session, when the context call outruns its own budget', async () => {
+    deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns), contextCallTimeoutMs: 500 });
+    const w = await words();
+    const started = Date.now();
+    const { questions } = await prepared([pick(w.saw), pick(w.table), pick(w.download)], 0, CHOICES_BATCH, CHOICES_CONTEXT, { delayMs: 5_000 });
+    expect(Date.now() - started).toBeLessThan(4_000);
+    // The answer came too late to be used: each card is on its saved example.
+    expect(ofType(questions, 'multiple_choice')).toMatchObject({ context: { text: 'He will saw the branch off.', mark: null } });
+    expect(ofType(questions, 'typed_translation')).toMatchObject({ context: { text: 'אני צריך להוריד את הקובץ קודם.', mark: null } });
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_call_failed', reason: expect.stringMatching(/timed out/) }));
   });
 
   it('never shows a sentence a recent session showed for that gloss on that card', async () => {

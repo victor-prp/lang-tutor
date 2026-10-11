@@ -43,6 +43,7 @@ import type { QuestionType } from '@lang-tutor/core/domain';
 import { LlmContextSchema, LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
+import { CONTEXT_CALL_BUDGET_MS } from '../../src/domain/jobs';
 import {
   buildContextPrompt,
   contextItemFor,
@@ -270,7 +271,8 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
-    timeoutMs: TIMEOUT_MS,
+    // Production's budget for this call (ruling R12): a wait past it is a fallback there.
+    timeoutMs: CONTEXT_CALL_BUDGET_MS,
   });
   console.log(`model     ${gemini.model}`);
   console.log(`schema    LlmContextSchema (${JSON.stringify(toGeminiSchema(LlmContextSchema)).length} characters of responseSchema)`);

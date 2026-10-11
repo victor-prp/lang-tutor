@@ -23,13 +23,12 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
-import { contextItemFor, markFor, resolveContext, type ContextItem } from '../../src/domain/context';
 import { comparable, distractorItems, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
-import type { LlmAccept, LlmContext, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
+import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
 import { askAccept, askContext, askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
@@ -55,6 +54,7 @@ import {
   type TranslationJudgeCase,
 } from './cases';
 import { askPhoto, askSenseMatch } from './askPhoto';
+import { contextItemOf, contextTier1, contextTier2, contextWritten } from './contextChecks';
 import { MATCH_CASES, PHOTO_CASES, type MatchCase, type PhotoCase } from './photoCases';
 
 const TIER2_THRESHOLD = 0.85;
@@ -778,70 +778,6 @@ const writtenBy = (kase: SentenceCase, answer: LlmDistractors): string[] => {
       : `${item.form}: ${got?.sentence ?? '(none)'} [${got?.gap ?? ''}] = ${got?.translation ?? '(none)'}${got?.alternatives?.length ? ` +${got.alternatives.join('/')}` : ''}`;
   });
 };
-
-/** Phase 34 (spec D6, D8). The one item a context case asks, as prepareSession builds it. */
-function contextItemOf(kase: ContextCase): ContextItem {
-  const item = contextItemFor({
-    key: 'q1',
-    type: kase.type,
-    row: {
-      glossId: 'g-c', senseId: 's-c', variantId: 'v-c', lexemeId: 'l-c',
-      form: kase.form, lemma: kase.lemma, partOfSpeech: kase.partOfSpeech, translation: kase.translation,
-      example: kase.example, exampleTranslation: kase.exampleTranslation,
-      acceptedAnswers: kase.acceptedAnswers ?? [], answerForm: null, acceptedAt: null,
-    },
-    alternatives: [],
-    recent: [],
-    sentence: kase.sentence ? { hebrew: kase.sentence.hebrew, target: kase.sentence.target, word: kase.sentence.word } : null,
-  });
-  if (!item) throw new Error(`${kase.label}: the ${kase.type} card asks no context`);
-  return item;
-}
-
-/** Ruling R3: the scripts, which a sentence that is no context at all would break. */
-function contextTier1(kase: ContextCase, answer: LlmContext): Check[] {
-  const item = contextItemOf(kase);
-  const got = answer.items.find((answered) => answered.key === item.key);
-  if (item.task === 'mark') {
-    return [{ name: 'the practised word is named', ok: Boolean(got?.sentence_word?.trim()), detail: got?.sentence_word }];
-  }
-  const own = item.task === 'target' ? kase.target : 'he';
-  const other = item.task === 'target' ? 'he' : kase.target;
-  const text = got?.context ?? '';
-  const translation = got?.context_translation ?? '';
-  return [
-    { name: `the sentence is in ${own} script`, ok: text.trim() !== '' && isInScript(text, own), detail: text || '(none)' },
-    { name: `its other half is in ${other} script`, ok: translation.trim() !== '' && isInScript(translation, other), detail: translation || '(none)' },
-  ];
-}
-
-/** Ruling R3: kept by the server's rules, the marked word a form of the card's word and none of the others. */
-function contextTier2(kase: ContextCase, answer: LlmContext): Check[] {
-  const item = contextItemOf(kase);
-  const got = answer.items.find((answered) => answered.key === item.key);
-  if (item.task === 'mark') {
-    const mark = markFor(item, got);
-    const marked = mark ? item.sentence.slice(mark.start, mark.end) : null;
-    return [{ name: `${kase.sentence!.marked} is marked`, ok: marked !== null && comparable(marked) === comparable(kase.sentence!.marked), detail: marked ?? `${got?.sentence_word ?? '(none)'} not found` }];
-  }
-  const outcome = resolveContext(item, got, { target: kase.target, explanation: 'he' });
-  const word = comparable(got?.context_word ?? '');
-  const checks: Check[] = [{ name: 'the server keeps the sentence', ok: outcome.dropped === null, detail: outcome.dropped ?? undefined }];
-  if (kase.formsOf) {
-    checks.push({ name: `context_word is a form of ${kase.formsOf.join('/')}`, ok: kase.formsOf.some((form) => word.startsWith(comparable(form))), detail: got?.context_word ?? '(none)' });
-  }
-  if (kase.notWords) {
-    checks.push({ name: `context_word is not ${kase.notWords.join('/')}`, ok: word !== '' && !kase.notWords.some((other) => comparable(other) === word), detail: got?.context_word ?? '(none)' });
-  }
-  return checks;
-}
-
-const contextWritten = (kase: ContextCase, answer: LlmContext): string[] =>
-  answer.items.map((got) =>
-    contextItemOf(kase).task === 'mark'
-      ? `${kase.form}: ${kase.sentence?.hebrew ?? ''} [${got.sentence_word ?? '(none)'}]`
-      : `${kase.form}: ${got.context ?? '(none)'} [${got.context_word ?? ''}] = ${got.context_translation ?? '(none)'}`,
-  );
 
 const sameText = (a: string, b: string) =>
   stripStress(a).replace(/\s+/g, ' ').trim().toLowerCase() === stripStress(b).replace(/\s+/g, ' ').trim().toLowerCase();

@@ -356,9 +356,14 @@ function stubItem(task: Task, key: string, opts: { alternatives?: string[] }) {
  * CONTEXT_MARKER and ranked above a broader stub, so the distractor batch's
  * stub never answers it. Without one the call finds no expectation, fails, and
  * the session is prepared on the fallbacks (ruling R11). `status` makes it a
- * failed call; '' is the provider's "no content".
+ * failed call; '' is the provider's "no content"; `delayMs` holds the answer
+ * back, past the call's budget if a test wants it to time out (ruling R12).
  */
-export async function expectContext(ns: string, answer: LlmContext['items'] | '', opts: { status?: number } = {}): Promise<void> {
+export async function expectContext(
+  ns: string,
+  answer: LlmContext['items'] | '',
+  opts: { status?: number; delayMs?: number } = {},
+): Promise<void> {
   const failed = opts.status !== undefined && opts.status !== 200;
   await expectation(ns, {
     match: { body: { type: 'REGEX', regex: `[\\s\\S]*${CONTEXT_MARKER}[\\s\\S]*` } },
@@ -370,6 +375,7 @@ export async function expectContext(ns: string, answer: LlmContext['items'] | ''
             statusCode: 200,
             headers: { 'content-type': ['application/json'] },
             body: JSON.stringify(answer === '' ? geminiBlockedResponse() : geminiResponse({ items: answer })),
+            ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
           },
     },
   });

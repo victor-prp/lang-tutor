@@ -1054,8 +1054,8 @@ export const LlmDistractorsSchema = z.object({
 // nullable: Gemini refuses a bare nullable string (LlmAcceptSchema). Measured
 // with `npx tsx tests/eval/measureSchema.ts --context` (in apps/server): ten
 // items, every kind (four target sentences, three Hebrew ones, three marks),
-// through the real prompt and client, gemini-2.5-flash, 2026-10-11, production's
-// 300 s budget, thinking on. Accepted on all four runs, no 400, answered in
+// through the real prompt and client, gemini-2.5-flash, 2026-10-11, a 300 s
+// budget (production now gives the call 60 s of its own, ruling R12), thinking on. Accepted on all four runs, no 400, answered in
 // 7.3, 7.1, 7.4 and 7.0 s, every item answered and kept by D6's rules. The batch beside it,
 // without the four strings, answered in 13.6 s the same day. A field more here
 // means measuring again, for a 400 and for the wait.

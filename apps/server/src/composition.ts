@@ -119,6 +119,9 @@ export function createServerDeps(io: {
   // Phase 19. The budget of one distractor call: a session's whole batch is one
   // long answer, so it gets its own, longer than a lookup's.
   sessionGenerationTimeoutMs: number;
+  // Phase 34 (ruling R12). The budget of the context call after the batch: its
+  // own and short, so a hang costs the sentences, not the batch's five minutes.
+  contextCallTimeoutMs: number;
   // Phase 25 (spec D13). One transcription's budget: short, because a learner
   // is waiting on a card.
   speechTimeoutMs: number;
@@ -158,6 +161,16 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     timeoutMs: io.sessionGenerationTimeoutMs,
+  });
+
+  // Phase 34 (spec D6, D8, ruling R12). The same provider for the context call,
+  // with its own budget: the call degrades on a timeout (ruling R11).
+  const contextLlm: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.contextCallTimeoutMs,
   });
 
   // Phase 25. The same provider over audio. Named here and nowhere else
@@ -221,6 +234,7 @@ export function createServerDeps(io: {
       now: io.now,
       logger: io.logger,
       llm: sessionLlm,
+      contextLlm,
       transcriber,
       judge,
     }),

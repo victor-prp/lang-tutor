@@ -76,6 +76,7 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
     now: createFakeClock(1_000, 1_400),
     logger,
     llm: createFakeLlmClient(''),
+    contextLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge,
   });
@@ -172,6 +173,7 @@ describe('answerJudged (spec D3)', () => {
       now: createFakeClock(1_000, 1_400),
       logger: createFakeLogger(),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge,
     });
