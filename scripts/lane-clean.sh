@@ -98,7 +98,7 @@ RECORDS
     for lane in $orphan_lanes; do
       echo "  lane:down  $lane"
       # Captured rather than piped to sed, which would swallow the exit status.
-      if out=$(npm run --silent lane:down -- "$lane" 2>&1); then
+      if out=$(npm run --silent lane:down -- "$lane" --no-worktree-hint 2>&1); then
         printf '%s\n' "$out" | sed 's/^/               /'
       else
         printf '%s\n' "$out" | sed 's/^/               /'
@@ -176,7 +176,7 @@ while IFS= read -r line; do
           # Inside the worktree, and before it is removed: this is the only place
           # `lane:down` can find the lane it belongs to.
           if [ -d "$wt_path/node_modules" ]; then
-            ( cd "$wt_path" && npm run lane:down --silent ) 2>&1 | sed 's/^/               /'
+            ( cd "$wt_path" && npm run lane:down --silent -- --no-worktree-hint ) 2>&1 | sed 's/^/               /'
           else
             printf '               no node_modules; its databases (if any) will show as ORPHAN in lane:list\n'
           fi

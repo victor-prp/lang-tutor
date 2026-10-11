@@ -105,3 +105,21 @@ export function findOrphans(
     .sort((a, b) => a.lane.localeCompare(b.lane));
   return { orphans, unowned: unowned.sort() };
 }
+
+/**
+ * The worktrees a lane's stamps name that still exist on disk. `lane:down` only
+ * tells you to remove a worktree when there is one: after an orphan's drop
+ * there is nothing left to remove.
+ */
+export function liveWorktreesOf(
+  rows: LaneDatabaseRow[],
+  lane: string,
+  exists: (path: string) => boolean,
+): string[] {
+  const roots = new Set<string>();
+  for (const row of rows) {
+    const stamp = parseLaneComment(row.comment);
+    if (stamp.lane === lane && stamp.root && exists(stamp.root)) roots.add(stamp.root);
+  }
+  return [...roots].sort();
+}
