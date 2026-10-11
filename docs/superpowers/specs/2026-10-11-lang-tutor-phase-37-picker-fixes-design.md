@@ -147,7 +147,7 @@ Two things are unchanged:
 | `EXPAND` | nothing due, and a live dimension untested | the first untested in ORDER |
 | `NOT_DUE` | everything tested, nothing due | the weakest |
 | `DONE` | answered today, no return owed (D1) | as the classes above would choose |
-| `SPEAK` | the speaking pick (D4) | SK |
+| `SPEAK` | the speaking pick when it moves a gloss to SK (D4, tiers 3 and 4); tiers 1 and 2 keep their class | SK |
 
 A return whose dimension is not live this session, because the device changed, waits for a later
 session.
