@@ -146,13 +146,17 @@ jobs:
   # with the tag, so new app code never calls a server that is not live yet.
   # The tag's checkout (the default ref), like build-push: what ships is the
   # tag's app. scripts/android-release.sh decides between an over-the-air
-  # update and a new Play build by fingerprint. It skips, green, unless the
-  # repository variable ANDROID_RELEASE is exactly "on", until the one-time
-  # setup is done (no EXPO_TOKEN, or no EAS project id), and when the tag
-  # predates this job. A failure here leaves the server release standing;
+  # update and a new Play build by fingerprint.
+  #
+  # The job is skipped (shown greyed out in the run) unless the repository
+  # variable ANDROID_RELEASE is exactly "on". The script checks the variable
+  # again, and also skips, green, until the one-time setup is done (no
+  # EXPO_TOKEN, or no EAS project id) and when the tag predates this job:
+  # a job-level `if` cannot read secrets. A failure here leaves the server release standing;
   # rerunning this job alone finishes what is missing.
   android:
     needs: apply
+    if: vars.ANDROID_RELEASE == 'on'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
