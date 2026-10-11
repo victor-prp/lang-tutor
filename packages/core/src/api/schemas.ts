@@ -393,6 +393,10 @@ export const NextStepRequestSchema = z.union([
     question_id: z.string().min(1),
     text: z.string().max(100),
     retry: z.boolean().optional(),
+    // Phase 38 (spec D4). On a first answer to a typed cloze: whether the learner
+    // opened its Hebrew sentence. Optional, so an older app is unchanged; stored for
+    // `cloze_typed` only, and never changed by a retry.
+    hint_opened: z.boolean().optional(),
   }),
   // Phase 25 (spec D5). A speaking card answered without audio: passed, or
   // "show me the answer".
