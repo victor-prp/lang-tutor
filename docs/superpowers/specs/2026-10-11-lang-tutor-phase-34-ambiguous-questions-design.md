@@ -427,3 +427,94 @@ One PR, as every line of work here.
   job runs lazily, one rendering at a time as sessions pick them, with a singleton key, so a
   save-all of twenty glosses costs nothing at save time. The judged and spoken routes' bound
   moves from one model call per card to two (D9).
+
+## As built
+
+Built on branch `phase-34-ambiguous-questions`. Where the build departs from the letter of the
+sections above, it is listed here with its reason; everything else was built as written.
+
+**D4a, measured**
+
+1. **The batch keeps six wrong options, and the context sentence and the sentence marks moved to
+   a call of their own (D4a's first fallback).** Gemini accepted the full schema, but with the
+   four new optional strings in it the batch's non-streaming call hung past 30 s (`translate it`
+   8 of 8, `sentence en` 2 of 5); with six options and none of the strings it never hung (0 of
+   14), and a context-only call answers in 2 to 7 s. The numbers are beside each schema in
+   `packages/core/src/api/schemas.ts`. So `domain/context.ts` holds the context task and
+   `domain/marks.ts` finds the marked word, where §2 put both in `buildDistractorPrompt`.
+2. **The context call runs after the batch, and its failure degrades the session, never fails
+   it.** A sentence card's mark needs the batch's Hebrew sentence. A failed, unreadable or empty
+   answer logs `context_call_failed`, every card falls back as D6 says (the saved example,
+   unmarked, or nothing), and sentence cards are unmarked: a missing hint is today's card, a
+   failed session is worse. The checker keeps D5's rule: an unreadable answer fails the attempt.
+3. **Each model call of a preparation has its own client and budget.** The batch keeps 300 s;
+   the context call and the checker get 60 s each (`CONTEXT_CALL_BUDGET_MS`,
+   `CHECKER_CALL_BUDGET_MS`), and the prepare job expires at twice their sum, 840 s, so a healthy
+   attempt is never cut off and an optional hint cannot stall a session for five minutes.
+
+**Ruled during the build**
+
+- **`answer_form` is checked where a card reads it, not when the `accept` job stores it (§2's
+  "a plausible form of the lemma").** A card asks for the stored form only when, a leading
+  article or "to" left off, one of its words shares a prefix of `min(3, shorter word − 1)`
+  letters, never fewer than two, with the lemma or the saved form (`ore`/`ora`,
+  `libri`/`libro`); otherwise the card asks for the saved form, as before the phase. The job
+  stores any form in the target script that is not the saved form. The cost: a suppletive form
+  (`ho` for `avere`) falls back to the saved form, which the lemma rule still accepts.
+- **The answer form is asked on multiple choice, listen choice (which also speaks it), reverse
+  choice, typed translation, say the translation and letter tiles.** Matching, typed meaning,
+  read aloud and dictation keep the saved form, so a plural rendering (שעות) still pairs with
+  `ora` on a board and a meaning card; that is left for a follow-up.
+- **A typed or spoken card accepts, in order: the stored list, up to three sibling headwords,
+  the session's own alternatives, then the remaining siblings, ten in all.** Phase 31 D18's
+  siblings are certain, and the stored list is never displaced by them.
+- **D3's "known right" set is wider than §1 lists.** A rendering with the same Hebrew text
+  contributes its form and lemma as well as its accepted answers (another headword rendering the
+  same Hebrew is right on the reversed card), and each picked gloss contributes its own key,
+  alternatives and member renderings, which the checker's context rule reads as "the sense's
+  meanings". `boardPicks` refuses two words when either one's board meaning is a known meaning
+  of the other.
+- **The checker also judges the board, and reads only the sentences the context call wrote.**
+  It is asked about the fifth-meaning candidates against each of the four board words, since one
+  right for the third word is as wrong as one right for the first. A saved example the card fell
+  back on is the learner's own, and is not checked. A Hebrew context is checked by a list
+  (`context_words`, a field §2 does not name), judged with the card's own `judgeTyped`.
+- **A target-language context must contain the form the card shows, or it is dropped; a
+  sentence without its other half is dropped too.** The mark of a target sentence is that form,
+  and the judge needs the hidden half (D7).
+- **The board carries `parts_of_speech`, parallel to its `words`,** where §2 says `part_of_speech`
+  on each matching word: the board is built from parallel arrays.
+- **The second try's wire (D9).** Giving up is each route's existing "show the answer" input with
+  `retry: true`: an empty text on the typed and judged routes, `pass: 'show_answer'` through
+  next-step for say the translation. A held card comes back as the same `question` with a
+  top-level `pending_retry: { answer, wording: 'word' | 'meaning' } | null` on the not-complete
+  next-step response (and so inside the judged and spoken responses' `next`), and on the session
+  view, which a resumed session reads. A retry sent as a skip is a give-up too, since D9 ends a second
+  try with an answer or a give-up.
+- **A given-up retry on the judged route is reported to the app as `wrong` and stored as
+  `gave_up`.** The response's verdict enum was not widened: the app builds its typed verdict from
+  it and shows the saved word either way.
+- **After a give-up or a wrong second try the app shows today's green banner for an
+  `alternative` answer on that card** ("נכון! המילה שתרגלנו:", or "נכון, אבל כאן תרגלנו:" on
+  typed meaning), where D9 says "as today's banner does". The first answer was right and the
+  score counts it right, so a red "wrong" banner would contradict both.
+- **An answer the phone judges `alternative` waits for the server** on typed translation, the
+  typed cloze and say the translation's typed form: the server holds the card, and the banner
+  would otherwise name the saved word before the second try. A failed call shows the judged
+  card's "try again", where a phone-judged card used to alert and go home.
+- **`API_LEVEL` is 2 (ADR 0012).** After an `alternative` the next-step response is the same card
+  again; a level-1 app would show it as a new card, answer it without `retry`, get the pending
+  answer replayed, and be stuck there. Level-1 builds see "update required" once the server is
+  live.
+- **On the spoken route an unheard retry records nothing and stays open,** as an unheard first
+  clip always has, so "at most twice per card" bounds the recorded answers; an unheard clip
+  costs a transcription call, as before the phase.
+- **The `accept` queue has pg-boss's `exclusive` policy.** A singleton key holds only on such a
+  queue; on a standard one pg-boss ignores it.
+- **The eval's context case is scored on structure, and the checker case reads the sentence.**
+  The `context` line checks that the `saw`/לנסר sentence shows `saw` and that its Hebrew holds a
+  form of נסר and none of ראה; the `checker` line checks that the checker reads it as לנסר.
+- **The e2e suite answers the three new calls by default.** `clearGemini` registers again, after
+  every clear, an `accept` answer that stamps the rendering (so no job retries in the background
+  and takes a later spec's one-shot stub), a context answer with no sentence, and a checker that
+  keeps every stubbed card; a spec ranks its own answer above them.
