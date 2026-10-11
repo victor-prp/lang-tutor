@@ -995,6 +995,10 @@ export const answers = pgTable(
     retryState: text('retry_state'),
     retryText: text('retry_text'),
     retryVerdict: text('retry_verdict'),
+    // Phase 38 (spec D4). Whether the learner opened a typed cloze's Hebrew sentence
+    // before its first answer. Null on every other card, from an older app, and
+    // never changed by a retry.
+    hintOpened: boolean('hint_opened'),
     answeredAt: timestamp('answered_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -1021,6 +1025,8 @@ export const answers = pgTable(
     ),
     // Phase 27 (spec D11): a judged answer is at most 300 characters.
     check('answers_typed_text_length', sql`length(${t.typedText}) <= 300`),
+    // Phase 38 (spec D4). A hint is opened before a typed answer, never a choice.
+    check('answers_hint_opened_typed', sql`${t.hintOpened} is null or ${t.typedText} is not null`),
     // Phase 34 (spec D9). A retry exists only after an `alternative` verdict, so a
     // choice answer, whose verdict is null, never has one: `is true` and not a bare
     // `=`, because a CHECK passes on null. Its text and verdict are set exactly when

@@ -1140,3 +1140,41 @@ describe('0028_ambiguous_questions', () => {
     ]);
   });
 });
+
+describe('0029_hint_opened', () => {
+  it('keeps every answer, with no hint recorded, and takes a hint only on a text answer', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0028_ambiguous_questions'));
+
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, gloss, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 'עפיפון', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'עפיפון');
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, prompt, alternatives)
+        values ('q1', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}');
+      insert into sessions (id, user_id, enrollment_id, status, source)
+        values ('00000000-0000-4000-8000-000000000029', 'u_1', 'e_1', 'ready', 'list');
+      insert into session_questions (session_id, position, question_id, option_order)
+        values ('00000000-0000-4000-8000-000000000029', 0, 'q1', '{}');
+      insert into answers (session_id, position, question_id, selected_option_position, typed_text, verdict)
+        values ('00000000-0000-4000-8000-000000000029', 0, 'q1', null, 'kite', 'exact');
+    `);
+
+    await runMigrations(db);
+
+    expect((await db.execute(sql`select hint_opened from answers`)).rows).toEqual([{ hint_opened: null }]);
+    await db.execute(sql`update answers set hint_opened = true`);
+    expect((await db.execute(sql`select hint_opened from answers`)).rows).toEqual([{ hint_opened: true }]);
+    // A hint belongs to a typed answer: a choice answer cannot carry one.
+    await expect(
+      db.execute(sql`update answers set typed_text = null, verdict = null, selected_option_position = 0`),
+    ).rejects.toMatchObject({ cause: { constraint: 'answers_hint_opened_typed' } });
+  });
+});

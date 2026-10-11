@@ -318,7 +318,10 @@ export function createSessionsRouter(sessions: SessionService) {
     const answer =
       'text' in body ? { text: body.text } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index };
     try {
-      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer, { retry: body.retry ?? false });
+      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer, {
+        retry: body.retry ?? false,
+        hintOpened: 'text' in body ? body.hint_opened : undefined,
+      });
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);

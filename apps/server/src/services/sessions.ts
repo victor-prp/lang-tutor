@@ -399,7 +399,7 @@ export function createSessionService({
       sessionId: string,
       questionId: string,
       answer: AnswerInput,
-      { retry = false }: { retry?: boolean } = {},
+      { retry = false, hintOpened }: { retry?: boolean; hintOpened?: boolean } = {},
     ): Promise<SessionResult> => {
       // The transaction returns its outcome and the log fires after it resolves:
       // a commit that fails after completeSession must not leave a log claiming a
@@ -442,13 +442,20 @@ export function createSessionService({
           await repos.session.resolveRetry(sessionId, position, { text: resolved.retry_answer_string!, verdict: resolved.retry_verdict! });
         } else {
           const recorded = outcome.record.answers[loaded.answers.length];
+          // Phase 38 (spec D4): only the card that has a hint records whether it was opened.
+          const hinted = loaded.questions[loaded.answers.length].type === 'cloze_typed' ? (hintOpened ?? null) : null;
           await repos.session.insertAnswer(
             sessionId,
             loaded.answers.length,
             questionId,
             'option_index' in answer
               ? { displayIndex: answer.option_index }
-              : { text: recorded.answer_string, verdict: recorded.verdict!, ...(recorded.retry_state === 'pending' ? { pending: true as const } : {}) },
+              : {
+                  text: recorded.answer_string,
+                  verdict: recorded.verdict!,
+                  ...(recorded.retry_state === 'pending' ? { pending: true as const } : {}),
+                  hintOpened: hinted,
+                },
           );
         }
 
