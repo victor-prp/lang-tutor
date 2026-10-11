@@ -952,17 +952,48 @@ export const LlmTranslationJudgeSchema = z.object({
 // optional and capped at twice the five kept, for the reason
 // LlmTranslationSchema.alternatives gives: a missing or surplus list must never
 // fail a session the model otherwise answered.
+//
+// Phase 34 (spec D4, D4a, D6, D8). An item gains `context`, `context_translation`
+// and `context_word` (the sentence a bare-word card shows, its hidden other half,
+// and the marked word as it appears in `context`) and `sentence_word` (the
+// practised word as it appears in the Hebrew sentence), and `distractors` goes
+// from three to six, of which the domain keeps three. That is the same trade as
+// `entries` above, so it was measured against the live API before anything was
+// built on it: this schema travels as `responseSchema`, where array caps
+// multiply, and MockServer, which never validates a schema, cannot show a 400.
+// `npx tsx tests/eval/measureSchema.ts` (in apps/server) sends the batch at full
+// size, ten items of every task kind through the real prompt and client, and
+// prints `accepted` or the provider's reason; its flags measure the variants
+// below. gemini-2.5-flash, 2026-10-11, the user message asking for every field:
+//
+//   accepted  today's shape (3 distractors, no context fields),
+//             the shape below: 6 distractors, and also 7 or 8 of them,
+//             6 distractors and one more optional string
+//   refused   9 distractors, 10, 12, 20; 6 distractors and two more optional
+//             strings, or three; 8 distractors and one more optional string;
+//             the shape below twice over (20 distractors, every field doubled)
+//
+// So the context fields stay in the batch and need no call of their own
+// (`LlmContextSchema` was the fallback, and was not built), and the six stay six.
+// The headroom is one optional string, or two wrong options, not both: a new
+// field here, or a larger cap, means measuring first. A 400 fails every list
+// session, with nothing in the diff to say so.
 export const LlmDistractorsSchema = z.object({
   items: z
     .array(
       z.object({
         key: z.string(),
-        distractors: z.array(z.string()).max(3),
+        distractors: z.array(z.string()).max(6),
         alternatives: z.array(z.string()).max(10).optional(),
         // Phase 27: the sentence tasks' answers (spec D5, D6).
         sentence: z.string().optional(),
         gap: z.string().optional(),
         translation: z.string().optional(),
+        // Phase 34 (spec D6, D7, D8).
+        context: z.string().optional(),
+        context_translation: z.string().optional(),
+        context_word: z.string().optional(),
+        sentence_word: z.string().optional(),
       }),
     )
     .max(10),

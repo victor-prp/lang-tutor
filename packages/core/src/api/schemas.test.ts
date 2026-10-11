@@ -150,10 +150,28 @@ describe('LlmDistractorsSchema', () => {
     ).toBe(true);
   });
 
-  it('rejects a fourth wrong option', () => {
-    expect(
-      LlmDistractorsSchema.safeParse({ items: [{ key: 'q1', distractors: ['a', 'b', 'c', 'd'] }] }).success,
-    ).toBe(false);
+  // Phase 34 (spec D4, D4a): six wrong options asked, and six is the ceiling the
+  // live API was measured to accept alongside the context fields.
+  it('accepts six wrong options and rejects a seventh', () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'];
+    expect(LlmDistractorsSchema.safeParse({ items: [{ key: 'q1', distractors: six }] }).success).toBe(true);
+    expect(LlmDistractorsSchema.safeParse({ items: [{ key: 'q1', distractors: [...six, 'g'] }] }).success).toBe(false);
+  });
+
+  // Phase 34 (spec D6, D8): the context sentence, its other half and the two
+  // marks are optional, so today's answers still parse and a model that leaves
+  // them out fails nothing.
+  it('accepts the context fields and does not require them', () => {
+    const item = {
+      key: 'q1',
+      distractors: ['a', 'b', 'c'],
+      context: 'Il contadino lavora nel campo.',
+      context_translation: 'האיכר עובד בשדה.',
+      context_word: 'campo',
+      sentence_word: 'בשדה',
+    };
+    expect(LlmDistractorsSchema.parse({ items: [item] }).items[0]).toEqual(item);
+    expect(LlmDistractorsSchema.safeParse({ items: [{ key: 'q1', distractors: ['a', 'b', 'c'] }] }).success).toBe(true);
   });
 });
 

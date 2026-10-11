@@ -96,7 +96,9 @@ describe('parseLlmDistractors', () => {
 
   it('answers null for junk and for the wrong shape', () => {
     expect(parseLlmDistractors('not json')).toBeNull();
-    expect(parseLlmDistractors(JSON.stringify({ items: [{ key: 'q1', distractors: ['a', 'b', 'c', 'd'] }] }))).toBeNull();
+    expect(
+      parseLlmDistractors(JSON.stringify({ items: [{ key: 'q1', distractors: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }] })),
+    ).toBeNull();
     expect(parseLlmDistractors(JSON.stringify({ items: [{ distractors: [] }] }))).toBeNull();
   });
 
@@ -113,6 +115,27 @@ describe('parseLlmDistractors', () => {
     expect(parseLlmDistractors(JSON.stringify({ items: [{ key: 'q3', distractors: null, alternatives: ['big'] }] }))).toEqual({
       items: [{ key: 'q3', distractors: [], alternatives: ['big'] }],
     });
+  });
+});
+
+// Phase 34 (spec D4a, D6, D8). The schema grew; the parser must still read what
+// it read before, and a null in a new field is "none" like any other.
+describe('parseLlmDistractors with the phase 34 fields', () => {
+  it('reads six wrong options and the context fields', () => {
+    const item = {
+      key: 'q1',
+      distractors: ['a', 'b', 'c', 'd', 'e', 'f'],
+      context: 'Parlo con mia madre.',
+      context_translation: 'אני מדבר עם אמא שלי.',
+      context_word: 'Parlo',
+      sentence_word: 'מדבר',
+    };
+    expect(parseLlmDistractors(JSON.stringify({ items: [item] }))).toEqual({ items: [item] });
+  });
+
+  it('drops a null context field instead of failing the batch', () => {
+    const raw = { items: [{ key: 'q1', distractors: ['a', 'b', 'c'], context: null, context_word: null, sentence_word: null }] };
+    expect(parseLlmDistractors(JSON.stringify(raw))).toEqual({ items: [{ key: 'q1', distractors: ['a', 'b', 'c'] }] });
   });
 });
 
