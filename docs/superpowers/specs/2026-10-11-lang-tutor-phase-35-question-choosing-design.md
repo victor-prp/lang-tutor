@@ -338,7 +338,8 @@ Today the level rule's day is derived in SQL from the latest `answered_at` of a 
 
 `users.kind` is `'learner' | 'bot'`, default `'learner'`, with a check. `users.bot_day` is a
 nullable date, set for bots only (a check: non-null exactly when the kind is bot). Bot profiles
-are created only by `bots/src/accounts.ts`, run by Victor against production (§4). It creates
+are created only by the server command `npm run db:bots:create`, run by Victor against production
+(§4), because ADR 0009 R6 keeps `insert(users)` in `repo/users.ts`. It creates
 each auth identity and profile with `kind = 'bot'` and a `.invalid` email that no mail can reach.
 Nothing in the app's sign-up path can create one. Anything that later counts learners filters
 `kind = 'learner'`.
@@ -584,8 +585,7 @@ That needs nothing new from Victor. Issues created with that token trigger no fu
   API and D12), `src/play.ts` (one bot's day).
 - **Output:** `src/report.ts` (D20), `src/analysis.ts` (D21), `src/issue.ts` (D22).
 - **State:** `src/state.ts`, which reads and commits the `bots-state` branch.
-- **Entry points:** `src/accounts.ts`, which creates the bot profiles (Victor runs it), and
-  `run.ts`, the driver, with `--dry-run` against a local lane (§6).
+- **Entry point:** `run.ts`, the driver, with `--dry-run` against a local lane (§6).
 
 ### CI and docs
 
@@ -663,7 +663,7 @@ These go, with exact commands, in the PR body. In order:
    GitHub secrets.
 2. Merge and release as usual.
 3. Run the memory recompute against production.
-4. Run `bots/src/accounts.ts` against production to create the six bot profiles.
+4. Run `npm run db:bots:create` against production to create the six bot profiles.
 5. Set the repository variable `BOTS_ENABLED` to `true`.
 
 The first weekly issue appears about seven hours later.
