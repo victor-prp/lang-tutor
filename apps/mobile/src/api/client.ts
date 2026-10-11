@@ -73,13 +73,25 @@ export type ApiClientDeps = {
   credentials: RequestCredentials;
   /** Told of every 401, before the call throws it. */
   onUnauthorized: () => void;
+  /** Phase 32 (spec D9): sent on every call. The API level on a phone, none on web. */
+  appHeaders: Record<string, string>;
+  /** Told of every 426, the server's "this app is too old", before the call throws it. */
+  onUpdateRequired: () => void;
 };
 
 // Everything is received, not read from the environment or the global object.
 // The literal process.env.EXPO_PUBLIC_API_URL lives in app/_layout.tsx, which
 // is where Metro's build-time inlining still sees it. No call names its actor
 // (spec D12): the session, sent by sessionHeaders, says who is asking.
-export function createApiClient({ baseUrl, fetch, sessionHeaders, credentials, onUnauthorized }: ApiClientDeps) {
+export function createApiClient({
+  baseUrl,
+  fetch,
+  sessionHeaders,
+  credentials,
+  onUnauthorized,
+  appHeaders,
+  onUpdateRequired,
+}: ApiClientDeps) {
   async function send(
     method: string,
     path: string,
@@ -89,6 +101,7 @@ export function createApiClient({ baseUrl, fetch, sessionHeaders, credentials, o
       method,
       credentials,
       headers: {
+        ...appHeaders,
         ...(await sessionHeaders()),
         ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
@@ -96,6 +109,7 @@ export function createApiClient({ baseUrl, fetch, sessionHeaders, credentials, o
       ...(init.signal ? { signal: init.signal } : {}),
     });
     if (res.status === 401) onUnauthorized();
+    if (res.status === 426) onUpdateRequired();
     if (!res.ok) throw await failureOf(res);
     return res;
   }

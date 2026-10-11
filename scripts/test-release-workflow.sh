@@ -9,6 +9,9 @@
 #     would undo every infrastructure change merged since (the domain binding
 #     first of all) and take the site down. The guard already requires the tag
 #     to be on master, so master's terraform/ is never older than the tag's.
+#   - (phase 32) the Android app ships after apply, whose last step waits for
+#     /health to name the tag, and from the tag's own checkout; a dispatch,
+#     which is a rollback, passes --rollback so it can never build.
 
 set -u
 
@@ -43,6 +46,9 @@ echo
 expect "the apply job checks out master" 0 apply '^[[:space:]]+ref: master$'
 expect "the apply job runs scripts/infra.sh" 0 apply 'scripts/infra.sh prod apply'
 expect "build-push builds the tag, not master" 1 build-push 'ref:'
+expect "android runs after apply" 0 android '^[[:space:]]+needs: apply$'
+expect "android ships the tag, not master" 1 android 'ref:'
+expect "android passes --rollback on a dispatch" 0 android "workflow_dispatch' && '--rollback'"
 
 echo
 if [ "$status" -ne 0 ]; then

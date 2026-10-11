@@ -6,7 +6,7 @@ import { loadConfig, loadGeminiConfig, maintenanceUrlFor, redactDatabaseUrl } fr
 import { createConsoleLogger } from '../logger';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
-import { dropLaneDatabases, findOrphans, listLaneDatabases } from './lanes';
+import { dropLaneDatabases, findOrphans, listLaneDatabases, liveWorktreesOf } from './lanes';
 import { requestLemmaRenders, requestLemmaRendersOnStart } from './lemmaRenders';
 import { runMigrations } from './migrate';
 import { createAuthRepo } from '../repo/auth';
@@ -153,16 +153,26 @@ async function printOrphans(databaseUrl: string, forScript: boolean): Promise<vo
   }
 }
 
-async function dropLane(databaseUrl: string, lane: string): Promise<void> {
+/**
+ * `--no-worktree-hint` is for lane-clean.sh and lane-abandon.sh, which run this
+ * first and remove the worktree themselves right after: the hint would be
+ * printed just above the line saying it was removed.
+ */
+async function dropLane(databaseUrl: string, lane: string, hint: boolean): Promise<void> {
   const admin = createDb(maintenanceUrlFor(databaseUrl), { max: 1, onError: () => {} });
   try {
+    // Read before the drop: the stamps are what say where the worktree was.
+    const worktrees = liveWorktreesOf(await listLaneDatabases(admin.db), lane, existsSync);
     const dropped = await dropLaneDatabases(admin.db, lane);
     if (dropped.length === 0) {
       console.log(`lane ${lane} owns no databases`);
       return;
     }
     for (const name of dropped) console.log(`dropped ${name}`);
-    console.log(`\nThe worktree itself is still there. Remove it with 'git worktree remove'.`);
+    if (hint && worktrees.length > 0) {
+      const where = worktrees[0];
+      console.log(`\nThe worktree is still there. Remove it with: git worktree remove ${where}`);
+    }
   } finally {
     await admin.close();
   }
@@ -188,7 +198,7 @@ async function main(): Promise<void> {
   }
   const downTarget = laneDownTarget(lane);
   if (downTarget !== undefined) {
-    await dropLane(databaseUrl, downTarget);
+    await dropLane(databaseUrl, downTarget, !process.argv.includes('--no-worktree-hint'));
     return;
   }
 

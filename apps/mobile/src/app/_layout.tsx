@@ -11,15 +11,20 @@ import * as ImagePicker from 'expo-image-picker';
 import { Stack } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
+import * as Updates from 'expo-updates';
 import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { API_LEVEL, API_LEVEL_HEADER } from '@lang-tutor/core/apiLevel';
+
 import { createApiClient } from '@/api/client';
+import { createAppUpdates, createUpdateRequiredEvents } from '@/appUpdates';
 import { createAppAuthClient } from '@/auth/client';
 import { createAuthEvents } from '@/authEvents';
 import { requireEnvValue } from '@/config/requireEnvValue';
 import { createRememberedEnrollmentStore } from '@/currentUser';
 import { ApiProvider } from '@/hooks/useApi';
+import { AppUpdatesProvider } from '@/hooks/useAppUpdates';
 import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
 import { PhotoImportsProvider } from '@/hooks/usePhotoImports';
@@ -45,13 +50,38 @@ const baseUrl = requireEnvValue(process.env.EXPO_PUBLIC_API_URL, 'EXPO_PUBLIC_AP
 // Phase 29 (spec D18). The only file that names expo-secure-store (ADR 0002 R1).
 const auth = createAppAuthClient({ baseUrl, platform: Platform.OS, storage: SecureStore });
 const authEvents = createAuthEvents();
+const updateRequiredEvents = createUpdateRequiredEvents();
 const api = createApiClient({
   baseUrl,
   fetch: globalThis.fetch,
   sessionHeaders: auth.sessionHeaders,
   credentials: auth.credentials,
   onUnauthorized: authEvents.unauthorized,
+  // Phase 32 (spec D9). The web app is served by the same image as the API and
+  // is never behind it, so it sends no level and the gate never sees it.
+  appHeaders: Platform.OS === 'web' ? {} : { [API_LEVEL_HEADER]: String(API_LEVEL) },
+  onUpdateRequired: updateRequiredEvents.updateRequired,
 });
+
+// Phase 32 (spec D8). The only file that names expo-updates (ADR 0002 R1).
+// Disabled in Expo Go, in development and on web, where the policy does nothing.
+const appUpdates = createAppUpdates({
+  engine: {
+    isEnabled: Updates.isEnabled,
+    check: async () => (await Updates.checkForUpdateAsync()).isAvailable,
+    fetch: async () => {
+      await Updates.fetchUpdateAsync();
+    },
+    reload: () => Updates.reloadAsync(),
+  },
+  now: Date.now,
+  minBackgroundMs: 30 * 60 * 1000,
+});
+
+// Phase 32 (spec D10). The release tag, inlined by Metro like the API URL: the
+// android release job sets it for every update, the Dockerfile for the web
+// export. Unset in Expo Go and every lane.
+const appVersion = process.env.EXPO_PUBLIC_APP_VERSION ?? 'dev';
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
 
 const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
@@ -180,7 +210,9 @@ export default function RootLayout() {
                     <VocabularyProvider api={api}>
                       <PhotoImportsProvider api={api} picker={photoPicker}>
                         <View style={styles.root} {...rtlProps}>
-                          <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                          <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} version={appVersion}>
+                            <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                          </AppUpdatesProvider>
                         </View>
                       </PhotoImportsProvider>
                     </VocabularyProvider>

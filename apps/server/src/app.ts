@@ -1,11 +1,13 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { HealthResponseSchema } from '@lang-tutor/core/api/schemas';
+import { API_LEVEL } from '@lang-tutor/core/apiLevel';
 import { Scalar } from '@scalar/hono-api-reference';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 
 import type { AppDeps } from './composition';
 import { PROFILE_EXEMPT, createSessionMiddleware, type ActorEnv } from './routes/actor';
+import { createApiLevelGate } from './routes/apiLevel';
 import { registerAuthDocs } from './routes/authDocs';
 import { createEnrollmentsRouter } from './routes/enrollments';
 import { createGrantsRouter } from './routes/grants';
@@ -48,6 +50,9 @@ export function createApp(deps: AppDeps) {
   // browser sends the session cookie only to an origin CORS names. The phone
   // sends no Origin and is unaffected.
   app.use('*', cors({ origin: deps.webOrigins, credentials: true }));
+  // Phase 32 (spec D9). Before the auth mount and the session middleware, so an
+  // old app is told to update rather than to sign in.
+  app.use('/api/*', createApiLevelGate({ apiLevel: API_LEVEL }));
 
   app.openapi(healthRoute, async (c) => {
     const ok = await deps.health.ping();

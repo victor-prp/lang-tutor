@@ -140,7 +140,7 @@ fi
 
 # --- do it -------------------------------------------------------------------
 if [ -d "$found_path/node_modules" ]; then
-  ( cd "$found_path" && npm run lane:down --silent ) 2>&1 | sed 's/^/  /'
+  ( cd "$found_path" && npm run lane:down --silent -- --no-worktree-hint ) 2>&1 | sed 's/^/  /'
 else
   echo "  no node_modules, so lane:down cannot run here."
   echo "  Any databases this lane owns will show as ORPHAN in 'npm run lane:list'."

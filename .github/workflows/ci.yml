@@ -63,6 +63,8 @@ jobs:
       - run: ./scripts/test-release-workflow.sh
       # npm run release / rollback: tag naming and refusals, against a bare origin.
       - run: ./scripts/test-release.sh
+      # Phase 32. The Android release's build-or-update decision, against stub eas and npx.
+      - run: ./scripts/test-android-release.sh
 
   check-types:
     runs-on: ubuntu-latest
