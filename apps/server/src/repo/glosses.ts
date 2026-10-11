@@ -144,8 +144,9 @@ export function createGlossRepo(tx: Tx) {
       throw new Error(`glosses ${input.otherId} and ${input.survivorId} are not of one lexeme and language`);
     }
 
-    // 1. Enrollments holding both: fold the progress onto the survivor's rows,
-    //    keep the earlier save, drop the other entry (its progress cascades).
+    // 1. Enrollments holding both: fold the progress and the memory onto the
+    //    survivor's rows, keep the earlier save, drop the other entry (what is
+    //    left of its progress and memory cascades).
     const both = await tx.execute<{
       enrollment_id: string;
       s_variant: string;
@@ -188,6 +189,17 @@ export function createGlossRepo(tx: Tx) {
           SET level = ${folded.level}, last_step_on = ${folded.lastStepOn}::date, last_wrong_on = ${folded.lastWrongOn}::date
           WHERE enrollment_id = ${row.enrollment_id} AND gloss_id = ${input.survivorId} AND dimension = ${level.dimension}`);
       }
+      // Memory (phase 35): per dimension, the row with the larger stability, the
+      // better-learnt trace; a dimension only the other has moves over.
+      await tx.execute(sql`
+        INSERT INTO gloss_memory (enrollment_id, gloss_id, dimension, stability, difficulty, last_day, reps, lapses, params)
+        SELECT enrollment_id, ${input.survivorId}, dimension, stability, difficulty, last_day, reps, lapses, params
+        FROM gloss_memory
+        WHERE enrollment_id = ${row.enrollment_id} AND gloss_id = ${input.otherId}
+        ON CONFLICT (enrollment_id, gloss_id, dimension) DO UPDATE
+        SET stability = EXCLUDED.stability, difficulty = EXCLUDED.difficulty, last_day = EXCLUDED.last_day,
+            reps = EXCLUDED.reps, lapses = EXCLUDED.lapses, params = EXCLUDED.params
+        WHERE EXCLUDED.stability > gloss_memory.stability`);
       const kept = keptEntry(
         { variantId: row.s_variant, addedByUserId: row.s_adder, savedAt: row.s_saved },
         { variantId: row.o_variant, addedByUserId: row.o_adder, savedAt: row.o_saved },
