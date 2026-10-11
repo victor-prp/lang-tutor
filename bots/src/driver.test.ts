@@ -88,6 +88,9 @@ test('one day of play makes the expected calls', async () => {
     noVoice: 0,
     unmatched: 0,
     failed: 0,
+    // At the session's start, two saved words in three live dimensions, none recalled yet.
+    listPairs: 6,
+    listWeak: 6,
   });
 });
 

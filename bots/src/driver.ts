@@ -32,7 +32,12 @@ export type RunOptions = {
   synthesize: Synthesize;
   log: (line: string) => void;
   poll?: Poll;
+  /** After each simulated day, with every bot's state: the weekly issue and reports (D20–D22). */
+  afterDay?: (done: DayDone) => Promise<void>;
 };
+
+/** A simulated day the run finished: its number, every bot's state, and the bot days it played. */
+export type DayDone = { day: number; states: ReadonlyMap<string, BotState>; played: { name: string; line: DayLine }[] };
 
 /** The day's line for one bot (D19, D22): what Task 10's issue comment prints, and the run log. */
 export function formatLine(name: string, line: DayLine): string {
@@ -53,6 +58,7 @@ export async function runDays(opts: RunOptions): Promise<{ name: string; line: D
     for (const profile of opts.profiles) states.set(profile.name, await opts.store.load(profile.name));
     const day = Math.min(...[...states.values()].map((s) => s.day)) + 1;
     opts.log(`--- day ${day} (${dateOf(day)})`);
+    const today: { name: string; line: DayLine }[] = [];
     for (const profile of opts.profiles) {
       const state = states.get(profile.name)!;
       if (state.day >= day) {
@@ -63,7 +69,9 @@ export async function runDays(opts: RunOptions): Promise<{ name: string; line: D
       await opts.store.save(state, `${profile.name}: day ${day} ${line.completed ? 'done' : 'failed'}`);
       opts.log(formatLine(profile.name, line));
       played.push({ name: profile.name, line });
+      today.push({ name: profile.name, line });
     }
+    if (opts.afterDay) await opts.afterDay({ day, states, played: today });
   }
   return played;
 }

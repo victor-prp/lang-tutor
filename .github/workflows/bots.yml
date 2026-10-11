@@ -1,0 +1,72 @@
+name: Bots
+
+# Phase 35 (spec D18). The simulated learners: each run plays one simulated day for
+# every bot against production, commits each bot's hidden state to the orphan branch
+# `bots-state`, and writes the week's issue (D22). The week's last run also asks
+# Claude for one report per bot (D20), at most six calls a run, on Victor's
+# subscription. Deliberately not part of ci.yml: it plays against production and
+# spends on a subscription, neither of which belongs on a push.
+#
+# Stop it without a code change: unset the repository variable BOTS_ENABLED, or set
+# it to anything but 'true'. docs/runbooks/bots.md has the rest.
+on:
+  schedule:
+    # Hourly, off the hour: GitHub's schedule is busiest at :00. A skipped or late
+    # run is a slower week, never a lost day (D18).
+    - cron: '17 * * * *'
+  # Plays the next day now: how a failed day is rerun.
+  workflow_dispatch:
+
+# One run at a time, and a late run queues behind the one before rather than
+# cancelling it: two runs at once would play the same day twice, and a cancelled
+# run can leave a bot half-way through its day.
+concurrency:
+  group: bots
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  play:
+    # Skipped on forks, and unless Victor has turned the bots on.
+    if: github.repository_owner == 'victor-prp' && vars.BOTS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # pushes the bots-state branch after every bot (D17)
+      issues: write     # the weekly issue (D22)
+    steps:
+      # The default credentials stay on the checkout, which is what lets state.ts
+      # push bots-state with the job's token. Depth does not matter: bots-state is
+      # an orphan branch, which state.ts fetches whole.
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # The speaking cards' voice (D16): espeak-ng speaks, ffmpeg encodes WebM. A
+      # bot without them passes its speaking cards and the daily line counts them
+      # under "no voice".
+      - name: Install espeak-ng and ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends espeak-ng ffmpeg
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      # A blocked postinstall leaves a CLI that cannot start; fail here, before
+      # any bot plays, rather than at the week's end.
+      - name: Verify the CLI can start
+        run: claude --version
+
+      - name: Play a simulated day
+        run: npx tsx bots/run.ts
+        env:
+          BOTS_API_URL: ${{ vars.BOTS_API_URL }}
+          BOT_SECRET: ${{ secrets.BOT_SECRET }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}

@@ -7,8 +7,10 @@ import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
 import type { AnswerVerdict } from '@lang-tutor/core/api';
 
 import type { ActrState } from './actr.ts';
+import type { WeekNumbers } from './analysis.ts';
 import type { Outcome, SavedWord } from './answer.ts';
 import type { FsrsState } from './fsrsBot.ts';
+import type { ReportRecord } from './report.ts';
 import type { Profile } from './roster.ts';
 
 /**
@@ -35,7 +37,8 @@ export type CardEntry = {
   /** What an unmatched card showed, so the log says why it did not match. */
   shown?: string;
   dimensions: Dimension[];
-  /** The bot's true recall per tested dimension, before the card: the hidden truth (D21). */
+  /** The bot's true recall before the card, in every live dimension and every one the card
+   *  tests: the hidden truth (D21). */
   recall: Partial<Record<Dimension, number>>;
   /** The chance of a right answer the bot drew against, guessing included. */
   p: number;
@@ -66,6 +69,11 @@ export type DayLine = {
   noVoice: number;
   unmatched: number;
   failed: number;
+  /** At the start of each session, summed: (saved word, live dimension) pairs, and those whose
+   *  true recall was below WEAK_P. The weak share of the list for D21 (a). Absent on days kept
+   *  before Task 10. */
+  listPairs?: number;
+  listWeak?: number;
 };
 
 export type BotState = {
@@ -81,6 +89,11 @@ export type BotState = {
   memory: ActrState | FsrsState;
   days: DayLine[];
   log: CardEntry[];
+  /** D21's numbers for every week the bot closed, computed once at the week's end: (e) reads
+   *  the hidden memory at that moment, which no later run can see again. */
+  weeks?: WeekNumbers[];
+  /** D20's reports, with the Claude spend each cost, tagged with the week and the run. */
+  reports?: ReportRecord[];
 };
 
 export function newState(profile: Pick<Profile, 'name' | 'memory'>): BotState {

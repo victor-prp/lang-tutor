@@ -4,9 +4,12 @@ import { parseArgs } from 'node:util';
 
 import { createApi } from './src/api.ts';
 import { runDays } from './src/driver.ts';
+import { fileSink, ghSink } from './src/issue.ts';
+import { claudeRunner, commandRunner, createReporter, dryReporter } from './src/report.ts';
 import { ROSTER } from './src/roster.ts';
 import { createSynthesizer } from './src/speech.ts';
 import { openScratchStore, openStateCheckout } from './src/state.ts';
+import { weeklyIssue } from './src/week.ts';
 import { loadWords, type WordSource } from './src/words.ts';
 
 /**
@@ -20,6 +23,12 @@ import { loadWords, type WordSource } from './src/words.ts';
  * in a repository of its own under bots/.dry/<lane>, never pushed. Either needs BOT_SECRET, the
  * server's own. A failed request is counted, not fatal; a dry run still exits 1 on one, being a
  * test of the driver. Anything else wrong fails the run.
+ *
+ * After each day the week's issue gets the day's lines, and the week's last day closes it with
+ * the five numbers and a Claude-written report per bot (D20–D22). A real run files through `gh`
+ * (GH_TOKEN) and reports through `claude` (CLAUDE_CODE_OAUTH_TOKEN), tagging the spend with
+ * GITHUB_RUN_ID. A dry run makes no Claude call and files nothing: the issue's text goes to
+ * <state>/issues/week-N.md.
  */
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 
@@ -71,9 +80,13 @@ if (!URL.canParse(baseUrl) || !['http:', 'https:'].includes(new URL(baseUrl).pro
 }
 
 async function main(): Promise<void> {
+  const dryDir = values.state ?? join(HERE, '.dry', process.env.LANE?.trim() || 'local');
   const store = dry
-    ? await openScratchStore(values.state ?? join(HERE, '.dry', process.env.LANE?.trim() || 'local'), profiles)
+    ? await openScratchStore(dryDir, profiles)
     : await openStateCheckout({ repoRoot: join(HERE, '..'), dir: join(HERE, '.state'), profiles });
+  const runId = given(process.env.GITHUB_RUN_ID) ?? 'local';
+  const sink = dry ? fileSink(join(dryDir, 'issues')) : ghSink(commandRunner('gh'));
+  const reporter = dry ? dryReporter(runId) : createReporter({ run: claudeRunner(), runId });
 
   const api = createApi({ baseUrl, secret });
   console.log(`bots: ${dry ? 'dry run' : 'run'} of ${days} day(s) for ${profiles.map((p) => p.name).join(', ')} against ${baseUrl}`);
@@ -87,6 +100,7 @@ async function main(): Promise<void> {
     wordsFor: (profile) => loadWords(profile.language, words),
     synthesize: createSynthesizer(),
     log: (line) => console.log(line),
+    afterDay: weeklyIssue({ profiles, store, sink, reporter, log: (line) => console.log(line) }),
   });
 
   const failed = played.filter(({ line }) => line.failed > 0);

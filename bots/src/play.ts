@@ -2,6 +2,7 @@ import type { AnswerVerdict, NextStepResponse, Question } from '@lang-tutor/core
 import { dimensionsTested, evaluate, isJudged, verdictCorrect, type Dimension } from '@lang-tutor/core/domain';
 
 import { ActrMemory, type ActrState } from './actr.ts';
+import { WEAK_P, liveDimensions } from './analysis.ts';
 import { decide, type Decision } from './answer.ts';
 import { ApiError, type BotApi } from './api.ts';
 import { FsrsMemory, type FsrsState } from './fsrsBot.ts';
@@ -42,6 +43,8 @@ export function newLine(day: number): DayLine {
     noVoice: 0,
     unmatched: 0,
     failed: 0,
+    listPairs: 0,
+    listWeak: 0,
   };
 }
 
@@ -192,6 +195,7 @@ async function firstQuestion(deps: PlayDeps, sessionId: string): Promise<Questio
 async function playSession(deps: PlayDeps, memory: BotMemory, rng: Rng, enrollmentId: string, startHour: number): Promise<void> {
   const sessionId = await openSession(deps, enrollmentId);
   let question = await firstQuestion(deps, sessionId);
+  countList(deps, memory, startHour);
   let hour = startHour;
   let cards = 0;
   while (question) {
@@ -202,6 +206,18 @@ async function playSession(deps: PlayDeps, memory: BotMemory, rng: Rng, enrollme
     hour += CARD_HOURS;
   }
   deps.line.sessions += 1;
+}
+
+/** D21 (a): how much of the saved list is weak as a session starts, by the bot's true recall. */
+function countList(deps: PlayDeps, memory: BotMemory, hour: number): void {
+  const { line, state, profile } = deps;
+  memory.setTime({ day: line.date, hour });
+  for (const word of state.saved) {
+    for (const dimension of liveDimensions(profile.devices)) {
+      line.listPairs = (line.listPairs ?? 0) + 1;
+      if (memory.recall(word.form, dimension) < WEAK_P) line.listWeak = (line.listWeak ?? 0) + 1;
+    }
+  }
 }
 
 type Sent = { next: NextStepResponse; answer: string; verdict?: AnswerVerdict; correct: boolean; heard?: CardEntry['heard'] };
@@ -218,10 +234,13 @@ async function answerCard(
   const decision = decide(card, memory, state.saved, rng, profile);
   const { detail } = decision;
 
-  // The truth before the card, in every dimension it tests: what analysis compares the picker with.
+  // The truth before the card, in every live dimension and every one it tests: what analysis
+  // compares the picker with (D21 a, b).
   const dimensions = dimensionsTested(card.type);
   const recall: Partial<Record<Dimension, number>> = {};
-  if (detail.word) for (const dim of dimensions) recall[dim] = memory.recall(detail.word, dim);
+  if (detail.word) {
+    for (const dim of new Set([...liveDimensions(profile.devices), ...dimensions])) recall[dim] = memory.recall(detail.word, dim);
+  }
 
   const sent = await send(deps, sessionId, card, decision);
 
