@@ -201,12 +201,31 @@ describe('chooseWords (spec D5, D6)', () => {
       expect(count(picks, (pick) => pick.cls === 'EXPAND')).toBe(7);
     });
 
-    it('stops at the daily cap of DAY_NEW_CAP, counting the new words already introduced today', () => {
-      const words = [...range(10, (i) => fresh(`n${i}`)), known('a'), known('b', { [WP]: 0.94 }), known('c', { [SP]: 0.94 })];
-      const picks = chooseWords(input(words, { newToday: DAY_NEW_CAP - 1 }));
-      expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(1);
-      expect(picks).toHaveLength(4);
-      expect(count(chooseWords(input(words, { newToday: DAY_NEW_CAP })), (pick) => pick.cls === 'NEW')).toBe(0);
+    it('stops at the daily cap of DAY_NEW_CAP while other words can fill the session', () => {
+      const others = range(10, (i) => known(`k${i}`, { [ALL[i % 5]]: 0.93 }));
+      const words = [...range(10, (i) => fresh(`n${i}`)), ...others];
+      const atCapLessOne = chooseWords(input(words, { newToday: DAY_NEW_CAP - 1 }));
+      expect(atCapLessOne).toHaveLength(SESSION_LENGTH);
+      expect(count(atCapLessOne, (pick) => pick.cls === 'NEW')).toBe(1);
+      const atCap = chooseWords(input(words, { newToday: DAY_NEW_CAP }));
+      expect(atCap).toHaveLength(SESSION_LENGTH);
+      expect(count(atCap, (pick) => pick.cls === 'NEW')).toBe(0);
+    });
+
+    // Ruling 15. A session is never left short while saved glosses remain.
+    it('goes past the daily cap as a last resort, after every other class', () => {
+      const words = [known('a', { [WP]: 0.93 }), known('b', { [SP]: 0.93 }), ...range(3, (i) => fresh(`n${i}`))];
+      const picks = chooseWords(input(words, { newToday: DAY_NEW_CAP }));
+      expect(picks.map((pick) => pick.glossId)).toEqual(['a', 'b', 'n2', 'n1', 'n0']);
+    });
+
+    it('fills an all-NEW list at or past the daily cap', () => {
+      const words = range(12, (i) => fresh(`n${i}`));
+      for (const newToday of [DAY_NEW_CAP - 2, DAY_NEW_CAP, DAY_NEW_CAP + 5]) {
+        const picks = chooseWords(input(words, { newToday }));
+        expect(ids(picks)).toEqual(Array.from({ length: 10 }, (_, i) => `n${11 - i}`));
+      }
+      expect(chooseWords(input(words.slice(0, 3), { newToday: DAY_NEW_CAP }))).toHaveLength(3);
     });
 
     it('fills an all-NEW list: the newest saved first, every one written receptive at rung 1', () => {

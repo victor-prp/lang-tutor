@@ -126,6 +126,8 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
       const unintroduced = live.find((d) => !rows.has(d));
       if (weak !== undefined && need !== null && need <= R_TARGET) [cls, dimension] = ['DUE', weak];
       else if (unintroduced !== undefined) [cls, dimension] = ['EXPAND', unintroduced];
+      // No live dimension is unintroduced, so every one has a row, and WR is
+      // always live: `weak` is set.
       else [cls, dimension] = ['NOT_DUE', weak!];
     }
     const r = rows?.get(dimension) ?? null;
@@ -164,7 +166,7 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   let hard = 0;
   let newCount = 0;
   // Skipped for a cap: asked after everything else, so the session still holds N
-  // when nothing else is left (three saved words give three picks).
+  // when nothing else is left (three saved words give three picks; ruling 14).
   const deferred: Candidate[] = [];
 
   const add = (candidate: Candidate) => {
@@ -201,11 +203,18 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
     if (picks.length >= n) break;
     offer(candidate);
   }
-  for (const candidate of deferred) {
-    if (picks.length >= n) break;
-    if (keys.has(candidate.key)) continue;
-    if (candidate.pick.cls === 'NEW' && newCount >= newAllowed) continue;
-    add(candidate);
-  }
+  // The last resorts, past the dimension and hard caps: what they held back,
+  // within the daily new cap; then, ruling 15, new words past it, so a session is
+  // never short while saved glosses remain.
+  const rest = [...deferred, ...fresh.slice(nextFresh)];
+  const fill = (newLimit: number) => {
+    for (const candidate of rest) {
+      if (picks.length >= n) break;
+      if (keys.has(candidate.key) || (candidate.pick.cls === 'NEW' && newCount >= newLimit)) continue;
+      add(candidate);
+    }
+  };
+  fill(newAllowed);
+  fill(Infinity);
   return picks;
 }
