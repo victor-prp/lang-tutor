@@ -33,6 +33,9 @@ function dayNumber(day: string): number {
   return Date.UTC(year, month - 1, date) / DAY_MS;
 }
 
+/** py-fsrs floors stability after every update. */
+const STABILITY_MIN = 0.001;
+
 const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
 const clampD = (d: number) => clamp(d, 1, 10);
 
@@ -82,10 +85,10 @@ export function review(state: MemoryState | null, grade: Grade, day: string): Me
     }
   }
   const difficulty = clampD(
-    w[7] * initialDifficulty(w, 3) + (1 - w[7]) * (d - (w[6] * (grade - 3) * (10 - d)) / 9),
+    w[7] * initialDifficulty(w, 4) + (1 - w[7]) * (d - (w[6] * (grade - 3) * (10 - d)) / 9),
   );
   return {
-    stability: next,
+    stability: Math.max(STABILITY_MIN, next),
     difficulty,
     lastDay: day,
     reps: state.reps + 1,

@@ -98,4 +98,32 @@ describe('review', () => {
     const grades: Grade[] = [1, 2, 3];
     expect(grades.length).toBe(3);
   });
+
+  it('matches py-fsrs over a mixed sequence of whole days', () => {
+    const steps: [string, Grade, number, number][] = [
+      [addDays(START, 0), 3, 2.3065, 2.118104],
+      [addDays(START, 2), 3, 10.964332, 2.111214],
+      [addDays(START, 13), 1, 1.538337, 7.392238],
+      [addDays(START, 13), 3, 1.571197, 7.380074],
+      [addDays(START, 15), 2, 3.592268, 8.246],
+      [addDays(START, 40), 3, 16.149692, 8.232982],
+    ];
+    let state: MemoryState | null = null;
+    for (const [day, grade, s, d] of steps) {
+      state = review(state, grade, day);
+      expect(state.stability).toBeCloseTo(s, 4);
+      expect(state.difficulty).toBeCloseTo(d, 4);
+    }
+    expect(state!.reps).toBe(6);
+    expect(state!.lapses).toBe(1);
+  });
+
+  it('matches py-fsrs for a first Again and a first Hard', () => {
+    const again = review(null, 1, START);
+    expect(again.stability).toBeCloseTo(0.212, 4);
+    expect(again.difficulty).toBeCloseTo(6.4133, 4);
+    const hard = review(null, 2, START);
+    expect(hard.stability).toBeCloseTo(1.2931, 4);
+    expect(hard.difficulty).toBeCloseTo(5.112171, 4);
+  });
 });
