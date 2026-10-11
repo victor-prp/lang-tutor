@@ -146,13 +146,17 @@ jobs:
   # with the tag, so new app code never calls a server that is not live yet.
   # The tag's checkout (the default ref), like build-push: what ships is the
   # tag's app. scripts/native-release.sh decides between an over-the-air
-  # update and a new Play build by fingerprint. It skips, green, unless the
-  # repository variable ANDROID_RELEASE is exactly "on", until the one-time
-  # setup is done (no EXPO_TOKEN, or no EAS project id), and when the tag
-  # predates this job. A failure here leaves the server release standing;
+  # update and a new Play build by fingerprint.
+  #
+  # The job is skipped (shown greyed out in the run) unless the repository
+  # variable ANDROID_RELEASE is exactly "on". The script checks the variable
+  # again, and also skips, green, until the one-time setup is done (no
+  # EXPO_TOKEN, or no EAS project id) and when the tag predates this job:
+  # a job-level `if` cannot read secrets. A failure here leaves the server release standing;
   # rerunning this job alone finishes what is missing.
   android:
     needs: apply
+    if: vars.ANDROID_RELEASE == 'on'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -178,13 +182,15 @@ jobs:
 
   # Phase 36 (spec D3–D5). The iPhone and iPad app: the android job with the
   # iOS switch. EAS builds on Expo's Macs, so this runner stays Linux. It runs
-  # beside android, not after it: each fails and reruns on its own. It skips,
-  # green, unless the repository variable IOS_RELEASE is exactly "on", and
-  # until the one-time setup is done (no EXPO_TOKEN, no EAS project id, or no
-  # App Store Connect app id in eas.json). Builds go to TestFlight, and a
+  # beside android, not after it: each fails and reruns on its own. It is
+  # skipped (greyed out) unless the repository variable IOS_RELEASE is exactly
+  # "on"; the script checks it again, and skips, green, until the one-time
+  # setup is done (no EXPO_TOKEN, no EAS project id, or no App Store Connect
+  # app id in eas.json). Builds go to TestFlight, and a
   # matching build older than 80 days is rebuilt: TestFlight expires it at 90.
   ios:
     needs: apply
+    if: vars.IOS_RELEASE == 'on'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

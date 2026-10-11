@@ -9,15 +9,16 @@ build to TestFlight. Design:
 [ADR 0012](../adr/adr-0012-native-client-releases.md).
 
 **The on/off switch is the repository variable `IOS_RELEASE`.** The `ios` job ships only when
-it is exactly `on`. Unset or any other value makes the job print a `::notice::` and skip, green,
-and the server, the web and Android still release. Turn it on or off with:
+it is exactly `on`. Unset or any other value means the job does not run: the release run shows
+`ios` as *skipped*, greyed out, and the server, the web and Android still release. Turn it on or off with:
 
 ```bash
 /opt/homebrew/bin/gh variable set IOS_RELEASE --body on    # ship the iOS app with every release
 /opt/homebrew/bin/gh variable set IOS_RELEASE --body off   # pause: releases skip iOS
 ```
 
-The job also skips, green, while steps 3–4 are not done.
+With `IOS_RELEASE` on, the job still skips, green, with a `::notice::`, while steps 3–4 are not
+done.
 
 ## Where go-live stands
 
@@ -132,7 +133,8 @@ The `ios` job runs `scripts/native-release.sh ios` from the tag's checkout:
 | `Build … is more than 80 days old and TestFlight expires it at 90: building anew …` | The same, with no native change: a fresh build before the old one expires |
 | a `::warning::` about the native layer, on a rollback | Nothing. Release a fix forward |
 | a `::warning::` that the build is more than 80 days old, on a rollback | The update was published, but a rollback never builds. Release forward soon |
-| a `::notice::` that it skipped | `IOS_RELEASE` is not `on`, `eas.json` has no `ascAppId`, or the tag predates phase 32 |
+| nothing: the job shows as *skipped* | `IOS_RELEASE` is not `on` |
+| a `::notice::` that it skipped | `eas.json` has no `ascAppId`, or the tag predates phase 32 |
 
 A failure in `ios` leaves the server and Android releases standing, and friends keep their
 current app. Rerun that job alone (*Actions → Release → the run → Re-run failed jobs*).

@@ -751,7 +751,7 @@ air within minutes of a release, native changes through Play
 [ADR 0012](docs/adr/adr-0012-native-client-releases.md)). The one-time setup, what each release
 prints, and Play's data-safety answers are in the [Android runbook](docs/runbooks/android.md).
 The repository variable `ANDROID_RELEASE` switches it: the `android` job ships only when it
-is `on`, and otherwise skips, green.
+is `on`; otherwise the release run shows it as skipped.
 
 A change that breaks older clients raises `API_LEVEL` in `packages/core/src/apiLevel.ts` by one,
 in the same PR: an installed app can be a day or two behind the server, and the server answers it
@@ -765,7 +765,7 @@ TestFlight build. On an iPad, and in a wide browser window, every screen sits in
 column at most 640 points wide
 ([phase 36 design](docs/superpowers/specs/2026-10-11-lang-tutor-phase-36-ios-app-design.md)).
 The repository variable `IOS_RELEASE` switches the `ios` job, as `ANDROID_RELEASE` does
-`android`. A TestFlight build expires after 90 days, so the job rebuilds at 80, and a release
+`android`: off, the release run shows it as skipped. A TestFlight build expires after 90 days, so the job rebuilds at 80, and a release
 is due at least that often. Running it in the iOS simulator, the one-time Apple setup and what
 each release prints are in the [iOS runbook](docs/runbooks/ios.md).
 

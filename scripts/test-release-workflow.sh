@@ -13,9 +13,10 @@
 #     /health to name the tag, and from the tag's own checkout; a dispatch,
 #     which is a rollback, passes --rollback so it can never build;
 #   - the job reads the ANDROID_RELEASE repository variable; without it the
-#     script would skip every release, green, and nobody would notice.
-#   - (phase 36) the ios job holds the same three facts with IOS_RELEASE, and
-#     each job passes its own platform to scripts/native-release.sh.
+#     script would skip every release, green, and nobody would notice. The job
+#     itself is skipped unless the variable is on, so the run shows it greyed out.
+#   - (phase 36) the ios job holds the same facts with IOS_RELEASE, and each
+#     job passes its own platform to scripts/native-release.sh.
 
 set -u
 
@@ -60,6 +61,8 @@ expect "ios ships the tag, not master" 1 ios 'ref:'
 expect "ios passes --rollback on a dispatch" 0 ios "workflow_dispatch' && '--rollback'"
 expect "ios hands the job the IOS_RELEASE variable" 0 ios 'IOS_RELEASE: \$\{\{ vars\.IOS_RELEASE \}\}'
 expect "ios runs native-release.sh for ios" 0 ios 'scripts/native-release\.sh ios '
+expect "android is skipped, not run, unless ANDROID_RELEASE is on" 0 android "^    if: vars\.ANDROID_RELEASE == 'on'$"
+expect "ios is skipped, not run, unless IOS_RELEASE is on" 0 ios "^    if: vars\.IOS_RELEASE == 'on'$"
 
 echo
 if [ "$status" -ne 0 ]; then
