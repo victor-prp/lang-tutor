@@ -15,8 +15,9 @@ import type { Language } from './words.ts';
  */
 export type Synthesize = (text: string, language: Language) => Promise<Buffer | null>;
 
-/** The speech route takes at most 200 KB of audio (phase 25 D13). */
-export const MAX_AUDIO_BYTES = 200 * 1024;
+/** The speech route takes at most 270,000 base64 characters (packages/core's schema), which is
+ *  at most 202,500 bytes of audio (4 characters per 3 bytes); 200,000 stays under it. */
+export const MAX_AUDIO_BYTES = 200_000;
 
 export function createSynthesizer(commands: { espeak?: string; ffmpeg?: string } = {}): Synthesize {
   const espeak = commands.espeak ?? 'espeak-ng';
