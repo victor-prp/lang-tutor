@@ -672,7 +672,7 @@ describe('phase 34: the answer form a card asks for', () => {
     });
     const record = (await withTx(t.db, (tx) => createSessionRepo(tx).loadSession(sessionId)))!;
     const stored = await t.db.execute<{ type: string; answer_form: string | null }>(sql`select type, answer_form from questions where enrollment_id = ${enrollmentOf('u_1')} order by type`);
-    return { questions: record.questions, stored: stored.rows };
+    return { sessionId, questions: record.questions, stored: stored.rows };
   }
 
   it('shows and asks for the stored form on all six cards, and keeps the rendering', async () => {
@@ -702,8 +702,11 @@ describe('phase 34: the answer form a card asks for', () => {
   });
 
   it('is a form a later change of the dictionary cannot alter: the question holds its own', async () => {
-    const { questions } = await loaded('ore');
+    const { sessionId } = await loaded('ore');
     await t.db.execute(sql`update dict_var_translations set answer_form = 'orario', accepted_answers = array['orario']`);
-    expect(questions.find((q) => q.type === 'typed_translation')).toMatchObject({ answer: 'ore' });
+    // Read again, after the change, through the path a resumed session takes.
+    const record = (await withTx(t.db, (tx) => createSessionRepo(tx).loadSession(sessionId)))!;
+    expect(record.questions.find((q) => q.type === 'typed_translation')).toMatchObject({ answer: 'ore' });
+    expect(record.questions.find((q) => q.type === 'multiple_choice')).toMatchObject({ question: 'ore' });
   });
 });

@@ -29,6 +29,20 @@ describe('usableAnswerForm', () => {
     expect(usableAnswerForm('Le Ore', 'ora', 'ora')).toBe('Ore');
   });
 
+  // normaliseTyped also trims a trailing sentence mark and a Cyrillic stress, so
+  // what is left of the judge's reading is no suffix of the stored text.
+  it('cuts the leading word from the start, whatever else the judge ignores in the rest', () => {
+    expect(usableAnswerForm('to blow up!', 'blown up', 'blow up')).toBe('blow up');
+    expect(usableAnswerForm('le ore.', 'ora', 'ora')).toBe('ore');
+    expect(usableAnswerForm('the ча́сы', 'час', 'час')).toBe('ча́сы');
+    expect(usableAnswerForm('Le ore …', 'ora', 'ora')).toBe('ore');
+  });
+
+  it('drops trailing marks from an answer form with no leading word, as the judge does', () => {
+    expect(usableAnswerForm('ore.', 'ora', 'ora')).toBe('ore');
+    expect(usableAnswerForm('ore!', 'ora', 'ora')).toBe('ore');
+  });
+
   it('refuses a word that is not a form of the card’s word: tempo for ora', () => {
     expect(usableAnswerForm('tempo', 'ora', 'ora')).toBeNull();
   });

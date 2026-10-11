@@ -615,7 +615,8 @@ export function createSessionService({
           form: row.form,
           translation: row.translation,
           tiles: tileEligible(row.answerForm ?? row.form),
-          speakable: speakable(row.answerForm ?? row.form),
+          // read_aloud and the sentence cards use the saved form, say_translation the asked one.
+          speakable: speakable(row.form) && speakable(row.answerForm ?? row.form),
           // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
           clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
         })),

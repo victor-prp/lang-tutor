@@ -12,6 +12,9 @@ import { normaliseTyped, withoutLeadingWord } from '@lang-tutor/core/domain';
 const SHARED_PREFIX = 3;
 const SHORT_WORD_PREFIX = 2;
 
+// The sentence marks normaliseTyped trims from the end of an answer.
+const TRAILING_MARKS = /[\s.,;:!?…]+$/u;
+
 const wordsOf = (text: string): string[] => normaliseTyped(text).split(/[^\p{L}]+/u).filter((word) => word !== '');
 
 function sharedPrefix(a: string, b: string): number {
@@ -44,9 +47,12 @@ export function usableAnswerForm(stored: string | null, form: string, lemma: str
   if (collapsed === '') return null;
   const lowered = normaliseTyped(collapsed);
   const bare = withoutLeadingWord(lowered);
-  // The stripped text is a suffix of the collapsed one: only a leading word went.
-  const asked = bare.length < lowered.length ? collapsed.slice(collapsed.length - bare.length) : collapsed;
-  if (bare === withoutLeadingWord(normaliseTyped(form))) return null;
+  // normaliseTyped also drops trailing marks and a Cyrillic stress, so the
+  // stripped text is no suffix of the collapsed one: cut the leading word from
+  // the start instead (it is ASCII, the same length in both), and drop the
+  // trailing marks the judge ignores.
+  const asked = collapsed.slice(lowered.length - bare.length).replace(TRAILING_MARKS, '');
+  if (asked === '' || bare === withoutLeadingWord(normaliseTyped(form))) return null;
   const words = wordsOf(asked);
   const known = [...wordsOf(lemma), ...wordsOf(form)];
   return words.some((word) => known.some((other) => agree(word, other))) ? asked : null;

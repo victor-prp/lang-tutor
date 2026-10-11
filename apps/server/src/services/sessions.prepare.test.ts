@@ -808,10 +808,33 @@ describe('prepareSession, phase 34 (spec D1, D2, D12)', () => {
       }
     });
 
-    it('asks no other card for it: a listening-only dictation and a typed cloze keep the saved form', async () => {
+    it('asks no other card for it: a dictation keeps the saved form', async () => {
       const listening = await prepare([FILLER[0], FILLER[1], HOURS], { payload: { listening: true, ordinal: 2 } });
       expect(listening.questions.map((q) => q.type)).toContain('dictation');
       for (const q of listening.questions.filter((q) => q.type === 'dictation')) expect(q.answerForm).toBeNull();
+    });
+
+    // read_aloud, the typed cloze and the sentence translation ask the saved form;
+    // only say_translation asks the answer form. A word too long to say in either
+    // is no speaking or sentence card.
+    it('plans no speaking or sentence card when the saved form or the answer form is too long to say', async () => {
+      const SPEAKING_OR_SENTENCE = ['read_aloud', 'say_translation', 'cloze_typed', 'sentence_translation'];
+      // Five words, against a one-word answer form; and the other way round.
+      const longForm = row({ form: 'ore di punta del lavoro', lemma: 'ora', translation: 'שעות שיא', answerForm: 'ore' }, 12);
+      const longAnswer = row({ form: 'ora', lemma: 'ora', translation: 'שעות', answerForm: 'ore di punta del lavoro' }, 13);
+      for (const long of [longForm, longAnswer]) {
+        for (const at of [0, 2]) {
+          const rows = at === 0 ? [long, ...FILLER] : [...FILLER, long];
+          const made = await prepare(rows, { payload: { speaking: true, ordinal: 1 } });
+          expect(SPEAKING_OR_SENTENCE).not.toContain(made.questions[at].type);
+          const asked = (JSON.parse(made.llm.calls[0].user).items as { key: string; task: string }[]).map((item) => `${item.key}:${item.task}`);
+          expect(asked).not.toContain(`q${at + 1}:sentence`);
+        }
+      }
+      // The same word with both forms short is a speaking card, so the test above can fail.
+      const short = row({ form: 'ora', lemma: 'ora', translation: 'שעות', answerForm: 'ore' }, 14);
+      const planned = await prepare([short, ...FILLER], { payload: { speaking: true, ordinal: 1 } });
+      expect(planned.questions[0].type).toBe('read_aloud');
     });
 
     it('never offers the answer form as a wrong option of the reversed card', async () => {
