@@ -313,6 +313,35 @@ describe('the second try on say the translation (speech)', () => {
     expect((await readSnapshot(t.db, sessionId)).length).toBeGreaterThan(0);
   });
 
+  // Review Focus 2, and D9's progress rule end to end on the spoken route.
+  it("completes the session on the last card's understood retry, and moves the word as an understood clip would", async () => {
+    const ns = namespaceFor('retry-speech-understood');
+    await expectTranscription(ns, 'lamp', { once: true });
+    await expectTranscription(ns, 'the tome', { once: true });
+    const app = buildTestApp(ns);
+    const { sessionId, questions, glossIds } = await start(['say_translation']);
+    const speak = (body: object) =>
+      postJson(app, `/api/sessions/${sessionId}/speech`, { question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO, ...body });
+
+    expect(await (await speak({})).json()).toMatchObject({ verdict: 'alternative', next: { complete: false, pending_retry: { answer: 'lamp' } } });
+    // Nothing is written while the last card is held.
+    expect(await (await getJson(app, `/api/sessions/${sessionId}`)).json()).toMatchObject({ status: 'ready', progress: [] });
+    expect(await readSnapshot(t.db, sessionId)).toEqual([]);
+
+    const retried = await speak({ retry: true });
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({
+      heard: 'the tome',
+      verdict: 'understood',
+      next: { complete: true, score: { correct: 1, total: 1 }, missed_questions: [] },
+    });
+    expect(await readStoredAnswers(t.db, sessionId)).toEqual([
+      expect.objectContaining({ verdict: 'alternative', retry_state: 'resolved', retry_answer_string: 'the tome', retry_verdict: 'understood' }),
+    ]);
+    // The first verdict, alternative, moves nothing; the retry's understood does.
+    expect((await raised(sessionId, glossIds[0])).sort()).toEqual(['spoken_productive', 'spoken_receptive']);
+  });
+
   it('records nothing for a retry that was not understood', async () => {
     const ns = namespaceFor('retry-speech-unheard');
     await expectTranscription(ns, 'lamp', { once: true });
