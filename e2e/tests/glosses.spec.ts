@@ -2,10 +2,10 @@ import type { VocabularyWordDetail } from '@lang-tutor/core/api';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { generationStub } from './support/cards';
+import { expectGeneration } from './support/cards';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { FINGER, FINGER_RECONCILED, FINGERS, MOUSE } from './support/lexemes';
-import { clearGemini, expectGeminiMatching, expectGeminiPayload, userText } from './support/mockServer';
+import { clearGemini, expectGeminiMatching, userText } from './support/mockServer';
 import { answerChoiceRight, askedForm, enrollmentIdOf, readyListSession, skipSession } from './support/sessions';
 import { openApp, signUpLearner } from './support/users';
 
@@ -51,7 +51,7 @@ test('two senses with one target word are one card, saved once, practised once, 
 
   // Practised once: one card in the session, and one level when it ends.
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStub());
+  await expectGeneration(request);
   const session = await readyListSession(page.request, enrollmentId);
   expect(session.total).toBe(1);
   expect(askedForm(session.question)).toBe('mouse');
@@ -107,7 +107,7 @@ test('a word saved from fingers headlines אצבע and says where it was saved f
   // `finger`. Twenty-four sessions miss `finger` once in 2^24 runs (about 6e-8),
   // and the loop stops at the first `finger`.
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStub());
+  await expectGeneration(request);
   const asked = new Set<string>();
   for (let attempt = 0; attempt < 24 && !asked.has('finger'); attempt++) {
     const session = await readyListSession(page.request, enrollmentId);

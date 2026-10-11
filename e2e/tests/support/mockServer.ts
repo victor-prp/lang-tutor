@@ -94,6 +94,52 @@ export async function expectGeminiPayload(request: APIRequestContext, payload: u
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
 
+/**
+ * Phase 35. The generation call's answer, item by item, from each item's task.
+ * A session no longer gives a position a fixed type (the card is chosen by the
+ * learner's memory, spec D6), so no fixed list of keys can answer it. MockServer
+ * renders this Velocity template per request instead: for each key `q1` to
+ * `q<positions>`, it answers the task the request gave that key, from `byTask`.
+ * The request's user part is JSON inside a JSON string, so an item reads
+ * `\"key\":\"q3\",\"task\":\"word\"` in the body, and `contains` is a plain
+ * substring test: `q1` never matches `q10`, whose next character differs.
+ */
+export async function expectGeminiByTask(
+  request: APIRequestContext,
+  byTask: Record<string, Record<string, unknown>>,
+  positions: number,
+): Promise<void> {
+  // Text inside a JSON string, as the envelope's `text` holds the payload.
+  const inString = (text: string) => JSON.stringify(text).slice(1, -1);
+  const items: string[] = [];
+  for (let position = 1; position <= positions; position++) {
+    for (const [task, answer] of Object.entries(byTask)) {
+      const item = JSON.stringify({ key: `q${position}`, ...answer });
+      // Velocity reads `$` and `#` as its own; no stub answer needs either.
+      if (/[$#]/.test(item)) throw new Error(`a generation stub answer cannot hold $ or #: ${item}`);
+      const marker = inString(`"key":"q${position}","task":"${task}"`);
+      items.push(`#if($request.body.contains('${marker}'))\${sep}${inString(item)}#set($sep = ',')#end##`);
+    }
+  }
+  // `##` ends a line with a comment, newline included, so the JSON string the
+  // items are written into never holds a raw newline.
+  const template = [
+    "#set($sep = '')##",
+    '{"statusCode":200,"headers":{"content-type":["application/json"]},"body":{"candidates":[{"content":{"role":"model","parts":[{"text":"' +
+      inString('{"items":[') +
+      '##',
+    ...items,
+    inString(']}') + '"}]},"finishReason":"STOP"}]}}',
+  ].join('\n');
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      httpRequest: { method: 'POST', path },
+      httpResponseTemplate: { templateType: 'VELOCITY', template },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
+
 /** Phase 25. The transcription call's answer, matched on the server's
  *  TRANSCRIBE_MARKER (apps/server/src/domain/speech.ts) and ranked above the
  *  generation stub, which matches any call. Consumed once, in registration

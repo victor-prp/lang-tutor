@@ -4,8 +4,8 @@ import { API_URL } from '../urls';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK, PROCHITALA } from './support/lexemes';
-import { answerChoice, answerMeaning, answerTyped, generationStub, readCard, rightOption, type CardKind } from './support/cards';
-import { clearGemini, expectGeminiPayload, expectJudge } from './support/mockServer';
+import { answerChoice, answerMeaning, answerTyped, expectGeneration, readCard, rightOption, type CardKind } from './support/cards';
+import { clearGemini, expectJudge } from './support/mockServer';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -53,18 +53,17 @@ test('a session moves the words it practised up the ladder, and the list filters
 
   // 2. A list session: лук answered right, прочитала wrong, whatever each card's
   // type. Which word lands on which position is random, so the test records
-  // the type each лук card had and works out the levels from it. Ordinal 0,
-  // no voices, speaking off: 1 choice, 2 reverse, 3 typed, and 4 a meaning card
-  // (run 1 prefers listen_choice, which falls through past read_aloud, removed
-  // with speaking off, to typed_meaning).
+  // the type each лук card had and works out the levels from it. Four words new
+  // to the memory model all take a choice of meanings (phase 35, spec D6), but
+  // the levels are worked out from whatever type each card has.
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStub());
+  await expectGeneration(request);
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
   const lukKinds: CardKind[] = [];
   for (let position = 1; position <= 4; position++) {
-    const card = await readCard(page, position, 4, position === 4 ? 'meaning' : undefined);
+    const card = await readCard(page, position, 4);
     // A meaning card shows the form itself.
     const word =
       card.kind === 'choice' || card.kind === 'meaning' ? card.prompt : card.kind === 'reverse' ? rightOption(card) : FORM_OF[card.prompt];
