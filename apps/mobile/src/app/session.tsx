@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MarkedText } from '@/components/ContextLine';
 import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { LetterTilesView } from '@/components/LetterTilesView';
 import { MatchingBoardView } from '@/components/MatchingBoardView';
@@ -24,15 +25,19 @@ import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 // Phase 27 (spec D5). The gap card's prompt: the sentence with its blank, the
-// Hebrew line under it, and once answered the sentence spoken.
+// Hebrew line under it, and once answered the sentence spoken. Phase 34 (spec
+// D8): a typed gap's Hebrew line marks the practised word.
 function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID?: string) {
   return (
     <View style={styles.gapCard} testID={testID}>
       <SentenceGap sentence={question.sentence} gap={question.gap} filled={answered} />
       {showsSentenceTranslation(question.type, answered) ? (
-        <Text style={styles.hebrewLine} testID="sentence-translation">
-          {question.translation}
-        </Text>
+        <MarkedText
+          text={question.translation}
+          mark={question.type === 'cloze_typed' ? question.mark : null}
+          style={styles.hebrewLine}
+          testID="sentence-translation"
+        />
       ) : null}
       {answered ? <SpeakButton text={question.sentence} language={language} testID="speak-sentence" /> : null}
     </View>
@@ -40,14 +45,13 @@ function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered:
 }
 
 // Phase 27 (spec D6). The translation card's prompt: the Hebrew sentence and,
-// once judged, the reference with its practised word in bold.
+// once judged, the reference with its practised word in bold. Phase 34 (spec
+// D8): the Hebrew sentence marks the practised word too.
 function translatePrompt(question: SentenceTranslationQuestion, answered: boolean, language: string) {
   const { before, word, after } = splitAtGap(question.sentence, question.gap);
   return (
     <View style={styles.gapCard}>
-      <Text style={styles.hebrewPrompt} testID="sentence-translation">
-        {question.question}
-      </Text>
+      <MarkedText text={question.question} mark={question.mark} style={styles.hebrewPrompt} testID="sentence-translation" />
       {answered ? (
         <View style={styles.reference}>
           <Text style={styles.referenceLabel}>{strings.translationReference}</Text>
@@ -92,6 +96,8 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         />
       );
     case 'typed_translation':
+      // Phase 34 (spec D9): another accepted word waits for the server to hold
+      // the card, so it checks and fails as a judged card does.
       return (
         <TypedAnswerView
           question={question}
@@ -101,8 +107,9 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
           onSubmit={session.submitText}
           direction="ltr"
-          checking={false}
-          failed={false}
+          checking={session.judging === 'checking'}
+          failed={session.judging === 'failed'}
+          retry={session.retry}
         />
       );
     case 'cloze_choice':
@@ -127,8 +134,9 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
           onSubmit={session.submitText}
           direction="ltr"
-          checking={false}
-          failed={false}
+          checking={session.judging === 'checking'}
+          failed={session.judging === 'failed'}
+          retry={session.retry}
           prompt={gapPrompt(question, session.answered, language)}
         />
       );
@@ -144,6 +152,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
           onSubmit={session.submitJudged}
+          retry={session.retry}
           prompt={translatePrompt(question, session.answered, language)}
         />
       );
@@ -159,6 +168,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
           onSubmit={session.submitJudged}
+          retry={session.retry}
         />
       );
     case 'listen_choice':
@@ -183,6 +193,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           direction="ltr"
           checking={false}
           failed={false}
+          retry={null}
         />
       );
     case 'letter_tiles':
@@ -221,6 +232,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onPass={session.pass}
           onCantSpeak={session.stopSpeaking}
           onRecordFailed={session.markSpeechFailed}
+          retry={null}
         />
       );
     case 'say_translation':
@@ -236,8 +248,9 @@ function renderQuestion(question: Question, session: SessionValue, language: str
               verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
               onSubmit={session.submitText}
               direction="ltr"
-              checking={false}
-              failed={false}
+              checking={session.judging === 'checking'}
+              failed={session.judging === 'failed'}
+              retry={session.retry}
             />
           </View>
         );
@@ -255,6 +268,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onPass={session.pass}
           onCantSpeak={session.stopSpeaking}
           onRecordFailed={session.markSpeechFailed}
+          retry={session.retry}
         />
       );
     default: {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Question } from '@lang-tutor/core/api';
 
-import { feedbackFor } from './feedback';
+import { feedbackFor, opensRetry, retryNotice, retryText } from './feedback';
 import { strings } from './strings';
 
 const choice: Question = {
@@ -247,5 +247,96 @@ describe('sentence cards (phase 27 D5, D6)', () => {
       line: 'parlavamo',
       verdict: 'wrong',
     });
+  });
+});
+
+describe('a second try (phase 34 D9)', () => {
+  const MEANING: Question = { id: 'm1', type: 'typed_meaning', vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין', context: null };
+  const SAY: Question = {
+    id: 's',
+    type: 'say_translation',
+    vocab_term_id: 'l',
+    question: 'מדבר',
+    part_of_speech: 'verb',
+    answer: 'parlo',
+    lemma: 'parlare',
+    alternatives: ['dico'],
+    context: null,
+  };
+  const CLOZE: Question = {
+    id: 'ct',
+    type: 'cloze_typed',
+    vocab_term_id: 'l',
+    sentence: 'Ieri parlavamo per ore.',
+    gap: { start: 5, end: 14 },
+    translation: 'אתמול דיברנו שעות.',
+    meaning: 'לדבר',
+    answer: 'parlavamo',
+    alternatives: ['chiacchieravamo'],
+    mark: { start: 6, end: 12 },
+  };
+  const TRANSLATE: Question = {
+    id: 'st',
+    type: 'sentence_translation',
+    vocab_term_id: 'l',
+    question: 'בואו נשלב כוחות.',
+    meaning: 'לשלב',
+    sentence: 'Uniamo le forze.',
+    gap: { start: 0, end: 6 },
+    answer: 'Uniamo',
+    mark: { start: 5, end: 9 },
+  };
+
+  it('says the first answer fits, then that another saved word is there', () => {
+    expect(retryNotice({ answer: 'vetrata', wording: 'word' })).toEqual({
+      right: '✓ נכון, ⁨vetrata⁩ מתאים כאן.',
+      again: 'יש מילה נוספת ששמרת — נסו שוב',
+    });
+  });
+
+  it('says another meaning is there on a typed meaning', () => {
+    expect(retryNotice({ answer: 'ספר', wording: 'meaning' })).toEqual({
+      right: '✓ נכון, ⁨ספר⁩ מתאים כאן.',
+      again: 'יש פירוש נוסף — נסו שוב',
+    });
+  });
+
+  it('clears the input, except a translation, which keeps its first sentence', () => {
+    expect(retryText('typed_translation', { answer: 'vetrata', wording: 'word' })).toBe('');
+    expect(retryText('typed_meaning', { answer: 'ספר', wording: 'meaning' })).toBe('');
+    expect(retryText('sentence_translation', { answer: 'Combiniamo le forze.', wording: 'word' })).toBe('Combiniamo le forze.');
+    expect(retryText('sentence_translation', null)).toBe('');
+  });
+
+  it('a typed answer that is another accepted word opens it, on the cards that have one', () => {
+    expect(opensRetry(typed, { text: 'vetrata' })).toBe(true);
+    expect(opensRetry(SAY, { text: 'dico' })).toBe(true);
+    expect(opensRetry(CLOZE, { text: 'chiacchieravamo' })).toBe(true);
+  });
+
+  it('no other answer the phone judges opens it', () => {
+    expect(opensRetry(typed, { text: 'finestra' })).toBe(false);
+    expect(opensRetry(typed, { text: 'finestar' })).toBe(false);
+    expect(opensRetry(typed, { text: '' })).toBe(false);
+    expect(opensRetry(typed, { text: 'porta' })).toBe(false);
+    expect(opensRetry(choice, { option_index: 0 })).toBe(false);
+    const dictation: Question = { id: 'd', type: 'dictation', vocab_term_id: 'l', question: 'parlo', meaning: 'מדבר' };
+    expect(opensRetry(dictation, { text: 'parlo' })).toBe(false);
+  });
+
+  it('giving up on it shows the saved word, as the banner after show the answer does', () => {
+    // Typed and the typed form of say the translation: empty text with retry.
+    expect(feedbackFor(typed, { text: '' })).toMatchObject({ tone: 'wrong', title: strings.feedbackWrong, line: 'finestra' });
+    expect(feedbackFor(SAY, { text: '' })).toMatchObject({ tone: 'wrong', line: 'parlo' });
+    // Spoken: show the answer with retry.
+    expect(feedbackFor(SAY, { pass: 'show_answer' })).toMatchObject({ tone: 'wrong', line: 'parlo' });
+    // Judged: the server reports a given-up retry as wrong (ruling R15).
+    expect(feedbackFor(MEANING, { text: '', judged: 'wrong' })).toMatchObject({ tone: 'wrong', line: 'להזמין' });
+    expect(feedbackFor(TRANSLATE, { text: '', judged: 'wrong' })).toMatchObject({ tone: 'wrong', line: 'Uniamo' });
+  });
+
+  it('the saved word found on it is just right', () => {
+    expect(feedbackFor(typed, { text: 'finestra' })).toMatchObject({ tone: 'correct', title: strings.feedbackCorrect, line: null });
+    expect(feedbackFor(SAY, { heard: 'parlo', verdict: 'understood' })).toMatchObject({ tone: 'correct', verdict: 'understood' });
   });
 });

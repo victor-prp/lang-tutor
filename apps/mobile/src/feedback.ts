@@ -1,4 +1,4 @@
-import type { AnswerVerdict, Question } from '@lang-tutor/core/api';
+import type { AnswerVerdict, PendingRetry, Question } from '@lang-tutor/core/api';
 import { evaluate, normaliseHebrew, rightAnswer, type AnswerInput } from '@lang-tutor/core/domain';
 
 import { strings } from '@/strings';
@@ -71,4 +71,29 @@ export function feedbackFor(question: Question, answer: CardAnswer): Feedback {
   if (verdict === 'near_miss') return { tone: 'correct', title: strings.feedbackNearMiss, line: right, verdict };
   if (verdict === 'alternative') return { tone: 'correct', title: strings.feedbackAlternative, line: right, verdict };
   return { tone: 'correct', title: strings.feedbackCorrect, line: null, verdict };
+}
+
+/** Phase 34 (spec D9). What a card held for its second try says: the first
+ *  answer was right, and another saved word, or on a typed meaning another
+ *  meaning, is there to find. */
+export function retryNotice(pending: PendingRetry): { right: string; again: string } {
+  return {
+    right: strings.retryRight(pending.answer),
+    again: pending.wording === 'meaning' ? strings.retryAnotherMeaning : strings.retryAnotherWord,
+  };
+}
+
+/** Phase 34 (spec D9). What the input holds on a second try: nothing, except
+ *  on a sentence translation, which keeps the first sentence so the learner
+ *  only changes the word. */
+export function retryText(type: Question['type'], pending: PendingRetry | null): string {
+  return pending !== null && type === 'sentence_translation' ? pending.answer : '';
+}
+
+/** Phase 34 (spec D9). Whether an answer the phone judges opens a second try.
+ *  Its banner would name the saved word, so the card waits for the server to
+ *  hold it instead. The `evaluate` the server runs decides, as for the banner. */
+export function opensRetry(question: Question, answer: CardAnswer): boolean {
+  if ('board' in answer || 'heard' in answer || 'judged' in answer) return false;
+  return evaluate(question, answer).retry_state === 'pending';
 }

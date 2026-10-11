@@ -2,16 +2,21 @@ import type {
   AnswerVerdict,
   ClozeTypedQuestion,
   DictationQuestion,
+  PendingRetry,
   SayTranslationQuestion,
   SentenceTranslationQuestion,
   TypedMeaningQuestion,
   TypedTranslationQuestion,
 } from '@lang-tutor/core/api';
 import { MAX_JUDGED_TEXT } from '@lang-tutor/core/domain';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { ContextLine } from '@/components/ContextLine';
 import { ListenPrompt } from '@/components/ListenPrompt';
+import { RetryNotice } from '@/components/RetryNotice';
+import { contextLanguage } from '@/context';
+import { retryText } from '@/feedback';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -53,6 +58,9 @@ type Props = {
   checking: boolean;
   /** The server could not judge it: the text stays, and retry sends what is in the box. */
   failed: boolean;
+  /** Phase 34 (spec D9). Held for a second try: the card says why, and its
+   *  input starts again (a translation keeps its first sentence). */
+  retry: PendingRetry | null;
 };
 
 /**
@@ -61,12 +69,20 @@ type Props = {
  * right answer nor a right answer into a wrong one, so autocorrect, spellcheck
  * and autocapitalisation are off.
  */
-export function TypedAnswerView({ question, instruction, language, answered, verdict, onSubmit, direction, checking, failed, prompt }: Props) {
+export function TypedAnswerView({ question, instruction, language, answered, verdict, onSubmit, direction, checking, failed, prompt, retry }: Props) {
   const [text, setText] = useState('');
+  const input = useRef<TextInput>(null);
 
+  // A new card, or the same card held for its second try, starts its input
+  // again (spec D9).
   useEffect(() => {
-    setText('');
-  }, [question.id]);
+    setText(retryText(question.type, retry));
+  }, [question.id, question.type, retry]);
+
+  // The keyboard went down with the first answer: the second try brings it back.
+  useEffect(() => {
+    if (retry !== null) input.current?.focus();
+  }, [retry]);
 
   const partOfSpeech = 'part_of_speech' in question ? strings.partOfSpeech(question.part_of_speech) : undefined;
   const empty = text.trim() === '';
@@ -105,9 +121,14 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
               {partOfSpeech}
             </Text>
           ) : null}
+          {'context' in question && question.context ? (
+            <ContextLine context={question.context} language={contextLanguage(question.type, language)} />
+          ) : null}
         </>
       ) : null}
+      {retry !== null && !answered ? <RetryNotice retry={retry} /> : null}
       <TextInput
+        ref={input}
         testID="typed-input"
         value={text}
         onChangeText={setText}

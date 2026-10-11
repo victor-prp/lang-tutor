@@ -5,6 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { firstAttempts, meaningTaken, startBoard, tapMeaning, tapWord, type BoardState } from '@/board';
 import { OptionButton, type OptionVisualState } from '@/components/OptionButton';
 import { answerStyles } from '@/components/TypedAnswerView';
+import { strings } from '@/strings';
 import { spacing } from '@/theme';
 
 type Props = {
@@ -18,6 +19,7 @@ type Props = {
  * Phase 24 (spec D10). Four words and five meanings: a tap on each side pairs
  * them, in either order. A right pair locks; a wrong one flashes until the next
  * tap. When the last word is matched, the board reports each word's first try.
+ * Phase 34 (spec D10): each word shows its part of speech under it.
  */
 export function MatchingBoardView({ question, instruction, answered, onComplete }: Props) {
   const [state, setState] = useState<BoardState>(() => startBoard(question));
@@ -72,6 +74,8 @@ export function MatchingBoardView({ question, instruction, answered, onComplete 
               testID={`board-word-${index}`}
               label={word}
               direction="ltr"
+              // Phase 34 (spec D10): each word's part of speech, under it.
+              note={strings.partOfSpeech(question.board.parts_of_speech[index] ?? '')}
               state={wordState(index)}
               disabled={answered || state.matched[index]}
               onPress={() => setState((current) => tapWord(current, question, index))}
