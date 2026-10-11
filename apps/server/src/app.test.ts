@@ -200,6 +200,16 @@ describe('the session gate in createApp', () => {
     expect(await res.json()).toEqual({ error: 'not signed in' });
   });
 
+  // Phase 32 (spec D9). A signed-out friend on an old build must be told to
+  // update, not sent to a sign-in that cannot help.
+  it('answers 426, not 401, to a client below API_LEVEL with no session', async () => {
+    const res = await createApp(depsWithPing(true)).request('/api/enrollments', {
+      headers: { 'X-Api-Level': '0' },
+    });
+    expect(res.status).toBe(426);
+    expect(await res.json()).toEqual({ error: 'app_update_required' });
+  });
+
   it('answers 404, not 401, to an auth path Better Auth is not mounted on', async () => {
     const res = await createApp(depsWithPing(true)).request('/api/auth/update-user', { method: 'POST' });
     expect(res.status).toBe(404);

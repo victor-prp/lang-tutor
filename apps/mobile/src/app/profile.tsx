@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { confirm } from '@/confirm';
 import { myTutors } from '@/grants';
+import { useAppVersion } from '@/hooks/useAppUpdates';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
@@ -22,6 +23,7 @@ function Row({ label, value, testID }: { label: string; value: string; testID: s
 
 export default function ProfileScreen() {
   const { user, enrollments, grants, endGrant, signOut } = useCurrentUser();
+  const appVersion = useAppVersion();
 
   if (!user) return <Redirect href="/" />;
 
@@ -68,6 +70,8 @@ export default function ProfileScreen() {
           }
           testID="profile-target"
         />
+        {/* Phase 32 (spec D10): the release tag this phone runs, or dev. */}
+        <Row label={strings.appVersionLabel} value={appVersion} testID="app-version" />
       </View>
 
       {tutors.length > 0 ? (

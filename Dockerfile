@@ -23,8 +23,10 @@ COPY . .
 # scripts/image-build.sh sets it for a local or CI build, which must call the
 # container it runs in, not production.
 ARG EXPO_PUBLIC_API_URL=
+# Phase 32 (spec D10). The release tag, shown on the profile screen.
+ARG APP_VERSION=dev
 RUN if [ -z "$EXPO_PUBLIC_API_URL" ]; then unset EXPO_PUBLIC_API_URL; fi \
- && npm run build:web --workspace apps/mobile \
+ && EXPO_PUBLIC_APP_VERSION="$APP_VERSION" npm run build:web --workspace apps/mobile \
  && npm run build --workspace apps/server
 
 # --- runtime: production dependencies, the bundle and the export -------------
