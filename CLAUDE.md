@@ -26,6 +26,34 @@ in the final message alongside the PR URL and the CI result.
 
 On `master` or a detached HEAD there is no branch to open a PR from, so stop and ask.
 
+# Continue till PR
+
+**`continue till PR`** is Victor saying, once, that every remaining approval is given: from
+here to an open PR with green CI, ask nothing and wait for nothing. It is the explicit
+instruction that lets a skill's gates be skipped, and it holds from wherever it is said —
+during a one-pager, during brainstorming, after the spec or after the plan. Pick up from
+that point:
+
+- **One-pager:** write the draft now. Any question still unanswered becomes an `(assumed)`
+  line with your recommendation, then go on to brainstorming with it as input.
+- **Brainstorming:** classify and announce the path as usual, then answer your own questions
+  with your recommendation and approve your own design. Keep the design short; on the
+  architectural path write and commit the spec without waiting for a review.
+- **Plan:** keep it short and do not ask how to execute it. `continue till PR` executes
+  inline with `superpowers:executing-plans`; `continue till PR, subagents` uses
+  `superpowers:subagent-driven-development`.
+- **Finishing:** as in *Finishing a branch* above — `git-create-pr`, then `ci-green`.
+
+Started from the main checkout on `master`, first open a worktree and branch of your own
+(`git worktree add -b <name> .claude/worktrees/<name> origin/master`, then
+`./scripts/setup-worktree.sh` there) and do the work in it.
+
+A step that needs Victor does not stop the run. Do everything around it and leave the step
+for him: anything you cannot or may not do yourself — merging, writing secrets,
+`terraform apply`, writing to lane 0's database, cleaning lanes — goes into a **Left for
+Victor** section of the PR body and of the final message, as a short guide with the exact
+commands in the order he runs them. The run still ends at an open PR; it never merges.
+
 # Prompt evals
 
 `apps/server/tests/eval/` is a fourth test bucket, run by `npm run eval`, and the only

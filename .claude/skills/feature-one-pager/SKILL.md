@@ -35,6 +35,9 @@ algorithms has done brainstorming badly and without the user.
 5. **Hand off:** give the path, invite corrections, then offer to start
    `superpowers:brainstorming` with the one-pager as its input.
 
+If the user says `continue till PR` at any point, stop asking and follow that section of
+`CLAUDE.md`: unanswered questions become `(assumed)` lines, and the run goes on to a PR.
+
 ## The one-pager
 
 Path: `drafts/YYYY-MM-DD-<topic>-one-pager.md` in the **main checkout**, even from a worktree
