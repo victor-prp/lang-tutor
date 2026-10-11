@@ -26,6 +26,7 @@ import type {
   LanguageCodeSchema,
   LevelSchema,
   LlmAcceptSchema,
+  LlmCheckSchema,
   LlmContextSchema,
   LlmCorrectionSchema,
   LlmDistractorsSchema,
@@ -171,6 +172,7 @@ export type SessionStatus = z.infer<typeof SessionStatusSchema>;
 export type SessionSource = z.infer<typeof SessionSourceSchema>;
 export type LlmDistractors = z.infer<typeof LlmDistractorsSchema>;
 export type LlmContext = z.infer<typeof LlmContextSchema>;
+export type LlmCheck = z.infer<typeof LlmCheckSchema>;
 export type SessionView = z.infer<typeof SessionViewSchema>;
 export type CurrentSession = z.infer<typeof CurrentSessionSchema>;
 export type CurrentSessionResponse = z.infer<typeof CurrentSessionResponseSchema>;

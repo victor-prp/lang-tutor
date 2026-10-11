@@ -58,8 +58,9 @@ export const JOB_QUEUES: QueueDefinition[] = [
     options: {
       retryLimit: 2,
       retryBackoff: true,
-      // Twice the generation budget (domain/jobs.ts, spec D16): a worker that
-      // crashed mid-call expires, and the expiry counts as a failed attempt.
+      // Twice the sum of the attempt's call budgets (domain/jobs.ts,
+      // PREPARE_SESSION_CALL_BUDGETS_MS; spec D16, phase 34 ruling R12): a worker
+      // that crashed mid-call expires, and the expiry counts as a failed attempt.
       expireInSeconds: PREPARE_SESSION_EXPIRY_SECONDS,
       deleteAfterSeconds: 86_400,
       deadLetter: PREPARE_SESSION_FAILED,

@@ -18,6 +18,7 @@ import {
   STUB_WRONG_ENGLISH,
   STUB_WRONG_HEBREW,
   expectAccept,
+  expectCheck,
   expectDistractors,
   expectGeminiStatus,
   geminiBaseUrlFor,
@@ -84,6 +85,7 @@ it('prepares a ten-word session with listening on: a run, the board, a run (spec
   await expectDistractors(ns, {
     tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'sentence'],
   });
+  await expectCheck(ns);
   const seed = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
   await deps.sessions.skipSession('u_1', seed.sessionId);
   for (const [lemma, translation] of Object.entries(TEN_WORDS)) {
@@ -130,6 +132,7 @@ describe('sentence cards through the queue', () => {
     await expectDistractors(ns, {
       tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'gap', 'sentence'],
     });
+    await expectCheck(ns);
     const seed = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
     await deps.sessions.skipSession('u_1', seed.sessionId);
     await saveTen(true);
@@ -162,6 +165,7 @@ describe('sentence cards through the queue', () => {
     await expectDistractors(ns, {
       tasks: ['typed', 'typed', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'translate'],
     });
+    await expectCheck(ns);
     const options = { listening: true, speaking: false };
     // The seed, then two list sessions skipped before the third (ordinal 2).
     const seed = await deps.sessions.createNextSession('u_1', E, options);
@@ -187,6 +191,7 @@ describe('sentence cards through the queue', () => {
 describe('prepare-session through the queue', () => {
   it('turns a list session ready, with its saved words as the prompts', async () => {
     await expectDistractors(ns);
+    await expectCheck(ns);
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
@@ -228,6 +233,7 @@ describe('prepare-session through the queue', () => {
   // Review Focus 2: a skip lands while the model is still answering.
   it('a skip during generation wins: the job writes nothing', async () => {
     await expectDistractors(ns, { delayMs: 3_000 });
+    await expectCheck(ns);
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await countGeminiRequests(ns, DISTRACTOR_MARKER)) === 1);

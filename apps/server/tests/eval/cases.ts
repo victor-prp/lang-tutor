@@ -1,6 +1,7 @@
 import type { LanguageCode, PartOfSpeech, SentenceTranslationQuestion, TranslationKind } from '@lang-tutor/core/api';
-import type { QuestionType } from '@lang-tutor/core/domain';
+import type { QuestionType, TypedTarget } from '@lang-tutor/core/domain';
 
+import type { CheckItem } from '../../src/domain/check';
 import type { Task } from '../../src/domain/distractors';
 import type { JudgeContext, MeaningJudgeContext } from '../../src/domain/judge';
 import type { StoredSense } from '../../src/domain/translation';
@@ -1618,5 +1619,114 @@ export const CONTEXT_CASES: ContextCase[] = [
     target: 'en', type: 'sentence_translation', form: 'combine', lemma: 'combine', partOfSpeech: 'verb', translation: 'לשלב',
     example: null, exampleTranslation: null,
     sentence: { hebrew: 'בואו נשלב כוחות.', target: "Let's combine forces.", word: 'combine', marked: 'נשלב' },
+  },
+];
+
+/**
+ * Phase 34 (spec D5; ruling R3). The checker, a second model reading the cards
+ * as a learner would. One call per case, one item each, through the real
+ * prompt and parser (askCheck). Tier 1 is that the answer reads (readCheck);
+ * tier 2 that it means what a careful reader means, scored by the server's own
+ * rules (wrongOnly, meaningFits, wordsFit, translationUses). Each kind has a
+ * "no" beside its "yes": a checker that calls every option right fails the
+ * blow up and pick up cases' wrong options and the gap's misfit, and one that
+ * confirms every sentence fails "I saw him" and the volume's להוריד.
+ */
+export type CheckCase = {
+  label: string;
+  /** The language learned; the learner's own is Hebrew. */
+  target: LanguageCode;
+  item: CheckItem;
+  /** A choice or gap item: per option, whether it is also right (or fits the gap). */
+  alsoRight?: Record<string, boolean>;
+  /** A target-language context: the gloss's meanings, which the reading must be one of to keep it. */
+  glossMeanings?: string[];
+  /** ...and the meanings it must not be read as (another word's). */
+  notMeanings?: string[];
+  /** A Hebrew context: the card it is for, by whose judge a word the checker reads fits. */
+  card?: TypedTarget;
+  /** A sentence card: the practised word and its accepted answers. */
+  practised?: string[];
+  /** A context or sentence card: whether the server keeps it on this answer. */
+  keep?: boolean;
+};
+
+const SAW_READINGS = ['לנסר', 'מסור', 'ראה', 'לראות'];
+
+export const CHECK_CASES: CheckCase[] = [
+  // 3c482348: blow up stored as לנפח; a learner picked להרוס ("blew up the bridge") and was marked wrong.
+  {
+    label: 'checker A (3c482348): blow up — להרוס is also right, לקפל and לשבור are not',
+    target: 'en',
+    item: { key: 'q1', task: 'choice', word: 'blow up', options: ['להרוס', 'לקפל', 'לשבור'] },
+    alsoRight: { להרוס: true, לקפל: false, לשבור: false },
+  },
+  // c49ddbec: pick up stored as לענות (the phone); להרים is its other sense.
+  {
+    label: 'checker A (c49ddbec): pick up — להרים is also right, לכתוב and לשיר are not',
+    target: 'en',
+    item: { key: 'q1', task: 'choice', word: 'pick up', options: ['להרים', 'לכתוב', 'לשיר'] },
+    alsoRight: { להרים: true, לכתוב: false, לשיר: false },
+  },
+  // A cloze choice: the sentence, not the word's meaning, makes an option right.
+  {
+    label: 'checker gap: unlocked still fits "She ___ the door", ate does not',
+    target: 'en',
+    item: { key: 'q1', task: 'gap', sentence: 'She ___ the door and walked in.', options: ['unlocked', 'ate', 'slept'] },
+    alsoRight: { unlocked: true, ate: false, slept: false },
+  },
+  // Ruling R3, 71b0b407: the sentence the context call wrote for saw on 2026-10-11 (CONTEXT_CASES' first).
+  {
+    label: 'checker E (71b0b407, ruling R3): saw/לנסר — the marked saw means לנסר, not ראה',
+    target: 'en',
+    item: { key: 'q1c', task: 'meaning', sentence: 'Can you saw this wood for me?', word: 'saw', candidates: SAW_READINGS },
+    glossMeanings: ['לנסר'],
+    notMeanings: ['ראה', 'לראות'],
+    keep: true,
+  },
+  {
+    label: 'checker E: "I saw him at the station" is the past of see, and is dropped from a card for saw/לנסר',
+    target: 'en',
+    item: { key: 'q1c', task: 'meaning', sentence: 'I saw him at the station yesterday.', word: 'saw', candidates: SAW_READINGS },
+    glossMeanings: ['לנסר'],
+    keep: false,
+  },
+  // d388f738: להוריד is download in one sentence and turn down in another.
+  {
+    label: 'checker C (d388f738): להוריד the new game is download',
+    target: 'en',
+    item: { key: 'q1c', task: 'words', sentence: 'אני רוצה להוריד את המשחק החדש הלילה.', word: 'להוריד' },
+    card: { answer: 'download', lemma: 'download', alternatives: ['get'] },
+    keep: true,
+  },
+  {
+    label: 'checker C: תוריד את הווליום is not download, and is dropped from a card for download',
+    target: 'en',
+    item: { key: 'q1c', task: 'words', sentence: 'תוריד את הווליום, בבקשה.', word: 'תוריד' },
+    card: { answer: 'download', lemma: 'download', alternatives: ['get'] },
+    keep: false,
+  },
+  // eb95d246: a learner wrote "lets work together" and got only "alternative".
+  {
+    label: 'checker F (eb95d246): בואו נשלב כוחות is said without combine, so the card is not a combine card',
+    target: 'en',
+    item: { key: 'q1', task: 'translate', sentence: 'בואו נשלב כוחות.' },
+    practised: ['combine'],
+    keep: false,
+  },
+  {
+    label: 'checker F: a sentence whose practised word is the natural one is kept',
+    target: 'en',
+    item: { key: 'q1', task: 'translate', sentence: 'אני שותה קפה כל בוקר.' },
+    practised: ['coffee'],
+    keep: true,
+  },
+  // The server's candidates are the gap's text as the reference writes it, the form and the lemma.
+  {
+    label: 'checker F: an everyday verb is kept, in the past its sentence needs',
+    target: 'en',
+    item: { key: 'q1', task: 'translate', sentence: 'הוא קנה מכונית חדשה אתמול.' },
+    practised: ['bought', 'buy'],
+    keep: true,
   },
 ];

@@ -10,6 +10,7 @@ import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import {
   assertMockServerReachable,
   clearNamespace,
+  expectCheck,
   expectDistractors,
   geminiBaseUrlFor,
   mockNamespace,
@@ -78,6 +79,7 @@ const pick = (word: Saved, i = 0) => ({ gloss_id: word.glossIds[i], sense_id: wo
 async function prepared(picks: ReturnType<typeof pick>[], alternatives?: string[]): Promise<{ sessionId: string; questions: Question[] }> {
   await clearNamespace(ns);
   await expectDistractors(ns, { tasks: ['meaning', 'word', 'typed'], ...(alternatives ? { alternatives } : {}) });
+  await expectCheck(ns);
   const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', IT));
   await deps.sessions.prepareSession({ session_id: sessionId, picks, listening: false, speaking: false, ordinal: 0 });
   const record = await deps.sessions.getSession('u_1', sessionId);

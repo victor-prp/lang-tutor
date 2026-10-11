@@ -55,8 +55,9 @@ describe('installJobs', () => {
     expect(prepare).toMatchObject({
       retry_limit: 2,
       retry_backoff: true,
-      // Phase 34 (ruling R12): twice the batch's 300 s and the context call's 60 s.
-      expire_seconds: 720,
+      // Phase 34 (ruling R12): twice the sum of the batch's 300 s, the context
+      // call's 60 s and the checker's 60 s.
+      expire_seconds: 840,
       deletion_seconds: 86_400,
       dead_letter: PREPARE_SESSION_FAILED,
     });

@@ -4,6 +4,7 @@ import {
   CreateEnrollmentRequestSchema,
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
+  LlmCheckSchema,
   LlmCorrectionSchema,
   LlmContextSchema,
   LlmDistractorsSchema,
@@ -194,6 +195,32 @@ describe('LlmContextSchema', () => {
     const items = (n: number) => Array.from({ length: n }, (_, i) => ({ key: `q${i + 1}` }));
     expect(LlmContextSchema.safeParse({ items: items(10) }).success).toBe(true);
     expect(LlmContextSchema.safeParse({ items: items(11) }).success).toBe(false);
+  });
+});
+
+// Phase 34 (spec D5). The checker's answer: per item, which options are also
+// right, which fit a gap, what a context's marked word means or which words fit
+// it, and a sentence's natural translation. Every field optional and uncapped:
+// the server checks each list against what it asked (domain/check.ts).
+describe('LlmCheckSchema', () => {
+  it('reads every field, and requires none but the key', () => {
+    const item = {
+      key: 'q1',
+      options: [true, false, false],
+      gap_fits: [false, true],
+      context_meaning: 'לנסר',
+      context_words: ['download', 'get'],
+      natural_translation: "Let's join forces.",
+    };
+    expect(LlmCheckSchema.parse({ items: [item] }).items[0]).toEqual(item);
+    expect(LlmCheckSchema.safeParse({ items: [{ key: 'q1c' }] }).success).toBe(true);
+    expect(LlmCheckSchema.safeParse({ items: [{ options: [true] }] }).success).toBe(false);
+    expect(LlmCheckSchema.safeParse({ items: [{ key: 'q1', options: ['yes'] }] }).success).toBe(false);
+  });
+
+  it('caps nothing: a session of every kind of card fits, and the server counts what it asked', () => {
+    const items = Array.from({ length: 24 }, (_, i) => ({ key: `q${i + 1}`, options: Array.from({ length: 6 }, () => false) }));
+    expect(LlmCheckSchema.safeParse({ items }).success).toBe(true);
   });
 });
 

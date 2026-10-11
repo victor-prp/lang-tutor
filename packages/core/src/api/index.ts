@@ -29,6 +29,7 @@ export type {
   LetterTilesQuestion,
   ListenChoiceQuestion,
   LlmAccept,
+  LlmCheck,
   LlmContext,
   LlmCorrection,
   LlmDistractors,

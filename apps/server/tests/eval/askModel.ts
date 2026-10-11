@@ -5,6 +5,7 @@ import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
 import type {
   LanguageCode,
   LlmAccept,
+  LlmCheck,
   LlmContext,
   TypedVerdict,
   LlmDistractors,
@@ -18,6 +19,7 @@ import type {
 } from '@lang-tutor/core/api';
 
 import { buildAcceptPrompt, parseAccept, validateAccept, type AcceptInput } from '../../src/domain/accept';
+import { buildCheckPrompt, parseCheck, type CheckItem } from '../../src/domain/check';
 import { buildContextPrompt, parseLlmContext, type ContextItem } from '../../src/domain/context';
 import {
   buildDistractorPrompt,
@@ -211,5 +213,18 @@ export async function askContext(
   const raw = await llm(buildContextPrompt(input));
   const answer = raw === '' ? null : parseLlmContext(raw);
   if (!answer) throw new Error(`unreadable context answer: ${raw.slice(0, 200)}`);
+  return answer;
+}
+
+/** Phase 34 (spec D5). The real checker prompt and parser, as prepareSession
+ *  sends them after the context call, minus the database. Throws on an empty or
+ *  unreadable answer: the session would fail the attempt on it too. */
+export async function askCheck(
+  llm: LlmClient,
+  input: { from: LanguageCode; to: LanguageCode; items: CheckItem[] },
+): Promise<LlmCheck> {
+  const raw = await llm(buildCheckPrompt(input.items, input.from, input.to));
+  const answer = raw === '' ? null : parseCheck(raw);
+  if (!answer) throw new Error(`unreadable checker answer: ${raw.slice(0, 200)}`);
   return answer;
 }

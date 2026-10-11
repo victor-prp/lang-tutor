@@ -14,6 +14,7 @@ import {
   assertMockServerReachable,
   clearNamespace,
   countGeminiRequests,
+  expectCheck,
   expectContext,
   expectDistractors,
   expectJudge,
@@ -93,10 +94,13 @@ async function prepared(
   batch: { tasks: Task[]; overrides?: Record<string, Record<string, unknown>> },
   context: Parameters<typeof expectContext>[1] | null,
   contextOpts: Parameters<typeof expectContext>[2] = {},
+  /** Phase 34 (spec D5). How the checker reads each sentence the context call wrote. */
+  check: Record<string, Record<string, unknown>> = {},
 ) {
   await clearNamespace(ns);
   await expectDistractors(ns, batch);
   if (context !== null) await expectContext(ns, context, contextOpts);
+  await expectCheck(ns, { overrides: check });
   const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN));
   await deps.sessions.prepareSession({ session_id: sessionId, picks, listening: false, speaking: false, ordinal });
   const record = await deps.sessions.getSession('u_1', sessionId);
@@ -118,6 +122,8 @@ const CHOICES_CONTEXT = [
   { key: 'q2', context: 'השולחן במטבח עשוי מעץ.', context_translation: 'The kitchen table is made of wood.', context_word: 'השולחן' },
   { key: 'q3', context: DOWNLOAD_SENTENCE, context_translation: 'I want to download the new game tonight.', context_word: 'להוריד' },
 ];
+// Phase 34 (spec D5). The checker reads each sentence as the writer meant it.
+const CHOICES_CHECK = { q1c: { context_meaning: 'לנסר' }, q2c: { context_words: ['table'] }, q3c: { context_words: ['download'] } };
 // Ordinal 2, three picks: a typed meaning, a tiles card and a sentence translation.
 const SENTENCES_BATCH = {
   tasks: ['meaning', 'meaning', 'translate'] as Task[],
@@ -127,6 +133,7 @@ const SENTENCES_CONTEXT = [
   { key: 'q1', context: SAW_SENTENCE, context_translation: SAW_HEBREW, context_word: 'saw' },
   { key: 'q3', sentence_word: 'נשלב' },
 ];
+const SENTENCES_CHECK = { q1c: { context_meaning: 'לנסר' }, q3: { natural_translation: "Let's combine forces." } };
 
 const ofType = <T extends Question['type']>(questions: Question[], type: T) =>
   questions.find((q): q is Extract<Question, { type: T }> => q.type === type)!;
@@ -134,7 +141,7 @@ const ofType = <T extends Question['type']>(questions: Question[], type: T) =>
 describe('context sentences and marks, through the database', () => {
   it('category C (d388f738): the typed card for להוריד shows a Hebrew sentence that pins the download sense, its word marked', async () => {
     const w = await words();
-    const { questions, stored } = await prepared([pick(w.saw), pick(w.table), pick(w.download)], 0, CHOICES_BATCH, CHOICES_CONTEXT);
+    const { questions, stored } = await prepared([pick(w.saw), pick(w.table), pick(w.download)], 0, CHOICES_BATCH, CHOICES_CONTEXT, {}, CHOICES_CHECK);
     expect(ofType(questions, 'typed_translation')).toMatchObject({
       question: 'להוריד', answer: 'download', context: { text: DOWNLOAD_SENTENCE, mark: { start: 9, end: 15 } },
     });
@@ -146,7 +153,7 @@ describe('context sentences and marks, through the database', () => {
 
   it('category H (a7d6bdb4): the multiple choice for saw shows an English sentence with saw marked', async () => {
     const w = await words();
-    const { questions, stored } = await prepared([pick(w.saw), pick(w.table), pick(w.download)], 0, CHOICES_BATCH, CHOICES_CONTEXT);
+    const { questions, stored } = await prepared([pick(w.saw), pick(w.table), pick(w.download)], 0, CHOICES_BATCH, CHOICES_CONTEXT, {}, CHOICES_CHECK);
     expect(ofType(questions, 'multiple_choice')).toMatchObject({ question: 'saw', context: { text: SAW_SENTENCE, mark: { start: 7, end: 10 } } });
     expect(stored[0]).toMatchObject({ context_translation: SAW_HEBREW });
     expect(ofType(questions, 'reverse_choice')).toMatchObject({ context: { text: 'השולחן במטבח עשוי מעץ.', mark: { start: 0, end: 6 } } });
@@ -154,7 +161,7 @@ describe('context sentences and marks, through the database', () => {
 
   it('category E (71b0b407): the typed meaning for saw shows its sentence, and the judge is given that sentence and its Hebrew', async () => {
     const w = await words();
-    const { sessionId, questions } = await prepared([pick(w.saw), pick(w.lamp), pick(w.combine)], 2, SENTENCES_BATCH, SENTENCES_CONTEXT);
+    const { sessionId, questions } = await prepared([pick(w.saw), pick(w.lamp), pick(w.combine)], 2, SENTENCES_BATCH, SENTENCES_CONTEXT, {}, SENTENCES_CHECK);
     const meaning = ofType(questions, 'typed_meaning');
     expect(meaning).toMatchObject({ question: 'saw', context: { text: SAW_SENTENCE, mark: { start: 7, end: 10 } } });
 
@@ -168,7 +175,7 @@ describe('context sentences and marks, through the database', () => {
 
   it('category F (eb95d246): the sentence card for combine marks נשלב in בואו נשלב כוחות', async () => {
     const w = await words();
-    const { questions, stored } = await prepared([pick(w.saw), pick(w.lamp), pick(w.combine)], 2, SENTENCES_BATCH, SENTENCES_CONTEXT);
+    const { questions, stored } = await prepared([pick(w.saw), pick(w.lamp), pick(w.combine)], 2, SENTENCES_BATCH, SENTENCES_CONTEXT, {}, SENTENCES_CHECK);
     expect(ofType(questions, 'sentence_translation')).toMatchObject({ question: 'בואו נשלב כוחות.', answer: 'combine', mark: { start: 5, end: 9 } });
     expect(stored[2]).toMatchObject({ type: 'sentence_translation', context: null, sentence_mark_start: 5, sentence_mark_end: 9 });
     // The tiles card shows no sentence.
@@ -194,7 +201,7 @@ describe('context sentences and marks, through the database', () => {
     deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns), contextCallTimeoutMs: 500 });
     const w = await words();
     const started = Date.now();
-    const { questions } = await prepared([pick(w.saw), pick(w.table), pick(w.download)], 0, CHOICES_BATCH, CHOICES_CONTEXT, { delayMs: 5_000 });
+    const { questions } = await prepared([pick(w.saw), pick(w.table), pick(w.download)], 0, CHOICES_BATCH, CHOICES_CONTEXT, { delayMs: 5_000 }, CHOICES_CHECK);
     expect(Date.now() - started).toBeLessThan(4_000);
     // The answer came too late to be used: each card is on its saved example.
     expect(ofType(questions, 'multiple_choice')).toMatchObject({ context: { text: 'He will saw the branch off.', mark: null } });
@@ -205,9 +212,9 @@ describe('context sentences and marks, through the database', () => {
   it('never shows a sentence a recent session showed for that gloss on that card', async () => {
     const w = await words();
     const picks = [pick(w.saw), pick(w.table), pick(w.download)];
-    const first = await prepared(picks, 0, CHOICES_BATCH, CHOICES_CONTEXT);
+    const first = await prepared(picks, 0, CHOICES_BATCH, CHOICES_CONTEXT, {}, CHOICES_CHECK);
     await deps.sessions.skipSession('u_1', first.sessionId);
-    const second = await prepared(picks, 0, CHOICES_BATCH, CHOICES_CONTEXT);
+    const second = await prepared(picks, 0, CHOICES_BATCH, CHOICES_CONTEXT, {}, CHOICES_CHECK);
     expect(ofType(second.questions, 'typed_translation')).toMatchObject({ context: { text: 'אני צריך להוריד את הקובץ קודם.', mark: null } });
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'context_dropped', type: 'typed_translation', reason: expect.stringContaining('recent') }));
   });

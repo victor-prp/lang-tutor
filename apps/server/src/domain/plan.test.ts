@@ -84,6 +84,24 @@ describe('planSession (spec D3, D4, D10)', () => {
     expect(plan.order).toEqual([0, 1, 2, 3, 4, 5, 7, 6, 8, 9]);
   });
 
+  // Phase 34 (spec D3). 282213b7: main sat on board f8ccaf3d as מרכזי beside
+  // mainstream, which the dictionary also knows as מרכזי. Either pairing was right.
+  it('category A (282213b7): never puts main and mainstream on one board when mainstream is also מרכזי', () => {
+    const main: PlanPick = { form: 'main', translation: 'מרכזי', tiles: true, speakable: true, clozeGap: true, meanings: ['מרכזי', 'ראשי', 'ים פתוח'] };
+    const mainstream: PlanPick = { form: 'mainstream', translation: 'מיינסטרימי', tiles: true, speakable: true, clozeGap: true, meanings: ['מיינסטרימי', 'מרכזי'] };
+    const list: PlanPick[] = [pick(0), pick(1), pick(2), main, mainstream, pick(5), pick(6), pick(7), pick(8), pick(9)];
+    const plan = planSession(list, OFF);
+    expect(plan.board).toEqual({ start: 3 });
+    // The board is main, word5, word6 and word7; mainstream waits for the next run.
+    expect(plan.order).toEqual([0, 1, 2, 3, 5, 6, 7, 4, 8, 9]);
+    // Either way round: the clash is found from the later word's meanings too.
+    const turned = planSession([pick(0), pick(1), pick(2), mainstream, main, pick(5), pick(6), pick(7), pick(8), pick(9)], OFF);
+    expect(turned.order).toEqual([0, 1, 2, 3, 5, 6, 7, 4, 8, 9]);
+    // Without what the dictionary knows, the two share the board, as on lane 0.
+    const unknown = planSession(list.map(({ meanings: _, ...rest }) => rest), OFF);
+    expect(unknown.order).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
   it('has no board when four distinct words cannot be found', () => {
     const same = Array.from({ length: 8 }, (_, i) => ({ form: i < 3 ? `w${i}` : 'lock', translation: `מ${i}`, tiles: true, speakable: true, clozeGap: true }));
     const plan = planSession(same, OFF);

@@ -53,6 +53,7 @@ export async function main(): Promise<void> {
     translationTimeoutMs: config.translationTimeoutMs,
     sessionGenerationTimeoutMs: config.sessionGenerationTimeoutMs,
     contextCallTimeoutMs: config.contextCallTimeoutMs,
+    checkerCallTimeoutMs: config.checkerCallTimeoutMs,
     speechTimeoutMs: config.speechTimeoutMs,
     judgeTimeoutMs: config.judgeTimeoutMs,
     photoReadTimeoutMs: config.photoReadTimeoutMs,

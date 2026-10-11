@@ -24,10 +24,21 @@ export const SESSION_GENERATION_BUDGET_MS = 300_000;
  *  session. The environment may lower it (config.ts); tests do. */
 export const CONTEXT_CALL_BUDGET_MS = 60_000;
 
+/** Phase 34 (spec D5, ruling R12). The most the checker may take, the call after
+ *  the context call. A minute, as the context call's: a full session's checks
+ *  are one short answer (the measurement is above LlmCheckSchema). Unlike the
+ *  context call, a checker that runs out fails the attempt, and pg-boss retries
+ *  it. The environment may lower it (config.ts); tests do. */
+export const CHECKER_CALL_BUDGET_MS = 60_000;
+
 /** Phase 34 (ruling R12). Every model call one prepare-session attempt makes, in
- *  order, each at most its budget: the batch, then the context call. A call
- *  added to the attempt (the checker, Task 6) adds its budget here. */
-export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [SESSION_GENERATION_BUDGET_MS, CONTEXT_CALL_BUDGET_MS];
+ *  order, each at most its budget: the batch, the context call, the checker. A
+ *  call added to the attempt adds its budget here. */
+export const PREPARE_SESSION_CALL_BUDGETS_MS: readonly number[] = [
+  SESSION_GENERATION_BUDGET_MS,
+  CONTEXT_CALL_BUDGET_MS,
+  CHECKER_CALL_BUDGET_MS,
+];
 
 /** Twice the sum of the calls' budgets, phase 19's rule: a worker that crashed
  *  mid-call expires and is retried, and a healthy attempt, every call of which

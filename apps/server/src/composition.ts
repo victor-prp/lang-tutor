@@ -122,6 +122,9 @@ export function createServerDeps(io: {
   // Phase 34 (ruling R12). The budget of the context call after the batch: its
   // own and short, so a hang costs the sentences, not the batch's five minutes.
   contextCallTimeoutMs: number;
+  // Phase 34 (spec D5, ruling R12). The checker's budget, after the context call:
+  // its own, so its wait is bounded apart from the batch's five minutes.
+  checkerCallTimeoutMs: number;
   // Phase 25 (spec D13). One transcription's budget: short, because a learner
   // is waiting on a card.
   speechTimeoutMs: number;
@@ -171,6 +174,17 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     timeoutMs: io.contextCallTimeoutMs,
+  });
+
+  // Phase 34 (spec D5, ruling R12). The same provider for the checker, with its
+  // own budget. Unlike the context call, a checker that times out fails the
+  // attempt, which pg-boss retries.
+  const checkerLlm: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.checkerCallTimeoutMs,
   });
 
   // Phase 25. The same provider over audio. Named here and nowhere else
@@ -235,6 +249,7 @@ export function createServerDeps(io: {
       logger: io.logger,
       llm: sessionLlm,
       contextLlm,
+      checkerLlm,
       transcriber,
       judge,
     }),

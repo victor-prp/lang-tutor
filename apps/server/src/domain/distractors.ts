@@ -30,6 +30,10 @@ import { dropNulls, unfence } from './translation';
  *
  * Phase 27. Three tasks more (spec D5 to D7): wrong words for a sentence with
  * a blank, a new sentence with its blank, and a Hebrew sentence to translate.
+ *
+ * Phase 34 (spec D3, D4). A choice item asks for six wrong options and keeps the
+ * first three that are not known to be right; the rest are spares the checker
+ * (domain/check.ts) draws on when it calls one of the three right.
  */
 
 /** What the model is asked to do for one item. */
@@ -82,7 +86,45 @@ export const MAX_CARD_ALTERNATIVES = 10;
 
 /** Part of the system prompt, and what MockServer matches to tell this call
  *  from a translation. Changing the wording means changing the stubs. */
-export const DISTRACTOR_MARKER = 'three wrong answers';
+export const DISTRACTOR_MARKER = 'six wrong answers';
+
+/** Phase 34 (spec D4). How many wrong options a choice card shows, and how many
+ *  of the six asked must survive D3 and the checker for the batch to stand. */
+export const KEPT_DISTRACTORS = 3;
+
+/**
+ * Phase 34 (spec D3). What the dictionary already knows to be right, read once
+ * per batch (repo/dictionary.ts, findKnownRight) so no wrong option is one of
+ * them:
+ * - `meaningsByLexeme`: per picked lexeme, every rendering, citation form and
+ *   alternative of every sense, and every gloss key and gloss alternative, in the
+ *   learner language, of the lexeme and of each homograph (another lexeme of the
+ *   language with a form spelled like a picked one: `see`'s `saw` beside `saw`);
+ * - `meaningsByGloss`: per picked gloss, its own meanings only (its key, its
+ *   alternatives, its senses' renderings), which a context sentence's reading
+ *   must be one of (spec D5);
+ * - `wordsByPrompt`: per rendering text a superset of the picked renderings
+ *   (the read compares loosely), every target word right for it: the accepted
+ *   answers of each rendering with that text in the language pair, and the form
+ *   and lemma it renders. `knownWords` applies the exact rule, `comparable`.
+ */
+export type KnownRight = {
+  meaningsByLexeme: Map<string, string[]>;
+  meaningsByGloss: Map<string, string[]>;
+  wordsByPrompt: Map<string, string[]>;
+};
+
+/** Nothing known: a batch with no dictionary behind it (the eval's). */
+export const nothingKnown = (): KnownRight => ({ meaningsByLexeme: new Map(), meaningsByGloss: new Map(), wordsByPrompt: new Map() });
+
+/** Spec D3 (1, 2). The meanings known right for a lexeme's word, its homographs' included. */
+export const knownMeanings = (known: KnownRight, lexemeId: string): string[] => known.meaningsByLexeme.get(lexemeId) ?? [];
+
+/** Spec D3 (3). The target words known right for a Hebrew prompt: same text under `comparable`. */
+export function knownWords(known: KnownRight, prompt: string): string[] {
+  const key = comparable(prompt);
+  return [...known.wordsByPrompt].flatMap(([text, words]) => (comparable(text) === key ? words : []));
+}
 
 /** One picked gloss as the generation reads it: the saved form, its lexeme,
  *  and that form's rendering of one member sense in the enrollment's source
@@ -119,6 +161,8 @@ export type RecentSentences = Map<string /* glossId */, { cloze: string[]; trans
 export type DistractorItem = {
   key: string;
   task: Task;
+  /** Phase 34 (spec D3). Whose known-right meanings a meaning item's options must avoid. */
+  lexemeId: string;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -146,6 +190,9 @@ export type DistractorPrompt = {
  *  task, cleaned alternatives for a typed one, and nothing else. */
 export type Generated = {
   distractors: string[];
+  /** Phase 34 (spec D4). A choice item's other usable wrong options, in the
+   *  model's order: what the checker's drops are refilled from. */
+  spares: string[];
   alternatives: string[];
   /** Phase 27 (spec D5, D6). A sentence item's validated content, or why it
    *  was not usable: `degraded` is set exactly when `sentence` and `translate`
@@ -189,6 +236,7 @@ export function distractorItems(
       {
         key: keyOf(index),
         task,
+        lexemeId: row.lexemeId,
         form: row.form,
         lemma: row.lemma,
         partOfSpeech: row.partOfSpeech,
@@ -241,8 +289,8 @@ export function buildDistractorPrompt(input: {
     'Each wrong answer must be plausible: the same part of speech, the same register and a',
     'similar length as the correct answer.',
     'A wrong answer must never be right: not the correct answer itself, not a synonym of it, and',
-    'not another valid translation of the word.',
-    'The three wrong answers of an item must differ from each other.',
+    'not another valid translation of the word in any of its senses.',
+    `The six wrong answers of an item must differ from each other. Put the best first: the first ${KEPT_DISTRACTORS} that are usable are shown, and the rest stand by in case one is refused.`,
     "When several items share a word, none of an item's wrong answers may be another item's correct answer.",
     "When several items share a meaning, none of a \"word\" item's wrong answers may be another of those items' words.",
     ...(related.length > 0
@@ -318,30 +366,29 @@ export const comparable = (text: string): string =>
     .trim()
     .toLowerCase();
 
-function badChoice(
+/**
+ * Phase 34 (spec D3, D4). A choice item's wrong options, one at a time: the
+ * usable ones in the model's order, and why the first refused one was refused.
+ * An option is refused when it is empty, repeats the answer or an earlier
+ * option, is in the explanation language where the options are target words,
+ * is a right answer of another row of the session (below), or is known right
+ * to the dictionary: a meaning of the word or of a homograph on a meaning item,
+ * a word right for the prompt on a word or gap item.
+ */
+function usableChoices(
   item: DistractorItem,
   items: DistractorItem[],
   others: readonly OtherRow[],
   found: string[],
   explanationLetters: RegExp,
-): string | null {
-  const texts = found.map((text) => text.trim());
-  if (texts.length !== 3 || texts.some((text) => text === '')) {
-    return `${item.key} needs three non-empty wrong answers`;
-  }
+  known: KnownRight,
+): { usable: string[]; refusal: string | null } {
   // A word item's right answer is the form, and its lemma is right too; a gap
   // item's is also the text the example actually blanks (phase 27, spec D7).
   const isWord = item.task === 'word' || item.task === 'gap';
   const rights = isWord
     ? [item.form, item.lemma, ...(item.answerForm && item.task === 'word' ? [item.answerForm] : []), ...(item.blank ? [item.blank] : [])]
     : [item.translation];
-  const all = texts.map(comparable);
-  if (new Set(all).size !== all.length || all.some((text) => rights.map(comparable).includes(text))) {
-    return `${item.key} repeats the answer or another wrong answer`;
-  }
-  if (isWord && texts.some((text) => explanationLetters.test(text))) {
-    return `${item.key} offers a wrong answer in the explanation language where the options are ${item.form}'s`;
-  }
   // Save-all stores every sense of a word, so the batch can hold the same
   // form twice; the other sense's translation is a right answer on a meaning
   // item. Turned round, two words with one meaning make each other right on a
@@ -355,12 +402,37 @@ function badChoice(
       )
       .map((other) => comparable(isWord ? other.form : other.translation)),
   );
-  if (all.some((text) => siblings.has(text))) {
-    return isWord
-      ? `${item.key} offers another saved word with the same meaning as a wrong answer`
-      : `${item.key} offers another meaning of the same word as a wrong answer`;
+  const dictionary = new Set((isWord ? knownWords(known, item.translation) : knownMeanings(known, item.lexemeId)).map(comparable));
+  const taken = new Set(rights.map(comparable));
+  const usable: string[] = [];
+  let refusal: string | null = null;
+  for (const raw of found) {
+    const text = raw.trim();
+    const key = comparable(text);
+    const why =
+      text === ''
+        ? `${item.key} has an empty wrong answer`
+        : taken.has(key)
+          ? `${item.key} repeats the answer or another wrong answer`
+          : isWord && explanationLetters.test(text)
+            ? `${item.key} offers a wrong answer in the explanation language where the options are ${item.form}'s`
+            : siblings.has(key)
+              ? isWord
+                ? `${item.key} offers another saved word with the same meaning as a wrong answer`
+                : `${item.key} offers another meaning of the same word as a wrong answer`
+              : dictionary.has(key)
+                ? isWord
+                  ? `${item.key} offers ${text}, which the dictionary knows is right for ${item.translation}`
+                  : `${item.key} offers ${text}, which the dictionary knows is a meaning of ${item.form}`
+                : null;
+    if (why) {
+      refusal ??= why;
+      continue;
+    }
+    taken.add(key);
+    usable.push(text);
   }
-  return null;
+  return { usable, refusal };
 }
 
 /** Alternatives for a typed card: trimmed, never empty, never the card's own
@@ -405,6 +477,10 @@ function cleanAlternatives(item: DistractorItem, found: string[] | undefined, ex
  * wrong words and a typed card's alternatives must not be in its script.
  * `others` are the session's rows that ask the model nothing: their other
  * meanings and their words are as off limits as an item's own.
+ *
+ * Phase 34 (spec D3, D4). A choice item keeps the first three usable wrong
+ * options of the six asked, and the rest as spares; it fails only when fewer
+ * than three are usable. `known` is what the dictionary already holds as right.
  */
 export function validateDistractors(
   items: DistractorItem[],
@@ -412,6 +488,7 @@ export function validateDistractors(
   explanation: string,
   others: readonly OtherRow[],
   target: LanguageCode,
+  known: KnownRight,
 ): DistractorVerdict {
   const explanationLetters = language(explanation).letters;
   const answered = new Map(answer.items.map((item) => [item.key, item]));
@@ -445,9 +522,16 @@ export function validateDistractors(
       });
       continue;
     }
-    const reason = badChoice(item, items, others, found.distractors, explanationLetters);
-    if (reason) return { ok: false, reason };
-    byKey.set(item.key, { ...NOTHING_GENERATED, distractors: found.distractors.map((text) => text.trim()) });
+    const { usable, refusal } = usableChoices(item, items, others, found.distractors, explanationLetters, known);
+    if (usable.length < KEPT_DISTRACTORS) {
+      return {
+        ok: false,
+        reason: refusal
+          ? `${refusal} (${usable.length} of ${found.distractors.length} usable, ${KEPT_DISTRACTORS} needed)`
+          : `${item.key} needs three non-empty wrong answers`,
+      };
+    }
+    byKey.set(item.key, { ...NOTHING_GENERATED, distractors: usable.slice(0, KEPT_DISTRACTORS), spares: usable.slice(KEPT_DISTRACTORS) });
   }
   return { ok: true, byKey };
 }
@@ -468,11 +552,16 @@ export type QuestionOption = { position: number; text: string; is_correct: boole
 /** Phase 24 (spec D10). A board's five meanings as stored: its four words'
  *  meanings, then the first of the first word's wrong meanings that is none of
  *  them nor another saved meaning of one of its words, so the last pair is
- *  never forced. Null when all three are. */
+ *  never forced. Null when all are.
+ *
+ *  Phase 34 (spec D3, D4). `wrong` is every usable wrong meaning the first word
+ *  has, spares included, and the fifth is also none that the dictionary knows
+ *  for any of the four words or their homographs (1d268882: אחר כך is poi's own). */
 export function boardMeanings(
   board: readonly GenerationContext[],
   session: readonly GenerationContext[],
   wrong: readonly string[],
+  known: KnownRight,
 ): string[] | null {
   const meanings = board.map((row) => row.translation);
   // A board word's other saved meanings would show it twice on the board.
@@ -480,6 +569,7 @@ export function boardMeanings(
   const taken = new Set([
     ...meanings.map(comparable),
     ...session.filter((row) => boardForms.has(comparable(row.form))).map((row) => comparable(row.translation)),
+    ...board.flatMap((row) => knownMeanings(known, row.lexemeId)).map(comparable),
   ]);
   const extra = wrong.map((text) => text.trim()).find((text) => !taken.has(comparable(text)));
   return extra === undefined ? null : [...meanings, extra];
@@ -494,7 +584,7 @@ export type Extras = {
   gap: { start: number; end: number } | null;
 };
 export const NO_EXTRAS: Extras = { tiles: null, board: null, gap: null };
-export const NOTHING_GENERATED: Generated = { distractors: [], alternatives: [], sentence: null, translate: null, degraded: null };
+export const NOTHING_GENERATED: Generated = { distractors: [], spares: [], alternatives: [], sentence: null, translate: null, degraded: null };
 
 export type QuestionContent = {
   prompt: string | null;

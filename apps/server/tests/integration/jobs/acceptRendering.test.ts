@@ -19,6 +19,7 @@ import {
   clearNamespace,
   countGeminiRequests,
   expectAccept,
+  expectCheck,
   expectDistractors,
   expectGeminiRawBody,
   expectGeminiStatus,
@@ -243,6 +244,7 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
     // The retry reads again, and the queue keeps one job per rendering.
     await clearNamespace(ns);
     await expectDistractors(ns);
+    await expectCheck(ns);
     await deps().sessions.prepareSession(payload);
     expect(await acceptJobs()).toEqual(expected);
     expect((await deps().sessions.getSession('u_1', sessionId)).status).toBe('ready');
@@ -251,6 +253,7 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
   it("never writes a session's own typed alternatives into the dictionary", async () => {
     await expectAccept(ns, { answers: ['codex'], answer_form: null });
     await expectDistractors(ns);
+    await expectCheck(ns);
     await registerWorkers(boss, deps(), { pollingIntervalSeconds: 0.5 });
     const { sessionId, saved } = await requestListSession();
 

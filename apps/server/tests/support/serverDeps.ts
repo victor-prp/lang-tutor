@@ -2,7 +2,7 @@ import type { PgBoss } from 'pg-boss';
 
 import { createServerDeps, type AppDeps } from '../../src/composition';
 import type { Db } from '../../src/db/client';
-import { CONTEXT_CALL_BUDGET_MS, PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from '../../src/domain/jobs';
+import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from '../../src/domain/jobs';
 import type { Logger } from '../../src/logger';
 import { unstartedBoss } from './jobs';
 
@@ -36,6 +36,8 @@ export function createTestServerDeps(io: {
   sessionGenerationTimeoutMs?: number;
   /** Phase 34. The budget of the context call; defaults to production's. */
   contextCallTimeoutMs?: number;
+  /** Phase 34. The budget of the checker; defaults to production's. */
+  checkerCallTimeoutMs?: number;
   /** Phase 25. The budget of one transcription; defaults to production's. */
   speechTimeoutMs?: number;
   /** Phase 27. The budget of one judged answer; defaults to production's. */
@@ -65,6 +67,7 @@ export function createTestServerDeps(io: {
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
     sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? SESSION_GENERATION_BUDGET_MS,
     contextCallTimeoutMs: io.contextCallTimeoutMs ?? CONTEXT_CALL_BUDGET_MS,
+    checkerCallTimeoutMs: io.checkerCallTimeoutMs ?? CHECKER_CALL_BUDGET_MS,
     speechTimeoutMs: io.speechTimeoutMs ?? 8_000,
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,

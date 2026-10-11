@@ -1,4 +1,4 @@
-import { CONTEXT_CALL_BUDGET_MS, PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
+import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
 
 // A pure function of its argument: it reads no global, so a test hands it a
 // literal object rather than mutating the process environment.
@@ -10,6 +10,7 @@ export type Config = {
   translationTimeoutMs: number;
   sessionGenerationTimeoutMs: number;
   contextCallTimeoutMs: number;
+  checkerCallTimeoutMs: number;
   speechTimeoutMs: number;
   judgeTimeoutMs: number;
   photoReadTimeoutMs: number;
@@ -61,6 +62,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     contextCallTimeoutMs: Math.min(
       Number(env.CONTEXT_CALL_TIMEOUT_MS) || CONTEXT_CALL_BUDGET_MS,
       CONTEXT_CALL_BUDGET_MS,
+    ),
+    // Phase 34 (spec D5, ruling R12). The checker after the context call, capped the same way.
+    checkerCallTimeoutMs: Math.min(
+      Number(env.CHECKER_CALL_TIMEOUT_MS) || CHECKER_CALL_BUDGET_MS,
+      CHECKER_CALL_BUDGET_MS,
     ),
     speechTimeoutMs: Number(env.SPEECH_TIMEOUT_MS) || DEFAULT_SPEECH_TIMEOUT_MS,
     judgeTimeoutMs: Number(env.JUDGE_TIMEOUT_MS) || DEFAULT_JUDGE_TIMEOUT_MS,

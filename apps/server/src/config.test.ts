@@ -10,6 +10,7 @@ import {
   redactDatabaseUrl,
 } from './config';
 import {
+  CHECKER_CALL_BUDGET_MS,
   CONTEXT_CALL_BUDGET_MS,
   PREPARE_SESSION_CALL_BUDGETS_MS,
   PREPARE_SESSION_EXPIRY_SECONDS,
@@ -28,6 +29,7 @@ describe('loadConfig', () => {
       translationTimeoutMs: 25_000,
       sessionGenerationTimeoutMs: 300_000,
       contextCallTimeoutMs: 60_000,
+      checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
@@ -75,6 +77,7 @@ describe('loadConfig', () => {
       translationTimeoutMs: 12_000,
       sessionGenerationTimeoutMs: 300_000,
       contextCallTimeoutMs: 60_000,
+      checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
@@ -105,12 +108,21 @@ describe('loadConfig', () => {
   // expiry covers their sum.
   it('expires a prepare-session job no sooner than twice the sum of its calls’ default budgets', () => {
     const config = loadConfig({});
-    expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(2 * (config.sessionGenerationTimeoutMs + config.contextCallTimeoutMs));
+    expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(
+      2 * (config.sessionGenerationTimeoutMs + config.contextCallTimeoutMs + config.checkerCallTimeoutMs),
+    );
   });
 
-  it('expires a prepare-session job at exactly twice the batch’s and the context call’s budgets (ruling R12)', () => {
-    expect(PREPARE_SESSION_CALL_BUDGETS_MS).toEqual([SESSION_GENERATION_BUDGET_MS, CONTEXT_CALL_BUDGET_MS]);
-    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (300_000 + 60_000)) / 1000);
+  it('expires a prepare-session job at exactly twice the batch’s, the context call’s and the checker’s budgets (ruling R12)', () => {
+    expect(PREPARE_SESSION_CALL_BUDGETS_MS).toEqual([SESSION_GENERATION_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, CHECKER_CALL_BUDGET_MS]);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (300_000 + 60_000 + 60_000)) / 1000);
+  });
+
+  it('defaults the checker’s budget to a minute, reads CHECKER_CALL_TIMEOUT_MS, and never above a minute', () => {
+    expect(loadConfig({}).checkerCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: '2000' }).checkerCallTimeoutMs).toBe(2_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: '300000' }).checkerCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: 'nonsense' }).checkerCallTimeoutMs).toBe(60_000);
   });
 
   it('defaults the context call’s budget to a minute, reads CONTEXT_CALL_TIMEOUT_MS, and never above a minute', () => {

@@ -28,11 +28,15 @@
  *                      how each would be kept. Run it several times: the batch's
  *                      context strings hung the call without a 400 (see the comment
  *                      above LlmDistractorsSchema), so the wait is a measurement too.
+ *   --check            measure the checker call instead (LlmCheckSchema, spec D5,
+ *                      ruling R8): ten items of every kind through buildCheckPrompt,
+ *                      within production's budget for it, and what each answer says.
+ *                      Run it several times, for the same reason as --context.
+ *   --required         with --check: every field of an item required, the variant
+ *                      ruling R8 names if the optional fields make the call hang.
  *
- * The prompt is the production one. Only the batch's user message gains an
- * `also` block that asks for the six wrong answers the prompt does not ask for
- * yet, so the answer is as long as a real one; the wording is a measurement's,
- * not the product's.
+ * The prompt is the production one, which asks a choice item for six wrong
+ * answers (spec D4), so the answer is as long as a real one.
  *
  * Exit status: 0 accepted, 1 refused (a 400), 2 any other provider failure (the
  * measurement is then inconclusive), 3 accepted but the answer does not parse.
@@ -40,10 +44,11 @@
 import { z, type ZodType } from 'zod';
 
 import type { QuestionType } from '@lang-tutor/core/domain';
-import { LlmContextSchema, LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
+import { LlmCheckSchema, LlmContextSchema, LlmDistractorsSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
-import { CONTEXT_CALL_BUDGET_MS } from '../../src/domain/jobs';
+import { buildCheckPrompt, parseCheck, readCheck, type CheckItem } from '../../src/domain/check';
+import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS } from '../../src/domain/jobs';
 import {
   buildContextPrompt,
   contextItemFor,
@@ -110,11 +115,6 @@ const ROWS: { row: GenerationContext; task: Task }[] = [
   { task: 'translate', row: row('parla', 'parlare', 'verb', 'לדבר', 'Lei parla tre lingue.', 'היא מדברת בשלוש שפות.') },
 ];
 
-/** What the production prompt does not ask for yet (Task 6 writes that wording). */
-const ALSO = {
-  wrong_answers: 'For a "meaning", "word" or "gap" item write six wrong answers in distractors instead of three.',
-};
-
 /** The card each row's context item is for, with --context: every kind the call
  *  answers, a target sentence, a Hebrew one and a sentence card's mark. */
 const CONTEXT_TYPES: Record<Task, QuestionType> = {
@@ -126,7 +126,7 @@ const CONTEXT_TYPES: Record<Task, QuestionType> = {
   translate: 'sentence_translation',
 };
 
-type Args = { oversized: boolean; distractors: number | null; extra: number; context: boolean };
+type Args = { oversized: boolean; distractors: number | null; extra: number; context: boolean; check: boolean; required: boolean };
 
 function parseArgs(argv: string[]): Args {
   const number = (flag: string): number | null => {
@@ -141,6 +141,8 @@ function parseArgs(argv: string[]): Args {
     distractors: number('--distractors'),
     extra: number('--extra') ?? 0,
     context: argv.includes('--context'),
+    check: argv.includes('--check'),
+    required: argv.includes('--required'),
   };
 }
 
@@ -175,6 +177,7 @@ async function main(): Promise<number> {
   }
   const args = parseArgs(process.argv.slice(2));
   if (args.context) return measureContext(gemini);
+  if (args.check) return measureCheck(gemini, args.required);
   const { schema, label } = schemaFor(args);
 
   const recent: RecentSentences = new Map();
@@ -184,7 +187,6 @@ async function main(): Promise<number> {
     recent,
   );
   const prompt = buildDistractorPrompt({ items, from: 'it', to: 'he', others: [] });
-  const user = JSON.stringify({ ...JSON.parse(prompt.user), also: ALSO });
 
   // The provider throws only `responded 400`; the reason is in the body, so a
   // wrapping fetch prints it. The body never carries the key (it travels in a header).
@@ -216,7 +218,7 @@ async function main(): Promise<number> {
   const started = Date.now();
   let raw: string;
   try {
-    raw = await llm({ system: prompt.system, user, schema });
+    raw = await llm({ system: prompt.system, user: prompt.user, schema });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.log(`after     ${Date.now() - started} ms`);
@@ -316,6 +318,83 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
   }
   for (const field of CONTEXT_FIELDS) {
     console.log(`filled    ${field.padEnd(20)} ${answer.items.filter((item) => (item as Record<string, unknown>)[field]).length} of ${answer.items.length}`);
+  }
+  return 0;
+}
+
+/** Spec D5. Ten checks of every kind, as prepareSession asks them for an English
+ *  session: two choice cards and a reversed one, a gap, two target-language
+ *  contexts and two Hebrew ones, and two sentence cards. Each has an answer a
+ *  careful reader gives, printed beside the model's. */
+const CHECKS: { item: CheckItem; expect: string }[] = [
+  { item: { key: 'q1', task: 'choice', word: 'blow up', options: ['להרוס', 'לקפל', 'לשבור', 'להתפוצץ', 'לצבוע', 'לבשל'] }, expect: 'להרוס and להתפוצץ right' },
+  { item: { key: 'q2', task: 'choice', word: 'pick up', options: ['להרים', 'לכתוב', 'לשיר', 'לרקוד', 'לבשל', 'לישון'] }, expect: 'להרים right' },
+  { item: { key: 'q3', task: 'choice', word: 'מהר', options: ['quickly', 'fast', 'slowly', 'loudly', 'rarely', 'softly'] }, expect: 'quickly and fast right' },
+  { item: { key: 'q4', task: 'gap', sentence: 'She ___ the door and walked in.', options: ['unlocked', 'ate', 'slept', 'sang', 'cooked', 'painted'] }, expect: 'unlocked fits' },
+  { item: { key: 'q5c', task: 'meaning', sentence: 'Please saw the plank in half.', word: 'saw', candidates: ['לנסר', 'מסור', 'ראה', 'לראות'] }, expect: 'לנסר' },
+  { item: { key: 'q6c', task: 'meaning', sentence: 'I saw him at the station yesterday.', word: 'saw', candidates: ['לנסר', 'מסור', 'ראה', 'לראות'] }, expect: 'ראה or לראות' },
+  { item: { key: 'q7c', task: 'words', sentence: 'אני רוצה להוריד את המשחק החדש הלילה.', word: 'להוריד' }, expect: 'download' },
+  { item: { key: 'q8c', task: 'words', sentence: 'תוריד את הווליום, בבקשה.', word: 'תוריד' }, expect: 'turn down, lower' },
+  { item: { key: 'q9', task: 'translate', sentence: 'בואו נשלב כוחות.' }, expect: 'join forces, not combine' },
+  { item: { key: 'q10', task: 'translate', sentence: 'אני מקווה שהדברים ישתפרו בקרוב.' }, expect: 'improve' },
+];
+
+/** Ruling R8. The checker call at full size, within production's budget for it. */
+async function measureCheck(gemini: ReturnType<typeof loadGeminiConfig>, required: boolean): Promise<number> {
+  const prompt = buildCheckPrompt(CHECKS.map((check) => check.item), 'en', 'he');
+  const element = LlmCheckSchema.shape.items.element;
+  const schema = required
+    ? z.object({ items: z.array(z.object(Object.fromEntries(Object.entries(element.shape).map(([name, type]) => [name, type instanceof z.ZodOptional ? type.unwrap() : type])) as Record<string, ZodType>)) })
+    : LlmCheckSchema;
+  const llm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    timeoutMs: CHECKER_CALL_BUDGET_MS,
+  });
+  console.log(`model     ${gemini.model}`);
+  console.log(`schema    LlmCheckSchema${required ? ', every field required' : ''} (${JSON.stringify(toGeminiSchema(schema)).length} characters of responseSchema)`);
+  console.log(`request   ${CHECKS.length} items: ${CHECKS.map((check) => check.item.task).join(' ')}`);
+  const started = Date.now();
+  let raw: string;
+  try {
+    raw = await llm({ ...prompt, schema: schema as typeof LlmCheckSchema });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(`after     ${Date.now() - started} ms`);
+    if (/responded 400$/.test(message)) {
+      console.log(`refused   ${message}`);
+      return 1;
+    }
+    console.log(`failed    ${message} (inconclusive)`);
+    return 2;
+  }
+  console.log(`after     ${Date.now() - started} ms`);
+  console.log('accepted');
+  const answer = parseCheck(raw);
+  const reading = answer ? readCheck(CHECKS.map((check) => check.item), answer) : null;
+  if (!answer || !reading?.ok) {
+    console.log(`parse     FAILED: ${reading && !reading.ok ? reading.reason : raw.slice(0, 300)}`);
+    return 3;
+  }
+  console.log(`parse     ok, ${answer.items.length} items`);
+  for (const { item, expect } of CHECKS) {
+    const finding = reading.byKey.get(item.key)!;
+    const said = (() => {
+      switch (finding.task) {
+        case 'choice':
+        case 'gap':
+          return (item as { options: string[] }).options.filter((_, index) => finding.alsoRight[index]).join(', ') || '(none right)';
+        case 'meaning':
+          return finding.meaning || '(none)';
+        case 'words':
+          return finding.words.join(', ') || '(none)';
+        case 'translate':
+          return finding.translation || '(none)';
+      }
+    })();
+    console.log(`${item.key.padEnd(4)} ${item.task.padEnd(9)} ${said}   [expected: ${expect}]`);
   }
   return 0;
 }

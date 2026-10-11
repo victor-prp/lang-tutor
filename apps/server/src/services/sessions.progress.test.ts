@@ -119,6 +119,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     now: createFakeClock(0),
     llm: createFakeLlmClient(''),
     contextLlm: createFakeLlmClient(''),
+    checkerLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
   });

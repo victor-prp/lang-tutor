@@ -10,34 +10,53 @@ import {
   spokenVerdict,
   type AnswerInput,
   type JudgedQuestion,
+  type QuestionType,
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
 
 import { usableAnswerForm } from '../domain/answerForm';
+import {
+  buildCheckPrompt,
+  contextKeyOf,
+  meaningFits,
+  parseCheck,
+  readCheck,
+  readingCandidates,
+  translationUses,
+  wordsFit,
+  wrongOnly,
+  type CheckFinding,
+  type CheckItem,
+} from '../domain/check';
 import { findGap } from '../domain/cloze';
 import {
   buildContextPrompt,
   contextColumns,
   contextItemFor,
+  contextLanguageOf,
   fallbackContext,
   markFor,
   parseLlmContext,
   resolveContext,
+  type BareContextItem,
   type ContextItem,
   type StoredContext,
 } from '../domain/context';
 import {
+  KEPT_DISTRACTORS,
   NOTHING_GENERATED,
   boardMeanings,
   buildDistractorPrompt,
   distractorItems,
   generatedContent,
   keyOf,
+  knownMeanings,
   parseLlmDistractors,
   tasksFor,
   validateDistractors,
   withSiblingAlternatives,
   type DistractorVerdict,
+  type GenerationContext,
   type Generated,
 } from '../domain/distractors';
 import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
@@ -84,6 +103,9 @@ import type { SpeechTranscriber } from './speech';
 import type { Repos, Transaction } from './transaction';
 
 export type { Transaction } from './transaction';
+
+/** Phase 34 (spec D4, D5). The cards that show wrong options, three of them. */
+const CHOSEN: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'listen_choice', 'reverse_choice', 'cloze_choice']);
 
 // The one place a completed session is logged. Redundant with the database, kept
 // because it is output you can tail without opening psql — structured, so you
@@ -175,6 +197,7 @@ export function createSessionService({
   logger,
   llm,
   contextLlm,
+  checkerLlm,
   transcriber,
   judge,
 }: {
@@ -186,6 +209,9 @@ export function createSessionService({
   /** Phase 34 (ruling R12). The context call's client: the batch's provider
    *  with a short budget of its own, so a hang costs the sentences only. */
   contextLlm: LlmClient;
+  /** Phase 34 (spec D5, ruling R12). The checker's client, likewise with a
+   *  budget of its own; its failure fails the attempt, which pg-boss retries. */
+  checkerLlm: LlmClient;
   transcriber: SpeechTranscriber;
   judge: LlmClient;
 }) {
@@ -620,7 +646,19 @@ export function createSessionService({
         // a card asks for it only when it is plausibly a form of its own word,
         // and as the card will show it. Everything below reads this one value.
         const asked = context.map((row) => ({ ...row, answerForm: usableAnswerForm(row.answerForm, row.form, row.lemma) }));
-        return { state, enrolled, context: asked, recent, recentContexts, siblings };
+        // Phase 34 (spec D3). What the dictionary already knows to be right for
+        // these picks, read once: no wrong option, no board's fifth meaning and no
+        // pair of board words may be one of them.
+        const unique = (values: string[]) => [...new Set(values)];
+        const known = await dict.findKnownRight({
+          glossIds: unique(asked.map((row) => row.glossId)),
+          lexemeIds: unique(asked.map((row) => row.lexemeId)),
+          variantIds: unique(asked.map((row) => row.variantId)),
+          prompts: unique(asked.map((row) => row.translation)),
+          userLanguageCode: enrolled.source_language,
+          targetLanguage: enrolled.target_language,
+        });
+        return { state, enrolled, context: asked, recent, recentContexts, siblings, known };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -642,6 +680,8 @@ export function createSessionService({
           speakable: speakable(row.form) && speakable(row.answerForm ?? row.form),
           // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
           clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
+          // Phase 34 (spec D3): no board word's meaning is one the dictionary knows for another.
+          meanings: knownMeanings(read.known, row.lexemeId),
         })),
         { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
       );
@@ -665,7 +705,6 @@ export function createSessionService({
       const started = now();
       let modelMs = 0;
       let verdict: Extract<DistractorVerdict, { ok: true }>;
-      let meanings: string[] | null;
       const board = plan.board;
       try {
         const raw = await llm(
@@ -676,21 +715,15 @@ export function createSessionService({
         // unlike a lookup, there is nothing useful to serve without it.
         const answer = raw === '' ? null : parseLlmDistractors(raw);
         if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
-        const checked = validateDistractors(items, answer, read.enrolled.source_language, others, target);
+        // Phase 34 (spec D3, D4): the first three usable of six, none known right.
+        const checked = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
         if (!checked.ok) throw new InvalidDistractors(sessionId, checked.reason);
         verdict = checked;
-
-        // Spec D10: the board's fifth meaning is its first word's first wrong
-        // meaning that is none of the four, nor another saved meaning of one
-        // of its words.
-        meanings = board
-          ? boardMeanings(
-              ordered.slice(board.start, board.start + BOARD_SIZE),
-              ordered,
-              verdict.byKey.get(keyOf(board.start))!.distractors,
-            )
-          : null;
-        if (board && !meanings) {
+        // Spec D10: a board with no usable fifth meaning fails here, before the
+        // context call and the checker are paid for; the checker can only take
+        // more away (below).
+        const first = board ? verdict.byKey.get(keyOf(board.start)) : undefined;
+        if (board && !boardMeanings(ordered.slice(board.start, board.start + BOARD_SIZE), ordered, [...first!.distractors, ...first!.spares], read.known)) {
           throw new InvalidDistractors(sessionId, "every wrong meaning of the board is one of its words' own");
         }
       } catch (error) {
@@ -706,6 +739,20 @@ export function createSessionService({
         throw error;
       }
 
+      // Spec D18, phase 34 (spec D1). A typed or spoken card accepts the
+      // rendering's stored list, a sibling headword, and this session's own
+      // alternatives, none written back. A typed cloze is judged against the
+      // form its sentence needs, so it keeps its sentence's alternatives alone.
+      const typedAnswered = (row: GenerationContext, content: Generated): Generated => ({
+        ...content,
+        alternatives: withSiblingAlternatives({
+          form: row.answerForm ?? row.form,
+          lemma: row.lemma,
+          accepted: row.acceptedAnswers,
+          siblings: siblingsOf(row.glossId),
+          alternatives: content.alternatives,
+        }),
+      });
       // Spec D5, D6 (phase 27): a sentence card the model did not make usable is
       // a typed translation, with nothing generated for it. Decided before the
       // context call, which asks each card by the type it ends up with.
@@ -716,24 +763,8 @@ export function createSessionService({
           (planned === 'cloze_typed' && !made.sentence) || (planned === 'sentence_translation' && !made.translate);
         const type = degraded ? 'typed_translation' : planned;
         const content = degraded ? NOTHING_GENERATED : made;
-        // Spec D18, phase 34 (spec D1). A typed or spoken card accepts the
-        // rendering's stored list, a sibling headword, and this session's own
-        // alternatives, none written back. A typed cloze is judged against the
-        // form its sentence needs, so it keeps its sentence's alternatives alone.
-        const answered: Generated =
-          type === 'typed_translation' || type === 'say_translation'
-            ? {
-                ...content,
-                alternatives: withSiblingAlternatives({
-                  form: row.answerForm ?? row.form,
-                  lemma: row.lemma,
-                  accepted: row.acceptedAnswers,
-                  siblings: siblingsOf(row.glossId),
-                  alternatives: content.alternatives,
-                }),
-              }
-            : content;
-        return { row, index, planned, type, answered, degraded, degradedReason: made.degraded };
+        const answered: Generated = type === 'typed_translation' || type === 'say_translation' ? typedAnswered(row, content) : content;
+        return { row, index, planned, type, answered, degradedReason: degraded ? (made.degraded ?? 'no sentence') : null };
       });
 
       // Phase 34 (spec D6, D7, D8; rulings R8, R11). One more call, after the
@@ -797,11 +828,10 @@ export function createSessionService({
       // Logged once the session is written, not on an attempt a failed insert or a retry repeats.
       const events: Record<string, unknown>[] = [];
       const shown = cards.map((card) => {
-        if (card.degraded) {
-          events.push({ event: 'sentence_degraded', session_id: sessionId, position: card.index, type: card.planned, reason: card.degradedReason });
-        }
         const item = contextItems.get(card.index);
         let context: StoredContext | null = null;
+        // Phase 34 (spec D5): only a sentence the model wrote is the checker's to read.
+        let checkable: BareContextItem | null = null;
         let sentence: { text: string; mark: Mark | null } | null = null;
         if (item?.task === 'mark') {
           sentence = { text: item.sentence, mark: contextAnswer ? markFor(item, found.get(item.key)) : null };
@@ -811,14 +841,186 @@ export function createSessionService({
             context = outcome.context;
             if (outcome.dropped) {
               events.push({ event: 'context_dropped', session_id: sessionId, position: card.index, type: card.type, reason: outcome.dropped });
+            } else {
+              checkable = item;
             }
           } else {
             context = fallbackContext(card.row, item.task);
           }
-          // Spec D6: a sense saved without an example has nothing to fall back on.
-          if (!context) events.push({ event: 'context_missing', session_id: sessionId, position: card.index, type: card.type });
         }
-        return { ...card, context, sentence };
+        return { ...card, context, checkable, sentence };
+      });
+
+      // Phase 34 (spec D5). The checker: a second model reads the cards as a
+      // learner would, with no transaction open (ADR 0001 R8). Every usable
+      // wrong option of a choice card, spares included, so a "yes" can be
+      // replaced; the board's candidates for its fifth meaning against each of
+      // its four words; each sentence the context call wrote; each sentence
+      // card's Hebrew. Unlike the context call, an unreadable or failed answer
+      // fails the attempt, as an unreadable batch does, and pg-boss retries it.
+      const candidatesOf = (index: number): string[] => {
+        const made = verdict.byKey.get(keyOf(index));
+        return made ? [...made.distractors, ...made.spares] : [];
+      };
+      const boardCandidates = board ? candidatesOf(board.start) : [];
+      const glossMeanings = (row: GenerationContext) => [row.translation, ...(read.known.meaningsByGloss.get(row.glossId) ?? [])];
+      const checkItems: CheckItem[] = [];
+      for (const card of shown) {
+        const key = keyOf(card.index);
+        const { row } = card;
+        if (card.type === 'multiple_choice' || card.type === 'listen_choice') {
+          checkItems.push({ key, task: 'choice', word: row.answerForm ?? row.form, options: candidatesOf(card.index) });
+        } else if (card.type === 'reverse_choice') {
+          checkItems.push({ key, task: 'choice', word: row.translation, options: candidatesOf(card.index) });
+        } else if (card.type === 'cloze_choice') {
+          const gap = gaps[card.index]!;
+          const sentence = `${row.example!.slice(0, gap.start)}___${row.example!.slice(gap.end)}`;
+          checkItems.push({ key, task: 'gap', sentence, options: candidatesOf(card.index) });
+        } else if (card.type === 'matching' && boardCandidates.length > 0) {
+          checkItems.push({ key, task: 'choice', word: row.form, options: boardCandidates });
+        }
+        if (card.checkable && card.context) {
+          const { text, mark } = card.context;
+          const marked = mark ? text.slice(mark.start, mark.end) : card.checkable.shown;
+          checkItems.push(
+            card.checkable.task === 'target'
+              ? {
+                  key: contextKeyOf(key),
+                  task: 'meaning',
+                  sentence: text,
+                  word: marked,
+                  candidates: readingCandidates([...glossMeanings(row), ...knownMeanings(read.known, row.lexemeId)]),
+                }
+              : { key: contextKeyOf(key), task: 'words', sentence: text, word: marked },
+          );
+        }
+        const hebrew = sentenceOf(card.answered)?.hebrew;
+        if ((card.type === 'cloze_typed' || card.type === 'sentence_translation') && hebrew) {
+          checkItems.push({ key, task: 'translate', sentence: hebrew });
+        }
+      }
+
+      const checkerStarted = now();
+      let checkerMs = 0;
+      let findings = new Map<string, CheckFinding>();
+      let meanings: string[] | null = null;
+      const survivors = new Map<number, string[]>();
+      try {
+        if (checkItems.length > 0) {
+          const raw = await checkerLlm(buildCheckPrompt(checkItems, target, read.enrolled.source_language));
+          checkerMs = now() - checkerStarted;
+          const answer = raw === '' ? null : parseCheck(raw);
+          if (!answer) {
+            throw new InvalidDistractors(sessionId, raw === '' ? 'the checker returned no content' : 'the checker answer was unreadable');
+          }
+          const reading = readCheck(checkItems, answer);
+          if (!reading.ok) throw new InvalidDistractors(sessionId, reading.reason);
+          findings = reading.byKey;
+        }
+        const alsoRight = (key: string): boolean[] => {
+          const finding = findings.get(key);
+          return finding && (finding.task === 'choice' || finding.task === 'gap') ? finding.alsoRight : [];
+        };
+        // Spec D4: a "yes" drops the option and the next spare takes its place;
+        // fewer than three left fails the attempt, as fewer than three usable does.
+        for (const card of shown) {
+          if (!CHOSEN.has(card.type)) continue;
+          const key = keyOf(card.index);
+          const left = wrongOnly(candidatesOf(card.index), alsoRight(key));
+          if (left.length < KEPT_DISTRACTORS) {
+            throw new InvalidDistractors(
+              sessionId,
+              `the checker calls ${candidatesOf(card.index).length - left.length} of ${key}'s ${candidatesOf(card.index).length} wrong options right, and ${KEPT_DISTRACTORS} must be left`,
+            );
+          }
+          survivors.set(card.index, left);
+        }
+        // Spec D10, phase 34 (D3, D5): the board's fifth meaning is the first of its
+        // first word's usable wrong meanings that no board word's own meaning, nor
+        // what the dictionary knows of the four, nor the checker for any of them,
+        // makes right.
+        if (board) {
+          const rightForOne = new Set(
+            Array.from({ length: BOARD_SIZE }, (_, offset) => alsoRight(keyOf(board.start + offset))).flatMap((flags) =>
+              boardCandidates.filter((_, at) => flags[at]),
+            ),
+          );
+          meanings = boardMeanings(
+            ordered.slice(board.start, board.start + BOARD_SIZE),
+            ordered,
+            boardCandidates.filter((text) => !rightForOne.has(text)),
+            read.known,
+          );
+          if (!meanings) throw new InvalidDistractors(sessionId, "every wrong meaning of the board is one of its words' own");
+          for (const text of rightForOne) {
+            events.push({ event: 'checker_dropped', session_id: sessionId, position: board.start, type: 'matching', kind: 'option', text, reason: 'the checker calls it right for a board word' });
+          }
+        }
+      } catch (error) {
+        logger.info({
+          event: 'session_preparation_attempt_failed',
+          session_id: sessionId,
+          stage: 'checker',
+          item_count: items.length,
+          check_count: checkItems.length,
+          model_ms: modelMs,
+          context_ms: contextMs,
+          checker_ms: now() - checkerStarted,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+
+      // What the checker's answer does to each card: its three wrong options, its
+      // context (D6's fallback when the checker reads another sense), and a
+      // sentence card the practised word is not natural in (phase 27's degraded
+      // path: a typed translation, D8).
+      const final = shown.map((card) => {
+        const key = keyOf(card.index);
+        const { row } = card;
+        let { type, answered, context, sentence, degradedReason } = card;
+        const left = survivors.get(card.index);
+        if (left) {
+          for (const text of candidatesOf(card.index).filter((option) => !left.includes(option))) {
+            events.push({ event: 'checker_dropped', session_id: sessionId, position: card.index, type, kind: 'option', text, reason: 'the checker calls it right' });
+          }
+          answered = { ...answered, distractors: left.slice(0, KEPT_DISTRACTORS), spares: left.slice(KEPT_DISTRACTORS) };
+        }
+        const contextFinding = findings.get(contextKeyOf(key));
+        if (card.checkable && context && contextFinding) {
+          const fits =
+            contextFinding.task === 'meaning'
+              ? meaningFits(contextFinding.meaning, glossMeanings(row))
+              : contextFinding.task === 'words' &&
+                wordsFit(contextFinding.words, { answer: row.answerForm ?? row.form, lemma: row.lemma, alternatives: [...row.acceptedAnswers, ...answered.alternatives] });
+          if (!fits) {
+            const reading = contextFinding.task === 'meaning' ? contextFinding.meaning : contextFinding.task === 'words' ? contextFinding.words.join(', ') : '';
+            events.push({ event: 'checker_dropped', session_id: sessionId, position: card.index, type, kind: 'context', text: context.text, reason: `the checker reads it as ${reading || 'nothing'}` });
+            context = fallbackContext(row, card.checkable.task);
+          }
+        }
+        const sentenceFinding = findings.get(key);
+        const made = sentenceOf(answered);
+        if (sentenceFinding?.task === 'translate' && made) {
+          const practised = [made.word, row.form, row.lemma, ...(row.answerForm ? [row.answerForm] : []), ...row.acceptedAnswers, ...answered.alternatives];
+          if (!translationUses(sentenceFinding.translation, practised)) {
+            const reason = `the checker says it "${sentenceFinding.translation}", using neither ${made.word} nor an answer the card accepts`;
+            events.push({ event: 'checker_dropped', session_id: sessionId, position: card.index, type, kind: 'sentence', text: made.hebrew, reason });
+            type = 'typed_translation';
+            answered = typedAnswered(row, NOTHING_GENERATED);
+            degradedReason = reason;
+            sentence = null;
+            context = fallbackContext(row, 'explanation');
+          }
+        }
+        if (degradedReason !== null) {
+          events.push({ event: 'sentence_degraded', session_id: sessionId, position: card.index, type: card.planned, reason: degradedReason });
+        }
+        // Spec D6: a sense saved without an example has nothing to fall back on.
+        if (!context && contextLanguageOf(type) !== null) {
+          events.push({ event: 'context_missing', session_id: sessionId, position: card.index, type });
+        }
+        return { row, index: card.index, type, answered, context, sentence };
       });
 
       const written = await transaction(async ({ session, question, gloss }) => {
@@ -827,14 +1029,14 @@ export function createSessionService({
         if (!(await session.transition(sessionId, ['preparing'], 'ready'))) return false;
         // Phase 31 (spec D14). Again, under this write's own share lock: a merge
         // may have landed during the model call.
-        const survivors = await gloss.resolveGlosses(ordered.map((row) => row.glossId));
+        const survivorGlosses = await gloss.resolveGlosses(ordered.map((row) => row.glossId));
         const generated = await question.insertGeneratedQuestions({
           userId: read.state.userId,
           enrollmentId: read.state.enrollmentId,
           targetLanguage: target,
           userLanguageCode: read.enrolled.source_language,
-          questions: shown.map(({ row, index, type, answered, context, sentence }) => ({
-            glossId: survivors.get(row.glossId)?.id ?? row.glossId,
+          questions: final.map(({ row, index, type, answered, context, sentence }) => ({
+            glossId: survivorGlosses.get(row.glossId)?.id ?? row.glossId,
             variantId: row.variantId,
             form: row.form,
             lemma: row.lemma,
@@ -864,6 +1066,8 @@ export function createSessionService({
         item_count: items.length,
         model_ms: modelMs,
         context_ms: contextMs,
+        check_count: checkItems.length,
+        checker_ms: checkerMs,
         ...(written ? {} : { stage: 'write' }),
       });
     },

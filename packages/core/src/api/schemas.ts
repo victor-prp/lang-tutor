@@ -1073,6 +1073,44 @@ export const LlmContextSchema = z.object({
     .max(10),
 });
 
+// Phase 34 (spec D5). The checker's answer: a second model call, after the batch
+// and the context call, that reads the session's cards as a learner would. One
+// item per check, keyed as the service asks (q1 for a card's options, gap or
+// sentence; q1c for its context sentence). `options` and `gap_fits` hold one
+// boolean per option in the order asked, true when that option is also right;
+// `context_meaning` is what a target-language context's marked word means there,
+// `context_words` which target words fit a Hebrew context's marked word, and
+// `natural_translation` a sentence card's Hebrew as a native speaker would say it.
+// Every field optional, never a bare nullable (LlmAcceptSchema), and no array
+// caps: a cap travels as `responseSchema`, and the domain checks each list's
+// length against the options it asked (domain/check.ts), so a miscount fails the
+// batch rather than shifting a "yes" onto the wrong option.
+//
+// Measured before anything was built on it (ruling R8: optional strings once made
+// the batch's non-streaming call hang). `npx tsx tests/eval/measureSchema.ts
+// --check` (in apps/server) sends ten checks of every kind (three choice cards,
+// a gap, two target-language contexts, two Hebrew ones, two sentence cards)
+// through the real prompt and client with production's 60 s budget
+// (CHECKER_CALL_BUDGET_MS), gemini-2.5-flash, 2026-10-11, thinking on. Nine runs,
+// all accepted, no 400, none hung: 10.6, 10.4, 14.5, 15.0, 10.6, 10.9, 15.5,
+// 16.3 and 15.8 s, every item answered with the right number of booleans. A
+// sixteen-check request, a session with a board, answered in 14.5, 13.8 and
+// 11.8 s. After the "translate" task's wording was sharpened (asked alone, the
+// checker had rendered בואו נשלב כוחות word for word), four more runs: 7.5, 6.9,
+// 7.0 and 7.3 s. A field more here means measuring again, for a 400 and for the wait.
+export const LlmCheckSchema = z.object({
+  items: z.array(
+    z.object({
+      key: z.string(),
+      options: z.array(z.boolean()).optional(),
+      gap_fits: z.array(z.boolean()).optional(),
+      context_meaning: z.string().optional(),
+      context_words: z.array(z.string()).optional(),
+      natural_translation: z.string().optional(),
+    }),
+  ),
+});
+
 // Phase 26. Words from a photo: an import is one photo of a word list, read in
 // the background into rows, each a word or phrase with one chosen gloss. The
 // image is base64 JPEG, because the app re-encodes every photo. 2 800 000

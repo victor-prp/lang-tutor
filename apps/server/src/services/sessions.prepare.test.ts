@@ -13,8 +13,10 @@ import {
   stub,
 } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
+import { CHECK_MARKER } from '../domain/check';
 import { CONTEXT_MARKER, type RecentContexts } from '../domain/context';
-import type { GenerationContext, RecentSentences } from '../domain/distractors';
+import { nothingKnown, type GenerationContext, type KnownRight, type RecentSentences } from '../domain/distractors';
+import type { LlmJsonRequest } from './llm';
 import type { SessionState } from '../domain/session';
 import { GlossLanguageMismatch, InvalidDistractors } from '../errors';
 import type { DictRepo } from '../repo/dictionary';
@@ -49,6 +51,42 @@ const GOOD = JSON.stringify({
   ],
 });
 
+/** Phase 34 (spec D5). What the checker was asked, as the request carries it. */
+type Checked = { key: string; task: string; word?: string; sentence?: string; options?: string[]; candidates?: string[] };
+const checksOf = (request: { user: string }) => JSON.parse(request.user).items as Checked[];
+
+/**
+ * Phase 34 (spec D5). A checker that calls every option wrong, every gap option
+ * a misfit, and says nothing of a sentence, which drops a context sentence to
+ * its fallback and a sentence card to a typed translation, unless `over` gives
+ * a key's answer (q1c for q1's context sentence).
+ */
+const checking = (over: Record<string, object> = {}) => (request: { user: string }) =>
+  JSON.stringify({
+    items: checksOf(request).map((item) => ({
+      key: item.key,
+      ...(item.task === 'choice' ? { options: item.options!.map(() => false) } : {}),
+      ...(item.task === 'gap' ? { gap_fits: item.options!.map(() => false) } : {}),
+      ...over[item.key],
+    })),
+  });
+
+/** The same checker, translating each sentence card's Hebrew as the batch's own
+ *  target sentence does: it agrees with the writer on every sentence card. */
+const agreeing = (batch: string) => (request: { user: string }) => {
+  const written = JSON.parse(batch).items as { key: string; sentence?: string; translation?: string }[];
+  const natural = Object.fromEntries(
+    checksOf(request)
+      .filter((item) => item.task === 'translate')
+      .map((item) => {
+        // A typed cloze's Hebrew is its translation; a translation card's is its sentence.
+        const made = written.find((w) => w.translation === item.sentence || w.sentence === item.sentence)!;
+        return [item.key, { natural_translation: made.translation === item.sentence ? made.sentence : made.translation }];
+      }),
+  );
+  return checking(natural)(request);
+};
+
 function world(opts: {
   state?: SessionState;
   context?: GenerationContext[];
@@ -63,6 +101,10 @@ function world(opts: {
   contextReply?: string | Error;
   /** Phase 34 (spec D6). What findRecentContexts answers. */
   recentContexts?: RecentContexts;
+  /** Phase 34 (spec D5). The checker's answer, on its own client; `checking()` by default. */
+  checkReply?: string | Error | ((request: LlmJsonRequest) => string);
+  /** Phase 34 (spec D3). What findKnownRight answers; nothing known by default. */
+  known?: KnownRight;
   enrollment?: Enrollment;
   /** The clock's ticks; 1 000 then 1 250 by default. */
   clock?: number[];
@@ -75,6 +117,7 @@ function world(opts: {
     recentContextsAsked: [] as unknown[],
     contextAsked: [] as unknown[],
     siblingsAsked: [] as unknown[],
+    knownAsked: [] as unknown[],
   };
   const session = stub<SessionRepo>({
     findState: async () => opts.state ?? STATE,
@@ -154,6 +197,7 @@ function world(opts: {
   });
   const llm = createFakeLlmClient(opts.reply ?? GOOD);
   const contextLlm = createFakeLlmClient(opts.contextReply ?? JSON.stringify({ items: [] }));
+  const checkerLlm = createFakeLlmClient(opts.checkReply ?? checking());
   const logger = createFakeLogger();
   // Phase 34 (spec D1). What the read asked the accept job for.
   const jobs = createFakeJobRepo();
@@ -168,6 +212,10 @@ function world(opts: {
           calls.siblingsAsked.push(input);
           return opts.siblings ?? [];
         },
+        findKnownRight: async (input) => {
+          calls.knownAsked.push(input);
+          return opts.known ?? nothingKnown();
+        },
       }),
       jobs,
     }),
@@ -176,10 +224,11 @@ function world(opts: {
     now: createFakeClock(...(opts.clock ?? [1_000, 1_250])),
     llm,
     contextLlm,
+    checkerLlm,
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
   });
-  return { service, calls, llm, contextLlm, logger, jobs };
+  return { service, calls, llm, contextLlm, checkerLlm, logger, jobs };
 }
 
 describe('prepareSession', () => {
@@ -371,8 +420,11 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
     // Each is valid for q4 (none is зонтик's own מטרייה), and each is another
     // board word's meaning: only the board check can refuse them.
     const reply = TEN_REPLY.replace('["דלי","שולחן","כיסא"]', '["דלי","כינור","את חפירה"]');
-    const { service } = world({ context: TEN, reply });
+    const { service, contextLlm, checkerLlm } = world({ context: TEN, reply });
     await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toThrow(/board/);
+    // Phase 34: before the context call and the checker are paid for.
+    expect(contextLlm.calls).toHaveLength(0);
+    expect(checkerLlm.calls).toHaveLength(0);
   });
 
   // Final review: a tiles card asks the model nothing, yet its meaning is as
@@ -620,7 +672,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
               : { key: item.key, distractors: [], alternatives: [] },
       ),
     });
-    const { service, calls, logger } = world({ context: TEN, reply });
+    const { service, calls, logger } = world({ context: TEN, reply, checkReply: agreeing(reply) });
     await service.prepareSession(TEN_PAYLOAD);
     expect(typesOf(calls)).toContain('cloze_typed');
     const [input] = calls.generated as { questions: { type: string; sentence: string | null; gapStart: number | null; gapEnd: number | null; sentenceTranslation: string | null }[] }[];
@@ -923,7 +975,7 @@ describe('prepareSession, phase 34 (spec D1, D2, D12)', () => {
                 : { key: item.key, distractors: [], alternatives: [] },
         ),
       });
-      const { service, calls } = world({ context: ten, reply });
+      const { service, calls } = world({ context: ten, reply, checkReply: agreeing(reply) });
       await service.prepareSession(TEN_PAYLOAD);
       const cloze = insertedOf(calls).find((q) => q.type === 'cloze_typed')!;
       expect(cloze.alternatives).toEqual(['глядеть']);
@@ -1001,6 +1053,9 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
     ],
   });
 
+  // Phase 34 (spec D5). The checker reads each sentence as the writer meant it.
+  const CHOICES_CHECK = checking({ q1c: { context_meaning: 'לנסר' }, q2c: { context_words: ['table'] }, q3c: { context_words: ['download'] } });
+
   // Ordinal 2, three picks: a typed meaning, a tiles card and a sentence translation.
   const SENTENCES = [SAW, LAMP, COMBINE];
   const SENTENCES_BATCH = JSON.stringify({
@@ -1012,9 +1067,10 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
       { key: 'q3', sentence_word: 'נשלב' },
     ],
   });
+  const SENTENCES_CHECK = checking({ q1c: { context_meaning: 'לנסר' }, q3: { natural_translation: "Let's combine forces." } });
 
   it('category C (d388f738): the typed card for להוריד shows a Hebrew sentence, its word marked, and keeps the other half', async () => {
-    const { service, calls } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT });
+    const { service, calls } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, checkReply: CHOICES_CHECK });
     await service.prepareSession(payloadOf(CHOICES, 0));
     const typed = insertedOf(calls)[2];
     expect(typed).toMatchObject({
@@ -1029,7 +1085,7 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
   });
 
   it('category H (a7d6bdb4): the multiple choice for saw shows a sentence in English with saw marked', async () => {
-    const { service, calls } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT });
+    const { service, calls } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, checkReply: CHOICES_CHECK });
     await service.prepareSession(payloadOf(CHOICES, 0));
     expect(insertedOf(calls)[0]).toMatchObject({
       type: 'multiple_choice',
@@ -1042,7 +1098,7 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
   });
 
   it('asks the context call after the batch, once, with what each card needs and no item for a card that shows none', async () => {
-    const { service, llm, contextLlm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT });
+    const { service, llm, contextLlm } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK });
     await service.prepareSession(payloadOf(SENTENCES, 2));
     expect(llm.calls).toHaveLength(1);
     expect(contextLlm.calls).toHaveLength(1);
@@ -1054,7 +1110,7 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
   });
 
   it('category E (71b0b407): the typed meaning for saw shows a sentence with saw in the sense of לנסר, and keeps its Hebrew for the judge', async () => {
-    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT });
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK });
     await service.prepareSession(payloadOf(SENTENCES, 2));
     expect(insertedOf(calls)[0]).toMatchObject({
       type: 'typed_meaning',
@@ -1066,7 +1122,7 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
   });
 
   it('category F (eb95d246): the sentence card for combine marks נשלב in בואו נשלב כוחות', async () => {
-    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT });
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: SENTENCES_CONTEXT, checkReply: SENTENCES_CHECK });
     await service.prepareSession(payloadOf(SENTENCES, 2));
     expect(insertedOf(calls)[2]).toMatchObject({
       type: 'sentence_translation', sentenceTranslation: 'בואו נשלב כוחות.', sentenceMarkStart: 5, sentenceMarkEnd: 9, context: null,
@@ -1077,7 +1133,7 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
   // Review Focus 4.
   it('keeps a sentence card unmarked when its word cannot be found in the Hebrew', async () => {
     const reply = SENTENCES_CONTEXT.replace('"sentence_word":"נשלב"', '"sentence_word":"לשלב"');
-    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: reply });
+    const { service, calls } = world({ enrollment: ENGLISH, context: SENTENCES, reply: SENTENCES_BATCH, contextReply: reply, checkReply: SENTENCES_CHECK });
     await service.prepareSession(payloadOf(SENTENCES, 2));
     expect(insertedOf(calls)[2]).toMatchObject({ type: 'sentence_translation', sentenceTranslation: 'בואו נשלב כוחות.', sentenceMarkStart: null, sentenceMarkEnd: null });
   });
@@ -1112,7 +1168,7 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
 
   it('reads the recent contexts in the read step, and drops a sentence one of them showed for the saved example', async () => {
     const recentContexts: RecentContexts = new Map([[DOWNLOAD.glossId, { typed_translation: ['אני רוצה להוריד את המשחק החדש הלילה'] }]]);
-    const { service, calls, logger, contextLlm } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, recentContexts });
+    const { service, calls, logger, contextLlm } = world({ enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, checkReply: CHOICES_CHECK, recentContexts });
     await service.prepareSession(payloadOf(CHOICES, 0));
     expect(calls.recentContextsAsked).toEqual([{ enrollmentId: 'e1', glossIds: CHOICES.map((r) => r.glossId), limit: 3 }]);
     // Told to the model as a sentence to avoid.
@@ -1142,9 +1198,252 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
 
   it('logs how long the context call took', async () => {
     const { service, logger } = world({
-      enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, clock: [1_000, 1_250, 2_000, 2_400],
+      enrollment: ENGLISH, context: CHOICES, reply: CHOICES_BATCH, contextReply: CHOICES_CONTEXT, checkReply: CHOICES_CHECK, clock: [1_000, 1_250, 2_000, 2_400],
     });
     await service.prepareSession(payloadOf(CHOICES, 0));
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', model_ms: 250, context_ms: 400 }));
+  });
+});
+
+// Phase 34 (spec D3, D4, D5). What the dictionary knows to be right is never a
+// wrong option, six are asked to keep three, and a second model checks the
+// cards before they are written. The audit's cards, rebuilt: c49ddbec, 3c482348
+// (A), 71b0b407 and a7d6bdb4's saw, d388f738 (C), eb95d246 (F).
+describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the spares and the checker', () => {
+  const ENGLISH: Enrollment = { ...ENROLLMENT, target_language: 'en' };
+  const STAMP = new Date('2026-10-11T10:00:00Z');
+  const row = (over: Partial<GenerationContext> & Pick<GenerationContext, 'form' | 'lemma' | 'translation'>, n: number): GenerationContext => ({
+    glossId: `g-k${n}`, senseId: `sk${n}`, variantId: `vk${n}`, lexemeId: `lk${n}`, partOfSpeech: 'verb',
+    example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: STAMP, ...over,
+  });
+  const BLOW_UP = row({ form: 'blow up', lemma: 'blow up', translation: 'לנפח' }, 1);
+  const PICK_UP = row({ form: 'pick up', lemma: 'pick up', translation: 'לענות' }, 2);
+  const TABLE = row({ form: 'table', lemma: 'table', partOfSpeech: 'noun', translation: 'שולחן' }, 3);
+  const DOWNLOAD = row({
+    form: 'download', lemma: 'download', translation: 'להוריד', acceptedAnswers: ['get'],
+    example: 'I need to download the file first.', exampleTranslation: 'אני צריך להוריד את הקובץ קודם.',
+  }, 4);
+  const SAW = row({ form: 'saw', lemma: 'saw', translation: 'לנסר', example: 'He will saw the branch off.', exampleTranslation: 'הוא ינסר את הענף.' }, 5);
+  const LAMP = row({ form: 'lamp', lemma: 'lamp', partOfSpeech: 'noun', translation: 'מנורה' }, 6);
+  const COMBINE = row({ form: 'combine', lemma: 'combine', translation: 'לשלב' }, 7);
+  const pickOf = (r: GenerationContext) => ({ gloss_id: r.glossId, sense_id: r.senseId, variant_id: r.variantId });
+  const payloadOf = (rows: GenerationContext[], ordinal = 0) => ({ ...PAYLOAD, picks: rows.map(pickOf), ordinal });
+  type Inserted = { type: string; options: { text: string; is_correct: boolean }[] | null; context?: string | null; contextTranslation?: string | null; sentence: string | null; sentenceTranslation: string | null; alternatives: string[] | null };
+  const insertedOf = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: Inserted[] }).questions;
+  const optionTexts = (q: Inserted) => q.options!.map((o) => o.text);
+  const events = (logger: { events: unknown[] }, name: string) => (logger.events as { event: string }[]).filter((e) => e.event === name);
+
+  // Ordinal 0: blow up on a multiple choice, table on a reversed card, download typed.
+  const CHOICES = [BLOW_UP, TABLE, DOWNLOAD];
+  const SIX_WRONG = ['להרוס', 'לקפל', 'לשבור', 'לצבוע', 'לבשל', 'לכתוב'];
+  const choicesBatch = (q1: string[]) =>
+    JSON.stringify({
+      items: [
+        { key: 'q1', distractors: q1 },
+        { key: 'q2', distractors: ['chair', 'door', 'wall', 'window', 'roof', 'floor'] },
+        { key: 'q3', distractors: [], alternatives: ['fetch'] },
+      ],
+    });
+  const CONTEXTS = JSON.stringify({
+    items: [
+      { key: 'q1', context: 'We will blow up twenty balloons.', context_translation: 'ננפח עשרים בלונים.', context_word: 'blow up' },
+      { key: 'q2', context: 'השולחן במטבח עשוי מעץ.', context_translation: 'The kitchen table is made of wood.', context_word: 'השולחן' },
+      { key: 'q3', context: 'אני רוצה להוריד את המשחק החדש הלילה.', context_translation: 'I want to download the new game tonight.', context_word: 'להוריד' },
+    ],
+  });
+  const SAW_CONTEXTS = CONTEXTS.replace('We will blow up twenty balloons.', 'Please saw the plank in half.').replace('ננפח עשרים בלונים.', 'בבקשה תנסר את הקרש לשניים.').replace('"context_word":"blow up"', '"context_word":"saw"');
+  const AGREED = { q1c: { context_meaning: 'לנסר' }, q2c: { context_words: ['table'] }, q3c: { context_words: ['download'] } };
+
+  it('reads the known-right set once, in the read step, for the picks’ glosses, lexemes, forms and renderings', async () => {
+    const { service, calls } = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG) });
+    await service.prepareSession(payloadOf(CHOICES));
+    expect(calls.knownAsked).toEqual([
+      {
+        glossIds: ['g-k1', 'g-k3', 'g-k4'],
+        lexemeIds: ['lk1', 'lk3', 'lk4'],
+        variantIds: ['vk1', 'vk3', 'vk4'],
+        prompts: ['לנפח', 'שולחן', 'להוריד'],
+        userLanguageCode: 'he',
+        targetLanguage: 'en',
+      },
+    ]);
+  });
+
+  it('category A (c49ddbec): never shows להרים on the card for pick up, the dictionary’s other sense of it, and a spare takes its place', async () => {
+    const rows = [PICK_UP, TABLE, DOWNLOAD];
+    const known: KnownRight = { ...nothingKnown(), meaningsByLexeme: new Map([['lk2', ['לענות', 'להרים']]]) };
+    const { service, calls, checkerLlm } = world({ enrollment: ENGLISH, context: rows, reply: choicesBatch(['להרים', 'לכתוב', 'לשיר', 'לרקוד']), known });
+    await service.prepareSession(payloadOf(rows));
+    expect(optionTexts(insertedOf(calls)[0])).toEqual(['לענות', 'לכתוב', 'לשיר', 'לרקוד']);
+    // Refused before the checker: it is never asked about להרים.
+    expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q1')!.options).toEqual(['לכתוב', 'לשיר', 'לרקוד']);
+  });
+
+  it('category A (3c482348): drops להרוס from blow up’s options when the checker says it is also right, and takes the first spare', async () => {
+    const { service, calls, llm, contextLlm, checkerLlm, logger } = world({
+      enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG),
+      checkReply: checking({ q1: { options: [true, false, false, false, false, false] } }),
+    });
+    await service.prepareSession(payloadOf(CHOICES));
+    expect(optionTexts(insertedOf(calls)[0])).toEqual(['לנפח', 'לקפל', 'לשבור', 'לצבוע']);
+    // Its own client, after the batch and the context call, asked every usable option.
+    expect(llm.calls.map((call) => call.system.includes(CHECK_MARKER))).toEqual([false]);
+    expect(contextLlm.calls.map((call) => call.system.includes(CHECK_MARKER))).toEqual([false]);
+    expect(checkerLlm.calls.map((call) => call.system.includes(CHECK_MARKER))).toEqual([true]);
+    expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q1')).toEqual({ key: 'q1', task: 'choice', word: 'blow up', options: SIX_WRONG });
+    expect(events(logger, 'checker_dropped')).toEqual([
+      { event: 'checker_dropped', session_id: SESSION, position: 0, type: 'multiple_choice', kind: 'option', text: 'להרוס', reason: 'the checker calls it right' },
+    ]);
+  });
+
+  // Review Focus 5.
+  it('fails the batch only when fewer than three wrong options survive the checker', async () => {
+    const three = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: checking({ q1: { options: [true, true, true, false, false, false] } }) });
+    await three.service.prepareSession(payloadOf(CHOICES));
+    expect(optionTexts(insertedOf(three.calls)[0])).toEqual(['לנפח', 'לצבוע', 'לבשל', 'לכתוב']);
+
+    const yes = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: checking({ q1: { options: SIX_WRONG.map(() => true) } }) });
+    await expect(yes.service.prepareSession(payloadOf(CHOICES))).rejects.toBeInstanceOf(InvalidDistractors);
+    expect(yes.calls.transitions).toEqual([]);
+    expect(yes.logger.events).toContainEqual(
+      expect.objectContaining({ event: 'session_preparation_attempt_failed', stage: 'checker', reason: expect.stringContaining("the checker calls 6 of q1's 6 wrong options right, and 3 must be left") }),
+    );
+  });
+
+  it('fails the batch, writing nothing, on a checker answer that is unreadable, numbers the options wrong, or never comes', async () => {
+    for (const checkReply of ['nope', '', checking({ q1: { options: [false, false] } }), new Error('provider down')]) {
+      const { service, calls, logger } = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply });
+      await expect(service.prepareSession(payloadOf(CHOICES))).rejects.toThrow();
+      expect(calls.transitions).toEqual([]);
+      expect(calls.generated).toEqual([]);
+      expect(events(logger, 'session_preparation_attempt_failed')).toEqual([expect.objectContaining({ stage: 'checker' })]);
+    }
+    const unreadable = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: 'nope' });
+    await expect(unreadable.service.prepareSession(payloadOf(CHOICES))).rejects.toBeInstanceOf(InvalidDistractors);
+  });
+
+  it('keeps each sentence the checker reads as the card’s sense, and asks what each card needs', async () => {
+    const rows = [SAW, TABLE, DOWNLOAD];
+    const known: KnownRight = { ...nothingKnown(), meaningsByLexeme: new Map([['lk5', ['לנסר', 'מסור', 'ראה']]]) };
+    const { service, calls, checkerLlm, logger } = world({
+      enrollment: ENGLISH, context: rows, reply: choicesBatch(SIX_WRONG), contextReply: SAW_CONTEXTS, checkReply: checking(AGREED), known,
+    });
+    await service.prepareSession(payloadOf(rows));
+    const [choice, reversed, typed] = insertedOf(calls);
+    expect(choice.context).toBe('Please saw the plank in half.');
+    expect(reversed.context).toBe('השולחן במטבח עשוי מעץ.');
+    expect(typed.context).toBe('אני רוצה להוריד את המשחק החדש הלילה.');
+    expect(events(logger, 'checker_dropped')).toEqual([]);
+    expect(checksOf(checkerLlm.calls[0]).map((item) => `${item.key}:${item.task}`)).toEqual(['q1:choice', 'q1c:meaning', 'q2:choice', 'q2c:words', 'q3c:words']);
+    const checks = checksOf(checkerLlm.calls[0]);
+    // The marked word, and every reading the dictionary knows, in a fixed order.
+    expect(checks[1]).toEqual({ key: 'q1c', task: 'meaning', sentence: 'Please saw the plank in half.', word: 'saw', candidates: ['לנסר', 'מסור', 'ראה'] });
+    expect(checks[2]).toMatchObject({ word: 'שולחן', options: ['chair', 'door', 'wall', 'window', 'roof', 'floor'] });
+    expect(checks[4]).toEqual({ key: 'q3c', task: 'words', sentence: 'אני רוצה להוריד את המשחק החדש הלילה.', word: 'להוריד' });
+  });
+
+  it('category E (71b0b407): drops a sentence for saw the checker reads as ראה, and shows the saved example instead', async () => {
+    const rows = [SAW, TABLE, DOWNLOAD];
+    const { service, calls, logger } = world({
+      enrollment: ENGLISH, context: rows, reply: choicesBatch(SIX_WRONG), contextReply: SAW_CONTEXTS,
+      checkReply: checking({ ...AGREED, q1c: { context_meaning: 'ראה' } }),
+    });
+    await service.prepareSession(payloadOf(rows));
+    expect(insertedOf(calls)[0]).toMatchObject({ context: 'He will saw the branch off.', contextTranslation: 'הוא ינסר את הענף.' });
+    expect(events(logger, 'checker_dropped')).toEqual([
+      { event: 'checker_dropped', session_id: SESSION, position: 0, type: 'multiple_choice', kind: 'context', text: 'Please saw the plank in half.', reason: 'the checker reads it as ראה' },
+    ]);
+  });
+
+  it('category C (d388f738): drops a Hebrew sentence whose להוריד the checker reads as lower, and logs a card left with none', async () => {
+    const { service, calls, logger } = world({
+      enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), contextReply: CONTEXTS,
+      checkReply: checking({ q1c: { context_meaning: 'לנפח' }, q2c: { context_words: ['desk'] }, q3c: { context_words: ['lower', 'turn down'] } }),
+    });
+    await service.prepareSession(payloadOf(CHOICES));
+    const [, reversed, typed] = insertedOf(calls);
+    expect(typed).toMatchObject({ context: 'אני צריך להוריד את הקובץ קודם.', contextTranslation: 'I need to download the file first.' });
+    // table has no saved example to fall back on.
+    expect(reversed.context).toBeNull();
+    expect(events(logger, 'checker_dropped').map((e) => (e as unknown as { position: number }).position)).toEqual([1, 2]);
+    expect(logger.events).toContainEqual({ event: 'context_missing', session_id: SESSION, position: 1, type: 'reverse_choice' });
+  });
+
+  it('category F (eb95d246): turns בואו נשלב כוחות into a typed translation when the checker says it naturally, without combine', async () => {
+    const rows = [SAW, LAMP, COMBINE];
+    const batch = JSON.stringify({ items: [{ key: 'q3', distractors: [], sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces.", gap: 'combine' }] });
+    const contexts = JSON.stringify({ items: [{ key: 'q3', sentence_word: 'נשלב' }] });
+    const joined = world({ enrollment: ENGLISH, context: rows, reply: batch, contextReply: contexts, checkReply: checking({ q3: { natural_translation: "Let's join forces." } }) });
+    await joined.service.prepareSession(payloadOf(rows, 2));
+    expect(insertedOf(joined.calls)[2]).toMatchObject({ type: 'typed_translation', sentence: null, sentenceTranslation: null, context: null });
+    expect(events(joined.logger, 'checker_dropped')).toEqual([
+      expect.objectContaining({ position: 2, type: 'sentence_translation', kind: 'sentence', text: 'בואו נשלב כוחות.', reason: expect.stringContaining("Let's join forces.") }),
+    ]);
+    expect(events(joined.logger, 'sentence_degraded')).toEqual([expect.objectContaining({ position: 2, type: 'sentence_translation' })]);
+    expect(checksOf(joined.checkerLlm.calls[0]).find((item) => item.key === 'q3')).toEqual({ key: 'q3', task: 'translate', sentence: 'בואו נשלב כוחות.' });
+
+    // The same sentence, read naturally with combine, is kept.
+    const combined = world({ enrollment: ENGLISH, context: rows, reply: batch, contextReply: contexts, checkReply: checking({ q3: { natural_translation: "Let's combine our forces." } }) });
+    await combined.service.prepareSession(payloadOf(rows, 2));
+    expect(insertedOf(combined.calls)[2]).toMatchObject({ type: 'sentence_translation', sentenceTranslation: 'בואו נשלב כוחות.' });
+    expect(events(combined.logger, 'sentence_degraded')).toEqual([]);
+  });
+
+  it('logs the checker’s time and how many checks it was asked', async () => {
+    const { service, logger } = world({
+      enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), contextReply: CONTEXTS, checkReply: checking({ ...AGREED, q1c: { context_meaning: 'לנפח' } }),
+      clock: [1_000, 1_250, 2_000, 2_400, 3_000, 3_700],
+    });
+    await service.prepareSession(payloadOf(CHOICES));
+    expect(logger.events).toContainEqual(
+      expect.objectContaining({ event: 'session_prepared', model_ms: 250, context_ms: 400, checker_ms: 700, check_count: 5 }),
+    );
+    expect(events(logger, 'checker_dropped')).toEqual([]);
+  });
+
+  it('asks no checker when no card has anything to check', async () => {
+    // A typed meaning alone (ordinal 2), its context call failed: no option, no written sentence.
+    const { service, calls, checkerLlm, logger } = world({ enrollment: ENGLISH, context: [SAW], reply: JSON.stringify({ items: [] }), contextReply: new Error('down') });
+    await service.prepareSession(payloadOf([SAW], 2));
+    expect(insertedOf(calls)[0]).toMatchObject({ type: 'typed_meaning', context: 'He will saw the branch off.' });
+    expect(checkerLlm.calls).toHaveLength(0);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', checker_ms: 0, check_count: 0 }));
+  });
+
+  describe('the board (spec D3, D5, D10)', () => {
+    // TEN at ordinal 0 with listening on: the board is positions 3 to 6, q4 its first word.
+    const BOARD_REPLY = TEN_REPLY.replace('["דלי","שולחן","כיסא"]', '["שולחן","כיסא","מנורה","ספה"]');
+
+    it('asks the checker about the fifth meaning against each of the four words, and skips one any of them makes right', async () => {
+      const { service, calls, checkerLlm, logger } = world({
+        context: TEN, reply: BOARD_REPLY, checkReply: checking({ q6: { options: [true, false, false, false] } }),
+      });
+      await service.prepareSession(TEN_PAYLOAD);
+      const boardChecks = checksOf(checkerLlm.calls[0]).filter((item) => ['q4', 'q5', 'q6', 'q7'].includes(item.key));
+      expect(boardChecks).toEqual(['зонтик', 'ведро', 'скрипка', 'лопата'].map((word, i) => ({ key: `q${i + 4}`, task: 'choice', word, options: ['שולחן', 'כיסא', 'מנורה', 'ספה'] })));
+      expect(insertedOf(calls)[3].options!.map((o) => o.text)).toEqual(['מטרייה', 'דלי', 'כינור', 'את חפירה', 'כיסא']);
+      expect(events(logger, 'checker_dropped')).toContainEqual(expect.objectContaining({ position: 3, type: 'matching', kind: 'option', text: 'שולחן' }));
+    });
+
+    it('category A (1d268882): never takes a board word’s own known meaning as the fifth', async () => {
+      // ведро (position 4) also means כיסא to the dictionary.
+      const known: KnownRight = { ...nothingKnown(), meaningsByLexeme: new Map([['l4', ['דלי', 'כיסא']]]) };
+      const { service, calls } = world({ context: TEN, reply: BOARD_REPLY, known, checkReply: checking({ q6: { options: [true, false, false, false] } }) });
+      await service.prepareSession(TEN_PAYLOAD);
+      expect(insertedOf(calls)[3].options!.map((o) => o.text)).toEqual(['מטרייה', 'דלי', 'כינור', 'את חפירה', 'מנורה']);
+    });
+
+    it('keeps two words whose meanings the dictionary overlaps off one board', async () => {
+      const boardOf = (calls: { generated: unknown[] }) =>
+        (calls.generated[0] as { questions: { form: string; type: string }[] }).questions.filter((q) => q.type === 'matching').map((q) => q.form);
+      const plain = world({ context: TEN, reply: TEN_REPLY });
+      await plain.service.prepareSession(TEN_PAYLOAD);
+      expect(boardOf(plain.calls)).toEqual(['зонтик', 'ведро', 'скрипка', 'лопата']);
+      // скрипка (pick 5) is also דלי to the dictionary, ведро's meaning on the board.
+      const known: KnownRight = { ...nothingKnown(), meaningsByLexeme: new Map([['l5', ['כינור', 'דלי']]]) };
+      const overlapping = world({ context: TEN, reply: TEN_REPLY, known });
+      await overlapping.service.prepareSession(TEN_PAYLOAD);
+      expect(boardOf(overlapping.calls)).toEqual(['зонтик', 'ведро', 'лопата', 'кастрюля']);
+    });
   });
 });

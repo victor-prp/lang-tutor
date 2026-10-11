@@ -162,6 +162,10 @@ describe('repos', () => {
     findSiblings: () => {
       throw new Error('these cases must not read a sibling');
     },
+    // Phase 34 (spec D3). Read by prepareSession, which these cases are not.
+    findKnownRight: () => {
+      throw new Error('these cases must not read what the dictionary knows to be right');
+    },
     // Phase 34. The accept job's and the backfill's: the session service writes
     // no accepted answers (spec D1).
     findRenderingForAccept: () => {
@@ -278,6 +282,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -327,6 +332,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -344,6 +350,7 @@ describe('repos', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -380,6 +387,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
@@ -427,6 +435,7 @@ describe('createNextSession, phase 31 (spec D12)', () => {
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
       contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
     });
