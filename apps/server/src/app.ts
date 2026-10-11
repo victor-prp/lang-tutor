@@ -9,6 +9,7 @@ import type { AppDeps } from './composition';
 import { PROFILE_EXEMPT, createSessionMiddleware, type ActorEnv } from './routes/actor';
 import { createApiLevelGate } from './routes/apiLevel';
 import { registerAuthDocs } from './routes/authDocs';
+import { createBotsRouter } from './routes/bots';
 import { createEnrollmentsRouter } from './routes/enrollments';
 import { createGrantsRouter } from './routes/grants';
 import { createMeRouter } from './routes/me';
@@ -69,6 +70,15 @@ export function createApp(deps: AppDeps) {
   }
   app.all('/api/auth/*', (c) => c.json({ error: 'not found' }, 404));
   registerAuthDocs(app);
+
+  // Phase 35 (spec D12). The bot route, only where BOT_SECRET is set, and
+  // before the session middleware: its bearer secret is its credential. Any
+  // other /api/bots path, and every one where it is unmounted, is a 404 that
+  // never reaches the session middleware, as with /api/auth.
+  if (deps.bots) {
+    app.route('/api', createBotsRouter({ secret: deps.bots.secret, bots: deps.bots.service, logger: deps.logger }));
+  }
+  app.all('/api/bots/*', (c) => c.json({ error: 'not found' }, 404));
 
   // Phase 29 (spec D11). Everything under /api past this point needs a
   // session; all but PROFILE_EXEMPT also need a profile. Registered after the

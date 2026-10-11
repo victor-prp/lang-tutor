@@ -77,6 +77,15 @@ describe('repos', () => {
     findById: () => {
       throw new Error('the session service must not read the users table');
     },
+    insertBot: () => {
+      throw new Error('the session service must not create a bot');
+    },
+    findBotByName: () => {
+      throw new Error('the session service must not look a bot up');
+    },
+    setBotDay: () => {
+      throw new Error("the session service must not move a bot's day");
+    },
   };
 
   // Phase 29: read by the authorization of every use case, and for nothing else

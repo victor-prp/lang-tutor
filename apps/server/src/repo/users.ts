@@ -1,5 +1,5 @@
 import type { CreateUserRequest, User } from '@lang-tutor/core/api';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { users } from '../db/schema';
@@ -20,6 +20,18 @@ function toUser(row: UserRow): User {
     native_language: row.nativeLanguage,
   };
 }
+
+/**
+ * Phase 35 (spec D11). A bot's name (`steady-en`) is kept as its username with
+ * each hyphen an underscore (`steady_en`), because the username check allows no
+ * hyphen. The bot name format allows no underscore, so two names never share a
+ * username. Here alone, so creating a bot and finding one cannot disagree.
+ */
+const botUsername = (name: string): string => name.replaceAll('-', '_');
+
+/** What a bot profile is given that onboarding would have asked for. */
+const BOT_AGE = 30;
+const BOT_NATIVE_LANGUAGE = 'he';
 
 export function createUserRepo(tx: Tx) {
   return {
@@ -63,6 +75,55 @@ export function createUserRepo(tx: Tx) {
       if (!row) return undefined;
       if (row.kind === 'bot') return { kind: 'bot', day: row.botDay! };
       return { kind: 'learner' };
+    },
+
+    /**
+     * Phase 35 (spec D11). A bot profile under the id of its sign-in identity,
+     * on `day`. Only `npm run db:bots:create` calls it (db/bots.ts). A learner
+     * holding the username is refused as UsernameTaken, like onboarding.
+     */
+    insertBot: async (input: { id: string; name: string; day: string }): Promise<void> => {
+      try {
+        await tx.insert(users).values({
+          id: input.id,
+          username: botUsername(input.name),
+          displayName: input.name,
+          age: BOT_AGE,
+          nativeLanguage: BOT_NATIVE_LANGUAGE,
+          kind: 'bot',
+          botDay: input.day,
+        });
+      } catch (error) {
+        if (isUniqueViolation(error) && constraintOf(error) !== 'users_pkey') throw new UsernameTaken(botUsername(input.name));
+        throw error;
+      }
+    },
+
+    /**
+     * Phase 35 (spec D12). The profile a bot name names, only if it is a bot:
+     * a learner's name finds nothing, exactly like a name nobody has, so the
+     * bot route can never reach a learner.
+     */
+    findBotByName: async (name: string): Promise<{ id: string } | undefined> => {
+      const [row] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.username, botUsername(name)), eq(users.kind, 'bot')));
+      return row;
+    },
+
+    /**
+     * Phase 35 (spec D12, ADR 0013 R2). Puts a bot on `day`. False when the name
+     * names no bot, in which case nothing changed. Setting the day it is already
+     * on is a no-op that still answers true, so a retried run is harmless.
+     */
+    setBotDay: async (name: string, day: string): Promise<boolean> => {
+      const rows = await tx
+        .update(users)
+        .set({ botDay: day })
+        .where(and(eq(users.username, botUsername(name)), eq(users.kind, 'bot')))
+        .returning({ id: users.id });
+      return rows.length > 0;
     },
 
     findByUsername: async (username: string): Promise<User | undefined> => {
