@@ -20,6 +20,10 @@ import type { BotState, StateStore } from './state.ts';
  * left out, since the memory at its end is gone. A bot's numbers and report are made once, so a
  * finished close never pays twice, and a closed issue is never closed again. When the run's report
  * calls run out (MAX_REPORTS_PER_RUN), the rest waits for the next run.
+ *
+ * The issue tracker failing (a `gh` error) before a day must not stop the day: a tracker that
+ * stays down would otherwise keep every run from playing. beforeDay logs and counts it, the day
+ * is played, and afterRun fails the run once the days are done, as a failed daily comment does.
  */
 export type WeekDeps = {
   profiles: readonly Profile[];
@@ -36,10 +40,38 @@ function memoryAtEndOf(profile: Profile, state: BotState, day: number): BotMemor
   return memory;
 }
 
-export function weeklyIssue(deps: WeekDeps): {
+/** An error from the issue tracker (the sink), as opposed to the bots' state or a bug. */
+export class SinkError extends Error {
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : String(error), { cause: error });
+    this.name = 'SinkError';
+  }
+}
+
+function tagged(sink: IssueSink): IssueSink {
+  const wrap = async <T>(call: () => Promise<T>): Promise<T> => {
+    try {
+      return await call();
+    } catch (error) {
+      throw error instanceof SinkError ? error : new SinkError(error);
+    }
+  };
+  return {
+    open: (week, body) => wrap(() => sink.open(week, body)),
+    comment: (ref, body) => wrap(() => sink.comment(ref, body)),
+    close: (ref) => wrap(() => sink.close(ref)),
+    where: (ref) => sink.where(ref),
+  };
+}
+
+export function weeklyIssue(given: WeekDeps): {
   beforeDay: (next: DayNext) => Promise<void>;
   afterDay: (done: DayDone) => Promise<void>;
+  afterRun: () => Promise<void>;
 } {
+  const deps: WeekDeps = { ...given, sink: tagged(given.sink) };
+  /** Week closes that failed on the tracker before a day: the day was played regardless. */
+  const failedBefore: string[] = [];
   const stateOf = (states: ReadonlyMap<string, BotState>, name: string) => {
     const state = states.get(name);
     if (!state) throw new Error(`no state for ${name}`);
@@ -116,8 +148,14 @@ export function weeklyIssue(deps: WeekDeps): {
   }
 
   return {
-    async beforeDay({ states }) {
-      await closeFinished(states, true);
+    async beforeDay({ day, states }) {
+      try {
+        await closeFinished(states, true);
+      } catch (error) {
+        if (!(error instanceof SinkError)) throw error;
+        deps.log(`day ${day}: closing a finished week failed on the issue tracker: ${error.message}; day ${day} is played all the same`);
+        failedBefore.push(`before day ${day}: ${error.message}`);
+      }
     },
     async afterDay({ day, states, played }) {
       // A daily comment that fails must not keep the week from closing: the error is raised
@@ -134,6 +172,11 @@ export function weeklyIssue(deps: WeekDeps): {
       }
       await closeFinished(states, false);
       if (failure) throw failure;
+    },
+    async afterRun() {
+      if (failedBefore.length > 0) {
+        throw new Error(`closing a finished week failed ${failedBefore.length} time(s): ${failedBefore.join('; ')}`);
+      }
     },
   };
 }

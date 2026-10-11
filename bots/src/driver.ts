@@ -44,6 +44,8 @@ export type RunOptions = {
   beforeDay?: (next: DayNext) => Promise<void>;
   /** After each simulated day, with every bot's state: the weekly issue and reports (D20–D22). */
   afterDay?: (done: DayDone) => Promise<void>;
+  /** Once every day is played: fails the run for what the hooks let the days go on past. */
+  afterRun?: () => Promise<void>;
 };
 
 /** The simulated day a run is about to play, and every bot's state before it. */
@@ -86,6 +88,7 @@ export async function runDays(opts: RunOptions): Promise<{ name: string; line: D
     }
     if (opts.afterDay) await opts.afterDay({ day, states, played: today });
   }
+  if (opts.afterRun) await opts.afterRun();
   return played;
 }
 

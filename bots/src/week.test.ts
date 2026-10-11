@@ -149,6 +149,41 @@ test('a close that fails on the week\'s last run is finished by the next run, be
   assert.equal(one.weeks?.[0].late, undefined);
 });
 
+test('a tracker that fails before a day does not stop the day; the run goes red at its end', async () => {
+  const { run, store, events, control } = setup();
+  await run(new FakeServer(), 6);
+  // Day 7's close fails on its closing comment, so the next run's beforeDay closes week 1.
+  control.fail = (event) => event === 'comment 1: ## Week 1 closed';
+  await assert.rejects(run(new FakeServer(), 1), /gh failed on comment 1: ## Week 1 closed/);
+
+  // The tracker fails once, on beforeDay's first look at week 1; afterDay's close works.
+  let opens = 0;
+  control.fail = (event) => event === 'open 1' && ++opens === 1;
+  const server = new FakeServer();
+  await assert.rejects(run(server, 1), /closing a finished week failed 1 time\(s\): before day 8: gh failed on open 1/);
+  // Day 8 was played regardless; after it, week 1 closed (late) and day 8 went to week 2.
+  assert.ok(server.calls.includes(`one-en day ${dateOf(8)}`));
+  assert.equal((await store.load('one-en')).day, 8);
+  assert.equal((await store.load('two-en')).day, 8);
+  assert.deepEqual(events.slice(-5), ['open 2', `comment 2: **Day 8** (${dateOf(8)})`, 'open 1', 'comment 1: ## Week 1 closed', 'close 1']);
+
+  // A tracker that stays down: the day is still played, and the run is still red.
+  control.fail = (event) => event.startsWith('open');
+  const down = new FakeServer();
+  await assert.rejects(run(down, 1), /gh failed on open/);
+  assert.equal((await store.load('one-en')).day, 9);
+});
+
+test('an error that is not the tracker\'s still stops the run before the day', async () => {
+  const { run, store } = setup();
+  await run(new FakeServer(), 7, { weekly: false });
+  const failing: StateStore = { load: (name) => store.load(name), save: async () => { throw new Error('push rejected'); } };
+  const { run: runFailing } = setup(failing);
+  const server = new FakeServer();
+  await assert.rejects(runFailing(server, 1), /push rejected/);
+  assert.ok(!server.calls.some((c) => c.includes(' day ')), 'no day was played');
+});
+
 test('a failed daily comment does not keep the week from closing, and still fails the run', async () => {
   const { run, events, control } = setup();
   await run(new FakeServer(), 6);
