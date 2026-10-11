@@ -443,7 +443,7 @@ export function createSessionService({
         } else {
           const recorded = outcome.record.answers[loaded.answers.length];
           // Phase 38 (spec D4): only the card that has a hint records whether it was opened.
-          const hinted = loaded.questions[loaded.answers.length].type === 'cloze_typed' ? (hintOpened ?? null) : null;
+          const hinted = loaded.questions[loaded.answers.length].type === 'cloze_typed' ? { hintOpened: hintOpened ?? null } : {};
           await repos.session.insertAnswer(
             sessionId,
             loaded.answers.length,
@@ -454,7 +454,7 @@ export function createSessionService({
                   text: recorded.answer_string,
                   verdict: recorded.verdict!,
                   ...(recorded.retry_state === 'pending' ? { pending: true as const } : {}),
-                  hintOpened: hinted,
+                  ...hinted,
                 },
           );
         }
