@@ -3,7 +3,7 @@ import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
 
 import { expectedSuccess } from './choose';
 import { CARD_TARGET } from './chooseConstants';
-import { MAX_PER_TYPE, RUNGS, planCards, type PlanInput, type PlanPick } from './plan';
+import { BOARD_MIN_PICKS, MAX_PER_TYPE, RUNGS, planCards, type PlanInput, type PlanPick } from './plan';
 
 const WR: Dimension = 'written_receptive';
 const WP: Dimension = 'written_productive';
@@ -189,15 +189,29 @@ describe('planCards: read aloud (spec D6)', () => {
 });
 
 describe('planCards: the board (spec D6, D10)', () => {
-  it('makes four multiple-choice picks with distinct forms and meanings one board', () => {
-    const plan = planCards([pick(0), pick(1), pick(2), pick(3)], ALL);
-    expect(plan.types).toEqual(['matching', 'matching', 'matching', 'matching']);
+  it('makes four multiple-choice picks with distinct forms and meanings one board, from seven picks', () => {
+    expect(BOARD_MIN_PICKS).toBe(7);
+    // Four new words (p 1) and three typed ones (p 0.9): the board first.
+    const list = [pick(0), pick(1), pick(2), pick(3), at(4, WP, 2), at(5, WP, 2), at(6, WP, 2)];
+    const plan = planCards(list, ALL);
     expect(plan.board).toEqual({ start: 0 });
-    expect([...plan.order].sort()).toEqual([0, 1, 2, 3]);
+    expect(plan.types.slice(0, 4)).toEqual(['matching', 'matching', 'matching', 'matching']);
+    expect(plan.order.slice(0, 4)).toEqual([0, 1, 2, 3]);
+  });
+
+  // Ruling 18: a board in a small session would swallow it into one card.
+  it('has no board under seven picks, even with four distinct multiple-choice picks', () => {
+    const four = planCards([pick(0), pick(1), pick(2), pick(3)], ALL);
+    expect(four.board).toBeNull();
+    expect(four.types).toEqual(Array(4).fill('multiple_choice'));
+    const six = planCards([pick(0), pick(1), pick(2), pick(3), at(4, WP, 2), at(5, WP, 2)], ALL);
+    expect(six.board).toBeNull();
+    expect(six.types).not.toContain('matching');
+    expect(count(six.types, 'multiple_choice')).toBe(4);
   });
 
   it('has no board with fewer than four multiple-choice picks', () => {
-    const plan = planCards([pick(0), pick(1), pick(2), at(3, WP, 1), at(4, WP, 2)], ALL);
+    const plan = planCards([pick(0), pick(1), pick(2), at(3, WP, 1), at(4, WP, 2), at(5, WP, 1), at(6, WP, 2)], ALL);
     expect(plan.board).toBeNull();
     expect(plan.types).not.toContain('matching');
     expect(count(plan.types, 'multiple_choice')).toBe(3);
@@ -224,6 +238,7 @@ describe('planCards: the board (spec D6, D10)', () => {
       pick(3, { form: 'large', translation: 'גָּדוֹל.' }),
       pick(4),
       pick(5),
+      at(6, WP, 2),
     ];
     const plan = planCards(list, ALL);
     const start = plan.board!.start;
@@ -240,8 +255,8 @@ describe('planCards: the board (spec D6, D10)', () => {
 
 describe('planCards: the order (spec D6)', () => {
   it('puts the highest p first', () => {
-    // p: SR rung 1 at R 0.25 = 0.625; WP rung 2 at R 0.9 = 0.9; WR rung 2 at R 0.7, level 3 = 0.7.
-    const list = [at(0, SR, 1, { r: 0.25 }), at(1, WP, 2), at(2, WR, 2, { r: 0.7 })];
+    // p: SR rung 1 at R 0.25 = 0.625; WP rung 2 at R 0.9 = 0.9; WR rung 2 at R 0.8, level 3 = 0.8.
+    const list = [at(0, SR, 1, { r: 0.25 }), at(1, WP, 2), at(2, WR, 2, { r: 0.8 })];
     const plan = planCards(list, ALL);
     expect(plan.order).toEqual([1, 2, 0]);
     expect(plan.types).toEqual(['typed_translation', 'typed_meaning', 'listen_choice']);

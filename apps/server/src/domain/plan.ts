@@ -59,6 +59,9 @@ export const RUNGS: Readonly<Record<Dimension, readonly [readonly QuestionType[]
 export const MAX_PER_TYPE = 4;
 
 export const BOARD_SIZE = 4;
+/** Ruling 18, as phase 24: a smaller session has no board, which would
+ *  swallow it into one card. */
+export const BOARD_MIN_PICKS = 7;
 
 /** The cards with four options to pick from: a guess is right one time in four. */
 const FOUR_OPTION: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'reverse_choice', 'cloze_choice', 'listen_choice']);
@@ -209,10 +212,11 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
     return card;
   });
 
-  // Spec D6, D10: four multiple-choice picks whose forms and meanings all
-  // differ become one matching board; otherwise there is none.
+  // Spec D6, D10: in a session of at least BOARD_MIN_PICKS, four
+  // multiple-choice picks whose forms and meanings all differ become one
+  // matching board; otherwise there is none.
   const multipleChoice = cards.flatMap((card, index) => (card.type === 'multiple_choice' ? [index] : []));
-  const board = boardPicks(picks, multipleChoice);
+  const board = picks.length >= BOARD_MIN_PICKS ? boardPicks(picks, multipleChoice) : null;
   const onBoard = new Set(board ?? []);
 
   const units: Unit[] = cards.flatMap((card, index) => (onBoard.has(index) ? [] : [{ indices: [index], ...card }]));
