@@ -240,13 +240,15 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
 /**
  * Phase 34 (spec D9). A second try, judged by the rule or the model call the
  * first answer was: the text and verdict it is stored with. An empty text, or
- * "show the answer", gives up; on a first answer an empty text is wrong. The
- * caller checks the answer's kind first, as for evaluate.
+ * a pass, gives up; on a first answer an empty text is wrong. D9 ends a second
+ * try with an answer or a give-up, so a skip there is a give-up too, never
+ * `skipped` (the app sends show_answer, but the wire takes either). The caller
+ * checks the answer's kind first, as for evaluate.
  */
 export function evaluateRetry(question: Question, answer: AnswerInput): { answer_string: string; verdict: AnswerVerdict } {
   const { answer_string, verdict } = evaluate(question, answer);
   if (verdict === undefined) throw new Error(`a ${question.type} question has no second try`);
-  const givenUp = ('text' in answer && answer.text.trim() === '') || ('pass' in answer && answer.pass === 'show_answer');
+  const givenUp = ('text' in answer && answer.text.trim() === '') || 'pass' in answer;
   return { answer_string, verdict: givenUp ? 'gave_up' : verdict };
 }
 

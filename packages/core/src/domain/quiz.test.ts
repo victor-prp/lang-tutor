@@ -491,12 +491,14 @@ describe('the second try (phase 34, spec D9)', () => {
     expect(evaluate(dictation, { text: 'parlo' })).toMatchObject({ verdict: 'exact', retry_state: null });
   });
 
-  it('judges a retry as the first answer was, and takes an empty text or show the answer as giving up', () => {
+  it('judges a retry as the first answer was, and takes an empty text, show the answer or a skip as giving up', () => {
     expect(evaluateRetry(typed, { text: 'casa' })).toEqual({ answer_string: 'casa', verdict: 'exact' });
     expect(evaluateRetry(typed, { text: 'porta' })).toEqual({ answer_string: 'porta', verdict: 'wrong' });
     expect(evaluateRetry(typed, { text: '  ' })).toEqual({ answer_string: '  ', verdict: 'gave_up' });
     expect(evaluateRetry(SAY, { heard: 'parlo' })).toEqual({ answer_string: 'parlo', verdict: 'understood' });
     expect(evaluateRetry(SAY, { pass: 'show_answer' })).toEqual({ answer_string: '', verdict: 'gave_up' });
+    // D9 ends a second try with an answer or a give-up: a skip is never stored as skipped.
+    expect(evaluateRetry(SAY, { pass: 'skip' })).toEqual({ answer_string: '', verdict: 'gave_up' });
     expect(evaluateRetry(MEANING, { text: 'לדבר', judged: 'exact' })).toEqual({ answer_string: 'לדבר', verdict: 'exact' });
     // The judged route's rule calls an empty text wrong; as a retry it is a give-up.
     expect(evaluateRetry(MEANING, { text: '', judged: 'wrong' })).toEqual({ answer_string: '', verdict: 'gave_up' });
