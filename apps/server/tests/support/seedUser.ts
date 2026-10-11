@@ -37,6 +37,11 @@ export async function seedUser(db: Db, id: string): Promise<void> {
   await seedEnrollment(db, { id: enrollmentOf(id), userId: id, targetLanguage: 'en' });
 }
 
+/** Phase 35 (spec D11). Turns a seeded learner into a bot on `botDay`. */
+export async function makeBot(db: Db, id: string, botDay: string): Promise<void> {
+  await db.update(users).set({ kind: 'bot', botDay }).where(eq(users.id, id));
+}
+
 /** A Hebrew-explained enrollment under an id the caller chooses. */
 export async function seedEnrollment(
   db: Db,

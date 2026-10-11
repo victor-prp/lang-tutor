@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { review } from '@lang-tutor/core/domain';
-import { eq } from 'drizzle-orm';
 
-import { glossMemory } from '../../../src/db/schema';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
-import { failInsertsInto, readProgress } from '../../support/progressRows';
+import { failInsertsInto, readGlossMemory, readProgress } from '../../support/progressRows';
 import { insertListSession } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
@@ -81,8 +79,7 @@ async function play(words: Word[], right: boolean[]) {
 // The columns are `real` (float32), so a stored number is the model's to about seven digits.
 const f32 = (x: number) => expect.closeTo(x, 4);
 
-const memoryOf = (glossId: string) =>
-  t.db.select().from(glossMemory).where(eq(glossMemory.glossId, glossId));
+const memoryOf = (glossId: string) => readGlossMemory(t.db, glossId);
 
 describe('memory written when a session ends', () => {
   it('writes rows for saved glosses only', async () => {

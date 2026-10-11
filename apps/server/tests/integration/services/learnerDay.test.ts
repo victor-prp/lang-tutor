@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { PgBoss } from 'pg-boss';
 
-import { eq, sql } from 'drizzle-orm';
-
-import { users } from '../../../src/db/schema';
 import type { SessionRecord } from '../../../src/domain/session';
 import type { SessionService } from '../../../src/services/sessions';
 import { createFakeLogger } from '../../support/fakes';
@@ -11,7 +8,7 @@ import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import { readProgress, saveSessionGlosses, sessionDay, setLastStep } from '../../support/progressRows';
 import { asChoice } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
-import { enrollmentOf, seedUser } from '../../support/seedUser';
+import { enrollmentOf, makeBot as makeBotUser, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 
@@ -45,9 +42,7 @@ afterEach(async () => {
   await t.close();
 });
 
-async function makeBot(botDay: string) {
-  await t.db.update(users).set({ kind: 'bot', botDay }).where(eq(users.id, 'u_1'));
-}
+const makeBot = (botDay: string) => makeBotUser(t.db, 'u_1', botDay);
 
 async function start() {
   const { sessionId } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
@@ -85,10 +80,7 @@ describe('the day a session counts for', () => {
 
   it('is unset while the session is open', async () => {
     const { sessionId } = await start();
-    const rows = await t.db.execute<{ day: string | null }>(
-      sql`select practice_day::text as day from sessions where id = ${sessionId}`,
-    );
-    expect(rows.rows[0].day).toBeNull();
+    expect(await sessionDay(t.db, sessionId)).toBeNull();
   });
 });
 

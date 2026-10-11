@@ -100,10 +100,20 @@ export async function readSnapshot(db: Db, sessionId: string) {
 }
 
 /** The day the rule counts a session for: its stored practice_day (phase 35). */
-export async function sessionDay(db: Db, sessionId: string): Promise<string> {
+export async function sessionDay(db: Db, sessionId: string): Promise<string | null> {
   const rows = await db.execute<{ day: string | null }>(sql`
     select practice_day::text as day from sessions where id = ${sessionId}`);
-  return rows.rows[0].day!;
+  return rows.rows[0].day;
+}
+
+/** Phase 35. One gloss's memory rows, as stored. */
+export function readGlossMemory(db: Db, glossId: string) {
+  return db.select().from(glossMemory).where(eq(glossMemory.glossId, glossId));
+}
+
+/** Phase 35. Memory rows written directly, for a history no session made. */
+export async function insertGlossMemory(db: Db, rows: (typeof glossMemory.$inferInsert)[]): Promise<void> {
+  await db.insert(glossMemory).values(rows);
 }
 
 /** Puts one progress row at a level that last stepped on `lastStepOn`. */
