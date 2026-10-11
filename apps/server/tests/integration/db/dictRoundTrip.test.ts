@@ -88,6 +88,25 @@ async function storedWord(t: TestDb, lemma: string) {
   return { senses, renderings, glosses };
 }
 
+/** Phase 34 (spec D1). What the accept job wrote on one lemma's renderings; the
+ *  stamp in epoch milliseconds, because drizzle's raw results keep timestamps as text. */
+async function acceptedOf(t: TestDb, lemma: string) {
+  const rows = await t.db.execute<{
+    translation: string;
+    accepted_answers: string[];
+    answer_form: string | null;
+    accepted_at: number | null;
+  }>(sql`
+    select tr.translation, tr.accepted_answers, tr.answer_form,
+           (extract(epoch from tr.accepted_at) * 1000)::float8 as accepted_at
+    from dict_var_translations tr
+    join dict_senses s on s.id = tr.sense_id
+    join dict_lexemes l on l.id = s.lexeme_id
+    where l.lemma = ${lemma}
+    order by tr.rank`);
+  return rows.rows;
+}
+
 /** Phase 31. One lemma's live glosses in Hebrew, by key, with their senses. */
 async function liveGlosses(t: TestDb, lemma: string): Promise<{ key: string; senses: string[] }[]> {
   const rows = await t.db.execute<{ key: string; senses: string[] }>(sql`
@@ -290,6 +309,103 @@ describe('dictionary export/restore', () => {
     expect(await storedWord(source, 'car')).toEqual(car);
     expect(await storedWord(target, 'car')).toEqual(car);
     expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
+  });
+
+  // Phase 34 (spec D1). The accept job's work is the dictionary's, shared by every
+  // learner of the pair, and costs a model call per rendering to redo: a restore
+  // that dropped it would empty the column the runbook's restore just filled.
+  // Each field only when present, as the others are, so a rendering the job has
+  // not reached exports exactly as it did before.
+  describe('accepted answers (phase 34)', () => {
+    const STAMP = '2026-10-11T08:30:00.000Z';
+    const lamps = {
+      form: 'lamps',
+      entries: [
+        {
+          lemma: 'lamp',
+          part_of_speech: 'noun' as const,
+          senses: [
+            { translation: 'מנורות', sense_code: 'light_source' },
+            { translation: 'מדורות', sense_code: 'campfire' },
+            { translation: 'נברשות', sense_code: 'chandelier' },
+          ],
+        },
+      ],
+    };
+
+    /** What the accept job would write: a list and a form for the first, a stamp
+     *  alone for the second (it found nothing beyond the word), nothing for the third. */
+    async function accept(t: TestDb) {
+      await t.db.execute(sql`
+        update dict_var_translations
+        set accepted_answers = ARRAY['lamps', 'lights']::text[], answer_form = 'lamps', accepted_at = ${STAMP}::timestamptz
+        where translation = 'מנורות'`);
+      await t.db.execute(sql`
+        update dict_var_translations set accepted_at = ${STAMP}::timestamptz where translation = 'מדורות'`);
+    }
+
+    const WRITTEN = [
+      { translation: 'מנורות', accepted_answers: ['lamps', 'lights'], answer_form: 'lamps', accepted_at: Date.parse(STAMP) },
+      { translation: 'מדורות', accepted_answers: [], answer_form: null, accepted_at: Date.parse(STAMP) },
+      { translation: 'נברשות', accepted_answers: [], answer_form: null, accepted_at: null },
+    ];
+
+    it('round-trips the list, the form and the stamp, and re-exports the same file', async () => {
+      await lookUp(source, lamps);
+      await accept(source);
+      expect(await acceptedOf(source, 'lamp')).toEqual(WRITTEN);
+
+      const exported = await exportDictionary(source.db, EN_HE);
+      expect(exported.find((record) => record.form === 'lamps')?.entries[0].senses).toEqual([
+        { translation: 'מנורות', sense_code: 'light_source', accepted_answers: ['lamps', 'lights'], answer_form: 'lamps', accepted_at: STAMP },
+        // A stamp with nothing beside it: "done, and nothing more", not "never run".
+        { translation: 'מדורות', sense_code: 'campfire', accepted_at: STAMP },
+        { translation: 'נברשות', sense_code: 'chandelier' },
+      ]);
+
+      await restoreInto(target, fromJsonl(toJsonl(exported)));
+
+      expect(await acceptedOf(target, 'lamp')).toEqual(WRITTEN);
+      expect(await exportDictionary(target.db, EN_HE)).toEqual(exported);
+    });
+
+    it('restores a file written before the phase, without these fields, as no list, no form and no stamp', async () => {
+      // A line of the phase-31 format, as the committed dictionary.jsonl has it.
+      const old = fromJsonl(
+        JSON.stringify({
+          form: 'lamps',
+          kind: 'word',
+          entries: [
+            {
+              lemma: 'lamp',
+              part_of_speech: 'noun',
+              senses: [{ translation: 'מנורות', sense_code: 'light_source', alternatives: ['פנסים'], gloss: 'מנורה' }],
+            },
+          ],
+        }) + '\n',
+      );
+
+      await restoreInto(target, old);
+
+      expect(await acceptedOf(target, 'lamp')).toEqual([
+        { translation: 'מנורות', accepted_answers: [], answer_form: null, accepted_at: null },
+      ]);
+    });
+
+    it('keeps what a live database already holds, as it keeps the rest of a rendering', async () => {
+      await lookUp(source, lamps);
+      await accept(source);
+      const exported = await exportDictionary(source.db, EN_HE);
+
+      // The target learned `lamps` itself, and its job has run since: a different list.
+      await lookUp(target, lamps);
+      await target.db.execute(sql`
+        update dict_var_translations set accepted_answers = ARRAY['lamp']::text[], accepted_at = now() where translation = 'מנורות'`);
+
+      await restoreInto(target, exported);
+
+      expect((await acceptedOf(target, 'lamp'))[0].accepted_answers).toEqual(['lamp']);
+    });
   });
 
   // Phase 31 (spec D7). Pinned as it is: the export carries each rendering's

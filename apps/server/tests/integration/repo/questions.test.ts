@@ -196,7 +196,7 @@ describe('phase 23: reversed and typed questions', () => {
   }[] = [
     { label: 'a typed question with options', type: 'typed_translation', prompt: 'ספר', options: generatedOptions('tome', ['a', 'b', 'c']), alternatives: [], tiles: null },
     { label: 'a typed question without a prompt', type: 'typed_translation', prompt: null, options: null, alternatives: [], tiles: null },
-    { label: 'a typed question with six alternatives', type: 'typed_translation', prompt: 'ספר', options: null, alternatives: ['a', 'b', 'c', 'd', 'e', 'f'], tiles: null },
+    { label: 'a typed question with eleven alternatives', type: 'typed_translation', prompt: 'ספר', options: null, alternatives: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'], tiles: null },
     { label: 'a reversed question without a prompt', type: 'reverse_choice', prompt: null, options: generatedOptions('tome', ['a', 'b', 'c']), alternatives: null, tiles: null },
     { label: 'a choice with a prompt', type: 'multiple_choice', prompt: 'ספר', options: generatedOptions('ספר', ['a', 'b', 'c']), alternatives: null, tiles: null },
     { label: 'a dictation with options', type: 'dictation', prompt: 'ספר', options: generatedOptions('tome', ['a', 'b', 'c']), alternatives: null, tiles: null },

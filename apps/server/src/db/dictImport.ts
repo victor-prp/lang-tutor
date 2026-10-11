@@ -28,6 +28,11 @@ export type ImportResult = {
  * definition replay through the same call: a definition fills only a sense
  * that has none, and a sense joins or creates its gloss as a lookup's would.
  *
+ * Phase 34. A rendering's accepted answers, answer form and the time the accept job
+ * last ran replay through the same call, each only when the file has it, so a file
+ * written before the phase restores with none. A rendering already in the database
+ * keeps its own, as it keeps the rest of its wording.
+ *
  * Chunked rather than one transaction for the whole file: the full backfill is
  * ~89k records, and a single transaction holding that many inserts would keep
  * one connection and its locks busy for minutes and pile the lot into one WAL

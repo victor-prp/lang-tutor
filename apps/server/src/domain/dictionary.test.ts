@@ -649,6 +649,36 @@ describe('entriesToRows (phase 31)', () => {
   });
 });
 
+describe('entriesToRows (phase 34)', () => {
+  const entry = (sense: object) => [
+    { lemma: 'hour', part_of_speech: 'noun' as const, senses: [{ translation: 'שעות', sense_code: 'time_unit', ...sense }] },
+  ];
+
+  it("leaves the accepted-answers fields out of a lookup's sense, so the columns take their defaults", () => {
+    const [row] = entriesToRows(entry({}));
+    expect(row.senses[0]).not.toHaveProperty('acceptedAnswers');
+    expect(row.senses[0]).not.toHaveProperty('answerForm');
+    expect(row.senses[0]).not.toHaveProperty('acceptedAt');
+  });
+
+  it("carries a restored sense's list, form and stamp", () => {
+    const [row] = entriesToRows(
+      entry({ accepted_answers: ['ore', 'ora'], answer_form: 'ore', accepted_at: '2026-10-11T08:30:00.000Z' }),
+    );
+    expect(row.senses[0]).toMatchObject({
+      acceptedAnswers: ['ore', 'ora'],
+      answerForm: 'ore',
+      acceptedAt: new Date('2026-10-11T08:30:00.000Z'),
+    });
+  });
+
+  it('carries a stamp with nothing beside it, which says the job ran and found nothing more', () => {
+    const [row] = entriesToRows(entry({ accepted_at: '2026-10-11T08:30:00.000Z' }));
+    expect(row.senses[0].acceptedAt).toEqual(new Date('2026-10-11T08:30:00.000Z'));
+    expect(row.senses[0]).not.toHaveProperty('acceptedAnswers');
+  });
+});
+
 // A citation form that normalises to nothing would key a gloss by '', which
 // every other such sense of the headword then joins, and head its card with
 // nothing: the translation stands in for it.

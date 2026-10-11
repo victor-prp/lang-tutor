@@ -214,10 +214,18 @@ export type SenseToWrite = {
   definition: string | null;
   exampleSource: string | null;
   exampleTarget: string | null;
+  /** Phase 34 (spec D1, D2). What the accept job stored for the rendering. Set only
+   *  by a dictionary restore (SenseToStore): a lookup, which has no such list yet,
+   *  leaves them out and the columns take their defaults. */
+  acceptedAnswers?: string[];
+  answerForm?: string | null;
+  acceptedAt?: Date | null;
 };
 
-/** One rendering as every writer stores it; the lookup adds the sense code. */
-export type Rendering = Omit<SenseToWrite, 'senseCode'>;
+/** One rendering as every writer stores it; the lookup adds the sense code. The
+ *  accepted-answers columns are not part of it: the repair carries them over
+ *  itself (repairVariantRenderings), and only a restore sets them. */
+export type Rendering = Omit<SenseToWrite, 'senseCode' | 'acceptedAnswers' | 'answerForm' | 'acceptedAt'>;
 
 /**
  * Phase 31. A sense as a writer hands it over: the first call's (LlmSense),
@@ -226,7 +234,15 @@ export type Rendering = Omit<SenseToWrite, 'senseCode'>;
  * (db/dictExport.ts); the first call no longer asks the model for them
  * (LlmSenseSchema).
  */
-export type SenseToStore = LlmSense & { gloss_alternatives?: readonly string[] };
+export type SenseToStore = LlmSense & {
+  gloss_alternatives?: readonly string[];
+  /** Phase 34 (spec D1, D2). The accept job's work on this rendering, replayed by a
+   *  restore; absent from a file written before the phase, and from a rendering
+   *  the job has not reached. `accepted_at` is an ISO timestamp. */
+  accepted_answers?: readonly string[];
+  answer_form?: string | null;
+  accepted_at?: string | null;
+};
 
 /** An entry as a writer hands it over: the first call's, with SenseToStore senses. */
 export type EntryToStore = Omit<LlmEntry, 'senses'> & { senses: SenseToStore[] };
@@ -290,8 +306,22 @@ export function entriesToRows(entries: readonly EntryToStore[], entryRankOffset 
     lemma: entry.lemma,
     partOfSpeech: entry.part_of_speech,
     entryRank: entryRankOffset + index,
-    senses: entry.senses.map((sense, rank) => ({ senseCode: sense.sense_code, ...renderingOf(sense, rank) })),
+    senses: entry.senses.map((sense, rank) => ({
+      senseCode: sense.sense_code,
+      ...renderingOf(sense, rank),
+      ...restoredOf(sense),
+    })),
   }));
+}
+
+/** Phase 34 (spec D1, D2). The accepted-answers fields of a restored sense, each only
+ *  when the file had it, so a lookup's sense and a pre-phase file write the defaults. */
+function restoredOf(sense: SenseToStore): Pick<SenseToWrite, 'acceptedAnswers' | 'answerForm' | 'acceptedAt'> {
+  return {
+    ...(sense.accepted_answers ? { acceptedAnswers: [...sense.accepted_answers] } : {}),
+    ...(sense.answer_form !== undefined ? { answerForm: sense.answer_form } : {}),
+    ...(sense.accepted_at ? { acceptedAt: new Date(sense.accepted_at) } : {}),
+  };
 }
 
 /** One row of the staleness probe: a form's variant beside the lexeme it belongs to. */

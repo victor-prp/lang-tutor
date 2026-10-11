@@ -695,6 +695,11 @@ export function createDictRepo(tx: Tx) {
             alternatives: sense.alternatives,
             exampleSource: sense.exampleSource,
             exampleTarget: sense.exampleTarget,
+            // Phase 34 (spec D1, D2). Only a restore brings these; a lookup's
+            // renderings start with none.
+            acceptedAnswers: sense.acceptedAnswers ?? [],
+            answerForm: sense.answerForm ?? null,
+            acceptedAt: sense.acceptedAt ?? null,
           })),
         )
         .onConflictDoNothing({
@@ -809,7 +814,13 @@ export function createDictRepo(tx: Tx) {
     senses: RepairedRendering[];
   }): Promise<{ needsMerge: boolean }> => {
     const current = await tx
-      .select({ senseId: dictVarTranslations.senseId })
+      .select({
+        senseId: dictVarTranslations.senseId,
+        translation: dictVarTranslations.translation,
+        acceptedAnswers: dictVarTranslations.acceptedAnswers,
+        answerForm: dictVarTranslations.answerForm,
+        acceptedAt: dictVarTranslations.acceptedAt,
+      })
       .from(dictVarTranslations)
       .where(
         and(
@@ -856,18 +867,30 @@ export function createDictRepo(tx: Tx) {
         ),
       );
 
+    // Phase 34 (spec D1). What the accept job stored goes back for every (variant,
+    // sense) whose translation text is unchanged, read above before the delete. A
+    // new or reworded rendering starts with none: what was accepted for the old
+    // words does not describe the new ones, and the next session re-enqueues the job.
+    const before = new Map(current.map((row) => [row.senseId, row]));
     await tx.insert(dictVarTranslations).values(
-      input.senses.map((sense) => ({
-        variantId: input.variantId,
-        senseId: sense.senseId,
-        userLanguageCode: input.userLanguageCode,
-        rank: sense.rank,
-        translation: sense.translation,
-        gloss: sense.gloss,
-        alternatives: sense.alternatives,
-        exampleSource: sense.exampleSource,
-        exampleTarget: sense.exampleTarget,
-      })),
+      input.senses.map((sense) => {
+        const was = before.get(sense.senseId);
+        const unchanged = was !== undefined && was.translation === sense.translation;
+        return {
+          variantId: input.variantId,
+          senseId: sense.senseId,
+          userLanguageCode: input.userLanguageCode,
+          rank: sense.rank,
+          translation: sense.translation,
+          gloss: sense.gloss,
+          alternatives: sense.alternatives,
+          exampleSource: sense.exampleSource,
+          exampleTarget: sense.exampleTarget,
+          acceptedAnswers: unchanged ? was.acceptedAnswers : [],
+          answerForm: unchanged ? was.answerForm : null,
+          acceptedAt: unchanged ? was.acceptedAt : null,
+        };
+      }),
     );
 
     await tx

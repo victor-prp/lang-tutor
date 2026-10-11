@@ -479,6 +479,152 @@ describe('sense_version stays correct under two concurrent writers', () => {
   });
 });
 
+// Phase 34 (spec D1). The accept job stores a rendering's other right answers,
+// the form that agrees with it and when the job ran; the repair deletes and
+// re-inserts the variant's renderings, so unless it carries those columns over,
+// every repair empties them and the next session pays for the call again. A
+// rendering whose wording the repair rewrote is a different rendering: what was
+// accepted for the old words does not describe the new ones.
+describe('a repair keeps what the accept job stored for a rendering it did not reword', () => {
+  const STAMP = new Date('2026-10-11T08:30:00.000Z');
+  const STORED = (n: number) => ({ answers: [`ok${n}`, `also${n}`], form: `form${n}` });
+
+  const renderings = async (variantId: string) => {
+    const rows = await t.db.execute<{
+      translation: string;
+      accepted_answers: string[];
+      answer_form: string | null;
+      accepted_at: number | null;
+    }>(sql`
+      select translation, accepted_answers, answer_form, (extract(epoch from accepted_at) * 1000)::float8 as accepted_at
+      from dict_var_translations where variant_id = ${variantId} order by rank`);
+    return rows.rows;
+  };
+
+  /** `cook` with two senses, both accepted, then the lexeme learns a third. */
+  const staleWithAcceptedAnswers = async () => {
+    await persist('cook', [
+      { lemma: 'cook', part_of_speech: 'noun',
+        senses: [
+          { sense_code: 'kitchen_worker', translation: 'N-COOK' },
+          { sense_code: 'cookery_writer', translation: 'N-COOK-2' },
+        ] },
+    ]);
+    await persist('cooks', [
+      { lemma: 'cook', part_of_speech: 'noun',
+        senses: [
+          { sense_code: 'kitchen_worker', translation: 'N-COOKS' },
+          { sense_code: 'cookery_writer', translation: 'N-COOKS-2' },
+          { sense_code: 'ships_cook', translation: 'N-COOKS-3' },
+        ] },
+    ]);
+    const [stale] = await withTx(t.db, (tx) =>
+      createDictRepo(tx).findStaleLexemesByForm({ form: 'cook', languageCode: 'en', userLanguageCode: 'he' }));
+    for (const [n, translation] of [[1, 'N-COOK'], [2, 'N-COOK-2']] as const) {
+      await t.db.execute(sql`
+        update dict_var_translations
+        set accepted_answers = ARRAY[${STORED(n).answers[0]}, ${STORED(n).answers[1]}]::text[],
+            answer_form = ${STORED(n).form}, accepted_at = ${STAMP.toISOString()}::timestamptz
+        where variant_id = ${stale.variantId} and translation = ${translation}`);
+    }
+    const { senseVersion, stored } = await renderableSenses(stale.lexemeId);
+    const idOf = (code: string) => stored.find((sense) => sense.senseCode === code)!.senseId;
+    return { stale, senseVersion, idOf };
+  };
+
+  const rendering = (senseId: string, rank: number, translation: string) => ({
+    senseId, rank, translation, alternatives: [], gloss: translation, glossAlternatives: [], definition: null,
+    exampleSource: null, exampleTarget: null,
+  });
+
+  const repair = (
+    w: Awaited<ReturnType<typeof staleWithAcceptedAnswers>>,
+    senses: ReturnType<typeof rendering>[],
+  ) =>
+    withTx(t.db, async (tx) => {
+      const dict = createDictRepo(tx);
+      await dict.lockLexemes([w.stale.lexemeId]);
+      await dict.repairVariantRenderings({
+        variantId: w.stale.variantId, lexemeId: w.stale.lexemeId, userLanguageCode: 'he',
+        senseVersion: w.senseVersion, lemmaForm: true, senses,
+      });
+    });
+
+  it('carries the three columns over for an unchanged translation, wherever it now ranks', async () => {
+    const w = await staleWithAcceptedAnswers();
+    await repair(w, [
+      rendering(w.idOf('ships_cook'), 0, 'N-NEW'),
+      rendering(w.idOf('cookery_writer'), 1, 'N-COOK-2'),
+      rendering(w.idOf('kitchen_worker'), 2, 'N-COOK'),
+    ]);
+
+    expect(await renderings(w.stale.variantId)).toEqual([
+      // New: nothing was accepted for it yet, so the next session enqueues the job.
+      { translation: 'N-NEW', accepted_answers: [], answer_form: null, accepted_at: null },
+      { translation: 'N-COOK-2', accepted_answers: STORED(2).answers, answer_form: STORED(2).form, accepted_at: STAMP.getTime() },
+      { translation: 'N-COOK', accepted_answers: STORED(1).answers, answer_form: STORED(1).form, accepted_at: STAMP.getTime() },
+    ]);
+  });
+
+  it('leaves them empty and unstamped for a rendering whose wording the repair changed', async () => {
+    const w = await staleWithAcceptedAnswers();
+    await repair(w, [
+      rendering(w.idOf('kitchen_worker'), 0, 'N-COOK'),
+      rendering(w.idOf('cookery_writer'), 1, 'N-COOK-2, REWORDED'),
+      rendering(w.idOf('ships_cook'), 2, 'N-COOK-3'),
+    ]);
+
+    expect(await renderings(w.stale.variantId)).toEqual([
+      { translation: 'N-COOK', accepted_answers: STORED(1).answers, answer_form: STORED(1).form, accepted_at: STAMP.getTime() },
+      // The words changed, so what was accepted for the old ones is gone with them.
+      { translation: 'N-COOK-2, REWORDED', accepted_answers: [], answer_form: null, accepted_at: null },
+      { translation: 'N-COOK-3', accepted_answers: [], answer_form: null, accepted_at: null },
+    ]);
+  });
+
+  it('keeps the stamp of a rendering the job found nothing for, so it is not paid for again', async () => {
+    const w = await staleWithAcceptedAnswers();
+    await t.db.execute(sql`
+      update dict_var_translations set accepted_answers = '{}', answer_form = null
+      where variant_id = ${w.stale.variantId} and translation = 'N-COOK'`);
+    await repair(w, [
+      rendering(w.idOf('kitchen_worker'), 0, 'N-COOK'),
+      rendering(w.idOf('cookery_writer'), 1, 'N-COOK-2'),
+      rendering(w.idOf('ships_cook'), 2, 'N-COOK-3'),
+    ]);
+
+    expect((await renderings(w.stale.variantId))[0]).toEqual(
+      { translation: 'N-COOK', accepted_answers: [], answer_form: null, accepted_at: STAMP.getTime() },
+    );
+  });
+
+  it('keys on the variant: another form with the same wording is not taken for its own', async () => {
+    const w = await staleWithAcceptedAnswers();
+    const [plural] = await t.db.execute<{ variant_id: string }>(sql`
+      select v.id as variant_id from dict_variants v where v.form = 'cooks'`).then((r) => r.rows);
+    await t.db.execute(sql`
+      update dict_var_translations set accepted_answers = ARRAY['plural']::text[], accepted_at = ${STAMP.toISOString()}::timestamptz
+      where variant_id = ${plural.variant_id} and translation = 'N-COOKS'`);
+
+    await repair(w, [
+      rendering(w.idOf('kitchen_worker'), 0, 'N-COOKS'),
+      rendering(w.idOf('cookery_writer'), 1, 'N-COOK-2'),
+      rendering(w.idOf('ships_cook'), 2, 'N-COOK-3'),
+    ]);
+
+    // The repaired variant's 'N-COOKS' is a new wording for it: `cooks`' own
+    // row, which has the same text, is a different (variant, sense) pair.
+    expect((await renderings(w.stale.variantId))[0]).toEqual(
+      { translation: 'N-COOKS', accepted_answers: [], answer_form: null, accepted_at: null },
+    );
+    expect(await renderings(plural.variant_id)).toEqual([
+      { translation: 'N-COOKS', accepted_answers: ['plural'], answer_form: null, accepted_at: STAMP.getTime() },
+      { translation: 'N-COOKS-2', accepted_answers: [], answer_form: null, accepted_at: null },
+      { translation: 'N-COOKS-3', accepted_answers: [], answer_form: null, accepted_at: null },
+    ]);
+  });
+});
+
 // Review round 2. The lock 1b takes is per-entry, inside the loop, and held to
 // commit — so a write's locks are taken in the MODEL's entry order, which is
 // whatever order the answer listed the lexemes in. `mergeEntries` preserves

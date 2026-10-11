@@ -341,6 +341,19 @@ export const dictVarTranslations = pgTable(
     // inflection: the lookup card's "also …", and right answers to a meaning
     // card built on this form (D13). Never more than five (tidyGlossList).
     alternatives: text('alternatives').array().notNull().default(sql`'{}'::text[]`),
+    // Phase 34 (spec D1). Every target-language word that translates this
+    // rendering in its sense, inflected to agree with it: the list every typed or
+    // spoken card built on the rendering accepts. Written only by the accept job,
+    // never more than ten, and empty both before the job has run and when it found
+    // nothing, which `accepted_at` tells apart.
+    acceptedAnswers: text('accepted_answers').array().notNull().default(sql`'{}'::text[]`),
+    // Phase 34 (spec D2). The form of the headword that agrees with the rendering
+    // in number and person (`ore` for שעות); null when it is the variant's own form.
+    answerForm: text('answer_form'),
+    // Phase 34 (spec D1). When the accept job last ran for this rendering; null =
+    // never. What "done" means, so a rendering the job found nothing for is not
+    // paid for again.
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     // Both halves of the example live here, because an example belongs to the
     // form that was typed: `booked` shows "I booked a table", not "I want to
     // book a table". The source half is duplicated per target language, which is
@@ -362,6 +375,8 @@ export const dictVarTranslations = pgTable(
       t.rank,
     ),
     check('dict_var_translations_rank_nonneg', sql`${t.rank} >= 0`),
+    // Phase 34 (spec D1). The cap is ten here and on questions.alternatives.
+    check('dict_var_translations_accepted_answers_cap', sql`cardinality(${t.acceptedAnswers}) <= 10`),
     // Phase 18. The primary key leads with variant_id, so "which renderings does
     // this SENSE have in this language" — the drill-down's renderings (and,
     // until phase 31 counted glosses, the vocabulary list's sense count) —
@@ -735,7 +750,7 @@ export const questions = pgTable(
     // than joined: a later repair may rewrite the rendering, and a question
     // records what was asked. Today's card prompts with the variant's form.
     prompt: text('prompt'),
-    // Phase 23. A typed card's other right answers, at most five.
+    // Phase 23. A typed card's other right answers, at most five; ten from phase 34.
     alternatives: text('alternatives').array(),
     // Phase 24. A tiles card's tiles: its letters and two more, shuffled.
     tiles: text('tiles').array(),
@@ -747,6 +762,23 @@ export const questions = pgTable(
     sentenceTranslation: text('sentence_translation'),
     gapStart: integer('gap_start'),
     gapEnd: integer('gap_end'),
+    // Phase 34 (spec D6, D7). A sentence that pins the sense of a card showing a
+    // bare word, and its translation, which is never shown and goes to the judge.
+    // Hebrew on a typed translation, say-the-translation or reverse choice; in the
+    // target language on a typed meaning or multiple choice. Null on every other type.
+    context: text('context'),
+    contextTranslation: text('context_translation'),
+    // The word the card marks in `context`, as offsets into it. Both null when the
+    // service could not find the word, and the sentence is then shown unmarked.
+    contextMarkStart: integer('context_mark_start'),
+    contextMarkEnd: integer('context_mark_end'),
+    // Phase 34 (spec D8). The practised word in `sentence_translation`, the Hebrew
+    // of a typed cloze or a sentence translation. Both null = shown unmarked.
+    sentenceMarkStart: integer('sentence_mark_start'),
+    sentenceMarkEnd: integer('sentence_mark_end'),
+    // Phase 34 (spec D2). The form of the headword the card asks for when the
+    // rendering it was built from has one of its own (`ore`); null = the variant's.
+    answerForm: text('answer_form'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -763,6 +795,9 @@ export const questions = pgTable(
     // Phase 27's meaning recall stores the meaning as its prompt and nothing else;
     // its sentence cards store the Hebrew meaning as the prompt, a cloze choice with
     // options, a typed cloze with alternatives, a translation with neither.
+    // Phase 34 (spec D1, D6, D8): at most ten alternatives, a context only on the five
+    // types that show a bare word, and a marked word in the Hebrew only on the two
+    // sentence types that ask it.
     check(
       'questions_shape_valid',
       sql`case ${t.type}
@@ -771,19 +806,37 @@ export const questions = pgTable(
         when 'matching' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
         when 'reverse_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'typed_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
-          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 10
         when 'dictation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'letter_tiles' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null
           and coalesce(array_length(${t.tiles}, 1), 0) between 5 and 12
         when 'read_aloud' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'say_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
-          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 10
         when 'typed_meaning' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'cloze_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'cloze_typed' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
-          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 10
         when 'sentence_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
-        else false end`,
+        else false end
+        and (${t.type} in ('typed_translation', 'say_translation', 'reverse_choice', 'typed_meaning', 'multiple_choice')
+          or (${t.context} is null and ${t.contextTranslation} is null
+            and ${t.contextMarkStart} is null and ${t.contextMarkEnd} is null))
+        and (${t.type} in ('cloze_typed', 'sentence_translation')
+          or (${t.sentenceMarkStart} is null and ${t.sentenceMarkEnd} is null))`,
+    ),
+    // Phase 34 (spec D6, D8). A mark names both ends or neither, and lies inside the
+    // sentence it marks; a context's translation and mark need a context. Null marks
+    // are valid: the word could not be found, and the sentence is shown unmarked.
+    check(
+      'questions_marks_valid',
+      sql`(${t.contextMarkStart} is null) = (${t.contextMarkEnd} is null)
+        and (${t.sentenceMarkStart} is null) = (${t.sentenceMarkEnd} is null)
+        and (${t.contextTranslation} is null or ${t.context} is not null)
+        and (${t.contextMarkStart} is null or (${t.context} is not null and ${t.contextMarkStart} >= 0
+          and ${t.contextMarkStart} < ${t.contextMarkEnd} and ${t.contextMarkEnd} <= length(${t.context})))
+        and (${t.sentenceMarkStart} is null or (${t.sentenceTranslation} is not null and ${t.sentenceMarkStart} >= 0
+          and ${t.sentenceMarkStart} < ${t.sentenceMarkEnd} and ${t.sentenceMarkEnd} <= length(${t.sentenceTranslation})))`,
     ),
     // Phase 27 (spec D11). The sentence columns belong to the three sentence
     // types, all four together, and the gap lies inside the sentence.
@@ -889,6 +942,12 @@ export const answers = pgTable(
     // How the typed text was judged when it was answered: the history records
     // what the learner was told (spec D12).
     verdict: text('verdict'),
+    // Phase 34 (spec D9). A right answer that is not the saved word keeps the card
+    // open for one more try. `pending` holds the session where it is; `resolved`
+    // has the retry's text and verdict. Null on every other answer.
+    retryState: text('retry_state'),
+    retryText: text('retry_text'),
+    retryVerdict: text('retry_verdict'),
     answeredAt: timestamp('answered_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -915,6 +974,25 @@ export const answers = pgTable(
     ),
     // Phase 27 (spec D11): a judged answer is at most 300 characters.
     check('answers_typed_text_length', sql`length(${t.typedText}) <= 300`),
+    // Phase 34 (spec D9). A retry exists only after an `alternative` verdict, so a
+    // choice answer, whose verdict is null, never has one: `is true` and not a bare
+    // `=`, because a CHECK passes on null. Its text and verdict are set exactly when
+    // it is resolved, and judged as the first answer is.
+    check('answers_retry_state_known', sql`${t.retryState} in ('pending', 'resolved')`),
+    check(
+      'answers_retry_only_on_alternative',
+      sql`${t.retryState} is null or (${t.verdict} = 'alternative') is true`,
+    ),
+    check(
+      'answers_retry_resolved_complete',
+      sql`(${t.retryState} is not distinct from 'resolved') = (${t.retryText} is not null)
+        and (${t.retryState} is not distinct from 'resolved') = (${t.retryVerdict} is not null)`,
+    ),
+    check(
+      'answers_retry_verdict_known',
+      sql`${t.retryVerdict} in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped')`,
+    ),
+    check('answers_retry_text_length', sql`length(${t.retryText}) <= 300`),
   ],
 );
 
