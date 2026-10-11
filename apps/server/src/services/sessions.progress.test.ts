@@ -9,6 +9,7 @@ import type { SessionRecord, SessionState } from '../domain/session';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { ProgressRepo, SessionEvidence } from '../repo/progress';
 import type { SessionRepo } from '../repo/sessions';
+import type { UserRepo } from '../repo/users';
 import { createSessionService } from './sessions';
 
 const SESSION = '22222222-2222-2222-2222-222222222222';
@@ -69,6 +70,8 @@ const CHANGE = [
 function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null; rows?: ProgressRow[] }) {
   const calls = {
     completed: 0,
+    // Phase 35. The practice_day each ending wrote.
+    endedOn: [] as string[],
     evidence: 0,
     asked: [] as string[][],
     updated: [] as ProgressRow[][],
@@ -79,11 +82,15 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
   const session = stub<SessionRepo>({
     loadSession: async () => opts.record,
     insertAnswer: async () => {},
-    completeSession: async () => {
+    completeSession: async (_id, day) => {
       calls.completed += 1;
+      calls.endedOn.push(day);
     },
     findState: async () => READY,
-    transition: async () => true,
+    transition: async (_id, _from, _to, day) => {
+      if (day !== undefined) calls.endedOn.push(day);
+      return true;
+    },
     findEnrollmentId: async () => 'e1',
   });
   const progress = stub<ProgressRepo>({
@@ -111,6 +118,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     transaction: createFakeTransaction({
       session,
       progress,
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' }) }),
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
     }),
     rng: testRng(7),
@@ -128,6 +136,7 @@ describe('progress when a session ends', () => {
     const { service, calls } = world({ record: record(9) });
     const result = await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
     expect(calls.completed).toBe(1);
+    expect(calls.endedOn).toEqual(['1970-01-01']);
     expect(calls.asked).toEqual([['s1', 'sX']]);
     expect(calls.updated).toEqual([
       [{ glossId: 's1', dimension: 'written_receptive', level: 2, lastStepOn: DAY, lastWrongOn: null }],

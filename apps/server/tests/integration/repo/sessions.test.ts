@@ -232,7 +232,7 @@ describe('completeSession', () => {
   it('sets completed_at, which loadSession reports as complete', async () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
-      await sessionRepo.completeSession(sessionId);
+      await sessionRepo.completeSession(sessionId, '2026-03-04');
 
       const loaded = await sessionRepo.loadSession(sessionId);
       expect(loaded!.complete).toBe(true);
@@ -249,7 +249,7 @@ describe('completeSession', () => {
   it('keeps the row after completion — there is no stale sweep', async () => {
     await withTx(t.db, async (tx) => {
       const { sessionRepo, sessionId } = await startSession(tx);
-      await sessionRepo.completeSession(sessionId);
+      await sessionRepo.completeSession(sessionId, '2026-03-04');
       expect(await sessionRepo.loadSession(sessionId)).toBeDefined();
     });
   });

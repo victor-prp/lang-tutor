@@ -53,6 +53,18 @@ export function createUserRepo(tx: Tx) {
       }
     },
 
+    /** Phase 35 (spec D10, D11, ADR 0013 R2). What the learner's day depends
+     *  on: a learner has none of its own, and a bot has the day it is on. */
+    findDayContext: async (userId: string): Promise<{ kind: 'learner' } | { kind: 'bot'; day: string } | undefined> => {
+      const [row] = await tx
+        .select({ kind: users.kind, botDay: users.botDay })
+        .from(users)
+        .where(eq(users.id, userId));
+      if (!row) return undefined;
+      if (row.kind === 'bot') return { kind: 'bot', day: row.botDay! };
+      return { kind: 'learner' };
+    },
+
     findByUsername: async (username: string): Promise<User | undefined> => {
       const [row] = await tx.select().from(users).where(eq(users.username, username));
       return row ? toUser(row) : undefined;

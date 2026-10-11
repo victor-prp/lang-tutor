@@ -67,6 +67,8 @@ describe('repos', () => {
     insertUser: () => {
       throw new Error('the session service must not register a user');
     },
+    // Read by learnerDay, wherever a session ends.
+    findDayContext: async () => ({ kind: 'learner' }),
     findByUsername: () => {
       throw new Error('the session service must not look a username up');
     },

@@ -145,16 +145,18 @@ export function createSessionRepo(tx: Tx) {
     },
 
     /** A conditional status change: true when the row was in one of `from`.
-     *  Conditional so a job finishing after a skip changes nothing. */
+     *  Conditional so a job finishing after a skip changes nothing. A change
+     *  that ends the session names its `practiceDay` (phase 35, D10). */
     transition: async (
       sessionId: string,
       from: SessionStatus[],
       to: SessionStatus,
+      practiceDay?: string,
     ): Promise<boolean> => {
       if (!UUID_RE.test(sessionId)) return false;
       const rows = await tx
         .update(sessions)
-        .set({ status: to })
+        .set(practiceDay === undefined ? { status: to } : { status: to, practiceDay })
         .where(and(eq(sessions.id, sessionId), inArray(sessions.status, from)))
         .returning({ id: sessions.id });
       return rows.length > 0;
@@ -300,10 +302,10 @@ export function createSessionRepo(tx: Tx) {
       });
     },
 
-    completeSession: (sessionId: string): Promise<unknown> =>
+    completeSession: (sessionId: string, practiceDay: string): Promise<unknown> =>
       tx
         .update(sessions)
-        .set({ completedAt: sql`now()`, status: 'completed' })
+        .set({ completedAt: sql`now()`, status: 'completed', practiceDay })
         .where(eq(sessions.id, sessionId)),
   };
 }

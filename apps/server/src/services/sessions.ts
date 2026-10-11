@@ -65,6 +65,7 @@ import {
 } from '../errors';
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
+import { learnerDay } from './learnerDay';
 import type { LlmClient } from './llm';
 import type { SpeechTranscriber } from './speech';
 import type { Repos, Transaction } from './transaction';
@@ -278,12 +279,13 @@ export function createSessionService({
      */
     skipSession: async (actorUserId: string, sessionId: string): Promise<void> => {
       const skipped = await transaction(async (repos) => {
-        await authorizeSession(repos, logger, actorUserId, sessionId);
+        const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const state = await repos.session.findState(sessionId);
         if (!state) throw new SessionNotFound(sessionId);
         if (state.status === 'skipped') return false;
         if (!isOpen(state.status)) throw new SessionNotSkippable(sessionId, state.status);
-        const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped');
+        const day = await learnerDay(repos, enrolled.user_id, now());
+        const changed = await repos.session.transition(sessionId, ['preparing', 'ready'], 'skipped', day);
         // Phase 20. The answers given before the skip are real answers.
         if (changed) await recordProgress(repos, sessionId);
         return changed;
@@ -304,7 +306,7 @@ export function createSessionService({
       // a commit that fails after completeSession must not leave a log claiming a
       // session the database never recorded.
       const { result, justCompleted } = await transaction(async (repos) => {
-        await authorizeSession(repos, logger, actorUserId, sessionId);
+        const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const loaded = await repos.session.loadSession(sessionId);
         if (!loaded) throw new SessionNotFound(sessionId);
 
@@ -342,7 +344,7 @@ export function createSessionService({
         );
 
         if (outcome.justCompleted) {
-          await repos.session.completeSession(sessionId);
+          await repos.session.completeSession(sessionId, await learnerDay(repos, enrolled.user_id, now()));
           await recordProgress(repos, sessionId);
         }
 

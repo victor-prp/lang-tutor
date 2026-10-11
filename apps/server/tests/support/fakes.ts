@@ -203,6 +203,8 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
       rows.push(user);
       return user;
     },
+    findDayContext: async (userId) =>
+      rows.some((row) => row.id === userId) ? { kind: 'learner' } : undefined,
     findByUsername: async (username) => rows.find((row) => row.username === username),
     findById: async (id) => rows.find((row) => row.id === id),
   };

@@ -24,6 +24,8 @@ export function createTestServerDeps(io: {
   db: Db;
   logger: Logger;
   rng: () => number;
+  /** Phase 35. The clock; defaults to the real one. */
+  now?: () => number;
   geminiBaseUrl?: string;
   /** Phase 29. Resend's base URL; defaults to an unroutable one, as Gemini's does. */
   mailBaseUrl?: string;
@@ -45,7 +47,7 @@ export function createTestServerDeps(io: {
     db: io.db,
     logger: io.logger,
     rng: io.rng,
-    now: Date.now,
+    now: io.now ?? Date.now,
     fetch: globalThis.fetch,
     gemini: {
       apiKey: 'test-key',

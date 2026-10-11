@@ -28,7 +28,7 @@ const TEXT_TYPES: ReadonlySet<string> = new Set([
 /** A session's answers as the rule reads them. */
 export type SessionEvidence = {
   enrollmentId: string;
-  /** The UTC date of the session's last answer: the day the session counts for. */
+  /** The session's practice_day: the learner's day it counts for (phase 35, D10). */
   day: string;
   /** The last answer's time as Postgres prints it. The recompute compares it with
    *  each entry's save time, and the `::text` round trip keeps microseconds. */
@@ -83,7 +83,7 @@ export function createProgressRepo(tx: Tx) {
         last_answered_at: string;
       }>(sql`
         SELECT s.enrollment_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict,
-               ((max(a.answered_at) OVER ()) AT TIME ZONE 'UTC')::date::text AS day,
+               s.practice_day::text AS day,
                (max(a.answered_at) OVER ())::text AS last_answered_at
         FROM answers a
         JOIN sessions s  ON s.id = a.session_id
