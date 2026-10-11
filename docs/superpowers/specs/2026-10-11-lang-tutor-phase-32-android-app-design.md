@@ -221,5 +221,5 @@ R1–R4, and each rule is planted once to see it fire.
    refuses (from the final review).
 6. Download the upload-key backup: `eas credentials` → Android → production → download keystore.
 
-The README's release section gains the runbook: these steps, what each D5 row prints, and rollback
+The Android runbook, `docs/runbooks/android.md`, holds these steps, what each D5 row prints, and rollback
 across a native change.
