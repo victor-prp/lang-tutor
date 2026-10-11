@@ -13,6 +13,7 @@ import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stopTestBoss, waitFor } from '../../support/jobs';
 import { holdRepairOpen, waitForBlockedQuery } from '../../support/locks';
+import { insertGlossMemory, setLastStep } from '../../support/progressRows';
 import {
   STUB_ALTERNATIVE,
   assertMockServerReachable,
@@ -211,15 +212,25 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
   const WORDS: Record<string, string> = { tome: 'ספר', sprint: 'ריצה', lantern: 'פנס' };
 
   /** Past the seed (skipped), three saved words, `lantern` already stamped with
-   *  an empty list, and a list session requested. */
-  async function requestListSession() {
+   *  an empty list, and a list session requested. Three new words are three
+   *  multiple choices (phase 35, spec D5, D6); `typedTome` makes tome due on
+   *  writing at R 0.85 and level 3, so it is asked as a typed translation. */
+  async function requestListSession(opts: { typedTome?: boolean } = {}) {
     const seed = await deps().sessions.createNextSession('u_1', E, { listening: false, speaking: false });
     await deps().sessions.skipSession('u_1', seed.sessionId);
-    const saved: Record<string, { variantId: string; senseIds: string[] }> = {};
+    const saved: Record<string, { variantId: string; senseIds: string[]; glossIds: string[] }> = {};
     for (const [lemma, translation] of Object.entries(WORDS)) {
       saved[lemma] = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
     }
     await t.db.execute(sql`update dict_var_translations set accepted_at = now() where variant_id = ${saved.lantern.variantId}`);
+    if (opts.typedTome) {
+      const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+      const glossId = saved.tome.glossIds[0];
+      await insertGlossMemory(t.db, [
+        { enrollmentId: E, glossId, dimension: 'written_productive', stability: 10, difficulty: 5, lastDay: daysAgo(19), reps: 1, lapses: 0, params: 'fsrs6-default' },
+      ]);
+      await setLastStep(t.db, { enrollmentId: E, glossId, dimension: 'written_productive', level: 3, lastStepOn: daysAgo(40) });
+    }
     const { sessionId } = await deps().sessions.createNextSession('u_1', E, { listening: false, speaking: false });
     return { sessionId, saved };
   }
@@ -243,7 +254,7 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
     // The retry reads again, and the queue keeps one job per rendering.
     await clearNamespace(ns);
-    await expectDistractors(ns);
+    await expectDistractors(ns, { tasks: ['meaning', 'meaning', 'meaning'] });
     await expectCheck(ns);
     await deps().sessions.prepareSession(payload);
     expect(await acceptJobs()).toEqual(expected);
@@ -252,10 +263,11 @@ describe('enqueueing the accept job from session preparation (spec D1)', () => {
 
   it("never writes a session's own typed alternatives into the dictionary", async () => {
     await expectAccept(ns, { answers: ['codex'], answer_form: null });
-    await expectDistractors(ns);
+    // The two new words' multiple choices (p 1) round tome's typed translation (p 0.85).
+    await expectDistractors(ns, { tasks: ['meaning', 'typed', 'meaning'] });
     await expectCheck(ns);
     await registerWorkers(boss, deps(), { pollingIntervalSeconds: 0.5 });
-    const { sessionId, saved } = await requestListSession();
+    const { sessionId, saved } = await requestListSession({ typedTome: true });
 
     await waitFor(async () => (await deps().sessions.getSession('u_1', sessionId)).status === 'ready');
     await waitFor(async () => events('accept_stored').length === 2);
