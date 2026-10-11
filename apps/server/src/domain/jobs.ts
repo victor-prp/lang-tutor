@@ -1,4 +1,4 @@
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+import { DIMENSIONS, MAX_LEVEL, MIN_LEVEL, SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { z } from 'zod';
 
 /**
@@ -32,6 +32,13 @@ export const PrepareSessionPayloadSchema = z.object({
         gloss_id: z.string().min(1),
         sense_id: z.string().min(1),
         variant_id: z.string().min(1),
+        // Phase 35 (spec D5, D6). The dimension the pick tests and its rung,
+        // chosen at create time, with the level and R the job's card choice
+        // reads. Defaults for a job enqueued before the deploy: a new word.
+        dimension: z.enum(DIMENSIONS).default('written_receptive'),
+        rung: z.union([z.literal(1), z.literal(2)]).default(1),
+        level: z.number().int().min(MIN_LEVEL).max(MAX_LEVEL).default(MIN_LEVEL),
+        r: z.number().min(0).max(1).nullable().default(null),
       }),
     )
     .min(1)
@@ -42,6 +49,8 @@ export const PrepareSessionPayloadSchema = z.object({
   // Phase 25 (spec D4). Absent in a job enqueued before the deploy: such a
   // session gets no speaking cards.
   speaking: z.boolean().default(false),
+  // Phase 24's rotation step. Phase 35's card choice replaces the rotation and
+  // drops it (ruling 2: kept until then).
   ordinal: z.number().int().nonnegative().default(0),
 });
 export type PrepareSessionPayload = z.infer<typeof PrepareSessionPayloadSchema>;

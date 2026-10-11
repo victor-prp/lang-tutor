@@ -112,6 +112,42 @@ export function createSessionRepo(tx: Tx) {
       return row.count;
     },
 
+    /** Phase 35 (spec D5, D10). The glosses answered in this enrollment's
+     *  sessions that count for `day`, and in an open one, which counts as today.
+     *  The picker asks them last. Sorted. */
+    findGlossesAnsweredOn: async (enrollmentId: string, day: string): Promise<string[]> => {
+      const rows = await tx.execute<{ gloss_id: string }>(sql`
+        SELECT DISTINCT q.gloss_id
+        FROM answers a
+        JOIN sessions s  ON s.id = a.session_id
+        JOIN questions q ON q.id = a.question_id
+        WHERE s.enrollment_id = ${enrollmentId}
+          AND (s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))
+        ORDER BY q.gloss_id`);
+      return rows.rows.map((row) => row.gloss_id);
+    },
+
+    /** Phase 35 (spec D5, D10). How many glosses `day` introduced: saved glosses
+     *  whose first answer given while saved is in a session counting for `day`,
+     *  an open session counting as it. An answer from before the save is no
+     *  introduction, as it writes no memory (D4). */
+    countNewOn: async (enrollmentId: string, day: string): Promise<number> => {
+      const rows = await tx.execute<{ n: number }>(sql`
+        SELECT count(*)::int AS n FROM (
+          SELECT q.gloss_id
+          FROM answers a
+          JOIN sessions s            ON s.id = a.session_id
+          JOIN questions q           ON q.id = a.question_id
+          JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = q.gloss_id
+          WHERE s.enrollment_id = ${enrollmentId}
+            AND a.answered_at >= ve.created_at
+            AND (s.practice_day IS NOT NULL OR s.status IN ('preparing', 'ready'))
+          GROUP BY q.gloss_id
+          HAVING min(coalesce(s.practice_day, ${day}::date)) = ${day}::date
+        ) introduced`);
+      return rows.rows[0].n;
+    },
+
     /** Phase 29 (spec D13). Whose list a session belongs to, so a use case
      *  addressed by a session id can authorize before it reads anything else.
      *  A malformed id is an absent one, as everywhere in this module. */

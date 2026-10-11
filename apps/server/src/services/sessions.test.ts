@@ -38,6 +38,8 @@ describe('repos', () => {
       transition: notStubbed,
       findLatest: notStubbed,
       countListSessions: notStubbed,
+      findGlossesAnsweredOn: notStubbed,
+      countNewOn: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
       findEnrollmentId: async () => 'e1',
       ...overrides,
@@ -344,6 +346,101 @@ describe('repos', () => {
   });
 });
 
+// Phase 35 (spec D5, D10). What createNextSession reads for chooseWords, for a
+// list with no history: no memory, no levels, nothing asked or new today.
+const SAVED_AT = '2026-10-01T09:00:00.000000Z';
+const nothingToday: Pick<SessionRepo, 'findGlossesAnsweredOn' | 'countNewOn'> = { findGlossesAnsweredOn: async () => [], countNewOn: async () => 0 };
+const noHistory = {
+  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const }) }),
+  memory: stub<MemoryRepo>({ findRows: async () => [] }),
+  progress: stub<ProgressRepo>({ findRows: async () => [] }),
+};
+
+describe('createNextSession, phase 35 (spec D5, D10)', () => {
+  const E = 'e1';
+  const TODAY = '2026-10-11';
+  const saved = [
+    { glossId: 'g_asked', key: 'כלב', variantId: 'v_asked', savedAt: '2026-10-11T08:00:00.000000Z' },
+    { glossId: 'g_due', key: 'עט', variantId: 'v_due', savedAt: '2026-09-01T08:00:00.000000Z' },
+    { glossId: 'g_new', key: 'חתול', variantId: 'v_new', savedAt: '2026-10-10T08:00:00.000000Z' },
+  ];
+  const DUE_STATE = { stability: 1, difficulty: 5, lastDay: '2026-09-01', reps: 1, lapses: 0, params: 'fsrs6-default' };
+
+  it("chooses from memory, levels and the learner's day, and carries each pick's dimension, rung, level and R", async () => {
+    const jobs = createFakeJobRepo();
+    const reads: Record<string, unknown> = {};
+    const service = createSessionService({
+      transaction: createFakeTransaction({
+        enrollment: stub<EnrollmentRepo>({
+          findById: async () => ({ id: E, user_id: 'u1', source_language: 'he', target_language: 'en', created_at: '' }),
+        }),
+        user: stub<UserRepo>({
+          findDayContext: async (userId) => {
+            reads.dayOf = userId;
+            return { kind: 'learner' as const };
+          },
+        }),
+        session: stub<SessionRepo>({
+          findLatest: async () => ({ id: 's0', status: 'completed', source: 'list' }) as never,
+          countListSessions: async () => 3,
+          insertPreparingSession: async () => 's1',
+          findGlossesAnsweredOn: async (enrollmentId, day) => {
+            reads.asked = [enrollmentId, day];
+            return ['g_asked'];
+          },
+          countNewOn: async (enrollmentId, day) => {
+            reads.newOn = [enrollmentId, day];
+            return 0;
+          },
+        }),
+        vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => saved }),
+        memory: stub<MemoryRepo>({
+          findRows: async (input) => {
+            reads.memory = input;
+            return [{ glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE }];
+          },
+        }),
+        progress: stub<ProgressRepo>({
+          findRows: async (input) => {
+            reads.levels = input;
+            return [{ glossId: 'g_due', dimension: 'written_receptive', level: 4, lastStepOn: null, lastWrongOn: null }];
+          },
+        }),
+        dict: stub<DictRepo>({
+          findGlossRenderings: async () =>
+            saved.map((gloss, i) => ({ glossId: gloss.glossId, senseId: `s${i}`, variantId: gloss.variantId, form: `f${i}`, gloss: gloss.key, rank: 0 })),
+        }),
+        jobs,
+      }),
+      rng: testRng(7),
+      logger: createFakeLogger(),
+      now: createFakeClock(Date.parse(`${TODAY}T10:00:00Z`)),
+      llm: createFakeLlmClient(''),
+      transcriber: createFakeTranscriber(''),
+      judge: createFakeLlmClient(''),
+    });
+
+    await service.createNextSession('u1', E, { listening: false, speaking: false });
+
+    // The day is the learner's (ADR 0013), and every read is over the saved list.
+    expect(reads).toEqual({
+      dayOf: 'u1',
+      asked: [E, TODAY],
+      newOn: [E, TODAY],
+      memory: { enrollmentId: E, glossIds: ['g_asked', 'g_due', 'g_new'] },
+      levels: { enrollmentId: E, glossIds: ['g_asked', 'g_due', 'g_new'], savedBy: null },
+    });
+    const { picks } = jobs.enqueued[0].data as { picks: Record<string, unknown>[] };
+    // DUE, then NEW, then what was asked today.
+    expect(picks).toEqual([
+      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number) },
+      { gloss_id: 'g_new', sense_id: 's2', variant_id: 'v_new', dimension: 'written_receptive', rung: 1, level: 1, r: null },
+      { gloss_id: 'g_asked', sense_id: 's0', variant_id: 'v_asked', dimension: 'written_receptive', rung: 1, level: 1, r: null },
+    ]);
+    expect(picks[0].r).toBeLessThan(0.75);
+  });
+});
+
 describe('createNextSession, phase 24 (spec D3, D5)', () => {
   const E = 'e1';
   it.each([true, false])('carries the listening flag, speaking %s and the list-session ordinal into the job', async (speaking) => {
@@ -357,10 +454,12 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'seed' }) as never,
           countListSessions: async () => 2,
           insertPreparingSession: async () => 's1',
+          ...nothingToday,
         }),
         vocabulary: stub<VocabularyRepo>({
-          listSavedGlosses: async () => [{ glossId: 'g1', key: 'עט', variantId: 'v1' }],
+          listSavedGlosses: async () => [{ glossId: 'g1', key: 'עט', variantId: 'v1', savedAt: SAVED_AT }],
         }),
+        ...noHistory,
         // Phase 31 (spec D12). The saved form's rendering, agreeing with the key.
         dict: stub<DictRepo>({
           findGlossRenderings: async () => [{ glossId: 'g1', senseId: 's1', variantId: 'v1', form: 'ручка', gloss: 'עט', rank: 0 }],
@@ -401,10 +500,12 @@ describe('createNextSession, phase 31 (spec D12)', () => {
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'seed' }) as never,
           countListSessions: async () => 0,
           insertPreparingSession: async () => 's1',
+          ...nothingToday,
         }),
         vocabulary: stub<VocabularyRepo>({
-          listSavedGlosses: async () => [{ glossId: 'g1', key: 'אצבע', variantId: 'v_fingers' }],
+          listSavedGlosses: async () => [{ glossId: 'g1', key: 'אצבע', variantId: 'v_fingers', savedAt: SAVED_AT }],
         }),
+        ...noHistory,
         dict: stub<DictRepo>({
           findGlossRenderings: async (input) => {
             reads.push(input);
@@ -429,7 +530,9 @@ describe('createNextSession, phase 31 (spec D12)', () => {
       const { service, jobs, reads } = world(seed, [DIGITS, FINGERS, FINGER]);
       await service.createNextSession('u1', E, { listening: false, speaking: false });
       expect(reads).toEqual([{ glossIds: ['g1'], userLanguageCode: 'he' }]);
-      const { picks } = jobs.enqueued[0].data as { picks: { gloss_id: string; sense_id: string; variant_id: string }[] };
+      const picks = (jobs.enqueued[0].data as { picks: { gloss_id: string; sense_id: string; variant_id: string }[] }).picks.map(
+        ({ gloss_id, sense_id, variant_id }) => ({ gloss_id, sense_id, variant_id }),
+      );
       expect(picks).toHaveLength(1);
       expect([
         { gloss_id: 'g1', sense_id: 's1', variant_id: 'v_fingers' },

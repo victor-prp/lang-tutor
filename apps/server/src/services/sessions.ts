@@ -13,6 +13,7 @@ import {
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
 
+import { chooseWords } from '../domain/choose';
 import { findGap } from '../domain/cloze';
 import {
   NOTHING_GENERATED,
@@ -42,7 +43,6 @@ import {
   isOpen,
   newSessionRecord,
   nextSource,
-  pickGlosses,
   pickRendering,
   sessionScore,
   step,
@@ -230,18 +230,40 @@ export function createSessionService({
 
         const saved = await vocabulary.listSavedGlosses(enrollmentId);
         if (saved.length === 0) throw new NoSavedWords(enrollmentId);
-        // Phase 31 (spec D18). At most one gloss per key, across headwords.
-        const picked = pickGlosses(saved, SESSION_LENGTH, rng);
+        // Phase 35 (spec D5, D10). The words, each with a dimension and a rung,
+        // from what the learner knows: memory and levels, on the owner's day,
+        // with what that day already asked and introduced. At most one gloss per
+        // key, across headwords (phase 31 D18), is chooseWords' rule now.
+        const glossIds = saved.map((gloss) => gloss.glossId);
+        const today = await learnerDay(repos, enrolled.user_id, now());
+        const memory = await repos.memory.findRows({ enrollmentId, glossIds });
+        const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
+        const askedToday = new Set(await session.findGlossesAnsweredOn(enrollmentId, today));
+        const newToday = await session.countNewOn(enrollmentId, today);
+        const chosen = chooseWords({
+          saved,
+          memory,
+          levels,
+          today,
+          askedToday,
+          newToday,
+          listening: options.listening,
+          speaking: options.speaking,
+          rng,
+        });
         // Spec D12. One rendering per gloss, uniformly over every form of every
         // member that agrees with the gloss, the saved form always among them.
         // No model call: a lemma form not yet rendered joins once its job lands.
         const renderings = await dict.findGlossRenderings({
-          glossIds: picked.map((gloss) => gloss.glossId),
+          glossIds: chosen.map((choice) => choice.glossId),
           userLanguageCode: enrolled.source_language,
         });
-        const picks = picked.flatMap((gloss) => {
-          const rendering = pickRendering(askableRenderings(gloss, renderings), rng);
-          return rendering ? [{ gloss_id: gloss.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId }] : [];
+        const savedById = new Map(saved.map((gloss) => [gloss.glossId, gloss]));
+        const picks = chosen.flatMap((choice) => {
+          const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
+          if (!rendering) return [];
+          const { dimension, rung, level, r } = choice;
+          return [{ gloss_id: choice.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId, dimension, rung, level, r }];
         });
         if (picks.length === 0) throw new NoSavedWords(enrollmentId);
         // Phase 24 (spec D3): the rotation's step is how many list sessions came

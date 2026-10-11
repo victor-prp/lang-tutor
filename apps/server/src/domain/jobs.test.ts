@@ -41,4 +41,18 @@ describe('PrepareSessionPayloadSchema', () => {
       }),
     ).toMatchObject({ listening: true, ordinal: 4 });
   });
+
+  // Phase 35 (spec D5, D6). Each pick carries its dimension, rung, level and R.
+  it('reads a pick from before phase 35 as a new word: written receptive, rung 1, level 1, no R', () => {
+    const [pick] = PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [{ gloss_id: 'g', sense_id: 'a', variant_id: 'b' }] }).picks;
+    expect(pick).toEqual({ gloss_id: 'g', sense_id: 'a', variant_id: 'b', dimension: 'written_receptive', rung: 1, level: 1, r: null });
+  });
+
+  it('keeps a chosen pick, and refuses an unknown dimension, rung or an R outside 0..1', () => {
+    const pick = { gloss_id: 'g', sense_id: 'a', variant_id: 'b', dimension: 'spelling', rung: 2, level: 4, r: 0.8 };
+    expect(PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [pick] }).picks).toEqual([pick]);
+    for (const bad of [{ dimension: 'smell' }, { rung: 3 }, { r: 1.5 }, { level: 6 }]) {
+      expect(PrepareSessionPayloadSchema.safeParse({ session_id: 's', picks: [{ ...pick, ...bad }] }).success).toBe(false);
+    }
+  });
 });
