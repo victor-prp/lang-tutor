@@ -20,7 +20,7 @@ import {
   type GenerationContext,
   type RecentSentences,
 } from './distractors';
-import { planSession } from './plan';
+import type { SessionPlan } from './plan';
 
 const NO_RECENT: RecentSentences = new Map();
 const NO_SENTENCE = { sentence: null, sentenceTranslation: null, gapStart: null, gapEnd: null };
@@ -378,10 +378,15 @@ describe('phase 24 generation (spec D2, D10)', () => {
     expect(taskFor('letter_tiles')).toBeNull();
     expect(taskFor('matching')).toBeNull();
     expect(taskFor('listen_choice')).toBe('meaning');
-    const plan = planSession(
-      Array.from({ length: 10 }, (_, i) => ({ form: `w${i}`, translation: `מ${i}`, tiles: true, speakable: false, clozeGap: false })),
-      { listening: true, speaking: false, ordinal: 0 },
-    );
+    const plan: SessionPlan = {
+      order: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+      types: [
+        'multiple_choice', 'reverse_choice', 'typed_translation',
+        'matching', 'matching', 'matching', 'matching',
+        'listen_choice', 'letter_tiles', 'dictation',
+      ],
+      board: { start: 3 },
+    };
     expect(tasksFor(plan)).toEqual(['meaning', 'word', 'typed', 'meaning', null, null, null, 'meaning', null, null]);
   });
 

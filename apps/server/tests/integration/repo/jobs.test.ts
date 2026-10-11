@@ -19,7 +19,7 @@ afterEach(async () => {
   await t.close();
 });
 
-const payload = { session_id: 's1', picks: [{ gloss_id: 'g', sense_id: 'x', variant_id: 'y', dimension: 'written_receptive' as const, rung: 1 as const, level: 1, r: null }], listening: false, speaking: false, ordinal: 0 };
+const payload = { session_id: 's1', picks: [{ gloss_id: 'g', sense_id: 'x', variant_id: 'y', dimension: 'written_receptive' as const, rung: 1 as const, level: 1, r: null }], listening: false, speaking: false };
 
 describe('createJobRepo', () => {
   it('enqueues inside the caller transaction: committed, one job', async () => {

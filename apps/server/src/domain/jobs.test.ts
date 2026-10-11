@@ -25,21 +25,22 @@ describe('phase 26 queues', () => {
 
 describe('PrepareSessionPayloadSchema', () => {
   // Review Focus 3: a job enqueued before phase 24 has neither field.
-  it('reads a payload from before phase 24 as listening off, at the first ordinal', () => {
+  it('reads a payload from before phase 24 as listening off', () => {
     expect(
       PrepareSessionPayloadSchema.parse({ session_id: 's', picks: [{ gloss_id: 'g', sense_id: 'a', variant_id: 'b' }] }),
-    ).toMatchObject({ listening: false, ordinal: 0 });
+    ).toMatchObject({ listening: false });
   });
 
-  it('keeps both when present', () => {
-    expect(
-      PrepareSessionPayloadSchema.parse({
-        session_id: 's',
-        picks: [{ gloss_id: 'g', sense_id: 'a', variant_id: 'b' }],
-        listening: true,
-        ordinal: 4,
-      }),
-    ).toMatchObject({ listening: true, ordinal: 4 });
+  // Phase 35 (spec D6): the rotation is gone, and its step with it.
+  it('keeps listening when present, and drops the ordinal of a job from before phase 35', () => {
+    const parsed = PrepareSessionPayloadSchema.parse({
+      session_id: 's',
+      picks: [{ gloss_id: 'g', sense_id: 'a', variant_id: 'b' }],
+      listening: true,
+      ordinal: 4,
+    });
+    expect(parsed).toMatchObject({ listening: true });
+    expect(parsed).not.toHaveProperty('ordinal');
   });
 
   // Phase 35 (spec D5, D6). Each pick carries its dimension, rung, level and R.

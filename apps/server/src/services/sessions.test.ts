@@ -37,7 +37,6 @@ describe('repos', () => {
       findState: notStubbed,
       transition: notStubbed,
       findLatest: notStubbed,
-      countListSessions: notStubbed,
       findGlossesAnsweredOn: notStubbed,
       countNewOn: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
@@ -382,7 +381,6 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
         }),
         session: stub<SessionRepo>({
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'list' }) as never,
-          countListSessions: async () => 3,
           insertPreparingSession: async () => 's1',
           findGlossesAnsweredOn: async (enrollmentId, day) => {
             reads.asked = [enrollmentId, day];
@@ -443,7 +441,7 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
 
 describe('createNextSession, phase 24 (spec D3, D5)', () => {
   const E = 'e1';
-  it.each([true, false])('carries the listening flag, speaking %s and the list-session ordinal into the job', async (speaking) => {
+  it.each([true, false])('carries the listening flag and speaking %s into the job, and no ordinal (phase 35, spec D6)', async (speaking) => {
     const jobs = createFakeJobRepo();
     const service = createSessionService({
       transaction: createFakeTransaction({
@@ -452,7 +450,6 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
         }),
         session: stub<SessionRepo>({
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'seed' }) as never,
-          countListSessions: async () => 2,
           insertPreparingSession: async () => 's1',
           ...nothingToday,
         }),
@@ -475,7 +472,8 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
     });
 
     await service.createNextSession('u1', E, { listening: true, speaking });
-    expect(jobs.enqueued[0].data).toMatchObject({ listening: true, speaking, ordinal: 2 });
+    expect(jobs.enqueued[0].data).toMatchObject({ listening: true, speaking });
+    expect(jobs.enqueued[0].data).not.toHaveProperty('ordinal');
   });
 });
 
@@ -498,7 +496,6 @@ describe('createNextSession, phase 31 (spec D12)', () => {
         }),
         session: stub<SessionRepo>({
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'seed' }) as never,
-          countListSessions: async () => 0,
           insertPreparingSession: async () => 's1',
           ...nothingToday,
         }),

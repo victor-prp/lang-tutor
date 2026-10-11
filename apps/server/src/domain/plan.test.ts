@@ -1,266 +1,280 @@
 import { describe, expect, it } from '@jest/globals';
+import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
 
-import { TIERS, planSession, type PlanPick } from './plan';
+import { expectedSuccess } from './choose';
+import { CARD_TARGET } from './chooseConstants';
+import { MAX_PER_TYPE, RUNGS, planCards, type PlanInput, type PlanPick } from './plan';
 
-const pick = (n: number, tiles = true, clozeGap = true): PlanPick => ({ form: `word${n}`, translation: `מילה${n}`, tiles, speakable: true, clozeGap });
-const picks = (count: number, tiles = true, clozeGap = true) => Array.from({ length: count }, (_, i) => pick(i, tiles, clozeGap));
-const ON = { listening: true, speaking: false, ordinal: 0 };
-const OFF = { listening: false, speaking: false, ordinal: 0 };
-const BOARD = ['matching', 'matching', 'matching', 'matching'];
+const WR: Dimension = 'written_receptive';
+const WP: Dimension = 'written_productive';
+const SP: Dimension = 'spelling';
+const SR: Dimension = 'spoken_receptive';
+const SK: Dimension = 'spoken_productive';
 
-describe('planSession (spec D3, D4, D10)', () => {
-  it('lays ten words out as a run, the board and a run, with six different single types', () => {
-    const plan = planSession(picks(10), ON);
-    expect(plan.types).toEqual([
-      'multiple_choice', 'reverse_choice', 'typed_translation',
-      ...BOARD,
-      'listen_choice', 'cloze_choice', 'cloze_typed',
-    ]);
-    expect(plan.board).toEqual({ start: 3 });
-    expect(plan.order).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+/** A new word unless told otherwise: written receptive, rung 1, level 1, no R. */
+const pick = (n: number, over: Partial<PlanPick> = {}): PlanPick => ({
+  form: `word${n}`,
+  translation: `מילה${n}`,
+  tiles: true,
+  speakable: true,
+  clozeGap: true,
+  dimension: WR,
+  rung: 1,
+  level: 1,
+  r: null,
+  ...over,
+});
+
+/** A known word at rung 1: R 0.5, level 1. At rung 2: R 0.9, level 3. */
+const at = (n: number, dimension: Dimension, rung: 1 | 2, over: Partial<PlanPick> = {}): PlanPick =>
+  pick(n, rung === 1 ? { dimension, rung, level: 1, r: 0.5, ...over } : { dimension, rung, level: 3, r: 0.9, ...over });
+
+const ALL: PlanInput = { listening: true, speaking: true };
+const NONE: PlanInput = { listening: false, speaking: false };
+
+/** The type each pick got, by pick index (not position). */
+function typesByPick(picks: PlanPick[], input: PlanInput = ALL): QuestionType[] {
+  const plan = planCards(picks, input);
+  const out: QuestionType[] = [];
+  plan.order.forEach((index, position) => (out[index] = plan.types[position]));
+  return out;
+}
+
+/** The first pick's type, in a session with one other word (a session of one
+ *  word gets no speaking card). */
+const typeOf = (p: PlanPick, input: PlanInput = ALL) => typesByPick([p, pick(99)], input)[0];
+
+const count = (types: readonly QuestionType[], type: QuestionType) => types.filter((t) => t === type).length;
+
+describe('planCards: the rungs (spec D6)', () => {
+  it('has the table of the spec', () => {
+    expect(RUNGS).toEqual({
+      written_receptive: [['multiple_choice'], ['typed_meaning']],
+      written_productive: [
+        ['reverse_choice', 'cloze_choice', 'letter_tiles'],
+        ['typed_translation', 'cloze_typed', 'sentence_translation'],
+      ],
+      spelling: [['dictation'], ['typed_translation', 'cloze_typed']],
+      spoken_receptive: [['listen_choice'], ['dictation']],
+      spoken_productive: [['read_aloud'], ['say_translation']],
+    });
   });
 
-  it('rotates by ordinal, so two ten-word sessions in a row show every type', () => {
-    expect(planSession(picks(10), { listening: true, speaking: false, ordinal: 1 }).types).toEqual([
-      'listen_choice', 'cloze_choice', 'cloze_typed',
-      ...BOARD,
-      'typed_meaning', 'letter_tiles', 'dictation',
-    ]);
-  });
-
-  it('has no board below seven words, and opens on phase 23 cycle', () => {
-    const plan = planSession(picks(6), OFF);
-    expect(plan.board).toBeNull();
-    expect(plan.types).toEqual([
-      'multiple_choice', 'reverse_choice', 'typed_translation',
-      'typed_meaning', 'cloze_choice', 'cloze_typed',
-    ]);
-  });
-
-  it('places the board after the first run at seven, eight and nine words', () => {
-    for (const n of [7, 8, 9]) {
-      const plan = planSession(picks(n), OFF);
-      expect(plan.board).toEqual({ start: 3 });
-      expect(plan.types.slice(3, 7)).toEqual(BOARD);
-      expect(plan.types).toHaveLength(n);
-    }
-  });
-
-  it('falls forward within a tier to an eligible type, ending at the first', () => {
-    const plan = planSession(picks(10, false, false), OFF);
-    expect(plan.types.filter((type) => type !== 'matching')).toEqual([
-      'multiple_choice', 'reverse_choice', 'typed_translation',
-      'typed_meaning', 'reverse_choice', 'cloze_typed',
-    ]);
-  });
-
-  // Review Focus 2.
-  it('never puts two senses of one word, or two words with one meaning, on a board', () => {
-    const list: PlanPick[] = [
-      pick(0), pick(1), pick(2),
-      { form: 'lock', translation: 'מנעול', tiles: true, speakable: true, clozeGap: true },
-      { form: 'Lock', translation: 'טירה', tiles: true, speakable: true, clozeGap: true },
-      { form: 'big', translation: 'גדול', tiles: true, speakable: true, clozeGap: true },
-      { form: 'large', translation: 'גדול', tiles: true, speakable: true, clozeGap: true },
-      pick(7), pick(8), pick(9),
-    ];
-    const plan = planSession(list, OFF);
-    expect(plan.board).toEqual({ start: 3 });
-    expect(plan.order).toEqual([0, 1, 2, 3, 5, 7, 8, 4, 6, 9]);
-  });
-
-  // Final review: "the same" is distractors' comparable, not just case.
-  it('treats a meaning that differs only by points or a full stop as the same on a board', () => {
-    const list: PlanPick[] = [
-      pick(0), pick(1), pick(2),
-      { form: 'lock', translation: 'מנעול', tiles: true, speakable: true, clozeGap: true },
-      { form: 'castle', translation: 'טירה', tiles: true, speakable: true, clozeGap: true },
-      { form: 'big', translation: 'גדול', tiles: true, speakable: true, clozeGap: true },
-      { form: 'large', translation: 'גָּדוֹל.', tiles: true, speakable: true, clozeGap: true },
-      pick(7), pick(8), pick(9),
-    ];
-    const plan = planSession(list, OFF);
-    expect(plan.board).toEqual({ start: 3 });
-    expect(plan.order).toEqual([0, 1, 2, 3, 4, 5, 7, 6, 8, 9]);
-  });
-
-  it('has no board when four distinct words cannot be found', () => {
-    const same = Array.from({ length: 8 }, (_, i) => ({ form: i < 3 ? `w${i}` : 'lock', translation: `מ${i}`, tiles: true, speakable: true, clozeGap: true }));
-    const plan = planSession(same, OFF);
-    expect(plan.board).toBeNull();
-    expect(plan.types).not.toContain('matching');
-  });
-
-  it('never gives two cards in a row one type, at any size, ordinal or listening', () => {
-    for (let n = 1; n <= 10; n++) {
-      for (const ordinal of [0, 1, 2, 3]) {
-        for (const listening of [true, false]) {
-          const { types, board } = planSession(picks(n), { listening, speaking: false, ordinal });
-          // A board is one card: keep its first word only.
-          const cards = types.filter((_, i) => !(board && i > board.start && i < board.start + 4));
-          for (let i = 1; i < cards.length; i++) expect(cards[i]).not.toBe(cards[i - 1]);
-        }
-      }
-    }
+  it.each([
+    [WR, 1, 'multiple_choice'],
+    [WR, 2, 'typed_meaning'],
+    [WP, 1, 'reverse_choice'],
+    [WP, 2, 'typed_translation'],
+    [SP, 1, 'dictation'],
+    [SP, 2, 'typed_translation'],
+    [SR, 1, 'listen_choice'],
+    [SR, 2, 'dictation'],
+    [SK, 1, 'read_aloud'],
+    [SK, 2, 'say_translation'],
+  ] as [Dimension, 1 | 2, QuestionType][])('asks %s at rung %d with %s', (dimension, rung, type) => {
+    expect(typeOf(at(0, dimension, rung))).toBe(type);
   });
 });
 
-describe('phase 25 speaking cards in the plan', () => {
-  const ten = Array.from({ length: 10 }, (_, i) => ({
-    form: `word${i}`,
-    translation: `מילה${i}`,
-    tiles: true,
-    speakable: true,
-    clozeGap: true,
-  }));
-
-  it('with speaking off, plans exactly what phase 24 planned', () => {
-    for (const ordinal of [0, 1, 2, 3, 4, 5]) {
-      for (const listening of [false, true]) {
-        const types = planSession(ten, { listening, speaking: false, ordinal }).types;
-        expect(types).not.toContain('read_aloud');
-        expect(types).not.toContain('say_translation');
-      }
-    }
-    expect(planSession(ten, { listening: true, speaking: false, ordinal: 2 }).types[7]).toBe('multiple_choice');
+describe('planCards: aiming at CARD_TARGET (spec D6)', () => {
+  it('takes the type whose p = g + (1 − g)·R^e is nearest the target', () => {
+    // Rung 1, R 0.81: tiles p = 0.9 (0.05 off), a four-option card 0.925 (0.075 off).
+    expect(Math.abs(expectedSuccess(0.81, false, 1) - CARD_TARGET)).toBeLessThan(
+      Math.abs(expectedSuccess(0.81, true, 1) - CARD_TARGET),
+    );
+    expect(typeOf(at(0, WP, 1, { r: 0.81 }))).toBe('letter_tiles');
+    // R 0.5: tiles 0.707 (0.143 off), four-option 0.780 (0.070 off).
+    expect(typeOf(at(0, WP, 1, { r: 0.5 }))).toBe('reverse_choice');
   });
 
-  it('with listening off and speaking on, ordinal 0 asks read aloud at 8 and the two cloze cards after it', () => {
-    expect(planSession(ten, { listening: false, speaking: true, ordinal: 0 }).types).toEqual([
-      'multiple_choice',
+  it('takes the next nearest when the nearest is not eligible', () => {
+    expect(typeOf(at(0, WP, 1, { r: 0.81, tiles: false }))).toBe('reverse_choice');
+    expect(typeOf(at(0, WP, 1, { r: 0.5, clozeGap: false }))).toBe('reverse_choice');
+  });
+
+  it('breaks a tie by the type used least so far, then by the table', () => {
+    // reverse_choice and cloze_choice are both four-option: always tied.
+    expect(typesByPick([at(0, WP, 1), at(1, WP, 1), at(2, WP, 1)])).toEqual([
       'reverse_choice',
-      'typed_translation',
-      'matching',
-      'matching',
-      'matching',
-      'matching',
-      'read_aloud',
       'cloze_choice',
+      'reverse_choice',
+    ]);
+    // The three typed WP cards are all g = 0 at rung 2.
+    expect(typesByPick([at(0, WP, 2), at(1, WP, 2), at(2, WP, 2), at(3, WP, 2)])).toEqual([
+      'typed_translation',
       'cloze_typed',
+      'sentence_translation',
+      'typed_translation',
     ]);
   });
 
-  it('four sessions in a row show both speaking cards', () => {
-    const seen = new Set([0, 1, 2, 3].flatMap((ordinal) => planSession(ten, { listening: true, speaking: true, ordinal }).types));
-    expect(seen).toContain('read_aloud');
-    expect(seen).toContain('say_translation');
+  it('uses no type more than four times, moving on to the next nearest', () => {
+    expect(MAX_PER_TYPE).toBe(4);
+    // No gap: reverse_choice is the only four-option WP card, and nearest at R 0.5.
+    const types = typesByPick(Array.from({ length: 6 }, (_, i) => at(i, WP, 1, { clozeGap: false })));
+    expect(count(types, 'reverse_choice')).toBe(4);
+    expect(count(types, 'letter_tiles')).toBe(2);
+    // A rung whose every type is spent falls to the other rung.
+    const sr = typesByPick(Array.from({ length: 5 }, (_, i) => at(i, SR, 1)));
+    expect(count(sr, 'listen_choice')).toBe(4);
+    expect(count(sr, 'dictation')).toBe(1);
+  });
+});
+
+describe('planCards: fallbacks (spec D6)', () => {
+  it('takes the other rung when the chosen one has no eligible type', () => {
+    // Dictation needs listening.
+    expect(typeOf(at(0, SP, 1), { listening: false, speaking: true })).toBe('typed_translation');
+    // Read aloud is spent once SK reaches level 2: say the translation.
+    expect(typeOf(at(0, SK, 1, { level: 2 }))).toBe('say_translation');
+    // Multiple choice spent (forms that clash, so no board): typed meaning.
+    const five = typesByPick(Array.from({ length: 5 }, (_, i) => at(i, WR, 1, { form: 'same' })));
+    expect(five).toEqual([...Array(4).fill('multiple_choice'), 'typed_meaning']);
   });
 
-  it('never gives a speaking card to a phrase of five words', () => {
-    const long = ten.map((pick) => ({ ...pick, speakable: false, clozeGap: true }));
-    const types = [0, 1, 2, 3].flatMap((ordinal) => planSession(long, { listening: false, speaking: true, ordinal }).types);
-    expect(types).not.toContain('read_aloud');
-    expect(types).not.toContain('say_translation');
+  it('takes multiple choice when neither rung has one', () => {
+    expect(typeOf(at(0, SR, 1), NONE)).toBe('multiple_choice');
+    expect(typeOf(at(0, SR, 2), NONE)).toBe('multiple_choice');
+    expect(typeOf(at(0, SK, 2), { listening: true, speaking: false })).toBe('multiple_choice');
+    expect(typeOf(at(0, SK, 1, { speakable: false }))).toBe('multiple_choice');
   });
 
   it('gives a one-word session no speaking card', () => {
-    for (const ordinal of [0, 1, 2]) {
-      expect(planSession([ten[0]], { listening: true, speaking: true, ordinal }).types).toEqual([
-        expect.not.stringMatching(/read_aloud|say_translation/),
-      ]);
-    }
+    expect(planCards([at(0, SK, 1)], ALL).types).toEqual(['multiple_choice']);
+    expect(planCards([at(0, SK, 2)], ALL).types).toEqual(['multiple_choice']);
   });
 
-  it('never puts two cards of one type in a row, over every size, with speaking on', () => {
-    for (let size = 1; size <= 10; size++) {
-      for (const ordinal of [0, 1, 2, 3]) {
-        const types = planSession(ten.slice(0, size), { listening: true, speaking: true, ordinal }).types;
-        types.forEach((type, i) => {
-          if (i > 0 && type !== 'matching') expect(type).not.toBe(types[i - 1]);
-        });
-      }
-    }
-  });
-});
-
-describe('typed_meaning in the recognise tier (phase 27 D9)', () => {
-  it('is the last type of the recognise tier', () => {
-    expect(TIERS[0]).toEqual(['multiple_choice', 'listen_choice', 'read_aloud', 'typed_meaning']);
-  });
-  it('is chosen when its turn comes, and when listening falls through to it', () => {
-    // Four picks, ordinal 0, no listening, no speaking: the second run's
-    // recognise card prefers listen_choice, which falls through to
-    // typed_meaning (the next eligible in the tier's order).
-    const plan = planSession(picks(4), { listening: false, speaking: false, ordinal: 0 });
-    expect(plan.types).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation', 'typed_meaning']);
-  });
-  it('never puts two cards of a type in a row, over sizes 1 to 10 and ordinals 0 to 4', () => {
-    for (let size = 1; size <= 10; size++) {
-      for (let ordinal = 0; ordinal <= 4; ordinal++) {
-        for (const flags of [{ listening: false, speaking: false }, { listening: true, speaking: true }]) {
-          const types = planSession(picks(size), { ...flags, ordinal }).types;
-          types.forEach((type, i) => {
-            if (i > 0) expect(type === types[i - 1] && type !== 'matching').toBe(false);
-          });
-        }
-      }
-    }
-  });
-});
-
-describe('the sentence cards in the plan (phase 27 D8, D9)', () => {
-  it('has the tiers of the spec', () => {
-    expect(TIERS).toEqual([
-      ['multiple_choice', 'listen_choice', 'read_aloud', 'typed_meaning'],
-      ['reverse_choice', 'cloze_choice', 'letter_tiles'],
-      ['typed_translation', 'cloze_typed', 'dictation', 'say_translation', 'sentence_translation'],
-    ]);
-  });
-
-  const ALL = { listening: true, speaking: true };
-
-  // Hand-derived. Ten picks: a board after the first run, singles s0..s5; single s
-  // is in tier s % 3, run floor(s / 3), preferred index (ordinal + run) % tier length.
-  it('lays out ordinal 1, ten words, everything eligible', () => {
-    // s0 A (4) pref 1 listen_choice; s1 B (3) pref 1 cloze_choice; s2 C (5) pref 1 cloze_typed;
-    // s3 A pref 2 read_aloud; s4 B pref 2 letter_tiles; s5 C pref 2 dictation.
-    expect(planSession(picks(10), { ...ALL, ordinal: 1 }).types).toEqual([
-      'listen_choice', 'cloze_choice', 'cloze_typed',
-      ...BOARD,
-      'read_aloud', 'letter_tiles', 'dictation',
-    ]);
-  });
-
-  it('reaches sentence_translation at ordinal 4', () => {
-    // s0 A pref 0 multiple_choice; s1 B pref 1 cloze_choice; s2 C pref 4 sentence_translation;
-    // s3 A pref 1 listen_choice; s4 B pref 2 letter_tiles; s5 C pref 0 typed_translation.
-    expect(planSession(picks(10), { ...ALL, ordinal: 4 }).types).toEqual([
-      'multiple_choice', 'cloze_choice', 'sentence_translation',
-      ...BOARD,
-      'listen_choice', 'letter_tiles', 'typed_translation',
-    ]);
-  });
-
-  it('needs a gap for the cloze choice, and a speakable form for the two sentence types', () => {
-    // Six words, ordinal 4, all on. s1 B pref 1: no gap, so letter_tiles. s2 C pref 4:
-    // not speakable, so sentence_translation falls to the wrap-around, typed_translation.
-    const list = [pick(0), { ...pick(1), clozeGap: false }, { ...pick(2), speakable: false }, pick(3), pick(4), pick(5)];
-    const types = planSession(list, { ...ALL, ordinal: 4 }).types;
-    expect(types.slice(0, 3)).toEqual(['multiple_choice', 'letter_tiles', 'typed_translation']);
-    // And over every ordinal, a form that cannot be said never gets the two sentence types.
-    const unspeakable = picks(6).map((p) => ({ ...p, speakable: false }));
-    const all = [0, 1, 2, 3, 4].flatMap((ordinal) => planSession(unspeakable, { ...ALL, ordinal }).types);
-    expect(all).not.toContain('cloze_typed');
-    expect(all).not.toContain('sentence_translation');
-    const noGap = [0, 1, 2, 3, 4].flatMap((ordinal) => planSession(picks(6, true, false), { ...ALL, ordinal }).types);
+  it('keeps the eligibility rules: tiles, a cloze gap, a speakable form', () => {
+    expect(typeOf(at(0, WP, 1, { r: 0.81, tiles: false, clozeGap: false }))).toBe('reverse_choice');
+    const unspeakable = typesByPick(Array.from({ length: 6 }, (_, i) => at(i, WP, 2, { speakable: false })));
+    expect(unspeakable).not.toContain('cloze_typed');
+    expect(unspeakable).not.toContain('sentence_translation');
+    const noGap = typesByPick(Array.from({ length: 6 }, (_, i) => at(i, WP, 1, { clozeGap: false })));
     expect(noGap).not.toContain('cloze_choice');
   });
+});
 
-  it('never gives two cards in a row one type, over sizes 1 to 10, ordinals 0 to 5 and every flag', () => {
-    for (let size = 1; size <= 10; size++) {
-      for (let ordinal = 0; ordinal <= 5; ordinal++) {
-        for (const listening of [false, true]) {
-          for (const speaking of [false, true]) {
-            for (const clozeGap of [false, true]) {
-              for (const speakable of [false, true]) {
-                const list = picks(size, true, clozeGap).map((p) => ({ ...p, speakable }));
-                const types = planSession(list, { listening, speaking, ordinal }).types;
-                types.forEach((type, i) => {
-                  if (i > 0) expect(type === types[i - 1] && type !== 'matching').toBe(false);
-                });
-              }
-            }
-          }
+describe('planCards: a new word (spec D6)', () => {
+  it('takes multiple choice', () => {
+    expect(typeOf(pick(0))).toBe('multiple_choice');
+  });
+
+  it('takes multiple choice even past the four-per-type limit', () => {
+    // Six new words whose forms clash, so no board takes four of them.
+    const six = Array.from({ length: 6 }, (_, i) => pick(i, { form: 'same' }));
+    expect(planCards(six, ALL).types).toEqual(Array(6).fill('multiple_choice'));
+  });
+
+  it('does not count toward the limit, so recognised words still get multiple choice', () => {
+    // Four new words (a board) and four recognised ones whose forms clash with each other.
+    const list = [pick(0), pick(1), pick(2), pick(3), ...Array.from({ length: 4 }, (_, i) => at(4 + i, WR, 1, { form: 'same' }))];
+    const types = typesByPick(list);
+    expect(types.slice(4)).toEqual(Array(4).fill('multiple_choice'));
+    expect(count(types, 'matching')).toBe(4);
+  });
+});
+
+describe('planCards: read aloud (spec D6)', () => {
+  it('reads aloud only while SK is unintroduced or below level 2, so once', () => {
+    expect(typeOf(pick(0, { dimension: SK, rung: 1, level: 1, r: null }))).toBe('read_aloud');
+    expect(typeOf(pick(0, { dimension: SK, rung: 1, level: 1, r: 0.5 }))).toBe('read_aloud');
+    // A read aloud said right raises SK to 2 and writes no memory: next time, say it.
+    expect(typeOf(pick(0, { dimension: SK, rung: 1, level: 2, r: null }))).toBe('say_translation');
+    expect(typeOf(pick(0, { dimension: SK, rung: 1, level: 2, r: 0.5 }))).toBe('say_translation');
+  });
+
+  it('never reads aloud with speaking off', () => {
+    expect(typeOf(pick(0, { dimension: SK, rung: 1 }), { listening: true, speaking: false })).toBe('multiple_choice');
+  });
+});
+
+describe('planCards: the board (spec D6, D10)', () => {
+  it('makes four multiple-choice picks with distinct forms and meanings one board', () => {
+    const plan = planCards([pick(0), pick(1), pick(2), pick(3)], ALL);
+    expect(plan.types).toEqual(['matching', 'matching', 'matching', 'matching']);
+    expect(plan.board).toEqual({ start: 0 });
+    expect([...plan.order].sort()).toEqual([0, 1, 2, 3]);
+  });
+
+  it('has no board with fewer than four multiple-choice picks', () => {
+    const plan = planCards([pick(0), pick(1), pick(2), at(3, WP, 1), at(4, WP, 2)], ALL);
+    expect(plan.board).toBeNull();
+    expect(plan.types).not.toContain('matching');
+    expect(count(plan.types, 'multiple_choice')).toBe(3);
+  });
+
+  it('takes only multiple-choice picks onto the board, and keeps its four together', () => {
+    const list = [at(0, WP, 1), pick(1), at(2, WP, 2), pick(3), pick(4), at(5, SR, 1), pick(6), pick(7)];
+    const plan = planCards(list, ALL);
+    expect(plan.board).not.toBeNull();
+    const start = plan.board!.start;
+    expect(plan.types.slice(start, start + 4)).toEqual(['matching', 'matching', 'matching', 'matching']);
+    expect(plan.order.slice(start, start + 4)).toEqual([1, 3, 4, 6]);
+    expect(count(plan.types, 'matching')).toBe(4);
+    // The fifth new word stays a multiple choice.
+    expect(typesByPick(list, ALL)[7]).toBe('multiple_choice');
+  });
+
+  // Review Focus 2 (phase 24).
+  it('never puts two senses of one word, or two words with one meaning, on a board', () => {
+    const list: PlanPick[] = [
+      pick(0, { form: 'lock', translation: 'מנעול' }),
+      pick(1, { form: 'Lock', translation: 'טירה' }),
+      pick(2, { form: 'big', translation: 'גדול' }),
+      pick(3, { form: 'large', translation: 'גָּדוֹל.' }),
+      pick(4),
+      pick(5),
+    ];
+    const plan = planCards(list, ALL);
+    const start = plan.board!.start;
+    expect(plan.order.slice(start, start + 4)).toEqual([0, 2, 4, 5]);
+  });
+
+  it('has no board when four distinct words cannot be found', () => {
+    const list = Array.from({ length: 8 }, (_, i) => pick(i, { form: i < 3 ? `w${i}` : 'w0' }));
+    const plan = planCards(list, ALL);
+    expect(plan.board).toBeNull();
+    expect(plan.types).not.toContain('matching');
+  });
+});
+
+describe('planCards: the order (spec D6)', () => {
+  it('puts the highest p first', () => {
+    // p: SR rung 1 at R 0.25 = 0.625; WP rung 2 at R 0.9 = 0.9; WR rung 2 at R 0.7, level 3 = 0.7.
+    const list = [at(0, SR, 1, { r: 0.25 }), at(1, WP, 2), at(2, WR, 2, { r: 0.7 })];
+    const plan = planCards(list, ALL);
+    expect(plan.order).toEqual([1, 2, 0]);
+    expect(plan.types).toEqual(['typed_translation', 'typed_meaning', 'listen_choice']);
+  });
+
+  it('avoids one type twice in a row where it can', () => {
+    // Two new words (p 1) and a typed meaning (p 0.95): the typed meaning goes between them.
+    const plan = planCards([pick(0), pick(1), at(2, WR, 2, { r: 0.95 })], ALL);
+    expect(plan.types).toEqual(['multiple_choice', 'typed_meaning', 'multiple_choice']);
+    expect(plan.order).toEqual([0, 2, 1]);
+  });
+
+  it('repeats a type only when nothing else is left', () => {
+    const plan = planCards([pick(0, { form: 'a' }), pick(1, { form: 'a' }), pick(2, { form: 'a' })], ALL);
+    expect(plan.types).toEqual(['multiple_choice', 'multiple_choice', 'multiple_choice']);
+  });
+
+  it('is deterministic, and never gives two cards in a row one type when another order would not', () => {
+    const dimensions = [WR, WP, SP, SR, SK];
+    for (let size = 2; size <= 10; size++) {
+      for (const input of [ALL, NONE, { listening: true, speaking: false }]) {
+        const list = Array.from({ length: size }, (_, i) =>
+          i % 3 === 0 ? pick(i) : at(i, dimensions[i % 5], ((i % 2) + 1) as 1 | 2, { r: 0.4 + (i % 4) * 0.15 }),
+        );
+        const plan = planCards(list, input);
+        expect(planCards(list, input)).toEqual(plan);
+        expect([...plan.order].sort((a, b) => a - b)).toEqual(list.map((_, i) => i));
+        // A board is one card: keep its first word only.
+        const cards = plan.types.filter((_, i) => !(plan.board && i > plan.board.start && i < plan.board.start + 4));
+        const most = Math.max(...cards.map((type) => count(cards, type)));
+        // Repeats are forced only when one type is more than half the cards.
+        if (most <= Math.ceil(cards.length / 2)) {
+          for (let i = 1; i < cards.length; i++) expect(cards[i]).not.toBe(cards[i - 1]);
         }
       }
     }

@@ -102,16 +102,6 @@ export function createSessionRepo(tx: Tx) {
 
     insertSessionQuestions,
 
-    /** Phase 24 (spec D3). How many list sessions an enrollment has had, of any
-     *  status: the planner's rotation step for the next one. */
-    countListSessions: async (enrollmentId: string): Promise<number> => {
-      const [row] = await tx
-        .select({ count: sql<number>`count(*)::int` })
-        .from(sessions)
-        .where(and(eq(sessions.enrollmentId, enrollmentId), eq(sessions.source, 'list')));
-      return row.count;
-    },
-
     /** Phase 35 (spec D5, D10). The glosses answered in this enrollment's
      *  sessions that count for `day`, and in an open one, which counts as today.
      *  The picker asks them last. Sorted. */

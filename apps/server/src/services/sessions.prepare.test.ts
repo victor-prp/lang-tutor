@@ -28,17 +28,26 @@ const CONTEXT: GenerationContext[] = [
   { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
   { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
 ];
+// Phase 35 (spec D6). A pick's dimension, rung, level and R choose its card, and
+// its chance of success p its position, highest first. A pick with none of
+// them is a new word: multiple choice, p 1.
+const RECOGNISE = { dimension: 'written_receptive', rung: 1, level: 1, r: 0.81 } as const; // multiple choice, p 0.925
+const PICK_FORM = { dimension: 'written_productive', rung: 1, level: 1, r: 0.5 } as const; // reverse or cloze choice, p 0.78
+const BUILD_FORM = { dimension: 'written_productive', rung: 1, level: 1, r: 0.81 } as const; // letter tiles, p 0.9
+const HEAR = { dimension: 'spoken_receptive', rung: 1, level: 1, r: 0.64 } as const; // listen and choose, p 0.85
+const SAY = { dimension: 'spoken_productive', rung: 1, level: 1, r: null } as const; // read aloud, p 1
+/** Typed recall of the form, p = R: typed translation, typed cloze, sentence translation in turn. */
+const produce = (r: number) => ({ dimension: 'written_productive', rung: 2, level: 3, r }) as const;
+
 const PAYLOAD = {
   session_id: SESSION,
   picks: [
     { gloss_id: 'g-s1', sense_id: 's1', variant_id: 'v1' },
-    { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2' },
+    { gloss_id: 'g-s2', sense_id: 's2', variant_id: 'v2', ...PICK_FORM },
   ],
   listening: false,
-  ordinal: 0,
 };
-// Phase 23: q2 is the second position, a reversed card, so its wrong options
-// are Russian words.
+// A new word, then a reversed card, so q2's wrong options are Russian words.
 const GOOD = JSON.stringify({
   items: [
     { key: 'q1', distractors: ['כתבה', 'שמעה', 'ראתה'] },
@@ -180,8 +189,8 @@ describe('prepareSession', () => {
     expect(calls.sessionQuestions[0]).toHaveLength(2);
   });
 
-  // Phase 23 (spec D2): types follow positions, in pick order.
-  it('gives each position its type, in pick order, with the content each type needs', async () => {
+  // Phase 35 (spec D6): each pick its card, the highest chance first.
+  it('gives each pick its card, highest chance first, with the content each type needs', async () => {
     const context = [
       ...CONTEXT,
       { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
@@ -194,7 +203,8 @@ describe('prepareSession', () => {
       ],
     });
     const { service, calls, llm } = world({ context, reply });
-    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3' }] });
+    // p: the new word 1, the reversed card 0.78, the typed one 0.76.
+    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3', ...produce(0.76) }] });
 
     expect(JSON.parse(llm.calls[0].user).items.map((item: { task: string }) => item.task)).toEqual(['meaning', 'word', 'typed']);
     const [input] = calls.generated as {
@@ -204,7 +214,7 @@ describe('prepareSession', () => {
     expect(input.questions[1]).toMatchObject({ prompt: 'בצל', alternatives: null });
     expect(input.questions[1].options!.map((o) => o.text)).toEqual(['лук', 'чеснок', 'морковь', 'капуста']);
     expect(input.questions[2]).toMatchObject({ prompt: 'מהר', options: null, alternatives: ['скоро'] });
-    // Not reshuffled: the type cycle depends on the order.
+    // Not reshuffled: the plan's order is the session's.
     expect(calls.sessionQuestions[0].map((q) => q.id)).toEqual(['g0', 'g1', 'g2']);
   });
 
@@ -225,7 +235,8 @@ describe('prepareSession', () => {
 
   // Review Focus 3: a pick whose dictionary rows vanished.
   it('generates the picks that remain, and fails when none does', async () => {
-    const partial = world({ context: CONTEXT.slice(1), reply: JSON.stringify({ items: [{ key: 'q1', distractors: ['שום', 'גזר', 'כרוב'] }] }) });
+    // The reversed card remains: its wrong options are Russian.
+    const partial = world({ context: CONTEXT.slice(1), reply: JSON.stringify({ items: [{ key: 'q1', distractors: ['чеснок', 'морковь', 'капуста'] }] }) });
     await partial.service.prepareSession(PAYLOAD);
     expect(JSON.parse(partial.llm.calls[0].user).items).toHaveLength(1);
     const [written] = partial.calls.generated as { questions: unknown[] }[];
@@ -293,55 +304,64 @@ const MEANINGS = ['מרגנית', 'צב', 'כרית', 'מטרייה', 'דלי', 
 const TEN: GenerationContext[] = FORMS.map((form, i) => ({
   glossId: `g-s${i}`, senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i], example: null, exampleTranslation: null,
 }));
-const TEN_PAYLOAD = {
+type Card = Partial<{ dimension: string; rung: 1 | 2; level: number; r: number | null }>;
+/** Ten picks, the first four new words (one board), then: a recognised word
+ *  (multiple choice, p 0.925), a form picked (reverse choice, 0.78), a form
+ *  typed (typed translation, 0.95), a word heard (listen and choose, 0.85), a
+ *  form built (letter tiles, 0.9) and one more typed (typed cloze, 0.88).
+ *  Highest p first: the board (q1-q4), typed translation q5, multiple choice
+ *  q6, tiles q7, typed cloze q8, listen and choose q9, reverse choice q10. */
+const TEN_CARDS: Card[] = [{}, {}, {}, {}, RECOGNISE, PICK_FORM, produce(0.95), HEAR, BUILD_FORM, produce(0.88)];
+const tenPayload = (cards: Card[] = TEN_CARDS) => ({
   session_id: SESSION,
-  picks: TEN.map((row) => ({ gloss_id: row.glossId, sense_id: row.senseId, variant_id: row.variantId })),
+  picks: TEN.map((row, i) => ({ gloss_id: row.glossId, sense_id: row.senseId, variant_id: row.variantId, ...cards[i] })),
   listening: true,
-  ordinal: 0,
-};
-// q4 is the board's first word. Its first wrong meaning, דלי, is a board word's
-// own meaning, so the fifth meaning must be the next one.
+});
+const TEN_PAYLOAD = tenPayload();
+// q1 is the board's first word, ромашка. Its first wrong meaning, צב, is a
+// board word's own meaning, so the fifth meaning must be the next one.
 const TEN_REPLY = JSON.stringify({
   items: [
-    { key: 'q1', distractors: ['דלת', 'קיר', 'תקרה'] },
-    { key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] },
-    { key: 'q3', distractors: [], alternatives: [] },
-    { key: 'q4', distractors: ['דלי', 'שולחן', 'כיסא'] },
-    { key: 'q8', distractors: ['ענן', 'גשם', 'רוח'] },
+    { key: 'q1', distractors: ['צב', 'שולחן', 'כיסא'] },
+    { key: 'q5', distractors: [], alternatives: [] },
+    { key: 'q6', distractors: ['דלת', 'קיר', 'תקרה'] },
+    { key: 'q9', distractors: ['ענן', 'גשם', 'רוח'] },
+    { key: 'q10', distractors: ['чеснок', 'морковь', 'капуста'] },
   ],
 });
 
-describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
-  it('plans ten words as a run, the board and a run, and writes each its content', async () => {
+describe('prepareSession, phase 24 and 35 (spec D6, D10, D11)', () => {
+  it('plans ten words by their cards, the board first, and writes each its content', async () => {
     const { service, calls, llm } = world({ context: TEN, reply: TEN_REPLY });
     await service.prepareSession(TEN_PAYLOAD);
 
     const asked = JSON.parse(llm.calls[0].user).items.map((item: { key: string; task: string }) => `${item.key}:${item.task}`);
-    expect(asked).toEqual(['q1:meaning', 'q2:word', 'q3:typed', 'q4:meaning', 'q8:meaning', 'q10:sentence']);
+    expect(asked).toEqual(['q1:meaning', 'q5:typed', 'q6:meaning', 'q8:sentence', 'q9:meaning', 'q10:word']);
 
     const [input] = calls.generated as {
-      questions: { type: string; prompt: string | null; options: { text: string; is_correct: boolean }[] | null; tiles: string[] | null }[];
+      questions: { type: string; form: string; prompt: string | null; options: { text: string; is_correct: boolean }[] | null; tiles: string[] | null }[];
     }[];
     expect(input.questions.map((q) => q.type)).toEqual([
-      'multiple_choice', 'reverse_choice', 'typed_translation',
       'matching', 'matching', 'matching', 'matching',
-      // s3 listen_choice, s4 letter_tiles (cloze_choice has no gap yet), s5 cloze_typed,
-      // which the reply left no sentence for, so typed_translation.
-      'listen_choice', 'letter_tiles', 'typed_translation',
+      'typed_translation', 'multiple_choice', 'letter_tiles',
+      // A typed cloze the reply left no sentence for: a typed translation.
+      'typed_translation',
+      'listen_choice', 'reverse_choice',
     ]);
-    expect(input.questions[3].options!.map((o) => o.text)).toEqual(['מטרייה', 'דלי', 'כינור', 'את חפירה', 'שולחן']);
-    expect(input.questions[4].options!.find((o) => o.is_correct)!.text).toBe('דלי');
-    expect(input.questions[8].tiles).toHaveLength([...'фонарь'].length + 2);
-    expect(input.questions[9]).toMatchObject({ prompt: 'לטאה', options: null, tiles: null });
+    expect(input.questions.map((q) => q.form)).toEqual([0, 1, 2, 3, 6, 4, 8, 9, 7, 5].map((i) => FORMS[i]));
+    expect(input.questions[0].options!.map((o) => o.text)).toEqual(['מרגנית', 'צב', 'כרית', 'מטרייה', 'שולחן']);
+    expect(input.questions[1].options!.find((o) => o.is_correct)!.text).toBe('צב');
+    expect(input.questions[6].tiles).toHaveLength([...'фонарь'].length + 2);
+    expect(input.questions[7]).toMatchObject({ prompt: 'לטאה', options: null, tiles: null });
 
     const shown = calls.sessionQuestions[0] as { options?: string[] }[];
-    for (const i of [4, 5, 6]) expect(shown[i].options).toEqual(shown[3].options);
+    for (const i of [1, 2, 3]) expect(shown[i].options).toEqual(shown[0].options);
   });
 
   it("refuses a board whose wrong meanings are all its words' own, so pg-boss retries", async () => {
-    // Each is valid for q4 (none is зонтик's own מטרייה), and each is another
+    // Each is valid for q1 (none is ромашка's own מרגנית), and each is another
     // board word's meaning: only the board check can refuse them.
-    const reply = TEN_REPLY.replace('["דלי","שולחן","כיסא"]', '["דלי","כינור","את חפירה"]');
+    const reply = TEN_REPLY.replace('["צב","שולחן","כיסא"]', '["צב","כרית","מטרייה"]');
     const { service } = world({ context: TEN, reply });
     await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toThrow(/board/);
   });
@@ -363,11 +383,8 @@ describe('prepareSession, phase 24 (spec D3, D10, D11)', () => {
   });
 
   it('gives a listening-off session no listening card', async () => {
-    // Listening off, the tenth card is a sentence card too, so q10 is asked either way.
-    const reply = JSON.stringify({
-      items: [...JSON.parse(TEN_REPLY).items, { key: 'q10', distractors: [], alternatives: [] }],
-    });
-    const { service, calls } = world({ context: TEN, reply });
+    // The word heard falls back to multiple choice (p 0.85), at the same place.
+    const { service, calls } = world({ context: TEN, reply: TEN_REPLY });
     await service.prepareSession({ ...TEN_PAYLOAD, listening: false });
     const [input] = calls.generated as { questions: { type: string }[] }[];
     expect(input.questions.map((q) => q.type)).not.toContain('listen_choice');
@@ -394,19 +411,22 @@ describe('failPreparation', () => {
 describe('prepareSession, phase 25 (spec D4)', () => {
   const types = (calls: { sessionQuestions: Question[][] }) => calls.sessionQuestions[0].map((question) => question.type);
 
+  // The first word's spoken production is unintroduced: read aloud, when speaking.
+  const SPEAK_PAYLOAD = { ...PAYLOAD, picks: [{ ...PAYLOAD.picks[0], ...SAY }, PAYLOAD.picks[1]] };
+
   it('plans a speaking card only when the payload says speaking', async () => {
     const on = world({ reply: JSON.stringify({ items: [{ key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] }] }) });
-    await on.service.prepareSession({ ...PAYLOAD, ordinal: 6, speaking: true });
+    await on.service.prepareSession({ ...SPEAK_PAYLOAD, speaking: true });
     expect(types(on.calls)).toEqual(['read_aloud', 'reverse_choice']);
 
     const off = world({});
-    await off.service.prepareSession({ ...PAYLOAD, ordinal: 2, speaking: false });
-    expect(types(off.calls)).not.toContain('read_aloud');
+    await off.service.prepareSession({ ...SPEAK_PAYLOAD, speaking: false });
+    expect(types(off.calls)).toEqual(['multiple_choice', 'reverse_choice']);
   });
 
   it('reads a payload from before phase 25 as speaking off', async () => {
     const { service, calls } = world({});
-    await service.prepareSession({ ...PAYLOAD, ordinal: 2 });
+    await service.prepareSession(SPEAK_PAYLOAD);
     expect(types(calls)).not.toContain('read_aloud');
   });
 });
@@ -429,9 +449,13 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
   const answers = (llm: { calls: { user: string }[] }, fill: (item: { key: string; task: string; word: string; example: string | null; avoid: string[] }) => object) =>
     JSON.stringify({ items: JSON.parse(llm.calls[0].user).items.map(fill) });
 
+  // The recognised word picks its form too: the first form picked is a reverse
+  // choice, the second, with a gap in its example, a cloze choice.
+  const GAP_PAYLOAD = tenPayload(TEN_CARDS.map((card, i) => (i === 4 ? PICK_FORM : card)));
+
   it('asks a gap item with the blank taken from the saved example, and keeps that gap on the card', async () => {
     const probe = world({ context: EXAMPLES, reply: 'nope' });
-    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    await expect(probe.service.prepareSession(GAP_PAYLOAD)).rejects.toThrow();
     const gapItems = JSON.parse(probe.llm.calls[0].user).items.filter((item: { task: string }) => item.task === 'gap');
     expect(gapItems.length).toBeGreaterThan(0);
     for (const item of gapItems) {
@@ -451,7 +475,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
         ),
       });
     const { service, calls, llm } = world({ context: EXAMPLES, reply: reply(JSON.parse(probe.llm.calls[0].user).items) });
-    await service.prepareSession(TEN_PAYLOAD);
+    await service.prepareSession(GAP_PAYLOAD);
     expect(KEYS(llm)).toEqual(KEYS(probe.llm));
     const [input] = calls.generated as { questions: { type: string; sentence: string | null; gapStart: number | null; gapEnd: number | null; options: { text: string; is_correct: boolean }[] | null }[] }[];
     const cloze = input.questions.filter((q) => q.type === 'cloze_choice');
@@ -508,9 +532,8 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
   });
 
   it('hands a translate item the recent Hebrew sentences and the example\'s Hebrew, and degrades a card that repeats one', async () => {
-    // Ordinal 2 plans a sentence_translation card among the ten.
-    // Ordinal 2 plans a sentence_translation card among the ten.
-    const PAYLOAD_T ={ ...TEN_PAYLOAD, ordinal: 2 };
+    // Three forms typed: a typed translation, a typed cloze and a sentence translation.
+    const PAYLOAD_T = tenPayload(TEN_CARDS.map((card, i) => (i === 4 ? produce(0.9) : card)));
     const hebrew = (row: GenerationContext) => `אתמול ראינו שם את ${row.translation} החדש.`;
     const recent: RecentSentences = new Map(EXAMPLES.map((row) => [row.glossId, { cloze: [], translate: [hebrew(row)] }]));
     const probe = world({ context: EXAMPLES, reply: 'nope', recent });
@@ -549,7 +572,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
 
   it('plans no gap card for a saved example with no Hebrew half', async () => {
     const probe = world({ context: EXAMPLES.map((row) => ({ ...row, exampleTranslation: null })), reply: 'nope' });
-    await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+    await expect(probe.service.prepareSession(GAP_PAYLOAD)).rejects.toThrow();
     const items = JSON.parse(probe.llm.calls[0].user).items as { task: string }[];
     expect(items.map((item) => item.task)).not.toContain('gap');
   });
@@ -653,7 +676,7 @@ describe('prepareSession, phase 31 (spec D18)', () => {
       ],
     });
     const { service, calls, llm } = world({ context, reply, siblings: [{ glossId: 'g_book', lemma: 'order' }] });
-    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { gloss_id: 'g_book', sense_id: 's3', variant_id: 'v3' }] });
+    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { gloss_id: 'g_book', sense_id: 's3', variant_id: 'v3', ...produce(0.76) }] });
 
     const inserted = (calls.generated[0] as { questions: { type: string; alternatives: string[] | null }[] }).questions;
     expect(inserted[2]).toMatchObject({ type: 'typed_translation', alternatives: ['order', 'reserve'] });

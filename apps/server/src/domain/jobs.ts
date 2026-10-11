@@ -43,15 +43,14 @@ export const PrepareSessionPayloadSchema = z.object({
     )
     .min(1)
     .max(SESSION_LENGTH),
-  // Phase 24 (spec D5, D3). Absent in a job enqueued before the deploy: such a
-  // session gets no listening cards, and the rotation's first step.
+  // Phase 24 (spec D5). Absent in a job enqueued before the deploy: such a
+  // session gets no listening cards.
   listening: z.boolean().default(false),
   // Phase 25 (spec D4). Absent in a job enqueued before the deploy: such a
   // session gets no speaking cards.
   speaking: z.boolean().default(false),
-  // Phase 24's rotation step. Phase 35's card choice replaces the rotation and
-  // drops it (ruling 2: kept until then).
-  ordinal: z.number().int().nonnegative().default(0),
+  // Phase 24's `ordinal`, the rotation's step, is gone with the rotation (phase
+  // 35, spec D6). A job enqueued before the deploy still parses: the key is dropped.
 });
 export type PrepareSessionPayload = z.infer<typeof PrepareSessionPayloadSchema>;
 

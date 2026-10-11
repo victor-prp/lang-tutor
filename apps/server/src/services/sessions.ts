@@ -27,11 +27,12 @@ import {
   validateDistractors,
   withSiblingAlternatives,
   type DistractorVerdict,
+  type GenerationContext,
 } from '../domain/distractors';
 import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
-import { BOARD_SIZE, planSession } from '../domain/plan';
+import { BOARD_SIZE, planCards } from '../domain/plan';
 import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
 import type { SessionRecord, SessionSummary } from '../domain/session';
@@ -266,16 +267,12 @@ export function createSessionService({
           return [{ gloss_id: choice.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId, dimension, rung, level, r }];
         });
         if (picks.length === 0) throw new NoSavedWords(enrollmentId);
-        // Phase 24 (spec D3): the rotation's step is how many list sessions came
-        // before this one. Read before the insert, so it does not count itself.
-        const ordinal = await session.countListSessions(enrollmentId);
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
         await jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,
           picks,
           listening: options.listening,
           speaking: options.speaking,
-          ordinal,
         });
         return { sessionId, status: 'preparing' as const, source: 'list' as const };
       }),
@@ -593,14 +590,25 @@ export function createSessionService({
           (pick) => (resolved.get(pick.gloss_id)?.userLanguageCode ?? enrolled.source_language) !== enrolled.source_language,
         );
         if (foreign) throw new GlossLanguageMismatch(foreign.gloss_id);
+        const asked = payload.picks.map((pick) => ({
+          glossId: resolved.get(pick.gloss_id)?.id ?? pick.gloss_id,
+          senseId: pick.sense_id,
+          variantId: pick.variant_id,
+          pick,
+        }));
         const context = await question.findGenerationContext({
-          picks: payload.picks.map((pick) => ({
-            glossId: resolved.get(pick.gloss_id)?.id ?? pick.gloss_id,
-            senseId: pick.sense_id,
-            variantId: pick.variant_id,
-          })),
+          picks: asked.map(({ glossId, senseId, variantId }) => ({ glossId, senseId, variantId })),
           sourceLanguage: enrolled.source_language,
         });
+        // Each row's pick. The rows come in the picks' order, a pick whose
+        // rendering is gone having none, and name the rendering asked for.
+        let next = 0;
+        const pickOf = (row: GenerationContext) => {
+          const at = asked.findIndex((a, i) => i >= next && a.senseId === row.senseId && a.variantId === row.variantId);
+          if (at < 0) throw new Error(`no pick asked for the rendering ${row.senseId}/${row.variantId}`);
+          next = at + 1;
+          return asked[at].pick;
+        };
         // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
         const recent = await question.findRecentSentences({
           enrollmentId: state.enrollmentId,
@@ -609,7 +617,7 @@ export function createSessionService({
         });
         // Phase 31 (spec D18): the other headwords with each card's key.
         const siblings = await dict.findSiblings({ glossIds: context.map((row) => row.glossId) });
-        return { state, enrolled, context, recent, siblings };
+        return { state, enrolled, context, picked: context.map(pickOf), recent, siblings };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -619,19 +627,27 @@ export function createSessionService({
         throw new InvalidDistractors(sessionId, 'none of the picked senses is in the dictionary any more');
       }
 
-      // Phase 24 (spec D3, D4). The plan decides each position's type and the
-      // order of the picks, before the model is asked anything.
+      // Phase 35 (spec D6). The plan chooses each pick's card from its dimension,
+      // rung, level and R, and the order of the picks, before the model is asked
+      // anything.
       const target = read.enrolled.target_language as LanguageCode;
-      const plan = planSession(
-        read.context.map((row) => ({
-          form: row.form,
-          translation: row.translation,
-          tiles: tileEligible(row.form),
-          speakable: speakable(row.form),
-          // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
-          clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
-        })),
-        { listening: payload.listening, speaking: payload.speaking, ordinal: payload.ordinal },
+      const plan = planCards(
+        read.context.map((row, index) => {
+          const { dimension, rung, level, r } = read.picked[index];
+          return {
+            form: row.form,
+            translation: row.translation,
+            tiles: tileEligible(row.form),
+            speakable: speakable(row.form),
+            // Phase 27 (spec D7): a cloze choice needs the form, or its lemma, once in the saved example.
+            clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
+            dimension,
+            rung,
+            level,
+            r,
+          };
+        }),
+        { listening: payload.listening, speaking: payload.speaking },
       );
       const ordered = plan.order.map((index) => read.context[index]);
       const tasks = tasksFor(plan);

@@ -350,21 +350,6 @@ describe('phase 24: boards', () => {
   });
 });
 
-describe('countListSessions', () => {
-  it('counts every list session the enrollment has had, whatever its status', async () => {
-    const E = enrollmentOf('u_1');
-    await withTx(t.db, async (tx) => {
-      const repo = createSessionRepo(tx);
-      expect(await repo.countListSessions(E)).toBe(0);
-      const failed = await repo.insertPreparingSession('u_1', E);
-      await repo.transition(failed, ['preparing'], 'failed');
-      const skipped = await repo.insertPreparingSession('u_1', E);
-      await repo.transition(skipped, ['preparing'], 'skipped');
-      expect(await repo.countListSessions(E)).toBe(2);
-    });
-  });
-});
-
 // Phase 35 (spec D5, D10). What the picker reads about today: the glosses asked
 // in sessions counting for it (an open session counts as today), and how many
 // glosses were first answered, while saved, on it.
