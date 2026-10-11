@@ -119,8 +119,10 @@ gh issue list --label bots --state all
   earlier one, the six reports, and the Claude spend. What each number is for:
   - (a) above 1: weak words get more than their share of the cards;
   - (b) high: a word's weakest dimension gets the cards;
-  - (c) the 2nd / 3rd / 4th+ gaps rising: intervals grow;
-  - (d) low: the rung fits the level and recall;
+  - (c) the 2nd / 3rd / 4th+ gaps rising: intervals grow (a day's first review only: a
+    same-day return is learning, phase 37);
+  - (d) low: the rung fits memory, recall for a same-day return or once recall is likely
+    (phase 37);
   - (e) steady or rising: the bot remembers more.
 
   The spec's *Risks* section names what to change when they do not (`R_TARGET`,
