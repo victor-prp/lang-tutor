@@ -55,7 +55,7 @@ below refer to it.
 
 ---
 
-### Task 1: The learner's day, `practice_day`, the migration, and ADR 0012
+### Task 1: The learner's day, `practice_day`, the migration, and ADR 0013
 
 Spec: D10, D11 (columns only), §5 Data, D23.
 
@@ -68,7 +68,7 @@ Spec: D10, D11 (columns only), §5 Data, D23.
   (set `practice_day`), `apps/server/src/repo/progress.ts` (`findSessionEvidence` reads
   `s.practice_day`), `apps/server/src/services/sessions.ts` (set the day where a session ends:
   `completeSession`, and the skip).
-- Create: `docs/adr/adr-0012-learner-day.md`, `scripts/check-adr-0012-learner-day.sh`.
+- Create: `docs/adr/adr-0013-learner-day.md`, `scripts/check-adr-0013-learner-day.sh`.
 - Test: `apps/server/tests/integration/services/learnerDay.test.ts`.
 
 **Interfaces:**
@@ -90,7 +90,7 @@ Spec: D10, D11 (columns only), §5 Data, D23.
   `(kind = 'bot') = (bot_day IS NOT NULL)`. Run `npm run db:migrate`.
 - [ ] Implement `learnerDay`. In the same transaction that ends a session, call it and write
   `practice_day`. Change `findSessionEvidence` to select `s.practice_day::text AS day`.
-- [ ] Write ADR 0012 with the `create-adr` skill: R1, R2 and R3 as in D23. Write the check script
+- [ ] Write ADR 0013 with the `create-adr` skill: R1, R2 and R3 as in D23. Write the check script
   in the style of `check-adr-0011-*.sh`. For each rule, plant a violation in a scratch file, see
   the script report it, then remove the plant.
 - [ ] Run `npm test -w apps/server`, the integration tests for progress and sessions, and
@@ -298,7 +298,7 @@ Spec: D11, D12.
   - every call logs `bot_route`;
   - `db:bots:create` creates `.invalid` bot identities and is idempotent.
 - [ ] Implement, using a constant-time compare (`crypto.timingSafeEqual` on equal-length
-  buffers). Run the integration tests, `npm run lint:arch` (ADR 0012 R2 and R3 and ADR 0009 must
+  buffers). Run the integration tests, `npm run lint:arch` (ADR 0013 R2 and R3 and ADR 0009 must
   pass), and the openapi test. Commit.
 
 ### Task 8: The bots workspace: memory, roster, answering
