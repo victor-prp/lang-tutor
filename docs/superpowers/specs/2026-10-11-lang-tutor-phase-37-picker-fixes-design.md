@@ -147,10 +147,11 @@ Two things are unchanged:
 | `EXPAND` | nothing due, and a live dimension untested | the first untested in ORDER |
 | `NOT_DUE` | everything tested, nothing due | the weakest |
 | `DONE` | answered today, no return owed (D1) | as the classes above would choose |
-| `SPEAK` | the speaking pick when it moves a gloss to SK (D4, tiers 3 and 4); tiers 1 and 2 keep their class | SK |
+| `SPEAK` | the speaking pick when it moves a gloss to SK (D4, tiers 3–5); tiers 1 and 2 keep their class | SK |
 
 A return whose dimension is not live this session, because the device changed, waits for a later
-session.
+session. Until then it counts as `DONE`, so every saved word is always a candidate and a session
+is never empty while a word is saved.
 
 ```
 N        = min(10, distinct keys)
@@ -167,7 +168,7 @@ reserve  = min(|NEW|, newLeft, clamp(room, NEW_FLOOR, NEW_PER_SESSION))
 6. more NEW, up to newLeft
 7. NOT_DUE, least known first
 8. what pass 5's dimension cap and the hard cap held back
-9. DONE, least known first
+9. DONE, the least practised today first
 10. only while the session is still empty: NEW past the daily limit
 ```
 
@@ -187,6 +188,10 @@ What changed, and why:
 - **`DONE` comes after everything else.** A word answered right today is asked again only when no
   other word can be. On a heavy day, that means extra practice of the day's words, often in a
   skill they have not been tested in.
+  - `dayState` lists the done words in the order they come back: fewest answers today first, then
+    the longest since the last.
+  - Late in a heavy day every done word has R = 1, so "least known first" would fall back to save
+    order and cycle the same few words.
 - **Ruling 15's last resort** (new words past the daily limit) now only fills a session that would
   otherwise be empty.
 
@@ -196,7 +201,10 @@ When speaking is live and N ≥ 2, one pick tests SK if any gloss qualifies. It 
 1. a return in SK, earliest first;
 2. a `DUE` gloss whose weakest dimension is SK, least known first;
 3. a gloss with memory that is not due and has no SK memory, least known first;
-4. a `DUE` gloss with no SK memory, best known first, so the most urgent reviews keep their
+4. a gloss done today with no SK memory, in `DONE`'s order. Speaking is practice it has not had,
+   not a repeat. This tier is what gives a new learner's first day, and a heavy day's late
+   sessions, their speaking cards.
+5. a `DUE` gloss with no SK memory, best known first, so the most urgent reviews keep their
    place.
 
 Its card follows phase 35 D6: read aloud while SK is below level 2, else say the translation. The
@@ -259,14 +267,23 @@ The returns are asked after every other card in the session. Each group keeps ph
 The first return also avoids the type of the card just before it. So a return is at least the
 rest of the session away from the previous answer (D1).
 
+A return is never held to `MAX_PER_TYPE`. Written receptive has one recall type, typed meaning, so
+a session owing five or more WR returns would otherwise ask the rest as multiple choice. A right
+multiple choice settles the return, and the word would never be recalled that day. Returns still
+count toward the limit for the session's other cards.
+
 `PlanPick` gains `step`. The job payload's pick gains `step`, which defaults to `false` for a job
 enqueued before the deploy.
 
 ## D7. Reading today
 
-- `findAnswersOn(enrollmentId, day)` replaces `findGlossesAnsweredOn`. It returns every answer in
-  a session counting for `day`, or still open, in answer order. Each is decoded as
-  `findSessionEvidence` decodes a session's answers.
+- `findAnswersOn(enrollmentId, day)` replaces `findGlossesAnsweredOn`.
+  - It returns every answer about a saved gloss, given while the gloss was saved, in a session
+    counting for `day` or still open.
+  - The answers come in answer order: sessions by creation, then positions within each.
+  - Each is decoded as `findSessionEvidence` decodes a session's answers.
+  - An answer from before the save, such as one in the first-day seed session, writes no memory.
+    So it opens no return and does not make a word done.
 - `findIntroducedOn(enrollmentId, day)` replaces `countNewOn`. It applies the same rule but
   returns the gloss ids instead of their count.
 - `createNextSession` reads both, calls `dayState`, and passes the returns and the done set to
@@ -312,8 +329,10 @@ meaning.
 - **The day tests** (`domain/day.test.ts`). A day runner wires `dayState`, `chooseWords`,
   `planCards`, `applySession` and `evaluateSession`. A fixed learner answers: every fifth card is
   wrong, and a read aloud is understood.
-  - It runs twice. First on lane 0's list at the start of 2026-10-11 for that day's nine
-    sessions, then on the same list for twenty.
+  - It runs three times:
+    - on lane 0's list on 2026-10-11, for that day's nine sessions;
+    - on the same list, for twenty sessions;
+    - on a new learner's thirty saved words, none met, for six sessions.
   - The list is an anonymised fixture, `domain/day.fixture.ts`. Ids and keys are replaced; keys
     that were equal stay equal. Memory and levels are rebuilt by replaying every earlier session
     through phase 35's rules.
@@ -322,9 +341,11 @@ meaning.
     2. Every word met before the last session has a rung-2 pick in a later session.
     3. Every miss before the last session is followed by a later pick of that word,
        unless the word has made its `RETURNS_PER_DAY` returns.
-    4. Every session without a `DONE` pick has an SK pick.
-    5. In a session with a `DONE` pick, the other picks are exactly what `chooseWords` picks with
-       the done words removed.
+    4. A session has a speaking card whenever some word met is not owed a return. Before that
+       there is nothing to say: the first session meets the words, and a new learner's second
+       owes each of them its return.
+    5. In a session with a `DONE` pick, every word `chooseWords` would pick with the done words
+       removed was picked.
 
 **Integration.**
 - the two repo queries, replacing phase 35's two tests;
@@ -342,6 +363,28 @@ meaning.
   cards still come out under D2.
 - `e2e/tests/support/memory.ts` documents the new rung bands.
 
+## As built
+
+Rulings made while building that changed or pinned down the design above. The text above is
+corrected where a ruling contradicted it.
+
+- **Ruling 1.** When passes 1–9 leave a session empty, pass 10 fills it with new words past the
+  daily limit, up to N. This is ruling 15's fill, now for an empty session only. It arises only
+  when every saved word is unpractised and today's limit is spent.
+- **Ruling 2.** The day tests' outcome 3 exempts a word that has made its `RETURNS_PER_DAY`
+  returns, since D1 caps them. The fixed learner misses every fifth card, and the last card of a
+  ten-card session is always one of those, so some returned words are missed four times running.
+- **Ruling 3.** `findAnswersOn` orders by session creation, then position, rather than by answer
+  time. Sessions never overlap, and a position is the order its answer was given.
+- **Final review**, fixed with a test each. The review's other minor findings were deferred and
+  are listed in the PR.
+  - Returns past `MAX_PER_TYPE` (D6).
+  - The speaking pick's done-word tier (D4).
+  - `DONE`'s order (D3).
+  - Waiting returns as `DONE` (D3).
+  - Answers given before the save (D7).
+  - The day tests' third run (D9).
+
 ## Left for Victor
 
 Nothing beyond merging and releasing. Phase 35's own rollout steps are unchanged.
@@ -350,8 +393,9 @@ Nothing beyond merging and releasing. Phase 35's own rollout steps are unchanged
 
 - **More recall means more misses.** In the simulation the share right falls to 0.85–0.88.
   Returns absorb the misses. The bots' share right will show whether `RUNG_R` needs to rise.
-- **Same-day R is 1**, so a return's expected success reads as 1. Returns are ordered last and
-  never count toward `HARD_CAP`, so the overestimate decides nothing else.
+- **Same-day R is 1**, so a return's expected success reads as 1. Returns are ordered last and go
+  through `HARD_CAP` like passes 4–7, but an expected success of 1 never makes one hard, so the
+  overestimate decides nothing else.
 - **Light learners get one new word a session while a backlog lasts.** That is the intent of D5.
   If it feels slow, `NEW_FLOOR` is the knob.
 - **Phase 34 is in flight** and changes question generation, not the picker. If it lands first,

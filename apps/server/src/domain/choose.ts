@@ -38,7 +38,8 @@ export type ChoiceInput = {
   today: string;
   /** Phase 37 (spec D1). The returns today owes, earliest opened first. */
   steps: readonly Step[];
-  /** Phase 37 (spec D1). Glosses answered today that owe no return. */
+  /** Phase 37 (spec D1). Glosses answered today that owe no return, in the order
+   *  a session asks them: the least practised today first. */
   done: ReadonlySet<string>;
   /** Glosses first introduced today. */
   newToday: number;
@@ -124,12 +125,13 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
     return { glossId, dimension, rung: cls === 'STEP' ? 2 : rungFor(r), level: levelOf(glossId, dimension), r, cls };
   };
 
-  // D1: a return whose dimension is not live this session waits for one where it is.
+  // D1: a return whose dimension is not live this session waits for one where it
+  // is. Meanwhile it is a word answered today, asked only when nothing else is left,
+  // so a session is never empty while a word is saved.
   const steps = new Map(input.steps.filter((step) => live.includes(step.dimension)).map((step) => [step.glossId, step]));
   const waiting = new Set(input.steps.filter((step) => !live.includes(step.dimension)).map((step) => step.glossId));
 
   const candidates = input.saved
-    .filter((gloss) => !waiting.has(gloss.glossId))
     .map((gloss): Candidate => {
       const rows = memory.get(gloss.glossId);
       const owed = steps.get(gloss.glossId);
@@ -152,7 +154,7 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
         // always live: `weak` is set.
         else [cls, dimension] = ['NOT_DUE', weak!];
       }
-      if (!owed && input.done.has(gloss.glossId)) cls = 'DONE';
+      if (!owed && (input.done.has(gloss.glossId) || waiting.has(gloss.glossId))) cls = 'DONE';
       return {
         pick: pickOf(gloss.glossId, dimension, cls, rows),
         key: normaliseGloss(gloss.key),
@@ -170,7 +172,9 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   const fresh = shuffle(of('NEW'), input.rng).sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0));
   const expand = of('EXPAND').sort(byNeed);
   const notDue = of('NOT_DUE').sort(byNeed);
-  const done = of('DONE').sort(byNeed);
+  // D3: in the order today gives them, the least practised first; a waiting return last.
+  const doneOrder = new Map([...input.done].map((glossId, index) => [glossId, index]));
+  const done = of('DONE').sort((a, b) => (doneOrder.get(a.pick.glossId) ?? Infinity) - (doneOrder.get(b.pick.glossId) ?? Infinity));
 
   // D3. The new-word reserve comes first and gives way to a backlog, down to NEW_FLOOR.
   const n = Math.min(SESSION_LENGTH, new Set(candidates.map((candidate) => candidate.key)).size);
@@ -224,13 +228,15 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   // 1. New words, up to the reserve.
   offerFresh(reserve);
   // 2. D4, the speaking pick: a return in SK, then a word due in SK, then a word not
-  //    due with no SK memory, least known first, then a due word with none, best
+  //    due with no SK memory, least known first, then a word done today with none,
+  //    whose speaking is practice it has not had, then a due word with none, best
   //    known first so the most urgent reviews keep their place.
   const silent = (candidate: Candidate) => !candidate.rows?.has(SPEAKING);
   const tiers: [Candidate[], boolean][] = [
     [returns.filter((candidate) => candidate.pick.dimension === SPEAKING), false],
     [due.filter((candidate) => candidate.pick.dimension === SPEAKING), false],
     [[...expand, ...notDue].sort(byNeed).filter(silent), true],
+    [done.filter((candidate) => candidate.rows !== undefined && silent(candidate)), true],
     [due.filter(silent).sort((a, b) => byNeed(b, a)), true],
   ];
   for (let spoken = 0; spoken < speak && picks.length < n; spoken++) {

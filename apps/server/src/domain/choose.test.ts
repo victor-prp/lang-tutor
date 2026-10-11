@@ -281,11 +281,12 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
       ]);
     });
 
-    it('wait while their dimension is not live: neither picked nor done', () => {
-      const picks = chooseWords(
-        input([{ id: 'heard', memory: { [WR]: 1, [SR]: 1 } }, known('k')], { steps: [step('heard', SR)], listening: false }),
-      );
-      expect(ids(picks)).toEqual(['k']);
+    it('wait while their dimension is not live, asked only as a word done today when nothing else is left', () => {
+      const heard: Word = { id: 'heard', memory: { [WR]: 1, [SR]: 1 } };
+      const listeningOff = { steps: [step('heard', SR)], listening: false };
+      expect(ids(chooseWords(input([heard, ...range(10, (i) => known(`k${i}`))], listeningOff)))).not.toContain('heard');
+      // A one-word list: a session is never empty while a word is saved.
+      expect(chooseWords(input([heard], listeningOff))).toEqual([{ glossId: 'heard', dimension: WP, rung: 1, level: 1, r: null, cls: 'DONE' }]);
     });
 
     it('take their key: a sibling with the same key is not asked too', () => {
@@ -316,6 +317,11 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
       const hard = range(HARD_CAP + 1, (i) => known(`h${i}`, { [WR]: 0.19 }));
       const picks = chooseWords(input([...hard, known('done')], { done: new Set(['done']) }));
       expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([...hard.map((word) => [word.id, 'DUE']), ['done', 'DONE']]);
+    });
+
+    it('comes in the order today gives it: the least practised first', () => {
+      const words = [known('a'), known('b'), known('c')];
+      expect(ids(chooseWords(input(words, { done: new Set(['c', 'a', 'b']) })))).toEqual(['c', 'a', 'b']);
     });
 
     it('fills a session before a new word past the daily cap', () => {
@@ -371,6 +377,16 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
       );
       expect(picks[0]).toEqual({ glossId: 'met-a', dimension: SK, rung: 1, level: 1, r: null, cls: 'SPEAK' });
       expect(count(picks, (pick) => pick.dimension === SK)).toBe(1);
+    });
+
+    it('then a word done today with no SK memory, moved to SK, before a due word is', () => {
+      const picks = chooseWords(
+        input([{ id: 'due', memory: { [WR]: 0.5 } }, { id: 'done', memory: { [WR]: 1 } }], { ...speaking, done: new Set(['done']) }),
+      );
+      expect(picks.map((pick) => [pick.glossId, pick.cls, pick.dimension])).toEqual([
+        ['done', 'SPEAK', SK],
+        ['due', 'DUE', WR],
+      ]);
     });
 
     it('then, with every word due, the best known one with no SK memory', () => {

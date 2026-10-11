@@ -77,6 +77,11 @@ describe('dayState (phase 37 D1)', () => {
     }
   });
 
+  it('lists the done words fewest answers today first, then the longest since the last', () => {
+    const state = dayState([mc('a', 's1', true), mc('b', 's1', true), mc('a', 's2', true), mc('c', 's2', true)], none);
+    expect([...state.done]).toEqual(['b', 'c', 'a']);
+  });
+
   it('orders the returns by when theirs opened', () => {
     const state = dayState([mc('a', 's1', false), mc('b', 's1', false), typed('a', 's2', 'wrong')], none);
     expect(state.steps.map((step) => [step.glossId, step.opened])).toEqual([

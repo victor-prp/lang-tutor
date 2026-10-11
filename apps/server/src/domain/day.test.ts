@@ -17,8 +17,9 @@ import { dayState, type DayAnswer } from './today';
  *   3. a word answered wrong returns later that day;
  *   4. speaking cards come up regularly when the device records;
  *   5. no word answered right today returns as filler.
- * The list is lane 0's at the start of 2026-10-11, when the learner did nine
- * sessions and met two new words; then the same list over twenty sessions.
+ * The lists: lane 0's on 2026-10-11, when the learner did nine sessions and met
+ * two new words, then the same list over twenty sessions; and a new learner's
+ * thirty saved words, none met yet.
  */
 
 const DIMENSIONS: Dimension[] = ['written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling'];
@@ -29,6 +30,24 @@ const RECALL: ReadonlySet<QuestionType> = new Set(Object.values(RUNGS).flatMap((
 
 type Asked = { session: number; glossId: string; cls: ChosenPick['cls']; rung: 1 | 2; type: QuestionType; right: boolean };
 type Session = { input: ChoiceInput; picks: ChosenPick[] };
+type DayList = {
+  today: string;
+  saved: ChoiceInput['saved'];
+  memory: MemoryRow[];
+  progress: ProgressRow[];
+};
+
+/** A new learner: thirty words saved this morning, none met. */
+const FRESH: DayList = {
+  today: '2026-10-12',
+  saved: Array.from({ length: 30 }, (_, i) => ({
+    glossId: `n${String(i).padStart(2, '0')}`,
+    key: `fresh-${i}`,
+    savedAt: `2026-10-12T08:${String(i).padStart(2, '0')}:00.000000Z`,
+  })),
+  memory: [],
+  progress: [],
+};
 
 /** The fixed learner: every fifth card answered is wrong, and a read aloud is
  *  always understood (it writes no memory either way). */
@@ -41,11 +60,11 @@ function answerOf(glossId: string, type: QuestionType, right: boolean): Answered
 
 const keyOf = (glossId: string, dimension: Dimension) => `${glossId}|${dimension}`;
 
-/** One day of `count` sessions over the fixture, each ended as recordProgress ends one. */
-function runDay(count: number): { log: Asked[]; sessions: Session[]; introduced: Set<string> } {
-  const memory = new Map<string, MemoryRow>(LANE0_DAY.memory.map((row) => [keyOf(row.glossId, row.dimension), row]));
-  const progress = new Map<string, ProgressRow>(LANE0_DAY.progress.map((row) => [keyOf(row.glossId, row.dimension), row]));
-  const met = new Set(LANE0_DAY.memory.map((row) => row.glossId));
+/** One day of `count` sessions over `list`, each ended as recordProgress ends one. */
+function runDay(list: DayList, count: number): { log: Asked[]; sessions: Session[]; introduced: Set<string> } {
+  const memory = new Map<string, MemoryRow>(list.memory.map((row) => [keyOf(row.glossId, row.dimension), row]));
+  const progress = new Map<string, ProgressRow>(list.progress.map((row) => [keyOf(row.glossId, row.dimension), row]));
+  const met = new Set(list.memory.map((row) => row.glossId));
   const today: DayAnswer[] = [];
   const introduced = new Set<string>();
   const log: Asked[] = [];
@@ -55,10 +74,10 @@ function runDay(count: number): { log: Asked[]; sessions: Session[]; introduced:
   for (let session = 0; session < count; session++) {
     const { steps, done } = dayState(today, introduced);
     const input: ChoiceInput = {
-      saved: LANE0_DAY.saved,
+      saved: list.saved,
       memory: [...memory.values()],
       levels: [...progress.values()].map(({ glossId, dimension, level }) => ({ glossId, dimension, level })),
-      today: LANE0_DAY.today,
+      today: list.today,
       steps,
       done,
       newToday: introduced.size,
@@ -94,13 +113,13 @@ function runDay(count: number): { log: Asked[]; sessions: Session[]; introduced:
 
     const glossIds = [...new Set(given.map((answer) => answer.glossId))];
     const before = [...memory.values()].filter((row) => glossIds.includes(row.glossId));
-    for (const row of applySession(before, given, LANE0_DAY.today)) memory.set(keyOf(row.glossId, row.dimension), row);
+    for (const row of applySession(before, given, list.today)) memory.set(keyOf(row.glossId, row.dimension), row);
     const rows = glossIds.flatMap((glossId) =>
       DIMENSIONS.map(
         (dimension) => progress.get(keyOf(glossId, dimension)) ?? { glossId, dimension, level: 1, lastStepOn: null, lastWrongOn: null },
       ),
     );
-    for (const row of evaluateSession(rows, given, LANE0_DAY.today).changed) progress.set(keyOf(row.glossId, row.dimension), row);
+    for (const row of evaluateSession(rows, given, list.today).changed) progress.set(keyOf(row.glossId, row.dimension), row);
     for (const glossId of glossIds) {
       if (!met.has(glossId)) {
         met.add(glossId);
@@ -112,8 +131,15 @@ function runDay(count: number): { log: Asked[]; sessions: Session[]; introduced:
   return { log, sessions, introduced };
 }
 
-describe.each([LANE0_DAY.sessions, 20])('a day of %i sessions on lane 0 list (phase 37)', (count) => {
-  const { log, sessions, introduced } = runDay(count);
+/** A list, its sessions, and what the day should meet in new words. */
+const DAYS: [string, DayList, number, (met: number) => void][] = [
+  ['lane 0, the nine sessions of 2026-10-11', LANE0_DAY, LANE0_DAY.sessions, (met) => expect(met).toBeGreaterThan(2)],
+  ['lane 0 over twenty sessions', LANE0_DAY, 20, (met) => expect(met).toBe(DAY_NEW_CAP)],
+  ['a new learner, thirty words saved and none met, over six sessions', FRESH, 6, (met) => expect(met).toBe(DAY_NEW_CAP)],
+];
+
+describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet) => {
+  const { log, sessions, introduced } = runDay(list, count);
   const last = count - 1;
 
   it('1. brings new words in every session while the daily limit allows', () => {
@@ -137,7 +163,8 @@ describe.each([LANE0_DAY.sessions, 20])('a day of %i sessions on lane 0 list (ph
     expect(missed.length).toBeGreaterThan(0);
     for (const card of missed) {
       // D1: a word comes back at most RETURNS_PER_DAY times a day. Returns are asked
-      // last and this learner misses every tenth card, so some words use them all.
+      // last, and the last card of a ten-card session is always one this learner
+      // misses, so some words use them all.
       const returns = log.filter((earlier) => earlier.glossId === card.glossId && earlier.cls === 'STEP' && earlier.session <= card.session);
       if (returns.length >= RETURNS_PER_DAY) continue;
       const back = log.some((later) => later.glossId === card.glossId && later.session > card.session);
@@ -145,9 +172,12 @@ describe.each([LANE0_DAY.sessions, 20])('a day of %i sessions on lane 0 list (ph
     }
   });
 
-  it('4. gives every session a speaking card while words not done today remain', () => {
-    sessions.forEach(({ picks }, session) => {
-      if (picks.some((pick) => pick.cls === 'DONE')) return;
+  it('4. gives a session a speaking card whenever a word met is not owed a return', () => {
+    // Before then there is nothing to say: the first session meets the words, and a
+    // new learner's second owes each of them its return.
+    sessions.forEach(({ input }, session) => {
+      const owed = new Set(input.steps.map((step) => step.glossId));
+      if (input.done.size === 0 && input.memory.every((row) => owed.has(row.glossId))) return;
       const spoke = log.some((card) => card.session === session && SPEAKING_CARDS.has(card.type));
       expect({ session, spoke }).toEqual({ session, spoke: true });
     });
@@ -156,20 +186,15 @@ describe.each([LANE0_DAY.sessions, 20])('a day of %i sessions on lane 0 list (ph
   it('5. asks a word done today only when no other word can be asked', () => {
     for (const { input, picks } of sessions) {
       if (!picks.some((pick) => pick.cls === 'DONE')) continue;
+      // Every word the session could ask besides the done ones was asked.
       const others = chooseWords({ ...input, saved: input.saved.filter((gloss) => !input.done.has(gloss.glossId)), done: new Set() });
-      const asked = picks.filter((pick) => pick.cls !== 'DONE').map((pick) => pick.glossId);
-      expect(asked.sort()).toEqual(others.map((pick) => pick.glossId).sort());
+      const asked = new Set(picks.map((pick) => pick.glossId));
+      expect(others.map((pick) => pick.glossId).filter((glossId) => !asked.has(glossId))).toEqual([]);
     }
   });
 
-  if (count === LANE0_DAY.sessions) {
-    it('meets more new words than the two that day did, and recalls some', () => {
-      expect(introduced.size).toBeGreaterThan(2);
-      expect(log.some((card) => card.rung === 2 && RECALL.has(card.type))).toBe(true);
-    });
-  } else {
-    it('meets exactly the daily limit of new words', () => {
-      expect(introduced.size).toBe(DAY_NEW_CAP);
-    });
-  }
+  it('meets new words up to the daily limit, and recalls', () => {
+    checkMet(introduced.size);
+    expect(log.some((card) => card.rung === 2 && RECALL.has(card.type))).toBe(true);
+  });
 });
