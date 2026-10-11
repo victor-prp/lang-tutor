@@ -57,19 +57,40 @@ on 89b4bb33 and refused it on 703a58ca. 29 of 47 typed cards had none.
 
 A rendering (one row of `dict_var_translations`: a form, a sense, a learner language) gets
 `accepted_answers`: every target-language word that translates that Hebrew rendering in that
-sense, inflected to agree with it. Every typed, spoken and typed-cloze card whose prompt is
-that rendering reads the same list.
+sense, inflected to agree with it. Every typed translation and say-the-translation card whose
+prompt is that rendering reads the same list.
 
+- **Not the typed cloze.** A typed cloze is judged against the form its sentence needs, and its
+  lemma is wrong (phase 27 D4, `verdictFor` in `quiz.ts`). A list inflected to the rendering
+  would let `answer` pass in a gap that needs `answered`. The typed cloze keeps the sentence
+  task's own alternatives, and F's `improve` reaches D9's second try through them.
 - **Written by its own call**, a new `accept` task, not as a side job of distractor generation.
   Its prompt asks for every right translation of the rendering in this sense, with placeholders
   written out (`lose one's temper` → `lose my temper`, `lose your temper`, … one entry each), and,
   for a verb form whose subject the rendering implies, the form with its subject pronoun too
   (יש לי → `ho`, `io ho`). That last line is all D needs.
-- **When:** a job enqueued in the transaction that saves a gloss, one per member rendering in
-  the learner language (ADR 0007). A backfill command enqueues it for every saved gloss (D13).
-- **Grow-only, at most ten.** A later answer from the session's `typed` task is merged in, never
-  replacing. The cap rises from five to ten, here and on `questions.alternatives`.
-- **Until the job has run**, a card uses the session's own `typed` alternatives, as today.
+- **Only the `accept` job writes the column.** The session's `typed` alternatives are generated
+  afresh per session, and phase 23's Risks already say a wrong one lets a wrong word pass. A
+  model error there costs one card; written into the dictionary it would be permanent, shared by
+  every learner of the pair, and would forbid a legitimate wrong option everywhere through D3.
+  So a card's accepted answers are the stored list plus that session's own `typed`
+  alternatives, stored on the question (D12) and never written back.
+- **When: lazily, when a session picks the rendering.** A rendering is written by more paths than
+  the save: the render-lemma job the save enqueues (`vocabulary.ts`), a later lookup of another
+  form, and the stale-form repair. Instead of a hook on each, the prepare-session job enqueues
+  the `accept` job for every rendering it picks whose `accepted_at` is null, with a pg-boss
+  singleton key per rendering so a burst never pays twice. That card falls back to the session's
+  own `typed` alternatives, as today; the next session has the list. A save-all of twenty glosses
+  therefore enqueues nothing at save time; the calls spread over the sessions that use them.
+- **`accepted_at` is what "done" means**, not a non-empty list: a rendering whose job found
+  nothing beyond the form is stamped and never paid for again. The backfill keys on it (D13).
+- **Kept across the repair and the export.** The stale-form repair (`repo/dictionary.ts`, the
+  delete and re-insert of a variant's renderings) carries `accepted_answers`, `answer_form` and
+  `accepted_at` over for every (variant, sense) whose `translation` text is unchanged, and leaves
+  them null for a new or rewritten rendering, which the next session re-enqueues. The dictionary
+  export and restore (`db/dictExport.ts`) carry the three columns, so the hosting runbook's
+  restore does not empty them.
+- **At most ten.** The cap rises from five to ten, here and on `questions.alternatives`.
 
 ### D2. The card's answer agrees with its prompt (G)
 
@@ -105,6 +126,24 @@ A choice item asks the model for six wrong options instead of three and keeps th
 that pass D3 and D5. The batch fails, and pg-boss retries it, only when fewer than three pass.
 Without spares, a stricter filter would only mean more failed batches.
 
+### D4a. The batch's response schema is measured before anything is built on it
+
+The batch travels as a Gemini `responseSchema`, and the repo has measured (comment above
+`entries` in `packages/core/src/api/schemas.ts`) that array caps multiply the schema's states:
+past a limit Gemini refuses the schema with a 400, every call fails, and MockServer, which never
+validates a schema, cannot show it. D4 doubles the wrong options and D6 and D8 add a sentence and
+spans per item, on a ten-item array. That failure would be every list session after the deploy.
+
+So the build's first step, before the migration, is to send the new batch schema to the live API
+for a full-size batch, as phase 31 did. If it is refused:
+
+1. the context sentence (D6) and the sentence spans (D8) move out of the batch into their own
+   call, which also takes the work off the batch's single answer;
+2. if the batch is still refused, the spares (D4) come down to five, then four, measured each
+   time.
+
+The outcome and the numbers go in a comment beside the schema, in the style of the existing one.
+
 ### D5. A checker call after generation (A, C, E, F)
 
 17 of A's 27 cards are synonyms the dictionary does not hold (*blow up* → להרוס). Only a model
@@ -113,6 +152,9 @@ the generator checking itself — asks per item:
 
 - **choice items:** for each wrong option, "could this be a correct translation of the word in
   any common use?" A yes drops the option, and a spare takes its place (D4);
+- **gap items (cloze choice):** for each wrong option, "does the sentence still read correctly
+  with this word in the gap?" A translation question would be the wrong test there: the
+  sentence, not the word's meaning, is what makes an option right;
 - **context sentences (D6):** "what does the marked word mean here?" (target-language sentence)
   or "which words in the target language fit the marked word?" (Hebrew sentence). An answer
   outside the sense's meanings, or outside its accepted answers, drops the sentence;
@@ -132,19 +174,30 @@ An unreadable checker answer fails the batch like an unreadable generation does.
 - **Generated per question**, in the session's batch, not copied from the saved example, so it
   can be checked (D5) and varies between sessions. Victor's call: a fixed sentence can be
   memorised and cannot be fixed.
-- **Rules:** the marked span is in the sentence. A Hebrew sentence never contains the
-  target-language answer. The sentence differs from the last one shown for this gloss on this
-  card type (phase 27 D8's rule).
-- **Fallback:** a sentence that fails a rule or D5 is replaced by the matching half of the saved
-  example, unmarked. A card never goes without one.
+- **Generated in pairs.** The model writes both halves: the sentence the card shows and its
+  translation, which is never shown and goes to the judge (D7).
+- **Rules:** a Hebrew sentence never contains the target-language answer. The sentence differs
+  from the last one shown for this gloss on this card type (phase 27 D8's rule). Breaking either
+  drops the sentence.
+- **The mark is best effort.** The model returns the marked word as text, and the service finds
+  it in the sentence. Hebrew verbs inflect and take prefixes, so a word it cannot find is common,
+  not an error: the sentence is kept and shown unmarked. It still pins the sense, which is what
+  C needs.
+- **Fallback:** a sentence dropped by a rule or by D5 is replaced by the matching half of the
+  saved example, unmarked. A saved sense without an example (both halves are nullable) leaves the
+  card as it is today, with the part of speech and no sentence, and the batch logs it.
 - **Not on:** letter tiles (the letters pin the word), listen choice (a written sentence would
   show the word it is testing; D10 covers it), matching (D10), dictation and read aloud (the
   word is the whole point), and the sentence types (D8).
 
 ### D7. The judge sees what the learner saw
 
-`findJudgeContext` today gives the meaning judge the saved example, which the learner never
-saw. It gets the card's own context sentence instead. Its rules do not change.
+`findJudgeContext` today gives the meaning judge the saved example and its translation
+(`judge.ts`, `example` and `example_translation`), which the learner never saw. It gets the
+card's own sentence pair instead (D6): the target-language sentence shown, and the hidden Hebrew
+translation that pins the sense, so the judge loses nothing it has today. When the card fell back
+to the saved example, it gets the saved example, as today. Its rules do not change. The eval adds
+meaning-judge cases built on a generated pair.
 
 ### D8. A sentence card names its word (F)
 
@@ -165,14 +218,50 @@ or another word in a sentence (`other_word`) — the card stays open:
   **"יש מילה נוספת ששמרת — נסו שוב"** ("There's another word you saved — try again") on typed
   translation, say the translation, typed cloze and sentence translation, or **"יש פירוש נוסף —
   נסו שוב"** ("There's another meaning — try again") on typed meaning;
-- the input is cleared, except on sentence translation, where it holds the first sentence so the
-  learner only changes the word;
-- **הצגת התשובה** ("show the answer") shows the saved word, as today's banner does.
+- the input is cleared; on sentence translation it holds the first sentence so the learner only
+  changes the word; on say the translation the microphone is offered again, and the typed
+  fallback works as on the first answer;
+- **הצגת התשובה** ("show the answer") shows the saved word, as today's banner does, and resolves
+  the retry as given up.
 
 One retry, never more. The session score counts the first answer, which was right. Progress
 counts the retry: an `exact`, `near_miss` or `understood` retry moves the gloss's dimensions as
 that verdict would. A retry that gives up, or is wrong, leaves the answer where it is today:
 right, no progress. The first answer is never re-judged, so the judge is no more lenient.
+
+**How it fits the session's state machine.** Today recording an answer is what advances the
+session (`step` in `packages/core`: the next position is the number of answers), and the last
+answer completes the session and writes its progress in the same transaction
+(`submitAnswer` in `services/sessions.ts`). A retry after that point would land on the replay
+path, and on the last card progress would already be written. So an `alternative` answer that
+offers a retry is recorded as **pending**, and a pending answer holds the session where it is:
+
+- **Recording.** The answer row is written with its verdict and `retry_state = 'pending'`. `step`
+  does not advance past a pending answer, and the session does not complete on one: completion,
+  `completeSession` and `recordProgress` run when the last card's retry resolves.
+- **Resolving.** The client sends the retry to the same route as the first answer, with
+  `retry: true` and the same question id. It is accepted only at a pending position. It is judged
+  by the same rule or model call the first answer was, stored in `retry_text` and
+  `retry_verdict`, and `retry_state` becomes `resolved`. "Show the answer" sends `retry: true`
+  with a give-up, recorded as `gave_up`.
+- **All three routes.** Typed (`submitAnswer`), judged by a model (`answerJudged`: typed meaning,
+  sentence translation) and spoken (`answerBySpeech`: say the translation). On the spoken route a
+  clip with `retry: true` at a pending position is a retry. Without it, a clip there replays the
+  pending first answer, as a network retry of the first clip must.
+- **Replays.** A request without `retry` at a pending or resolved position replays the first
+  answer's result, pending flag included, so a network retry of the first answer re-opens the
+  second try. A request with `retry` at a resolved position replays the retry's result. Neither
+  calls a model again.
+- **Spending.** The judged and spoken routes call a model at most twice per card: once for the
+  first answer and once for its one retry. The bound per card moves from one to two, and stays
+  a bound.
+- **Leaving and skipping.** A session left on a pending card resumes on its second try: loading a
+  session returns the pending state. Skipping a session resolves a pending retry as given up
+  before `recordProgress` runs, so the skip writes progress exactly as today.
+
+For progress, an answer's evidence is its retry verdict when the retry resolved as `exact`,
+`near_miss` or `understood`, and its first verdict otherwise (`findSessionEvidence`). For the
+score, it is always the first verdict.
 
 ### D10. Part of speech on listen choice and matching (H)
 
@@ -190,13 +279,16 @@ untouched. They read fuller lists (D1), the sentence the card showed (D7), and a
 ### D12. Questions record what was shown
 
 As phase 23 stores the prompt rather than joining it, a question stores its context sentence
-and marked spans, its answer form, and its accepted answers at the time it was generated. A
-later backfill or a grown list changes future cards, never an asked one.
+(both halves) and marked spans, its answer form, and its accepted answers at the time it was
+generated: the stored list plus that session's own `typed` alternatives (D1). A later backfill
+or a changed list alters future cards, never an asked one.
 
 ### D13. Backfill
 
 `npm run dict:accept` (through the lane wrapper, like every `dict:` script) enqueues D1's job
-for every saved gloss that has no `accepted_answers` yet. Lane 0 has about 495 senses. Prod
+for every rendering, in its learner language, of a saved gloss's members whose `accepted_at` is
+null. It saves the first session after the deploy from falling back on every card; D1's lazy
+enqueue would get there anyway. Lane 0 has about 495 senses. Prod
 needs the same run after the deploy, which goes under **Left for Victor** in the PR.
 
 ## 2. Changes
@@ -207,24 +299,27 @@ Names below are a starting point. Where the build departs, "As built" will say s
 
 - `dict_var_translations`: `accepted_answers text[] not null default '{}'` (at most ten),
   `answer_form text` (null = the variant's form), `accepted_at timestamptz` (when D1's job last
-  ran; null = never).
+  ran; null = never). The stale-form repair and the dictionary export carry all three (D1).
 - `questions`:
-  - `context text`, `context_mark_start int`, `context_mark_end int` (D6);
+  - `context text`, `context_translation text` (the hidden half, D7), `context_mark_start int`,
+    `context_mark_end int` (D6);
   - `sentence_mark_start int`, `sentence_mark_end int` into `sentence_translation` (D8);
   - `answer_form text` (D2);
   - `alternatives`' check raised from five to ten.
   - The shape check names which types may carry a context.
-- `answers`: `retry_text text`, `retry_verdict text` (D9), with a check that a retry exists only
-  after an `alternative` verdict, and the same verdict list and length limit as the first
-  answer.
+- `answers`: `retry_state text` (null, `pending` or `resolved`), `retry_text text`,
+  `retry_verdict text` (D9). Checks: a retry state only on an `alternative` verdict; text and
+  verdict exactly when resolved; the same verdict list and length limit as the first answer.
 
 ### `packages/core`
 
 - Question wire schemas: `context: { text, mark: { start, end } | null } | null` on the five D6
   types; `mark` on the sentence types; `part_of_speech` on listen choice and on each matching
   word (D10).
-- An answer request may say it is the retry; the answer response says when a retry is offered
-  and which wording it uses.
+- The three answer requests (typed, judged, spoken) take `retry: true`. Their responses, and
+  the session load, say when a retry is pending and which wording it uses (D9).
+- `step`: a pending answer holds the position and blocks completion; a retry resolves it; the
+  replay rules of D9.
 - `typed.ts` / `spoken.ts`: unchanged (D11).
 
 ### Server
@@ -237,10 +332,17 @@ Names below are a starting point. Where the build departs, "As built" will say s
   - six wrong options and keep three (D4);
   - the context task (D6) and the sentence spans (D8) in `buildDistractorPrompt`.
 - `domain/check.ts`: D5's checker prompt and parser.
-- `services/sessions.ts`: reads the known-right set and the accepted answers, runs the checker,
-  applies the fallbacks, stores the new columns, and records and scores the retry (D9).
-- `services/vocabulary.ts` (save): enqueues D1's job in the save transaction (ADR 0007).
-- A worker for the `accept` job, and the `dict:accept` CLI (D13).
+- `services/sessions.ts`:
+  - `prepareSession` reads the known-right set and the accepted answers, enqueues the `accept`
+    job for picked renderings with a null `accepted_at` (D1), runs the checker, applies the
+    fallbacks and stores the new columns;
+  - `submitAnswer`, `answerJudged` and `answerBySpeech` record a pending answer and its retry,
+    and complete the session only when nothing is pending (D9); `skipSession` resolves a
+    pending retry first;
+  - `findSessionEvidence` (repo) reads the retry verdict for progress.
+- `repo/dictionary.ts`: the stale-form repair carries D1's columns over for unchanged renderings.
+- `db/dictExport.ts`: export and restore carry D1's columns.
+- A worker for the `accept` job (singleton key per rendering), and the `dict:accept` CLI (D13).
 - `repo/questions.ts`: `findJudgeContext` reads the card's context (D7).
 
 ### Mobile
@@ -270,10 +372,19 @@ Names below are a starting point. Where the build departs, "As built" will say s
   homograph, board 1d268882); D4's keep-three and fail-under-three; D5's parser and how a "yes"
   replaces an option; D6's rules and fallback; D9's scoring and progress rule; the app's
   feedback for a retry.
-- **Integration (real Postgres):** saving a gloss enqueues D1's job; the job stores
-  `accepted_answers` and `answer_form` and only grows them; the backfill enqueues only what is
-  missing; a session for the audit's cards stores context, spans and answer form; a retry is
-  recorded and moves progress; the new checks refuse bad rows.
+- **Integration (real Postgres):**
+  - D1: preparing a session enqueues the `accept` job once per rendering with a null
+    `accepted_at`, and not for a stamped one, even with an empty list; the job stores the list,
+    the answer form and the stamp; a session's `typed` alternatives never reach the dictionary;
+    the stale-form repair keeps the columns on an unchanged rendering and clears them on a
+    rewritten one; export then restore round-trips them; the backfill enqueues only null stamps.
+  - A session for the audit's cards stores context, spans and answer form.
+  - D9, on each of the three routes: a pending answer holds the position; a network retry of the
+    first answer replays it with the pending flag; the retry resolves it and moves progress; a
+    give-up does not; on the last card the session completes, and progress is written, only
+    when the retry resolves; a skip with a pending retry writes progress as today; a retry of the
+    retry replays without a model call.
+  - The new checks refuse bad rows.
 - **E2E:** a typed card shows its context line; an alternative answer gets the second try and
   the saved word then counts; a sentence card shows its marked word.
 - **Done-means 1:** one test per category A–H, named for the category and the audit card it
@@ -283,7 +394,10 @@ Names below are a starting point. Where the build departs, "As built" will say s
 
 ## Build order
 
-1. Migration and D1/D2: the `accept` task, job, save hook, backfill. A, B, D and G read from it.
+0. D4a: measure the batch's new response schema against the live API, and settle whether the
+   context sentence and spans need their own call. Everything after builds on the answer.
+1. Migration and D1/D2: the `accept` task, job, lazy enqueue, repair and export carry-over,
+   backfill. A, B, D and G read from it.
 2. D3 and D4 in `badChoice`, then D5's checker.
 3. D6 and D7 (context sentences), D8 (sentence spans), D10 (part of speech): server, wire, app.
 4. D9's second try: wire, recording, progress, app.
@@ -300,6 +414,11 @@ One PR, as every line of work here.
 - **An over-strict checker** drops too many options and sentences, and batches fail. D4's spares
   and D6's fallback absorb most of it; the eval's "no" cases guard against a checker that says
   yes to everything.
-- **Hebrew span marking** can miss the inflected word. A span that does not fall on the sentence
-  leaves it unmarked, not wrong.
-- **The backfill's cost** is one call per saved rendering, once.
+- **Gemini refusing the batch's schema** (D4a): every list session would fail with a 400 that
+  MockServer cannot reproduce. Measured first, in build step 0.
+- **Hebrew span marking** can miss the inflected word. A mark that cannot be found leaves the
+  sentence unmarked (D6), not dropped.
+- **Model spend.** The backfill is one call per saved rendering, once. After it, the `accept`
+  job runs lazily, one rendering at a time as sessions pick them, with a singleton key, so a
+  save-all of twenty glosses costs nothing at save time. The judged and spoken routes' bound
+  moves from one model call per card to two (D9).
