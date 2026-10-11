@@ -110,6 +110,14 @@ describe('parseLlmDistractors', () => {
     expect(parseLlmDistractors(JSON.stringify({ items: [{ distractors: [] }] }))).toBeNull();
   });
 
+  // Phase 38 (spec D2). A typed gap asks for ten, the schema's cap: one more must
+  // cost the surplus, never the session.
+  it('keeps the first ten alternatives of a longer list rather than refusing the answer', () => {
+    const many = Array.from({ length: 12 }, (_, index) => `word${index}`);
+    const parsed = parseLlmDistractors(JSON.stringify({ items: [{ key: 'q1', distractors: [], alternatives: many }] }));
+    expect(parsed?.items[0].alternatives).toEqual(many.slice(0, 10));
+  });
+
   // Phase 23, Review Focus 4: null is how structured output spells "none", and
   // a typed item has no wrong options to give. Neither may fail the parse; the
   // per-task validation decides what an empty list costs.

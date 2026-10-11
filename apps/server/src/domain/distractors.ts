@@ -343,9 +343,15 @@ function withEmptyLists(json: unknown): unknown {
   if (!isRecord(cleaned) || !Array.isArray(cleaned.items)) return cleaned;
   return {
     ...cleaned,
-    items: cleaned.items.map((item) =>
-      isRecord(item) && !('distractors' in item) ? { ...item, distractors: [] } : item,
-    ),
+    items: cleaned.items.map((item) => {
+      if (!isRecord(item)) return item;
+      const listed = 'distractors' in item ? item : { ...item, distractors: [] };
+      // Phase 38 (spec D2). A typed gap asks for as many alternatives as the schema
+      // takes, so a surplus is trimmed here, the likeliest kept, never a refusal.
+      return Array.isArray(listed.alternatives) && listed.alternatives.length > MAX_CARD_ALTERNATIVES
+        ? { ...listed, alternatives: listed.alternatives.slice(0, MAX_CARD_ALTERNATIVES) }
+        : listed;
+    }),
   };
 }
 
