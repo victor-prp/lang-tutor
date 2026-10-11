@@ -11,6 +11,33 @@ within a day or so. Design:
 Until steps 2–4 below are done, the `android` job prints a `::notice::` and skips, green.
 Releases keep working in the meantime.
 
+## Where go-live stands
+
+Last updated 2026-10-11.
+
+- [ ] **1. Play Console.** The account is created and the ID documents are uploaded. **Waiting
+      for Google's identity email**, which can take a few days. Steps 1.2–1.4 come after it.
+- [x] **2. Expo account and project.** Done. The project is `@wordspal/lang-tutor`, owned by the
+      `wordspal` Expo account, id `66fb04ba-7006-4095-92be-9c26592db6c7`. The `production`
+      channel exists, and `app.json` has the project id, updates URL and owner (PR #130).
+- [ ] **3. Play service account.** Not started. 3.1 (Google Cloud) can be done now; 3.2 waits
+      for Play.
+- [x] **4. The GitHub secret.** Done. `EXPO_TOKEN` is a **Developer** robot token of the
+      `wordspal` account.
+- [ ] **5. The first release.** Waits for steps 1 and 3.
+- [ ] **6. Back up the upload key.** After step 5.
+- [ ] **7. Check it on your phone.** After step 5.
+- [ ] **8. Invite friends.** After step 7.
+
+> **Do not run `npm run release` until steps 1 and 3 are done.** Since step 4, the `android`
+> job no longer skips: it builds, then tries to submit to Play, which fails while the app does
+> not exist. The server release still goes through, and rerunning the `android` job after
+> steps 1 and 3 recovers, because the build already exists. Holding the release off avoids a
+> red run.
+
+**Picking up from here:** when Google's email arrives, do steps 1.2–1.4, then step 3, then
+step 5.
+
 ## Go-live, once
 
 Run from the main checkout on `master`, after phase 32 has merged. Each step says what it
@@ -18,8 +45,10 @@ proves before the next one starts.
 
 1. **Play Console.**
    1. At [play.google.com/console](https://play.google.com/console), create a developer
-      account. It costs a one-time $25, and Google verifies your identity, which can take a few
-      days.
+      account for **Yourself**, not an organisation. An organisation account needs a D-U-N-S
+      number and a registered business. It costs a one-time $25, and Google verifies your
+      identity, which can take a few days. *(Account created and documents uploaded
+      2026-10-11; waiting for verification.)*
    2. *Create app*: name **WordsPal**, default language Hebrew, App, Free.
    3. *Testing → Internal testing → Testers*: create an email list with your friends'
       Google-account addresses, and your own. Keep the opt-in link it shows: friends open it
@@ -37,9 +66,11 @@ proves before the next one starts.
    *Proves:* the app exists. Its package name is not set yet: Play takes it from the first
    upload, and after that it can never change.
 
-2. **Expo account and project.** Create an account at [expo.dev](https://expo.dev), then:
+2. **Expo account and project.** *(Done 2026-10-11.)* Create an account at
+   [expo.dev](https://expo.dev), then:
 
    ```bash
+   npm install                             # at the repo root first: app.json names the expo-updates plugin
    cd apps/mobile
    npx eas-cli@24.8.0 login
    npx eas-cli@24.8.0 init                 # writes extra.eas.projectId into app.json
@@ -48,9 +79,14 @@ proves before the next one starts.
    git diff app.json                       # the project id and the updates URL, nothing else
    ```
 
-   Commit the `app.json` change on a branch and merge it through a PR. Neither value is a
-   secret. Do not merge anything else in `app.json` that these commands changed: the name,
-   package, runtime version and plugins are already right.
+   `init` asks which account owns the project: pick the **wordspal** organisation, not the
+   personal account. The robot token in step 4 must belong to the same account.
+
+   Commit the `app.json` change on a branch and merge it through a PR. Keep only three keys:
+   `extra.eas.projectId`, `updates.url` and `owner`. None of them is a secret. The commands
+   also write the evaluated config back: `android.permissions`, with each permission listed
+   twice, and `extra.router`. Leave those out, because the plugins add them at build time. The
+   name, package, runtime version and plugins are already right.
 
    *Proves:* `npx eas-cli@24.8.0 channel:list` shows `production`.
 
@@ -69,8 +105,11 @@ proves before the next one starts.
 
    *Proves:* `npx eas-cli@24.8.0 credentials` shows the service account under Android.
 
-4. **The GitHub secret.** At expo.dev, *Account settings → Access tokens*, create a **robot**
-   token, then:
+4. **The GitHub secret.** *(Done 2026-10-11.)* At expo.dev, switch to the **wordspal**
+   account, then *Settings → Access tokens → Robot users*, and create a robot with the
+   **Developer** role. That role builds, submits and publishes. It would need *Release Manager*
+   only if the `production` channel were marked protected. Copy the token, which Expo shows
+   once, then:
 
    ```bash
    /opt/homebrew/bin/gh secret set EXPO_TOKEN    # paste the token when asked
