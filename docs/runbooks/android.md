@@ -9,8 +9,8 @@ within a day or so. Design:
 [ADR 0012](../adr/adr-0012-native-client-releases.md).
 
 **The on/off switch is the repository variable `ANDROID_RELEASE`.** The `android` job ships
-only when it is exactly `on`. Unset or any other value makes the job print a `::notice::` and
-skip, green, and the server and web still release. It is unset until step 5. Turn it on or off
+only when it is exactly `on`. Unset or any other value means the job does not run: the release
+run shows `android` as *skipped*, greyed out, and the server and web still release. It is unset until step 5. Turn it on or off
 with:
 
 ```bash
@@ -39,8 +39,8 @@ Last updated 2026-10-11.
 - [ ] **7. Check it on your phone.** After step 5.
 - [ ] **8. Invite friends.** After step 7.
 
-Releasing other phases meanwhile is safe. `ANDROID_RELEASE` is unset, so every release skips
-Android, green. Do not set it to `on` before steps 1 and 3 are done: the job would build, then
+Releasing other phases meanwhile is safe. `ANDROID_RELEASE` is unset, so every release shows
+`android` as skipped. Do not set it to `on` before steps 1 and 3 are done: the job would build, then
 fail to submit to a Play app that does not exist.
 
 **Picking up from here:** when Google's email arrives, do steps 1.2–1.4, then step 3, then
@@ -191,7 +191,8 @@ The `android` job runs `scripts/android-release.sh` from the tag's checkout:
 | `Build … has no update yet, so it never reached Play: submitting it first.` | A rerun after a failed submit: `eas submit`, then `eas update`. Every update's message names its build (`<tag> for build <id>`), and that is how the job tells |
 | `The native layer changed: building, submitting …` | `eas build`, then `eas submit` to the internal track, then `eas update`. Play installs it within a day or so |
 | a `::warning::` about the native layer, on a rollback | Nothing. Play cannot downgrade an installed app. If the newer app is broken against the older server, release a fix forward |
-| a `::notice::` that it skipped | `ANDROID_RELEASE` is not `on`, steps 2–4 are not done, or the tag predates phase 32 |
+| nothing: the job shows as *skipped* | `ANDROID_RELEASE` is not `on` |
+| a `::notice::` that it skipped | Steps 2–4 are not done, or the tag predates phase 32 |
 
 A failure in `android` leaves the server release standing, and friends keep their current app.
 Rerun that job alone (*Actions → Release → the run → Re-run failed jobs*). Expo's free tier can
