@@ -24,3 +24,7 @@ nightly-qa/.work/
 *.tfstate
 *.tfstate.*
 *.tfplan
+
+# Phase 35 (spec D17, §6). The bots-state worktree, and a dry run's own state per lane.
+bots/.state/
+bots/.dry/

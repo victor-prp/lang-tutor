@@ -202,6 +202,19 @@ jobs:
       # CI beyond what playwright.config.ts already does via process.env.CI.
       - run: npm run e2e
 
+      # Phase 35 (spec §6, ruling 5). The bots' driver, for one simulated day of
+      # steady-en on the ten-word fixture list, against the e2e server started
+      # again on its port, database and MockServer namespace, now with BOT_SECRET,
+      # which mounts the bot route. Its stubs go in after e2e, so they cannot clash
+      # with a spec's. Runs `npm run bots:dry -- --days 1 --bots steady-en --words
+      # fixtures` (e2e/botsDryRun.ts); a failed request fails the step, so a broken
+      # driver is red before release. No espeak-ng here: speaking cards take the
+      # no-voice path, which the log counts.
+      - name: Bots dry run
+        env:
+          BOT_SECRET: ci-bot-secret-that-is-at-least-32-characters
+        run: npm run bots:ci
+
       # trace: 'retain-on-failure' is already set in the config, but a failure before
       # Playwright even runs (npm ci, or the browser install) leaves
       # e2e/test-results/ never created, so if-no-files-found: ignore covers that case.

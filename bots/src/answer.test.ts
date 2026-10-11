@@ -269,3 +269,13 @@ test('the same inputs and rng give the same decision', () => {
   const rngB = (() => { let i = 0; return () => ((i++ * 0.37) % 1); })();
   assert.deepEqual(decide(mc, memory(0.5), saved, rngA, calm), decide(mc, memory(0.5), saved, rngB, calm));
 });
+
+test('a card that shows the lemma or the gloss key matches the word saved from an inflected form', () => {
+  // Seen in the lane's dry run: хочешь was saved, and the cards asked хотеть / לרצות.
+  const inflected: SavedWord[] = [{ form: 'хочешь', meaning: 'רוצה', lemma: 'хотеть', key: 'לרצות' }];
+  const base = { id: 'q', vocab_term_id: 'g', options: ['לרצות', 'לדעת', 'ללכת', 'לאהוב'], correct_option: 0 };
+  const listen: Card = { ...base, type: 'listen_choice', question: 'хотеть' };
+  assert.equal(matchCard(listen, inflected)?.form, 'хочешь');
+  const reverse: Card = { ...base, type: 'reverse_choice', question: 'לרצות', part_of_speech: 'verb', options: ['хотеть', 'мочь', 'знать', 'думать'] };
+  assert.equal(matchCard(reverse, inflected)?.form, 'хочешь');
+});

@@ -9,8 +9,12 @@ import { pick, type Rng } from './rng.ts';
 /** Spec D16. How a bot answers one card. Pure: memory and rng are passed in, nothing is sent. */
 export type Card = z.infer<typeof QuestionSchema>;
 
-/** A word the bot has saved: the target-language form and its Hebrew meaning. */
-export type SavedWord = { form: string; meaning: string };
+/**
+ * A word the bot has saved: the target-language form and its Hebrew meaning, as its lookup
+ * showed them. Cards show the gloss, which can differ: the lemma for an inflected form (хочешь,
+ * asked as хотеть) and the gloss key for the meaning (רוצה, asked as לרצות). Either matches too.
+ */
+export type SavedWord = { form: string; meaning: string; lemma?: string; key?: string };
 
 export type Behaviour = {
   /** Chance a recalled typed form has one letter wrong. */
@@ -72,12 +76,13 @@ function shown(card: Card): { forms: string[]; meanings: string[] } {
 /** D16 step 1: the saved word the card shows, by form first, then by Hebrew meaning. */
 export function matchCard(card: Card, saved: readonly SavedWord[]): SavedWord | null {
   const { forms, meanings } = shown(card);
+  const is = (text: string | undefined, shown: string) => text !== undefined && norm(text) === norm(shown);
   for (const f of forms) {
-    const hit = saved.find((w) => norm(w.form) === norm(f));
+    const hit = saved.find((w) => is(w.form, f)) ?? saved.find((w) => is(w.lemma, f));
     if (hit) return hit;
   }
   for (const m of meanings) {
-    const hit = saved.find((w) => norm(w.meaning) === norm(m));
+    const hit = saved.find((w) => is(w.meaning, m)) ?? saved.find((w) => is(w.key, m));
     if (hit) return hit;
   }
   return null;
