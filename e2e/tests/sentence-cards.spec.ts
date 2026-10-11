@@ -127,6 +127,10 @@ async function reachSentenceSession(page: Page, request: APIRequestContext, user
   await tapUntil(page, 'start-button', 'progress-label');
 }
 
+/** Phase 38 (spec D4). The next answer the app sends, to read what it says. */
+const nextStepSent = (page: Page) =>
+  page.waitForRequest((sent) => sent.method() === 'POST' && sent.url().endsWith('/next-step'));
+
 /** Gets past a card this spec is not about: a choice answered right, a typed
  *  card by its saved form, and a sentence to translate by showing the answer. */
 async function pass(page: Page, card: Card) {
@@ -173,7 +177,10 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await expect(page.getByTestId('sentence-translation')).toBeVisible();
       // Phase 34 (spec D8): the Hebrew names the word the gap wants.
       await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
+      // Phase 38 (spec D4): the answer says the hint was opened.
+      const sent = nextStepSent(page);
       await answerTyped(page, STUB_GAP);
+      expect((await sent).postDataJSON()).toMatchObject({ text: STUB_GAP, hint_opened: true });
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
       await page.getByTestId('continue-button').click();
@@ -238,7 +245,10 @@ test('a typed gap takes a word that fits, opens its hint and asks again', async 
   await expect(page.getByTestId('sentence-translation')).toHaveCount(0);
   await expect(page.getByTestId('sentence-hint')).toBeVisible();
 
+  // Phase 38 (spec D4): answered without the hint, so it says so.
+  const first = nextStepSent(page);
   await answerTyped(page, FITS);
+  expect((await first).postDataJSON()).toMatchObject({ text: FITS, hint_opened: false });
   await expect(page.getByTestId('retry-notice')).toBeVisible();
   expect(stripIsolates(await page.getByTestId('retry-right').textContent())).toBe(`✓ נכון, ${FITS} מתאים כאן.`);
   await expect(page.getByTestId('retry-again')).toHaveText('אבל התכוונו למילה אחרת — היעזרו במשפט בעברית ונסו שוב');
@@ -249,7 +259,12 @@ test('a typed gap takes a word that fits, opens its hint and asks again', async 
   await expect(page.getByTestId('continue-button')).toHaveCount(0);
   await expect(page.getByTestId('typed-input')).toHaveValue('');
 
+  // The second try never says: the hint it opened is the app's doing.
+  const second = nextStepSent(page);
   await answerTyped(page, STUB_GAP);
+  const retried = (await second).postDataJSON() as Record<string, unknown>;
+  expect(retried).toMatchObject({ text: STUB_GAP, retry: true });
+  expect(retried).not.toHaveProperty('hint_opened');
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
   await expect(page.getByTestId('retry-notice')).toHaveCount(0);
