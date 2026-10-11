@@ -127,8 +127,9 @@ enforced.
 | [0009](docs/adr/adr-0009-sign-in.md) | Sign-in with Better Auth, behind one seam — one import site per app, the session becomes an actor in `routes/actor.ts` only, exact version pins |
 | [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 | [0011](docs/adr/adr-0011-learner-unit-is-the-gloss.md) | The learner's unit is the gloss — the learner's tables hold gloss ids rather than sense ids, senses stay the dictionary's, and no table outside the `dict_` prefix references `dict_senses` or `dict_var_translations` |
+| [0012](docs/adr/adr-0012-native-client-releases.md) | The Android app ships with every release, after the server, by fingerprint — an update lands only on a matching build, builds go to Play's internal track, and `X-Api-Level` is named only in `packages/core` |
 
-All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 = 64 checks, grep only, no deps,
+All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 = 68 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
@@ -582,7 +583,7 @@ npm run db:up       # Postgres + MockServer (+ the pg-boss dashboard, outside CI
 npm run test:integration  # apps/server's database-backed tests; needs db:up
 npm run test:all    # both buckets — run this before pushing
 npm run typecheck   # every workspace
-npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container, 0011 learner unit) — grep only, no deps, no database
+npm run lint:arch   # every ADR's rules (0001 layering, 0002 DI, 0003 contract, 0004 tests, 0006 lanes, 0007 jobs, 0008 grants, 0009 sign-in, 0010 single container, 0011 learner unit, 0012 native releases) — grep only, no deps, no database
 ```
 
 **Run `npm run test:all` before you push.** Bare `npm test` is unit-only, so it can go
@@ -735,6 +736,71 @@ names the tag. Rolling back is the same workflow run from an earlier tag. After 
 the newest tag is no longer live, so name the tag for the next. Everything else, from the
 first apply to reading the container's log, is in the
 [hosting runbook](docs/runbooks/hosting.md).
+
+Since phase 32 a release also ships the Android app, in a last job, `android`, after `apply`.
+See *The Android app* below.
+
+### The Android app
+
+Friends install **WordsPal** (`ai.wordspal.app`) from Play's internal testing track, limited to
+the tester list, and never need a laptop running. The app updates itself: JavaScript over the
+air within minutes of a release, native changes through Play
+([phase 32 design](docs/superpowers/specs/2026-10-11-lang-tutor-phase-32-android-app-design.md),
+[ADR 0012](docs/adr/adr-0012-native-client-releases.md)).
+
+**What a release does.** The `android` job runs `scripts/android-release.sh` from the tag's
+checkout. It compares the tag's native fingerprint with the newest Play build's and prints the
+path it took:
+
+| It prints | It did |
+|---|---|
+| `Same native layer as build …: publishing … over the air.` | `eas update`; phones take it on their next open, or after 30 minutes away |
+| `Build … has no update yet, so it never reached Play: submitting it first.` | a rerun after a failed submit: `eas submit`, then `eas update` |
+| `The native layer changed: building, submitting …` | `eas build`, `eas submit` to the internal track, `eas update`; Play installs it on friends' phones within a day or so |
+| a `::warning::` about the native layer, on a rollback | nothing: Play cannot downgrade an app. Release a fix forward |
+| a `::notice::` that it skipped | the setup below is not done, or the tag predates phase 32 |
+
+A failure in `android` leaves the server release standing. Rerun that job alone.
+
+**Breaking older clients.** An installed app can be a day or two behind the server. A change
+that breaks older clients raises `API_LEVEL` in `packages/core/src/apiLevel.ts` by one in the same
+PR. The server then answers those apps 426, and they show an "update required" screen that tries
+an over-the-air update, then offers Play.
+
+**One-time setup** (the job skips, green, until it is done):
+
+1. **Play Console:** create a developer account and verify your identity. Create the app with
+   package `ai.wordspal.app`. Under *Testing → Internal testing*, add the testers' Google-account
+   emails. Fill in *App content*: the privacy policy is
+   `https://app.wordspal.ai/privacy.html`, the content rating questionnaire, and data safety (below).
+2. **Expo:** create an account, then from `apps/mobile` run `npx eas-cli@24.8.0 login`,
+   `npx eas-cli@24.8.0 init` and `npx eas-cli@24.8.0 update:configure`. Commit the `app.json`
+   change they make (the project id and the updates URL, neither a secret) through a PR. Then run
+   `npx eas-cli@24.8.0 channel:create production`.
+3. **Play service account:** in Google Cloud create a service account with a JSON key. Invite it
+   in Play Console under *Users and permissions* with release rights for the app. Upload the key with
+   `npx eas-cli@24.8.0 credentials` → Android → production → Google Service Account.
+4. **GitHub:** create an Expo robot token (expo.dev → account settings → Access tokens) and save it
+   as the repository secret `EXPO_TOKEN`.
+5. **The first release after that builds.** A Play app that has never been rolled out accepts
+   only draft releases through the API. If the submit fails with "Only releases with status draft
+   may be created on draft app", download the AAB from the EAS build page and upload it once in
+   *Internal testing → Create new release*. Roll it out, then rerun the `android` job.
+6. **Keep the upload key:** `npx eas-cli@24.8.0 credentials` → Android → production → download
+   the keystore, and store it somewhere safe.
+
+**Data safety answers** (what the app sends, phase 32):
+
+| Data type | Collected | Shared | Why | Optional |
+|---|---|---|---|---|
+| Email address | yes | no | account management | no |
+| Name (display name), other info (age) | yes | no | app functionality | no |
+| App activity: in-app actions (saved words, answers) | yes | no | app functionality | no |
+| Audio: voice recordings | yes, processed and not stored | no | app functionality | yes |
+| Photos | yes, deleted once read | no | app functionality | yes |
+
+All of it is encrypted in transit. Users can ask for deletion by email. Gemini, Resend and AWS
+process data on WordsPal's behalf, so Play counts them as service providers, not sharing.
 
 ## End-to-end test
 
