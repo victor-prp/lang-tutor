@@ -10,12 +10,28 @@ The driver is `bots/run.ts`. The roster and every simulation knob are in `bots/s
 
 ## Start
 
-Once, in this order. Steps 1 and 3 to 5 need production access; `PROD_DB` is the connection
+Once, in this order. Steps 2, 5 and 6 need production access (AWS or the database); `PROD_DB` is the connection
 string from the hosting runbook's go-live step 9.
 
-1. **`BOT_SECRET`**, one value in two places: production's Secrets Manager, which the container
-   reads, and the repository's secrets, which the workflow reads. The server refuses fewer than
-   32 characters.
+1. **Delete the test incident's junk branch, before anything else.** A local run during the
+   build pushed a `bots-state` with three days of junk on it. Left there, the first real run
+   would start every bot at day 4 from that junk. It must be gone before step 8 sets
+   `BOTS_ENABLED`:
+
+   ```bash
+   git push origin --delete bots-state
+   ```
+
+   Only in a checkout that ran the bots locally (it has `bots/.state`), also remove its local
+   copy, from that checkout:
+
+   ```bash
+   git worktree remove bots/.state
+   git branch -D bots-state
+   ```
+2. **`BOT_SECRET`**, one value in two places: production's Secrets Manager, which the container
+   reads, and the repository's GitHub secret `BOT_SECRET`, which the workflow reads. The server
+   refuses fewer than 32 characters.
 
    ```bash
    KEY="$(openssl rand -hex 32)" \
@@ -23,30 +39,53 @@ string from the hosting runbook's go-live step 9.
      && gh secret set BOT_SECRET --body "$KEY"; unset KEY
    ```
 
-   The container gets a Secrets Manager entry only when `terraform/prod/variables.tf` lists it
-   in `secret_env_names`; `BOT_SECRET` must be in that list (hosting runbook, *Changing a
-   secret*). A plan reads every secret it names, so the secret comes before the merge that adds
-   it.
-2. **Merge and release** as usual (hosting runbook, *Releasing*). `curl -s -o /dev/null -w '%{http_code}\n' -X PUT https://app.wordspal.ai/api/bots/day`
+   This comes before the merge. The PR adds `BOT_SECRET` to `secret_env_names` in
+   `terraform/prod/variables.tf`, and a plan reads every secret it names, so the PR's
+   `terraform-plan` job is red until the secret exists (re-run it then), and the release guard
+   refuses a commit whose plan is red.
+3. **Point the workflow at production** (the workflow is still off; `BOTS_ENABLED` is unset):
+
+   ```bash
+   gh variable set BOTS_API_URL --body https://app.wordspal.ai
+   ```
+4. **Merge, then release** as usual (hosting runbook, *Releasing*):
+
+   ```bash
+   git switch master && git pull && npm run release
+   ```
+
+   The Release workflow runs `./scripts/infra.sh prod apply`, the Terraform apply that hands
+   the container its new `BOT_SECRET` entry, and deploys the new image. To give the serving
+   container the secret without a release, `./scripts/infra.sh prod apply` from the laptop
+   does the same apply (hosting runbook, *Changing a secret*). Then:
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -X PUT https://app.wordspal.ai/api/bots/day
+   ```
+
    answers 401 once the route is mounted; 404 means the container has no `BOT_SECRET`.
-3. **Recompute memory** from every ended session (spec D8), so learners' existing words start
+5. **Recompute memory** from every ended session (spec D8), so learners' existing words start
    with memory instead of as new:
 
    ```bash
    DATABASE_URL="$PROD_DB" npm run db:progress:recompute
    ```
-4. **Create the six bot profiles.** `--day` is the day each bot starts on. Use day 1 of the bots'
-   calendar, `2026-01-01` (`EPOCH` in `bots/src/play.ts`); every run sets the day explicitly
-   anyway, before the bot plays.
+6. **Create the six bot profiles.** `--day` is required: the day each bot starts on. Use day 1
+   of the bots' calendar, `2026-01-01` (`EPOCH` in `bots/src/play.ts`); every run sets the day
+   explicitly anyway, before the bot plays.
 
    ```bash
    DATABASE_URL="$PROD_DB" npm run db:bots:create -- --day 2026-01-01 \
      steady-en fast-ru forgetful-it skipper-en silent-ru control-it
    ```
-5. **Point the workflow at production and turn it on:**
+7. **Check the junk branch is gone** (step 1); this prints nothing when it is:
 
    ```bash
-   gh variable set BOTS_API_URL --body https://app.wordspal.ai
+   git ls-remote --heads origin bots-state
+   ```
+8. **Turn the bots on:**
+
+   ```bash
    gh variable set BOTS_ENABLED --body true
    ```
 
@@ -71,8 +110,11 @@ gh issue list --label bots --state all
 - **Each run's comment** has a line per bot: sessions, cards, right, new words, unheard (spoken
   answers the transcription missed), no voice (espeak-ng or ffmpeg missing on the runner),
   unmatched (cards the bot could not tie to a saved word) and failed requests. "day not
-  finished" means a failed request ended that bot's day; the next run plays it again, and the
-  third failure counts it as played so the others are not held back.
+  finished" means a failed request ended that bot's day; the next run goes on with it from where it
+  stopped (words already saved and sessions already played are not repeated), and the third
+  failure counts it as played so the others are not held back. A bot's state is committed
+  after every session, so a run killed by the job's 55-minute timeout loses at most the
+  session it was in.
 - **The week's closing comment** has the five numbers (spec D21) per bot for this week and every
   earlier one, the six reports, and the Claude spend. What each number is for:
   - (a) above 1: weak words get more than their share of the cards;
@@ -91,7 +133,7 @@ gh issue list --label bots --state all
 - **A week left open** (the week's last run died mid-close: a `gh` error, the job's timeout, or
   the six report calls running out) recovers by itself: every run first closes any finished
   week whose issue is still open or whose numbers or reports are missing, before it plays its
-  day. Nothing to do but let the next run happen, or start it now with `gh workflow run
+  day. If `gh` fails there, the run logs it, plays its day all the same, and ends red. Nothing to do but let the next run happen, or start it now with `gh workflow run
   bots.yml`. Its closing comment opens with "Closed by a later run". If later days were played
   before it closed (the bots were stopped or every run failed), its (e) shows –, since the
   memory at its end is gone; the other numbers come from the log and are unaffected.
