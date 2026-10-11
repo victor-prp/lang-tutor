@@ -27,6 +27,16 @@ export type Profile = {
 
 export const BURST_SIZE = 30;
 
+/**
+ * The ACT-R variants (Ruling 23 knobs), checked with ages in seconds (Ruling 30). A word answered
+ * once a day for a week at 08:00 (a trace plus the 0.5 seen-answer trace each day) recalls the
+ * next morning at about 0.95 for FAST, 0.83 for ACTR_AVERAGE and 0.66 for FORGETFUL, and a word
+ * met once is near 0.13 a day later on average. FORGETFUL was a: 0.22, tau: -0.5 while ages were
+ * hours; in seconds that left it at 0.47 after a week of daily practice, a bot that barely learns.
+ */
+export const ACTR_FAST: ActrParams = { ...ACTR_AVERAGE, a: 0.12, tau: -0.8 };
+export const ACTR_FORGETFUL: ActrParams = { ...ACTR_AVERAGE, a: 0.2, tau: -0.6 };
+
 const base = {
   playChance: 1,
   devices: { listening: true, speaking: true },
@@ -49,7 +59,7 @@ export const ROSTER: readonly Profile[] = [
     ...base,
     name: 'fast-ru',
     memory: 'actr',
-    actr: { ...ACTR_AVERAGE, a: 0.12, tau: -0.8 },
+    actr: ACTR_FAST,
     language: 'ru',
     sessions: [2, 3],
     lookups: [4, 6],
@@ -60,7 +70,7 @@ export const ROSTER: readonly Profile[] = [
     ...base,
     name: 'forgetful-it',
     memory: 'actr',
-    actr: { ...ACTR_AVERAGE, a: 0.22, tau: -0.5 },
+    actr: ACTR_FORGETFUL,
     language: 'it',
     sessions: [1, 1],
     lookups: [2, 4],

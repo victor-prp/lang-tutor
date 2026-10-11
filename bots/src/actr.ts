@@ -10,18 +10,24 @@ import { mulberry32, normal, seedFrom } from './rng.ts';
  *   d_j = c * e^(m_(j-1)) + a               decay of trace j; m_0 = -infinity so d_1 = a
  *   P   = 1 / (1 + e^((tau - m) / s))       recall
  *
- * Time is simulated hours. Time between sessions is multiplied by h, as in the papers. A stretch
- * between two consecutive events of the item (a trace or "now") longer than SESSION_GAP_HOURS is
- * "between sessions" and counts h times; a shorter one is within a session and counts in full.
- * The age of trace j is the sum of these stretches from t_j to now.
+ * Clock and ages are in different units. The bot's clock (`When.hour`, `Trace.at`) is simulated
+ * hours, but ages are SECONDS: the published parameter set (a, c, s, tau, h) is fit to ages in
+ * seconds, and in hours the same parameters barely forget (a single exposure a day old would
+ * recall at P = 0.945 instead of about 0.07). The time unit is a fact of the model, not a knob.
+ *
+ * Time between sessions is multiplied by h, as in the papers. A stretch between two consecutive
+ * events of the item (a trace or "now") longer than SESSION_GAP_HOURS is "between sessions" and
+ * counts h times; a shorter one is within a session and counts in full. The age of trace j is
+ * the sum of these stretches from t_j to now, converted to seconds.
  */
 export type ActrParams = { a: number; c: number; s: number; tau: number; h: number };
 
 export const ACTR_AVERAGE: ActrParams = { a: 0.167, c: 0.232, s: 0.252, tau: -0.669, h: 0.031 };
 
 export const SESSION_GAP_HOURS = 1;
-/** An age of zero would make a trace infinitely strong; one minute is the floor. */
-export const MIN_AGE_HOURS = 1 / 60;
+export const SECONDS_PER_HOUR = 3600;
+/** An age of zero would make a trace infinitely strong; one minute (60 s) is the floor. */
+export const MIN_AGE_SECONDS = 60;
 
 export type Trace = { at: number; weight: number };
 
@@ -30,15 +36,16 @@ export function addTrace(traces: readonly Trace[], at: number, weight = 1): Trac
   return next.sort((x, y) => x.at - y.at);
 }
 
-/** Effective age of every trace at `now`, newest trace last. */
+/** Effective age in seconds of every trace at `now` (hours), newest trace last. */
 function agesAt(traces: readonly Trace[], now: number, h: number): number[] {
   const ages = new Array<number>(traces.length);
   let age = 0;
   let next = now;
   for (let j = traces.length - 1; j >= 0; j--) {
     const gap = Math.max(0, next - traces[j].at);
-    age += gap > SESSION_GAP_HOURS ? gap * h : gap;
-    ages[j] = Math.max(age, MIN_AGE_HOURS);
+    const seconds = gap * SECONDS_PER_HOUR;
+    age += gap > SESSION_GAP_HOURS ? seconds * h : seconds;
+    ages[j] = Math.max(age, MIN_AGE_SECONDS);
     next = traces[j].at;
   }
   return ages;

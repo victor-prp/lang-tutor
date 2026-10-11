@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { ROSTER, lookupsToday, playsToday, sessionHours } from './roster.ts';
+import { ACTR_AVERAGE, addTrace, recall, type ActrParams, type Trace } from './actr.ts';
+import { ACTR_FAST, ACTR_FORGETFUL, ROSTER, lookupsToday, playsToday, sessionHours } from './roster.ts';
 import { rngFor } from './rng.ts';
 
 test('the six bots of D13, with valid names', () => {
@@ -58,4 +59,24 @@ test('lookups are two to six a day, with a rare burst of thirty', () => {
     else assert.ok(n >= 2 && n <= 6, String(n));
   }
   assert.ok(burst > 0 && burst < 100, `bursts ${burst}`);
+});
+
+test('each ACT-R profile keeps its character with ages in seconds', () => {
+  // A word answered at 08:00 each day for a week: a trace and the 0.5 seen-answer trace a day.
+  let week: Trace[] = [];
+  for (let d = 0; d < 7; d++) week = addTrace(addTrace(week, d * 24 + 8), d * 24 + 8.01, 0.5);
+  const once = addTrace(addTrace([], 8), 8.01, 0.5);
+  const nextDay = (p: ActrParams) => recall(week, 7 * 24 + 8, p);
+  const weekLater = (p: ActrParams) => recall(week, 13 * 24 + 8, p);
+
+  assert.ok(nextDay(ACTR_AVERAGE) > 0.8, `average after a week of practice: ${nextDay(ACTR_AVERAGE)}`);
+  for (const days of [1, 2, 3]) assert.ok(recall(once, 8 + days * 24, ACTR_AVERAGE) < 0.7, `met once, ${days} days`);
+  // The fast learner forgets slower than average, the forgetful one faster.
+  assert.ok(nextDay(ACTR_FAST) > nextDay(ACTR_AVERAGE) && nextDay(ACTR_AVERAGE) > nextDay(ACTR_FORGETFUL));
+  assert.ok(weekLater(ACTR_FAST) > weekLater(ACTR_AVERAGE) && weekLater(ACTR_AVERAGE) > weekLater(ACTR_FORGETFUL));
+  // The forgetful bot still learns: a week of daily practice lifts it well above a single meeting.
+  assert.ok(nextDay(ACTR_FORGETFUL) > 0.6, `forgetful after a week: ${nextDay(ACTR_FORGETFUL)}`);
+  const by = Object.fromEntries(ROSTER.map((b) => [b.name, b]));
+  assert.equal(by['fast-ru'].actr, ACTR_FAST);
+  assert.equal(by['forgetful-it'].actr, ACTR_FORGETFUL);
 });

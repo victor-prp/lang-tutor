@@ -7,56 +7,68 @@ const near = (actual: number, expected: number, eps = 1e-6) =>
   assert.ok(Math.abs(actual - expected) < eps, `${actual} is not ${expected}`);
 
 // Parameters: a = 0.167, c = 0.232, s = 0.252, tau = -0.669, h = 0.031.
-// Hours are simulated hours; a gap of more than one hour is "between sessions" and is
-// multiplied by h, so 24 h counts as 24 * 0.031 = 0.744 h.
+// The clock is simulated hours; ages are seconds (the parameters are fit to seconds). A gap of
+// more than one hour is "between sessions" and is multiplied by h, so 24 h counts as
+// 24 * 3600 * 0.031 = 2678.4 s. Expected values were computed independently of actr.ts.
 const P = (m: number) => 1 / (1 + Math.exp((-0.669 - m) / 0.252));
+const DAY = 24 * 3600 * 0.031; // 2678.4 s
 
 test('one trace, a day old', () => {
-  // m = ln(0.744^-0.167) = -0.167 * ln 0.744 = -0.167 * -0.295587 = 0.049384
-  // P = 1 / (1 + e^((-0.669 - 0.049384) / 0.252)) = 1 / (1 + e^-2.850730) = 0.945356
+  // m = ln(2678.4^-0.167) = -0.167 * ln 2678.4 = -0.167 * 7.892975 = -1.318127
+  // P = 1 / (1 + e^((-0.669 + 1.318127) / 0.252)) = 1 / (1 + e^2.575900) = 0.070706
   const traces = addTrace([], 0);
-  near(recall(traces, 24, ACTR_AVERAGE, 0), 0.9453564704926174);
-  near(recall(traces, 24, ACTR_AVERAGE, 0), P(0.04938427877289058));
+  near(recall(traces, 24, ACTR_AVERAGE, 0), 0.07070565196973046);
+  near(recall(traces, 24, ACTR_AVERAGE, 0), P(-1.3181268050092911));
+  near(recall(traces, 24, ACTR_AVERAGE, 0), P(Math.log(DAY ** -0.167)));
 });
 
 test('two traces', () => {
-  // Traces at 0 and 24, now 48. Activation at 24 (one trace aged 0.744): m1 = 0.049384.
-  // Decay of the second trace d2 = 0.232 * e^0.049384 + 0.167 = 0.410745.
-  // Ages now: trace 1 = 48 * 0.031 = 1.488, trace 2 = 24 * 0.031 = 0.744.
-  // m = ln(1.488^-0.167 + 0.744^-0.410745) = ln(0.93601 + 1.12882) = 0.725097
-  // P = 1 / (1 + e^((-0.669 - 0.725097) / 0.252)) = 0.996058
+  // Traces at 0 and 24 h, now 48 h. Activation at 24 h (one trace aged 2678.4 s): m1 = -1.318127.
+  // Decay of the second trace d2 = 0.232 * e^-1.318127 + 0.167 = 0.229092.
+  // Ages now: trace 1 = 2 * 2678.4 = 5356.8 s, trace 2 = 2678.4 s.
+  // m = ln(5356.8^-0.167 + 2678.4^-0.229092) = ln(0.238382 + 0.163947) = -0.910487
+  // P = 1 / (1 + e^((-0.669 + 0.910487) / 0.252)) = 0.277222
   const traces = addTrace(addTrace([], 0), 24);
-  near(recall(traces, 48, ACTR_AVERAGE, 0), 0.9960580508942238);
+  near(recall(traces, 48, ACTR_AVERAGE, 0), 0.2772224444836956);
 });
 
 test('three traces', () => {
-  // Traces at 0, 24, 48, now 72. Activation at 48 is the two-trace m = 0.725097, so
-  // d3 = 0.232 * e^0.725097 + 0.167 = 0.646064 (d2 = 0.410745 as above).
-  // Ages now: 72 * 0.031 = 2.232, 48 * 0.031 = 1.488, 24 * 0.031 = 0.744.
-  // m = ln(2.232^-0.167 + 1.488^-0.410745 + 0.744^-0.646064) = 1.076510
-  // P = 1 / (1 + e^((-0.669 - 1.076510) / 0.252)) = 0.999020
+  // Traces at 0, 24, 48 h, now 72 h. Activation at 48 h is the two-trace m = -0.910487, so
+  // d3 = 0.232 * e^-0.910487 + 0.167 = 0.260340 (d2 = 0.229092 as above).
+  // Ages now: 3 * 2678.4 = 8035.2 s, 5356.8 s, 2678.4 s.
+  // m = ln(8035.2^-0.167 + 5356.8^-0.229092 + 2678.4^-0.260340) = -0.711800
+  // P = 1 / (1 + e^((-0.669 + 0.711800) / 0.252)) = 0.457642
   const traces = addTrace(addTrace(addTrace([], 0), 24), 48);
-  near(recall(traces, 72, ACTR_AVERAGE, 0), 0.9990196578295467);
+  near(recall(traces, 72, ACTR_AVERAGE, 0), 0.45764179501906016);
 });
 
 test('a hidden difficulty shifts tau', () => {
-  // tau + 0.3: P = 1 / (1 + e^((-0.669 + 0.3 - 0.049384) / 0.252)) = 0.840272
-  near(recall(addTrace([], 0), 24, ACTR_AVERAGE, 0.3), 0.8402722408007601);
+  // tau + 0.3: P = 1 / (1 + e^((-0.669 + 0.3 + 1.318127) / 0.252)) = 0.022613
+  near(recall(addTrace([], 0), 24, ACTR_AVERAGE, 0.3), 0.02261259138072348);
 });
 
 test('time within a session is not scaled', () => {
-  // Traces at 0 and 0.5 h, now 0.75 h: every gap is under an hour, so ages are real.
-  // m at 0.5 = ln(0.5^-0.167) = 0.115763; d2 = 0.232 * e^0.115763 + 0.167 = 0.4349.
-  // Ages now: 0.75 and 0.25. m = ln(0.75^-0.167 + 0.25^-0.4349)
-  const m1 = Math.log(0.5 ** -0.167);
+  // Traces at 0 and 0.5 h, now 0.75 h: every gap is under an hour, so ages are real seconds.
+  // m at 0.5 h = ln(1800^-0.167) = -1.251756; d2 = 0.232 * e^-1.251756 + 0.167 = 0.233353.
+  // Ages now: 2700 s and 900 s. m = ln(2700^-0.167 + 900^-0.233353) = -0.751321, P = 0.419051
+  const m1 = Math.log(1800 ** -0.167);
   const d2 = 0.232 * Math.exp(m1) + 0.167;
-  const m = Math.log(0.75 ** -0.167 + 0.25 ** -d2);
+  const m = Math.log(2700 ** -0.167 + 900 ** -d2);
   near(recall(addTrace(addTrace([], 0), 0.5), 0.75, ACTR_AVERAGE, 0), P(m));
+  near(recall(addTrace(addTrace([], 0), 0.5), 0.75, ACTR_AVERAGE, 0), 0.4190508074223288);
 });
 
 test('a gap over an hour is scaled by h, from the last trace on', () => {
-  // One trace at 0, now 1.5 h: the gap is between sessions, so the age is 1.5 * 0.031.
-  near(recall(addTrace([], 0), 1.5, ACTR_AVERAGE, 0), P(Math.log((1.5 * 0.031) ** -0.167)));
+  // One trace at 0, now 1.5 h: the gap is between sessions, so the age is 5400 * 0.031 = 167.4 s.
+  // m = -0.167 * ln 167.4 = -0.855104, P = 0.323330
+  near(recall(addTrace([], 0), 1.5, ACTR_AVERAGE, 0), P(Math.log((1.5 * 3600 * 0.031) ** -0.167)));
+  near(recall(addTrace([], 0), 1.5, ACTR_AVERAGE, 0), 0.32333007906590655);
+});
+
+test('an age under a minute is floored at 60 s', () => {
+  // Now 30 s after the trace: the age is floored to 60 s. m = -0.167 * ln 60 = -0.683757.
+  near(recall(addTrace([], 0), 30 / 3600, ACTR_AVERAGE, 0), P(-0.167 * Math.log(60)));
+  near(recall(addTrace([], 0), 0, ACTR_AVERAGE, 0), P(-0.167 * Math.log(60)));
 });
 
 test('no trace gives no recall, and a lower decay remembers longer', () => {
