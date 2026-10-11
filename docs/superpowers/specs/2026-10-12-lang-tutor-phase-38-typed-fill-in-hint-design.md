@@ -5,6 +5,13 @@
   over showing the answer, then said "go til PR": the questions the one-pager parked are
   answered here with recommendations, and the design is self-approved (CLAUDE.md, *Continue till
   PR*). Rulings are at the end.
+  Implemented on branch `phase-38-typed-fill-in-hint` from
+  `docs/superpowers/plans/2026-10-12-phase-38-typed-fill-in-hint.md`. Building found one
+  deviation: D2's prompt also says "whatever it then means, not only words of the same meaning"
+  and "agreeing in gender, number and case with the words around it". The first wording kept
+  English lists to synonyms (`begin` → `start` only); the checker's prompt already uses the
+  phrase. Measured: sentence tier 2 26/26, every tier at or above 85%. Italian gender slips still
+  appear now and then (`una nuova fiore`), the cost R5 accepts.
 - **Date:** 2026-10-12
 - **Source:** `drafts/2026-10-12-typed-fill-in-hint-one-pager.md` (gitignored; restated below).
 - **Builds on:** phase 27 D5 (`cloze_typed`: a new sentence, its gap, its Hebrew), phase 34 D8
