@@ -19,7 +19,10 @@
 #   same, no update for it yet      eas submit that build, then eas update
 #                                   (the update after a successful submit is the
 #                                   marker that the build reached Play, so a rerun
-#                                   after a failed submit submits again)
+#                                   after a failed submit submits again; each
+#                                   message names its build, because after a
+#                                   reverted native change an older build of the
+#                                   same runtime has updates of its own)
 #   different, a release            eas build, eas submit, eas update
 #   different, a rollback           nothing: Play cannot downgrade an app
 #
@@ -63,26 +66,27 @@ newest_id=$(jq -r '.[0].id // empty' <<< "$newest")
 newest_runtime=$(jq -r '.[0].runtime.version // empty' <<< "$newest")
 echo "fingerprint $fp; newest build ${newest_id:-none} (runtime ${newest_runtime:-none})"
 
-update_exists() {
+# Whether the runtime's newest update on production was published for this build.
+update_names_build() {
   eas update:list --branch production --runtime-version "$fp" --limit 1 --json --non-interactive \
-    | jq -e '(.currentPage // []) | length > 0' > /dev/null
+    | jq -e --arg marker "for build $1" '(.currentPage // [])[0].message // "" | contains($marker)' > /dev/null
 }
 submit() {
   eas submit --platform android --profile production --id "$1" --wait --non-interactive
 }
-publish() {
+publish() { # publish <the build it targets>
   EXPO_PUBLIC_APP_VERSION="$TAG" eas update --branch production --platform android \
-    --environment production --message "$TAG" --non-interactive
+    --environment production --message "$TAG for build $1" --non-interactive
 }
 
 if [ "$fp" = "$newest_runtime" ]; then
-  if update_exists; then
+  if update_names_build "$newest_id"; then
     echo "Same native layer as build $newest_id: publishing $TAG over the air."
   else
     echo "Build $newest_id has no update yet, so it never reached Play: submitting it first."
     submit "$newest_id"
   fi
-  publish
+  publish "$newest_id"
 elif [ "$rollback" = 1 ]; then
   echo "::warning::$TAG's native layer differs from the build on Play ($newest_id), and Play cannot downgrade an installed app. Nothing was published: phones keep the newer app against the older server. If that is broken, release a fix forward."
 else
@@ -93,5 +97,5 @@ else
     exit 1
   fi
   submit "$build_id"
-  publish
+  publish "$build_id"
 fi

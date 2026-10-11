@@ -31,8 +31,9 @@ printf '{"sources":[],"hash":"%s"}\n' "$FP"
 STUB
 
 # eas: the newest finished build (LATEST_ID/LATEST_RT, none when LATEST_RT is
-# empty), whether production has an update for the runtime (HAS_UPDATE), a
-# new build's id (NEW_ID), and a submit that fails (SUBMIT_FAILS).
+# empty), the build the runtime's newest update on production was published
+# for (UPDATE_FOR, none when empty; the script names it in the message), a new
+# build's id (NEW_ID), and a submit that fails (SUBMIT_FAILS).
 cat > "$STUB/eas" <<'STUB'
 #!/usr/bin/env bash
 case "$1" in
@@ -42,7 +43,8 @@ case "$1" in
     echo "eas $*" >> "$LOG" ;;
   update:list)
     echo "eas $*" >> "$LOG"
-    if [ "$HAS_UPDATE" = 1 ]; then echo '{"name":"production","id":"b","currentPage":[{"group":"g"}]}'
+    if [ -n "$UPDATE_FOR" ]; then
+      printf '{"name":"production","id":"b","currentPage":[{"group":"g","message":"\\"v2026.10.10 for build %s\\" (1 day ago by robot)"}]}\n' "$UPDATE_FOR"
     else echo '{"name":"production","id":"b","currentPage":[]}'; fi ;;
   build)
     echo "eas $*" >> "$LOG"
@@ -72,7 +74,8 @@ run() {
     bash "$REPO/scripts/android-release.sh" "$@" > "$OUT" 2>&1
   code=$?
 }
-fixture() { export FP="$1" LATEST_ID="$2" LATEST_RT="$3" HAS_UPDATE="$4" NEW_ID=b-new SUBMIT_FAILS="${5:-0}" EXPO_TOKEN=t; }
+# fixture <fp> <newest build id> <newest runtime> <build the newest update names> [submit fails]
+fixture() { export FP="$1" LATEST_ID="$2" LATEST_RT="$3" UPDATE_FOR="$4" NEW_ID=b-new SUBMIT_FAILS="${5:-0}" EXPO_TOKEN=t; }
 
 logged() { grep -q -- "$1" "$LOG"; }
 expect_calls() { # expect_calls <label> <want-exit> <yes/no pattern>...
@@ -93,60 +96,67 @@ $(cat "$OUT")"; fi
 echo "Testing scripts/android-release.sh"
 echo
 
-fixture fp1 b1 fp1 1; run
+fixture fp1 b1 fp1 b1; run
 expect_calls "same fingerprint, on Play: publishes an update only" 0 \
   "yes:eas update --branch production" "no:eas build " "no:eas submit"
-expect_calls "the update carries the tag as its message and as the app version" 0 \
-  "yes:--message v2026.10.11.1" "yes:APP_VERSION=v2026.10.11.1" "yes:--environment production"
+expect_calls "the update carries the tag and the build it targets as its message, and the tag as the app version" 0 \
+  "yes:--message v2026.10.11.1 for build b1" "yes:APP_VERSION=v2026.10.11.1" "yes:--environment production"
 expect_calls "the marker is asked for this fingerprint on production" 0 \
   "yes:update:list --branch production --runtime-version fp1"
 
-fixture fp1 b1 fp1 0; run
+fixture fp1 b1 fp1 ''; run
 expect_calls "same fingerprint, never reached Play: submits that build, then updates" 0 \
   "yes:eas submit --platform android --profile production --id b1 --wait" "yes:eas update --branch production" "no:eas build "
 
-fixture fp2 b1 fp1 1; run
+fixture fp2 b1 fp1 b1; run
 expect_calls "new fingerprint: builds, submits the new build, then updates" 0 \
   "yes:eas build --platform android --profile production --wait" "yes:--id b-new" "yes:eas update --branch production"
 order=$(awk '$2 == "build" || $2 == "submit" || $2 == "update" { printf "%s ", $2 }' "$LOG")
 if [ "$order" = "build submit update " ]; then ok "build, then submit, then update, in that order"
 else fail "build, then submit, then update, in that order" "got: $order"; fi
 
-fixture fp1 b1 "" 0; run
+fixture fp1 b1 "" ''; run
 expect_calls "no build yet: builds" 0 "yes:eas build --platform android" "yes:eas update --branch production"
 
 # Reverting a native change: fp equals an OLDER build's runtime, not the newest.
 # The script asks only for the newest, so the stub's newest is fp2 here.
-fixture fp1 b2 fp2 1; run
+fixture fp1 b2 fp2 b2; run
 expect_calls "a reverted native change builds again, never updates an older runtime" 0 \
   "yes:eas build --platform android" "no:update:list --branch production --runtime-version fp1 "
 
-fixture fp1 b2 fp2 1; run --rollback
+fixture fp1 b2 fp2 b2; run --rollback
 expect_calls "a rollback across a native change publishes nothing" 0 \
   "no:eas build " "no:eas submit" "no:eas update "
 grep -q '::warning::' "$OUT" && ok "and says so in a warning" || fail "and says so in a warning" "$(cat "$OUT")"
 
-fixture fp1 b1 fp1 1; run --rollback
+fixture fp1 b1 fp1 b1; run --rollback
 expect_calls "a rollback with the same fingerprint publishes the old tag's JavaScript" 0 \
   "yes:eas update --branch production" "no:eas build "
 
-fixture fp2 b1 fp1 1 1; run
+fixture fp2 b1 fp1 b1 1; run
 expect_calls "a failed submit fails the job and publishes no update" 1 \
   "yes:eas submit" "no:eas update "
 
-fixture fp1 b1 fp1 1; EXPO_TOKEN='' run
+fixture fp1 b1 fp1 b1; EXPO_TOKEN='' run
 expect_calls "no EXPO_TOKEN: skips, green, calling nothing" 0 "no:eas " "no:npx "
 grep -q '::notice::' "$OUT" && ok "and leaves a notice" || fail "and leaves a notice" "$(cat "$OUT")"
 
-fixture fp1 b1 fp1 1; echo '{"expo":{}}' > "$MOBILE/app.json"; run
+fixture fp1 b1 fp1 b1; echo '{"expo":{}}' > "$MOBILE/app.json"; run
 expect_calls "no EAS project id yet: skips, green, calling nothing" 0 "no:eas " "no:npx "
 with_project
 
-fixture fp1 b1 fp1 1; rm "$MOBILE/eas.json"; run
+fixture fp1 b1 fp1 b1; rm "$MOBILE/eas.json"; run
 expect_calls "a tag from before phase 32 (no eas.json): skips, green" 0 "no:eas " "no:npx "
 with_project
 
-fixture "" b1 fp1 1; run
+# Review finding: a rerun after a reverted native change whose submit failed.
+# The runtime's newest update was published for an older build of the same
+# runtime, so it proves nothing about the newest build: submit it.
+fixture fp1 b3 fp1 b1; run
+expect_calls "an update for an older build of the same runtime does not count: submits the newest" 0 \
+  "yes:eas submit --platform android --profile production --id b3 --wait" "yes:--message v2026.10.11.1 for build b3"
+
+fixture "" b1 fp1 b1; run
 expect_calls "no fingerprint: fails before asking EAS anything" 1 "no:eas "
 
 echo
