@@ -1,0 +1,23 @@
+import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
+
+/**
+ * When a bot is asked. `hour` is absolute simulated hours (day * 24 + hour of day), for ACT-R;
+ * `day` is the UTC date the server sees, for FSRS.
+ */
+export type When = { day: string; hour: number };
+
+/** What a card showed and how it came out: the input of the grades table. */
+export type LearnEvent = {
+  type: QuestionType;
+  correct?: boolean;
+  verdict?: 'exact' | 'near_miss' | 'wrong' | 'gave_up' | 'understood' | 'skipped' | 'alternative';
+};
+
+/** What `decide` needs of a bot's memory, whichever way it forgets. */
+export interface BotMemory {
+  setTime(when: When): void;
+  /** The chance the bot recalls this word in this dimension right now, before any guessing. */
+  recall(word: string, dimension: Dimension): number;
+  /** Practice: the card the bot just answered, with its outcome. */
+  learn(word: string, event: LearnEvent): void;
+}

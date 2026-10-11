@@ -9,6 +9,7 @@ import {
   dictLexemes,
   dictVariants,
   questions,
+  glossMemory,
   glossProgress,
   sessionProgress,
   sessionQuestions,
@@ -75,6 +76,15 @@ export async function readProgress(db: Db, enrollmentId: string): Promise<Stored
     .orderBy(asc(glossProgress.glossId), asc(glossProgress.dimension));
 }
 
+/** Every memory row of one enrollment, ordered by gloss and dimension (phase 35). */
+export async function readMemory(db: Db, enrollmentId: string) {
+  return db
+    .select()
+    .from(glossMemory)
+    .where(eq(glossMemory.enrollmentId, enrollmentId))
+    .orderBy(asc(glossMemory.glossId), asc(glossMemory.dimension));
+}
+
 /** One session's snapshot rows, ordered by gloss and dimension. */
 export async function readSnapshot(db: Db, sessionId: string) {
   return db
@@ -89,12 +99,38 @@ export async function readSnapshot(db: Db, sessionId: string) {
     .orderBy(asc(sessionProgress.glossId), asc(sessionProgress.dimension));
 }
 
-/** The UTC date of a session's last answer: the day the rule counts it for. */
-export async function sessionDay(db: Db, sessionId: string): Promise<string> {
-  const rows = await db.execute<{ day: string }>(sql`
-    select ((max(answered_at)) at time zone 'UTC')::date::text as day
-    from answers where session_id = ${sessionId}`);
+/** The day the rule counts a session for: its stored practice_day (phase 35). */
+export async function sessionDay(db: Db, sessionId: string): Promise<string | null> {
+  const rows = await db.execute<{ day: string | null }>(sql`
+    select practice_day::text as day from sessions where id = ${sessionId}`);
   return rows.rows[0].day;
+}
+
+/** Phase 35. One gloss's memory rows, as stored. */
+export function readGlossMemory(db: Db, glossId: string) {
+  return db.select().from(glossMemory).where(eq(glossMemory.glossId, glossId));
+}
+
+/** Phase 35. Memory rows written directly, for a history no session made. */
+export async function insertGlossMemory(db: Db, rows: (typeof glossMemory.$inferInsert)[]): Promise<void> {
+  await db.insert(glossMemory).values(rows);
+}
+
+/** Puts one progress row at a level that last stepped on `lastStepOn`. */
+export async function setLastStep(
+  db: Db,
+  input: { enrollmentId: string; glossId: string; dimension: Dimension; level: number; lastStepOn: string },
+): Promise<void> {
+  await db
+    .update(glossProgress)
+    .set({ level: input.level, lastStepOn: input.lastStepOn })
+    .where(
+      and(
+        eq(glossProgress.enrollmentId, input.enrollmentId),
+        eq(glossProgress.glossId, input.glossId),
+        eq(glossProgress.dimension, input.dimension),
+      ),
+    );
 }
 
 /** The gloss and form of each question at `positions` of a session, as save
@@ -209,6 +245,10 @@ export async function insertAnsweredSession(
         answeredAt: sql`${a.at}::timestamptz`,
       })),
     );
+    // Phase 35. An ended session carries the day of its last answer, as the migration's backfill sets it.
+    await db.execute(sql`
+      update sessions set practice_day = (select ((max(answered_at)) at time zone 'UTC')::date from answers where session_id = ${session.id})
+      where id = ${session.id} and status in ('completed', 'skipped')`);
   }
   return session.id;
 }
@@ -217,7 +257,7 @@ export async function insertAnsweredSession(
  * Makes every insert into `table` fail, to prove a write is all-or-nothing.
  * The database is the test's own clone, so the trigger goes with it.
  */
-export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss_progress'): Promise<void> {
+export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss_progress' | 'gloss_memory'): Promise<void> {
   await db.execute(
     sql.raw(`
       create function fail_insert() returns trigger language plpgsql as $$

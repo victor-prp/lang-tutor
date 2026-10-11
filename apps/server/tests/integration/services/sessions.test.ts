@@ -124,8 +124,9 @@ describe('createNextSession', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0].data.session_id).toBe(created.sessionId);
     expect(jobs[0].data.picks).toHaveLength(SESSION_LENGTH);
-    // Phase 24: listening on, and the ordinal is the list sessions before this one (none).
-    expect(jobs[0].data).toMatchObject({ listening: true, ordinal: 0 });
+    // Phase 24: listening on. Phase 35 (spec D6): no rotation step.
+    expect(jobs[0].data).toMatchObject({ listening: true });
+    expect(jobs[0].data).not.toHaveProperty('ordinal');
     expect(jobs[0].data.picks.every((p) => saved.glossIds.includes(p.gloss_id))).toBe(true);
     // Phase 31: each pick names its gloss, and the sense its saved form renders.
     expect(jobs[0].data.picks.every((p) => saved.senseIds[saved.glossIds.indexOf(p.gloss_id)] === p.sense_id)).toBe(true);

@@ -1,4 +1,4 @@
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+import { DIMENSIONS, MAX_LEVEL, MIN_LEVEL, SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { z } from 'zod';
 
 /**
@@ -56,17 +56,25 @@ export const PrepareSessionPayloadSchema = z.object({
         gloss_id: z.string().min(1),
         sense_id: z.string().min(1),
         variant_id: z.string().min(1),
+        // Phase 35 (spec D5, D6). The dimension the pick tests and its rung,
+        // chosen at create time, with the level and R the job's card choice
+        // reads. Defaults for a job enqueued before the deploy: a new word.
+        dimension: z.enum(DIMENSIONS).default('written_receptive'),
+        rung: z.union([z.literal(1), z.literal(2)]).default(1),
+        level: z.number().int().min(MIN_LEVEL).max(MAX_LEVEL).default(MIN_LEVEL),
+        r: z.number().min(0).max(1).nullable().default(null),
       }),
     )
     .min(1)
     .max(SESSION_LENGTH),
-  // Phase 24 (spec D5, D3). Absent in a job enqueued before the deploy: such a
-  // session gets no listening cards, and the rotation's first step.
+  // Phase 24 (spec D5). Absent in a job enqueued before the deploy: such a
+  // session gets no listening cards.
   listening: z.boolean().default(false),
   // Phase 25 (spec D4). Absent in a job enqueued before the deploy: such a
   // session gets no speaking cards.
   speaking: z.boolean().default(false),
-  ordinal: z.number().int().nonnegative().default(0),
+  // Phase 24's `ordinal`, the rotation's step, is gone with the rotation (phase
+  // 35, spec D6). A job enqueued before the deploy still parses: the key is dropped.
 });
 export type PrepareSessionPayload = z.infer<typeof PrepareSessionPayloadSchema>;
 

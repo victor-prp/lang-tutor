@@ -304,15 +304,17 @@ export function createVocabularyRepo(tx: Tx) {
 
     /** Every saved gloss of one enrollment with its key and the form it was saved
      *  from, for picking a list session (spec D12, D18). Ordered so a seeded rng
-     *  picks reproducibly. */
+     *  picks reproducibly. Phase 35 (spec D5): with when it was saved, in UTC to
+     *  the microsecond and fixed width, so the text sorts by time. */
     listSavedGlosses: async (enrollmentId: string): Promise<SavedGloss[]> => {
-      const rows = await tx.execute<{ gloss_id: string; key: string; variant_id: string }>(sql`
-        SELECT ve.gloss_id, g.key, ve.variant_id
+      const rows = await tx.execute<{ gloss_id: string; key: string; variant_id: string; saved_at: string }>(sql`
+        SELECT ve.gloss_id, g.key, ve.variant_id,
+               to_char(ve.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS saved_at
         FROM vocabulary_entries ve
         JOIN dict_glosses g ON g.id = ve.gloss_id
         WHERE ve.enrollment_id = ${enrollmentId}
         ORDER BY ve.gloss_id`);
-      return rows.rows.map((row) => ({ glossId: row.gloss_id, key: row.key, variantId: row.variant_id }));
+      return rows.rows.map((row) => ({ glossId: row.gloss_id, key: row.key, variantId: row.variant_id, savedAt: row.saved_at }));
     },
 
     countEntries: async (enrollmentId: string): Promise<number> => {

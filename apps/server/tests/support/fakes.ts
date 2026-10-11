@@ -23,6 +23,7 @@ import type { TranslationService } from '../../src/services/translations';
 import type { GrantService } from '../../src/services/grants';
 import type { VocabularyService } from '../../src/services/vocabulary';
 import type { UserService } from '../../src/services/users';
+import type { BotService } from '../../src/services/bots';
 
 export type FakeLogger = Logger & {
   events: Record<string, unknown>[];
@@ -113,7 +114,17 @@ export function createFakeAppDeps(): AppDeps {
     auth: { handler: async () => new Response(null, { status: 500 }), paths: [] },
     signedIn: { sessionOf: async () => null },
     webOrigins: ['https://web.example.test'],
+    bots: null,
   };
+}
+
+/** Phase 35. The bot route's deps for a document-shape test: mounted, unreachable. */
+export function createFakeBots(): NonNullable<AppDeps['bots']> {
+  const unreachable = (): never => {
+    throw new Error('a document-shape test must not reach a collaborator');
+  };
+  const service: BotService = { signIn: unreachable, setDay: unreachable };
+  return { secret: 'x'.repeat(32), service };
 }
 
 /**
@@ -207,8 +218,16 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
       rows.push(user);
       return user;
     },
+    findDayContext: async (userId) =>
+      rows.some((row) => row.id === userId) ? { kind: 'learner' } : undefined,
     findByUsername: async (username) => rows.find((row) => row.username === username),
     findById: async (id) => rows.find((row) => row.id === id),
+    // Phase 35. Every row here is a learner, so no name names a bot.
+    insertBot: async () => {
+      throw new Error('the in-memory user repo holds learners only');
+    },
+    findBotByName: async () => undefined,
+    setBotDay: async () => false,
   };
 }
 
@@ -249,6 +268,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     gloss: repos.gloss ?? unreachableRepo('gloss repo'),
     vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
     progress: repos.progress ?? unreachableRepo('progress repo'),
+    memory: repos.memory ?? unreachableRepo('memory repo'),
     jobs: repos.jobs ?? unreachableRepo('jobs repo'),
     photoImport: repos.photoImport ?? unreachableRepo('photo import repo'),
   };

@@ -303,8 +303,9 @@ export const STUB_WRONG_HEBREW = ['דלת', 'קיר', 'תקרה'];
 export const STUB_WRONG_ENGLISH = ['door', 'wall', 'ceiling'];
 export const STUB_ALTERNATIVE = 'volume';
 
-/** Phase 23's cycle of tasks: what a test's session of up to six words asks at
- *  ordinal 0 with listening off, at every position that asks anything. */
+/** The default tasks: meaning, word, typed, repeating, what a multiple choice,
+ *  a reverse choice and a typed translation ask, in that order. A test whose
+ *  picks plan other cards (phase 35, spec D6) passes its own. */
 const CYCLE_TASKS: Task[] = Array.from({ length: 10 }, (_, i) => (['meaning', 'word', 'typed'] as const)[i % 3]);
 
 export const STUB_SENTENCE = 'Tome sprint lantern kettle pillow ladder bucket violin turtle lizard';

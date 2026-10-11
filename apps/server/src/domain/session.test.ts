@@ -10,10 +10,9 @@ import {
   missedQuestions,
   newSessionRecord,
   nextSource,
-  pickGlosses,
   pickRendering,
-  pickSenses,
   pendingRetryOf,
+  shuffle,
   positionOf,
   sessionScore,
   step,
@@ -240,22 +239,19 @@ describe('sessionScore and missedQuestions', () => {
   });
 });
 
-describe('pickSenses', () => {
+describe('shuffle', () => {
   const entries = Array.from({ length: 12 }, (_, i) => ({ glossId: `s${i}` }));
 
-  it('takes at most `max`, with no repeats', () => {
-    const picked = pickSenses(entries, 10, testRng(3));
-    expect(picked).toHaveLength(10);
-    expect(new Set(picked.map((e) => e.glossId)).size).toBe(10);
-  });
-
-  it('takes all of a shorter list', () => {
-    expect(pickSenses(entries.slice(0, 4), 10, testRng(3))).toHaveLength(4);
+  it('keeps every entry once', () => {
+    const shuffled = shuffle(entries, testRng(3));
+    expect(shuffled).toHaveLength(12);
+    expect(new Set(shuffled.map((e) => e.glossId)).size).toBe(12);
   });
 
   it('is a pure function of the rng, and leaves its input alone', () => {
     const copy = [...entries];
-    expect(pickSenses(entries, 10, testRng(5))).toEqual(pickSenses(entries, 10, testRng(5)));
+    expect(shuffle(entries, testRng(5))).toEqual(shuffle(entries, testRng(5)));
+    expect(shuffle(entries, testRng(5))).not.toEqual(entries);
     expect(entries).toEqual(copy);
   });
 });
@@ -325,23 +321,9 @@ describe('phase 25 speaking cards in step', () => {
   });
 });
 
-const saved = (glossId: string, key: string, variantId = `v-${glossId}`): SavedGloss => ({ glossId, key, variantId });
+const saved = (glossId: string, key: string, variantId = `v-${glossId}`): SavedGloss => ({ glossId, key, variantId, savedAt: '' });
 const rendering = (glossId: string, variantId: string, gloss: string, senseId = 's1', form = variantId): GlossRendering => ({
   glossId, senseId, variantId, form, gloss, rank: 0,
-});
-
-describe('pickGlosses (spec D18)', () => {
-  it('never picks two glosses with one key, and picks either of them', () => {
-    const list = [saved('g_book', 'להזמין'), saved('g_order', 'לְהַזְמִין'), saved('g_cat', 'חתול'), saved('g_dog', 'כלב')];
-    const seen = new Set<string>();
-    for (let seed = 1; seed <= 20; seed++) {
-      const picked = pickGlosses(list, 10, testRng(seed)).map((gloss) => gloss.glossId);
-      expect(picked.filter((id) => id === 'g_book' || id === 'g_order')).toHaveLength(1);
-      expect(picked).toHaveLength(3);
-      picked.forEach((id) => seen.add(id));
-    }
-    expect(seen).toEqual(new Set(['g_book', 'g_order', 'g_cat', 'g_dog']));
-  });
 });
 
 describe('askableRenderings (spec D12)', () => {

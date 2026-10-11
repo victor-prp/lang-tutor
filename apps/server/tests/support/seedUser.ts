@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 
+import { createBots } from '../../src/db/bots';
 import type { Db } from '../../src/db/client';
 import { authUsers, enrollments, sessions, users } from '../../src/db/schema';
 
@@ -35,6 +36,23 @@ export async function seedUser(db: Db, id: string): Promise<void> {
     .values({ id, username: id, displayName: `test ${id}`, age: 30, nativeLanguage: 'he' })
     .onConflictDoNothing();
   await seedEnrollment(db, { id: enrollmentOf(id), userId: id, targetLanguage: 'en' });
+}
+
+/** Phase 35 (spec D11). Turns a seeded learner into a bot on `botDay`. */
+export async function makeBot(db: Db, id: string, botDay: string): Promise<void> {
+  await db.update(users).set({ kind: 'bot', botDay }).where(eq(users.id, id));
+}
+
+/** Phase 35 (spec D11). A bot as `npm run db:bots:create` makes one. */
+export async function seedBot(db: Db, name: string, day: string): Promise<void> {
+  await createBots(db, { names: [name], day });
+}
+
+/** Phase 35. The day a profile is on: null for a learner. */
+export async function botDayOf(db: Db, username: string): Promise<string | null> {
+  const [row] = await db.select({ day: users.botDay }).from(users).where(eq(users.username, username));
+  if (!row) throw new Error(`no profile ${username}`);
+  return row.day;
 }
 
 /** A Hebrew-explained enrollment under an id the caller chooses. */

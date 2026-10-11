@@ -11,6 +11,7 @@ import { dropLaneDatabases, findOrphans, listLaneDatabases, liveWorktreesOf } fr
 import { requestLemmaRenders, requestLemmaRendersOnStart } from './lemmaRenders';
 import { runMigrations } from './migrate';
 import { createAuthRepo } from '../repo/auth';
+import { createBots } from './bots';
 import { recomputeProgress } from './progressRecompute';
 import { reseedContent } from './reseed';
 import { seedContent } from './seed';
@@ -55,6 +56,11 @@ function argValue(flag: string): string | undefined {
  *  developer's ad-hoc export back into the repo's dataset folder. */
 function correctionsPathFor(dictionaryPath: string): string {
   return join(dirname(dictionaryPath), 'corrections.jsonl');
+}
+
+/** Every argument that is neither a flag nor the value of `--day`: the bot names. */
+function botNamesFrom(argv: string[]): string[] {
+  return argv.slice(2).filter((arg, i, args) => !arg.startsWith('--') && args[i - 1] !== '--day');
 }
 
 /** `--lane-down <name>`, or the current lane when the name is omitted. */
@@ -265,6 +271,26 @@ async function main(): Promise<void> {
       } as const;
       (outcome === 'claimed' ? console.log : console.error)(messages[outcome]);
       if (outcome !== 'claimed') process.exitCode = 1;
+      return;
+    }
+
+    // Phase 35 (spec D11). The only way a bot profile comes to exist. Run by
+    // Victor against production; idempotent, so a name that already is a bot is
+    // reported and left alone, its day included. The day is given rather than
+    // read from the clock: a bot's day is its own (ADR 0013), and the driver
+    // sets it before every run in any case.
+    if (process.argv.includes('--create-bots')) {
+      const day = argValue('--day');
+      const names = botNamesFrom(process.argv);
+      if (!day || names.length === 0) {
+        console.error('usage: npm run db:bots:create -- --day <YYYY-MM-DD> <name>…');
+        process.exitCode = 1;
+        return;
+      }
+      const { created, existing } = await createBots(db, { names, day });
+      for (const name of created) console.log(`created bot ${name} (${name}@bots.invalid) on ${day}`);
+      for (const name of existing) console.log(`bot ${name} already exists; unchanged`);
+      console.log(`${created.length} created, ${existing.length} already there, in ${shownUrl}`);
       return;
     }
 

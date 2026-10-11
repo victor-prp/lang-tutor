@@ -10,6 +10,7 @@ import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
 import { createAuthRepo } from './repo/auth';
 import { createGlossRepo } from './repo/glosses';
 import { createHealthRepo, type HealthRepo } from './repo/health';
+import { createMemoryRepo } from './repo/memory';
 import { createJobRepo, type JobRepo } from './repo/jobs';
 import { createPhotoImportRepo } from './repo/photoImports';
 import { createProgressRepo } from './repo/progress';
@@ -20,6 +21,7 @@ import { createGrantRepo } from './repo/grants';
 import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
+import { createBotService, type BotService, type MintSession } from './services/bots';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
 import { createGlossService, type GlossService } from './services/glosses';
 import type { LlmClient, VisionClient } from './services/llm';
@@ -71,6 +73,9 @@ export type AppDeps = {
   signedIn: SessionReader;
   // Phase 29 (spec D15). The browser origins CORS admits, with credentials.
   webOrigins: string[];
+  // Phase 35 (spec D12). The bot route's secret and use cases, or null, which
+  // leaves the route unmounted: every lane, CI and every test that sets none.
+  bots: { secret: string; service: BotService } | null;
 };
 
 // A tool that enqueues nothing gets a jobs repository that says so.
@@ -91,6 +96,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     dict: createDictRepo(tx),
     vocabulary: createVocabularyRepo(tx),
     progress: createProgressRepo(tx),
+    memory: createMemoryRepo(tx),
     jobs: boss ? createJobRepo(tx, boss) : NO_JOBS,
     photoImport: createPhotoImportRepo(tx),
     gloss: createGlossRepo(tx),
@@ -135,6 +141,8 @@ export function createServerDeps(io: {
   judgeTimeoutMs: number;
   identity: ServerIdentity;
   webDistDir: string | null;
+  // Phase 35 (spec D12). BOT_SECRET, or null where it is unset.
+  botSecret: string | null;
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
   boss: PgBoss;
@@ -240,6 +248,9 @@ export function createServerDeps(io: {
   });
 
   const translations = createTranslationService({ llm, transaction, logger: io.logger, now: io.now });
+  // Phase 35 (spec D12). The one place that hands Better Auth's session minting
+  // to the use case that needs it (ADR 0001 R13).
+  const mintSession: MintSession = authModule.mintSession;
 
   return {
     sessions: createSessionService({
@@ -278,6 +289,7 @@ export function createServerDeps(io: {
     auth: { handler: authModule.handler, paths: authModule.paths },
     signedIn: { sessionOf: authModule.sessionOf },
     webOrigins: io.auth.webOrigins,
+    bots: io.botSecret ? { secret: io.botSecret, service: createBotService({ transaction, mintSession }) } : null,
   };
 }
 

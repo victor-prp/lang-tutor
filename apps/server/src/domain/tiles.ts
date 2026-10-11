@@ -1,5 +1,5 @@
 import { stripStress } from './languages';
-import { pickSenses } from './session';
+import { shuffle } from './session';
 
 /**
  * Phase 24 (spec D11). Letter tiles: which words can be built from tiles, and
@@ -30,6 +30,5 @@ export function tilesFor(form: string, alphabet: string, rng: () => number): str
   const pool = [...alphabet];
   const extras = Array.from({ length: EXTRA_TILES }, () => pool[Math.floor(rng() * pool.length)]);
   const all = [...letters, ...extras];
-  // pickSenses keeping every entry is a uniform shuffle.
-  return pickSenses(all, all.length, rng);
+  return shuffle(all, rng);
 }

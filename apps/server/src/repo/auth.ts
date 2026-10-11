@@ -1,6 +1,6 @@
 import { and, count, eq, gte, lt, ne } from 'drizzle-orm';
 
-import type { Db } from '../db/client';
+import type { Db, Tx } from '../db/client';
 import { authCodeSends, authUsers, users } from '../db/schema';
 import { createTransaction } from '../db/transaction';
 import { isUniqueViolation } from './pgErrors';
@@ -51,7 +51,12 @@ export function createAuthRepo(db: Db) {
       const email = normalizeEmail(input.email);
       try {
         return await inTransaction(async (tx): Promise<ClaimOutcome> => {
-          const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.username, input.username));
+          // Phase 35 (spec D11). A bot's identity is `.invalid` too, and is never
+          // claimed: a real address on it would let a person sign in as the bot.
+          const [user] = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(and(eq(users.username, input.username), eq(users.kind, 'learner')));
           if (!user) return 'no_such_user';
           const [identity] = await tx.select({ email: authUsers.email }).from(authUsers).where(eq(authUsers.id, user.id));
           if (!identity || !isUnclaimed(identity.email)) return 'already_claimed';
@@ -74,3 +79,22 @@ export function createAuthRepo(db: Db) {
 }
 
 export type AuthRepo = ReturnType<typeof createAuthRepo>;
+
+/**
+ * Phase 35 (spec D11, ruling 4). A bot's sign-in identity, written inside the
+ * caller's transaction so db/bots.ts can create it and the profile together.
+ * Shaped like migration 0022's unclaimed identities: an address in the reserved
+ * `.invalid` domain, which no code is ever sent to, and never verified.
+ */
+export function createBotIdentityRepo(tx: Tx) {
+  return {
+    insertIdentity: async (input: { name: string; email: string }): Promise<string> => {
+      if (!isUnclaimed(input.email)) throw new Error(`a bot's address must be .invalid: ${input.email}`);
+      const [row] = await tx
+        .insert(authUsers)
+        .values({ name: input.name, email: normalizeEmail(input.email), emailVerified: false })
+        .returning({ id: authUsers.id });
+      return row.id;
+    },
+  };
+}

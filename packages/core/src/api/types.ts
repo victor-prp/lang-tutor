@@ -9,6 +9,9 @@ import type {
   SignOutResponseSchema,
   AuthErrorSchema,
   MeResponseSchema,
+  BotSignInRequestSchema,
+  BotSignInResponseSchema,
+  BotDayRequestSchema,
   AnswerRecordSchema,
   CreateEnrollmentRequestSchema,
   CreateGrantRequestSchema,
@@ -222,3 +225,6 @@ export type GetSessionResponse = z.infer<typeof GetSessionResponseSchema>;
 export type SignOutResponse = z.infer<typeof SignOutResponseSchema>;
 export type AuthError = z.infer<typeof AuthErrorSchema>;
 export type MeResponse = z.infer<typeof MeResponseSchema>;
+export type BotSignInRequest = z.infer<typeof BotSignInRequestSchema>;
+export type BotSignInResponse = z.infer<typeof BotSignInResponseSchema>;
+export type BotDayRequest = z.infer<typeof BotDayRequestSchema>;

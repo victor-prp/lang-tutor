@@ -6,6 +6,7 @@ import type { PgBoss } from 'pg-boss';
 import type { AppDeps } from '../../../src/composition';
 import { CHECK_MARKER } from '../../../src/domain/check';
 import type { Task } from '../../../src/domain/distractors';
+import type { PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
@@ -59,6 +60,27 @@ afterEach(async () => {
 
 type Saved = { variantId: string; glossIds: string[]; senseIds: string[] };
 const pick = (word: Saved, i = 0) => ({ gloss_id: word.glossIds[i], sense_id: word.senseIds[i], variant_id: word.variantId });
+
+// Phase 35 (spec D6). The job chooses each pick's card from the dimension, rung,
+// level and R the pick carries, highest chance of success first; these picks
+// name theirs. THREE is a multiple choice, a reversed card and a typed
+// translation, in that order (p 1, 0.78, 0.7).
+type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r'>>;
+const PICK_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.5 }; // reverse or cloze choice, p 0.78
+/** Typed recall of the form, p = R: typed translation, typed cloze, sentence translation in turn. */
+const produce = (r: number): Card => ({ dimension: 'written_productive', rung: 2, level: 3, r });
+const THREE: Card[] = [{}, PICK_FORM, produce(0.7)];
+const steered = <P extends object>(picks: P[], cards: Card[]) => picks.map((p, i) => ({ ...p, ...cards[i] }));
+/** A typed meaning, a tiles card and a sentence translation, then a typed
+ *  translation and a typed cloze, asked last, which a sentence translation
+ *  needs before it (p 0.99, 0.9, 0.88, 0.6, 0.5). */
+const SENTENCE_CARDS: Card[] = [
+  { dimension: 'written_receptive', rung: 2, level: 3, r: 0.99 },
+  { dimension: 'written_productive', rung: 1, level: 1, r: 0.81 },
+  produce(0.6),
+  produce(0.5),
+  produce(0.88),
+];
 const saved = (enrollmentId: string, lemma: string, translations: string[], over: { partOfSpeech?: string; languageCode?: string } = {}) =>
   seedSavedSenses(t.db, { enrollmentId, lemma, translations, partOfSpeech: over.partOfSpeech ?? 'verb', languageCode: over.languageCode });
 
@@ -66,7 +88,7 @@ const saved = (enrollmentId: string, lemma: string, translations: string[], over
 async function prepared(
   enrollmentId: string,
   picks: ReturnType<typeof pick>[],
-  ordinal: number,
+  cards: Card[],
   batch: { tasks: Task[]; overrides?: Record<string, Record<string, unknown>> },
   check: Parameters<typeof expectCheck>[1] = {},
 ) {
@@ -74,7 +96,7 @@ async function prepared(
   await expectDistractors(ns, batch);
   await expectCheck(ns, check);
   const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', enrollmentId));
-  await deps.sessions.prepareSession({ session_id: sessionId, picks, listening: false, speaking: false, ordinal });
+  await deps.sessions.prepareSession({ session_id: sessionId, picks: steered(picks, cards), listening: false, speaking: false });
   const record = await deps.sessions.getSession('u_1', sessionId);
   expect(record.status).toBe('ready');
   return { sessionId, questions: record.questions };
@@ -92,7 +114,7 @@ describe('the known-right set and the checker, through the database', () => {
     const pickUp = await saved(EN, 'pick up', ['לענות', 'להרים']);
     const table = await saved(EN, 'table', ['שולחן'], { partOfSpeech: 'noun' });
     const lamp = await saved(EN, 'lamp', ['מנורה'], { partOfSpeech: 'noun' });
-    const { questions } = await prepared(EN, [pick(pickUp, 0), pick(table), pick(lamp)], 0, {
+    const { questions } = await prepared(EN, [pick(pickUp, 0), pick(table), pick(lamp)], THREE, {
       tasks: CHOICE_TASKS,
       overrides: { q1: { distractors: ['להרים', 'לכתוב', 'לשיר', 'לרקוד'] } },
     });
@@ -114,7 +136,7 @@ describe('the known-right set and the checker, through the database', () => {
     });
     const table = await saved(EN, 'table', ['שולחן'], { partOfSpeech: 'noun' });
     const lamp = await saved(EN, 'lamp', ['מנורה'], { partOfSpeech: 'noun' });
-    const { questions } = await prepared(EN, [pick(saw), pick(table), pick(lamp)], 0, {
+    const { questions } = await prepared(EN, [pick(saw), pick(table), pick(lamp)], THREE, {
       tasks: CHOICE_TASKS,
       overrides: { q1: { distractors: ['ראה', 'לשייף', 'לקדוח', 'לשבור'] } },
     });
@@ -132,7 +154,7 @@ describe('the known-right set and the checker, through the database', () => {
     });
     await t.db.execute(sql`update dict_var_translations set accepted_answers = array['presto']::text[], accepted_at = now() where variant_id = ${subito.variantIds[0]}`);
     const cane = await saved(IT, 'cane', ['כלב'], { languageCode: 'it', partOfSpeech: 'noun' });
-    const { questions } = await prepared(IT, [pick(casa), pick(ora), pick(cane)], 0, {
+    const { questions } = await prepared(IT, [pick(casa), pick(ora), pick(cane)], THREE, {
       tasks: CHOICE_TASKS,
       overrides: { q2: { distractors: ['presto', 'subito', 'sempre', 'mai', 'ieri'] } },
     });
@@ -148,7 +170,7 @@ describe('the known-right set and the checker, through the database', () => {
     const { questions } = await prepared(
       EN,
       [pick(blowUp), pick(table), pick(lamp)],
-      0,
+      THREE,
       { tasks: CHOICE_TASKS, overrides: { q1: { distractors: ['להרוס', 'לקפל', 'לשבור', 'לצבוע', 'לבשל', 'לכתוב'] } } },
       { overrides: { q1: { options: [true, false, false, false, false, false] } } },
     );
@@ -162,16 +184,19 @@ describe('the known-right set and the checker, through the database', () => {
     const saw = await saved(EN, 'saw', ['לנסר']);
     const lamp = await saved(EN, 'lamp', ['מנורה'], { partOfSpeech: 'noun' });
     const combine = await saved(EN, 'combine', ['לשלב']);
+    const river = await saved(EN, 'river', ['נהר'], { partOfSpeech: 'noun' });
+    const bread = await saved(EN, 'bread', ['לחם'], { partOfSpeech: 'noun' });
+    const picks = [pick(saw), pick(lamp), pick(river), pick(bread), pick(combine)];
     const batch = {
-      tasks: ['meaning', 'meaning', 'translate'] as Task[],
+      tasks: ['meaning', 'meaning', 'translate', 'typed', 'sentence'] as Task[],
       overrides: { q3: { sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces.", gap: 'combine' } },
     };
-    const joined = await prepared(EN, [pick(saw), pick(lamp), pick(combine)], 2, batch, { overrides: { q3: { natural_translation: "Let's join forces." } } });
+    const joined = await prepared(EN, picks, SENTENCE_CARDS, batch, { overrides: { q3: { natural_translation: "Let's join forces." } } });
     expect(joined.questions[2]).toMatchObject({ type: 'typed_translation', question: 'לשלב', answer: 'combine' });
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'sentence_degraded', position: 2, type: 'sentence_translation' }));
     await deps.sessions.skipSession('u_1', joined.sessionId);
 
-    const kept = await prepared(EN, [pick(saw), pick(lamp), pick(combine)], 2, batch, { overrides: { q3: { natural_translation: "Let's combine our forces." } } });
+    const kept = await prepared(EN, picks, SENTENCE_CARDS, batch, { overrides: { q3: { natural_translation: "Let's combine our forces." } } });
     expect(kept.questions[2]).toMatchObject({ type: 'sentence_translation', question: 'בואו נשלב כוחות.' });
   });
 
@@ -183,7 +208,7 @@ describe('the known-right set and the checker, through the database', () => {
     await expectCheck(ns, { status: 500 });
     const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN));
     await expect(
-      deps.sessions.prepareSession({ session_id: sessionId, picks: [pick(blowUp), pick(table), pick(lamp)], listening: false, speaking: false, ordinal: 0 }),
+      deps.sessions.prepareSession({ session_id: sessionId, picks: steered([pick(blowUp), pick(table), pick(lamp)], THREE), listening: false, speaking: false }),
     ).rejects.toThrow();
     expect((await deps.sessions.getSession('u_1', sessionId)).status).toBe('preparing');
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_preparation_attempt_failed', stage: 'checker' }));

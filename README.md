@@ -128,13 +128,14 @@ enforced.
 | [0010](docs/adr/adr-0010-single-container-migrations.md) | Production is one container, which migrates the database before it serves — `scale = 1` in `terraform/prod`, the Dockerfile's `CMD` migrates first, nothing overrides it |
 | [0011](docs/adr/adr-0011-learner-unit-is-the-gloss.md) | The learner's unit is the gloss — the learner's tables hold gloss ids rather than sense ids, senses stay the dictionary's, and no table outside the `dict_` prefix references `dict_senses` or `dict_var_translations` |
 | [0012](docs/adr/adr-0012-native-client-releases.md) | The Android app ships with every release, after the server, by fingerprint — an update lands only on a matching build, builds go to Play's internal track, and `X-Api-Level` is named only in `packages/core` |
+| [0013](docs/adr/adr-0013-learner-day.md) | A learner's day comes from one place — only `services/learnerDay.ts` computes a progress day, `bot_day` is read and written only in `repo/users.ts`, and `routes/bots.ts` is the only route file naming the bot kind or its secret |
 
-All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 = 68 checks, grep only, no deps,
+All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 + 3 = 71 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
 
-Twenty-six tables, all in `apps/server/src/db/schema.ts`, whose comments describe every
+Twenty-seven tables, all in `apps/server/src/db/schema.ts`, whose comments describe every
 one. These are the ones the rest of this README leans on:
 
 | Table | Holds |
@@ -748,7 +749,8 @@ air within minutes of a release, native changes through Play
 ([phase 32 design](docs/superpowers/specs/2026-10-11-lang-tutor-phase-32-android-app-design.md),
 [ADR 0012](docs/adr/adr-0012-native-client-releases.md)). The one-time setup, what each release
 prints, and Play's data-safety answers are in the [Android runbook](docs/runbooks/android.md).
-Until that setup is done, the `android` job skips, green.
+The repository variable `ANDROID_RELEASE` switches it: the `android` job ships only when it
+is `on`, and otherwise skips, green.
 
 A change that breaks older clients raises `API_LEVEL` in `packages/core/src/apiLevel.ts` by one,
 in the same PR: an installed app can be a day or two behind the server, and the server answers it

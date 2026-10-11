@@ -231,15 +231,14 @@ export function nextSource(hasAnySession: boolean): SessionSource {
   return hasAnySession ? 'list' : 'seed';
 }
 
-/** Up to `max` entries, uniformly at random under the injected rng, without
- *  repeats. A copy: the caller's array is left alone. */
-export function pickSenses<T>(entries: readonly T[], max: number, rng: () => number): T[] {
+/** A uniform shuffle under the injected rng. A copy: the caller's array is left alone. */
+export function shuffle<T>(entries: readonly T[], rng: () => number): T[] {
   const shuffled = [...entries];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
-  return shuffled.slice(0, max);
+  return shuffled;
 }
 
 /** A session row as the use cases read it before changing its status. */
@@ -261,30 +260,13 @@ export type SessionSummary = {
   total: number;
 };
 
-/** Phase 31. A saved gloss as a session picks it: its key, and the form it was saved from. */
-export type SavedGloss = { glossId: string; key: string; variantId: string };
+/** Phase 31. A saved gloss as a session picks it: its key, and the form it was saved from.
+ *  Phase 35: and when it was saved, a sortable UTC timestamp (newest new words first, D5). */
+export type SavedGloss = { glossId: string; key: string; variantId: string; savedAt: string };
 
 /** Phase 31 (spec D12). One rendering of one member of a gloss, by one form, with
  *  the citation form the model gave it. */
 export type GlossRendering = { glossId: string; senseId: string; variantId: string; form: string; gloss: string; rank: number };
-
-/**
- * Spec D18. Up to `max` saved glosses, uniformly at random, at most one per
- * normalised key: `book` and `order` both saved under להזמין give one card, so a
- * session never asks one target word twice. Which of them is uniform too.
- */
-export function pickGlosses(saved: readonly SavedGloss[], max: number, rng: () => number): SavedGloss[] {
-  const keys = new Set<string>();
-  const picked: SavedGloss[] = [];
-  for (const gloss of pickSenses(saved, saved.length, rng)) {
-    const key = normaliseGloss(gloss.key);
-    if (keys.has(key)) continue;
-    keys.add(key);
-    picked.push(gloss);
-    if (picked.length === max) break;
-  }
-  return picked;
-}
 
 /**
  * Spec D12. The renderings a session may ask for a gloss: every form of every
@@ -293,7 +275,7 @@ export function pickGlosses(saved: readonly SavedGloss[], max: number, rng: () =
  * misspelt citation form) and always may be asked the one they saved. Ordered by
  * variant and sense, so a seeded rng picks reproducibly.
  */
-export function askableRenderings(gloss: SavedGloss, renderings: readonly GlossRendering[]): GlossRendering[] {
+export function askableRenderings(gloss: Omit<SavedGloss, 'savedAt'>, renderings: readonly GlossRendering[]): GlossRendering[] {
   const key = normaliseGloss(gloss.key);
   return renderings
     .filter(

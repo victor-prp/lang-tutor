@@ -1,7 +1,7 @@
 # ADR 0003: OpenAPI generated from the wire contract
 
 - **Status:** Accepted
-- **Date:** 2026-09-06; R1's exception widened 2026-10-08 (phase 29)
+- **Date:** 2026-09-06; R1's exception widened 2026-10-08 (phase 29) and 2026-10-11 (phase 35)
 - **Source:** [phase 7 design](../superpowers/specs/2026-09-05-lang-tutor-phase-7-openapi-design.md)
 
 ## Decision
@@ -30,7 +30,7 @@ apps/server/src/
 
 | # | Subject | May do | Must not do |
 |---|---|---|---|
-| R1 | `apps/server/src/routes/`, `app.ts` | Declare an endpoint via `createRoute` + `router.openapi(...)` / `app.openapi(...)` | Register an API endpoint with a raw Hono verb (`.get(`, `.post(`, `.put(`, `.patch(`, `.delete(`) — the exceptions are the `/docs` UI mount and the four `/api/auth/*` Better Auth mounts plus the `/api/auth/*` 404 in `app.ts` ([ADR 0009](adr-0009-sign-in.md)), whose paths are published through `routes/authDocs.ts`; test files (`*.test.ts`) are not scanned |
+| R1 | `apps/server/src/routes/`, `app.ts` | Declare an endpoint via `createRoute` + `router.openapi(...)` / `app.openapi(...)` | Register an API endpoint with a raw Hono verb (`.get(`, `.post(`, `.put(`, `.patch(`, `.delete(`) — the exceptions are the `/docs` UI mount and the four `/api/auth/*` Better Auth mounts plus the `/api/auth/*` 404 in `app.ts` ([ADR 0009](adr-0009-sign-in.md)), whose paths are published through `routes/authDocs.ts`, and the `/api/bots/*` 404 in `app.ts` (phase 35), which answers a plain 404 for an unmounted bot route before the session middleware; test files (`*.test.ts`) are not scanned |
 | R2 | `apps/server/src/routes/` | Import request/response schemas from `@lang-tutor/core/api/schemas` | Define its own schema file (`schemas.ts` or similar) — the wire contract has exactly one home |
 | R3 | `packages/core/src/api/types.ts` | Export `z.infer<typeof XSchema>` | Export a hand-written type |
 | R4 | `packages/core/src/api/index.ts` | `export type { ... }` | Export a value (a schema, a runtime helper) |
@@ -92,6 +92,12 @@ grep -n "'/doc'" apps/server/src/app.ts
 - The Better Auth mounts in `app.ts` use `app.on(...)` and `app.all(...)`, which R1's verb
   list does not match, so no script change was needed for them; the exception above records
   that they are deliberate.
+- So does phase 35's `app.all('/api/bots/*', ...)` in `app.ts`, a raw 404 with no schema and
+  no OpenAPI entry, accepted on purpose. The bot route (`routes/bots.ts`, declared with
+  `createRoute` like any other) is mounted only where `BOT_SECRET` is set; everywhere else,
+  and for any `/api/bots` path it does not declare, this mount answers a plain 404 before the
+  session middleware runs, so the bot door looks absent rather than answering a 401 that
+  says something is there. It publishes nothing, as a 404 should not.
 - `apps/mobile` is deliberately unscanned: phase 7 states no mobile change as a success
   criterion, and it imports only types from `@lang-tutor/core/api`, never `./api/schemas`.
 - No composition-root exclusions apply — `createRoute` definitions and their handlers are

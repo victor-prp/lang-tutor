@@ -670,7 +670,7 @@ describe('0020_sentence_cards', () => {
     await expect(insertQuestion('s1', 'cloze_choice', { ...sentence, prompt: 'עפיפון' })).rejects.toMatchObject(shape);
     await expect(insertQuestion('s2', 'cloze_choice', { ...sentence, options, prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject(shape);
     await expect(insertQuestion('s3', 'cloze_typed', { ...sentence, prompt: 'עפיפון', options, alternatives: '{}' })).rejects.toMatchObject(shape);
-    // Eleven, since 0027 raised the cap from five to ten.
+    // Eleven, since 0028 raised the cap from five to ten.
     await expect(insertQuestion('s4', 'cloze_typed', { ...sentence, prompt: 'עפיפון', alternatives: '{a,b,c,d,e,f,g,h,i,j,k}' })).rejects.toMatchObject(shape);
     await expect(insertQuestion('s5', 'sentence_translation', { ...sentence, prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject(shape);
     await expect(insertQuestion('s6', 'sentence_translation', { ...sentence, prompt: 'עפיפון', tiles: '{a,b,c,d,e}' })).rejects.toMatchObject(shape);
@@ -1010,13 +1010,69 @@ describe('0025_glosses_rekey', () => {
   });
 });
 
+describe('0027_learner_day_and_memory', () => {
+  const S = (n: number) => `00000000-0000-0000-0000-0000000000${40 + n}`;
+
+  it("gives every ended session with answers the UTC date of its last answer, the day the old SQL derived, and leaves the rest unset", async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0023_users_auth_fk'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank) values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, rank) values ('v1', 's1', 'he', 'עפיפון', 0);
+      insert into questions (id, user_id, enrollment_id, sense_id, prompt_variant_id, target_language, user_language_code, type, options)
+        values ('q1', 'u_1', 'e_1', 's1', 'v1', 'en', 'he', 'multiple_choice',
+                '[{"position":0,"text":"עפיפון","is_correct":true},{"position":1,"text":"x","is_correct":false}]');
+    `);
+    // 1 completed across UTC midnight; 2 skipped just before it; 3 completed at an offset
+    // that is the next calendar day locally; 4 skipped with no answers; 5 still open.
+    const sessions = [
+      { n: 1, status: 'completed', done: true, at: ['2026-03-04 23:59:30+00', '2026-03-05 00:00:30+00'], day: '2026-03-05' },
+      { n: 2, status: 'skipped', done: false, at: ['2026-03-04 23:59:59+00'], day: '2026-03-04' },
+      { n: 3, status: 'completed', done: true, at: ['2026-03-05 01:30:00+02'], day: '2026-03-04' },
+      { n: 4, status: 'skipped', done: false, at: [], day: null },
+      { n: 5, status: 'ready', done: false, at: ['2026-03-06 10:00:00+00'], day: null },
+    ];
+    for (const s of sessions) {
+      await db.execute(sql`
+        insert into sessions (id, user_id, enrollment_id, status, source, completed_at)
+        values (${S(s.n)}, 'u_1', 'e_1', ${s.status}, 'list', ${s.done ? sql`now()` : null})`);
+      for (const [position, at] of s.at.entries()) {
+        await db.execute(sql`
+          insert into session_questions (session_id, position, question_id, option_order)
+          values (${S(s.n)}, ${position}, 'q1', '{0,1}')`);
+        await db.execute(sql`
+          insert into answers (session_id, position, question_id, selected_option_position, answered_at)
+          values (${S(s.n)}, ${position}, 'q1', 0, ${at}::timestamptz)`);
+      }
+    }
+
+    await runMigrations(db);
+
+    const rows = await db.execute<{ id: string; day: string | null; old: string | null }>(sql`
+      select s.id, s.practice_day::text as day,
+             (select ((max(a.answered_at)) at time zone 'UTC')::date::text from answers a where a.session_id = s.id) as old
+      from sessions s order by s.id`);
+    expect(rows.rows.map((r) => [r.id, r.day])).toEqual(sessions.map((s) => [S(s.n), s.day]));
+    for (const r of rows.rows) {
+      // The old derivation, for every ended session that has answers.
+      const ended = sessions.find((s) => S(s.n) === r.id)!;
+      if (ended.status !== 'ready') expect(r.day).toBe(r.old);
+    }
+  });
+});
+
 // Phase 34 (spec §2, Data). The migration adds columns that are null or empty on
 // every existing row, and checks that read only those columns plus the cap, which
 // rises: a database of phase 33 renderings, cards and answers must come through whole.
-describe('0027_ambiguous_questions', () => {
+describe('0028_ambiguous_questions', () => {
   it('keeps every rendering, card and answer, and gives each the new columns empty', async () => {
     const db = await emptyDatabase();
-    await runMigrationsFrom(db, migrationsUpTo('0026_lemma_renders'));
+    await runMigrationsFrom(db, migrationsUpTo('0027_learner_day_and_memory'));
 
     const options = JSON.stringify([
       { position: 0, text: 'kite', is_correct: true },
@@ -1044,13 +1100,13 @@ describe('0027_ambiguous_questions', () => {
         values ('q2', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'multiple_choice', ${options}::jsonb)`);
     await db.execute(sql`
       insert into sessions (id, user_id, enrollment_id, status, source)
-        values ('00000000-0000-4000-8000-000000000027', 'u_1', 'e_1', 'ready', 'list');
+        values ('00000000-0000-4000-8000-000000000028', 'u_1', 'e_1', 'ready', 'list');
       insert into session_questions (session_id, position, question_id, option_order)
-        values ('00000000-0000-4000-8000-000000000027', 0, 'q1', '{}'),
-               ('00000000-0000-4000-8000-000000000027', 1, 'q2', '{0,1,2,3}');
+        values ('00000000-0000-4000-8000-000000000028', 0, 'q1', '{}'),
+               ('00000000-0000-4000-8000-000000000028', 1, 'q2', '{0,1,2,3}');
       insert into answers (session_id, position, question_id, selected_option_position, typed_text, verdict)
-        values ('00000000-0000-4000-8000-000000000027', 0, 'q1', null, 'kit', 'alternative'),
-               ('00000000-0000-4000-8000-000000000027', 1, 'q2', 0, null, null);
+        values ('00000000-0000-4000-8000-000000000028', 0, 'q1', null, 'kit', 'alternative'),
+               ('00000000-0000-4000-8000-000000000028', 1, 'q2', 0, null, null);
     `);
 
     await runMigrations(db);

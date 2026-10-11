@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
+import type { PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createFakeLogger } from '../../support/fakes';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import {
@@ -74,6 +75,17 @@ async function saved(input: {
 
 const pick = (word: Saved, i = 0) => ({ gloss_id: word.glossIds[i], sense_id: word.senseIds[i], variant_id: word.variantId });
 
+// Phase 35 (spec D6). The job chooses each pick's card from the dimension, rung,
+// level and R the pick carries, highest chance of success first; these picks
+// name theirs. THREE is a multiple choice, a reversed card and a typed
+// translation, in that order (p 1, 0.78, 0.7).
+type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r'>>;
+const PICK_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.5 }; // reverse or cloze choice, p 0.78
+/** Typed recall of the form, p = R: typed translation, typed cloze, sentence translation in turn. */
+const produce = (r: number): Card => ({ dimension: 'written_productive', rung: 2, level: 3, r });
+const THREE: Card[] = [{}, PICK_FORM, produce(0.7)];
+const steered = <P extends object>(picks: P[], cards: Card[]) => picks.map((p, i) => ({ ...p, ...cards[i] }));
+
 /** Prepares one session over `picks` in that order (three words: a choice, a
  *  reversed card, a typed card) and reads it back through the service. */
 async function prepared(picks: ReturnType<typeof pick>[], alternatives?: string[]): Promise<{ sessionId: string; questions: Question[] }> {
@@ -81,7 +93,7 @@ async function prepared(picks: ReturnType<typeof pick>[], alternatives?: string[
   await expectDistractors(ns, { tasks: ['meaning', 'word', 'typed'], ...(alternatives ? { alternatives } : {}) });
   await expectCheck(ns);
   const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', IT));
-  await deps.sessions.prepareSession({ session_id: sessionId, picks, listening: false, speaking: false, ordinal: 0 });
+  await deps.sessions.prepareSession({ session_id: sessionId, picks: steered(picks, THREE), listening: false, speaking: false });
   const record = await deps.sessions.getSession('u_1', sessionId);
   expect(record.status).toBe('ready');
   // One open session per enrollment: the next call prepares another.

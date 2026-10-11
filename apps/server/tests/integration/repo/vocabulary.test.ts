@@ -560,6 +560,9 @@ describe('a repaired variant', () => {
   });
 });
 
+// Phase 35 (spec D5). A save time in UTC to the microsecond, fixed width, so it sorts as text.
+const ISO_MICROS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+
 describe('the saved list for sessions (phase 19)', () => {
   // Phase 31 (spec D12, D18). With its key, which a session picks by, and the
   // form it was saved from; the rendering is chosen per pick.
@@ -568,8 +571,8 @@ describe('the saved list for sessions (phase 19)', () => {
     const byGloss = <T extends { glossId: string }>(rows: T[]) => [...rows].sort((a, b) => a.glossId.localeCompare(b.glossId));
     expect(byGloss(await repo((r) => r.listSavedGlosses(E)))).toEqual(
       byGloss([
-        { glossId: word.glossIds[0], key: 'בצל', variantId: word.variantId },
-        { glossId: word.glossIds[1], key: 'קשת', variantId: word.variantId },
+        { glossId: word.glossIds[0], key: 'בצל', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS) },
+        { glossId: word.glossIds[1], key: 'קשת', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS) },
       ]),
     );
     expect(await repo((r) => r.countEntries(E))).toBe(2);
@@ -580,8 +583,18 @@ describe('the saved list for sessions (phase 19)', () => {
   it('lists a gloss of two senses once', async () => {
     const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'mouse', translations: ['עכבר', 'עכבר'] });
     expect(word.glossIds[1]).toBe(word.glossIds[0]);
-    expect(await repo((r) => r.listSavedGlosses(E))).toEqual([{ glossId: word.glossIds[0], key: 'עכבר', variantId: word.variantId }]);
+    expect(await repo((r) => r.listSavedGlosses(E))).toEqual([
+      { glossId: word.glossIds[0], key: 'עכבר', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS) },
+    ]);
     expect(await repo((r) => r.countEntries(E))).toBe(1);
+  });
+
+  // Phase 35 (spec D5). New words are asked newest saved first.
+  it('says when each gloss was saved, in UTC, as text that sorts by time', async () => {
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'onion', translations: ['בצל'] });
+    await t.db.execute(sql`UPDATE vocabulary_entries SET created_at = '2026-10-11 09:30:00.5+03' WHERE enrollment_id = ${E}`);
+    const [gloss] = await repo((r) => r.listSavedGlosses(E));
+    expect(gloss.savedAt).toBe('2026-10-11T06:30:00.500000Z');
   });
 
   it('lists and counts nothing for an enrollment that saved nothing', async () => {

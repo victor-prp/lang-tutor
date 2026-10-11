@@ -1,12 +1,12 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerTyped, boardWords, generationStubFor, readCard, speak } from './support/cards';
+import { answerChoice, answerMeaning, answerTyped, expectGeneration, readCard, speak, type Card, type CardKind } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
-import { skipListSession, tapUntil } from './support/interactions';
+import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
-import { clearGemini, expectGeminiMatching, expectGeminiPayload, expectTranscription, userText } from './support/mockServer';
-import { stripIsolates } from './support/text';
+import { seedMemory, type MemorySeed } from './support/memory';
+import { clearGemini, expectGeminiMatching, expectTranscription, userText } from './support/mockServer';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -18,18 +18,21 @@ test.use({
   launchOptions: { args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] },
 });
 
-const MEANING_OF: Record<string, string> = Object.fromEntries(BOARD_WORDS.map((w) => [w.form, w.translation]));
-const FORM_OF: Record<string, string> = Object.fromEntries(BOARD_WORDS.map((w) => [w.translation, w.form]));
+// Four words are enough for every speaking card, and with fewer than seven
+// picks a session has no board (ruling 18).
+const WORDS = BOARD_WORDS.slice(0, 4);
+const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.translation, w.form]));
+const MEANING_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.form, w.translation]));
 
-/** Past a skipped seed, with the ten words looked up and saved through the API. */
-async function saveTenWords(request: APIRequestContext): Promise<string> {
+/** Past a skipped seed, with the four words looked up and saved through the API. */
+async function saveFourWords(request: APIRequestContext): Promise<void> {
   const enrollments = (await (await request.get(`${API_URL}/api/enrollments`)).json()) as { id: string }[];
   const enrollmentId = enrollments[0].id;
   const seed = (await (await request.post(`${API_URL}/api/sessions`, { data: { enrollment_id: enrollmentId } })).json()) as {
     session_id: string;
   };
   expect((await request.post(`${API_URL}/api/sessions/${seed.session_id}/skip`)).ok()).toBe(true);
-  for (const word of BOARD_WORDS) {
+  for (const word of WORDS) {
     await clearGemini(request);
     // Phase 31. Matched on its own text, as lookUp's is: a background render-lemma
     // job from an earlier spec's save may still be calling, and a stub that
@@ -45,21 +48,48 @@ async function saveTenWords(request: APIRequestContext): Promise<string> {
     });
     expect(saved.ok(), await saved.text()).toBe(true);
   }
-  return enrollmentId;
 }
 
-/** Builds the word on the tiles card from its tiles. */
-async function buildWord(page: Page, word: string) {
-  const count = await page.getByTestId(/^tile-\d+$/).count();
-  const tiles = await Promise.all(Array.from({ length: count }, async (_, i) => (await page.getByTestId(`tile-${i}`).textContent()) ?? ''));
-  const used = new Set<number>();
-  for (const letter of word) {
-    const index = tiles.findIndex((tile, i) => tile === letter && !used.has(i));
-    used.add(index);
-    await page.getByTestId(`tile-${index}`).click();
-  }
-  await page.getByTestId('tiles-submit').click();
+/**
+ * Phase 35 (spec D5, D6). The memory each session starts from. Speaking on and
+ * no voices, so the live dimensions are WR, WP, SP and SK. A read aloud is
+ * spoken production at recognition (rung 1), offered only while that level is
+ * below 2 (ruling 16); say the translation is its recall (rung 2). Each seeded
+ * word is due on the one dimension it has a row for.
+ *
+ * Session 1:
+ * - ромашка: SK at R 0.50 (S 1, 90 days), level 1: a read aloud.
+ * - черепаха: SK at R 0.85 (S 10, 19 days), level 3: say the translation.
+ * - подушка, зонтик: no memory, new words, a choice of meanings each.
+ */
+const FIRST: MemorySeed[] = [
+  { gloss: 'מרגנית', dimension: 'spoken_productive', stability: 1, daysAgo: 90, level: 1 },
+  { gloss: 'צב', dimension: 'spoken_productive', stability: 10, daysAgo: 19, level: 3 },
+];
+
+/**
+ * Session 2, seeded over what session 1 wrote, so that the read aloud comes
+ * before say the translation: the higher p first (spec D6).
+ * - подушка: SK at R 0.85 (S 10, 19 days), level 1: a read aloud, p = √0.85 = 0.92.
+ * - черепаха: SK at R 0.79 (S 10, 38 days), level 4: say the translation, p = 0.79.
+ * - ромашка: WR at R 0.85, level 3: a typed meaning, p = 0.85. Its read aloud in
+ *   session 1 took SK to level 2, so it gets no second one.
+ * - зонтик: WP at R 0.50 (S 1, 90 days), level 1: a choice of words, p = 0.78.
+ */
+const SECOND: MemorySeed[] = [
+  { gloss: 'כרית', dimension: 'spoken_productive', stability: 10, daysAgo: 19, level: 1 },
+  { gloss: 'צב', dimension: 'spoken_productive', stability: 10, daysAgo: 38, level: 4 },
+  { gloss: 'מרגנית', dimension: 'written_receptive', stability: 10, daysAgo: 19, level: 3 },
+  { gloss: 'מטרייה', dimension: 'written_productive', stability: 1, daysAgo: 90, level: 1 },
+];
+
+/** Gets past a card this spec is not about: a choice answered right, a typed
+ *  meaning by the saved meaning, which is judged by rule. */
+async function pass(page: Page, card: Card) {
+  if (card.kind === 'meaning') await answerMeaning(page, MEANING_OF[card.prompt]);
+  else await answerChoice(page, card, true);
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
+  await page.getByTestId('continue-button').click();
 }
 
 test("speaking: read aloud, say the translation, and can't speak now", async ({ page, request }) => {
@@ -68,87 +98,54 @@ test("speaking: read aloud, say the translation, and can't speak now", async ({ 
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
   await signUpLearner(page, 'e2e_speak_ru', 'ru');
-  const enrollmentId = await saveTenWords(page.request);
-  // A list session made and skipped first, so the one played is ordinal 1.
-  await skipListSession(page.request, enrollmentId);
+  await saveFourWords(page.request);
+  await seedMemory('e2e_speak_ru', FIRST);
 
-  // Session 1, ordinal 1, speaking on and listening off. Tiers [multiple_choice,
-  // read_aloud, typed_meaning], [reverse_choice, cloze_choice, letter_tiles],
-  // [typed_translation, cloze_typed, say_translation, sentence_translation]
-  // (listen_choice and dictation ineligible). Six singles and a board at 4-7;
-  // single s is tier s % 3, run floor(s / 3), prefers (1 + run) % length:
-  //   1 (s0) prefers listen_choice -> read aloud   2 (s1) prefers cloze_choice (no example) -> tiles
-  //   3 (s2) prefers cloze_typed, its sentence unanswered by the stub -> typed_translation
-  //   8 (s3) run 1 prefers index 2 -> read aloud   9 (s4) prefers index 2 -> tiles
-  //   10 (s5) prefers index 2, dictation ineligible -> say the translation.
+  // Session 1: a read aloud, say the translation and two choices, in the order
+  // of their p, so each card is answered by its type.
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStubFor({ 3: 'typed', 4: 'meaning', 10: 'typed' }));
+  await expectGeneration(request);
   await openApp(page, 'create-button');
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
-  // 1: read aloud. First not understood, then understood.
-  const read = await readCard(page, 1, 10, 'read');
-  await expectTranscription(request, 'кошка');
-  await expectTranscription(request, read.prompt);
-  await speak(page);
-  await expect(page.getByTestId('speak-notice')).toContainText('לא הבנו');
-  await expect(page.getByTestId('speak-notice-heard')).toHaveText(/кошка/);
-  await expect(page.getByTestId('feedback-correct')).not.toBeVisible();
-  await page.getByTestId('speak-try-again').click();
-  await speak(page);
-  await expect(page.getByTestId('feedback-title')).toHaveText(/נכון! שמענו:/);
-  await expect(page.getByTestId('feedback-line')).toContainText(read.prompt);
-  await page.getByTestId('continue-button').click();
-
-  // 2: tiles.
-  const tiles1 = await readCard(page, 2, 10, 'tiles');
-  await buildWord(page, FORM_OF[tiles1.prompt]);
-  await page.getByTestId('continue-button').click();
-
-  // 3: typed (the sentence card's degraded form).
-  const typed = await readCard(page, 3, 10, 'typed');
-  await answerTyped(page, FORM_OF[typed.prompt]);
-  await page.getByTestId('continue-button').click();
-
-  await readCard(page, 4, 10, 'board');
-  const words = await boardWords(page);
-  const meanings = await Promise.all(
-    [0, 1, 2, 3, 4].map(async (i) => stripIsolates(await page.getByTestId(`board-meaning-${i}`).textContent())),
-  );
-  for (const [i, word] of words.entries()) {
-    await page.getByTestId(`board-word-${i}`).click();
-    await page.getByTestId(`board-meaning-${meanings.indexOf(MEANING_OF[word])}`).click();
+  const kinds: CardKind[] = [];
+  for (let position = 1; position <= 4; position++) {
+    const card = await readCard(page, position, 4);
+    kinds.push(card.kind);
+    if (card.kind === 'read') {
+      // Read aloud: first not understood, then understood.
+      await expectTranscription(request, 'кошка');
+      await expectTranscription(request, card.prompt);
+      await speak(page);
+      await expect(page.getByTestId('speak-notice')).toContainText('לא הבנו');
+      await expect(page.getByTestId('speak-notice-heard')).toHaveText(/кошка/);
+      await expect(page.getByTestId('feedback-correct')).not.toBeVisible();
+      await page.getByTestId('speak-try-again').click();
+      await speak(page);
+      await expect(page.getByTestId('feedback-title')).toHaveText(/נכון! שמענו:/);
+      await expect(page.getByTestId('feedback-line')).toContainText(card.prompt);
+      await page.getByTestId('continue-button').click();
+    } else if (card.kind === 'say') {
+      // Say the translation, understood at once.
+      await expectTranscription(request, FORM_OF[card.prompt]);
+      await speak(page);
+      await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      await page.getByTestId('continue-button').click();
+    } else {
+      await pass(page, card);
+    }
   }
-  await expect(page.getByTestId('feedback-title')).toHaveText(/4\s*מתוך\s*4/);
-  await page.getByTestId('continue-button').click();
-
-  // 8: read aloud, understood at once.
-  const read2 = await readCard(page, 8, 10, 'read');
-  await expectTranscription(request, read2.prompt);
-  await speak(page);
-  await expect(page.getByTestId('feedback-correct')).toBeVisible();
-  await page.getByTestId('continue-button').click();
-
-  // 9: tiles.
-  const tilesCard = await readCard(page, 9, 10, 'tiles');
-  await buildWord(page, FORM_OF[tilesCard.prompt]);
-  await page.getByTestId('continue-button').click();
-
-  // 10: say the translation.
-  const say = await readCard(page, 10, 10, 'say');
-  await expectTranscription(request, FORM_OF[say.prompt]);
-  await speak(page);
-  await expect(page.getByTestId('feedback-correct')).toBeVisible();
-  await page.getByTestId('continue-button').click();
+  expect(kinds.sort()).toEqual(['choice', 'choice', 'read', 'say']);
 
   await expect(page.getByText(/דיבור/).first(), report()).toBeVisible();
 
-  // Session 2, ordinal 2 (the prefers shift by one): 1 read aloud, 2 tiles, 3 say the translation, 4-7
-  // board, 8 meaning recall, 9 reverse, 10 say the translation.
+  // Session 2: "can't speak now" on the read aloud, and say the translation
+  // after it renders as the typed card.
+  await seedMemory('e2e_speak_ru', SECOND);
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStubFor({ 3: 'typed', 4: 'meaning', 9: 'word', 10: 'typed' }));
+  await expectGeneration(request);
   await page.getByTestId('results-next-session').click();
   await expect(async () => {
     if ((await page.getByTestId('create-button').count()) > 0) await page.getByTestId('create-button').click({ timeout: 2_000 });
@@ -156,24 +153,44 @@ test("speaking: read aloud, say the translation, and can't speak now", async ({ 
   }).toPass({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
-  // 1: "can't speak now" passes the card unseen, and the 2nd is tiles.
-  await readCard(page, 1, 10, 'read');
+  let position = 1;
+  for (; ; position++) {
+    expect(position, 'session 2 asked no read aloud').toBeLessThan(4);
+    const card = await readCard(page, position, 4);
+    if (card.kind === 'read') break;
+    expect(card.kind, `position ${position}`).not.toBe('say');
+    await pass(page, card);
+  }
+  // "Can't speak now" passes the card unseen (spec D8 of phase 25): the next
+  // card is up, and no banner or Continue came between.
   await page.getByTestId('speak-cant-speak').click();
-  const tiles2 = await readCard(page, 2, 10, 'tiles');
-  // Passed unseen (spec D8): card 2 is up, and no banner or Continue came between.
+  await readCard(page, position + 1, 4);
   await expect(page.getByTestId('feedback-title')).toHaveCount(0);
   await expect(page.getByTestId('continue-button')).toHaveCount(0);
-  await buildWord(page, FORM_OF[tiles2.prompt]);
-  await page.getByTestId('continue-button').click();
 
-  // 3: say the translation renders as the typed card from now on.
-  const typed2 = await readCard(page, 3, 10, 'typed');
-  await answerTyped(page, FORM_OF[typed2.prompt]);
-  await expect(page.getByTestId('feedback-correct')).toBeVisible();
-  await page.getByTestId('continue-button').click();
-
-  await page.getByTestId('session-skip').click();
-  await expect(page.getByTestId('create-button').or(page.getByTestId('start-button')).or(page.getByTestId('preparing-label'))).toBeVisible();
+  // Say the translation renders as the typed card from now on: черепаха's card
+  // is the session's only typed one.
+  for (position += 1; ; position++) {
+    expect(position, 'session 2 asked no say the translation after the read aloud').toBeLessThanOrEqual(4);
+    const card = await readCard(page, position, 4);
+    expect(card.kind, `position ${position}`).not.toBe('say');
+    if (card.kind === 'typed') {
+      expect(card.prompt).toBe('צב');
+      await answerTyped(page, FORM_OF[card.prompt]);
+      await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      await page.getByTestId('continue-button').click();
+      break;
+    }
+    await pass(page, card);
+  }
+  if (position < 4) await page.getByTestId('session-skip').click();
+  await expect(
+    page
+      .getByTestId('results-score')
+      .or(page.getByTestId('create-button'))
+      .or(page.getByTestId('start-button'))
+      .or(page.getByTestId('preparing-label')),
+  ).toBeVisible();
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

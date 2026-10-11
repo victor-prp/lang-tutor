@@ -1,11 +1,12 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerChoice, answerMeaning, answerTyped, generationStub, readCard, type Card } from './support/cards';
+import { answerChoice, answerMeaning, answerTyped, expectGeneration, readCard, type Card } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { PROCHITALA, ZAMOK } from './support/lexemes';
-import { clearGemini, expectCheck, expectContext, expectGeminiPayload, expectJudge } from './support/mockServer';
+import { seedMemory, type MemorySeed } from './support/memory';
+import { clearGemini, expectCheck, expectContext, expectJudge } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
@@ -28,18 +29,33 @@ const FORM_OF: Record<string, string> = {
  *  D1), which no near miss of a saved form could be. */
 const ALTERNATIVE = 'синоним';
 
-/** The context call's Hebrew sentence for the typed card. Which of the four
- *  meanings the card shows is the plan's draw, so the sentence holds each of
- *  them once, whole, and the server marks whichever the card shows. */
+/** The context call's Hebrew sentence for the typed card, which asks for טירה.
+ *  It holds each of the four meanings once, whole, so the mark is the server's
+ *  to find. */
 const CONTEXT = 'אחרי הקריאה היא קראה על מנעול של טירה';
 const CONTEXT_TRANSLATION = 'После чтения вслух она прочла о замке крепости';
 
 /**
- * Past the seed, four saved senses of two words, the stubs for one session, and
- * the session started at its typed card (3 of 4). Ordinal 0, no voices,
- * speaking off: 1 choice, 2 reverse, 3 typed, 4 a meaning card
- * (question-types.spec.ts). The checker reads the typed card's sentence as
- * either saved word, so it keeps the sentence the context call wrote.
+ * Phase 35 (spec D5, D6). The memory that gives the four senses four card
+ * types in a fixed order, as question-types.spec.ts does, with טירה's R a little
+ * above מנעול's so the typed card comes second. No voices and speaking off:
+ * - קראה: no memory, a new word: a choice of meanings, p 1, first.
+ * - טירה: WP at R 0.855 (S 10, 18 days), level 3: recall, a typed translation
+ *   (the table's first of three at the same p), p 0.855, second.
+ * - מנעול: WR at R 0.85 (S 10, 19 days), level 3: a typed meaning, p 0.85, third.
+ * - הקריאה: WP at R 0.50 (S 1, 90 days), level 1: a reversed card, p 0.78, last.
+ */
+const MEMORY: MemorySeed[] = [
+  { gloss: 'טירה', dimension: 'written_productive', stability: 10, daysAgo: 18, level: 3 },
+  { gloss: 'מנעול', dimension: 'written_receptive', stability: 10, daysAgo: 19, level: 3 },
+  { gloss: 'הקריאה', dimension: 'written_productive', stability: 1, daysAgo: 90, level: 1 },
+];
+
+/**
+ * Past the seed, four saved senses of two words, their memory seeded, the stubs
+ * for one session, and the session started at its typed card (2 of 4). The
+ * checker reads the typed card's sentence as either saved word, so it keeps the
+ * sentence the context call wrote.
  */
 async function reachTypedCard(page: Page, request: APIRequestContext, username: string, report: () => string): Promise<Card> {
   page.on('dialog', (dialog) => void dialog.accept());
@@ -58,22 +74,22 @@ async function reachTypedCard(page: Page, request: APIRequestContext, username: 
   await lookUp(page, request, 'замок', ZAMOK);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
   await page.getByTestId('translate-back').click();
+  await seedMemory(username, MEMORY);
 
   await clearGemini(request);
-  await expectGeminiPayload(request, generationStub([ALTERNATIVE]));
-  await expectContext(request, [{ key: 'q3', context: CONTEXT, context_translation: CONTEXT_TRANSLATION }]);
-  await expectCheck(request, { q3c: { context_words: ['прочитала', 'замок'] } });
+  await expectGeneration(request, [ALTERNATIVE]);
+  await expectContext(request, [{ key: 'q2', context: CONTEXT, context_translation: CONTEXT_TRANSLATION }]);
+  await expectCheck(request, { q2c: { context_words: ['прочитала', 'замок'] } });
   await page.getByTestId('create-button').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
-  for (const position of [1, 2]) {
-    await answerChoice(page, await readCard(page, position, 4), true);
-    await page.getByTestId('continue-button').click();
-  }
+  await answerChoice(page, await readCard(page, 1, 4, 'choice'), true);
+  await page.getByTestId('continue-button').click();
 
   // Spec D6: the typed card shows a Hebrew sentence with its meaning marked.
-  const card = await readCard(page, 3, 4);
+  const card = await readCard(page, 2, 4, 'typed');
+  expect(card.prompt).toBe('טירה');
   await expect(page.getByTestId('context-line')).toHaveText(CONTEXT);
   await expect(page.getByTestId('context-line-mark')).toHaveText(card.prompt);
   return card;
@@ -92,11 +108,15 @@ async function answerWithTheAlternative(page: Page) {
   await expect(page.getByTestId('typed-input')).toBeEditable();
 }
 
-/** Card 4, a meaning card, answered by a synonym the judge accepts. */
-async function finishWithTheMeaningCard(page: Page, request: APIRequestContext) {
-  await readCard(page, 4, 4, 'meaning');
+/** Card 3, a meaning card, answered by a synonym the judge accepts, and card 4,
+ *  the reversed card, answered right. */
+async function finishTheSession(page: Page, request: APIRequestContext) {
+  await readCard(page, 3, 4, 'meaning');
   await expectJudge(request, 'right');
   await answerMeaning(page, 'מילה');
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
+  await page.getByTestId('continue-button').click();
+  await answerChoice(page, await readCard(page, 4, 4, 'reverse'), true);
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await page.getByTestId('continue-button').click();
 }
@@ -118,7 +138,7 @@ test('a typed card shows its sentence, and an alternative answer gets a second t
   await expect(page.getByTestId('retry-notice')).toHaveCount(0);
   await page.getByTestId('continue-button').click();
 
-  await finishWithTheMeaningCard(page, request);
+  await finishTheSession(page, request);
 
   // The score counts the first answer, which was right; progress counts the
   // second, which was the saved word, so the typed card's word moved too.
@@ -144,13 +164,14 @@ test('"show the answer" on a second try names the saved word in the green banner
   expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(FORM_OF[card.prompt]);
   await page.getByTestId('continue-button').click();
 
-  await finishWithTheMeaningCard(page, request);
+  await finishTheSession(page, request);
 
   // Still right in the score, and no progress for the typed card's word.
   await expect(page.getByTestId('results-score')).toHaveText(/4\s*\/\s*4/);
   await expect(page.getByTestId('missed-row')).toHaveCount(0);
   await expect(page.getByTestId('practised-row')).toHaveCount(4);
-  await expect(page.getByTestId('practised-progressed')).toHaveCount(3);
+  // The other three moved: the choice and the reversed card progressed, the meaning card raised.
+  await expect(page.getByTestId(/^practised-(progressed|raised)$/)).toHaveCount(3);
   await expect(practisedRow(page, card.prompt)).toHaveCount(1);
   await expect(practisedRow(page, card.prompt).getByTestId(/^practised-(progressed|raised)$/)).toHaveCount(0);
 

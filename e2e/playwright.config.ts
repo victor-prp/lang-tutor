@@ -2,9 +2,8 @@ import path from 'node:path';
 
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
 
-import { E2E_DATABASE_URL } from './globalSetup';
-import { E2E_MOCK_NAMESPACE } from './tests/support/mockServer';
-import { API_URL, APP_URL, MOCKSERVER_URL } from './urls';
+import { serverEnv } from './serverEnv';
+import { API_URL, APP_URL } from './urls';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
@@ -14,28 +13,7 @@ type WebServer = Exclude<NonNullable<PlaywrightTestConfig['webServer']>, unknown
 // serving the export and the API. Anything else is the source target below.
 const TARGET = process.env.E2E_TARGET === 'image' ? 'image' : 'source';
 
-// One environment for the server however it runs, so a variable a later phase
-// adds here reaches the image too.
-const serverEnv = {
-  PORT: String(new URL(API_URL).port),
-  DATABASE_URL: E2E_DATABASE_URL,
-  // Published on /health, so a probe that reaches the wrong server says so.
-  LANE: process.env.LANE ?? 'main',
-  // Only the base URL differs from production. There is no stub mode inside
-  // the server.
-  GEMINI_BASE_URL: `${MOCKSERVER_URL}/${E2E_MOCK_NAMESPACE}`,
-  GEMINI_API_KEY: 'e2e',
-  GEMINI_MODEL: 'e2e-model',
-  // Phase 29. Sign-in: a fixed test secret, this run's origins, and Resend
-  // faked by the lane's MockServer namespace, as Gemini is. Under the image
-  // target the app and the API share one origin, so WEB_ORIGINS is the API's.
-  BETTER_AUTH_SECRET: 'e2e-secret-that-is-at-least-32-characters',
-  AUTH_BASE_URL: API_URL,
-  WEB_ORIGINS: APP_URL,
-  RESEND_API_KEY: 'e2e',
-  RESEND_BASE_URL: `${MOCKSERVER_URL}/${E2E_MOCK_NAMESPACE}`,
-  MAIL_FROM: 'e2e@example.com',
-};
+// One environment for the server however it runs: serverEnv.ts.
 
 // The tsx server and `expo serve` over a fresh export, each on its own port.
 const sourceServers: WebServer[] = [

@@ -23,7 +23,7 @@ export async function skipSession(request: APIRequestContext, sessionId: string)
 /**
  * Phase 31. The enrollment's next list session, made over the API and waited
  * for. An enrollment's first session is the seed, which is skipped unplayed.
- * Needs a generation stub registered (cards.ts' generationStub).
+ * Needs a generation stub registered (cards.ts' expectGeneration).
  */
 export async function readyListSession(
   request: APIRequestContext,
@@ -50,9 +50,9 @@ export async function readyListSession(
 }
 
 /**
- * The form a one-word session asks about. With no voice and no microphone
- * declared, one pick always takes the first tier's card: a choice of meanings
- * or a typed meaning, and both show the form as `question` (domain/plan.ts).
+ * The form a one-word session asks about. A word with no memory yet takes a
+ * choice of meanings, and a word recalled well enough a typed meaning; both
+ * show the form as `question` (phase 35, domain/plan.ts).
  */
 export function askedForm(question: Question): string {
   if (question.type === 'multiple_choice' || question.type === 'typed_meaning') return question.question;

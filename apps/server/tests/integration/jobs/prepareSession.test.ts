@@ -4,6 +4,9 @@ import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
 import { DISTRACTOR_MARKER } from '../../../src/domain/distractors';
+import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
+import { createJobRepo } from '../../../src/repo/jobs';
+import { createSessionRepo } from '../../../src/repo/sessions';
 import { registerWorkers } from '../../../src/worker';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { startTestBoss, stopTestBoss, waitFor } from '../../support/jobs';
@@ -29,6 +32,7 @@ import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 import { seedSavedSenses } from '../../support/vocabularyRows';
+import { withTx } from '../../support/withTx';
 
 let t: TestDb;
 let boss: PgBoss;
@@ -76,39 +80,80 @@ async function requestListSession(): Promise<string> {
 
 const statusOf = async (sessionId: string) => (await deps.sessions.getSession('u_1', sessionId)).status;
 
+// Phase 35 (spec D6). The job chooses each pick's card from the dimension, rung,
+// level and R the pick carries, highest chance of success first. These tests
+// enqueue the job with picks that name their cards; a pick with none of them
+// is a new word, multiple choice. sessionsChoose.test.ts covers how a created
+// session's picks get theirs.
+type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r'>>;
+const RECOGNISE: Card = { dimension: 'written_receptive', rung: 1, level: 1, r: 0.81 }; // multiple choice, p 0.925
+const PICK_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.5 }; // reverse or cloze choice, p 0.78
+const BUILD_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.81 }; // letter tiles, p 0.9
+const HEAR: Card = { dimension: 'spoken_receptive', rung: 1, level: 1, r: 0.64 }; // listen and choose, p 0.85
+/** Typed recall of the form, p = R: typed translation, typed cloze, sentence translation in turn. */
+const produce = (r: number): Card => ({ dimension: 'written_productive', rung: 2, level: 3, r });
+
+/** Saves `words` and enqueues a list session's job with one pick each, carrying `cards[i]`. */
+async function enqueueSession(words: Record<string, string>, cards: Card[], opts: { listening: boolean; example?: { target: string } }) {
+  const picks: PrepareSessionPayload['picks'] = [];
+  for (const [i, [lemma, translation]] of Object.entries(words).entries()) {
+    const example = opts.example && { source: `We saw the ${lemma} there.`, target: opts.example.target };
+    const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation], ...(example ? { example } : {}) });
+    picks.push({
+      gloss_id: saved.glossIds[0],
+      sense_id: saved.senseIds[0],
+      variant_id: saved.variantId,
+      dimension: 'written_receptive',
+      rung: 1,
+      level: 1,
+      r: null,
+      ...cards[i],
+    });
+  }
+  return withTx(t.db, async (tx) => {
+    const sessionId = await createSessionRepo(tx).insertPreparingSession('u_1', E);
+    await createJobRepo(tx, boss).enqueue(PREPARE_SESSION, { session_id: sessionId, picks, listening: opts.listening, speaking: false });
+    return sessionId;
+  });
+}
+
 const TEN_WORDS: Record<string, string> = {
   tome: 'ספר', sprint: 'ריצה', lantern: 'פנס', kettle: 'קומקום', pillow: 'כרית',
   ladder: 'סולם', bucket: 'דלי', violin: 'כינור', turtle: 'צב', lizard: 'לטאה',
 };
 
-it('prepares a ten-word session with listening on: a run, the board, a run (spec D3, D10)', async () => {
+it('prepares a ten-word session with listening on: the board, then each card by its chance (spec D6, D10)', async () => {
+  // Highest p first: the four new words' board (q1-q4), typed translation q5,
+  // multiple choice q6, letter tiles q7, typed cloze q8, listen and choose q9,
+  // reverse choice q10.
   await expectDistractors(ns, {
-    tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'sentence'],
+    tasks: ['meaning', 'meaning', 'meaning', 'meaning', 'typed', 'meaning', 'meaning', 'sentence', 'meaning', 'word'],
   });
   await expectCheck(ns);
-  const seed = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
-  await deps.sessions.skipSession('u_1', seed.sessionId);
-  for (const [lemma, translation] of Object.entries(TEN_WORDS)) {
-    await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
-  }
-  const { sessionId } = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
+  const sessionId = await enqueueSession(
+    TEN_WORDS,
+    [{}, {}, {}, {}, RECOGNISE, PICK_FORM, produce(0.95), HEAR, BUILD_FORM, produce(0.88)],
+    { listening: true },
+  );
 
   await waitFor(async () => (await statusOf(sessionId)) === 'ready');
   const { questions } = await deps.sessions.getSession('u_1', sessionId);
   expect(questions.map((q) => q.type)).toEqual([
-    'multiple_choice', 'reverse_choice', 'typed_translation',
     'matching', 'matching', 'matching', 'matching',
-    'listen_choice', 'letter_tiles', 'cloze_typed',
+    'typed_translation', 'multiple_choice', 'letter_tiles', 'cloze_typed',
+    'listen_choice', 'reverse_choice',
   ]);
-  const board = questions.slice(3, 7) as MatchingQuestion[];
+  const board = questions.slice(0, 4) as MatchingQuestion[];
   for (const word of board) {
     expect(word.options).toEqual(board[0].options);
     expect(word.board.question_ids).toEqual(board.map((q) => q.id));
     expect(word.options[word.correct_option]).toBe(TEN_WORDS[word.question]);
   }
+  expect(board.map((word) => word.question).sort()).toEqual(['kettle', 'lantern', 'sprint', 'tome']);
   expect(board[0].options).toHaveLength(5);
   expect(board[0].options).toContain(STUB_WRONG_HEBREW[0]);
-  const tiles = questions[8] as LetterTilesQuestion;
+  const tiles = questions[6] as LetterTilesQuestion;
+  expect(tiles.answer).toBe('turtle');
   expect(tiles.tiles).toHaveLength([...tiles.answer].length + 2);
 });
 
@@ -117,32 +162,27 @@ it('prepares a ten-word session with listening on: a run, the board, a run (spec
 describe('sentence cards through the queue', () => {
   const EXAMPLE_HEBREW = 'ראינו את זה שם.';
 
-  async function saveTen(withExamples: boolean) {
-    for (const [lemma, translation] of Object.entries(TEN_WORDS)) {
-      await seedSavedSenses(t.db, {
-        enrollmentId: E,
-        lemma,
-        translations: [translation],
-        ...(withExamples ? { example: { source: `We saw the ${lemma} there.`, target: EXAMPLE_HEBREW } } : {}),
-      });
-    }
-  }
-
   it('stores a cloze choice from the saved example and a typed cloze from the model, each with its sentence and gap', async () => {
+    // Two forms picked: the first a reverse choice, the second, its example
+    // holding the form, a cloze choice. The board, typed translation q5, tiles
+    // q6, typed cloze q7, listen and choose q8, reverse choice q9, cloze choice q10.
     await expectDistractors(ns, {
-      tasks: ['meaning', 'word', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'gap', 'sentence'],
+      tasks: ['meaning', 'meaning', 'meaning', 'meaning', 'typed', 'meaning', 'sentence', 'meaning', 'word', 'gap'],
     });
     await expectCheck(ns);
-    const seed = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
-    await deps.sessions.skipSession('u_1', seed.sessionId);
-    await saveTen(true);
-    const { sessionId } = await deps.sessions.createNextSession('u_1', E, { listening: true, speaking: false });
+    const sessionId = await enqueueSession(
+      TEN_WORDS,
+      [{}, {}, {}, {}, PICK_FORM, PICK_FORM, produce(0.95), HEAR, BUILD_FORM, produce(0.88)],
+      { listening: true, example: { target: EXAMPLE_HEBREW } },
+    );
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
     const { questions } = await deps.sessions.getSession('u_1', sessionId);
-    expect(questions.slice(7).map((q) => q.type)).toEqual(['listen_choice', 'cloze_choice', 'cloze_typed']);
+    expect(questions.slice(4).map((q) => q.type)).toEqual([
+      'typed_translation', 'letter_tiles', 'cloze_typed', 'listen_choice', 'reverse_choice', 'cloze_choice',
+    ]);
 
-    const choice = questions[8] as ClozeChoiceQuestion;
+    const choice = questions[9] as ClozeChoiceQuestion;
     expect(choice.translation).toBe(EXAMPLE_HEBREW);
     const answer = choice.sentence.slice(choice.gap.start, choice.gap.end);
     // The blank is the saved example's own text for the word; the right option is that text.
@@ -152,7 +192,7 @@ describe('sentence cards through the queue', () => {
     expect(choice.meaning).toBe(TEN_WORDS[answer]);
     expect([...choice.options].sort()).toEqual([answer, ...STUB_WRONG_ENGLISH].sort());
 
-    const typed = questions[9] as ClozeTypedQuestion;
+    const typed = questions[6] as ClozeTypedQuestion;
     expect(typed.sentence).toBe(STUB_SENTENCE);
     expect(typed.sentence.slice(typed.gap.start, typed.gap.end)).toBe(STUB_GAP);
     expect(typed.answer).toBe(STUB_GAP);
@@ -161,26 +201,22 @@ describe('sentence cards through the queue', () => {
   });
 
   it('stores a sentence translation with its reference and gap', async () => {
-    // Ordinal 2 of ten words with listening on: the last position is a translation.
+    // Three forms typed: a typed cloze q5 (p 0.95), a typed translation q6
+    // (0.91), and the sentence translation q8 (0.88), after tiles q7.
     await expectDistractors(ns, {
-      tasks: ['typed', 'typed', 'typed', 'meaning', 'meaning', 'meaning', 'meaning', 'meaning', 'word', 'translate'],
+      tasks: ['meaning', 'meaning', 'meaning', 'meaning', 'sentence', 'typed', 'meaning', 'translate', 'meaning', 'word'],
     });
     await expectCheck(ns);
-    const options = { listening: true, speaking: false };
-    // The seed, then two list sessions skipped before the third (ordinal 2).
-    const seed = await deps.sessions.createNextSession('u_1', E, options);
-    await deps.sessions.skipSession('u_1', seed.sessionId);
-    await saveTen(false);
-    for (let ordinal = 0; ordinal < 2; ordinal++) {
-      const early = await deps.sessions.createNextSession('u_1', E, options);
-      await deps.sessions.skipSession('u_1', early.sessionId);
-    }
-    const { sessionId } = await deps.sessions.createNextSession('u_1', E, options);
+    const sessionId = await enqueueSession(
+      TEN_WORDS,
+      [{}, {}, {}, {}, produce(0.91), PICK_FORM, produce(0.95), HEAR, BUILD_FORM, produce(0.88)],
+      { listening: true },
+    );
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
     const { questions } = await deps.sessions.getSession('u_1', sessionId);
-    expect(questions[9].type).toBe('sentence_translation');
-    const translate = questions[9] as SentenceTranslationQuestion;
+    expect(questions[7].type).toBe('sentence_translation');
+    const translate = questions[7] as SentenceTranslationQuestion;
     expect(translate.question).toBe(STUB_SENTENCE_HEBREW);
     expect(translate.sentence).toBe(STUB_SENTENCE);
     expect(translate.answer).toBe(STUB_GAP);
@@ -190,13 +226,30 @@ describe('sentence cards through the queue', () => {
 
 describe('prepare-session through the queue', () => {
   it('turns a list session ready, with its saved words as the prompts', async () => {
-    await expectDistractors(ns);
     await expectCheck(ns);
+    await expectDistractors(ns, { tasks: ['meaning', 'meaning', 'meaning'] });
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await statusOf(sessionId)) === 'ready');
     const record = await deps.sessions.getSession('u_1', sessionId);
-    // Phase 23 (spec D2): the type cycle, in order.
+    // Phase 35 (spec D6): three new words, each a multiple choice, too few for a board.
+    expect(record.questions.map((q) => q.type)).toEqual(['multiple_choice', 'multiple_choice', 'multiple_choice']);
+    for (const choice of record.questions) {
+      if (choice.type !== 'multiple_choice') throw new Error('unreachable');
+      expect(choice.options[choice.correct_option]).toBe(WORDS[choice.question]);
+      expect([...choice.options].sort()).toEqual([WORDS[choice.question], ...STUB_WRONG_HEBREW].sort());
+    }
+    expect(new Set(record.questions.map((q) => (q as { question: string }).question))).toEqual(new Set(Object.keys(WORDS)));
+  });
+
+  it('writes each card the content its type needs', async () => {
+    await expectDistractors(ns);
+    await expectCheck(ns);
+    // p: sprint new 1, lantern's form picked 0.78, tome's form typed 0.76.
+    const sessionId = await enqueueSession(WORDS, [produce(0.76), {}, PICK_FORM], { listening: false });
+
+    await waitFor(async () => (await statusOf(sessionId)) === 'ready');
+    const record = await deps.sessions.getSession('u_1', sessionId);
     expect(record.questions.map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation']);
     const [choice, reversed, typed] = record.questions;
     if (choice.type !== 'multiple_choice' || reversed.type !== 'reverse_choice' || typed.type !== 'typed_translation') {
@@ -211,13 +264,12 @@ describe('prepare-session through the queue', () => {
     expect(reversed.question).toBe(WORDS[reversedWord]);
     expect([...reversed.options].sort()).toEqual([reversedWord, ...STUB_WRONG_ENGLISH].sort());
     // The typed card: the meaning, the word as its answer, the alternative kept.
-    // Phase 31 (spec D18): the seeded `book` is also ספר, so when `tome` is the
-    // typed word its sibling is accepted too, ahead of the model's alternative.
-    // Which word is typed varies from run to run (saved glosses are read in id
-    // order, and ids are random), so the expectation covers each of them.
+    // Phase 31 (spec D18): the seeded `book` is also ספר, so `tome`'s sibling
+    // is accepted too, ahead of the model's alternative.
+    expect(typed.answer).toBe('tome');
     expect(typed.question).toBe(WORDS[typed.answer]);
-    expect(typed.alternatives).toEqual([...(SEEDED_SIBLINGS[typed.answer] ?? []), STUB_ALTERNATIVE]);
-    expect(new Set([choice.question, reversedWord, typed.answer]).size).toBe(3);
+    expect(typed.alternatives).toEqual([...SEEDED_SIBLINGS.tome, STUB_ALTERNATIVE]);
+    expect([choice.question, reversedWord, typed.answer]).toEqual(['sprint', 'lantern', 'tome']);
   });
 
   it('a provider that keeps failing ends the session failed, through the dead-letter queue', async () => {

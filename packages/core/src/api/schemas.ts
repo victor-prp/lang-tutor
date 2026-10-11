@@ -1260,3 +1260,14 @@ export const AuthErrorSchema = z.object({ code: z.string().optional(), message: 
 
 // Phase 29 (spec D12). Who the session belongs to; `user` is null until onboarding.
 export const MeResponseSchema = z.object({ email: z.string(), user: UserSchema.nullable() });
+
+// Phase 35 (spec D12). The bot route, mounted only where BOT_SECRET is set. A
+// bot's name is lowercase letters, digits and hyphens (`steady-en`); its
+// profile's username is the same name with each hyphen an underscore, which is
+// why the length matches UsernameSchema's and an underscore is refused here.
+export const BotNameSchema = z.string().regex(/^[a-z0-9-]{3,30}$/);
+export const BotSignInRequestSchema = z.object({ name: BotNameSchema });
+/** The whole `Cookie` header value a signed-in request sends. */
+export const BotSignInResponseSchema = z.object({ cookie: z.string() });
+/** `day` is a calendar date, `YYYY-MM-DD`; a date that does not exist is refused. */
+export const BotDayRequestSchema = z.object({ name: BotNameSchema, day: z.iso.date() });

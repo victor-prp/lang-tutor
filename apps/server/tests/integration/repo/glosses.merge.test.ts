@@ -80,6 +80,42 @@ describe('mergeGlosses (spec D7)', () => {
     expect(survivor.rows[0].alternatives).toContain('אצבעות');
   });
 
+  it('folds the memory of an enrollment that saved both: per dimension the larger stability, and a dimension only the other has moves over', async () => {
+    const w = await twoGlosses();
+    const e1 = enrollmentOf('u_1');
+    const e2 = enrollmentOf('u_2');
+    await save(e1, w.other, w.fingers, w.lexemeId, '2026-01-01');
+    await save(e1, w.survivor, w.finger, w.lexemeId, '2026-02-01');
+    await save(e2, w.other, w.fingers, w.lexemeId, '2026-03-01');
+    const remember = (enrollmentId: string, glossId: string, dimension: string, stability: number, reps: number) =>
+      t.db.execute(sql`
+        insert into gloss_memory (enrollment_id, gloss_id, dimension, stability, difficulty, last_day, reps, lapses, params)
+        values (${enrollmentId}, ${glossId}, ${dimension}, ${stability}, 5, '2026-09-01', ${reps}, 0, 'fsrs6-default')`);
+    // WR: the other is stronger. WP: the survivor is stronger. SP: only the other has it.
+    await remember(e1, w.other, 'written_receptive', 20, 4);
+    await remember(e1, w.survivor, 'written_receptive', 3, 1);
+    await remember(e1, w.other, 'written_productive', 2, 1);
+    await remember(e1, w.survivor, 'written_productive', 9, 3);
+    await remember(e1, w.other, 'spelling', 6, 2);
+    // An enrollment holding only the other: its memory follows the moved entry.
+    await remember(e2, w.other, 'written_receptive', 7, 2);
+
+    await merge(w.lexemeId, w.survivor, w.other);
+
+    const memory = await t.db.execute<{ enrollment_id: string; gloss_id: string; dimension: string; stability: number; reps: number }>(sql`
+      select enrollment_id, gloss_id, dimension, stability, reps from gloss_memory`);
+    const byRow = (a: { enrollment_id: string; dimension: string }, b: { enrollment_id: string; dimension: string }) =>
+      `${a.enrollment_id} ${a.dimension}` < `${b.enrollment_id} ${b.dimension}` ? -1 : 1;
+    expect([...memory.rows].sort(byRow)).toEqual(
+      [
+        { enrollment_id: e1, gloss_id: w.survivor, dimension: 'spelling', stability: 6, reps: 2 },
+        { enrollment_id: e1, gloss_id: w.survivor, dimension: 'written_productive', stability: 9, reps: 3 },
+        { enrollment_id: e1, gloss_id: w.survivor, dimension: 'written_receptive', stability: 20, reps: 4 },
+        { enrollment_id: e2, gloss_id: w.survivor, dimension: 'written_receptive', stability: 7, reps: 2 },
+      ].sort(byRow),
+    );
+  });
+
   it('is idempotent: a second run changes nothing', async () => {
     const w = await twoGlosses();
     await merge(w.lexemeId, w.survivor, w.other);

@@ -1,5 +1,5 @@
 {
-  "id": "d100357b-5028-4dd5-a6d3-b1f16ef63511",
+  "id": "a9062976-8ff1-4e72-81bd-0abdd9857b83",
   "prevId": "186783ac-7079-4f83-8f8e-663c2d790c19",
   "version": "7",
   "dialect": "postgresql",
@@ -40,24 +40,6 @@
         },
         "verdict": {
           "name": "verdict",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "retry_state": {
-          "name": "retry_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "retry_text": {
-          "name": "retry_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "retry_verdict": {
-          "name": "retry_verdict",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -117,26 +99,6 @@
         "answers_typed_text_length": {
           "name": "answers_typed_text_length",
           "value": "length(\"answers\".\"typed_text\") <= 300"
-        },
-        "answers_retry_state_known": {
-          "name": "answers_retry_state_known",
-          "value": "\"answers\".\"retry_state\" in ('pending', 'resolved')"
-        },
-        "answers_retry_only_on_alternative": {
-          "name": "answers_retry_only_on_alternative",
-          "value": "\"answers\".\"retry_state\" is null or (\"answers\".\"verdict\" = 'alternative') is true"
-        },
-        "answers_retry_resolved_complete": {
-          "name": "answers_retry_resolved_complete",
-          "value": "(\"answers\".\"retry_state\" is not distinct from 'resolved') = (\"answers\".\"retry_text\" is not null)\n        and (\"answers\".\"retry_state\" is not distinct from 'resolved') = (\"answers\".\"retry_verdict\" is not null)"
-        },
-        "answers_retry_verdict_known": {
-          "name": "answers_retry_verdict_known",
-          "value": "\"answers\".\"retry_verdict\" in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped')"
-        },
-        "answers_retry_text_length": {
-          "name": "answers_retry_text_length",
-          "value": "length(\"answers\".\"retry_text\") <= 300"
         }
       },
       "isRLSEnabled": false
@@ -1141,25 +1103,6 @@
           "notNull": true,
           "default": "'{}'::text[]"
         },
-        "accepted_answers": {
-          "name": "accepted_answers",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::text[]"
-        },
-        "answer_form": {
-          "name": "answer_form",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "accepted_at": {
-          "name": "accepted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "example_source": {
           "name": "example_source",
           "type": "text",
@@ -1256,10 +1199,6 @@
         "dict_var_translations_rank_nonneg": {
           "name": "dict_var_translations_rank_nonneg",
           "value": "\"dict_var_translations\".\"rank\" >= 0"
-        },
-        "dict_var_translations_accepted_answers_cap": {
-          "name": "dict_var_translations_accepted_answers_cap",
-          "value": "cardinality(\"dict_var_translations\".\"accepted_answers\") <= 10"
         }
       },
       "isRLSEnabled": false
@@ -1643,6 +1582,111 @@
         "enrollments_target_known": {
           "name": "enrollments_target_known",
           "value": "\"enrollments\".\"target_language\" in ('he', 'en', 'ru', 'it')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.gloss_memory": {
+      "name": "gloss_memory",
+      "schema": "",
+      "columns": {
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gloss_id": {
+          "name": "gloss_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dimension": {
+          "name": "dimension",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stability": {
+          "name": "stability",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "difficulty": {
+          "name": "difficulty",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_day": {
+          "name": "last_day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reps": {
+          "name": "reps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lapses": {
+          "name": "lapses",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "params": {
+          "name": "params",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "gloss_memory_entry_fk": {
+          "name": "gloss_memory_entry_fk",
+          "tableFrom": "gloss_memory",
+          "tableTo": "vocabulary_entries",
+          "columnsFrom": [
+            "enrollment_id",
+            "gloss_id"
+          ],
+          "columnsTo": [
+            "enrollment_id",
+            "gloss_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "cascade"
+        }
+      },
+      "compositePrimaryKeys": {
+        "gloss_memory_pkey": {
+          "name": "gloss_memory_pkey",
+          "columns": [
+            "enrollment_id",
+            "gloss_id",
+            "dimension"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "gloss_memory_dimension_known": {
+          "name": "gloss_memory_dimension_known",
+          "value": "\"gloss_memory\".\"dimension\" in ('written_receptive', 'written_productive', 'spoken_receptive', 'spoken_productive', 'spelling')"
+        },
+        "gloss_memory_stability_positive": {
+          "name": "gloss_memory_stability_positive",
+          "value": "\"gloss_memory\".\"stability\" > 0"
+        },
+        "gloss_memory_difficulty_range": {
+          "name": "gloss_memory_difficulty_range",
+          "value": "\"gloss_memory\".\"difficulty\" between 1 and 10"
         }
       },
       "isRLSEnabled": false
@@ -2078,48 +2122,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "context": {
-          "name": "context",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "context_translation": {
-          "name": "context_translation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "context_mark_start": {
-          "name": "context_mark_start",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "context_mark_end": {
-          "name": "context_mark_end",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sentence_mark_start": {
-          "name": "sentence_mark_start",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sentence_mark_end": {
-          "name": "sentence_mark_end",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "answer_form": {
-          "name": "answer_form",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2199,11 +2201,7 @@
         },
         "questions_shape_valid": {
           "name": "questions_shape_valid",
-          "value": "case \"questions\".\"type\"\n        when 'multiple_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'listen_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'matching' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'reverse_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'typed_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 10\n        when 'dictation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'letter_tiles' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null\n          and coalesce(array_length(\"questions\".\"tiles\", 1), 0) between 5 and 12\n        when 'read_aloud' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'say_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 10\n        when 'typed_meaning' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'cloze_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'cloze_typed' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 10\n        when 'sentence_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        else false end\n        and (\"questions\".\"type\" in ('typed_translation', 'say_translation', 'reverse_choice', 'typed_meaning', 'multiple_choice')\n          or (\"questions\".\"context\" is null and \"questions\".\"context_translation\" is null\n            and \"questions\".\"context_mark_start\" is null and \"questions\".\"context_mark_end\" is null))\n        and (\"questions\".\"type\" in ('cloze_typed', 'sentence_translation')\n          or (\"questions\".\"sentence_mark_start\" is null and \"questions\".\"sentence_mark_end\" is null))"
-        },
-        "questions_marks_valid": {
-          "name": "questions_marks_valid",
-          "value": "(\"questions\".\"context_mark_start\" is null) = (\"questions\".\"context_mark_end\" is null)\n        and (\"questions\".\"sentence_mark_start\" is null) = (\"questions\".\"sentence_mark_end\" is null)\n        and (\"questions\".\"context_translation\" is null or \"questions\".\"context\" is not null)\n        and (\"questions\".\"context_mark_start\" is null or (\"questions\".\"context\" is not null and \"questions\".\"context_mark_start\" >= 0\n          and \"questions\".\"context_mark_start\" < \"questions\".\"context_mark_end\" and \"questions\".\"context_mark_end\" <= length(\"questions\".\"context\")))\n        and (\"questions\".\"sentence_mark_start\" is null or (\"questions\".\"sentence_translation\" is not null and \"questions\".\"sentence_mark_start\" >= 0\n          and \"questions\".\"sentence_mark_start\" < \"questions\".\"sentence_mark_end\" and \"questions\".\"sentence_mark_end\" <= length(\"questions\".\"sentence_translation\")))"
+          "value": "case \"questions\".\"type\"\n        when 'multiple_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'listen_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'matching' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'reverse_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'typed_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'dictation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'letter_tiles' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null\n          and coalesce(array_length(\"questions\".\"tiles\", 1), 0) between 5 and 12\n        when 'read_aloud' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'say_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'typed_meaning' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'cloze_choice' then \"questions\".\"options\" is not null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        when 'cloze_typed' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"tiles\" is null\n          and \"questions\".\"alternatives\" is not null and coalesce(array_length(\"questions\".\"alternatives\", 1), 0) <= 5\n        when 'sentence_translation' then \"questions\".\"options\" is null and \"questions\".\"prompt\" is not null and \"questions\".\"alternatives\" is null and \"questions\".\"tiles\" is null\n        else false end"
         },
         "questions_sentence_valid": {
           "name": "questions_sentence_valid",
@@ -2420,6 +2418,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "practice_day": {
+          "name": "practice_day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -2551,6 +2555,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'learner'"
+        },
+        "bot_day": {
+          "name": "bot_day",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -2581,6 +2598,14 @@
       },
       "policies": {},
       "checkConstraints": {
+        "users_kind_known": {
+          "name": "users_kind_known",
+          "value": "\"users\".\"kind\" in ('learner', 'bot')"
+        },
+        "users_bot_day_iff_bot": {
+          "name": "users_bot_day_iff_bot",
+          "value": "(\"users\".\"kind\" = 'bot') = (\"users\".\"bot_day\" is not null)"
+        },
         "users_username_format": {
           "name": "users_username_format",
           "value": "\"users\".\"username\" ~ '^[a-z0-9_]{3,30}$'"

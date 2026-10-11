@@ -8,7 +8,7 @@ import { createSessionsRouter } from '../../../src/routes/sessions';
 import { ACT_AS, actAs } from '../../support/actAs';
 import { createFakeLogger } from '../../support/fakes';
 import { clearNamespace, countGeminiRequests, expectJudge, expectTranscription, geminiBaseUrlFor, mockNamespace } from '../../support/mockServer';
-import { readSnapshot } from '../../support/progressRows';
+import { readGlossMemory, readSnapshot } from '../../support/progressRows';
 import { insertListSession, readStoredAnswers, type AskedGloss } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
@@ -99,6 +99,12 @@ async function raised(sessionId: string, glossId: string): Promise<string[]> {
     .map((row) => row.dimension);
 }
 
+/** Phase 35 (spec D4). The dimensions of one gloss the hidden memory has a row
+ *  for, from the session's evidence, which D9 reads for memory as for levels. */
+async function remembered(glossId: string): Promise<string[]> {
+  return (await readGlossMemory(t.db, glossId)).map((row) => row.dimension).sort();
+}
+
 describe('the second try on a typed card (next-step)', () => {
   it('holds the card on an alternative, replays it pending, and moves progress for the retry', async () => {
     const app = buildTestApp(namespaceFor('retry-typed'));
@@ -147,6 +153,9 @@ describe('the second try on a typed card (next-step)', () => {
     expect(done).toMatchObject({ complete: true, score: { correct: 2, total: 2 }, missed_questions: [] });
     // Progress counts the retry, as an exact answer.
     expect(await raised(sessionId, glossIds[0])).toEqual(['spelling', 'written_productive', 'written_receptive']);
+    // And so does the memory (phase 35 D3: a typed translation's exact grades
+    // all three Good), where the first answer's alternative would write nothing.
+    expect(await remembered(glossIds[0])).toEqual(['spelling', 'written_productive', 'written_receptive']);
   });
 
   // Review Focus 2.
@@ -171,6 +180,9 @@ describe('the second try on a typed card (next-step)', () => {
     // Written once, and a give-up moves nothing.
     expect((await readSnapshot(t.db, sessionId)).length).toBeGreaterThan(0);
     expect(await raised(sessionId, glossIds[0])).toEqual([]);
+    // Nor the memory: the evidence is the first answer, an alternative, which
+    // grades nothing (phase 35 D3); a give-up read as the retry would be Again.
+    expect(await remembered(glossIds[0])).toEqual([]);
   });
 
   it('a skip gives a pending retry up and writes progress once', async () => {
@@ -340,6 +352,8 @@ describe('the second try on say the translation (speech)', () => {
     ]);
     // The first verdict, alternative, moves nothing; the retry's understood does.
     expect((await raised(sessionId, glossIds[0])).sort()).toEqual(['spoken_productive', 'spoken_receptive']);
+    // In memory too: say the translation, understood, grades SR and SK Good.
+    expect(await remembered(glossIds[0])).toEqual(['spoken_productive', 'spoken_receptive']);
   });
 
   it('records nothing for a retry that was not understood', async () => {

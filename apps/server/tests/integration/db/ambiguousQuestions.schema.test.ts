@@ -6,7 +6,7 @@ import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 
 /**
- * Phase 34 (spec §2, Data). The columns and checks of 0027_ambiguous_questions.
+ * Phase 34 (spec §2, Data). The columns and checks of 0028_ambiguous_questions.
  *
  * Every refusal names its constraint, not just "throws": a column the migration
  * forgot would make any insert throw, and a test that only says `rejects`

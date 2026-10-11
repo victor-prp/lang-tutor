@@ -1,5 +1,7 @@
-import { expect, type Page } from '@playwright/test';
+import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
+import { expectGeminiByTask } from './mockServer';
 import { stripIsolates } from './text';
 
 /** Wrong Hebrew meanings for today's card. None is a right answer anywhere. */
@@ -7,30 +9,7 @@ export const WRONG_HEBREW = ['דלת', 'קיר', 'תקרה'];
 /** Wrong Russian words for a reversed card. None is a saved form or lemma. */
 export const WRONG_RUSSIAN = ['писать', 'дверь', 'стена'];
 
-/** The type cycle by position (server domain/session.ts, spec D2). */
-export const CYCLE = ['choice', 'reverse', 'typed'] as const;
 export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning' | 'cloze-choice' | 'cloze-typed' | 'translate';
-
-/**
- * Phase 23. The generation stub for q1 to q10, each key answering the task of
- * its position: Hebrew wrong options for today's card, Russian ones for a
- * reversed card, no options and `alternatives` for a typed card.
- */
-export function generationStub(alternatives: string[] = []) {
-  return {
-    items: Array.from({ length: 10 }, (_, i) => {
-      const key = `q${i + 1}`;
-      switch (CYCLE[i % 3]) {
-        case 'choice':
-          return { key, distractors: WRONG_HEBREW };
-        case 'reverse':
-          return { key, distractors: WRONG_RUSSIAN };
-        case 'typed':
-          return { key, distractors: [], alternatives };
-      }
-    }),
-  };
-}
 
 export type Card = { kind: CardKind; prompt: string; options: string[] };
 
@@ -56,18 +35,14 @@ async function kindOnScreen(page: Page): Promise<CardKind> {
 
 /**
  * The card at `position` of `total`, read once the counter shows it, and
- * checked against `expected`: by default phase 23's cycle, which a session of
- * four words at ordinal 0 with no voices still follows (phase 24 plan).
+ * checked against `expected` when one is given. Phase 35: which type a
+ * position gets follows from the learner's memory (spec D6), so a spec that
+ * steers it seeds memory (memory.ts) and reads the type from the screen.
  */
-export async function readCard(
-  page: Page,
-  position: number,
-  total: number,
-  expected: CardKind = CYCLE[(position - 1) % 3],
-): Promise<Card> {
+export async function readCard(page: Page, position: number, total: number, expected?: CardKind): Promise<Card> {
   await expect(page.getByTestId('progress-label')).toHaveText(new RegExp(`${position}\\s*/\\s*${total}`));
   const kind = await kindOnScreen(page);
-  expect(kind, `position ${position}`).toBe(expected);
+  if (expected) expect(kind, `position ${position}`).toBe(expected);
   const prompt =
     (await page.getByTestId('question-prompt').count()) > 0
       ? stripIsolates(await page.getByTestId('question-prompt').textContent())
@@ -102,28 +77,26 @@ export const STUB_SENTENCE_HEBREW = 'אתמול היא קראה את הספר ה
 export const STUB_GAP = 'прочитала';
 export const STUB_GAP_LEMMA = 'прочитать';
 
-type Task = 'meaning' | 'word' | 'typed' | 'gap' | 'sentence' | 'translate';
-
-/** Phase 24. A stub answering exactly the keys a plan asks, each by its task. */
-export function generationStubFor(tasks: Record<number, Task>, alternatives: string[] = []) {
+/** Phase 35. What the generation stub answers for each task the job can ask
+ *  (domain/distractors.ts taskFor), whichever position asks it: Hebrew wrong
+ *  options for a choice of meanings (and a board's), Russian ones for a choice
+ *  of words or of a gap, `alternatives` for a typed card, and the one stub
+ *  sentence for a gap to type and a sentence to translate. */
+export function generationStub(alternatives: string[] = []): Record<string, Record<string, unknown>> {
   return {
-    items: Object.entries(tasks).map(([position, task]) => {
-      const key = `q${position}`;
-      switch (task) {
-        case 'meaning':
-          return { key, distractors: WRONG_HEBREW };
-        case 'word':
-        case 'gap':
-          return { key, distractors: WRONG_RUSSIAN };
-        case 'typed':
-          return { key, distractors: [], alternatives };
-        case 'sentence':
-          return { key, distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] };
-        case 'translate':
-          return { key, distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE };
-      }
-    }),
+    meaning: { distractors: WRONG_HEBREW },
+    word: { distractors: WRONG_RUSSIAN },
+    gap: { distractors: WRONG_RUSSIAN },
+    typed: { distractors: [], alternatives },
+    sentence: { distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] },
+    translate: { distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE },
   };
+}
+
+/** Registers the generation stub: every position's item answered by its task,
+ *  for as many positions as a list session holds. */
+export async function expectGeneration(request: APIRequestContext, alternatives: string[] = []): Promise<void> {
+  await expectGeminiByTask(request, generationStub(alternatives), SESSION_LENGTH);
 }
 
 /** Whether an option is one of the stub's wrong words. Case-blind: a gap's wrong
@@ -164,7 +137,7 @@ export function nearMiss(word: string): string {
  *  Chromium's fake microphone, tap. */
 export async function speak(page: Page) {
   // Retried: a click before the static export hydrates is a silent no-op, and
-  // the first card of a session can be this one (the rotation, phase 27).
+  // the first card of a session can be this one (phase 27; by p since phase 35).
   await expect(async () => {
     // Only while nothing is recording: a second tap would stop the recording
     // a slow recorder.start() has just begun.

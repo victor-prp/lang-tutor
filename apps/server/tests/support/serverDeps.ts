@@ -24,6 +24,8 @@ export function createTestServerDeps(io: {
   db: Db;
   logger: Logger;
   rng: () => number;
+  /** Phase 35. The clock; defaults to the real one. */
+  now?: () => number;
   geminiBaseUrl?: string;
   /** Phase 29. Resend's base URL; defaults to an unroutable one, as Gemini's does. */
   mailBaseUrl?: string;
@@ -44,12 +46,14 @@ export function createTestServerDeps(io: {
   judgeTimeoutMs?: number;
   /** Phase 26. A read's budget; defaults to production's. */
   photoReadTimeoutMs?: number;
+  /** Phase 35 (spec D12). Mounts the bot route; unset, as on every lane. */
+  botSecret?: string | null;
 }): AppDeps {
   return createServerDeps({
     db: io.db,
     logger: io.logger,
     rng: io.rng,
-    now: Date.now,
+    now: io.now ?? Date.now,
     fetch: globalThis.fetch,
     gemini: {
       apiKey: 'test-key',
@@ -73,6 +77,7 @@ export function createTestServerDeps(io: {
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test' },
     webDistDir: null,
+    botSecret: io.botSecret ?? null,
     boss: io.boss ?? unstartedBoss(io.db),
   });
 }

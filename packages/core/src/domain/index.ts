@@ -27,3 +27,7 @@ export type { TypedTarget } from './typed';
 export { DIMENSIONS, LIVE_DIMENSIONS, MAX_LEVEL, MIN_LEVEL, badge } from './progress';
 export type { Dimension } from './progress';
 export { normaliseGloss } from './gloss';
+export { FSRS6_DEFAULT, retrievability, review } from './memory';
+export type { Grade, MemoryState } from './memory';
+export { dimensionsTested, gradesFor } from './memoryGrades';
+export type { GradableAnswer, GradedPiece } from './memoryGrades';

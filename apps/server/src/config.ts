@@ -165,6 +165,20 @@ export function loadAuthConfig(env: NodeJS.ProcessEnv): AuthConfig {
 }
 
 /**
+ * Phase 35 (spec D12). BOT_SECRET, which mounts the bot route, or null where it
+ * is unset: every lane, CI and tests. Read separately from Config for the
+ * reason AuthConfig is: db/cli.ts calls loadConfig and has no use for it. A
+ * secret too short to resist guessing fails at start-up; the value is never
+ * printed.
+ */
+export function loadBotSecret(env: NodeJS.ProcessEnv): string | null {
+  const secret = env.BOT_SECRET?.trim();
+  if (!secret) return null;
+  if (secret.length < 32) throw new Error('BOT_SECRET must be at least 32 characters. Generate one with: openssl rand -base64 32');
+  return secret;
+}
+
+/**
  * The database name inside a connection string. `/health` publishes it and the
  * lane tooling drops by it, so it is parsed once, here, rather than with a
  * regex at each call site.
