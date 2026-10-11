@@ -26,8 +26,9 @@
 #   different, a release            eas build, eas submit, eas update
 #   different, a rollback           nothing: Play cannot downgrade an app
 #
-# Env: TAG (the release tag), EXPO_TOKEN, MOBILE_DIR (default apps/mobile; the
-# test points it at a fixture).
+# Env: TAG (the release tag); ANDROID_RELEASE, the repository variable that
+# turns Android releases on (only the exact value "on" ships); EXPO_TOKEN;
+# MOBILE_DIR (default apps/mobile; the test points it at a fixture).
 
 set -euo pipefail
 
@@ -40,6 +41,10 @@ MOBILE_DIR=${MOBILE_DIR:-apps/mobile}
 
 if [ ! -f "$MOBILE_DIR/eas.json" ]; then
   echo "::notice::$TAG predates the Android release (no eas.json): nothing to ship."
+  exit 0
+fi
+if [ "${ANDROID_RELEASE:-}" != on ]; then
+  echo "::notice::Android releases are off: the repository variable ANDROID_RELEASE is '${ANDROID_RELEASE:-}', not 'on' (docs/runbooks/android.md). Skipped."
   exit 0
 fi
 if [ -z "${EXPO_TOKEN:-}" ]; then

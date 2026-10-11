@@ -146,8 +146,9 @@ jobs:
   # with the tag, so new app code never calls a server that is not live yet.
   # The tag's checkout (the default ref), like build-push: what ships is the
   # tag's app. scripts/android-release.sh decides between an over-the-air
-  # update and a new Play build by fingerprint, and skips, green, until the
-  # one-time setup is done (no EXPO_TOKEN, or no EAS project id) or when the tag
+  # update and a new Play build by fingerprint. It skips, green, unless the
+  # repository variable ANDROID_RELEASE is exactly "on", until the one-time
+  # setup is done (no EXPO_TOKEN, or no EAS project id), and when the tag
   # predates this job. A failure here leaves the server release standing;
   # rerunning this job alone finishes what is missing.
   android:
@@ -158,6 +159,7 @@ jobs:
       contents: read
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      ANDROID_RELEASE: ${{ vars.ANDROID_RELEASE }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -166,7 +168,7 @@ jobs:
           cache: npm
       - run: npm ci
       - uses: expo/expo-github-action@v9
-        if: env.EXPO_TOKEN != ''
+        if: env.ANDROID_RELEASE == 'on' && env.EXPO_TOKEN != ''
         with:
           eas-version: 24.8.0
           packager: npm
