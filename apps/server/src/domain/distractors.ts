@@ -8,6 +8,7 @@ import type { SessionPlan } from './plan';
 import {
   MAX_ALTERNATIVES,
   MAX_AVOID,
+  MAX_GAP_ALTERNATIVES,
   SENTENCE_MAX_WORDS,
   SENTENCE_MIN_WORDS,
   TRANSLATE_MAX_WORDS,
@@ -76,7 +77,7 @@ export function tasksFor(plan: SessionPlan): (Task | null)[] {
 /** A position's key: `q1` is the first card, whichever positions ask nothing. */
 export const keyOf = (position: number): string => `q${position + 1}`;
 
-/** The most alternatives the model is asked for, and a typed cloze keeps. */
+/** The most alternatives the typed task asks for. */
 export { MAX_ALTERNATIVES };
 
 /** Phase 34 (spec D1). The most alternatives a stored question keeps
@@ -289,7 +290,7 @@ export function buildDistractorPrompt(input: {
     `- "word": the learner sees the ${answers.name} translation and picks the ${learned.name} word. Write ${DISTRACTOR_MARKER} in ${learned.name} as distractors.`,
     `- "typed": the learner sees the ${answers.name} translation and types the ${learned.name} word. Leave distractors empty. As alternatives, list every other ${learned.name} word or phrase that translates it equally well in this sense, at most ${MAX_ALTERNATIVES}, or none.`,
     `- "gap": the learner sees the example sentence with the ${learned.name} word blanked, and picks the missing word. Write ${DISTRACTOR_MARKER} in ${learned.name}: words of the same part of speech and in the same form as the blanked word, each of which makes this sentence wrong or meaningless. Read each candidate into the sentence and drop it if the sentence still makes sense, however differently: never a word that also fits. Prefer a word that clashes with the other words of the sentence (an object, subject, place or time it cannot go with) over a plausible neighbour of the blanked word.`,
-    `- "sentence": write a new, natural, everyday ${learned.name} sentence of ${SENTENCE_MIN_WORDS} to ${SENTENCE_MAX_WORDS} words that uses the word in the meaning given by correct and shown by the example, never in another sense. Use whatever form of the word the sentence needs, written as consecutive words, as many as the word has. It must differ from every sentence in avoid. Put it in sentence; the word exactly as written in the sentence in gap; the whole sentence in natural ${answers.name}, which fixes its person, number and tense, in translation; and in alternatives every other ${learned.name} word that would fill the gap equally well given that translation, in the same form, or none. Leave distractors empty.`,
+    `- "sentence": write a new, natural, everyday ${learned.name} sentence of ${SENTENCE_MIN_WORDS} to ${SENTENCE_MAX_WORDS} words that uses the word in the meaning given by correct and shown by the example, never in another sense. Use whatever form of the word the sentence needs, written as consecutive words, as many as the word has. It must differ from every sentence in avoid. Put it in sentence; the word exactly as written in the sentence in gap; the whole sentence in natural ${answers.name}, which fixes its person, number and tense, in translation; and in alternatives every other ${learned.name} word that would fill the gap with the sentence read on its own, without its translation, leaving a correct and natural sentence, in the form the gap needs, the likeliest first, at most ${MAX_GAP_ALTERNATIVES}, or none. Leave distractors empty.`,
     `- "translate": write a short, natural, everyday ${answers.name} sentence of ${SENTENCE_MIN_WORDS} to ${TRANSLATE_MAX_WORDS} words that uses the meaning in correct, in the sense the example shows. It must differ from every sentence in avoid. Put it in sentence; a natural ${learned.name} translation of it that uses the word, in whatever form the translation needs, in translation; and that word exactly as written in the translation in gap. Leave distractors empty.`,
     'Each wrong answer must be plausible: the same part of speech, the same register and a',
     'similar length as the correct answer.',

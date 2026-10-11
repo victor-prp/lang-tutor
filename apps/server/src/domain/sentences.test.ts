@@ -19,6 +19,11 @@ describe('validateSentenceItem (spec D5)', () => {
       content: { sentence: 'Ieri parlavamo per ore.', translation: 'אתמול דיברנו שעות.', gap: { start: 5, end: 14 }, alternatives: ['chiacchieravamo'] },
     });
   });
+  it('keeps up to ten alternatives, the words that fit the sentence read alone (phase 38 D2)', () => {
+    const many = Array.from({ length: 12 }, (_, index) => `parola${index}`);
+    const result = validateSentenceItem(INPUT, { ...good, alternatives: many });
+    expect(result.ok && result.content.alternatives).toEqual(many.slice(0, 10));
+  });
   it.each([
     ['a sentence it was told to avoid', { ...good, sentence: 'Mi piace parlare con te.', gap: 'parlare' }],
     ['a gap that is not in the sentence', { ...good, gap: 'parlato' }],

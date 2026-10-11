@@ -615,6 +615,10 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(prompt.system).toContain('3 to 10 words');
       expect(prompt.system).toContain(DISTRACTOR_MARKER);
     });
+    it('asks a sentence for every word that fits its gap read alone, at most ten (phase 38 D2)', () => {
+      expect(prompt.system).toContain('would fill the gap with the sentence read on its own, without its translation');
+      expect(prompt.system).toContain('at most 10');
+    });
     it('sends the example, its translation and the sentences to avoid', () => {
       const sent = JSON.parse(prompt.user) as { items: Record<string, unknown>[] };
       expect(sent.items[0]).toMatchObject({
