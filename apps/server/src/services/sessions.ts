@@ -31,6 +31,7 @@ import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../doma
 import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planSession } from '../domain/plan';
+import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
 import type { SessionRecord, SessionSummary } from '../domain/session';
 import {
@@ -123,6 +124,17 @@ async function recordProgress(repos: Repos, sessionId: string): Promise<void> {
   const outcome = evaluateSession(rows, evidence.answers, evidence.day);
   await repos.progress.updateRows({ enrollmentId: evidence.enrollmentId, rows: outcome.changed });
   await repos.progress.insertSnapshot({ sessionId, rows: outcome.snapshot });
+
+  // Phase 35 (spec D4). The same answers, as memory. `rows` exist only for saved
+  // glosses, so an answer about an unsaved one counts for nothing here too.
+  const saved = new Set(rows.map((row) => row.glossId));
+  const before = await repos.memory.findRows({ enrollmentId: evidence.enrollmentId, glossIds: [...saved] });
+  const memory = applySession(
+    before,
+    evidence.answers.filter((answer) => saved.has(answer.glossId)),
+    evidence.day,
+  );
+  await repos.memory.upsertRows({ enrollmentId: evidence.enrollmentId, rows: memory });
 }
 
 /**

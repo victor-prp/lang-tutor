@@ -8,6 +8,7 @@ import { createFakeLogger } from '../../support/fakes';
 import {
   insertAnsweredSession,
   insertProgressRows,
+  readMemory,
   readProgress,
   readSnapshot,
   saveSessionGlosses,
@@ -277,5 +278,50 @@ describe('recomputeProgress', () => {
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 1 });
     expect(await written()).toEqual(before);
+  });
+
+  // Phase 35 (spec D8). Three sessions over two days, the first two on the same
+  // day, one word wrong once: the recompute writes back the memory the live path wrote.
+  it('rebuilds the memory the live path wrote, over three sessions on two days', async () => {
+    let clock = Date.parse('2026-03-04T09:00:00Z');
+    const { sessions: live } = createTestServerDeps({
+      db: t.db,
+      logger: createFakeLogger(),
+      rng: testRng(7),
+      now: () => clock,
+    });
+    const words: Parameters<typeof insertListSession>[1]['asked'] = [];
+    for (const [lemma, translation] of [['tome', 'ספר'], ['quill', 'נוצה']]) {
+      const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
+      words.push({ glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation });
+    }
+    const play = async (rights: boolean[]) => {
+      const { sessionId, questions } = await insertListSession(t.db, {
+        userId: 'u_1',
+        enrollmentId: E,
+        asked: words,
+        types: ['multiple_choice', 'multiple_choice'],
+      });
+      for (const [i, question] of questions.entries()) {
+        const q = asChoice(question);
+        await live.submitAnswer('u_1', sessionId, q.id, {
+          option_index: rights[i] ? q.correct_option : (q.correct_option + 1) % q.options.length,
+        });
+      }
+      return sessionId;
+    };
+    await play([true, true]);
+    clock += 3_600_000;
+    await play([true, false]);
+    clock += 24 * 3_600_000;
+    await play([false, true]);
+
+    const before = await readMemory(t.db, E);
+    expect(before).toHaveLength(2);
+    expect(before.map((row) => row.reps)).toEqual([3, 3]);
+    expect(before.some((row) => row.lapses > 0)).toBe(true);
+
+    expect(await recomputeProgress(t.db)).toEqual({ sessions: 3 });
+    expect(await readMemory(t.db, E)).toEqual(before);
   });
 });

@@ -9,6 +9,7 @@ import {
   dictLexemes,
   dictVariants,
   questions,
+  glossMemory,
   glossProgress,
   sessionProgress,
   sessionQuestions,
@@ -73,6 +74,15 @@ export async function readProgress(db: Db, enrollmentId: string): Promise<Stored
     .from(glossProgress)
     .where(eq(glossProgress.enrollmentId, enrollmentId))
     .orderBy(asc(glossProgress.glossId), asc(glossProgress.dimension));
+}
+
+/** Every memory row of one enrollment, ordered by gloss and dimension (phase 35). */
+export async function readMemory(db: Db, enrollmentId: string) {
+  return db
+    .select()
+    .from(glossMemory)
+    .where(eq(glossMemory.enrollmentId, enrollmentId))
+    .orderBy(asc(glossMemory.glossId), asc(glossMemory.dimension));
 }
 
 /** One session's snapshot rows, ordered by gloss and dimension. */
@@ -237,7 +247,7 @@ export async function insertAnsweredSession(
  * Makes every insert into `table` fail, to prove a write is all-or-nothing.
  * The database is the test's own clone, so the trigger goes with it.
  */
-export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss_progress'): Promise<void> {
+export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss_progress' | 'gloss_memory'): Promise<void> {
   await db.execute(
     sql.raw(`
       create function fail_insert() returns trigger language plpgsql as $$

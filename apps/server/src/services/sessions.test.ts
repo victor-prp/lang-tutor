@@ -4,6 +4,7 @@ import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogg
 import { testRng } from '../../tests/support/testRng';
 import type { GlossRendering, SessionRecord } from '../domain/session';
 import { AnswerKindMismatch, NoSavedWords, SessionNotFound } from '../errors';
+import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
@@ -219,6 +220,12 @@ describe('repos', () => {
     listEndedSessions: unreachableProgress,
   };
 
+  const memoryRepo: MemoryRepo = {
+    findRows: unreachableProgress,
+    upsertRows: unreachableProgress,
+    deleteAll: unreachableProgress,
+  };
+
   const photoImportRepo: PhotoImportRepo = {
     insertImport: forbidden,
     deleteExpired: forbidden,
@@ -247,6 +254,7 @@ describe('repos', () => {
         gloss: glossRepo,
         vocabulary: vocabularyRepo,
         progress: progressRepo,
+        memory: memoryRepo,
         photoImport: photoImportRepo,
         jobs: {
           enqueue: () => {

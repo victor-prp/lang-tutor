@@ -10,6 +10,7 @@ import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
 import { createAuthRepo } from './repo/auth';
 import { createGlossRepo } from './repo/glosses';
 import { createHealthRepo, type HealthRepo } from './repo/health';
+import { createMemoryRepo } from './repo/memory';
 import { createJobRepo, type JobRepo } from './repo/jobs';
 import { createPhotoImportRepo } from './repo/photoImports';
 import { createProgressRepo } from './repo/progress';
@@ -91,6 +92,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     dict: createDictRepo(tx),
     vocabulary: createVocabularyRepo(tx),
     progress: createProgressRepo(tx),
+    memory: createMemoryRepo(tx),
     jobs: boss ? createJobRepo(tx, boss) : NO_JOBS,
     photoImport: createPhotoImportRepo(tx),
     gloss: createGlossRepo(tx),
