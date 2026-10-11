@@ -124,13 +124,26 @@ describe('the accept job (spec D1, D2)', () => {
 
   // Review Focus 3: a rendering the job found nothing for is stamped, so the stamp,
   // not the list, says it is done.
-  it('stamps an empty list when the model has no content', async () => {
+  it('stamps an empty list when the model finds no other answer', async () => {
     const ora = await oraFromHours();
-    await expectAccept(ns, '');
+    await expectAccept(ns, { answers: [], answer_form: null });
 
     await deps().translations.acceptRendering(ora.payload);
 
     expect(await rendering(ora.variantIds[0], ora.senseIds[0])).toMatchObject({ accepted_answers: [], answer_form: null, accepted: true });
+  });
+
+  // Final review I1: "no content" is no answer. Stamped, it would decide for good
+  // that the rendering has no other answers, and no session would ask again.
+  it('fails the attempt, stamping nothing, when the model has no content', async () => {
+    const ora = await oraFromHours();
+    await expectAccept(ns, '');
+
+    await expect(deps().translations.acceptRendering(ora.payload)).rejects.toThrow(/no content/);
+
+    expect(await rendering(ora.variantIds[0], ora.senseIds[0])).toMatchObject({ accepted_answers: [], answer_form: null, accepted: false });
+    expect(events('accept_attempt_failed')).toEqual([expect.objectContaining({ ...ora.payload, reason: expect.stringContaining('no content') })]);
+    expect(events('accept_stored')).toEqual([]);
   });
 
   it('skips a rendering that is gone, with no model call', async () => {

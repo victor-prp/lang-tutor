@@ -34,7 +34,7 @@ import {
   type StaleLexeme,
 } from '../domain/dictionary';
 import { coversPair, markSaved } from '../domain/vocabulary';
-import { PairNotEnrolled, TranslationUnreadable } from '../errors';
+import { LlmUnavailable, PairNotEnrolled, TranslationUnreadable } from '../errors';
 import type { Logger } from '../logger';
 import type { RepairedRendering } from '../repo/dictionary';
 import { authorizeEnrollment } from './access';
@@ -915,10 +915,13 @@ export function createTranslationService({
      * Phase 34 (spec D1, D2). The accept job: asks the model once for every right
      * answer to one rendering and the form that agrees with it, and stores both
      * with the stamp that says it ran. Read, call, write, each step its own: no
-     * transaction is held across the call (ADR 0001 R8). An empty answer, the
-     * provider's "no content", is an answer too: the rendering is stamped with
-     * an empty list and never paid for again. Any throw is a failed attempt,
-     * which pg-boss retries and then dead-letters.
+     * transaction is held across the call (ADR 0001 R8). An answer with no
+     * other words is an answer: the rendering is stamped with an empty list and
+     * never paid for again. An empty reply, the provider's "no content", is no
+     * answer at all, so it is a failed attempt like an unreadable one: stamped,
+     * it would settle for good that the rendering has no other answers. Any
+     * throw is a failed attempt, which pg-boss retries and then dead-letters,
+     * unstamped, so the next session that picks the rendering asks again.
      *
      * The write takes the lexeme lock the stale-form repair's caller takes, and
      * lands only on the rendering text it asked about: a repair that reworded it
@@ -952,7 +955,8 @@ export function createTranslationService({
             explanation,
           }),
         );
-        const answer = raw === '' ? { answers: [], answer_form: null } : parseAccept(raw);
+        if (raw === '') throw new LlmUnavailable('the model returned no content');
+        const answer = parseAccept(raw);
         if (!answer) throw new TranslationUnreadable(raw.slice(0, 200));
         ({ answers, answerForm } = validateAccept({ form: rendering.form, lemma: rendering.lemma, target, explanation }, answer));
       } catch (error) {
