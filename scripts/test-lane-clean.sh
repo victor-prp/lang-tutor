@@ -155,9 +155,9 @@ printf '%s\n' "$*" >> "$NPM_LOG"
 case "$*" in
   *lane:list*)
     [ -n "${STUB_LIST_FAILS:-}" ] && { echo "connect ECONNREFUSED" >&2; exit 1; }
-    printf 'orphan\tgone_one\tlang_tutor_e2e_gone_one lang_tutor_gone_one\n'
-    printf 'orphan\tgone_two\tlang_tutor_gone_two\n'
-    printf 'unowned\tlang_tutor_mystery\n'
+    printf 'orphan\tgone_one\tdb_e2e_gone_one db_gone_one\n'
+    printf 'orphan\tgone_two\tdb_gone_two\n'
+    printf 'unowned\tdb_mystery\n'
     ;;
   *lane:down*)
     [ -n "${STUB_DOWN_FAILS:-}" ] && { echo "drop failed" >&2; exit 1; }
@@ -172,9 +172,9 @@ STUB_PATH="$FIXTURE/bin:$PATH"
 : > "$NPM_LOG"
 oplan=$(cd "$MAIN" && PATH="$STUB_PATH" bash ./scripts/lane-clean.sh --orphans 2>&1)
 expect_contains "an orphan lane is planned for dropping"     "drop       gone_one" "$oplan"
-expect_contains "with the databases it owns"                 "lang_tutor_e2e_gone_one lang_tutor_gone_one" "$oplan"
+expect_contains "with the databases it owns"                 "db_e2e_gone_one db_gone_one" "$oplan"
 expect_contains "every orphan lane is planned"               "drop       gone_two" "$oplan"
-expect_contains "an unstamped database is left alone"        "leave      lang_tutor_mystery" "$oplan"
+expect_contains "an unstamped database is left alone"        "leave      db_mystery" "$oplan"
 expect_absent   "--orphans does not also walk the worktrees" "clean      done" "$oplan"
 expect_contains "and the plan says how to act on it"         "lane:clean -- --orphans --yes" "$oplan"
 expect_absent   "a plan alone drops nothing"                 "lane:down" "$(cat "$NPM_LOG")"
