@@ -56,12 +56,19 @@ const secret =
   process.env.BOT_SECRET?.trim() ||
   fail('BOT_SECRET is not set: the server mounts the bot route only with it, and the driver signs in with it');
 
-// A dry run's server is this lane's, whose port the lane wrapper exports (ADR 0006).
-const lanePort = process.env.PORT?.trim();
+// A dry run's server is this lane's, whose port the lane wrapper exports (ADR 0006). An empty
+// value is no value: GitHub expands an unset `vars.BOTS_API_URL` to ''.
+const given = (value: string | undefined) => value?.trim() || undefined;
+const lanePort = given(process.env.PORT);
 const baseUrl =
-  values.api ??
-  (dry ? (lanePort ? `http://localhost:${lanePort}` : undefined) : process.env.BOTS_API_URL?.trim()) ??
+  given(values.api) ??
+  (dry ? (lanePort ? `http://localhost:${lanePort}` : undefined) : given(process.env.BOTS_API_URL)) ??
   fail(dry ? 'no --api and no PORT: run it as npm run bots:dry, through the lane wrapper' : 'no --api and no BOTS_API_URL');
+// Checked before anything is opened or sent: a run against no server would fail every request,
+// and three such runs count every bot's day as played.
+if (!URL.canParse(baseUrl) || !['http:', 'https:'].includes(new URL(baseUrl).protocol)) {
+  fail(`the API address ${JSON.stringify(baseUrl)} is not an http(s) URL`);
+}
 
 async function main(): Promise<void> {
   const store = dry

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -84,6 +84,22 @@ test('the real store makes the orphan branch once, pushes every bot, and a fresh
     // The first checkout, opened again, fast-forwards to what the second pushed.
     const reopened = await openStateCheckout({ repoRoot: join(root, 'a'), dir: join(root, 'a', 'bots', '.state'), profiles: [] });
     assert.equal((await reopened.load('one-en')).day, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a remote that cannot be read is a failure, never "no state yet": no orphan is made', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bots-remote-'));
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+  try {
+    git(root, 'init', '--quiet', 'repo');
+    // An origin nobody can reach, as a network, auth or checkout misconfiguration leaves it.
+    git(join(root, 'repo'), 'remote', 'add', 'origin', join(root, 'no-such-remote.git'));
+    const dir = join(root, 'repo', 'bots', '.state');
+    await assert.rejects(openStateCheckout({ repoRoot: join(root, 'repo'), dir, profiles: [] }), /bots-state/);
+    assert.equal(existsSync(dir), false, 'no checkout was made');
+    assert.equal(git(join(root, 'repo'), 'branch', '--list', 'bots-state'), '', 'no orphan branch was made');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

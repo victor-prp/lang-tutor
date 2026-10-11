@@ -190,10 +190,19 @@ export async function openStateCheckout(opts: {
 }): Promise<StateStore> {
   const remote = opts.remote ?? 'origin';
   const git = (...args: string[]) => run('git', args, { cwd: opts.repoRoot });
-  const fetched = await git('fetch', '--quiet', remote, STATE_BRANCH).then(
+  // Absent and unreadable are different answers. Only `ls-remote --exit-code` saying the branch
+  // is not there (exit 2) means "no state yet"; any other failure (network, auth, a checkout
+  // without the remote) throws. Read as absent, it would make an orphan with every bot on day 0
+  // and move production's bots back to day 1 before the push failed.
+  const exists = await git('ls-remote', '--exit-code', '--heads', remote, STATE_BRANCH).then(
     () => true,
-    () => false,
+    (error: { code?: unknown; stderr?: string }) => {
+      if (error.code === 2) return false;
+      throw new Error(`cannot read ${STATE_BRANCH} from ${remote}: ${String(error.stderr ?? error).trim()}`);
+    },
   );
+  if (exists) await git('fetch', '--quiet', remote, STATE_BRANCH);
+  const fetched = exists;
   if (!existsSync(opts.dir)) {
     const local = await git('rev-parse', '--verify', '--quiet', `refs/heads/${STATE_BRANCH}`).then(
       () => true,
