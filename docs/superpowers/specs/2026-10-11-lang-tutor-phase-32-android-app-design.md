@@ -97,6 +97,9 @@ forward. A tag without `apps/mobile/eas.json` predates this phase, and the job s
 **D7. The job skips, green, until it is set up** *(ruling)*: with no `EXPO_TOKEN` secret, or no
 `extra.eas.projectId` in `app.json`, it prints a notice and exits 0. Releases keep working between
 the merge and Victor's one-time setup, and the first release after setup takes the build path.
+Added after the merge: the repository variable `ANDROID_RELEASE` is the explicit switch. The job
+ships only when it is exactly `on`, and skips with a notice naming it otherwise. That lets releases
+go out while Play is not ready, without removing the token *(Victor's call, 2026-10-11)*.
 
 **D8. When an update applies.** `updates.checkAutomatically: ON_LOAD` with
 `fallbackToCacheTimeout: 3000`: on a cold start the app waits up to 3 s for a new update. If one

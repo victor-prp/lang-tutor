@@ -8,8 +8,17 @@ within a day or so. Design:
 [phase 32](../superpowers/specs/2026-10-11-lang-tutor-phase-32-android-app-design.md),
 [ADR 0012](../adr/adr-0012-native-client-releases.md).
 
-Until steps 2–4 below are done, the `android` job prints a `::notice::` and skips, green.
-Releases keep working in the meantime.
+**The on/off switch is the repository variable `ANDROID_RELEASE`.** The `android` job ships
+only when it is exactly `on`. Unset or any other value makes the job print a `::notice::` and
+skip, green, and the server and web still release. It is unset until step 5. Turn it on or off
+with:
+
+```bash
+/opt/homebrew/bin/gh variable set ANDROID_RELEASE --body on    # ship the app with every release
+/opt/homebrew/bin/gh variable set ANDROID_RELEASE --body off   # pause: releases skip Android
+```
+
+The job also skips, green, while steps 2–4 are not done.
 
 ## Where go-live stands
 
@@ -24,16 +33,15 @@ Last updated 2026-10-11.
       for Play.
 - [x] **4. The GitHub secret.** Done. `EXPO_TOKEN` is a **Developer** robot token of the
       `wordspal` account.
-- [ ] **5. The first release.** Waits for steps 1 and 3.
+- [ ] **5. The first release.** Waits for steps 1 and 3. `ANDROID_RELEASE` is not set yet,
+      so releases until then skip Android.
 - [ ] **6. Back up the upload key.** After step 5.
 - [ ] **7. Check it on your phone.** After step 5.
 - [ ] **8. Invite friends.** After step 7.
 
-> **Do not run `npm run release` until steps 1 and 3 are done.** Since step 4, the `android`
-> job no longer skips: it builds, then tries to submit to Play, which fails while the app does
-> not exist. The server release still goes through, and rerunning the `android` job after
-> steps 1 and 3 recovers, because the build already exists. Holding the release off avoids a
-> red run.
+Releasing other phases meanwhile is safe. `ANDROID_RELEASE` is unset, so every release skips
+Android, green. Do not set it to `on` before steps 1 and 3 are done: the job would build, then
+fail to submit to a Play app that does not exist.
 
 **Picking up from here:** when Google's email arrives, do steps 1.2–1.4, then step 3, then
 step 5.
@@ -117,7 +125,14 @@ proves before the next one starts.
 
    *Proves:* `gh secret list` shows `EXPO_TOKEN`.
 
-5. **The first release.** `npm run release`. The `android` job finds no build, so it builds
+5. **The first release.** Turn Android releases on, then release:
+
+   ```bash
+   /opt/homebrew/bin/gh variable set ANDROID_RELEASE --body on
+   npm run release
+   ```
+
+   The `android` job finds no build, so it builds
    (about 15–20 minutes), submits the build to the internal track, then publishes the
    update. EAS creates the app's signing key on this first build.
 
@@ -176,7 +191,7 @@ The `android` job runs `scripts/android-release.sh` from the tag's checkout:
 | `Build … has no update yet, so it never reached Play: submitting it first.` | A rerun after a failed submit: `eas submit`, then `eas update`. Every update's message names its build (`<tag> for build <id>`), and that is how the job tells |
 | `The native layer changed: building, submitting …` | `eas build`, then `eas submit` to the internal track, then `eas update`. Play installs it within a day or so |
 | a `::warning::` about the native layer, on a rollback | Nothing. Play cannot downgrade an installed app. If the newer app is broken against the older server, release a fix forward |
-| a `::notice::` that it skipped | Steps 2–4 are not done, or the tag predates phase 32 |
+| a `::notice::` that it skipped | `ANDROID_RELEASE` is not `on`, steps 2–4 are not done, or the tag predates phase 32 |
 
 A failure in `android` leaves the server release standing, and friends keep their current app.
 Rerun that job alone (*Actions → Release → the run → Re-run failed jobs*). Expo's free tier can
