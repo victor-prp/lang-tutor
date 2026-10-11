@@ -5,6 +5,7 @@ import type { QuestionType } from '@lang-tutor/core/domain';
 import {
   DISTRACTOR_MARKER,
   MAX_ALTERNATIVES,
+  MAX_CARD_ALTERNATIVES,
   NOTHING_GENERATED,
   NO_EXTRAS,
   boardMeanings,
@@ -23,7 +24,8 @@ import {
 import { planSession } from './plan';
 
 const NO_RECENT: RecentSentences = new Map();
-const NO_SENTENCE = { sentence: null, sentenceTranslation: null, gapStart: null, gapEnd: null };
+// A card of any type but the six that ask for an answer form (phase 34) has neither a sentence nor one.
+const NO_SENTENCE = { sentence: null, sentenceTranslation: null, gapStart: null, gapEnd: null, answerForm: null };
 
 /** Items for today's card only, as every batch was before phase 23. */
 const meaningItems = (context: GenerationContext[]) =>
@@ -744,7 +746,7 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
 });
 
 describe('withSiblingAlternatives (spec D18)', () => {
-  it('accepts the sibling headwords first, never the card’s own word, at most five', () => {
+  it('accepts the sibling headwords first, never the card’s own word, then the model’s alternatives', () => {
     expect(
       withSiblingAlternatives({
         form: 'booked',
@@ -752,10 +754,10 @@ describe('withSiblingAlternatives (spec D18)', () => {
         siblings: ['order', 'reserve', 'book'],
         alternatives: ['reserved', 'Order', 'arranged', 'scheduled', 'set up'],
       }),
-    ).toEqual(['order', 'reserve', 'reserved', 'arranged', 'scheduled']);
+    ).toEqual(['order', 'reserve', 'reserved', 'arranged', 'scheduled', 'set up']);
   });
 
-  it('keeps three siblings and both of the model’s alternatives when five or more siblings share the key', () => {
+  it('keeps three siblings first, then the model’s alternatives, then the other siblings, up to ten', () => {
     expect(
       withSiblingAlternatives({
         form: 'booked',
@@ -763,7 +765,15 @@ describe('withSiblingAlternatives (spec D18)', () => {
         siblings: ['arrange', 'charter', 'hire', 'order', 'reserve', 'schedule'],
         alternatives: ['reserved', 'ordered'],
       }),
-    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered']);
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered', 'order', 'reserve', 'schedule']);
+    expect(
+      withSiblingAlternatives({
+        form: 'booked',
+        lemma: 'book',
+        siblings: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8'],
+        alternatives: ['reserved', 'ordered', 'hired', 'chartered', 'scheduled'],
+      }),
+    ).toEqual(['a1', 'a2', 'a3', 'reserved', 'ordered', 'hired', 'chartered', 'scheduled', 'a4', 'a5']);
   });
 
   it('lets more siblings in after the model’s alternatives when the model gave few', () => {
@@ -774,7 +784,7 @@ describe('withSiblingAlternatives (spec D18)', () => {
         siblings: ['arrange', 'charter', 'hire', 'order', 'reserve'],
         alternatives: ['reserved'],
       }),
-    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'order']);
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'order', 'reserve']);
     expect(
       withSiblingAlternatives({ form: 'booked', lemma: 'book', siblings: ['arrange', 'charter', 'hire', 'order', 'reserve'], alternatives: [] }),
     ).toEqual(['arrange', 'charter', 'hire', 'order', 'reserve']);
@@ -788,6 +798,99 @@ describe('withSiblingAlternatives (spec D18)', () => {
         siblings: ['Book', 'arrange', 'Arrange', 'charter', 'hire', 'order'],
         alternatives: ['reserved', 'ordered', 'set up'],
       }),
-    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered']);
+    ).toEqual(['arrange', 'charter', 'hire', 'reserved', 'ordered', 'set up', 'order']);
+  });
+
+  // Phase 34 (spec D1). The rendering's stored list is the certain part, and
+  // comes before everything a session's model wrote.
+  describe('with the rendering’s stored accepted answers', () => {
+    it('puts the stored list first, then three siblings, then the session’s alternatives, deduped', () => {
+      expect(
+        withSiblingAlternatives({
+          form: 'booked',
+          lemma: 'book',
+          accepted: ['reserved', 'ordered'],
+          siblings: ['arrange', 'charter', 'hire', 'order'],
+          alternatives: ['Reserved', 'hired', 'set up'],
+        }),
+      ).toEqual(['reserved', 'ordered', 'arrange', 'charter', 'hire', 'hired', 'set up', 'order']);
+    });
+
+    it('never drops a stored answer for what a session wrote when the cap is hit', () => {
+      const accepted = Array.from({ length: 10 }, (_, i) => `stored${i}`);
+      const kept = withSiblingAlternatives({
+        form: 'booked',
+        lemma: 'book',
+        accepted,
+        siblings: ['order'],
+        alternatives: ['reserved', 'ordered'],
+      });
+      expect(kept).toEqual(accepted);
+      expect(kept).toHaveLength(MAX_CARD_ALTERNATIVES);
+    });
+
+    it('keeps the card’s own form and lemma out of the stored list, as out of the rest', () => {
+      expect(
+        withSiblingAlternatives({ form: 'ore', lemma: 'ora', accepted: ['ore', 'Ora', 'molte ore'], siblings: [], alternatives: [] }),
+      ).toEqual(['molte ore']);
+    });
+
+    it('with no stored list is what it was before phase 34', () => {
+      const input = { form: 'booked', lemma: 'book', siblings: ['order', 'reserve'], alternatives: ['reserved'] };
+      expect(withSiblingAlternatives({ ...input, accepted: [] })).toEqual(withSiblingAlternatives(input));
+    });
+  });
+});
+
+// Phase 34 (spec D2, D12). A card whose rendering has an answer form asks for it:
+// the typed and spoken answer, the tiles, and the choice cards' shown form. The
+// answer form is stored on the question, so a later change alters no asked card.
+describe('the answer form (phase 34, spec D2, D12)', () => {
+  // The audit's card 2260df83: ora, saved from its plural rendering שעות.
+  const ORA: GenerationContext = {
+    glossId: 'g-hours', senseId: 's-hours', variantId: 'v-ora', lexemeId: 'l-ora', form: 'ora', lemma: 'ora', partOfSpeech: 'noun',
+    translation: 'שעות', example: 'Ho aspettato per ore.', exampleTranslation: 'חיכיתי שעות.',
+    acceptedAnswers: ['ore'], answerForm: 'ore', acceptedAt: new Date('2026-10-11T10:00:00Z'),
+  };
+  const generated = { ...NOTHING_GENERATED, distractors: ['a', 'b', 'c'], alternatives: ['x'] };
+
+  it('stores the answer form on each of the six cards that ask for it', () => {
+    for (const type of ['multiple_choice', 'listen_choice', 'reverse_choice', 'typed_translation', 'say_translation'] as const) {
+      expect(generatedContent(ORA, type, generated, NO_EXTRAS).answerForm).toBe('ore');
+    }
+    expect(generatedContent(ORA, 'letter_tiles', generated, { ...NO_EXTRAS, tiles: ['o', 'r', 'e', 'x', 'z'] }).answerForm).toBe('ore');
+  });
+
+  it('puts the answer form, not the saved form, among a reversed card’s options, and leaves a choice’s meaning alone', () => {
+    expect(generatedContent(ORA, 'reverse_choice', generated, NO_EXTRAS).options).toEqual(optionsFor('ore', ['a', 'b', 'c']));
+    expect(generatedContent(ORA, 'multiple_choice', generated, NO_EXTRAS).options).toEqual(optionsFor('שעות', ['a', 'b', 'c']));
+  });
+
+  it('stores nothing for a card with no answer form, as before', () => {
+    const plain = { ...ORA, answerForm: null };
+    expect(generatedContent(plain, 'typed_translation', generated, NO_EXTRAS).answerForm).toBeNull();
+    expect(generatedContent(plain, 'reverse_choice', generated, NO_EXTRAS).options).toEqual(optionsFor('ora', ['a', 'b', 'c']));
+  });
+
+  it('stores it on no other card: a dictation, a read-aloud, a meaning card, a board word or a sentence card', () => {
+    const sentence = { sentence: 'Ieri ho aspettato per ore.', translation: 'אתמול חיכיתי שעות.', gap: { start: 14, end: 22 }, alternatives: [] };
+    const translate = { hebrew: 'חיכיתי שעות', reference: 'Ho aspettato per ore.', gap: { start: 3, end: 12 } };
+    for (const type of ['dictation', 'read_aloud', 'typed_meaning'] as const) {
+      expect(generatedContent(ORA, type, generated, NO_EXTRAS).answerForm).toBeNull();
+    }
+    expect(generatedContent(ORA, 'matching', generated, { ...NO_EXTRAS, board: { meanings: ['שעות', 'a', 'b', 'c', 'd'], own: 0 } }).answerForm).toBeNull();
+    expect(generatedContent(ORA, 'cloze_choice', generated, { ...NO_EXTRAS, gap: { start: 0, end: 3 } }).answerForm).toBeNull();
+    expect(generatedContent(ORA, 'cloze_typed', { ...NOTHING_GENERATED, sentence }, NO_EXTRAS).answerForm).toBeNull();
+    expect(generatedContent(ORA, 'sentence_translation', { ...NOTHING_GENERATED, translate }, NO_EXTRAS).answerForm).toBeNull();
+  });
+
+  it('carries the answer form into the item, so a wrong word is never the card’s own answer', () => {
+    const [item] = distractorItems([ORA], ['word'], NO_RECENT);
+    expect(item.answerForm).toBe('ore');
+    // The model sees the saved form and writes `ore` among the wrong words of a card whose right option is `ore`.
+    const verdict = validateDistractors([item], { items: [{ key: 'q1', distractors: ['tempo', 'ore', 'giorno'] }] }, 'he', [], 'it');
+    expect(verdict.ok).toBe(false);
+    const fine = validateDistractors([item], { items: [{ key: 'q1', distractors: ['tempo', 'minuto', 'giorno'] }] }, 'he', [], 'it');
+    expect(fine.ok).toBe(true);
   });
 });

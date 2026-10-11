@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Enrollment, Question } from '@lang-tutor/core/api';
+import { judgeTyped } from '@lang-tutor/core/domain';
 
 import {
   createFakeClock,
@@ -103,22 +104,22 @@ function world(opts: {
         const choice = () => ({ options: q.options!.map((o) => o.text), correct_option: correct(q) });
         switch (q.type) {
           case 'typed_translation':
-            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives! };
           case 'dictation':
             return { ...base, type: q.type, question: q.form, meaning: q.prompt! };
           case 'letter_tiles':
-            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, tiles: q.tiles! };
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, tiles: q.tiles! };
           case 'reverse_choice':
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, ...choice() };
           case 'matching':
             return { ...base, type: q.type, question: q.form, ...choice(), board };
           case 'multiple_choice':
           case 'listen_choice':
-            return { ...base, type: q.type, question: q.form, ...choice() };
+            return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice() };
           case 'read_aloud':
             return { ...base, type: q.type, question: q.form, meaning: q.prompt! };
           case 'say_translation':
-            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.form, lemma: q.lemma, alternatives: q.alternatives! };
+            return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives! };
           case 'typed_meaning':
             return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, meaning: q.prompt! };
           case 'cloze_choice':
@@ -703,5 +704,203 @@ describe('prepareSession, phase 34 (spec D1)', () => {
     const { service, jobs } = world({ state: { ...STATE, status: 'skipped' } });
     await service.prepareSession(PAYLOAD);
     expect(jobs.enqueued).toEqual([]);
+  });
+});
+
+// Phase 34 (spec D1, D2, D12; rulings R6, R7). A card reads the rendering's stored
+// list and answer form. The audit's cards, rebuilt: 2260df83 (G), 703a58ca (B),
+// 5d9e4f97 (D).
+describe('prepareSession, phase 34 (spec D1, D2, D12)', () => {
+  const STAMP = new Date('2026-10-11T10:00:00Z');
+  const row = (over: Partial<GenerationContext> & Pick<GenerationContext, 'form' | 'lemma' | 'translation'>, n: number): GenerationContext => ({
+    glossId: `g-x${n}`, senseId: `sx${n}`, variantId: `vx${n}`, lexemeId: `lx${n}`, partOfSpeech: 'noun',
+    example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: STAMP, ...over,
+  });
+  // Two plain words fill the first two positions (a choice and a reversed card);
+  // the third is a typed translation, the card each test is about.
+  const FILLER = [
+    row({ form: 'casa', lemma: 'casa', translation: 'בית' }, 1),
+    row({ form: 'cane', lemma: 'cane', translation: 'כלב' }, 2),
+  ];
+  const pickOf = (r: GenerationContext) => ({ gloss_id: r.glossId, sense_id: r.senseId, variant_id: r.variantId });
+  const payloadOf = (rows: GenerationContext[], over: object = {}) => ({ ...PAYLOAD, picks: rows.map(pickOf), ...over });
+  const ENROLLMENT_IT = { ...ENROLLMENT, target_language: 'it' };
+  type Inserted = { type: string; answerForm: string | null; alternatives: string[] | null; tiles: string[] | null; options: { text: string; is_correct: boolean }[] | null; form: string };
+  const insertedOf = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: Inserted[] }).questions;
+  /** A model that answers every item of the batch the way the cycle asks. */
+  const answering = (typed: string[] = [], over: Record<string, object> = {}) => (llm: { calls: { user: string }[] }) =>
+    JSON.stringify({
+      items: (JSON.parse(llm.calls[0].user).items as { key: string; task: string }[]).map((item) => ({
+        key: item.key,
+        ...(item.task === 'meaning'
+          ? { distractors: ['שגוי1', 'שגוי2', 'שגוי3'] }
+          : item.task === 'word'
+            ? { distractors: ['tempo', 'giorno', 'minuto'] }
+            : { distractors: [], alternatives: typed }),
+        ...over[item.key],
+      })),
+    });
+  /** Runs the batch twice: once to learn the items asked, once with the answers. */
+  async function prepare(rows: GenerationContext[], opts: { typed?: string[]; payload?: object; over?: Record<string, object> } = {}) {
+    const probe = world({ context: rows, reply: 'nope' });
+    await expect(probe.service.prepareSession(payloadOf(rows, opts.payload))).rejects.toThrow();
+    const run = world({ context: rows, reply: answering(opts.typed ?? [], opts.over)(probe.llm) });
+    await run.service.prepareSession(payloadOf(rows, opts.payload));
+    return { ...run, questions: insertedOf(run.calls) };
+  }
+  const judge = (card: { answer: string; lemma: string; alternatives: string[] }, text: string) => judgeTyped(card, text);
+  const asCard = (q: Inserted) => ({ answer: q.answerForm ?? q.form, lemma: 'ora', alternatives: q.alternatives ?? [] });
+
+  describe('the answer form (D2, D12)', () => {
+    // 2260df83: ora, saved from its plural rendering שעות, answered `ora`, refused `ore`.
+    const HOURS = row({ form: 'ora', lemma: 'ora', translation: 'שעות', acceptedAnswers: ['ore'], answerForm: 'ore' }, 3);
+    const HOUR = row({ form: 'ora', lemma: 'ora', translation: 'שעה', acceptedAnswers: [], answerForm: null }, 4);
+
+    it('category G (2260df83): the card for שעות asks for ore, accepts ora by the lemma rule, and the card for שעה refuses ore', async () => {
+      const hours = await prepare([...FILLER, HOURS]);
+      const typed = hours.questions[2];
+      expect(typed).toMatchObject({ type: 'typed_translation', answerForm: 'ore' });
+      expect(judge(asCard(typed), 'ore')).toBe('exact');
+      expect(judge(asCard(typed), 'ora')).toBe('exact');
+
+      const hour = await prepare([...FILLER, HOUR]);
+      expect(hour.questions[2]).toMatchObject({ type: 'typed_translation', answerForm: null });
+      expect(judge(asCard(hour.questions[2]), 'ora')).toBe('exact');
+      expect(judge(asCard(hour.questions[2]), 'ore')).toBe('wrong');
+    });
+
+    it('shows ore beside שעות on a choice card, and offers it as the reversed card’s right option', async () => {
+      const choice = await prepare([HOURS, ...FILLER]);
+      expect(choice.questions[0]).toMatchObject({ type: 'multiple_choice', answerForm: 'ore' });
+      expect(choice.questions[0].options!.find((o) => o.is_correct)!.text).toBe('שעות');
+
+      const reversed = await prepare([FILLER[0], HOURS, FILLER[1]]);
+      expect(reversed.questions[1]).toMatchObject({ type: 'reverse_choice', answerForm: 'ore' });
+      expect(reversed.questions[1].options!.find((o) => o.is_correct)!.text).toBe('ore');
+    });
+
+    it('builds a tiles card from ore, and plans tiles by the form the card asks for', async () => {
+      // Ordinal 2 puts a tiles card second.
+      const tiles = await prepare([FILLER[0], HOURS, FILLER[1]], { payload: { ordinal: 2 } });
+      expect(tiles.questions[1]).toMatchObject({ type: 'letter_tiles', answerForm: 'ore' });
+      const letters = tiles.questions[1].tiles!;
+      expect(letters).toHaveLength(5);
+      for (const letter of ['o', 'r', 'e']) expect(letters).toContain(letter);
+
+      // A form that is two words has no tiles, so the plan asks another card.
+      const phrase = row({ form: 'ora', lemma: 'ora', translation: 'שעות', acceptedAnswers: [], answerForm: 'ore di punta' }, 5);
+      const planned = await prepare([FILLER[0], phrase, FILLER[1]], { payload: { ordinal: 2 } });
+      expect(planned.questions[1].type).not.toBe('letter_tiles');
+    });
+
+    it('stores the answer form the way the card shows it: one leading article is gone', async () => {
+      const article = row({ form: 'ora', lemma: 'ora', translation: 'שעות', answerForm: 'le ore' }, 6);
+      const made = await prepare([...FILLER, article]);
+      expect(made.questions[2].answerForm).toBe('ore');
+    });
+
+    it('ruling R6: an implausible answer form falls back to the saved form, as the card is today', async () => {
+      const unrelated = row({ form: 'ora', lemma: 'ora', translation: 'שעות', answerForm: 'tempo' }, 7);
+      const irregular = row({ form: 'ha', lemma: 'avere', translation: 'יש לו', answerForm: 'ho' }, 8);
+      for (const odd of [unrelated, irregular]) {
+        const made = await prepare([...FILLER, odd]);
+        expect(made.questions[2]).toMatchObject({ type: 'typed_translation', answerForm: null });
+      }
+    });
+
+    it('asks no other card for it: a listening-only dictation and a typed cloze keep the saved form', async () => {
+      const listening = await prepare([FILLER[0], FILLER[1], HOURS], { payload: { listening: true, ordinal: 2 } });
+      expect(listening.questions.map((q) => q.type)).toContain('dictation');
+      for (const q of listening.questions.filter((q) => q.type === 'dictation')) expect(q.answerForm).toBeNull();
+    });
+
+    it('never offers the answer form as a wrong option of the reversed card', async () => {
+      const reply = (words: string[]) => ({ 'q2': { distractors: words } });
+      const probe = world({ context: [FILLER[0], HOURS, FILLER[1]], reply: 'nope' });
+      await expect(probe.service.prepareSession(payloadOf([FILLER[0], HOURS, FILLER[1]]))).rejects.toThrow();
+      const bad = world({ context: [FILLER[0], HOURS, FILLER[1]], reply: answering([], reply(['tempo', 'ore', 'giorno']))(probe.llm) });
+      await expect(bad.service.prepareSession(payloadOf([FILLER[0], HOURS, FILLER[1]]))).rejects.toBeInstanceOf(InvalidDistractors);
+      expect(bad.calls.generated).toEqual([]);
+    });
+  });
+
+  describe('the accepted answers (D1, D12)', () => {
+    // 703a58ca: אז asked for poi; a learner typed `allora` and was refused, though
+    // another card for the same prompt had accepted it.
+    const POI = row({ form: 'poi', lemma: 'poi', translation: 'אז', acceptedAnswers: ['allora', 'dopo'] }, 9);
+
+    it('category B (703a58ca): two sessions accept allora whatever their own alternatives were', async () => {
+      for (const own of [['quindi'], ['dunque', 'perciò'], []]) {
+        const made = await prepare([...FILLER, POI], { typed: own });
+        const typed = made.questions[2];
+        expect(typed.alternatives).toEqual(expect.arrayContaining(['allora', 'dopo', ...own]));
+        expect(judge({ answer: 'poi', lemma: 'poi', alternatives: typed.alternatives! }, 'allora')).toBe('alternative');
+        expect(judge({ answer: 'poi', lemma: 'poi', alternatives: typed.alternatives! }, 'dopo')).toBe('alternative');
+      }
+    });
+
+    it('puts the stored list first, then the session’s own alternatives, deduped, at most ten', async () => {
+      const stored = Array.from({ length: 9 }, (_, i) => `ris${i}`);
+      const crowded = row({ form: 'poi', lemma: 'poi', translation: 'אז', acceptedAnswers: stored }, 10);
+      const made = await prepare([...FILLER, crowded], { typed: ['Ris0', 'quindi', 'dunque'] });
+      expect(made.questions[2].alternatives).toEqual([...stored, 'quindi']);
+    });
+
+    it('category D (5d9e4f97): io ho is accepted when the stored list holds it', async () => {
+      const HO = row({ form: 'ho', lemma: 'avere', translation: 'יש לי', partOfSpeech: 'verb', acceptedAnswers: ['io ho'] }, 11);
+      const made = await prepare([...FILLER, HO], { typed: [] });
+      const typed = made.questions[2];
+      expect(judge({ answer: 'ho', lemma: 'avere', alternatives: typed.alternatives! }, 'io ho')).toBe('alternative');
+      expect(judge({ answer: 'ho', lemma: 'avere', alternatives: [] }, 'io ho')).toBe('wrong');
+    });
+
+    it('reads the stored list on a speaking card as on a typed one', async () => {
+      const spoken = await prepare([FILLER[0], FILLER[1], POI], { payload: { speaking: true, ordinal: 3 } });
+      const say = spoken.questions.find((q) => q.type === 'say_translation');
+      expect(say?.alternatives).toEqual(expect.arrayContaining(['allora', 'dopo']));
+    });
+
+    it('keeps a typed cloze to its sentence’s own alternatives, never the stored list', async () => {
+      const ten = TEN.map((r, i) => (i === 9 ? { ...r, acceptedAnswers: ['запас', 'резерв'], acceptedAt: STAMP } : r));
+      const probe = world({ context: ten, reply: 'nope' });
+      await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+      const items = JSON.parse(probe.llm.calls[0].user).items as { key: string; task: string; word: string }[];
+      const reply = JSON.stringify({
+        items: items.map((item) =>
+          item.task === 'sentence'
+            ? { key: item.key, sentence: `Я вижу ${item.word} там сейчас.`, gap: item.word, translation: 'אני רואה את זה שם עכשיו.', alternatives: ['глядеть'] }
+            : item.task === 'meaning'
+              ? { key: item.key, distractors: ['דלת', 'קיר', 'תקרה'] }
+              : item.task === 'word'
+                ? { key: item.key, distractors: ['чеснок', 'морковь', 'капуста'] }
+                : { key: item.key, distractors: [], alternatives: [] },
+        ),
+      });
+      const { service, calls } = world({ context: ten, reply });
+      await service.prepareSession(TEN_PAYLOAD);
+      const cloze = insertedOf(calls).find((q) => q.type === 'cloze_typed')!;
+      expect(cloze.alternatives).toEqual(['глядеть']);
+    });
+
+    it('gives a typed card the stored list even when its sentence card degraded into one', async () => {
+      const ten = TEN.map((r, i) => (i === 9 ? { ...r, acceptedAnswers: ['запас'], acceptedAt: STAMP } : r));
+      // The tenth position asks for a sentence the model does not write.
+      const probe = world({ context: ten, reply: 'nope' });
+      await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
+      const reply = answering()(probe.llm);
+      const { service, calls } = world({ context: ten, reply });
+      await service.prepareSession(TEN_PAYLOAD);
+      const last = insertedOf(calls)[9];
+      expect(last).toMatchObject({ type: 'typed_translation', alternatives: ['запас'] });
+    });
+  });
+
+  describe('ruling R7: the accept enqueues go in key order', () => {
+    it('enqueues the picked renderings sorted by their singleton key, whatever order they were picked in', async () => {
+      const unstamped = ['vz', 'va', 'vm'].map((v, i) => row({ form: `f${i}`, lemma: `f${i}`, translation: `מ${i}`, variantId: v, senseId: 's1', acceptedAt: null }, 20 + i));
+      const { service, jobs } = world({ context: unstamped, reply: 'nope' });
+      await expect(service.prepareSession(payloadOf(unstamped))).rejects.toThrow();
+      expect(jobs.enqueued.map((job) => (job.options as { singletonKey: string }).singletonKey)).toEqual(['va:s1:he', 'vm:s1:he', 'vz:s1:he']);
+    });
   });
 });

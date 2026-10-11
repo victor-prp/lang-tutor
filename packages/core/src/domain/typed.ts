@@ -34,8 +34,10 @@ export function normaliseTyped(text: string): string {
     .replace(/[\s.,;:!?…]+$/u, '');
 }
 
-/** The text without one leading article or "to", when anything is left. */
-function bare(text: string): string {
+/** The text without one leading article or "to", when anything is left. Read
+ *  on a normalised answer (lowercase, single spaces); exported for phase 34's
+ *  answer-form check, which must strip exactly what this judge does. */
+export function bare(text: string): string {
   const space = text.indexOf(' ');
   if (space > 0 && LEADING_WORDS.has(text.slice(0, space))) return text.slice(space + 1);
   for (const prefix of ELIDED) {

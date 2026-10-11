@@ -309,7 +309,11 @@ export const STUB_SENTENCE = 'Tome sprint lantern kettle pillow ladder bucket vi
 export const STUB_SENTENCE_HEBREW = 'אני רואה ספר ופנס בבית';
 export const STUB_GAP = 'lantern';
 
-export async function expectDistractors(ns: string, opts: { delayMs?: number; tasks?: Task[] } = {}): Promise<void> {
+export async function expectDistractors(
+  ns: string,
+  /** `alternatives`: what a typed item's alternatives are (phase 34), `STUB_ALTERNATIVE` alone by default. */
+  opts: { delayMs?: number; tasks?: Task[]; alternatives?: string[] } = {},
+): Promise<void> {
   const items = (opts.tasks ?? CYCLE_TASKS).map((task, i) => {
     const key = `q${i + 1}`;
     switch (task) {
@@ -318,7 +322,7 @@ export async function expectDistractors(ns: string, opts: { delayMs?: number; ta
       case 'word':
         return { key, distractors: STUB_WRONG_ENGLISH };
       case 'typed':
-        return { key, distractors: [], alternatives: [STUB_ALTERNATIVE] };
+        return { key, distractors: [], alternatives: opts.alternatives ?? [STUB_ALTERNATIVE] };
       case 'gap':
         return { key, distractors: STUB_WRONG_ENGLISH };
       // Phase 27 Part B. One sentence holds every word the tests save, once, so

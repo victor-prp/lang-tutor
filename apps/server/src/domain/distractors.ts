@@ -72,8 +72,13 @@ export function tasksFor(plan: SessionPlan): (Task | null)[] {
 /** A position's key: `q1` is the first card, whichever positions ask nothing. */
 export const keyOf = (position: number): string => `q${position + 1}`;
 
-/** The most alternatives a typed question keeps (questions_shape_valid). */
+/** The most alternatives the model is asked for, and a typed cloze keeps. */
 export { MAX_ALTERNATIVES };
+
+/** Phase 34 (spec D1). The most alternatives a stored question keeps
+ *  (questions_shape_valid, raised from five): the rendering's stored list, a
+ *  session's own and the siblings, which the model's five no longer have to cover. */
+export const MAX_CARD_ALTERNATIVES = 10;
 
 /** Part of the system prompt, and what MockServer matches to tell this call
  *  from a translation. Changing the wording means changing the stubs. */
@@ -98,7 +103,9 @@ export type GenerationContext = {
   exampleTranslation: string | null;
   /** Phase 34 (spec D1, D2). What the accept job stored for this rendering: every
    *  right answer, the form that agrees with it (null = the form), and when the job
-   *  ran (null = never, and the session asks for it). */
+   *  ran (null = never, and the session asks for it). prepareSession replaces
+   *  `answerForm` with usableAnswerForm's answer before anything else reads the
+   *  row, so past that point it is the form a card asks for, or null. */
   acceptedAnswers: string[];
   answerForm: string | null;
   acceptedAt: Date | null;
@@ -118,6 +125,9 @@ export type DistractorItem = {
   translation: string;
   example: string | null;
   exampleTranslation: string | null;
+  /** Phase 34 (spec D2). The form a card of this row asks for when it is not
+   *  `form`; never sent to the model, only kept out of a word item's wrong options. */
+  answerForm: string | null;
   /** Sentences the model must not write again (spec D5, D6); empty for other tasks. */
   avoid: string[];
   /** A gap item's blanked text in `example` (spec D7); null for every other task. */
@@ -185,6 +195,7 @@ export function distractorItems(
         translation: row.translation,
         example: row.example,
         exampleTranslation: row.exampleTranslation,
+        answerForm: row.answerForm,
         avoid: avoidFor(row, task, recent),
         blank: where && row.example ? row.example.slice(where.start, where.end) : null,
       },
@@ -322,7 +333,7 @@ function badChoice(
   // item's is also the text the example actually blanks (phase 27, spec D7).
   const isWord = item.task === 'word' || item.task === 'gap';
   const rights = isWord
-    ? [item.form, item.lemma, ...(item.blank ? [item.blank] : [])]
+    ? [item.form, item.lemma, ...(item.answerForm && item.task === 'word' ? [item.answerForm] : []), ...(item.blank ? [item.blank] : [])]
     : [item.translation];
   const all = texts.map(comparable);
   if (new Set(all).size !== all.length || all.some((text) => rights.map(comparable).includes(text))) {
@@ -353,12 +364,13 @@ function badChoice(
 }
 
 /** Alternatives for a typed card: trimmed, never empty, never the card's own
- *  form or lemma, no two alike under `comparable`, at most MAX_ALTERNATIVES, in
- *  the order given. `accept` adds a caller's own refusal. */
+ *  form or lemma, no two alike under `comparable`, at most `limit`, in the order
+ *  given. `accept` adds a caller's own refusal. */
 function keepAlternatives(
   form: string,
   lemma: string,
   candidates: readonly string[],
+  limit: number,
   accept: (text: string) => boolean = () => true,
 ): string[] {
   const seen = new Set([form, lemma].map(comparable));
@@ -369,7 +381,7 @@ function keepAlternatives(
     if (text === '' || !accept(text) || seen.has(key)) continue;
     seen.add(key);
     kept.push(text);
-    if (kept.length === MAX_ALTERNATIVES) break;
+    if (kept.length === limit) break;
   }
   return kept;
 }
@@ -378,7 +390,7 @@ function keepAlternatives(
  *  bad one is dropped (empty, in the explanation language, the answer itself,
  *  a repeat) and the rest kept, up to MAX_ALTERNATIVES. */
 function cleanAlternatives(item: DistractorItem, found: string[] | undefined, explanationLetters: RegExp): string[] {
-  return keepAlternatives(item.form, item.lemma, found ?? [], (text) => !explanationLetters.test(text));
+  return keepAlternatives(item.form, item.lemma, found ?? [], MAX_ALTERNATIVES, (text) => !explanationLetters.test(text));
 }
 
 /**
@@ -495,7 +507,21 @@ export type QuestionContent = {
   sentenceTranslation: string | null;
   gapStart: number | null;
   gapEnd: number | null;
+  /** Phase 34 (spec D2, D12). The form the card asks for when it is not the
+   *  saved form, on the six types that ask for the word; null on every other. */
+  answerForm: string | null;
 };
+
+/** Phase 34 (spec D2). The types that ask for the word, or show it beside the
+ *  rendering, and so ask for the form that agrees with the rendering. */
+const ASKS_FOR_FORM: ReadonlySet<QuestionType> = new Set([
+  'multiple_choice',
+  'listen_choice',
+  'reverse_choice',
+  'typed_translation',
+  'say_translation',
+  'letter_tiles',
+]);
 
 /**
  * Phase 23 and 24. One generated question's stored content (phase 23 D13,
@@ -513,16 +539,19 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
     sentenceTranslation: null,
     gapStart: null,
     gapEnd: null,
+    answerForm: null,
   };
+  // Phase 34 (spec D2, D12). Stored as shown: a later backfill changes no asked card.
+  const answerForm = ASKS_FOR_FORM.has(type) ? row.answerForm : null;
   switch (type) {
     case 'multiple_choice':
     case 'listen_choice':
-      return { ...none, options: optionsFor(row.translation, generated.distractors) };
+      return { ...none, options: optionsFor(row.translation, generated.distractors), answerForm };
     case 'reverse_choice':
-      return { ...none, prompt: row.translation, options: optionsFor(row.form, generated.distractors) };
+      return { ...none, prompt: row.translation, options: optionsFor(answerForm ?? row.form, generated.distractors), answerForm };
     case 'typed_translation':
     case 'say_translation':
-      return { ...none, prompt: row.translation, alternatives: generated.alternatives };
+      return { ...none, prompt: row.translation, alternatives: generated.alternatives, answerForm };
     case 'dictation':
     case 'read_aloud':
     case 'typed_meaning':
@@ -576,7 +605,7 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
     }
     case 'letter_tiles':
       if (!extras.tiles) throw new Error(`the tiles card for ${row.form} has no tiles`);
-      return { ...none, prompt: row.translation, tiles: extras.tiles };
+      return { ...none, prompt: row.translation, tiles: extras.tiles, answerForm };
     case 'matching': {
       const board = extras.board;
       if (!board) throw new Error(`the board word ${row.form} has no board`);
@@ -588,24 +617,35 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
   }
 }
 
-/** How many sibling headwords a typed or spoken card accepts before the model's alternatives. */
+/** How many sibling headwords a typed or spoken card accepts before the session's alternatives. */
 const SIBLINGS_FIRST = 3;
 
 /**
- * Phase 31 (spec D18). A typed or spoken card's right answers: up to three
- * sibling headwords first, which are certain (`order` is right where להזמין
- * asks for `book`), then the model's alternatives, then any remaining
- * siblings, never the card's own form or lemma, no two alike, at most
- * MAX_ALTERNATIVES, the column check's five. Siblings are lemmas, while the
- * model's alternatives are inflected to the card's form, so a key with five
- * sibling headwords must still leave room for a right inflected synonym.
+ * Phase 31 (spec D18), with phase 34 (spec D1). A typed or spoken card's right
+ * answers, in this order: the rendering's stored accepted answers, which the
+ * accept job wrote once and every card of the rendering reads; up to three
+ * sibling headwords, which are certain (`order` is right where להזמין asks for
+ * `book`); this session's own alternatives, which the model wrote afresh; any
+ * remaining siblings. Never the card's own form or lemma, no two alike, at most
+ * MAX_CARD_ALTERNATIVES, the column check's ten. A stored answer is never
+ * dropped for a later one, and with no stored list this is phase 31's order
+ * exactly. Siblings are lemmas, while the model's alternatives are inflected to
+ * the card's form, so a key with many sibling headwords must still leave room
+ * for a right inflected synonym.
  */
 export function withSiblingAlternatives(input: {
   form: string;
   lemma: string;
+  /** The rendering's stored `accepted_answers`; none until its accept job has run. */
+  accepted?: readonly string[];
   siblings: readonly string[];
   alternatives: readonly string[];
 }): string[] {
-  const first = keepAlternatives(input.form, input.lemma, input.siblings).slice(0, SIBLINGS_FIRST);
-  return keepAlternatives(input.form, input.lemma, [...first, ...input.alternatives, ...input.siblings]);
+  const first = keepAlternatives(input.form, input.lemma, input.siblings, SIBLINGS_FIRST);
+  return keepAlternatives(
+    input.form,
+    input.lemma,
+    [...(input.accepted ?? []), ...first, ...input.alternatives, ...input.siblings],
+    MAX_CARD_ALTERNATIVES,
+  );
 }

@@ -25,6 +25,9 @@ export type QuestionRow = {
   sentenceTranslation: string | null;
   gapStart: number | null;
   gapEnd: number | null;
+  /** Phase 34 (spec D2, D12). The form the card asks for when it is not the
+   *  variant's `form`; null on a card with none. */
+  answerForm: string | null;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -44,6 +47,7 @@ export const questionColumns = {
   sentenceTranslation: questions.sentenceTranslation,
   gapStart: questions.gapStart,
   gapEnd: questions.gapEnd,
+  answerForm: questions.answerForm,
   form: dictVariants.form,
   lemma: dictLexemes.lemma,
   partOfSpeech: dictLexemes.partOfSpeech,
@@ -65,6 +69,10 @@ export const questionColumns = {
  */
 export function questionFrom(row: QuestionRow, order: number[] | null): Question {
   const base = { id: row.id, vocab_term_id: row.lexemeId };
+  // Phase 34 (spec D2, D12). The word a card asks for, or shows beside its
+  // rendering: the form that agrees with the rendering when the question stored
+  // one, else the variant's own. One source for the six types that ask for it.
+  const asked = row.answerForm ?? row.form;
   switch (row.type) {
     case 'typed_translation':
       return {
@@ -72,7 +80,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         type: 'typed_translation',
         question: row.prompt!,
         part_of_speech: row.partOfSpeech,
-        answer: row.form,
+        answer: asked,
         lemma: row.lemma,
         alternatives: row.alternatives ?? [],
       };
@@ -86,7 +94,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         type: 'say_translation',
         question: row.prompt!,
         part_of_speech: row.partOfSpeech,
-        answer: row.form,
+        answer: asked,
         lemma: row.lemma,
         alternatives: row.alternatives ?? [],
       };
@@ -129,7 +137,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         type: 'letter_tiles',
         question: row.prompt!,
         part_of_speech: row.partOfSpeech,
-        answer: row.form,
+        answer: asked,
         tiles: row.tiles!,
       };
   }
@@ -153,7 +161,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
     case 'reverse_choice':
       return { ...base, type: 'reverse_choice', question: row.prompt!, part_of_speech: row.partOfSpeech, ...choice };
     case 'listen_choice':
-      return { ...base, type: 'listen_choice', question: row.form, ...choice };
+      return { ...base, type: 'listen_choice', question: asked, ...choice };
     case 'matching':
       return {
         ...base,
@@ -163,7 +171,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         board: { question_ids: [row.id], words: [row.form], correct_options: [choice.correct_option] },
       };
     default:
-      return { ...base, type: 'multiple_choice', question: row.form, ...choice };
+      return { ...base, type: 'multiple_choice', question: asked, ...choice };
   }
 }
 
@@ -421,6 +429,8 @@ export function createQuestionRepo(tx: Tx) {
         sentenceTranslation?: string | null;
         gapStart?: number | null;
         gapEnd?: number | null;
+        // Phase 34 (spec D2, D12): the form the card asks for; null = the variant's.
+        answerForm?: string | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -444,6 +454,7 @@ export function createQuestionRepo(tx: Tx) {
             sentenceTranslation: question.sentenceTranslation ?? null,
             gapStart: question.gapStart ?? null,
             gapEnd: question.gapEnd ?? null,
+            answerForm: question.answerForm ?? null,
           })),
         )
         .returning({ id: questions.id });
@@ -461,6 +472,7 @@ export function createQuestionRepo(tx: Tx) {
             sentenceTranslation: question.sentenceTranslation ?? null,
             gapStart: question.gapStart ?? null,
             gapEnd: question.gapEnd ?? null,
+            answerForm: question.answerForm ?? null,
             form: question.form,
             lemma: question.lemma,
             partOfSpeech: question.partOfSpeech,

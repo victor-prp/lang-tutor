@@ -8,7 +8,7 @@ import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 import { content, optionsFor } from '../../../src/db/content';
 import { dictGlosses, dictSenseGlosses, dictVariants } from '../../../src/db/schema';
-import { optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
+import { NOTHING_GENERATED, NO_EXTRAS, generatedContent, optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
 import { meaningRuleVerdict } from '../../../src/domain/judge';
 import { asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -631,5 +631,79 @@ describe('phase 27 Part B: sentence cards', () => {
       expect(recent.has('other')).toBe(false);
       expect((await read(2, [])).size).toBe(0);
     });
+  });
+});
+
+// Phase 34 (spec D2, D12). A question stores the form its card asks for, and the
+// repository's question mapping is the one place that turns it into the wire's
+// shown form and answer.
+describe('phase 34: the answer form a card asks for', () => {
+  const SIX: QuestionType[] = ['multiple_choice', 'listen_choice', 'reverse_choice', 'typed_translation', 'say_translation', 'letter_tiles'];
+
+  async function loaded(answerForm: string | null) {
+    const saved = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'ora', languageCode: 'it', translations: ['שעות'] });
+    const row = {
+      glossId: saved.glossIds[0], senseId: saved.senseIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'ora', lemma: 'ora',
+      partOfSpeech: 'noun', translation: 'שעות', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm, acceptedAt: null,
+    };
+    const generated = { ...NOTHING_GENERATED, distractors: ['x1', 'x2', 'x3'], alternatives: ['ore'] };
+    const { sessionId } = await withTx(t.db, async (tx) => {
+      const made = await createQuestionRepo(tx).insertGeneratedQuestions({
+        userId: 'u_1',
+        enrollmentId: enrollmentOf('u_1'),
+        targetLanguage: 'it',
+        userLanguageCode: 'he',
+        questions: SIX.map((type) => ({
+          glossId: row.glossId,
+          variantId: row.variantId,
+          form: row.form,
+          lemma: row.lemma,
+          partOfSpeech: row.partOfSpeech,
+          lexemeId: row.lexemeId,
+          type,
+          ...generatedContent(row, type, generated, { ...NO_EXTRAS, tiles: type === 'letter_tiles' ? ['o', 'r', 'a', 'x', 'z'] : null }),
+        })),
+      });
+      const sessions = createSessionRepo(tx);
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'));
+      await sessions.insertSessionQuestions(id, made);
+      await sessions.transition(id, ['preparing'], 'ready');
+      return { sessionId: id };
+    });
+    const record = (await withTx(t.db, (tx) => createSessionRepo(tx).loadSession(sessionId)))!;
+    const stored = await t.db.execute<{ type: string; answer_form: string | null }>(sql`select type, answer_form from questions where enrollment_id = ${enrollmentOf('u_1')} order by type`);
+    return { questions: record.questions, stored: stored.rows };
+  }
+
+  it('shows and asks for the stored form on all six cards, and keeps the rendering', async () => {
+    const { questions, stored } = await loaded('ore');
+    const byType = Object.fromEntries(questions.map((q) => [q.type, q]));
+    expect(byType.multiple_choice).toMatchObject({ question: 'ore' });
+    expect(byType.listen_choice).toMatchObject({ question: 'ore' });
+    expect(byType.reverse_choice).toMatchObject({ question: 'שעות' });
+    expect(asChoice(byType.reverse_choice).options[asChoice(byType.reverse_choice).correct_option]).toBe('ore');
+    expect(asChoice(byType.multiple_choice).options[asChoice(byType.multiple_choice).correct_option]).toBe('שעות');
+    expect(byType.typed_translation).toMatchObject({ question: 'שעות', answer: 'ore', lemma: 'ora' });
+    expect(byType.say_translation).toMatchObject({ question: 'שעות', answer: 'ore', lemma: 'ora' });
+    expect(byType.letter_tiles).toMatchObject({ question: 'שעות', answer: 'ore' });
+    expect(stored.map((row) => row.answer_form)).toEqual(Array(6).fill('ore'));
+  });
+
+  it('shows the variant’s own form when none is stored', async () => {
+    const { questions, stored } = await loaded(null);
+    const byType = Object.fromEntries(questions.map((q) => [q.type, q]));
+    expect(byType.multiple_choice).toMatchObject({ question: 'ora' });
+    expect(byType.listen_choice).toMatchObject({ question: 'ora' });
+    expect(byType.typed_translation).toMatchObject({ answer: 'ora' });
+    expect(byType.say_translation).toMatchObject({ answer: 'ora' });
+    expect(byType.letter_tiles).toMatchObject({ answer: 'ora' });
+    expect(asChoice(byType.reverse_choice).options[asChoice(byType.reverse_choice).correct_option]).toBe('ora');
+    expect(stored.every((row) => row.answer_form === null)).toBe(true);
+  });
+
+  it('is a form a later change of the dictionary cannot alter: the question holds its own', async () => {
+    const { questions } = await loaded('ore');
+    await t.db.execute(sql`update dict_var_translations set answer_form = 'orario', accepted_answers = array['orario']`);
+    expect(questions.find((q) => q.type === 'typed_translation')).toMatchObject({ answer: 'ore' });
   });
 });

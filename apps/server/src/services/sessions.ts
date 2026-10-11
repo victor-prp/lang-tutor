@@ -13,6 +13,7 @@ import {
   type SpeakingQuestion,
 } from '@lang-tutor/core/domain';
 
+import { usableAnswerForm } from '../domain/answerForm';
 import { findGap } from '../domain/cloze';
 import {
   NOTHING_GENERATED,
@@ -571,11 +572,18 @@ export function createSessionService({
         // next session has the list. The stamp decides, not the list: a
         // rendering the job found nothing for is stamped and never asked again.
         // The queue keeps one job per rendering, so a retry of this job or a
-        // burst of sessions pays for one call.
-        for (const row of context) {
-          if (row.acceptedAt !== null) continue;
-          const accept = { variant_id: row.variantId, sense_id: row.senseId, user_language_code: enrolled.source_language };
-          await jobs.enqueue(ACCEPT_RENDERING, accept, { singletonKey: acceptRenderingKey(accept) });
+        // burst of sessions pays for one call. In key order (ruling R7): two
+        // concurrent transactions that share renderings then take the queue's
+        // unique key in the same order, and neither waits on the other's second.
+        const accepts = context
+          .filter((row) => row.acceptedAt === null)
+          .map((row) => {
+            const payload = { variant_id: row.variantId, sense_id: row.senseId, user_language_code: enrolled.source_language };
+            return { payload, singletonKey: acceptRenderingKey(payload) };
+          })
+          .sort((a, b) => (a.singletonKey < b.singletonKey ? -1 : a.singletonKey > b.singletonKey ? 1 : 0));
+        for (const { payload, singletonKey } of accepts) {
+          await jobs.enqueue(ACCEPT_RENDERING, payload, { singletonKey });
         }
         // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
         const recent = await question.findRecentSentences({
@@ -585,7 +593,11 @@ export function createSessionService({
         });
         // Phase 31 (spec D18): the other headwords with each card's key.
         const siblings = await dict.findSiblings({ glossIds: context.map((row) => row.glossId) });
-        return { state, enrolled, context, recent, siblings };
+        // Phase 34 (spec D2, ruling R6). A stored answer form is a model's word:
+        // a card asks for it only when it is plausibly a form of its own word,
+        // and as the card will show it. Everything below reads this one value.
+        const asked = context.map((row) => ({ ...row, answerForm: usableAnswerForm(row.answerForm, row.form, row.lemma) }));
+        return { state, enrolled, context: asked, recent, siblings };
       });
       if (!read) {
         logger.info({ event: 'session_preparation_dropped', session_id: sessionId, stage: 'read' });
@@ -602,8 +614,8 @@ export function createSessionService({
         read.context.map((row) => ({
           form: row.form,
           translation: row.translation,
-          tiles: tileEligible(row.form),
-          speakable: speakable(row.form),
+          tiles: tileEligible(row.answerForm ?? row.form),
+          speakable: speakable(row.answerForm ?? row.form),
           // Spec D7: a cloze choice needs the form, or its lemma, once in the saved example.
           clozeGap: row.exampleTranslation !== null && findGap(row.example ?? '', [row.form, row.lemma]) !== null,
         })),
@@ -703,14 +715,18 @@ export function createSessionService({
             }
             const type = degraded ? 'typed_translation' : planned;
             const content = degraded ? NOTHING_GENERATED : made;
-            // Spec D18. A sibling headword is a right answer to a typed or spoken card.
+            // Spec D18, phase 34 (spec D1). A typed or spoken card accepts the
+            // rendering's stored list, a sibling headword, and this session's own
+            // alternatives, none written back. A typed cloze is judged against the
+            // form its sentence needs, so it keeps its sentence's alternatives alone.
             const answered =
               type === 'typed_translation' || type === 'say_translation'
                 ? {
                     ...content,
                     alternatives: withSiblingAlternatives({
-                      form: row.form,
+                      form: row.answerForm ?? row.form,
                       lemma: row.lemma,
+                      accepted: row.acceptedAnswers,
                       siblings: siblingsOf(row.glossId),
                       alternatives: content.alternatives,
                     }),
@@ -725,7 +741,7 @@ export function createSessionService({
               lexemeId: row.lexemeId,
               type,
               ...generatedContent(row, type, answered, {
-                tiles: type === 'letter_tiles' ? tilesFor(row.form, LANGUAGES[target].alphabet, rng) : null,
+                tiles: type === 'letter_tiles' ? tilesFor(row.answerForm ?? row.form, LANGUAGES[target].alphabet, rng) : null,
                 board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
                 gap: gaps[index],
               }),
