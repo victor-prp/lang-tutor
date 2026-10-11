@@ -5,7 +5,8 @@
     "apps/*",
     "packages/*",
     "e2e",
-    "nightly-qa"
+    "nightly-qa",
+    "bots"
   ],
   "dependencies": {
     "zod": "^4.4.3"
