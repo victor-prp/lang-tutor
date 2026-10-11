@@ -130,12 +130,12 @@ enforced.
 | [0012](docs/adr/adr-0012-native-client-releases.md) | The Android app ships with every release, after the server, by fingerprint — an update lands only on a matching build, builds go to Play's internal track, and `X-Api-Level` is named only in `packages/core` |
 | [0013](docs/adr/adr-0013-learner-day.md) | A learner's day comes from one place — only `services/learnerDay.ts` computes a progress day, `bot_day` is read and written only in `repo/users.ts`, and `routes/bots.ts` is the only route file naming the bot kind or its secret |
 
-All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 = 68 checks, grep only, no deps,
+All but the superseded 0005 are enforced by `npm run lint:arch` (19 + 7 + 6 + 8 + 6 + 4 + 3 + 6 + 3 + 2 + 4 + 3 = 71 checks, grep only, no deps,
 no database) — see *Checks* below.
 
 ## Data model
 
-Twenty-six tables, all in `apps/server/src/db/schema.ts`, whose comments describe every
+Twenty-seven tables, all in `apps/server/src/db/schema.ts`, whose comments describe every
 one. These are the ones the rest of this README leans on:
 
 | Table | Holds |
