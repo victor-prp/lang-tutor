@@ -101,8 +101,9 @@ const MEMORY: MemorySeed[] = [
   { gloss: 'צדף', dimension: 'written_productive', stability: 10, daysAgo: 19, level: 3 },
 ];
 
-/** Six saved words, their memory seeded, and a list session started. */
-async function reachSentenceSession(page: Page, request: APIRequestContext, username: string) {
+/** Six saved words, their memory seeded, and a list session started. Phase 38:
+ *  `gapAlternatives`, the words the stub says also fit the typed gap. */
+async function reachSentenceSession(page: Page, request: APIRequestContext, username: string, gapAlternatives: string[] = []) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
   await signUpLearner(page, username, 'ru');
@@ -110,7 +111,7 @@ async function reachSentenceSession(page: Page, request: APIRequestContext, user
   await seedMemory(username, MEMORY);
 
   await clearGemini(request);
-  await expectGeneration(request);
+  await expectGeneration(request, [], gapAlternatives);
   // Phase 34 (spec D8). The context call names the practised word in a sentence
   // card's Hebrew, the stub sentence's קראה, which the card marks. Asked of
   // every position, since the order is the cards' p: a bare-word card given
@@ -161,10 +162,14 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await expect(page.getByTestId('sentence-gap')).toContainText(right);
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'cloze-typed') {
-      // A new sentence, its Hebrew always shown. Its gap is inflected, so the
-      // lemma is a wrong answer and the form the right one.
+      // A new sentence. Its gap is inflected, so the lemma is a wrong answer
+      // and the form the right one.
       await expect(page.getByText('השלימו את המילה החסרה ברוסית')).toBeVisible();
       expect(stripIsolates(await page.getByTestId('sentence-gap').textContent())).toBe('Вчера она _____ эту книгу');
+      // Phase 38 (spec D1): the Hebrew is a hint, closed until tapped.
+      await expect(page.getByTestId('sentence-translation')).toHaveCount(0);
+      await page.getByTestId('sentence-hint').click();
+      await expect(page.getByTestId('sentence-hint')).toHaveCount(0);
       await expect(page.getByTestId('sentence-translation')).toBeVisible();
       // Phase 34 (spec D8): the Hebrew names the word the gap wants.
       await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
@@ -212,6 +217,42 @@ test('a typed gap refuses the lemma of its inflected word', async ({ page, reque
   await expect(page.getByTestId('feedback-wrong')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('התשובה הנכונה:');
   expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(STUB_GAP);
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 38 (spec D2, D3). A word that fits the sentence read alone is right, says
+// another was meant, opens the Hebrew sentence and asks again.
+test('a typed gap takes a word that fits, opens its hint and asks again', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const FITS = 'купила';
+  await reachSentenceSession(page, request, 'e2e_sentences_fits_ru', [FITS]);
+
+  for (let position = 1; ; position++) {
+    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(6);
+    const card = await readCard(page, position, 6);
+    if (card.kind === 'cloze-typed') break;
+    await pass(page, card);
+  }
+  await expect(page.getByTestId('sentence-translation')).toHaveCount(0);
+  await expect(page.getByTestId('sentence-hint')).toBeVisible();
+
+  await answerTyped(page, FITS);
+  await expect(page.getByTestId('retry-notice')).toBeVisible();
+  expect(stripIsolates(await page.getByTestId('retry-right').textContent())).toBe(`✓ נכון, ${FITS} מתאים כאן.`);
+  await expect(page.getByTestId('retry-again')).toHaveText('אבל התכוונו למילה אחרת — היעזרו במשפט בעברית ונסו שוב');
+  // Opened by the second try, without a tap.
+  await expect(page.getByTestId('sentence-translation')).toBeVisible();
+  await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
+  await expect(page.getByTestId('sentence-hint')).toHaveCount(0);
+  await expect(page.getByTestId('continue-button')).toHaveCount(0);
+  await expect(page.getByTestId('typed-input')).toHaveValue('');
+
+  await answerTyped(page, STUB_GAP);
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
+  await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
+  await expect(page.getByTestId('retry-notice')).toHaveCount(0);
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
