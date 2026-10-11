@@ -11,7 +11,9 @@
 #     to be on master, so master's terraform/ is never older than the tag's.
 #   - (phase 32) the Android app ships after apply, whose last step waits for
 #     /health to name the tag, and from the tag's own checkout; a dispatch,
-#     which is a rollback, passes --rollback so it can never build.
+#     which is a rollback, passes --rollback so it can never build;
+#   - the job reads the ANDROID_RELEASE repository variable; without it the
+#     script would skip every release, green, and nobody would notice.
 
 set -u
 
@@ -49,6 +51,7 @@ expect "build-push builds the tag, not master" 1 build-push 'ref:'
 expect "android runs after apply" 0 android '^[[:space:]]+needs: apply$'
 expect "android ships the tag, not master" 1 android 'ref:'
 expect "android passes --rollback on a dispatch" 0 android "workflow_dispatch' && '--rollback'"
+expect "android hands the job the ANDROID_RELEASE variable" 0 android 'ANDROID_RELEASE: \$\{\{ vars\.ANDROID_RELEASE \}\}'
 
 echo
 if [ "$status" -ne 0 ]; then

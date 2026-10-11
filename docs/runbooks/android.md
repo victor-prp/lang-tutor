@@ -8,8 +8,43 @@ within a day or so. Design:
 [phase 32](../superpowers/specs/2026-10-11-lang-tutor-phase-32-android-app-design.md),
 [ADR 0012](../adr/adr-0012-native-client-releases.md).
 
-Until steps 2–4 below are done, the `android` job prints a `::notice::` and skips, green.
-Releases keep working in the meantime.
+**The on/off switch is the repository variable `ANDROID_RELEASE`.** The `android` job ships
+only when it is exactly `on`. Unset or any other value makes the job print a `::notice::` and
+skip, green, and the server and web still release. It is unset until step 5. Turn it on or off
+with:
+
+```bash
+/opt/homebrew/bin/gh variable set ANDROID_RELEASE --body on    # ship the app with every release
+/opt/homebrew/bin/gh variable set ANDROID_RELEASE --body off   # pause: releases skip Android
+```
+
+The job also skips, green, while steps 2–4 are not done.
+
+## Where go-live stands
+
+Last updated 2026-10-11.
+
+- [ ] **1. Play Console.** The account is created and the ID documents are uploaded. **Waiting
+      for Google's identity email**, which can take a few days. Steps 1.2–1.4 come after it.
+- [x] **2. Expo account and project.** Done. The project is `@wordspal/lang-tutor`, owned by the
+      `wordspal` Expo account, id `66fb04ba-7006-4095-92be-9c26592db6c7`. The `production`
+      channel exists, and `app.json` has the project id, updates URL and owner (PR #130).
+- [ ] **3. Play service account.** Not started. 3.1 (Google Cloud) can be done now; 3.2 waits
+      for Play.
+- [x] **4. The GitHub secret.** Done. `EXPO_TOKEN` is a **Developer** robot token of the
+      `wordspal` account.
+- [ ] **5. The first release.** Waits for steps 1 and 3. `ANDROID_RELEASE` is not set yet,
+      so releases until then skip Android.
+- [ ] **6. Back up the upload key.** After step 5.
+- [ ] **7. Check it on your phone.** After step 5.
+- [ ] **8. Invite friends.** After step 7.
+
+Releasing other phases meanwhile is safe. `ANDROID_RELEASE` is unset, so every release skips
+Android, green. Do not set it to `on` before steps 1 and 3 are done: the job would build, then
+fail to submit to a Play app that does not exist.
+
+**Picking up from here:** when Google's email arrives, do steps 1.2–1.4, then step 3, then
+step 5.
 
 ## Go-live, once
 
@@ -18,8 +53,10 @@ proves before the next one starts.
 
 1. **Play Console.**
    1. At [play.google.com/console](https://play.google.com/console), create a developer
-      account. It costs a one-time $25, and Google verifies your identity, which can take a few
-      days.
+      account for **Yourself**, not an organisation. An organisation account needs a D-U-N-S
+      number and a registered business. It costs a one-time $25, and Google verifies your
+      identity, which can take a few days. *(Account created and documents uploaded
+      2026-10-11; waiting for verification.)*
    2. *Create app*: name **WordsPal**, default language Hebrew, App, Free.
    3. *Testing → Internal testing → Testers*: create an email list with your friends'
       Google-account addresses, and your own. Keep the opt-in link it shows: friends open it
@@ -37,9 +74,11 @@ proves before the next one starts.
    *Proves:* the app exists. Its package name is not set yet: Play takes it from the first
    upload, and after that it can never change.
 
-2. **Expo account and project.** Create an account at [expo.dev](https://expo.dev), then:
+2. **Expo account and project.** *(Done 2026-10-11.)* Create an account at
+   [expo.dev](https://expo.dev), then:
 
    ```bash
+   npm install                             # at the repo root first: app.json names the expo-updates plugin
    cd apps/mobile
    npx eas-cli@24.8.0 login
    npx eas-cli@24.8.0 init                 # writes extra.eas.projectId into app.json
@@ -48,9 +87,14 @@ proves before the next one starts.
    git diff app.json                       # the project id and the updates URL, nothing else
    ```
 
-   Commit the `app.json` change on a branch and merge it through a PR. Neither value is a
-   secret. Do not merge anything else in `app.json` that these commands changed: the name,
-   package, runtime version and plugins are already right.
+   `init` asks which account owns the project: pick the **wordspal** organisation, not the
+   personal account. The robot token in step 4 must belong to the same account.
+
+   Commit the `app.json` change on a branch and merge it through a PR. Keep only three keys:
+   `extra.eas.projectId`, `updates.url` and `owner`. None of them is a secret. The commands
+   also write the evaluated config back: `android.permissions`, with each permission listed
+   twice, and `extra.router`. Leave those out, because the plugins add them at build time. The
+   name, package, runtime version and plugins are already right.
 
    *Proves:* `npx eas-cli@24.8.0 channel:list` shows `production`.
 
@@ -69,8 +113,11 @@ proves before the next one starts.
 
    *Proves:* `npx eas-cli@24.8.0 credentials` shows the service account under Android.
 
-4. **The GitHub secret.** At expo.dev, *Account settings → Access tokens*, create a **robot**
-   token, then:
+4. **The GitHub secret.** *(Done 2026-10-11.)* At expo.dev, switch to the **wordspal**
+   account, then *Settings → Access tokens → Robot users*, and create a robot with the
+   **Developer** role. That role builds, submits and publishes. It would need *Release Manager*
+   only if the `production` channel were marked protected. Copy the token, which Expo shows
+   once, then:
 
    ```bash
    /opt/homebrew/bin/gh secret set EXPO_TOKEN    # paste the token when asked
@@ -78,7 +125,14 @@ proves before the next one starts.
 
    *Proves:* `gh secret list` shows `EXPO_TOKEN`.
 
-5. **The first release.** `npm run release`. The `android` job finds no build, so it builds
+5. **The first release.** Turn Android releases on, then release:
+
+   ```bash
+   /opt/homebrew/bin/gh variable set ANDROID_RELEASE --body on
+   npm run release
+   ```
+
+   The `android` job finds no build, so it builds
    (about 15–20 minutes), submits the build to the internal track, then publishes the
    update. EAS creates the app's signing key on this first build.
 
@@ -137,7 +191,7 @@ The `android` job runs `scripts/android-release.sh` from the tag's checkout:
 | `Build … has no update yet, so it never reached Play: submitting it first.` | A rerun after a failed submit: `eas submit`, then `eas update`. Every update's message names its build (`<tag> for build <id>`), and that is how the job tells |
 | `The native layer changed: building, submitting …` | `eas build`, then `eas submit` to the internal track, then `eas update`. Play installs it within a day or so |
 | a `::warning::` about the native layer, on a rollback | Nothing. Play cannot downgrade an installed app. If the newer app is broken against the older server, release a fix forward |
-| a `::notice::` that it skipped | Steps 2–4 are not done, or the tag predates phase 32 |
+| a `::notice::` that it skipped | `ANDROID_RELEASE` is not `on`, steps 2–4 are not done, or the tag predates phase 32 |
 
 A failure in `android` leaves the server release standing, and friends keep their current app.
 Rerun that job alone (*Actions → Release → the run → Re-run failed jobs*). Expo's free tier can

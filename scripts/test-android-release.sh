@@ -75,7 +75,7 @@ run() {
   code=$?
 }
 # fixture <fp> <newest build id> <newest runtime> <build the newest update names> [submit fails]
-fixture() { export FP="$1" LATEST_ID="$2" LATEST_RT="$3" UPDATE_FOR="$4" NEW_ID=b-new SUBMIT_FAILS="${5:-0}" EXPO_TOKEN=t; }
+fixture() { export FP="$1" LATEST_ID="$2" LATEST_RT="$3" UPDATE_FOR="$4" NEW_ID=b-new SUBMIT_FAILS="${5:-0}" EXPO_TOKEN=t ANDROID_RELEASE=on; }
 
 logged() { grep -q -- "$1" "$LOG"; }
 expect_calls() { # expect_calls <label> <want-exit> <yes/no pattern>...
@@ -136,6 +136,20 @@ expect_calls "a rollback with the same fingerprint publishes the old tag's JavaS
 fixture fp2 b1 fp1 b1 1; run
 expect_calls "a failed submit fails the job and publishes no update" 1 \
   "yes:eas submit" "no:eas update "
+
+# The ANDROID_RELEASE repository variable: the job ships only when it is "on".
+fixture fp1 b1 fp1 b1; ANDROID_RELEASE='' run
+expect_calls "ANDROID_RELEASE unset: skips, green, calling nothing" 0 "no:eas " "no:npx "
+grep -q 'ANDROID_RELEASE' "$OUT" && ok "and the notice names the flag" || fail "and the notice names the flag" "$(cat "$OUT")"
+
+fixture fp1 b1 fp1 b1; ANDROID_RELEASE=off run
+expect_calls "ANDROID_RELEASE=off: skips, green, calling nothing" 0 "no:eas " "no:npx "
+
+fixture fp1 b1 fp1 b1; ANDROID_RELEASE=yes run
+expect_calls "any value but on skips: the flag is explicit" 0 "no:eas " "no:npx "
+
+fixture fp2 b1 fp1 b1; ANDROID_RELEASE=off run --rollback
+expect_calls "a rollback honours the flag too" 0 "no:eas " "no:npx "
 
 fixture fp1 b1 fp1 b1; EXPO_TOKEN='' run
 expect_calls "no EXPO_TOKEN: skips, green, calling nothing" 0 "no:eas " "no:npx "
