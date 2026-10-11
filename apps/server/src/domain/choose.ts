@@ -185,15 +185,16 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   };
 
   // DUE first, leaving room for the new words the session is owed.
-  for (const candidate of due) {
-    if (picks.length >= n - newRoom) break;
-    offer(candidate);
-  }
+  let nextDue = 0;
+  while (nextDue < due.length && picks.length < n - newRoom) offer(due[nextDue++]);
   let nextFresh = 0;
   const offerFresh = (limit: number) => {
     while (nextFresh < fresh.length && newCount < limit && picks.length < n) offer(fresh[nextFresh++]);
   };
   offerFresh(newThisSession);
+  // The room left for new words is the rest of DUE's when a cap deferred them:
+  // DUE words come before EXPAND and NOT_DUE ones (R above R_TARGET).
+  while (nextDue < due.length && picks.length < n) offer(due[nextDue++]);
   for (const candidate of expand) {
     if (picks.length >= n) break;
     offer(candidate);

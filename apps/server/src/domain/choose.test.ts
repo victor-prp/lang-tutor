@@ -268,6 +268,31 @@ describe('chooseWords (spec D5, D6)', () => {
     expect(count(picks, (pick) => pick.dimension === SR)).toBe(PER_DIMENSION_CAP);
   });
 
+  it('offers the DUE words held back for new ones before EXPAND when the new words are capped', () => {
+    // Eight DUE words fill the room DUE gets (N − 2 for the new words owed); the four in WR
+    // reach WR's cap, so both new words (always WR) are deferred. The DUE word left over
+    // (SP) then comes ahead of the EXPAND and NOT_DUE words, not after them.
+    const wr = range(4, (i) => known(`r${i}`, { [WR]: 0.3 }));
+    const wp = range(4, (i) => known(`p${i}`, { [WP]: 0.4 }));
+    const picks = chooseWords(
+      input([
+        ...wr,
+        ...wp,
+        known('due-sp', { [SP]: 0.5 }),
+        { id: 'expand', memory: { [WR]: 0.95, [WP]: 0.95 } },
+        known('not-due', { [SK]: 0.93 }),
+        fresh('n0'),
+        fresh('n1'),
+      ]),
+    );
+    expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([
+      ...wr.map((word) => [word.id, 'DUE']),
+      ...wp.map((word) => [word.id, 'DUE']),
+      ['due-sp', 'DUE'],
+      ['expand', 'EXPAND'],
+    ]);
+  });
+
   it('asks at most HARD_CAP picks whose best card is expected to succeed below 0.6', () => {
     // R 0.19 at rung 1: 0.25 + 0.75·√0.19 ≈ 0.58.
     expect(expectedSuccess(0.19, true, 1)).toBeLessThan(0.6);
