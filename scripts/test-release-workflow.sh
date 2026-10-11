@@ -13,7 +13,8 @@
 #     /health to name the tag, and from the tag's own checkout; a dispatch,
 #     which is a rollback, passes --rollback so it can never build;
 #   - the job reads the ANDROID_RELEASE repository variable; without it the
-#     script would skip every release, green, and nobody would notice.
+#     script would skip every release, green, and nobody would notice. The job
+#     itself is skipped unless the variable is on, so the run shows it greyed out.
 
 set -u
 
@@ -52,6 +53,7 @@ expect "android runs after apply" 0 android '^[[:space:]]+needs: apply$'
 expect "android ships the tag, not master" 1 android 'ref:'
 expect "android passes --rollback on a dispatch" 0 android "workflow_dispatch' && '--rollback'"
 expect "android hands the job the ANDROID_RELEASE variable" 0 android 'ANDROID_RELEASE: \$\{\{ vars\.ANDROID_RELEASE \}\}'
+expect "android is skipped, not run, unless ANDROID_RELEASE is on" 0 android "^    if: vars\.ANDROID_RELEASE == 'on'$"
 
 echo
 if [ "$status" -ne 0 ]; then
