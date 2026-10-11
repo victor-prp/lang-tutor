@@ -142,6 +142,71 @@ fi
 expect_fails "it refuses to run from a worktree" \
   env -C "$FIXTURE/done" bash ./scripts/lane-clean.sh
 
+# --- --orphans ---------------------------------------------------------------
+# The orphan rule is findOrphans' (apps/server/src/db/lanes.ts, unit-tested
+# there), reached through `npm run lane:list -- --orphans --names`. A stub `npm`
+# on PATH stands in for it and for `lane:down`, and logs every call: what is
+# asserted here is what the script does with the records, not the rule.
+mkdir -p "$FIXTURE/bin"
+NPM_LOG="$FIXTURE/npm.log"
+cat > "$FIXTURE/bin/npm" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$NPM_LOG"
+case "$*" in
+  *lane:list*)
+    [ -n "${STUB_LIST_FAILS:-}" ] && { echo "connect ECONNREFUSED" >&2; exit 1; }
+    printf 'orphan\tgone_one\tdb_e2e_gone_one db_gone_one\n'
+    printf 'orphan\tgone_two\tdb_gone_two\n'
+    printf 'unowned\tdb_mystery\n'
+    ;;
+  *lane:down*)
+    [ -n "${STUB_DOWN_FAILS:-}" ] && { echo "drop failed" >&2; exit 1; }
+    echo "dropped something"
+    ;;
+esac
+STUB
+chmod +x "$FIXTURE/bin/npm"
+export NPM_LOG
+STUB_PATH="$FIXTURE/bin:$PATH"
+
+: > "$NPM_LOG"
+oplan=$(cd "$MAIN" && PATH="$STUB_PATH" bash ./scripts/lane-clean.sh --orphans 2>&1)
+expect_contains "an orphan lane is planned for dropping"     "drop       gone_one" "$oplan"
+expect_contains "with the databases it owns"                 "db_e2e_gone_one db_gone_one" "$oplan"
+expect_contains "every orphan lane is planned"               "drop       gone_two" "$oplan"
+expect_contains "an unstamped database is left alone"        "leave      db_mystery" "$oplan"
+expect_absent   "--orphans does not also walk the worktrees" "clean      done" "$oplan"
+expect_contains "and the plan says how to act on it"         "lane:clean -- --orphans --yes" "$oplan"
+expect_absent   "a plan alone drops nothing"                 "lane:down" "$(cat "$NPM_LOG")"
+
+: > "$NPM_LOG"
+oapply=$(cd "$MAIN" && PATH="$STUB_PATH" bash ./scripts/lane-clean.sh --yes --orphans 2>&1)
+calls=$(cat "$NPM_LOG")
+expect_contains "--yes drops the first orphan lane"          "lane:down -- gone_one" "$calls"
+expect_contains "and the second"                             "lane:down -- gone_two" "$calls"
+expect_absent   "and never an unstamped database"            "mystery" "$(printf '%s' "$calls" | grep lane:down)"
+expect_contains "and reports what it did"                    "Dropped 2 orphan lanes" "$oapply"
+checks=$((checks + 1))
+if [ -d "$FIXTURE/done" ]; then
+  printf '  ok         --orphans --yes removes no worktree\n'
+else
+  printf '\n  FAIL       --orphans --yes removes no worktree (done is gone)\n' >&2
+  status=1
+fi
+
+: > "$NPM_LOG"
+expect_fails "a failed listing is an error, not an empty plan" \
+  env -C "$MAIN" PATH="$STUB_PATH" STUB_LIST_FAILS=1 bash ./scripts/lane-clean.sh --orphans --yes
+expect_absent   "and drops nothing"                          "lane:down" "$(cat "$NPM_LOG")"
+
+expect_fails "a failed lane:down fails the run" \
+  env -C "$MAIN" PATH="$STUB_PATH" STUB_DOWN_FAILS=1 bash ./scripts/lane-clean.sh --orphans --yes
+
+expect_fails "--orphans refuses to run from a worktree too" \
+  env -C "$FIXTURE/done" PATH="$STUB_PATH" bash ./scripts/lane-clean.sh --orphans
+expect_fails "an unknown flag is refused, not ignored" \
+  env -C "$MAIN" bash ./scripts/lane-clean.sh --force
+
 echo
 if [ "$status" -ne 0 ]; then
   echo "lane-clean.sh FAILED ($checks checks)" >&2

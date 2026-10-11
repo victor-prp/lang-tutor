@@ -26,6 +26,13 @@
 #   checkout    worktree you are standing in — which is also why this refuses to
 #               run from anywhere else.
 #
+# `--orphans` is a second, separate job: the lanes whose worktree is already
+# gone, which the walk below can never see because it starts from
+# `git worktree list`. Which lanes those are is findOrphans' decision
+# (apps/server/src/db/lanes.ts), read through `npm run lane:list -- --orphans
+# --names`; this script only plans and, with --yes, runs `lane:down` for each.
+# A database with no lane stamp is listed and never dropped.
+#
 # Order matters and is not adjustable: `npm run lane:down` runs INSIDE the
 # worktree, so it has to happen before the worktree is removed. Reverse them and
 # the databases become orphans — findable with `npm run lane:list`, which reports
@@ -46,7 +53,70 @@ if [ "$ROOT" != "$MAIN" ]; then
 fi
 
 APPLY=0
-[ "${1:-}" = "--yes" ] && APPLY=1
+ORPHANS=0
+for arg in "$@"; do
+  case "$arg" in
+    --yes)     APPLY=1 ;;
+    --orphans) ORPHANS=1 ;;
+    # Refused rather than ignored: a mistyped flag on a command that deletes
+    # things should stop it, not quietly run the default.
+    *) echo "lane-clean.sh: unknown argument '$arg' (expected --orphans and/or --yes)" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$ORPHANS" -eq 1 ]; then
+  # Captured whole before anything is printed or dropped: a listing that fails
+  # half way (Postgres down) must be an error, not a short plan.
+  records=$(npm run --silent lane:list -- --orphans --names) || {
+    echo "lane-clean.sh: could not list the lane databases. Is Postgres up? (npm run db:up)" >&2
+    exit 1
+  }
+  orphan_lanes=""
+  orphan_count=0
+  tab=$(printf '\t')
+  while IFS="$tab" read -r kind first rest; do
+    case "$kind" in
+      orphan)
+        printf '  drop       %-28s %s\n' "$first" "$rest"
+        orphan_lanes="$orphan_lanes $first"
+        orphan_count=$((orphan_count + 1))
+        ;;
+      unowned)
+        printf '  leave      %-28s no lane stamp, so nothing says who owns it\n' "$first"
+        ;;
+    esac
+  done <<RECORDS
+$records
+RECORDS
+
+  echo
+  if [ "$orphan_count" -eq 0 ]; then
+    echo "No orphan lanes."
+  elif [ "$APPLY" -eq 1 ]; then
+    # Lane names are [a-z0-9_] (lane-env.sh), so word-splitting is safe here.
+    failed=0
+    for lane in $orphan_lanes; do
+      echo "  lane:down  $lane"
+      # Captured rather than piped to sed, which would swallow the exit status.
+      if out=$(npm run --silent lane:down -- "$lane" 2>&1); then
+        printf '%s\n' "$out" | sed 's/^/               /'
+      else
+        printf '%s\n' "$out" | sed 's/^/               /'
+        failed=$((failed + 1))
+      fi
+    done
+    echo
+    if [ "$failed" -gt 0 ]; then
+      echo "Dropped $((orphan_count - failed)) of $orphan_count orphan lanes; $failed failed (above)." >&2
+      exit 1
+    fi
+    echo "Dropped $orphan_count orphan lanes. Check with: npm run lane:list"
+  else
+    echo "This was a plan; nothing was changed. To carry it out:"
+    echo "    npm run lane:clean -- --orphans --yes        (the bare -- is required)"
+  fi
+  exit 0
+fi
 
 # Merged against origin/master when it exists, falling back to the local branch.
 # origin/master is the authoritative answer to "is this work in?", and a stale
