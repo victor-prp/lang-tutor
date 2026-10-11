@@ -647,6 +647,8 @@ export function createSessionService({
             rung,
             level,
             r,
+            // Until the job payload carries it (phase 37 D7).
+            step: false,
           };
         }),
         { listening: payload.listening, speaking: payload.speaking },

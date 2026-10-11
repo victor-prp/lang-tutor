@@ -22,6 +22,7 @@ const pick = (n: number, over: Partial<PlanPick> = {}): PlanPick => ({
   rung: 1,
   level: 1,
   r: null,
+  step: false,
   ...over,
 });
 
@@ -293,5 +294,39 @@ describe('planCards: the order (spec D6)', () => {
         }
       }
     }
+  });
+});
+
+describe('planCards: same-day returns (phase 37 D6)', () => {
+  /** A return owed today: recall, R 1 on the day it opened. */
+  const back = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}): PlanPick =>
+    pick(n, { dimension, rung: 2, level: 1, r: 1, step: true, ...over });
+
+  it('asks a return after every other card, however high its p', () => {
+    // The listening card's p is 0.625, the return's typed meaning 1.
+    const plan = planCards([at(0, SR, 1, { r: 0.25 }), back(1, WR)], ALL);
+    expect(plan.order).toEqual([0, 1]);
+    expect(plan.types).toEqual(['listen_choice', 'typed_meaning']);
+  });
+
+  it('keeps the highest p first among the returns', () => {
+    const plan = planCards([pick(0), back(1, WP, { r: 0.8 }), back(2, WR)], ALL);
+    expect(plan.order).toEqual([0, 2, 1]);
+    expect(plan.types).toEqual(['multiple_choice', 'typed_meaning', 'typed_translation']);
+  });
+
+  it('starts the returns with a type other than the card before them, where one can', () => {
+    const plan = planCards([at(0, WR, 2, { r: 0.9 }), back(1, WR), back(2, WP, { r: 0.95 })], ALL);
+    expect(plan.types).toEqual(['typed_meaning', 'typed_translation', 'typed_meaning']);
+    expect(plan.order).toEqual([0, 2, 1]);
+  });
+
+  it('keeps a return off the board, which still forms from the new words', () => {
+    // A return with no memory falls back to a multiple choice, which the board must not take.
+    const list = [back(0, WR, { r: null }), pick(1), pick(2), pick(3), pick(4), at(5, WP, 2), back(6, WP)];
+    const plan = planCards(list, ALL);
+    expect(plan.board).toEqual({ start: 0 });
+    expect(plan.order.slice(0, 4)).toEqual([1, 2, 3, 4]);
+    expect(plan.order.slice(5)).toEqual([0, 6]);
   });
 });
