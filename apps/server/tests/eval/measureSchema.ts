@@ -29,7 +29,7 @@
  *                      context strings hung the call without a 400 (see the comment
  *                      above LlmDistractorsSchema), so the wait is a measurement too.
  *   --check            measure the checker call instead (LlmCheckSchema, spec D5,
- *                      ruling R8): ten items of every kind through buildCheckPrompt,
+ *                      ruling R8): a full session's sixteen checks through buildCheckPrompt,
  *                      within production's budget for it, and what each answer says.
  *                      Run it several times, for the same reason as --context.
  *   --required         with --check: every field of an item required, the variant
@@ -322,21 +322,31 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
   return 0;
 }
 
-/** Spec D5. Ten checks of every kind, as prepareSession asks them for an English
- *  session: two choice cards and a reversed one, a gap, two target-language
- *  contexts and two Hebrew ones, and two sentence cards. Each has an answer a
- *  careful reader gives, printed beside the model's. */
+/** Spec D5. A full session's checks, sixteen of every kind, as prepareSession
+ *  asks them for an English session with a board: choice cards (a multiple
+ *  choice, a reversed card, a listen choice), the board's fifth-meaning
+ *  candidates against each of its four words, a gap, target-language and Hebrew
+ *  contexts, and sentence cards. Each has the answer a careful reader gives,
+ *  printed beside the model's. */
+const BOARD_CANDIDATES = ['ענן', 'גשם', 'רוח', 'סיר', 'מחבת', 'כוס'];
+const SAW_READINGS = ['לנסר', 'מסור', 'ראה', 'לראות'];
 const CHECKS: { item: CheckItem; expect: string }[] = [
   { item: { key: 'q1', task: 'choice', word: 'blow up', options: ['להרוס', 'לקפל', 'לשבור', 'להתפוצץ', 'לצבוע', 'לבשל'] }, expect: 'להרוס and להתפוצץ right' },
-  { item: { key: 'q2', task: 'choice', word: 'pick up', options: ['להרים', 'לכתוב', 'לשיר', 'לרקוד', 'לבשל', 'לישון'] }, expect: 'להרים right' },
-  { item: { key: 'q3', task: 'choice', word: 'מהר', options: ['quickly', 'fast', 'slowly', 'loudly', 'rarely', 'softly'] }, expect: 'quickly and fast right' },
-  { item: { key: 'q4', task: 'gap', sentence: 'She ___ the door and walked in.', options: ['unlocked', 'ate', 'slept', 'sang', 'cooked', 'painted'] }, expect: 'unlocked fits' },
-  { item: { key: 'q5c', task: 'meaning', sentence: 'Please saw the plank in half.', word: 'saw', candidates: ['לנסר', 'מסור', 'ראה', 'לראות'] }, expect: 'לנסר' },
-  { item: { key: 'q6c', task: 'meaning', sentence: 'I saw him at the station yesterday.', word: 'saw', candidates: ['לנסר', 'מסור', 'ראה', 'לראות'] }, expect: 'ראה or לראות' },
-  { item: { key: 'q7c', task: 'words', sentence: 'אני רוצה להוריד את המשחק החדש הלילה.', word: 'להוריד' }, expect: 'download' },
-  { item: { key: 'q8c', task: 'words', sentence: 'תוריד את הווליום, בבקשה.', word: 'תוריד' }, expect: 'turn down, lower' },
-  { item: { key: 'q9', task: 'translate', sentence: 'בואו נשלב כוחות.' }, expect: 'join forces, not combine' },
-  { item: { key: 'q10', task: 'translate', sentence: 'אני מקווה שהדברים ישתפרו בקרוב.' }, expect: 'improve' },
+  { item: { key: 'q1c', task: 'meaning', sentence: 'The kids blew up twenty balloons.', word: 'blew up', candidates: ['לנפח', 'להתפוצץ', 'להגדיל', 'להתפרץ בכעס'] }, expect: 'לנפח' },
+  { item: { key: 'q2', task: 'choice', word: 'מהר', options: ['quickly', 'fast', 'slowly', 'loudly', 'rarely', 'softly'] }, expect: 'quickly and fast right' },
+  { item: { key: 'q2c', task: 'words', sentence: 'הוא רץ מהר מאוד לתחנה.', word: 'מהר' }, expect: 'fast, quickly' },
+  { item: { key: 'q3c', task: 'words', sentence: 'אני רוצה להוריד את המשחק החדש הלילה.', word: 'להוריד' }, expect: 'download' },
+  { item: { key: 'q4', task: 'choice', word: 'kettle', options: BOARD_CANDIDATES }, expect: 'none right (סיר at most)' },
+  { item: { key: 'q5', task: 'choice', word: 'pillow', options: BOARD_CANDIDATES }, expect: 'none right' },
+  { item: { key: 'q6', task: 'choice', word: 'ladder', options: BOARD_CANDIDATES }, expect: 'none right' },
+  { item: { key: 'q7', task: 'choice', word: 'bucket', options: BOARD_CANDIDATES }, expect: 'none right' },
+  { item: { key: 'q8', task: 'choice', word: 'pick up', options: ['להרים', 'לכתוב', 'לשיר', 'לרקוד', 'לבשל', 'לישון'] }, expect: 'להרים right' },
+  { item: { key: 'q9', task: 'gap', sentence: 'She ___ the door and walked in.', options: ['unlocked', 'ate', 'slept', 'sang', 'cooked', 'painted'] }, expect: 'unlocked fits (painted too)' },
+  { item: { key: 'q10', task: 'translate', sentence: 'בואו נשלב כוחות.' }, expect: 'join forces, not combine' },
+  { item: { key: 'q11c', task: 'meaning', sentence: 'Please saw the plank in half.', word: 'saw', candidates: SAW_READINGS }, expect: 'לנסר' },
+  { item: { key: 'q12c', task: 'meaning', sentence: 'I saw him at the station yesterday.', word: 'saw', candidates: SAW_READINGS }, expect: 'ראה or לראות' },
+  { item: { key: 'q13c', task: 'words', sentence: 'תוריד את הווליום, בבקשה.', word: 'תוריד' }, expect: 'turn down, lower' },
+  { item: { key: 'q14', task: 'translate', sentence: 'אני מקווה שהדברים ישתפרו בקרוב.' }, expect: 'improve or get better' },
 ];
 
 /** Ruling R8. The checker call at full size, within production's budget for it. */

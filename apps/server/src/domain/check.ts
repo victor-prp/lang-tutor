@@ -191,10 +191,12 @@ const INFLECTION_LETTERS = 3;
 /** Below this a word is matched exactly: a short stem begins too many words. */
 const STEM_MIN_LETTERS = 3;
 
+/** A text's words under `comparable`. An apostrophe splits, as a space does,
+ *  so an elided article or preposition is a word of its own (l'acqua, all'università)
+ *  on both sides, and the word behind it is found. */
 const wordsOf = (text: string): string[] =>
   comparable(text)
-    .replace(/[’‘ʼ]/gu, "'")
-    .split(/[^\p{L}\p{M}\p{N}']+/u)
+    .split(/[^\p{L}\p{M}\p{N}]+/u)
     .filter((word) => word !== '');
 
 /** A word of the translation is `sought`, or `sought` with an ending. */

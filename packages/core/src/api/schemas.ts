@@ -1087,17 +1087,22 @@ export const LlmContextSchema = z.object({
 // batch rather than shifting a "yes" onto the wrong option.
 //
 // Measured before anything was built on it (ruling R8: optional strings once made
-// the batch's non-streaming call hang). `npx tsx tests/eval/measureSchema.ts
-// --check` (in apps/server) sends ten checks of every kind (three choice cards,
-// a gap, two target-language contexts, two Hebrew ones, two sentence cards)
-// through the real prompt and client with production's 60 s budget
-// (CHECKER_CALL_BUDGET_MS), gemini-2.5-flash, 2026-10-11, thinking on. Nine runs,
-// all accepted, no 400, none hung: 10.6, 10.4, 14.5, 15.0, 10.6, 10.9, 15.5,
-// 16.3 and 15.8 s, every item answered with the right number of booleans. A
-// sixteen-check request, a session with a board, answered in 14.5, 13.8 and
-// 11.8 s. After the "translate" task's wording was sharpened (asked alone, the
-// checker had rendered בואו נשלב כוחות word for word), four more runs: 7.5, 6.9,
-// 7.0 and 7.3 s. A field more here means measuring again, for a 400 and for the wait.
+// the batch's non-streaming call hang), with `npx tsx tests/eval/measureSchema.ts
+// --check` (in apps/server), through the real prompt and client with
+// production's 60 s budget (CHECKER_CALL_BUDGET_MS), gemini-2.5-flash,
+// 2026-10-11, thinking on. None hung, none was refused:
+//
+//   16 checks, a full session with a board (three choice cards, the board's
+//   four, a gap, three target-language contexts, three Hebrew ones, two sentence
+//   cards), the current wording: seven runs, 15.9, 12.7, 13.3, 12.2, 15.7, 14.9
+//   and 15.2 s
+//   10 checks, the first wording of the "translate" task: nine runs, 10.4 to
+//   16.3 s; the current wording: four runs, 6.9 to 7.5 s
+//
+// Every item came back with the right number of booleans. (Asked alone, the
+// first wording rendered בואו נשלב כוחות word for word, "combine forces"; the
+// current one asks for what a native speaker reaches for first.) A field more
+// here means measuring again, for a 400 and for the wait.
 export const LlmCheckSchema = z.object({
   items: z.array(
     z.object({

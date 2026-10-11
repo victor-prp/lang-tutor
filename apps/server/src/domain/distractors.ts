@@ -92,6 +92,11 @@ export const DISTRACTOR_MARKER = 'six wrong answers';
  *  of the six asked must survive D3 and the checker for the batch to stand. */
 export const KEPT_DISTRACTORS = 3;
 
+/** Phase 34 (spec D4, D5). How many wrong options a choice item asks for, and the
+ *  most it keeps, spares included: the checker numbers every one it is sent, and a
+ *  miscount fails the attempt, so a longer list from the model is cut here. */
+export const ASKED_DISTRACTORS = 6;
+
 /**
  * Phase 34 (spec D3). What the dictionary already knows to be right, read once
  * per batch (repo/dictionary.ts, findKnownRight) so no wrong option is one of
@@ -479,8 +484,9 @@ function cleanAlternatives(item: DistractorItem, found: string[] | undefined, ex
  * meanings and their words are as off limits as an item's own.
  *
  * Phase 34 (spec D3, D4). A choice item keeps the first three usable wrong
- * options of the six asked, and the rest as spares; it fails only when fewer
- * than three are usable. `known` is what the dictionary already holds as right.
+ * options of the six asked, and the rest, up to six in all, as spares; it fails
+ * only when fewer than three are usable. `known` is what the dictionary already
+ * holds as right.
  */
 export function validateDistractors(
   items: DistractorItem[],
@@ -531,7 +537,11 @@ export function validateDistractors(
           : `${item.key} needs three non-empty wrong answers`,
       };
     }
-    byKey.set(item.key, { ...NOTHING_GENERATED, distractors: usable.slice(0, KEPT_DISTRACTORS), spares: usable.slice(KEPT_DISTRACTORS) });
+    byKey.set(item.key, {
+      ...NOTHING_GENERATED,
+      distractors: usable.slice(0, KEPT_DISTRACTORS),
+      spares: usable.slice(KEPT_DISTRACTORS, ASKED_DISTRACTORS),
+    });
   }
   return { ok: true, byKey };
 }

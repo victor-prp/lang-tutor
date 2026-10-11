@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
 import {
+  ASKED_DISTRACTORS,
   DISTRACTOR_MARKER,
   MAX_ALTERNATIVES,
   MAX_CARD_ALTERNATIVES,
@@ -970,6 +971,19 @@ describe('phase 34: the known-right set and the spares (spec D3, D4)', () => {
       distractors: ['לכתוב', 'לשיר', 'לרקוד'],
       spares: [],
     });
+  });
+
+  // Review, fix round 1: the checker numbers what it is asked, and a miscount
+  // fails the attempt, so it is never asked more than the six the prompt asks for.
+  it('keeps at most six usable wrong options, three shown and three spares, whatever the model returns', () => {
+    const eight = ['לכתוב', 'לשיר', 'לרקוד', 'לבשל', 'לישון', 'לקרוא', 'לצייר', 'לשחות'];
+    // Past the parser, which already refuses a seventh (LlmDistractorsSchema).
+    expect(kept(validateDistractors(pickUpItems, one('q1', eight), 'he', [], 'en', NONE))).toEqual({
+      ...NOTHING_GENERATED,
+      distractors: ['לכתוב', 'לשיר', 'לרקוד'],
+      spares: ['לבשל', 'לישון', 'לקרוא'],
+    });
+    expect(ASKED_DISTRACTORS).toBe(6);
   });
 
   it('asks for six wrong answers, best first', () => {

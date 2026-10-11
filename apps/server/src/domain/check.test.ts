@@ -149,4 +149,17 @@ describe('what the answers mean for a card', () => {
     expect(translationUses('He picked the phone up.', ['pick up'])).toBe(false);
     expect(translationUses('I hope things get better soon.', ['pick up', 'improve'])).toBe(false);
   });
+
+  // Review, fix round 1: an Italian article or preposition elides onto a
+  // vowel-initial word, and the word is still the word.
+  it('finds a word behind an elided article or preposition, as the translation and as the candidate', () => {
+    expect(translationUses("Bevo l'acqua ogni mattina.", ['acqua'])).toBe(true);
+    expect(translationUses("Bevo l'acqua ogni mattina.", ["l'acqua"])).toBe(true);
+    expect(translationUses("È l'ora di andare.", ['ora'])).toBe(true);
+    expect(translationUses("Vado all'università domani.", ['università'])).toBe(true);
+    // A typographic apostrophe is the same mark.
+    expect(translationUses('Vado all’università domani.', ['università'])).toBe(true);
+    // The article is split off, not the word: l'acquerello holds no acqua.
+    expect(translationUses("Guardo l'acquerello.", ['acqua'])).toBe(false);
+  });
 });

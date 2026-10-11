@@ -1729,4 +1729,13 @@ export const CHECK_CASES: CheckCase[] = [
     practised: ['bought', 'buy'],
     keep: true,
   },
+  // Review, fix round 1: Italian elides a preposition onto a vowel-initial word
+  // (all'università), and the word is still found.
+  {
+    label: "checker F: an Italian word behind an elided preposition is kept (all'università)",
+    target: 'it',
+    item: { key: 'q1', task: 'translate', sentence: 'הלכתי לאוניברסיטה אתמול בבוקר.' },
+    practised: ['università'],
+    keep: true,
+  },
 ];

@@ -1296,6 +1296,19 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     ]);
   });
 
+  // Review, fix round 1: the checker is never asked about more than six options,
+  // the miscount risk that fails the attempt. A seventh never gets past the parse
+  // (LlmDistractorsSchema), and validateDistractors keeps at most six.
+  it('asks the checker about at most six options of a card, and never sees a seventh', async () => {
+    const six = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG) });
+    await six.service.prepareSession(payloadOf(CHOICES));
+    expect(checksOf(six.checkerLlm.calls[0]).filter((item) => item.task === 'choice').map((item) => item.options!.length)).toEqual([6, 6]);
+
+    const seven = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch([...SIX_WRONG, 'לשחות']) });
+    await expect(seven.service.prepareSession(payloadOf(CHOICES))).rejects.toBeInstanceOf(InvalidDistractors);
+    expect(seven.checkerLlm.calls).toHaveLength(0);
+  });
+
   // Review Focus 5.
   it('fails the batch only when fewer than three wrong options survive the checker', async () => {
     const three = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: checking({ q1: { options: [true, true, true, false, false, false] } }) });
@@ -1369,6 +1382,40 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     expect(logger.events).toContainEqual({ event: 'context_missing', session_id: SESSION, position: 1, type: 'reverse_choice' });
   });
 
+  // Review, fix round 1: the card asks for its answer form, and the saved form
+  // is right too (D3's "form, lemma, answer form and accepted answers").
+  it('keeps a Hebrew context the checker reads as the saved form when the card asks for an answer form', async () => {
+    const ITALIAN: Enrollment = { ...ENROLLMENT, target_language: 'it' };
+    const casa = row({ form: 'casa', lemma: 'casa', partOfSpeech: 'noun', translation: 'בית' }, 20);
+    const cane = row({ form: 'cane', lemma: 'cane', partOfSpeech: 'noun', translation: 'כלב' }, 21);
+    // Saved as parliamo; this rendering is she-speaks, so the card asks for parla.
+    const speaks = row({ form: 'parliamo', lemma: 'parlare', translation: 'מדברת', answerForm: 'parla' }, 22);
+    const rows = [casa, cane, speaks];
+    const batch = JSON.stringify({
+      items: [
+        { key: 'q1', distractors: ['שולחן', 'כיסא', 'דלת'] },
+        { key: 'q2', distractors: ['gatto', 'topo', 'pane'] },
+        { key: 'q3', distractors: [], alternatives: [] },
+      ],
+    });
+    const contexts = JSON.stringify({
+      items: [{ key: 'q3', context: 'היא מדברת עם אמא שלה כל יום.', context_translation: 'Parla con sua madre ogni giorno.', context_word: 'מדברת' }],
+    });
+    const asked = (words: string[]) =>
+      world({ enrollment: ITALIAN, context: rows, reply: batch, contextReply: contexts, checkReply: checking({ q3c: { context_words: words } }) });
+
+    const saved = asked(['parliamo']);
+    await saved.service.prepareSession(payloadOf(rows));
+    expect(insertedOf(saved.calls)[2]).toMatchObject({ type: 'typed_translation', context: 'היא מדברת עם אמא שלה כל יום.' });
+    expect(events(saved.logger, 'checker_dropped')).toEqual([]);
+
+    // A word none of the card's forms or answers is still drops it.
+    const other = asked(['dire']);
+    await other.service.prepareSession(payloadOf(rows));
+    expect(insertedOf(other.calls)[2]).toMatchObject({ type: 'typed_translation', context: null });
+    expect(events(other.logger, 'checker_dropped')).toEqual([expect.objectContaining({ position: 2, kind: 'context' })]);
+  });
+
   it('category F (eb95d246): turns בואו נשלב כוחות into a typed translation when the checker says it naturally, without combine', async () => {
     const rows = [SAW, LAMP, COMBINE];
     const batch = JSON.stringify({ items: [{ key: 'q3', distractors: [], sentence: 'בואו נשלב כוחות.', translation: "Let's combine forces.", gap: 'combine' }] });
@@ -1408,6 +1455,43 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     expect(insertedOf(calls)[0]).toMatchObject({ type: 'typed_meaning', context: 'He will saw the branch off.' });
     expect(checkerLlm.calls).toHaveLength(0);
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', checker_ms: 0, check_count: 0 }));
+  });
+
+  // Review, fix round 1. A cloze choice is checked as a gap: the saved example
+  // with its gap written ___, and "does the sentence still read correctly?".
+  describe('the cloze choice (spec D5)', () => {
+    // Ordinal 1, speaking and listening off: a typed meaning, a cloze choice
+    // (download's saved example holds it once) and a typed cloze.
+    const rows = [SAW, DOWNLOAD, COMBINE];
+    const GAP_WRONG = ['eat', 'sleep', 'sing', 'dance', 'swim'];
+    const batch = JSON.stringify({
+      items: [
+        { key: 'q2', distractors: GAP_WRONG },
+        { key: 'q3', distractors: [], sentence: 'We combine the two plans today.', gap: 'combine', translation: 'אנחנו משלבים את שתי התוכניות היום.', alternatives: [] },
+      ],
+    });
+    const natural = { q3: { natural_translation: 'We combine the two plans today.' } };
+
+    it('sends the checker the saved example with its gap written ___, and every usable option', async () => {
+      const { service, calls, checkerLlm } = world({ enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking(natural) });
+      await service.prepareSession(payloadOf(rows, 1));
+      expect(insertedOf(calls).map((q) => q.type)).toEqual(['typed_meaning', 'cloze_choice', 'cloze_typed']);
+      expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q2')).toEqual({
+        key: 'q2', task: 'gap', sentence: 'I need to ___ the file first.', options: GAP_WRONG,
+      });
+      expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sleep', 'sing']);
+    });
+
+    it('drops an option the checker says still fits the gap, and the next spare takes its place', async () => {
+      const { service, calls, logger } = world({
+        enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking({ ...natural, q2: { gap_fits: [false, true, false, false, false] } }),
+      });
+      await service.prepareSession(payloadOf(rows, 1));
+      expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sing', 'dance']);
+      expect(events(logger, 'checker_dropped')).toEqual([
+        { event: 'checker_dropped', session_id: SESSION, position: 1, type: 'cloze_choice', kind: 'option', text: 'sleep', reason: 'the checker calls it right' },
+      ]);
+    });
   });
 
   describe('the board (spec D3, D5, D10)', () => {

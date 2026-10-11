@@ -43,6 +43,7 @@ import {
   type StoredContext,
 } from '../domain/context';
 import {
+  ASKED_DISTRACTORS,
   KEPT_DISTRACTORS,
   NOTHING_GENERATED,
   boardMeanings,
@@ -858,9 +859,11 @@ export function createSessionService({
       // its four words; each sentence the context call wrote; each sentence
       // card's Hebrew. Unlike the context call, an unreadable or failed answer
       // fails the attempt, as an unreadable batch does, and pg-boss retries it.
+      // At most six (ASKED_DISTRACTORS), as validateDistractors keeps them: the
+      // checker numbers every option, and a miscount fails the attempt.
       const candidatesOf = (index: number): string[] => {
         const made = verdict.byKey.get(keyOf(index));
-        return made ? [...made.distractors, ...made.spares] : [];
+        return made ? [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS) : [];
       };
       const boardCandidates = board ? candidatesOf(board.start) : [];
       const glossMeanings = (row: GenerationContext) => [row.translation, ...(read.known.meaningsByGloss.get(row.glossId) ?? [])];
@@ -992,7 +995,12 @@ export function createSessionService({
             contextFinding.task === 'meaning'
               ? meaningFits(contextFinding.meaning, glossMeanings(row))
               : contextFinding.task === 'words' &&
-                wordsFit(contextFinding.words, { answer: row.answerForm ?? row.form, lemma: row.lemma, alternatives: [...row.acceptedAnswers, ...answered.alternatives] });
+                // The answer form the card asks for, its lemma, and the saved form, which is right too.
+                wordsFit(contextFinding.words, {
+                  answer: row.answerForm ?? row.form,
+                  lemma: row.lemma,
+                  alternatives: [row.form, ...row.acceptedAnswers, ...answered.alternatives],
+                });
           if (!fits) {
             const reading = contextFinding.task === 'meaning' ? contextFinding.meaning : contextFinding.task === 'words' ? contextFinding.words.join(', ') : '';
             events.push({ event: 'checker_dropped', session_id: sessionId, position: card.index, type, kind: 'context', text: context.text, reason: `the checker reads it as ${reading || 'nothing'}` });
