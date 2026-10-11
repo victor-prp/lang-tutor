@@ -39,6 +39,9 @@ export const PrepareSessionPayloadSchema = z.object({
         rung: z.union([z.literal(1), z.literal(2)]).default(1),
         level: z.number().int().min(MIN_LEVEL).max(MAX_LEVEL).default(MIN_LEVEL),
         r: z.number().min(0).max(1).nullable().default(null),
+        // Phase 37 (spec D6). A same-day return, asked after every other card.
+        // Absent in a job enqueued before the deploy: no return.
+        step: z.boolean().default(false),
       }),
     )
     .min(1)

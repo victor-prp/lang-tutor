@@ -1,8 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, SESSION_LENGTH, retrievability, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import { chooseWords, expectedSuccess, type ChoiceInput, type ChosenPick } from './choose';
-import { DAY_NEW_CAP, HARD_CAP, NEW_PER_SESSION, PER_DIMENSION_CAP, R_TARGET } from './chooseConstants';
+import { chooseWords, expectedSuccess, rungFor, type ChoiceInput, type ChosenPick } from './choose';
+import { DAY_NEW_CAP, HARD_CAP, NEW_PER_SESSION, PER_DIMENSION_CAP, RUNG_R, R_TARGET } from './chooseConstants';
+import type { Step } from './today';
 
 // Not tests/support/testRng: ADR 0001 R3 greps domain/ for any parent-directory
 // import, test files included. Same LCG.
@@ -49,6 +50,8 @@ type Word = {
 
 const savedAt = (i: number) => `2026-01-01T00:${String(i).padStart(2, '0')}:00.000000Z`;
 
+/** Speaking is off unless a test turns it on: the speaking pick (phase 37 D4) has
+ *  tests of its own. */
 function input(words: Word[], over: Partial<ChoiceInput> = {}): ChoiceInput {
   return {
     saved: words.map((word, i) => ({ glossId: word.id, key: word.key ?? `key-${word.id}`, savedAt: word.savedAt ?? savedAt(i) })),
@@ -64,10 +67,11 @@ function input(words: Word[], over: Partial<ChoiceInput> = {}): ChoiceInput {
       Object.entries(word.levels ?? {}).map(([dimension, level]) => ({ glossId: word.id, dimension: dimension as Dimension, level })),
     ),
     today: TODAY,
-    askedToday: new Set(),
+    steps: [],
+    done: new Set(),
     newToday: 0,
     listening: true,
-    speaking: true,
+    speaking: false,
     rng: testRng(1),
     ...over,
   };
@@ -79,6 +83,8 @@ const every = (r: number, low: Partial<Record<Dimension, number>> = {}) =>
 
 const known = (id: string, low: Partial<Record<Dimension, number>> = {}): Word => ({ id, memory: every(0.95, low) });
 const fresh = (id: string, extra: Partial<Word> = {}): Word => ({ id, ...extra });
+/** A return owed (D1), opened at answer `opened`. */
+const step = (glossId: string, dimension: Dimension, opened = 0): Step => ({ glossId, dimension, opened });
 const ids = (picks: ChosenPick[]) => picks.map((pick) => pick.glossId);
 const count = (picks: ChosenPick[], test: (pick: ChosenPick) => boolean) => picks.filter(test).length;
 const range = (n: number, make: (i: number) => Word) => Array.from({ length: n }, (_, i) => make(i));
@@ -103,26 +109,37 @@ describe('expectedSuccess (spec D6, ruling 3)', () => {
   });
 });
 
-describe('chooseWords (spec D5, D6)', () => {
-  it('takes the classes in order: DUE, NEW, EXPAND, NOT_DUE, then what was asked today', () => {
+describe('rungFor (phase 37 D2)', () => {
+  it('is recall from RUNG_R up with memory, and recognition below it or with none', () => {
+    expect(rungFor(RUNG_R)).toBe(2);
+    expect(rungFor(1)).toBe(2);
+    expect(rungFor(RUNG_R - 0.001)).toBe(1);
+    expect(rungFor(null)).toBe(1);
+  });
+});
+
+describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
+  it('takes the classes in order: NEW, STEP, DUE, EXPAND, NOT_DUE, then DONE', () => {
     const picks = chooseWords(
       input(
         [
           known('not-due'),
-          known('asked'),
+          known('done'),
           { id: 'expand', memory: { [WR]: 0.95 } },
           fresh('new'),
+          { id: 'step', memory: { [WR]: 1 } },
           known('due', { [WP]: 0.5 }),
         ],
-        { askedToday: new Set(['asked']) },
+        { steps: [step('step', WR)], done: new Set(['done']) },
       ),
     );
     expect(picks.map((pick) => [pick.glossId, pick.cls, pick.dimension])).toEqual([
-      ['due', 'DUE', WP],
       ['new', 'NEW', WR],
+      ['step', 'STEP', WR],
+      ['due', 'DUE', WP],
       ['expand', 'EXPAND', WP],
       ['not-due', 'NOT_DUE', WR],
-      ['asked', 'ASKED', WR],
+      ['done', 'DONE', WR],
     ]);
   });
 
@@ -164,39 +181,52 @@ describe('chooseWords (spec D5, D6)', () => {
     expect(picks[0]).toEqual({ glossId: 'g', dimension: WR, rung: 2, level: 5, r: expect.closeTo(0.85, 10), cls: 'DUE' });
   });
 
-  it('chooses the rung by level and R: recall only at level 3 or more and R at least RUNG_R', () => {
+  it('chooses the rung by memory, not level: recall from RUNG_R up, recognition below it or untested', () => {
     const rungOf = (level: number, r: number) =>
       chooseWords(input([{ ...known('g', { [WR]: r }), levels: { [WR]: level } }]))[0].rung;
-    expect(rungOf(1, 0.85)).toBe(1);
-    expect(rungOf(2, 0.85)).toBe(1);
-    expect(rungOf(3, 0.85)).toBe(2);
+    expect(rungOf(1, 0.85)).toBe(2);
+    expect(rungOf(2, 0.85)).toBe(2);
     expect(rungOf(3, 0.7)).toBe(1);
     expect(rungOf(5, 0.5)).toBe(1);
-    // No level row reads as level 1.
-    expect(chooseWords(input([known('g', { [WR]: 0.85 })]))[0]).toMatchObject({ level: 1, rung: 1 });
+    expect(chooseWords(input([fresh('g')]))[0]).toMatchObject({ rung: 1, r: null });
+    expect(chooseWords(input([{ id: 'g', memory: { [WR]: 0.95 } }]))[0]).toMatchObject({ cls: 'EXPAND', rung: 1, r: null });
+  });
+
+  it('asks a return at rung 2 in its owed dimension, whatever its R', () => {
+    const [pick] = chooseWords(input([{ id: 'g', memory: { [WR]: 0.5, [WP]: 0.95 } }], { steps: [step('g', WR)] }));
+    expect(pick).toEqual({ glossId: 'g', dimension: WR, rung: 2, level: 1, r: expect.closeTo(0.5, 10), cls: 'STEP' });
   });
 
   describe('NEW', () => {
-    it('gets at least two when the daily cap allows, however many words are due', () => {
-      // Twelve DUE words in four dimensions, three each: no cap is reached by eight of them.
-      const due = range(12, (i) => known(`d${i}`, { [[WP, SP, SR, SK][i % 4]]: 0.5 }));
+    it('gets NEW_FLOOR, one, under a backlog of due words', () => {
+      const due = range(12, (i) => known(`d${i}`, { [[WR, WP, SP, SR][i % 4]]: 0.5 }));
       const picks = chooseWords(input([...due, ...range(5, (i) => fresh(`n${i}`))]));
       expect(picks).toHaveLength(SESSION_LENGTH);
-      expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(2);
-      expect(count(picks, (pick) => pick.cls === 'DUE')).toBe(8);
+      expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(1);
+      expect(count(picks, (pick) => pick.cls === 'DUE')).toBe(9);
     });
 
-    it('takes three when DUE leaves room, and no more while other words can fill the session', () => {
-      // Seven EXPAND words in four dimensions: WP, SR, SP and SK each next for some.
-      const next: Partial<Record<Dimension, number>>[] = [
-        { [WR]: 0.95 },
-        { [WR]: 0.95, [WP]: 0.95 },
-        { [WR]: 0.95, [WP]: 0.95, [SR]: 0.95 },
-        { [WR]: 0.95, [WP]: 0.95, [SR]: 0.95, [SP]: 0.95 },
-      ];
-      const expand = range(7, (i) => ({ id: `x${i}`, memory: next[i % 4] }));
+    it('is never held back by the per-skill limit: with four due words in WR, a new word still comes first', () => {
+      const wr = range(4, (i) => known(`r${i}`, { [WR]: 0.3 }));
+      const wp = range(4, (i) => known(`p${i}`, { [WP]: 0.4 }));
+      const picks = chooseWords(
+        input([...wr, ...wp, known('due-sp', { [SP]: 0.5 }), { id: 'expand', memory: { [WR]: 0.95, [WP]: 0.95 } }, known('not-due'), fresh('n0'), fresh('n1')]),
+      );
+      expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([
+        ['n1', 'NEW'],
+        ...wr.map((word) => [word.id, 'DUE']),
+        ...wp.map((word) => [word.id, 'DUE']),
+        ['due-sp', 'DUE'],
+      ]);
+    });
+
+    it('takes NEW_PER_SESSION first when the due words leave room, and no more while other words fill the session', () => {
+      // Seven EXPAND words into WP, SR and SP, none over the per-skill limit.
+      const next: Partial<Record<Dimension, number>>[] = [{ [WR]: 0.95 }, { [WR]: 0.95, [WP]: 0.95 }, { [WR]: 0.95, [WP]: 0.95, [SR]: 0.95 }];
+      const expand = range(7, (i) => ({ id: `x${i}`, memory: next[i % 3] }));
       const picks = chooseWords(input([...expand, ...range(10, (i) => fresh(`n${i}`))]));
       expect(picks).toHaveLength(SESSION_LENGTH);
+      expect(picks.slice(0, NEW_PER_SESSION).map((pick) => pick.cls)).toEqual(Array(NEW_PER_SESSION).fill('NEW'));
       expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(NEW_PER_SESSION);
       expect(count(picks, (pick) => pick.cls === 'EXPAND')).toBe(7);
     });
@@ -212,20 +242,16 @@ describe('chooseWords (spec D5, D6)', () => {
       expect(count(atCap, (pick) => pick.cls === 'NEW')).toBe(0);
     });
 
-    // Ruling 15. A session is never left short while saved glosses remain.
-    it('goes past the daily cap as a last resort, after every other class', () => {
+    it('goes past the daily cap only for a session that would otherwise be empty', () => {
       const words = [known('a', { [WP]: 0.93 }), known('b', { [SP]: 0.93 }), ...range(3, (i) => fresh(`n${i}`))];
-      const picks = chooseWords(input(words, { newToday: DAY_NEW_CAP }));
-      expect(picks.map((pick) => pick.glossId)).toEqual(['a', 'b', 'n2', 'n1', 'n0']);
-    });
-
-    it('fills an all-NEW list at or past the daily cap', () => {
-      const words = range(12, (i) => fresh(`n${i}`));
-      for (const newToday of [DAY_NEW_CAP - 2, DAY_NEW_CAP, DAY_NEW_CAP + 5]) {
-        const picks = chooseWords(input(words, { newToday }));
-        expect(ids(picks)).toEqual(Array.from({ length: 10 }, (_, i) => `n${11 - i}`));
+      expect(ids(chooseWords(input(words, { newToday: DAY_NEW_CAP })))).toEqual(['a', 'b']);
+      // An all-NEW list: what the cap allows below it, and a full session at or past it.
+      const all = range(12, (i) => fresh(`n${i}`));
+      expect(ids(chooseWords(input(all, { newToday: DAY_NEW_CAP - 2 })))).toEqual(['n11', 'n10']);
+      for (const newToday of [DAY_NEW_CAP, DAY_NEW_CAP + 5]) {
+        expect(ids(chooseWords(input(all, { newToday })))).toEqual(Array.from({ length: 10 }, (_, i) => `n${11 - i}`));
       }
-      expect(chooseWords(input(words.slice(0, 3), { newToday: DAY_NEW_CAP }))).toHaveLength(3);
+      expect(chooseWords(input(all.slice(0, 3), { newToday: DAY_NEW_CAP }))).toHaveLength(3);
     });
 
     it('fills an all-NEW list: the newest saved first, every one written receptive at rung 1', () => {
@@ -246,51 +272,139 @@ describe('chooseWords (spec D5, D6)', () => {
     });
   });
 
-  it('leaves glosses asked today for last, even a due one', () => {
-    const words = [known('due', { [WR]: 0.3 }), ...range(10, (i) => known(`k${i}`, { [[WR, WP, SP, SR, SK][i % 5]]: 0.93 }))];
-    const picks = chooseWords(input(words, { askedToday: new Set(['due']) }));
-    expect(picks).toHaveLength(SESSION_LENGTH);
-    expect(ids(picks)).not.toContain('due');
-    const few = chooseWords(input(words.slice(0, 3), { askedToday: new Set(['due']) }));
-    expect(few.map((pick) => [pick.glossId, pick.cls])).toEqual([
-      ['k0', 'NOT_DUE'],
-      ['k1', 'NOT_DUE'],
-      ['due', 'ASKED'],
-    ]);
+  describe('returns (phase 37 D1)', () => {
+    it('come before a DUE word, however much less known that word is', () => {
+      const picks = chooseWords(input([known('due', { [WP]: 0.2 }), { id: 'step', memory: { [WR]: 1 } }], { steps: [step('step', WR)] }));
+      expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([
+        ['step', 'STEP'],
+        ['due', 'DUE'],
+      ]);
+    });
+
+    it('wait while their dimension is not live, asked only as a word done today when nothing else is left', () => {
+      const heard: Word = { id: 'heard', memory: { [WR]: 1, [SR]: 1 } };
+      const listeningOff = { steps: [step('heard', SR)], listening: false };
+      expect(ids(chooseWords(input([heard, ...range(10, (i) => known(`k${i}`))], listeningOff)))).not.toContain('heard');
+      // A one-word list: a session is never empty while a word is saved.
+      expect(chooseWords(input([heard], listeningOff))).toEqual([{ glossId: 'heard', dimension: WP, rung: 1, level: 1, r: null, cls: 'DONE' }]);
+    });
+
+    it('take their key: a sibling with the same key is not asked too', () => {
+      const picks = chooseWords(
+        input([{ ...known('due', { [WP]: 0.2 }), key: 'לְהַזְמִין' }, { id: 'step', key: 'להזמין', memory: { [WR]: 1 } }], {
+          steps: [step('step', WR)],
+        }),
+      );
+      expect(ids(picks)).toEqual(['step']);
+    });
   });
 
-  it('tests one dimension in at most PER_DIMENSION_CAP picks while others can fill the session', () => {
-    // A newly capable device: eight words due for listening, and written words not due.
-    const spoken = range(8, (i) => known(`s${i}`, { [SR]: 0.4 }));
-    const written = range(6, (i) => known(`w${i}`, { [[WR, WP, SP][i % 3]]: 0.92 }));
-    const picks = chooseWords(input([...spoken, ...written]));
-    expect(picks).toHaveLength(SESSION_LENGTH);
-    expect(count(picks, (pick) => pick.dimension === SR)).toBe(PER_DIMENSION_CAP);
+  describe('DONE (phase 37 D3)', () => {
+    it('is asked only after every other word, a due one included', () => {
+      const words = [known('due', { [WR]: 0.3 }), ...range(10, (i) => known(`k${i}`, { [[WR, WP, SP, SR, SK][i % 5]]: 0.93 }))];
+      const picks = chooseWords(input(words, { done: new Set(['due']) }));
+      expect(picks).toHaveLength(SESSION_LENGTH);
+      expect(ids(picks)).not.toContain('due');
+      const few = chooseWords(input(words.slice(0, 3), { done: new Set(['due']) }));
+      expect(few.map((pick) => [pick.glossId, pick.cls])).toEqual([
+        ['k0', 'NOT_DUE'],
+        ['k1', 'NOT_DUE'],
+        ['due', 'DONE'],
+      ]);
+    });
+
+    it('comes after what the hard cap held back', () => {
+      const hard = range(HARD_CAP + 1, (i) => known(`h${i}`, { [WR]: 0.19 }));
+      const picks = chooseWords(input([...hard, known('done')], { done: new Set(['done']) }));
+      expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([...hard.map((word) => [word.id, 'DUE']), ['done', 'DONE']]);
+    });
+
+    it('comes in the order today gives it: the least practised first', () => {
+      const words = [known('a'), known('b'), known('c')];
+      expect(ids(chooseWords(input(words, { done: new Set(['c', 'a', 'b']) })))).toEqual(['c', 'a', 'b']);
+    });
+
+    it('fills a session before a new word past the daily cap', () => {
+      const picks = chooseWords(input([known('a'), known('b'), fresh('n')], { done: new Set(['a', 'b']), newToday: DAY_NEW_CAP }));
+      expect(ids(picks)).toEqual(['a', 'b']);
+    });
   });
 
-  it('offers the DUE words held back for new ones before EXPAND when the new words are capped', () => {
-    // Eight DUE words fill the room DUE gets (N − 2 for the new words owed); the four in WR
-    // reach WR's cap, so both new words (always WR) are deferred. The DUE word left over
-    // (SP) then comes ahead of the EXPAND and NOT_DUE words, not after them.
-    const wr = range(4, (i) => known(`r${i}`, { [WR]: 0.3 }));
-    const wp = range(4, (i) => known(`p${i}`, { [WP]: 0.4 }));
-    const picks = chooseWords(
-      input([
-        ...wr,
-        ...wp,
-        known('due-sp', { [SP]: 0.5 }),
-        { id: 'expand', memory: { [WR]: 0.95, [WP]: 0.95 } },
-        known('not-due', { [SK]: 0.93 }),
-        fresh('n0'),
-        fresh('n1'),
-      ]),
-    );
-    expect(picks.map((pick) => [pick.glossId, pick.cls])).toEqual([
-      ...wr.map((word) => [word.id, 'DUE']),
-      ...wp.map((word) => [word.id, 'DUE']),
-      ['due-sp', 'DUE'],
-      ['expand', 'EXPAND'],
-    ]);
+  describe('the per-skill limit (phase 37 D3)', () => {
+    it('holds back expansions past PER_DIMENSION_CAP while others can fill the session', () => {
+      // A newly capable device: eight words to introduce to listening, and written words not due.
+      const spoken = range(8, (i) => ({ id: `s${i}`, memory: { [WR]: 0.95, [WP]: 0.95 } }));
+      const written = range(6, (i) => known(`w${i}`, { [[WR, WP, SP][i % 3]]: 0.92 }));
+      const picks = chooseWords(input([...spoken, ...written]));
+      expect(picks).toHaveLength(SESSION_LENGTH);
+      expect(count(picks, (pick) => pick.dimension === SR)).toBe(PER_DIMENSION_CAP);
+    });
+
+    it('never holds back a due word', () => {
+      const spoken = range(8, (i) => known(`s${i}`, { [SR]: 0.4 }));
+      const written = range(2, (i) => known(`w${i}`, { [WR]: 0.92 }));
+      const picks = chooseWords(input([...spoken, ...written]));
+      expect(picks).toHaveLength(SESSION_LENGTH);
+      expect(count(picks, (pick) => pick.dimension === SR)).toBe(8);
+    });
+  });
+
+  describe('the speaking pick (phase 37 D4)', () => {
+    const speaking = { speaking: true };
+
+    it('takes a return in SK first', () => {
+      const picks = chooseWords(
+        input([known('due-sk', { [SK]: 0.4 }), { id: 'sk-step', memory: { [WR]: 1, [SK]: 1 } }, known('other')], {
+          ...speaking,
+          steps: [step('sk-step', SK)],
+        }),
+      );
+      expect(picks[0]).toMatchObject({ glossId: 'sk-step', cls: 'STEP', dimension: SK, rung: 2 });
+    });
+
+    it('then the least known word due in SK, keeping its class', () => {
+      const picks = chooseWords(input([known('sk-a', { [SK]: 0.6 }), known('sk-b', { [SK]: 0.4 }), known('wr', { [WR]: 0.3 })], speaking));
+      expect(picks.map((pick) => [pick.glossId, pick.cls, pick.dimension])).toEqual([
+        ['sk-b', 'DUE', SK],
+        ['wr', 'DUE', WR],
+        ['sk-a', 'DUE', SK],
+      ]);
+    });
+
+    it('then the least known word not due with no SK memory, moved to SK at rung 1', () => {
+      const picks = chooseWords(
+        input([{ id: 'met-b', memory: { [WR]: 0.97 } }, { id: 'met-a', memory: { [WR]: 0.92 } }, known('other')], speaking),
+      );
+      expect(picks[0]).toEqual({ glossId: 'met-a', dimension: SK, rung: 1, level: 1, r: null, cls: 'SPEAK' });
+      expect(count(picks, (pick) => pick.dimension === SK)).toBe(1);
+    });
+
+    it('then a word done today with no SK memory, moved to SK, before a due word is', () => {
+      const picks = chooseWords(
+        input([{ id: 'due', memory: { [WR]: 0.5 } }, { id: 'done', memory: { [WR]: 1 } }], { ...speaking, done: new Set(['done']) }),
+      );
+      expect(picks.map((pick) => [pick.glossId, pick.cls, pick.dimension])).toEqual([
+        ['done', 'SPEAK', SK],
+        ['due', 'DUE', WR],
+      ]);
+    });
+
+    it('then, with every word due, the best known one with no SK memory', () => {
+      const picks = chooseWords(
+        input([{ id: 'd1', memory: { [WR]: 0.3 } }, { id: 'd2', memory: { [WR]: 0.8 } }, { id: 'd3', memory: { [WR]: 0.6 } }], speaking),
+      );
+      expect(picks.map((pick) => [pick.glossId, pick.cls, pick.dimension])).toEqual([
+        ['d2', 'SPEAK', SK],
+        ['d1', 'DUE', WR],
+        ['d3', 'DUE', WR],
+      ]);
+    });
+
+    it('is not made for a one-word session, nor from words never met', () => {
+      expect(chooseWords(input([{ id: 'met', memory: { [WR]: 0.95 } }], speaking))[0]).toMatchObject({ cls: 'EXPAND', dimension: WP });
+      const picks = chooseWords(input(range(4, (i) => fresh(`n${i}`)), speaking));
+      expect(count(picks, (pick) => pick.dimension === SK)).toBe(0);
+    });
   });
 
   it('asks at most HARD_CAP picks whose best card is expected to succeed below 0.6', () => {

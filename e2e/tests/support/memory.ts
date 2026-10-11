@@ -13,9 +13,13 @@ import { E2E_DATABASE_URL } from '../../globalSetup';
 // R is the chance of recall today: R(t, S) = (1 + F·t/S)^(−w20), so R is 0.9
 // exactly when t = S. The bands that steer a card (chooseConstants.ts):
 //   R ≤ R_TARGET (0.9)             the word is due, on its weakest dimension
-//   level ≥ 3 and R ≥ RUNG_R (0.75)  recall (rung 2), else recognition (rung 1)
+//   memory and R ≥ RUNG_R (0.75)   recall (rung 2), else recognition (rung 1);
+//                                  phase 37 (D2): the level no longer decides
 // and within a rung the type whose p = g + (1 − g)·R^e is nearest 0.85, with
-// g = 0.25 for a four-option card and e = 0.5 at rung 1, 1 at rung 2.
+// g = 0.25 for a four-option card and e = 0.5 at rung 1, 1 at rung 2. A second
+// list session the same day also brings back, as recall cards, the words the
+// first met or missed (phase 37 D1); a spec that needs a card should not count
+// on a second session.
 
 /** One memory row to write, for the saved gloss whose key (its Hebrew meaning)
  *  is `gloss`. `daysAgo` is how long before today it was last reviewed, and

@@ -1,11 +1,13 @@
 import { gradesFor, retrievability, review, type Dimension, type MemoryState, type QuestionType } from '@lang-tutor/core/domain';
 
 // The server's own rules, imported rather than copied: (d) asks whether the server's rung agrees
-// with the level and R its rule implies, and a copy could drift from the rule it checks. These
-// three modules are pure domain code that imports only @lang-tutor/core.
-import { R_TARGET, RUNG_R } from '../../apps/server/src/domain/chooseConstants';
+// with the memory its rule reads, and a copy could drift from the rule it checks. These modules
+// are pure domain code that imports only @lang-tutor/core and each other.
+import { rungFor } from '../../apps/server/src/domain/choose';
+import { R_TARGET } from '../../apps/server/src/domain/chooseConstants';
 import { RUNGS } from '../../apps/server/src/domain/plan';
 import { evaluateSession, type AnsweredQuestion, type ProgressRow } from '../../apps/server/src/domain/progress';
+import { dayState, type DayAnswer } from '../../apps/server/src/domain/today';
 
 import type { BotMemory } from './memory.ts';
 import type { BotState, CardEntry, SavedEntry } from './state.ts';
@@ -62,9 +64,6 @@ function servedBy(type: QuestionType): { dimension: Dimension; rung: Rung }[] {
   return out;
 }
 
-/** D6's rung rule, as the server applies it: recall only from level 3 with R at least RUNG_R. */
-const impliedRung = (level: number, r: number | null): Rung => (r !== null && level >= 3 && r >= RUNG_R ? 2 : 1);
-
 const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'reverse_choice', 'listen_choice', 'matching', 'cloze_choice']);
 
 function answered(entry: CardEntry & { word: string }): AnsweredQuestion {
@@ -83,7 +82,8 @@ const DIMENSION_LIST: readonly Dimension[] = ORDER;
 /**
  * The server's side of every card, index for index with the log; null for an unmatched card.
  * Replays what the server keeps, from the verdicts in the log: FSRS memory (D4: the session's
- * grades in order, written when it ends, on its day) and levels (the step rule, per session).
+ * grades in order, written when it ends, on its day), levels (the step rule, per session) and,
+ * phase 37 (spec D1, D8), the day's answers, which owe the returns a later session that day asks.
  * Each card is then placed on a dimension and given the level and R the server chose it by.
  */
 export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
@@ -91,6 +91,11 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
   const levels = new Map<string, ProgressRow>();
   const key = (word: string, dimension: Dimension) => `${word}|${dimension}`;
   const view: (CardView | null)[] = [];
+  // The words met so far, and the current day's answers and the words it met.
+  const met = new Set<string>();
+  let day: string | null = null;
+  let answers: DayAnswer[] = [];
+  let introduced = new Set<string>();
 
   let start = 0;
   while (start < log.length) {
@@ -98,6 +103,8 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
     while (end < log.length && log[end].session === log[start].session) end++;
     const session = log.slice(start, end);
     const date = session[0].date;
+    if (date !== day) [day, answers, introduced] = [date, [], new Set()];
+    const owed = new Map(dayState(answers, introduced).steps.map((step) => [step.glossId, step.dimension]));
 
     for (const entry of session) {
       if (entry.word === null) {
@@ -115,6 +122,14 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
         return state ? retrievability(state, date) : null;
       };
       const withR = options.map((o) => ({ ...o, r: rOf(o.dimension) }));
+      // Phase 37 (D1): a return is asked in its owed dimension, at recall. A card that fell back
+      // to another rung is placed as D5 would place it, and disagrees (ruling 29).
+      const owedDimension = owed.get(word);
+      const step = withR.find((o) => o.dimension === owedDimension && o.rung === 2);
+      if (step) {
+        view.push({ dimension: step.dimension, rung: 2, level: levels.get(key(word, step.dimension))?.level ?? 1, r: step.r, implied: 2 });
+        continue;
+      }
       const known = withR.filter((o) => o.r !== null).sort((x, y) => x.r! - y.r!);
       // D5: the weakest dimension when it is due, else the next one to introduce, else the weakest.
       const chosen =
@@ -122,7 +137,8 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
         withR.find((o) => o.r === null) ??
         known[0];
       const level = levels.get(key(word, chosen.dimension))?.level ?? 1;
-      view.push({ dimension: chosen.dimension, rung: chosen.rung, level, r: chosen.r, implied: impliedRung(level, chosen.r) });
+      const implied = owedDimension === chosen.dimension ? 2 : rungFor(chosen.r);
+      view.push({ dimension: chosen.dimension, rung: chosen.rung, level, r: chosen.r, implied });
     }
 
     const matched = session.filter((e): e is CardEntry & { word: string } => e.word !== null);
@@ -141,6 +157,11 @@ export function serverView(log: readonly CardEntry[]): (CardView | null)[] {
     );
     const { changed } = evaluateSession(rows, matched.map(answered), date);
     for (const row of changed) levels.set(key(row.glossId, row.dimension), row);
+    for (const entry of matched) {
+      if (!met.has(entry.word)) introduced.add(entry.word);
+      met.add(entry.word);
+      answers.push({ glossId: entry.word, sessionId: entry.session, type: entry.type, correct: entry.correct, verdict: entry.verdict });
+    }
 
     start = end;
   }
@@ -224,7 +245,8 @@ export function weekNumbers(state: BotState, week: number, memory: BotMemory, li
   const b = eligible > 0 ? onWeakest / eligible : null;
 
   // (c) Per word and dimension, over the whole log so a run can span weeks: the gap to the
-  // previous review, for this week's reviews that are the 2nd, 3rd, 4th+ right in a row.
+  // previous review, for this week's reviews that are the 2nd, 3rd, 4th+ right in a row. Only the
+  // first review of a day counts (phase 37 D8): a same-day return is learning, not an interval.
   const runs = new Map<string, { streak: number; lastDay: number }>();
   const gaps: Record<keyof Intervals, number[]> = { second: [], third: [], later: [] };
   state.log.forEach((entry, i) => {
@@ -232,6 +254,7 @@ export function weekNumbers(state: BotState, week: number, memory: BotMemory, li
     if (!v || entry.word === null) return;
     const k = `${entry.word}|${v.dimension}`;
     const before = runs.get(k);
+    if (before && before.lastDay === entry.day) return;
     const streak = entry.correct ? (before?.streak ?? 0) + 1 : 0;
     if (before && streak >= 2 && inWeek(entry.day, week)) {
       gaps[streak === 2 ? 'second' : streak === 3 ? 'third' : 'later'].push(entry.day - before.lastDay);
@@ -240,7 +263,8 @@ export function weekNumbers(state: BotState, week: number, memory: BotMemory, li
   });
   const c = { second: median(gaps.second), third: median(gaps.third), later: median(gaps.later) };
 
-  // (d) Cards whose rung is not the one the level and R imply.
+  // (d) Cards whose rung is not the one the server's rule implies: recall for a return, or for
+  // memory at R at least RUNG_R (phase 37 D2).
   const d = cards.length > 0 ? cards.filter((x) => x.view.rung !== x.view.implied).length / cards.length : null;
 
   const e = meanRecall(memory, state.saved, live, lastDayOf(week));
