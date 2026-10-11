@@ -59,7 +59,14 @@
     },
     "updates": {
       "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 3000
-    }
+      "fallbackToCacheTimeout": 3000,
+      "url": "https://u.expo.dev/66fb04ba-7006-4095-92be-9c26592db6c7"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "66fb04ba-7006-4095-92be-9c26592db6c7"
+      }
+    },
+    "owner": "wordspal"
   }
 }
