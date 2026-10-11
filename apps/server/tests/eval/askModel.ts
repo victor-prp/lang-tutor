@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
 import type {
   LanguageCode,
+  LlmAccept,
   TypedVerdict,
   LlmDistractors,
   LlmEntry,
@@ -15,6 +16,7 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { buildAcceptPrompt, parseAccept, validateAccept, type AcceptInput } from '../../src/domain/accept';
 import {
   buildDistractorPrompt,
   parseLlmDistractors,
@@ -179,4 +181,19 @@ export async function askJudge(
   kase: { context: MeaningJudgeContext; answer: string },
 ): Promise<TypedVerdict | null> {
   return parseMeaningJudge(await llm(buildMeaningJudgePrompt(kase.context, kase.answer)));
+}
+
+/** Phase 34 (spec D1, D2). The real accept prompt, parser and validation, as the
+ *  accept job uses them, minus the database. `raw` is the answer as the model
+ *  wrote it, which the placeholder check reads; `answers` and `answerForm` are
+ *  what the server would store. An empty answer is the provider's "no content",
+ *  stored as an empty list; an unreadable one throws, and tier 1 records it. */
+export async function askAccept(
+  llm: LlmClient,
+  input: AcceptInput,
+): Promise<{ raw: LlmAccept; answers: string[]; answerForm: string | null }> {
+  const text = await llm(buildAcceptPrompt(input));
+  const raw = text === '' ? { answers: [], answer_form: null } : parseAccept(text);
+  if (!raw) throw new Error(`unreadable accept answer: ${text.slice(0, 200)}`);
+  return { raw, ...validateAccept(input, raw) };
 }

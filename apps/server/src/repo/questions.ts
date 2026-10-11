@@ -229,7 +229,8 @@ export function createQuestionRepo(tx: Tx) {
      * form's rendering of the picked sense in the source language, under the
      * gloss the pick practises (phase 31). In pick order. A pick whose rows are
      * gone (a db:reseed between request and job) is dropped rather than failing
-     * the whole session.
+     * the whole session. Phase 34 (spec D1, D2): with what the accept job stored
+     * for the rendering, and when it ran.
      */
     findGenerationContext: async (input: {
       picks: { glossId: string; senseId: string; variantId: string }[];
@@ -247,9 +248,15 @@ export function createQuestionRepo(tx: Tx) {
         translation: string;
         example_source: string | null;
         example_target: string | null;
+        accepted_answers: string[];
+        answer_form: string | null;
+        accepted_ms: number | null;
       }>(sql`
         SELECT asked.gloss_id, tr.sense_id, tr.variant_id, l.id AS lexeme_id, v.form, l.lemma, l.part_of_speech,
-               tr.translation, tr.example_source, tr.example_target
+               tr.translation, tr.example_source, tr.example_target,
+               tr.accepted_answers, tr.answer_form,
+               -- A raw read hands a timestamptz back as text; milliseconds parse exactly.
+               (extract(epoch from tr.accepted_at) * 1000)::float8 AS accepted_ms
         FROM (VALUES ${sql.join(
           input.picks.map((pick) => sql`(${pick.glossId}::text, ${pick.senseId}::text, ${pick.variantId}::text)`),
           sql`, `,
@@ -275,6 +282,9 @@ export function createQuestionRepo(tx: Tx) {
                 translation: row.translation,
                 example: row.example_source,
                 exampleTranslation: row.example_target,
+                acceptedAnswers: row.accepted_answers,
+                answerForm: row.answer_form,
+                acceptedAt: row.accepted_ms === null ? null : new Date(row.accepted_ms),
               },
             ]
           : [];

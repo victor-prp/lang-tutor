@@ -26,7 +26,7 @@ function serviceWith(...replies: (string | Error)[]) {
   const logger = createFakeLogger();
   const dict = createFakeDictRepo();
   const transaction = createFakeTransaction({ dict });
-  return { service: createTranslationService({ llm, transaction, logger }), llm, logger, dict };
+  return { service: createTranslationService({ llm, transaction, logger, now: () => 0 }), llm, logger, dict };
 }
 
 const row = (translation: string, over: Partial<SenseRow> = {}): SenseRow => ({
@@ -400,7 +400,7 @@ describe('translate', () => {
     const dict = createFakeDictRepo();
     dict.mergePairs = [{ lexemeId: 't-0', userLanguageCode: 'he' }];
     const jobs = createFakeJobRepo();
-    const service = createTranslationService({ llm, transaction: createFakeTransaction({ dict, jobs }), logger: createFakeLogger() });
+    const service = createTranslationService({ llm, transaction: createFakeTransaction({ dict, jobs }), logger: createFakeLogger(), now: () => 0 });
 
     await service.translate('u1', { text: 'finger', from: 'en', to: 'he' });
 
@@ -416,7 +416,7 @@ describe('translate', () => {
     dict.repairVariantRenderings = async () => ({ needsMerge: true });
     const jobs = createFakeJobRepo();
     const logger = createFakeLogger();
-    const service = createTranslationService({ llm, transaction: createFakeTransaction({ dict, jobs }), logger });
+    const service = createTranslationService({ llm, transaction: createFakeTransaction({ dict, jobs }), logger, now: () => 0 });
 
     await service.translate('u1', { text: 'finger', from: 'en', to: 'he' });
 

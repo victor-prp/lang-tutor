@@ -3,6 +3,7 @@ import type { ClozeChoiceQuestion, ClozeTypedQuestion, LetterTilesQuestion, Matc
 import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
+import { DISTRACTOR_MARKER } from '../../../src/domain/distractors';
 import { registerWorkers } from '../../../src/worker';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
 import { startTestBoss, stopTestBoss, waitFor } from '../../support/jobs';
@@ -16,6 +17,7 @@ import {
   STUB_SENTENCE_HEBREW,
   STUB_WRONG_ENGLISH,
   STUB_WRONG_HEBREW,
+  expectAccept,
   expectDistractors,
   expectGeminiStatus,
   geminiBaseUrlFor,
@@ -42,6 +44,10 @@ beforeEach(async () => {
   logger = createFakeLogger();
   boss = await startTestBoss(t.db);
   deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns) });
+  // Phase 34 (spec D1). Preparing a session asks for the accept job of every
+  // picked rendering, which the workers below then run: answered here, and above
+  // any stub a test registers, so it is never the subject of one.
+  await expectAccept(ns, { answers: [], answer_form: null });
   await registerWorkers(boss, deps, { pollingIntervalSeconds: 0.5 });
 });
 
@@ -214,8 +220,8 @@ describe('prepare-session through the queue', () => {
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await statusOf(sessionId)) === 'failed', 25_000);
-    // One attempt and two retries.
-    expect(await countGeminiRequests(ns)).toBe(3);
+    // One attempt and two retries. Phase 34: the accept calls are not counted.
+    expect(await countGeminiRequests(ns, DISTRACTOR_MARKER)).toBe(3);
     expect((await deps.sessions.currentSession('u_1', E)).current).toMatchObject({ id: sessionId, status: 'failed' });
   });
 
@@ -224,7 +230,7 @@ describe('prepare-session through the queue', () => {
     await expectDistractors(ns, { delayMs: 3_000 });
     const sessionId = await requestListSession();
 
-    await waitFor(async () => (await countGeminiRequests(ns)) === 1);
+    await waitFor(async () => (await countGeminiRequests(ns, DISTRACTOR_MARKER)) === 1);
     await deps.sessions.skipSession('u_1', sessionId);
     await waitFor(async () => logger.events.some((e) => e.event === 'session_preparation_dropped'), 15_000);
 

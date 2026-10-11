@@ -75,6 +75,8 @@ export function createFakeAppDeps(): AppDeps {
     translate: unreachable,
     renderLemma: unreachable,
     failLemmaRender: unreachable,
+    acceptRendering: unreachable,
+    failAcceptRendering: unreachable,
   };
   const vocabulary: VocabularyService = {
     save: unreachable,
@@ -165,16 +167,17 @@ export function createFakeGlossRepo(userLanguageCode = 'he') {
   };
 }
 
-export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown }[] };
+export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown; options?: { singletonKey: string } }[] };
 
 /** Records what a use case enqueued. No queue behind it: a unit test asserts
- *  the call, the integration suite asserts the job row. */
+ *  the call, the integration suite asserts the job row. Options are recorded
+ *  only when given (phase 34). */
 export function createFakeJobRepo(): FakeJobRepo {
-  const enqueued: { name: string; data: unknown }[] = [];
+  const enqueued: FakeJobRepo['enqueued'] = [];
   return {
     enqueued,
-    enqueue: async (name, data) => {
-      enqueued.push({ name, data });
+    enqueue: async (name, data, options) => {
+      enqueued.push({ name, data, ...(options ? { options } : {}) });
     },
   };
 }
@@ -357,6 +360,11 @@ export function createFakeDictRepo(): FakeDictRepo {
     claimLemmaRenders: async () => [],
     claimSavedLemmaRenders: async () => [],
     releaseLemmaRender: async () => false,
+    // Phase 34 (spec D1, D13). The accept job's read and write, and the
+    // backfill's; a lookup reaches none of them.
+    findRenderingForAccept: async () => undefined,
+    storeAccepted: async () => false,
+    findUnacceptedSavedRenderings: async () => [],
     // Phase 31 (spec D12, D18). A session's reads; a lookup reaches neither.
     findGlossRenderings: async () => [],
     findSiblings: async () => [],

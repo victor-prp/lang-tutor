@@ -28,6 +28,7 @@ export type {
   LanguageCode,
   LetterTilesQuestion,
   ListenChoiceQuestion,
+  LlmAccept,
   LlmCorrection,
   LlmDistractors,
   LlmEntry,

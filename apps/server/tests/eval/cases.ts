@@ -1447,3 +1447,90 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('en', enBookWord, enTable, 'table', 'wrong', 'not a sentence'),
   tjudge('en', enBookWord, enTable, 'I want to book a tabel for two.', 'exact', 'slip in another word'),
 ];
+
+/**
+ * Phase 34 (spec D1, D2). The accept call: every right answer to a typed or
+ * spoken card whose prompt is one rendering, and the form of the headword that
+ * agrees with it. Each case is a card from the audit
+ * (drafts/2026-10-11-ambiguous-questions-findings.md, B, D and G), with its
+ * rendering and saved example as lane 0 holds them. The prompt's own examples
+ * are deliberately not these, so the cases measure the rules rather than recall.
+ */
+export type AcceptCase = {
+  label: string;
+  form: string;
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  /** The explanation-language text the card shows. */
+  rendering: string;
+  example: string | null;
+  exampleTranslation: string | null;
+  target: LanguageCode;
+  /** Defaults to he. */
+  explanation?: LanguageCode;
+  /** Each must be accepted, by the typed judge, from the answers the server keeps. */
+  expectAnswers?: string[];
+  /** No answer as the model wrote it may contain one: a placeholder written out. */
+  rejectSubstrings?: string[];
+  /** The answer form the server keeps; null for a form that already agrees. */
+  expectAnswerForm?: string | null;
+};
+
+export const ACCEPT_CASES: AcceptCase[] = [
+  // B, 324633b1: four other cards for this prompt accept `frate`, this one did not.
+  {
+    label: 'B: a religious brother is also frate',
+    form: 'fratello', lemma: 'fratello', partOfSpeech: 'noun', target: 'it',
+    rendering: 'אח (במסדר דתי)',
+    example: 'Il fratello francescano ha dedicato la sua vita alla preghiera.',
+    exampleTranslation: 'האח הפרנציסקני הקדיש את חייו לתפילה.',
+    expectAnswers: ['frate'],
+  },
+  // B, 703a58ca: 89b4bb33 accepted `allora` for the same prompt, this one refused it.
+  {
+    label: 'B: אז as "in that case" is also allora',
+    form: 'poi', lemma: 'poi', partOfSpeech: 'adverb', target: 'it',
+    rendering: 'אז',
+    example: 'Se non vuoi venire, poi non lamentarti.',
+    exampleTranslation: 'אם אינך רוצה לבוא, אז אל תתלונן.',
+    expectAnswers: ['allora'],
+  },
+  // D, 5d9e4f97: `io ho`, the form with the pronoun יש לי implies, was marked wrong.
+  {
+    label: 'D: the subject pronoun יש לי implies',
+    form: 'ho', lemma: 'avere', partOfSpeech: 'verb', target: 'it',
+    rendering: 'יש לי',
+    example: 'Ho un libro interessante da leggere.',
+    exampleTranslation: 'יש לי ספר מעניין לקרוא.',
+    expectAnswers: ['io ho'],
+  },
+  // B, 7d96a0c2: "lose one's temper" was listed; `lose my temper` was marked wrong.
+  {
+    label: "B: a placeholder written out, never one's",
+    form: 'blow up', lemma: 'blow up', partOfSpeech: 'verb', target: 'en',
+    rendering: 'להתפרץ בכעס',
+    example: "My boss will blow up if I'm late again.",
+    exampleTranslation: 'הבוס שלי יתפרץ בכעס אם אאחר שוב.',
+    expectAnswers: ['lose my temper'],
+    rejectSubstrings: ["one's", 'one’s', 'someone'],
+  },
+  // G, 2260df83: שעות from "per ore" asked for the singular `ora`.
+  {
+    label: 'G: a plural rendering asks for the plural form',
+    form: 'ora', lemma: 'ora', partOfSpeech: 'noun', target: 'it',
+    rendering: 'שעות',
+    example: 'Abbiamo aspettato per ore.',
+    exampleTranslation: 'חיכינו שעות.',
+    expectAnswerForm: 'ore',
+  },
+  // The counterweight, and it must stay green: a card built from שעה still asks
+  // for `ora` (spec D2). A prompt that pluralises everything shows up here.
+  {
+    label: 'G: a singular rendering keeps the form',
+    form: 'ora', lemma: 'ora', partOfSpeech: 'noun', target: 'it',
+    rendering: 'שעה',
+    example: "La lezione dura un'ora.",
+    exampleTranslation: 'השיעור נמשך שעה.',
+    expectAnswerForm: null,
+  },
+];

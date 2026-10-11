@@ -76,6 +76,12 @@ const unreachableTranslations: TranslationService = {
   failLemmaRender: () => {
     throw new Error('the health route must not reach the translation service');
   },
+  acceptRendering: () => {
+    throw new Error('the health route must not reach the translation service');
+  },
+  failAcceptRendering: () => {
+    throw new Error('the health route must not reach the translation service');
+  },
 };
 
 const unreachableVocabulary: VocabularyService = {

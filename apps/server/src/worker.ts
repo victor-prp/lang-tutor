@@ -1,6 +1,8 @@
 import type { PgBoss } from 'pg-boss';
 
 import {
+  ACCEPT_RENDERING,
+  ACCEPT_RENDERING_FAILED,
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_FAILED,
   MERGE_GLOSSES,
@@ -89,5 +91,18 @@ export async function registerWorkers(
   );
   await boss.work(RENDER_LEMMA_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
     for (const job of jobs) await translations.failLemmaRender(job.data);
+  });
+
+  // Phase 34 (spec D1). Two at once per process: one short call each, beside the
+  // sessions that enqueue them.
+  await boss.work(
+    ACCEPT_RENDERING,
+    { localConcurrency: 2, pollingIntervalSeconds: options.pollingIntervalSeconds },
+    async (jobs) => {
+      for (const job of jobs) await translations.acceptRendering(job.data);
+    },
+  );
+  await boss.work(ACCEPT_RENDERING_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
+    for (const job of jobs) await translations.failAcceptRendering(job.data);
   });
 }

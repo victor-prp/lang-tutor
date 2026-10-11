@@ -1,7 +1,7 @@
 # ADR 0006: Every checkout is self-contained
 
 - **Status:** Accepted
-- **Date:** 2026-09-16; R7 gains nightly QA's inbox port 2026-10-08 (phase 29); R3's key list gains `dict:lemmas:render` and `dict:glosses:merge` 2026-10-10 (phase 31); R3's command shows the script's missing-key branch 2026-10-10 (phase 31)
+- **Date:** 2026-09-16; R7 gains nightly QA's inbox port 2026-10-08 (phase 29); R3's key list gains `dict:lemmas:render` and `dict:glosses:merge` 2026-10-10 (phase 31); R3's command shows the script's missing-key branch 2026-10-10 (phase 31); R3's key list gains `dict:accept` 2026-10-11 (phase 34)
 - **Source:** [phase 15 design](../superpowers/specs/2026-09-16-lang-tutor-phase-15-lanes-design.md)
 
 ## Decision
@@ -114,7 +114,7 @@ grep -rnE "['\"\`/]lang_tutor" e2e scripts package.json \
 # R3 — a start-or-test script that bypasses the wrapper, or has gone missing
 for key in server mobile e2e test:integration db:up db:migrate db:reseed \
            db:progress:recompute dict:export dict:restore dict:lemmas:render \
-           dict:glosses:merge lane:list lane:down; do
+           dict:glosses:merge dict:accept lane:list lane:down; do
   line=$(grep -E "^    \"$key\": " package.json)
   if [ -z "$line" ]; then
     echo "\"$key\" is missing from package.json scripts"

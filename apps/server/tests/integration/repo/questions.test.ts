@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { QuestionType } from '@lang-tutor/core/domain';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { insertLexeme } from '../../support/dictRows';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
@@ -116,9 +116,25 @@ describe('phase 19', () => {
       }),
     );
     expect(context).toEqual([
-      { glossId: run.glossIds[0], senseId: run.senseIds[0], variantId: run.variantId, lexemeId: run.lexemeId, form: 'sprint', lemma: 'sprint', partOfSpeech: 'noun', translation: 'ריצה', example: null, exampleTranslation: null },
-      { glossId: book.glossIds[0], senseId: book.senseIds[0], variantId: book.variantId, lexemeId: book.lexemeId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', translation: 'ספר', example: null, exampleTranslation: null },
+      { glossId: run.glossIds[0], senseId: run.senseIds[0], variantId: run.variantId, lexemeId: run.lexemeId, form: 'sprint', lemma: 'sprint', partOfSpeech: 'noun', translation: 'ריצה', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+      { glossId: book.glossIds[0], senseId: book.senseIds[0], variantId: book.variantId, lexemeId: book.lexemeId, form: 'tome', lemma: 'tome', partOfSpeech: 'noun', translation: 'ספר', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
     ]);
+  });
+
+  // Phase 34 (spec D1, D2; ruling R1). What the accept job stored, read with the pick.
+  it('reads the generation context with the accepted answers, the answer form and the stamp', async () => {
+    const book = await seedSavedSenses(t.db, { enrollmentId: enrollmentOf('u_1'), lemma: 'tome', translations: ['ספרים'] });
+    const at = new Date('2026-10-11T09:30:15.123Z');
+    await t.db.execute(sql`
+      update dict_var_translations set accepted_answers = array['tomes','volumes'], answer_form = 'tomes', accepted_at = ${at.toISOString()}
+      where variant_id = ${book.variantId}`);
+    const [row] = await withTx(t.db, (tx) =>
+      createQuestionRepo(tx).findGenerationContext({
+        picks: [{ glossId: book.glossIds[0], senseId: book.senseIds[0], variantId: book.variantId }],
+        sourceLanguage: 'he',
+      }),
+    );
+    expect(row).toMatchObject({ acceptedAnswers: ['tomes', 'volumes'], answerForm: 'tomes', acceptedAt: at });
   });
 
   it('inserts generated questions owned by the enrollment, correct option first', async () => {

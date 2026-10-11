@@ -28,7 +28,7 @@ import {
   type DistractorVerdict,
 } from '../domain/distractors';
 import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
-import { PREPARE_SESSION, PrepareSessionPayloadSchema } from '../domain/jobs';
+import { ACCEPT_RENDERING, PREPARE_SESSION, PrepareSessionPayloadSchema, acceptRenderingKey } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planSession } from '../domain/plan';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
@@ -544,7 +544,7 @@ export function createSessionService({
       const payload = PrepareSessionPayloadSchema.parse(data);
       const sessionId = payload.session_id;
 
-      const read = await transaction(async ({ session, enrollment, question, gloss, dict }) => {
+      const read = await transaction(async ({ session, enrollment, question, gloss, dict, jobs }) => {
         const state = await session.findState(sessionId);
         // Skipped, or gone (a reseed): nothing to prepare, and not a failure.
         if (!state || state.status !== 'preparing') return undefined;
@@ -565,6 +565,18 @@ export function createSessionService({
           })),
           sourceLanguage: enrolled.source_language,
         });
+        // Phase 34 (spec D1). A picked rendering the accept job never ran for is
+        // asked for now, in the transaction of the read that found it (ADR
+        // 0007). Its card falls back on this session's own alternatives; the
+        // next session has the list. The stamp decides, not the list: a
+        // rendering the job found nothing for is stamped and never asked again.
+        // The queue keeps one job per rendering, so a retry of this job or a
+        // burst of sessions pays for one call.
+        for (const row of context) {
+          if (row.acceptedAt !== null) continue;
+          const accept = { variant_id: row.variantId, sense_id: row.senseId, user_language_code: enrolled.source_language };
+          await jobs.enqueue(ACCEPT_RENDERING, accept, { singletonKey: acceptRenderingKey(accept) });
+        }
         // Spec D5, D6: the sentences the last sessions asked, so a new one is never one of them.
         const recent = await question.findRecentSentences({
           enrollmentId: state.enrollmentId,

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { PgBoss } from 'pg-boss';
 
-import { PREPARE_SESSION } from '../../../src/domain/jobs';
+import { ACCEPT_RENDERING, PREPARE_SESSION } from '../../../src/domain/jobs';
 import { createJobRepo } from '../../../src/repo/jobs';
 import { countJobs, startTestBoss, stopTestBoss } from '../../support/jobs';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -35,5 +35,15 @@ describe('createJobRepo', () => {
       }),
     ).rejects.toThrow('roll back');
     expect(await countJobs(t.db, PREPARE_SESSION)).toBe(0);
+  });
+
+  // Phase 34 (spec D1). On the accept queue, whose policy is `exclusive`.
+  it('holds one job per singleton key while it is queued, and a job for another key beside it', async () => {
+    const accept = (variant: string) => ({ variant_id: variant, sense_id: 's', user_language_code: 'he' });
+    await withTx(t.db, (tx) => createJobRepo(tx, boss).enqueue(ACCEPT_RENDERING, accept('v1'), { singletonKey: 'v1:s:he' }));
+    await withTx(t.db, (tx) => createJobRepo(tx, boss).enqueue(ACCEPT_RENDERING, accept('v1'), { singletonKey: 'v1:s:he' }));
+    expect(await countJobs(t.db, ACCEPT_RENDERING)).toBe(1);
+    await withTx(t.db, (tx) => createJobRepo(tx, boss).enqueue(ACCEPT_RENDERING, accept('v2'), { singletonKey: 'v2:s:he' }));
+    expect(await countJobs(t.db, ACCEPT_RENDERING)).toBe(2);
   });
 });

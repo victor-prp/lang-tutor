@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 
 import type { LlmEntry, LlmRendering, TranslationKind } from '@lang-tutor/core/api';
 
+import { ACCEPT_MARKER } from '../../src/domain/accept';
 import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
 import { JUDGE_MARKER } from '../../src/domain/judge';
 import { PHOTO_READING_MARKER } from '../../src/domain/photoReading';
 import { SENSE_MATCH_MARKER } from '../../src/domain/senseMatching';
 import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
-import { geminiResponse } from './geminiResponse';
+import { geminiBlockedResponse, geminiResponse } from './geminiResponse';
 
 // tests/support/ is the test composition root, so naming a concrete URL and
 // reading the environment is what this file is for (ADR 0001, ADR 0004 R6).
@@ -377,6 +378,42 @@ export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' |
       },
       times: { remainingTimes: 1, unlimited: false },
       priority: 10,
+    },
+  });
+}
+
+/**
+ * Phase 34 (spec D1, D2). The accept call's answer, matched on ACCEPT_MARKER and
+ * ranked above a broader stub, so neither a lookup's nor the distractor batch's
+ * stub answers it. `matchText` narrows it to one rendering (the call's user part
+ * is the rendering); `status` makes it a failed call; `delayMs` holds it back,
+ * so a test can change the rendering while the call is in flight.
+ */
+export async function expectAccept(
+  ns: string,
+  answer: { answers: string[]; answer_form: string | null } | '',
+  opts: { matchText?: string; status?: number; delayMs?: number } = {},
+): Promise<void> {
+  const failed = opts.status !== undefined && opts.status !== 200;
+  // '' is the provider's "no content": a safety block, which the client reads as ''.
+  const body = JSON.stringify(answer === '' ? geminiBlockedResponse() : geminiResponse(answer));
+  await expectation(ns, {
+    match: {
+      body: {
+        type: 'REGEX',
+        regex: `[\\s\\S]*${ACCEPT_MARKER}${opts.matchText ? `[\\s\\S]*${opts.matchText}` : ''}[\\s\\S]*`,
+      },
+    },
+    action: {
+      priority: 10,
+      httpResponse: failed
+        ? { statusCode: opts.status, body: '{"error":{"message":"upstream"}}' }
+        : {
+            statusCode: 200,
+            headers: { 'content-type': ['application/json'] },
+            body,
+            ...(opts.delayMs ? { delay: { timeUnit: 'MILLISECONDS', value: opts.delayMs } } : {}),
+          },
     },
   });
 }

@@ -75,6 +75,9 @@ const row = (
     translation,
     example,
     exampleTranslation,
+    acceptedAnswers: [],
+    answerForm: null,
+    acceptedAt: null,
   };
 };
 

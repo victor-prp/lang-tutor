@@ -212,7 +212,7 @@ export function createServerDeps(io: {
     logger: io.logger,
   });
 
-  const translations = createTranslationService({ llm, transaction, logger: io.logger });
+  const translations = createTranslationService({ llm, transaction, logger: io.logger, now: io.now });
 
   return {
     sessions: createSessionService({

@@ -77,6 +77,24 @@ export type CorrectionRow = {
 /** One rendering a repair produces: what the lookup writes, by sense id. */
 export type RepairedRendering = Rendering & { senseId: string };
 
+/** Phase 34 (spec D1). One rendering: a form, a sense, a learner language. What
+ *  the accept job is about. */
+export type RenderingKey = { variantId: string; senseId: string; userLanguageCode: string };
+
+/** Phase 34 (spec D1, D2). One rendering as the accept job reads it, with its
+ *  form and lexeme. `rendering` is the text shown; `acceptedAt` null = never asked. */
+export type RenderingForAccept = RenderingKey & {
+  lexemeId: string;
+  languageCode: string;
+  form: string;
+  lemma: string;
+  partOfSpeech: string;
+  rendering: string;
+  example: string | null;
+  exampleTranslation: string | null;
+  acceptedAt: Date | null;
+};
+
 export function createDictRepo(tx: Tx) {
   /**
    * Four tables, driven by the unique index's (language_code, lower(form))
@@ -1036,12 +1054,87 @@ export function createDictRepo(tx: Tx) {
     return rows.rows.map((row) => ({ glossId: row.gloss_id, lemma: row.lemma }));
   };
 
+  /** Phase 34 (spec D1, D2). One rendering with its form and lexeme, for the
+   *  accept job; undefined when it is gone. */
+  const findRenderingForAccept = async (key: RenderingKey): Promise<RenderingForAccept | undefined> => {
+    const [row] = await tx
+      .select({
+        variantId: dictVarTranslations.variantId,
+        senseId: dictVarTranslations.senseId,
+        userLanguageCode: dictVarTranslations.userLanguageCode,
+        lexemeId: dictLexemes.id,
+        languageCode: dictLexemes.languageCode,
+        form: dictVariants.form,
+        lemma: dictLexemes.lemma,
+        partOfSpeech: dictLexemes.partOfSpeech,
+        rendering: dictVarTranslations.translation,
+        example: dictVarTranslations.exampleSource,
+        exampleTranslation: dictVarTranslations.exampleTarget,
+        acceptedAt: dictVarTranslations.acceptedAt,
+      })
+      .from(dictVarTranslations)
+      .innerJoin(dictVariants, eq(dictVariants.id, dictVarTranslations.variantId))
+      .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
+      .where(
+        and(
+          eq(dictVarTranslations.variantId, key.variantId),
+          eq(dictVarTranslations.senseId, key.senseId),
+          eq(dictVarTranslations.userLanguageCode, key.userLanguageCode),
+        ),
+      );
+    return row;
+  };
+
+  /**
+   * Phase 34 (spec D1, D2). The accept job's write: the list, the answer form and
+   * the stamp, on the rendering whose text is still `translation`. A repair that
+   * reworded the rendering during the call leaves it unstamped instead, so what
+   * was accepted for the old words never lands on the new ones and the next
+   * session asks again. The caller holds lockLexemes, the lock the repair's
+   * caller takes, so this reads the repair's committed rows rather than racing
+   * its delete. Whether a row was written.
+   */
+  const storeAccepted = async (
+    input: RenderingKey & { translation: string; answers: string[]; answerForm: string | null; at: Date },
+  ): Promise<boolean> => {
+    const written = await tx
+      .update(dictVarTranslations)
+      .set({ acceptedAnswers: input.answers, answerForm: input.answerForm, acceptedAt: input.at })
+      .where(
+        and(
+          eq(dictVarTranslations.variantId, input.variantId),
+          eq(dictVarTranslations.senseId, input.senseId),
+          eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
+          eq(dictVarTranslations.translation, input.translation),
+        ),
+      )
+      .returning({ variantId: dictVarTranslations.variantId });
+    return written.length > 0;
+  };
+
+  /** Phase 34 (spec D13). Every rendering, in its enrollment's learner language,
+   *  of a saved gloss's member senses that the accept job has never run for: the
+   *  backfill's work. In key order, so a rerun asks in the same order. */
+  const findUnacceptedSavedRenderings = async (): Promise<RenderingKey[]> => {
+    const rows = await tx.execute<{ variant_id: string; sense_id: string; user_language_code: string }>(sql`
+      SELECT DISTINCT tr.variant_id, tr.sense_id, tr.user_language_code
+      FROM vocabulary_entries ve
+      JOIN enrollments e            ON e.id = ve.enrollment_id
+      JOIN dict_sense_glosses m     ON m.gloss_id = ve.gloss_id AND m.user_language_code = e.source_language
+      JOIN dict_var_translations tr ON tr.sense_id = m.sense_id AND tr.user_language_code = m.user_language_code
+      WHERE tr.accepted_at IS NULL
+      ORDER BY tr.variant_id, tr.sense_id, tr.user_language_code`);
+    return rows.rows.map((row) => ({ variantId: row.variant_id, senseId: row.sense_id, userLanguageCode: row.user_language_code }));
+  };
+
   return {
     claimLemmaRenders,
     claimSavedLemmaRenders,
     findCorrectionByForm,
     findGlossRenderings,
     findLexeme,
+    findRenderingForAccept,
+    findUnacceptedSavedRenderings,
     findSenseVersion,
     findSensesByForm,
     findSensesByLexeme,
@@ -1054,6 +1147,7 @@ export function createDictRepo(tx: Tx) {
     persistEntries,
     releaseLemmaRender,
     repairVariantRenderings,
+    storeAccepted,
   };
 }
 

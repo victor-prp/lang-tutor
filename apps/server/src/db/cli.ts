@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createGlossTools } from '../composition';
 import { loadConfig, loadGeminiConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
 import { createConsoleLogger } from '../logger';
+import { requestAcceptRenderings } from './acceptRenderings';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, findOrphans, listLaneDatabases, liveWorktreesOf } from './lanes';
@@ -279,6 +280,13 @@ async function main(): Promise<void> {
     if (process.argv.includes('--render-lemmas')) {
       const { requested } = await requestLemmaRenders(db);
       console.log(`asked for ${requested} lemma renders in ${shownUrl}`);
+      return;
+    }
+
+    // Phase 34 (spec D13). On demand, after migrating: `npm run dict:accept`.
+    if (process.argv.includes('--accept-renderings')) {
+      const { requested } = await requestAcceptRenderings(db);
+      console.log(`asked for the accepted answers of ${requested} renderings in ${shownUrl}`);
       return;
     }
 

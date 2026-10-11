@@ -159,6 +159,17 @@ describe('repos', () => {
     findSiblings: () => {
       throw new Error('these cases must not read a sibling');
     },
+    // Phase 34. The accept job's and the backfill's: the session service writes
+    // no accepted answers (spec D1).
+    findRenderingForAccept: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    storeAccepted: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    findUnacceptedSavedRenderings: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
   };
 
   // Phase 31. Bound into the same transaction, and untouched by these cases:

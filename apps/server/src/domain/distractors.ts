@@ -96,6 +96,12 @@ export type GenerationContext = {
    *  and its Hebrew translation: null when they saved none. */
   example: string | null;
   exampleTranslation: string | null;
+  /** Phase 34 (spec D1, D2). What the accept job stored for this rendering: every
+   *  right answer, the form that agrees with it (null = the form), and when the job
+   *  ran (null = never, and the session asks for it). */
+  acceptedAnswers: string[];
+  answerForm: string | null;
+  acceptedAt: Date | null;
 };
 
 /** Phase 27 (spec D5, D6). Per gloss (phase 31), the sentences its last

@@ -102,7 +102,7 @@ export async function insertListSession(
         ...sentenceCard(sense, types[index], input.alternatives ?? [], (example, generated, gap) =>
           generatedContent(
             // generatedContent reads neither id; a list session's card names its gloss alone.
-            { ...sense, senseId: '', partOfSpeech: 'noun', example, exampleTranslation: example ? HEBREW_SENTENCE : null },
+            { ...sense, senseId: '', partOfSpeech: 'noun', example, exampleTranslation: example ? HEBREW_SENTENCE : null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
             types[index],
             generated,
             {

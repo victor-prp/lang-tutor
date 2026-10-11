@@ -66,7 +66,7 @@ r3() {
   # they are acting on, which is where the lane values are read.
   for key in server mobile e2e test:integration db:up db:migrate db:reseed \
              db:progress:recompute dict:export dict:restore dict:lemmas:render \
-             dict:glosses:merge lane:list lane:down; do
+             dict:glosses:merge dict:accept lane:list lane:down; do
     line=$(grep -E "^    \"$key\": " package.json)
     if [ -z "$line" ]; then
       echo "\"$key\" is missing from package.json scripts"

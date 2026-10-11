@@ -4,6 +4,7 @@ import type { Enrollment, Question } from '@lang-tutor/core/api';
 import {
   createFakeClock,
   createFakeGlossRepo,
+  createFakeJobRepo,
   createFakeLlmClient,
   createFakeLogger,
   createFakeTransaction,
@@ -25,8 +26,8 @@ const SESSION = '11111111-1111-1111-1111-111111111111';
 const STATE: SessionState = { id: SESSION, userId: 'u1', enrollmentId: 'e1', status: 'preparing', source: 'list' };
 const ENROLLMENT: Enrollment = { id: 'e1', user_id: 'u1', source_language: 'he', target_language: 'ru', created_at: '' };
 const CONTEXT: GenerationContext[] = [
-  { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null },
-  { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null },
+  { glossId: 'g-s1', senseId: 's1', variantId: 'v1', lexemeId: 'l1', form: 'прочитала', lemma: 'прочитать', partOfSpeech: 'verb', translation: 'קראה', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+  { glossId: 'g-s2', senseId: 's2', variantId: 'v2', lexemeId: 'l2', form: 'лук', lemma: 'лук', partOfSpeech: 'noun', translation: 'בצל', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
 ];
 const PAYLOAD = {
   session_id: SESSION,
@@ -132,6 +133,8 @@ function world(opts: {
   });
   const llm = createFakeLlmClient(opts.reply ?? GOOD);
   const logger = createFakeLogger();
+  // Phase 34 (spec D1). What the read asked the accept job for.
+  const jobs = createFakeJobRepo();
   const service = createSessionService({
     transaction: createFakeTransaction({
       session,
@@ -144,6 +147,7 @@ function world(opts: {
           return opts.siblings ?? [];
         },
       }),
+      jobs,
     }),
     rng: testRng(7),
     logger,
@@ -152,7 +156,7 @@ function world(opts: {
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
   });
-  return { service, calls, llm, logger };
+  return { service, calls, llm, logger, jobs };
 }
 
 describe('prepareSession', () => {
@@ -184,7 +188,7 @@ describe('prepareSession', () => {
   it('gives each position its type, in pick order, with the content each type needs', async () => {
     const context = [
       ...CONTEXT,
-      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null },
+      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
     ];
     const reply = JSON.stringify({
       items: [
@@ -291,7 +295,7 @@ describe('prepareSession', () => {
 const FORMS = ['ромашка', 'черепаха', 'подушка', 'зонтик', 'ведро', 'скрипка', 'лопата', 'кастрюля', 'фонарь', 'ящерица'];
 const MEANINGS = ['מרגנית', 'צב', 'כרית', 'מטרייה', 'דלי', 'כינור', 'את חפירה', 'סיר', 'פנס', 'לטאה'];
 const TEN: GenerationContext[] = FORMS.map((form, i) => ({
-  glossId: `g-s${i}`, senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i], example: null, exampleTranslation: null,
+  glossId: `g-s${i}`, senseId: `s${i}`, variantId: `v${i}`, lexemeId: `l${i}`, form, lemma: form, partOfSpeech: 'noun', translation: MEANINGS[i], example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null,
 }));
 const TEN_PAYLOAD = {
   session_id: SESSION,
@@ -548,7 +552,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
   });
 
   it('plans no gap card for a saved example with no Hebrew half', async () => {
-    const probe = world({ context: EXAMPLES.map((row) => ({ ...row, exampleTranslation: null })), reply: 'nope' });
+    const probe = world({ context: EXAMPLES.map((row) => ({ ...row, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null })), reply: 'nope' });
     await expect(probe.service.prepareSession(TEN_PAYLOAD)).rejects.toThrow();
     const items = JSON.parse(probe.llm.calls[0].user).items as { task: string }[];
     expect(items.map((item) => item.task)).not.toContain('gap');
@@ -643,7 +647,7 @@ describe('prepareSession, phase 31 (spec D18)', () => {
   it('accepts a sibling headword on the typed card and names it to the model (spec D18)', async () => {
     const context: GenerationContext[] = [
       ...CONTEXT,
-      { glossId: 'g_book', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'book', lemma: 'book', partOfSpeech: 'verb', translation: 'להזמין', example: null, exampleTranslation: null },
+      { glossId: 'g_book', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'book', lemma: 'book', partOfSpeech: 'verb', translation: 'להזמין', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
     ];
     const reply = JSON.stringify({
       items: [
@@ -660,5 +664,44 @@ describe('prepareSession, phase 31 (spec D18)', () => {
     expect(JSON.parse(llm.calls[0].user).also_in_session).toContainEqual({ word: 'order', correct: 'להזמין' });
     // Read once, in the read step, for the cards' glosses.
     expect(calls.siblingsAsked).toEqual([{ glossIds: ['g-s1', 'g-s2', 'g_book'] }]);
+  });
+});
+
+// Phase 34 (spec D1). The accept job is asked for lazily, by the read that finds
+// a picked rendering it never ran for.
+describe('prepareSession, phase 34 (spec D1)', () => {
+  it('asks for the accept job once per picked rendering it never ran for, keyed by the rendering', async () => {
+    const { service, jobs } = world({});
+    await service.prepareSession(PAYLOAD);
+    expect(jobs.enqueued).toEqual([
+      {
+        name: 'accept-rendering',
+        data: { variant_id: 'v1', sense_id: 's1', user_language_code: 'he' },
+        options: { singletonKey: 'v1:s1:he' },
+      },
+      {
+        name: 'accept-rendering',
+        data: { variant_id: 'v2', sense_id: 's2', user_language_code: 'he' },
+        options: { singletonKey: 'v2:s2:he' },
+      },
+    ]);
+  });
+
+  // Review Focus 3: the stamp decides, not the list.
+  it('asks nothing for a stamped rendering, even one whose list is empty', async () => {
+    const stamped = new Date('2026-10-11T10:00:00Z');
+    const context: GenerationContext[] = [
+      { ...CONTEXT[0], acceptedAt: stamped },
+      { ...CONTEXT[1], acceptedAnswers: ['репчатый лук'], acceptedAt: stamped },
+    ];
+    const { service, jobs } = world({ context });
+    await service.prepareSession(PAYLOAD);
+    expect(jobs.enqueued).toEqual([]);
+  });
+
+  it('asks nothing for a session that is no longer preparing', async () => {
+    const { service, jobs } = world({ state: { ...STATE, status: 'skipped' } });
+    await service.prepareSession(PAYLOAD);
+    expect(jobs.enqueued).toEqual([]);
   });
 });

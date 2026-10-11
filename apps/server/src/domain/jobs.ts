@@ -98,6 +98,28 @@ export const RenderLemmaPayloadSchema = z.object({
 });
 export type RenderLemmaPayload = z.infer<typeof RenderLemmaPayloadSchema>;
 
+/** Phase 34 (spec D1, D2). Asks the model once for every right answer to one
+ *  rendering and the form that agrees with it, and stores both. */
+export const ACCEPT_RENDERING = 'accept-rendering';
+/** Where pg-boss moves an accept job once its retries are spent or it expired.
+ *  pg-boss copies the job's `data` across unchanged. */
+export const ACCEPT_RENDERING_FAILED = 'accept-rendering-failed';
+/** One call within a lookup's 25 s, and two short transactions. */
+export const ACCEPT_RENDERING_EXPIRY_SECONDS = 120;
+
+export const AcceptRenderingPayloadSchema = z.object({
+  variant_id: z.string().min(1),
+  sense_id: z.string().min(1),
+  user_language_code: z.string().min(1),
+});
+export type AcceptRenderingPayload = z.infer<typeof AcceptRenderingPayloadSchema>;
+
+/** Phase 34 (spec D1). One accept job per rendering at a time: the singleton key
+ *  its queue's `exclusive` policy holds while a job is queued, retrying or active,
+ *  so a burst of sessions picking one rendering pays for one call. */
+export const acceptRenderingKey = (payload: AcceptRenderingPayload): string =>
+  `${payload.variant_id}:${payload.sense_id}:${payload.user_language_code}`;
+
 export type JobPayloads = {
   [PREPARE_SESSION]: PrepareSessionPayload;
   [PREPARE_SESSION_FAILED]: PrepareSessionPayload;
@@ -108,5 +130,7 @@ export type JobPayloads = {
   [MERGE_GLOSSES]: MergeGlossesPayload;
   [RENDER_LEMMA]: RenderLemmaPayload;
   [RENDER_LEMMA_FAILED]: RenderLemmaPayload;
+  [ACCEPT_RENDERING]: AcceptRenderingPayload;
+  [ACCEPT_RENDERING_FAILED]: AcceptRenderingPayload;
 };
 export type JobName = keyof JobPayloads;

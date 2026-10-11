@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
+import * as schemas from '@lang-tutor/core/api/schemas';
 import { LlmTranslationSchema } from '@lang-tutor/core/api/schemas';
 import { z } from 'zod';
 
@@ -88,6 +89,18 @@ describe('toGeminiSchema', () => {
   // `.default()` will reach for it in packages/core, nowhere near this reasoning.
   it('emits no default keyword anywhere, at any depth', () => {
     expect(JSON.stringify(toGeminiSchema(LlmTranslationSchema))).not.toContain('"default"');
+  });
+
+  // Phase 34. Zod writes a bare `z.string().nullable()` as `"type": ["string",
+  // "null"]`, and Gemini refuses the whole request with a 400 ("Proto field is not
+  // repeating"), which MockServer, validating nothing, never shows. With any
+  // constraint Zod writes `anyOf`, which Gemini takes. Every model answer schema.
+  it('writes no list of types into any model answer schema', () => {
+    const answers = Object.entries(schemas).filter(([name]) => /^Llm\w*Schema$/.test(name));
+    expect(answers.length).toBeGreaterThan(10);
+    for (const [name, schema] of answers) {
+      expect([name, JSON.stringify(toGeminiSchema(schema as z.ZodType))]).not.toEqual([name, expect.stringMatching(/"type":\[/)]);
+    }
   });
 
   it('leaves correction out of the root required list', () => {

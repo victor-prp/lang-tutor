@@ -927,6 +927,20 @@ export const LlmGlossMergeSchema = z.object({
   definitions: z.array(z.object({ sense_code: z.string().min(1), definition: z.string().min(1) })),
 });
 
+// Phase 34 (spec D1, D2). The accept job's answer for one rendering: every right
+// translation of it in its sense, and the form of the headword that agrees with
+// it, or null. No array caps: a cap travels as `responseSchema`, and the server
+// keeps ten of what comes back (domain/accept.ts). `answer_form` has `.min(1)`
+// for the provider, not the parse: a bare `z.string().nullable()` becomes
+// `"type": ["string", "null"]`, which Gemini refuses with a 400 ("Proto field is
+// not repeating"), measured 2026-10-11 on gemini-2.5-flash; with a constraint
+// Zod writes `anyOf`, which it accepts, as LlmRenderingSchema's `translation`.
+// parseAccept reads an empty answer form as null before this schema sees it.
+export const LlmAcceptSchema = z.object({
+  answers: z.array(z.string()),
+  answer_form: z.string().min(1).nullable(),
+});
+
 // Phase 25 (spec D13). The transcriber's answer: the words it heard, or an
 // empty string for nothing intelligible.
 export const LlmTranscriptSchema = z.object({ heard: z.string() });
