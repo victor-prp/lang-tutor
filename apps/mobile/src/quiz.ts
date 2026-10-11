@@ -118,14 +118,18 @@ export function passFor(kind: 'skip' | 'show_answer', retry: PendingRetry | null
 }
 
 /** Phase 34 (spec D9). The next-step request for an answer to the card on
- *  screen: on a second try it carries `retry: true`, and a pass is the give-up. */
+ *  screen: on a second try it carries `retry: true`, and a pass is the give-up.
+ *  Phase 38 (spec D4): a first text answer carries `hint_opened` when the card
+ *  has a hint; a retry never does, as the hint it opened is the app's doing. */
 export function nextStepRequest(
   questionId: string,
   input: { option_index: number } | { text: string } | { pass: 'skip' | 'show_answer' },
   retry: PendingRetry | null,
+  hintOpened?: boolean,
 ): NextStepRequest {
   const request = 'pass' in input ? { question_id: questionId, pass: passFor(input.pass, retry) } : { question_id: questionId, ...input };
-  return retried(request, retry);
+  const hinted = 'text' in input && retry === null && hintOpened !== undefined ? { ...request, hint_opened: hintOpened } : request;
+  return retried(hinted, retry);
 }
 
 /** Phase 34 (spec D9). How an answer the phone judges goes out. `banner`: its

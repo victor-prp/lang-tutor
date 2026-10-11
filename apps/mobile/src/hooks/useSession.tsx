@@ -43,8 +43,9 @@ export type SessionValue = {
    *  and resuming are the same call: the server knows how far it got. */
   enter: (sessionId: string) => void;
   select: (optionIndex: number) => void;
-  /** Phase 23. Answers a typed card. An empty text is "show me the answer". */
-  submitText: (text: string) => void;
+  /** Phase 23. Answers a typed card. An empty text is "show me the answer".
+   *  Phase 38 (spec D4): a typed gap says whether its hint was opened. */
+  submitText: (text: string, hintOpened?: boolean) => void;
   /** Phase 24. Answers a board: each word's first-tried meaning, in board order. */
   submitBoard: (firstAttempts: number[]) => void;
   /** Phase 25. The speaking card's attempt that has recorded nothing yet. */
@@ -208,13 +209,13 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   // Phase 23: one path for a chosen option and a typed text. The guard on
   // `state.answer` is what makes a second tap, or Return then Check, a no-op.
   const answerWith = useCallback(
-    (input: { option_index: number } | { text: string }) => {
+    (input: { option_index: number } | { text: string }, hintOpened?: boolean) => {
       if (!state || state.answer !== null || !state.question || state.judging === 'checking') return;
       const { sessionId, question, retry } = state;
       // Phase 34 (spec D9): the second try at a held card carries retry: true,
       // and an answer meeting a hold it could not have opened goes again as one.
       const call = settle(question, retry, (as) =>
-        api.nextStep(sessionId, nextStepRequest(question.id, input, as)).then((next) => ({ answer: input, next })),
+        api.nextStep(sessionId, nextStepRequest(question.id, input, as, hintOpened)).then((next) => ({ answer: input, next })),
       );
 
       // Phase 34 (spec D9). Another accepted word, or any answer after a failed
@@ -236,7 +237,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
   );
 
   const select = useCallback((optionIndex: number) => answerWith({ option_index: optionIndex }), [answerWith]);
-  const submitText = useCallback((text: string) => answerWith({ text }), [answerWith]);
+  const submitText = useCallback((text: string, hintOpened?: boolean) => answerWith({ text }, hintOpened), [answerWith]);
 
   // Phase 24 (spec D10). A board's words are separate questions: their answers
   // go in board order, one call after another, and only the last response is

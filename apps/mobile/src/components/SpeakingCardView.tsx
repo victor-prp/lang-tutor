@@ -182,7 +182,7 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
 
       {answered ? null : (
         <>
-          {retry !== null ? <RetryNotice retry={retry} /> : null}
+          {retry !== null ? <RetryNotice retry={retry} type={question.type} /> : null}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={strings.record}

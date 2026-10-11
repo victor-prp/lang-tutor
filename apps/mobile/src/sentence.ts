@@ -9,8 +9,12 @@ export function splitAtGap(
 }
 
 /** Phase 27 (spec D5). Whether a gap card shows its Hebrew line: a choice card
- *  holds it back until the answer, as it hints which word fits; a typed card
- *  always shows it, as it fixes the inflection to type. */
-export function showsSentenceTranslation(type: 'cloze_choice' | 'cloze_typed', answered: boolean): boolean {
-  return type === 'cloze_typed' || answered;
+ *  holds it back until the answer, as it hints which word fits. Phase 38 (spec
+ *  D1): a typed card too, unless the learner opened the hint or a second try is
+ *  pending, since the Hebrew alone gives the word away. */
+export function showsSentenceTranslation(
+  type: 'cloze_choice' | 'cloze_typed',
+  { answered, hintOpen, retrying }: { answered: boolean; hintOpen: boolean; retrying: boolean },
+): boolean {
+  return answered || (type === 'cloze_typed' && (hintOpen || retrying));
 }

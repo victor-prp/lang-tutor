@@ -288,16 +288,23 @@ describe('a second try (phase 34 D9)', () => {
   };
 
   it('says the first answer fits, then that another saved word is there', () => {
-    expect(retryNotice({ answer: 'vetrata', wording: 'word' })).toEqual({
+    expect(retryNotice('typed_translation', { answer: 'vetrata', wording: 'word' })).toEqual({
       right: '✓ נכון, ⁨vetrata⁩ מתאים כאן.',
       again: 'יש מילה נוספת ששמרת — נסו שוב',
     });
   });
 
   it('says another meaning is there on a typed meaning', () => {
-    expect(retryNotice({ answer: 'ספר', wording: 'meaning' })).toEqual({
+    expect(retryNotice('typed_meaning', { answer: 'ספר', wording: 'meaning' })).toEqual({
       right: '✓ נכון, ⁨ספר⁩ מתאים כאן.',
       again: 'יש פירוש נוסף — נסו שוב',
+    });
+  });
+
+  it('says on a typed gap that the word fits but another was meant (phase 38 D3)', () => {
+    expect(retryNotice('cloze_typed', { answer: 'wasted', wording: 'word' })).toEqual({
+      right: '✓ נכון, ⁨wasted⁩ מתאים כאן.',
+      again: 'אבל התכוונו למילה אחרת — היעזרו במשפט בעברית ונסו שוב',
     });
   });
 

@@ -1,6 +1,6 @@
 import type { ClozeChoiceQuestion, ClozeTypedQuestion, Question, SentenceTranslationQuestion } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -26,18 +26,26 @@ import { colors, fontSizes, lineHeights, spacing } from '@/theme';
 
 // Phase 27 (spec D5). The gap card's prompt: the sentence with its blank, the
 // Hebrew line under it, and once answered the sentence spoken. Phase 34 (spec
-// D8): a typed gap's Hebrew line marks the practised word.
-function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID?: string) {
+// D8): a typed gap's Hebrew line marks the practised word. Phase 38 (spec D1):
+// a typed gap's Hebrew line is a hint, a button until it is opened.
+type GapHint = { open: boolean; retrying: boolean; onOpen: () => void };
+
+function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID?: string, hint?: GapHint) {
+  const shown = showsSentenceTranslation(question.type, { answered, hintOpen: hint?.open ?? false, retrying: hint?.retrying ?? false });
   return (
     <View style={styles.gapCard} testID={testID}>
       <SentenceGap sentence={question.sentence} gap={question.gap} filled={answered} />
-      {showsSentenceTranslation(question.type, answered) ? (
+      {shown ? (
         <MarkedText
           text={question.translation}
           mark={question.type === 'cloze_typed' ? question.mark : null}
           style={styles.hebrewLine}
           testID="sentence-translation"
         />
+      ) : hint ? (
+        <Pressable accessibilityRole="button" testID="sentence-hint" hitSlop={8} onPress={hint.onOpen}>
+          <Text style={styles.hint}>{strings.sentenceHint}</Text>
+        </Pressable>
       ) : null}
       {answered ? <SpeakButton text={question.sentence} language={language} testID="speak-sentence" /> : null}
     </View>
@@ -66,6 +74,31 @@ function translatePrompt(question: SentenceTranslationQuestion, answered: boolea
         </View>
       ) : null}
     </View>
+  );
+}
+
+// Phase 38 (spec D1, D4). The typed gap card holds whether its hint is open, and
+// sends it with the first answer. Keyed by question id, so a new card starts closed.
+function ClozeTypedCard({ question, session, language }: { question: ClozeTypedQuestion; session: SessionValue; language: string }) {
+  const [hintOpen, setHintOpen] = useState(false);
+  return (
+    <TypedAnswerView
+      question={question}
+      instruction={strings.questionInstructionClozeTyped(language)}
+      language={language}
+      answered={session.answered}
+      verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
+      onSubmit={(text) => session.submitText(text, hintOpen)}
+      direction="ltr"
+      checking={session.judging === 'checking'}
+      failed={session.judging === 'failed'}
+      retry={session.retry}
+      prompt={gapPrompt(question, session.answered, language, undefined, {
+        open: hintOpen,
+        retrying: session.retry !== null,
+        onOpen: () => setHintOpen(true),
+      })}
+    />
   );
 }
 
@@ -125,21 +158,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       );
     case 'cloze_typed':
       // Judged on the phone against the gap's word, as a typed translation is.
-      return (
-        <TypedAnswerView
-          question={question}
-          instruction={strings.questionInstructionClozeTyped(language)}
-          language={language}
-          answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
-          onSubmit={session.submitText}
-          direction="ltr"
-          checking={session.judging === 'checking'}
-          failed={session.judging === 'failed'}
-          retry={session.retry}
-          prompt={gapPrompt(question, session.answered, language)}
-        />
-      );
+      return <ClozeTypedCard key={question.id} question={question} session={session} language={language} />;
     case 'sentence_translation':
       return (
         <TypedAnswerView
@@ -375,6 +394,7 @@ export default function SessionScreen() {
 const styles = StyleSheet.create({
   gapCard: { gap: spacing.md, alignItems: 'center' },
   hebrewLine: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
+  hint: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.primary, fontWeight: '700', writingDirection: 'rtl' },
   hebrewPrompt: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, textAlign: 'center', writingDirection: 'rtl' },
   reference: { gap: spacing.xs, alignItems: 'center' },
   referenceLabel: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },
