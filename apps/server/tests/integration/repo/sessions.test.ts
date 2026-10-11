@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import type { AnswerVerdict } from '@lang-tutor/core/api';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { eq } from 'drizzle-orm';
 
@@ -14,6 +15,7 @@ import { newSessionRecord } from '../../../src/domain/session';
 import { answers, sessionQuestions, sessions } from '../../../src/db/schema';
 import { SessionOpen } from '../../../src/errors';
 import { createQuestionRepo } from '../../../src/repo/questions';
+import { createProgressRepo } from '../../../src/repo/progress';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { createVocabularyRepo } from '../../../src/repo/vocabulary';
 
@@ -353,7 +355,7 @@ describe('phase 24: boards', () => {
 // Phase 35 (spec D5, D10). What the picker reads about today: the glosses asked
 // in sessions counting for it (an open session counts as today), and how many
 // glosses were first answered, while saved, on it.
-describe('phase 35: asked and new on a day', () => {
+describe('phase 37: answers and introductions on a day', () => {
   const E = enrollmentOf('u_1');
   const D1 = '2026-10-10';
   const D2 = '2026-10-11';
@@ -381,8 +383,8 @@ describe('phase 35: asked and new on a day', () => {
       }),
     );
 
-  /** A session asking `asked`, the first `answered` of them answered, then
-   *  skipped on `day` or left open. */
+  /** A multiple-choice session asking `asked`, the first `answered` of them
+   *  answered, then skipped on `day` or left open. */
   async function play(asked: Word[], day: string | 'open', answered = asked.length, enrollmentId = E, userId = 'u_1') {
     const { sessionId, questions } = await insertListSession(t.db, {
       userId,
@@ -395,37 +397,70 @@ describe('phase 35: asked and new on a day', () => {
       for (const [i, question] of questions.slice(0, answered).entries()) await repo.insertAnswer(sessionId, i, question.id, { displayIndex: 0 });
       if (day !== 'open') await repo.transition(sessionId, ['ready'], 'skipped', day);
     });
+    return sessionId;
+  }
+
+  /** A session of typed translations, answered with `verdicts` in order, then
+   *  skipped on `day` or left open. */
+  async function playTyped(asked: Word[], day: string | 'open', verdicts: AnswerVerdict[]) {
+    const { sessionId, questions } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked,
+      types: asked.map(() => 'typed_translation' as const),
+    });
+    await withTx(t.db, async (tx) => {
+      const repo = createSessionRepo(tx);
+      for (const [i, verdict] of verdicts.entries()) await repo.insertAnswer(sessionId, i, questions[i].id, { text: 'x', verdict });
+      if (day !== 'open') await repo.transition(sessionId, ['ready'], 'skipped', day);
+    });
+    return sessionId;
   }
 
   const read = <T>(run: (repo: ReturnType<typeof createSessionRepo>) => Promise<T>) => withTx(t.db, (tx) => run(createSessionRepo(tx)));
 
-  it("names the glosses answered in that day's sessions and in an open one, and no other enrollment's", async () => {
+  it("reads the answers of that day's sessions and of an open one, in answer order, and no other enrollment's", async () => {
     const a = await savedWord('apple', 'תפוח');
     const b = await savedWord('bread', 'לחם');
     const c = await savedWord('cheese', 'גבינה');
     const d = await savedWord('dates', 'תמרים');
-    await play([a, b], D1, 1);
-    await play([c], D2);
-    await play([d], 'open');
-    expect(await read((repo) => repo.findGlossesAnsweredOn(E, D2))).toEqual([c.glossId, d.glossId].sort());
-    expect(await read((repo) => repo.findGlossesAnsweredOn(E, D1))).toEqual([a.glossId, d.glossId].sort());
+    const s1 = await playTyped([a, b], D1, ['exact']);
+    const s2 = await playTyped([c, a], D2, ['exact', 'wrong']);
+    const s3 = await playTyped([d], 'open', ['near_miss']);
+    expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual([
+      { glossId: c.glossId, sessionId: s2, type: 'typed_translation', verdict: 'exact' },
+      { glossId: a.glossId, sessionId: s2, type: 'typed_translation', verdict: 'wrong' },
+      { glossId: d.glossId, sessionId: s3, type: 'typed_translation', verdict: 'near_miss' },
+    ]);
+    expect((await read((repo) => repo.findAnswersOn(E, D1))).map((answer) => [answer.glossId, answer.sessionId])).toEqual([
+      [a.glossId, s1],
+      [d.glossId, s3],
+    ]);
     await seedUser(t.db, 'u_2');
-    expect(await read((repo) => repo.findGlossesAnsweredOn(enrollmentOf('u_2'), D2))).toEqual([]);
+    expect(await read((repo) => repo.findAnswersOn(enrollmentOf('u_2'), D2))).toEqual([]);
   });
 
-  it('counts the glosses first answered while saved on that day, an open session counting as it', async () => {
+  it("decodes a choice answer as the session's evidence does", async () => {
+    const a = await savedWord('apple', 'תפוח');
+    const b = await savedWord('bread', 'לחם');
+    const sessionId = await play([a, b], D2);
+    const evidence = await withTx(t.db, (tx) => createProgressRepo(tx).findSessionEvidence(sessionId));
+    expect(await read((repo) => repo.findAnswersOn(E, D2))).toEqual(evidence!.answers.map((answer) => ({ ...answer, sessionId })));
+  });
+
+  it('names the glosses first answered while saved on that day, an open session counting as it', async () => {
     const a = await savedWord('apple', 'תפוח');
     const b = await savedWord('bread', 'לחם');
     const c = await savedWord('cheese', 'גבינה');
     const late = await unsavedWord('lemon', 'לימון');
     await play([a, late], D1);
     await save(late);
-    expect(await read((repo) => repo.countNewOn(E, D1))).toBe(1);
+    expect(await read((repo) => repo.findIntroducedOn(E, D1))).toEqual([a.glossId]);
     // `a` is from D1. `late` was answered on D1 before it was saved, which introduced nothing.
     await play([a, b, late], D2);
-    expect(await read((repo) => repo.countNewOn(E, D2))).toBe(2);
+    expect(await read((repo) => repo.findIntroducedOn(E, D2))).toEqual([b.glossId, late.glossId].sort());
     await play([c, a], 'open');
-    expect(await read((repo) => repo.countNewOn(E, D2))).toBe(3);
+    expect(await read((repo) => repo.findIntroducedOn(E, D2))).toEqual([b.glossId, c.glossId, late.glossId].sort());
   });
 });
 

@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import type { SessionRecord, SessionState, SessionSummary } from '../domain/session';
+import type { DayAnswer } from '../domain/today';
 import {
   answers,
   dictLexemes,
@@ -15,6 +16,7 @@ import {
 } from '../db/schema';
 import { SessionOpen } from '../errors';
 import { isUniqueViolation } from './pgErrors';
+import { decodeAnswer, type AnswerRow } from './progress';
 import { canonicalOptions, questionColumns, questionFrom, withBoards } from './questions';
 
 // `sessions.id` is a `uuid` column: a malformed value makes Postgres raise
@@ -102,40 +104,40 @@ export function createSessionRepo(tx: Tx) {
 
     insertSessionQuestions,
 
-    /** Phase 35 (spec D5, D10). The glosses answered in this enrollment's
-     *  sessions that count for `day`, and in an open one, which counts as today.
-     *  The picker asks them last. Sorted. */
-    findGlossesAnsweredOn: async (enrollmentId: string, day: string): Promise<string[]> => {
-      const rows = await tx.execute<{ gloss_id: string }>(sql`
-        SELECT DISTINCT q.gloss_id
+    /** Phase 37 (spec D7). Every answer in this enrollment's sessions that count
+     *  for `day`, and in an open one, which counts as today, decoded as a session's
+     *  evidence is. In answer order: sessions as they were created (one is open
+     *  at a time), each in its positions' order. */
+    findAnswersOn: async (enrollmentId: string, day: string): Promise<DayAnswer[]> => {
+      const rows = await tx.execute<AnswerRow & { session_id: string }>(sql`
+        SELECT s.id AS session_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict
         FROM answers a
         JOIN sessions s  ON s.id = a.session_id
         JOIN questions q ON q.id = a.question_id
         WHERE s.enrollment_id = ${enrollmentId}
           AND (s.practice_day = ${day}::date OR s.status IN ('preparing', 'ready'))
-        ORDER BY q.gloss_id`);
-      return rows.rows.map((row) => row.gloss_id);
+        ORDER BY s.created_at, s.id, a.position`);
+      return rows.rows.map((row) => ({ ...decodeAnswer(row), sessionId: row.session_id }));
     },
 
-    /** Phase 35 (spec D5, D10). How many glosses `day` introduced: saved glosses
-     *  whose first answer given while saved is in a session counting for `day`,
-     *  an open session counting as it. An answer from before the save is no
-     *  introduction, as it writes no memory (D4). */
-    countNewOn: async (enrollmentId: string, day: string): Promise<number> => {
-      const rows = await tx.execute<{ n: number }>(sql`
-        SELECT count(*)::int AS n FROM (
-          SELECT q.gloss_id
-          FROM answers a
-          JOIN sessions s            ON s.id = a.session_id
-          JOIN questions q           ON q.id = a.question_id
-          JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = q.gloss_id
-          WHERE s.enrollment_id = ${enrollmentId}
-            AND a.answered_at >= ve.created_at
-            AND (s.practice_day IS NOT NULL OR s.status IN ('preparing', 'ready'))
-          GROUP BY q.gloss_id
-          HAVING min(coalesce(s.practice_day, ${day}::date)) = ${day}::date
-        ) introduced`);
-      return rows.rows[0].n;
+    /** Phase 35 (spec D5, D10), phase 37 (D7). The glosses `day` introduced: saved
+     *  glosses whose first answer given while saved is in a session counting for
+     *  `day`, an open session counting as it. An answer from before the save is no
+     *  introduction, as it writes no memory (D4). Sorted. */
+    findIntroducedOn: async (enrollmentId: string, day: string): Promise<string[]> => {
+      const rows = await tx.execute<{ gloss_id: string }>(sql`
+        SELECT q.gloss_id
+        FROM answers a
+        JOIN sessions s            ON s.id = a.session_id
+        JOIN questions q           ON q.id = a.question_id
+        JOIN vocabulary_entries ve ON ve.enrollment_id = s.enrollment_id AND ve.gloss_id = q.gloss_id
+        WHERE s.enrollment_id = ${enrollmentId}
+          AND a.answered_at >= ve.created_at
+          AND (s.practice_day IS NOT NULL OR s.status IN ('preparing', 'ready'))
+        GROUP BY q.gloss_id
+        HAVING min(coalesce(s.practice_day, ${day}::date)) = ${day}::date
+        ORDER BY q.gloss_id`);
+      return rows.rows.map((row) => row.gloss_id);
     },
 
     /** Phase 29 (spec D13). Whose list a session belongs to, so a use case
