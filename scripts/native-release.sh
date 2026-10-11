@@ -124,6 +124,9 @@ build_submit_publish() {
   fi
   submit "$build_id"
   publish "$build_id"
+  if [ "$platform" = ios ]; then
+    echo "::notice::New iOS build $build_id is on TestFlight. External testers get it only once it is in their group: TestFlight → Friends → Builds → + (docs/runbooks/ios.md)."
+  fi
 }
 
 if [ "$fp" = "$newest_runtime" ] && [ "$too_old" = true ] && [ "$rollback" = 0 ]; then

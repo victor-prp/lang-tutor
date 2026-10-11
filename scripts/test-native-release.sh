@@ -242,6 +242,23 @@ fixture fp1 b1 fp1 b1; export NOW="$(days_later 81)"; run android
 expect_calls "android builds never expire: 81 days old still updates only" 0 \
   "yes:eas update --branch production --platform android" "no:eas build "
 
+# Final review: every case above fixes NOW, so production's default needs its own.
+fixture fp1 b1 fp1 b1; unset NOW; run ios
+expect_calls "NOW unset: the clock is read (a build from 2026-01-01 is long past 80 days)" 0 \
+  "yes:eas build --platform ios --profile production --wait"
+
+# A new iOS build reaches external testers only once it is in their group.
+fixture fp2 b1 fp1 b1; run ios
+said "a new iOS build: a notice says to add it to TestFlight's Friends group" '::notice::.*b-new.*Friends'
+fixture fp1 b1 fp1 b1; export NOW="$(days_later 81)"; run ios
+said "and so does the 80-day rebuild, which nobody asked for" '::notice::.*b-new.*Friends'
+fixture fp1 b1 fp1 b1; run ios
+if grep -q 'Friends' "$OUT"; then fail "an update alone says nothing about the group" "$(cat "$OUT")"
+else ok "an update alone says nothing about the group"; fi
+fixture fp2 b1 fp1 b1; run android
+if grep -q 'Friends' "$OUT"; then fail "android has no such group" "$(cat "$OUT")"
+else ok "android has no such group"; fi
+
 echo
 echo "arguments"
 

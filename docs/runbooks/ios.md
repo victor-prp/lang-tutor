@@ -129,7 +129,7 @@ The `ios` job runs `scripts/native-release.sh ios` from the tag's checkout:
 |---|---|
 | `Same native layer as build …: publishing … over the air.` | `eas update`. Phones take it on their next open, or after 30 minutes away |
 | `Build … has no update yet, so it never reached TestFlight: submitting it first.` | A rerun after a failed submit: `eas submit`, then `eas update` |
-| `The native layer changed: building, submitting to TestFlight, then publishing …` | `eas build`, `eas submit`, `eas update`. Add the build to the Friends group (below) |
+| `The native layer changed: building, submitting to TestFlight, then publishing …` | `eas build`, `eas submit`, `eas update`, then a `::notice::` to add the build to the Friends group (below) |
 | `Build … is more than 80 days old and TestFlight expires it at 90: building anew …` | The same, with no native change: a fresh build before the old one expires |
 | a `::warning::` about the native layer, on a rollback | Nothing. Release a fix forward |
 | a `::warning::` that the build is more than 80 days old, on a rollback | The update was published, but a rollback never builds. Release forward soon |
