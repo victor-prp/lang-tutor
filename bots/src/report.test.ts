@@ -68,7 +68,7 @@ test('a report is one Sonnet call with no tools and three turns, tagged with bot
 
 test('the seventh report call in one run is refused before anything is spawned', async () => {
   assert.equal(MAX_REPORTS_PER_RUN, 6);
-  // Six calls at their timeout still leave most of the job's 30 minutes to the day's play.
+  // Six calls at their timeout still leave most of the job's 55 minutes to the day's play.
   assert.equal(REPORT_TIMEOUT_MS, 2 * 60_000);
   const claude = fakeClaude();
   const reporter = createReporter({ run: claude.run, runId: 'r' });

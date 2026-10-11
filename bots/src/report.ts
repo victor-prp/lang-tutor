@@ -21,7 +21,7 @@ import type { BotState } from './state.ts';
 /** One per bot in the roster: a week's reports, and no more. */
 export const MAX_REPORTS_PER_RUN = 6;
 
-/** One report call, at most: six of them must leave most of the job's 30 minutes to the day's play. */
+/** One report call, at most: six of them must leave most of the job's 55 minutes to the day's play. */
 export const REPORT_TIMEOUT_MS = 2 * 60_000;
 
 /** Runs the CLI with these arguments and gives back its stdout; rejects on a non-zero exit. */

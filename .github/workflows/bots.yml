@@ -32,7 +32,9 @@ jobs:
     # Skipped on forks, and unless Victor has turned the bots on.
     if: github.repository_owner == 'victor-prp' && vars.BOTS_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Under the hourly cadence: a run that takes longer only queues the next one
+    # (concurrency above), and a killed run loses at most one session (driver.ts).
+    timeout-minutes: 55
     permissions:
       contents: write   # pushes the bots-state branch after every bot (D17)
       issues: write     # the weekly issue (D22)
