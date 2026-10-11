@@ -1,0 +1,11 @@
+# CI fixture (spec §6): ten words for the dry run, none in the seed or an e2e spec, each with a MockServer lookup in e2e/botsDryRun.ts.
+mestolo
+ciottolo
+bollitore
+prato
+sella
+porto
+candela
+noce
+camino
+brocca
