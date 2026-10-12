@@ -42,6 +42,7 @@ import {
 import type { Logger } from '../logger';
 import type { ItemResult, PhotoImportItemRow, PhotoImportRow } from '../repo/photoImports';
 import { authorizeEnrollment } from './access';
+import { requestStock } from './stock';
 import type { LlmClient, VisionClient } from './llm';
 import type { Repos, Transaction } from './transaction';
 
@@ -258,6 +259,8 @@ export function createPhotoImportService({
         if (!(await photoImport.transition(importId, ['read'], 'saved'))) {
           throw new PhotoImportConflict(importId, 'not ready to save');
         }
+        // Phase 43 (spec D3, ruling R3). The next session in stock, if the list has none.
+        await requestStock(repos, { enrollment_id: row.enrollmentId, reason: 'save' });
         return { entries, items, repeated: false };
       });
       if (!outcome.repeated) {
