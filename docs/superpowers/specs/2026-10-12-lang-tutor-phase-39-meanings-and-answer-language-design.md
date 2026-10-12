@@ -155,6 +155,8 @@ off, where speaking is not required; `known_at` then holds in later sessions wit
 export type FamilyGloss = {
   glossId: string;
   lexemeId: string;
+  /** Its lexeme's lemma (vocabulary_entries.lemma): what a family's label is made of. */
+  lemma: string;
   /** Its Hebrew meaning: what an intro card lists as known. */
   key: string;
   savedAt: string;
