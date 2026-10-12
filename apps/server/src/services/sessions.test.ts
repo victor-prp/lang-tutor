@@ -45,6 +45,7 @@ describe('repos', () => {
       resolvePendingRetry: notStubbed,
       // Phase 43 (spec D1–D4).
       markStarted: notStubbed,
+      lockNextSession: notStubbed,
       findOpen: notStubbed,
       findSessionGlosses: notStubbed,
       findNewestDevices: notStubbed,
@@ -408,10 +409,11 @@ const LEXEME = lexeme('l1');
 /** Phase 39 (spec D4). No family stored yet. */
 const noFamilies = { glossFamilies: stub<GlossFamiliesRepo>({ load: async () => [] }) };
 // Phase 43 (spec D4, D5): and no session open, so create builds one with nothing in flight.
-const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn' | 'findOpen'> = {
+const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn' | 'findOpen' | 'lockNextSession'> = {
   findAnswersOn: async () => [],
   findIntroducedOn: async () => [],
   findOpen: async () => ({}),
+  lockNextSession: async () => {},
 };
 const noHistory = {
   ...noFamilies,
@@ -449,6 +451,7 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
         session: stub<SessionRepo>({
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'list' }) as never,
           findOpen: async () => ({}),
+          lockNextSession: async () => {},
           insertPreparingSession: async () => 's1',
           findAnswersOn: async (enrollmentId, day) => {
             reads.answers = [enrollmentId, day];

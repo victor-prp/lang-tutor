@@ -106,6 +106,14 @@ export function createSessionRepo(tx: Tx) {
     insertPreparingSession: (userId: string, enrollmentId: string, devices: Devices): Promise<string> =>
       insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', ...devices }),
 
+    /** Phase 43 (review C1). Serializes, per enrollment, the use cases that make
+     *  its next session, create and the stock job: the second waits for the
+     *  first to commit, then reads what it made rather than racing it into the
+     *  index. Held to the end of the transaction. */
+    lockNextSession: async (enrollmentId: string): Promise<void> => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`next-session:${enrollmentId}`}, 0))`);
+    },
+
     /** Phase 43 (spec D2). Starts a ready session: true when this call started
      *  it, false when it was started already, is not ready, or is unknown. A
      *  second started session of the enrollment is SessionOpen. */

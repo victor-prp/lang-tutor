@@ -58,6 +58,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
       session: stub<SessionRepo>({
         findAnswersOn: async () => [],
         findIntroducedOn: async () => [],
+        lockNextSession: async () => {},
         insertPreparingSession: async (...args) => {
           inserted.push(args);
           return 's_new';

@@ -401,6 +401,8 @@ export function createSessionService({
           permission: 'session.practice',
         });
 
+        // Review C1. A double tap, or the stock job, waits here for the other.
+        await session.lockNextSession(enrollmentId);
         const open = await session.findOpen(enrollmentId);
         if (open.started) throw new SessionOpen(enrollmentId);
         if (open.stock) {
@@ -1423,6 +1425,8 @@ export function createSessionService({
         outcome = await transaction(async (repos): Promise<Stocked> => {
           const enrolled = await repos.enrollment.findById(enrollmentId);
           if (!enrolled) return { why: 'no_enrollment' };
+          // Review C1. A create running now finishes first, and its stock is seen.
+          await repos.session.lockNextSession(enrollmentId);
           if ((await repos.session.findOpen(enrollmentId)).stock) return { why: 'stocked' };
           if (!(await repos.session.findLatest(enrollmentId))) return { why: 'seed_next' };
           const devices =
