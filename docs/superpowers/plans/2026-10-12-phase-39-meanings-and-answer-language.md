@@ -284,6 +284,18 @@ export function familyChanges(stored: readonly StoredFamilyView[], computed: Fam
 
 ---
 
+### Task 7b: e2e specs under gloss families (added while building, Task 4 review)
+
+**Why:** `e2e/tests/support/lexemes.ts` saves "four senses of two words, shared by every spec that saves and then practises them" (PROCHITALA plus LUK or ZAMOK). Under phase 39 those are two families: a session asks at most one gloss of each, and a family's second meaning waits until the first is known in every live skill (spec D2, D3). Specs that walk four cards now break, and `ambiguous-questions.spec.ts`'s premise — two meanings of one form in one session — is impossible by design.
+
+**Files:** `e2e/tests/support/lexemes.ts` and every spec that saves its fixtures and practises them. Known: `next-session.spec.ts` (~52–56), `meaning-recall.spec.ts` (~52, 64), `progress.spec.ts` (~65), `question-types.spec.ts` (~83), `ambiguous-questions.spec.ts` (~87). Check also `vocabulary`, `sign-in`, `tutor`, `session`, `speaking`, `sentence-cards`, `listening-variety`, `glosses`, `photo-import`.
+
+- [ ] **Step 1:** Run the whole e2e suite (`npm run e2e` from the worktree root) and list every failure with its cause.
+- [ ] **Step 2:** For each spec, keep what it was written to verify. Where a spec needs N cards of distinct words, give it single-meaning words (add fixtures to `lexemes.ts` rather than changing the shared homograph ones that phase 34 specs rely on). Where a spec verifies two meanings of one form (phase 34's alternative verdict, known-right options), make the first meaning known by seeding memory (`seedMemory` from `support/memory.ts`, stability ≥ 7 in every live skill) and assert the phase 39 behaviour: the second meaning arrives — as a `new_meaning` card when never asked — and the two never share a session.
+- [ ] **Step 3:** Run the whole suite again — green. **Commit** `test(e2e): specs under gloss families (phase 39 D5)`.
+
+---
+
 ### Task 8: Day tests with families
 
 **Files:**
