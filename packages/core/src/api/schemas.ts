@@ -412,6 +412,10 @@ export const NextStepRequestSchema = z.union([
     // opened its Hebrew sentence. Optional, so an older app is unchanged; stored for
     // `cloze_typed` only, and never changed by a retry.
     hint_opened: z.boolean().optional(),
+    // Phase 41 (spec D2). On a first answer to a typed cloze that the rule calls
+    // wrong: the app waits while the server asks the model whether the word fits
+    // the gap. Optional, so an older app is graded as before.
+    check_fit: z.boolean().optional(),
   }),
   // Phase 25 (spec D5). A speaking card answered without audio: passed, or
   // "show me the answer".
@@ -1037,6 +1041,12 @@ export const LlmTranscriptSchema = z.object({ heard: z.string() });
 // to a typed verdict in the server (domain/judge.ts).
 export const LlmMeaningJudgeSchema = z.object({
   verdict: z.enum(['right', 'other_sense', 'wrong']),
+});
+
+// Phase 41 (spec D2). The model's verdict on whether a typed word fills a
+// fill-in sentence's gap. `fits` is recorded as `alternative` (domain/judge.ts).
+export const LlmFitJudgeSchema = z.object({
+  verdict: z.enum(['fits', 'wrong']),
 });
 
 // Phase 27 (spec D4). The model's verdict on a sentence translation.
