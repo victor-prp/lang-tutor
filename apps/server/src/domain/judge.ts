@@ -1,5 +1,5 @@
-import type { SentenceTranslationQuestion, TypedVerdict } from '@lang-tutor/core/api';
-import { LlmMeaningJudgeSchema, LlmTranslationJudgeSchema } from '@lang-tutor/core/api/schemas';
+import type { ClozeTypedQuestion, SentenceTranslationQuestion, TypedVerdict } from '@lang-tutor/core/api';
+import { LlmFitJudgeSchema, LlmMeaningJudgeSchema, LlmTranslationJudgeSchema } from '@lang-tutor/core/api/schemas';
 import { normaliseHebrew, normaliseTyped, type JudgedQuestion } from '@lang-tutor/core/domain';
 
 import { LANGUAGES, type LanguageCode } from './languages';
@@ -163,5 +163,39 @@ export function parseJudge(type: JudgedQuestion['type'], raw: string): TypedVerd
       return parseMeaningJudge(raw);
     case 'sentence_translation':
       return parseTranslationJudge(raw);
+  }
+}
+
+/**
+ * Phase 41 (spec D2). Whether a word the card's list missed fills a typed
+ * cloze's gap. The learner saw the sentence with its gap and no translation, so
+ * the model sees the same: whether the answer makes it a correct, natural
+ * sentence, whatever it then means. A word in a form the gap cannot take does
+ * not fit. Only `fits` and `wrong`: a slip of the word meant is the rule's
+ * `near_miss`, decided before any call.
+ */
+export function buildFitJudgePrompt(question: ClozeTypedQuestion, language: LanguageCode, answer: string) {
+  const name = LANGUAGES[language].name;
+  const system = [
+    `Your task: ${JUDGE_MARKER}. A learner of ${name} was shown a ${name} sentence with one word left out, marked ___, and no translation, and typed a word for the gap.`,
+    'word_meant is the word the sentence was written with; the answer is another word.',
+    'Put the answer in the gap and read the sentence on its own.',
+    'Return JSON only, matching the supplied schema, with one field, verdict:',
+    '- "fits": the sentence is correct and natural with the answer, whatever it then means, and the answer is in the form the gap needs, agreeing with the words around it.',
+    '- "wrong": anything else, including a sentence that is ungrammatical, unnatural or meaningless with the answer, or an answer in a form the gap cannot take.',
+  ].join('\n');
+  const sentence = `${question.sentence.slice(0, question.gap.start)}___${question.sentence.slice(question.gap.end)}`;
+  const user = JSON.stringify({ sentence, word_meant: question.answer, answer });
+  return { system, user, schema: LlmFitJudgeSchema };
+}
+
+/** The model's fit verdict, or null when it cannot be read. */
+export function parseFitJudge(raw: string): 'fits' | 'wrong' | null {
+  if (raw.trim() === '') return null;
+  try {
+    const parsed = LlmFitJudgeSchema.safeParse(JSON.parse(unfence(raw)));
+    return parsed.success ? parsed.data.verdict : null;
+  } catch {
+    return null;
   }
 }
