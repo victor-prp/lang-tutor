@@ -376,6 +376,14 @@ describe('a second try (phase 34 D9)', () => {
     expect(feedbackFor(MEANING, { text: 'לקרוא', judged: 'wrong' }, PENDING_MEANING)).toEqual(wrong('להזמין'));
   });
 
+  // Phase 42 review I1. The first answer typed again was told it fits a moment ago:
+  // the fit check never runs on a retry, so its banner must not turn red.
+  it('the first answer typed again keeps the first answer\'s banner', () => {
+    expect(feedbackFor(CLOZE, { text: ' Cantavamo ' }, { answer: 'cantavamo', wording: 'word' })).toEqual({ ...OTHER_WORD, line: 'parlavamo' });
+    expect(feedbackFor(TRANSLATE, { text: 'Uniamo le forze', judged: 'wrong' }, { answer: 'Uniamo le forze.', wording: 'word' })).toEqual({ ...OTHER_WORD, line: 'Uniamo' });
+    expect(feedbackFor(MEANING, { text: 'סֵפֶר', judged: 'wrong' }, PENDING_MEANING)).toMatchObject({ tone: 'correct', verdict: 'alternative' });
+  });
+
   // Review Focus 3: another accepted word on the second try is still right.
   it('another accepted word on the second try keeps its own right banner', () => {
     expect(feedbackFor(typed, { text: 'vetrata' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'finestra' });
