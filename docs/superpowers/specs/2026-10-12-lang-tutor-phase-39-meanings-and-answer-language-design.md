@@ -583,17 +583,24 @@ renumbered (`npx drizzle-kit generate` on the merged schema).
 
 ## Left for Victor
 
-After merge, from the main checkout:
+After merge, from the main checkout, in this order:
 
 ```bash
+rm e2e/tests/answer-language.spec.ts        # a stray copy, see below; git pull refuses to overwrite it
+rm -rf e2e/test-results apps/mobile/dist    # optional: ignored build output from the same mistake
 git pull
 npm install
-npm run db:migrate      # lane 0 gets 0030
+npm run db:migrate                          # lane 0 gets 0030
 # restart lane 0's server (npm run server)
 ```
 
 Then release as usual. Installed apps below API level 3 see the update screen once and take the
 over-the-air update.
+
+**The stray file.** While building, one subagent ran an e2e spec from the main checkout by mistake.
+It left an untracked copy of this branch's new `answer-language.spec.ts` there, plus ignored build
+output. Lane 0's dev database and server were not touched. The permission system refused the
+subagent's own clean-up, and the session left it to you rather than work around that refusal.
 
 **What to expect on lane 0.** The first session after the deploy records 20 families. No gloss is yet
 known in all five skills, so in each family one gloss is current and the rest wait: 43 glosses, 29
@@ -605,6 +612,12 @@ debugging queries in D4 show who waits on what.
 
 - **The pace is slow, on purpose.** Every skill at 7 days, with one speaking card per session, holds
   a family's next meaning for a week or two per meaning. `KNOWN_STABILITY` is the knob.
+- **A small list may never unlock a second meaning.** Found building the day tests: on a short list asked many times
+  a day, a learner around 80–85% right keeps missing some skill of each word, a miss drops that skill's stability to
+  about 1, and a second right answer the same day adds nothing, so the word is never known in all five skills at
+  once and its family's next meaning never arrives. Lane 0's list is large enough not to hit it in the day runs. If
+  it shows, the knob is to count a skill once it has *reached* `KNOWN_STABILITY` (per-skill "known once"), which needs
+  a per-skill record beside `known_at`.
 - **Already-practised meanings fade while they wait** (D3). They are relearned when their turn comes,
   as ordinary cards. Exempting them is a one-line change in rule 4 if the cost shows.
 - **The bots' numbers move.** Fewer glosses are active, and families serialise their meanings, so
@@ -615,4 +628,36 @@ debugging queries in D4 show who waits on what.
 
 ## As built
 
-Rulings made while building go here.
+Rulings made while building. The text above stands unless a line here says otherwise.
+
+- **New family ids come from the database (D4, ADR 0002).** `familyChanges(stored, computed, at)` gives a new family the
+  placeholder `new:<index>`; `repo/glossFamilies.ts` `apply` inserts it with `gen_random_uuid()` and swaps the
+  placeholder for the real id in its members and events. No service reaches for randomness. `at` is the service's
+  clock, stamped as `known_at`; `since` and an event's `at` are the database's `now()`.
+- **Event details (D4).** A member that leaves every family is logged `to_state: null` with evidence `{}` (it has no
+  computed evidence). A member moved by a merge gets one `joined` event carrying its new state, no separate `left`.
+  Families created in one refresh share `created_at` (the transaction's `now()`), so a tie between two of them falls
+  to id order.
+- **`liveDimensions(listening, speaking)`** in `choose.ts` is the one place both `chooseWords` and the families rule
+  read the live skills from.
+- **`generatedAs` (D6).** The prepare job maps `new_meaning` to `multiple_choice` at every generation site; the arms
+  `taskFor` and `generatedContent` (`domain/distractors.ts`) keep for `new_meaning` throw, so a caller that skips the
+  mapping fails loudly. `findRecentContexts` files a `new_meaning` card's sentence under `multiple_choice`, so the two
+  share one avoid list, capped once at `MAX_AVOID`, newest first.
+- **`MultipleChoiceView` draws its own context line only when no `prompt` is passed (D6)**; the `new_meaning` prompt
+  draws it, once.
+- **The bots** read `new_meaning` as written receptive, rung 1, since `RUNGS` does not list it.
+- **The wrong-script refusal (D10)** names the language in English in its 422 body ("Hebrew"). A first empty answer
+  is still `wrong`, as before; only a pending second try gives up on empty text.
+- **e2e under families (Task 7b, added while building).** `support/lexemes.ts`'s shared fixtures are two-meaning
+  words, so each is now a family. Specs that walked four cards over them now expect one card per word, or use new
+  single-meaning fixtures (`SINGLE_WORDS`). `ambiguous-questions.spec` seeds one meaning of each word known, so the
+  other arrives as `new_meaning` and the two never share a session. `progress.spec` seeds levels so that one word
+  reaches level 2 deterministically.
+- **Day tests (D12).** The families-over-days run uses a learner who misses one card in ten, not phase 37's one in
+  five: with a miss every fifth card on a twelve-gloss list at six sessions a day, no gloss ever reaches known in all
+  five skills. The first meaning is known on day 8, and the second arrives that session as `new_meaning`. See
+  *Risks*.
+- **Fixture lemmas.** A lemma two lexemes share anonymises to the first lexeme's id.
+- **An existing integration test** that saved twelve meanings of one word to get more than ten picks now saves twelve
+  words: twelve meanings of one word are one family.
