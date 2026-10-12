@@ -96,6 +96,20 @@ describe('NextStepRequestSchema', () => {
     expect(NextStepRequestSchema.safeParse({ option_index: 0 }).success).toBe(false);
   });
 
+  // Phase 38 (spec D4). Whether a typed cloze's hint was opened: optional and boolean.
+  it('keeps hint_opened on a text answer, and takes a text answer without it', () => {
+    expect(NextStepRequestSchema.parse({ question_id: 'q1', text: 'spent', hint_opened: true })).toEqual({
+      question_id: 'q1',
+      text: 'spent',
+      hint_opened: true,
+    });
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'spent' }).success).toBe(true);
+  });
+
+  it('rejects a hint_opened that is not a boolean', () => {
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'spent', hint_opened: 'yes' }).success).toBe(false);
+  });
+
   it('rejects a negative option_index', () => {
     expect(NextStepRequestSchema.safeParse({ ...valid, option_index: -1 }).success).toBe(false);
   });

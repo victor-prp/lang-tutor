@@ -393,6 +393,10 @@ export const NextStepRequestSchema = z.union([
     question_id: z.string().min(1),
     text: z.string().max(100),
     retry: z.boolean().optional(),
+    // Phase 38 (spec D4). On a first answer to a typed cloze: whether the learner
+    // opened its Hebrew sentence. Optional, so an older app is unchanged; stored for
+    // `cloze_typed` only, and never changed by a retry.
+    hint_opened: z.boolean().optional(),
   }),
   // Phase 25 (spec D5). A speaking card answered without audio: passed, or
   // "show me the answer".
@@ -1034,7 +1038,9 @@ export const LlmTranslationJudgeSchema = z.object({
 // the schema's. `alternatives` (other right answers for a typed item) is
 // optional and capped at twice the five kept, for the reason
 // LlmTranslationSchema.alternatives gives: a missing or surplus list must never
-// fail a session the model otherwise answered.
+// fail a session the model otherwise answered. Phase 38 (spec D2): a typed gap
+// asks for ten, the cap itself, so the server trims a longer list before this
+// schema reads it (domain/distractors.ts withEmptyLists).
 //
 // Phase 34 (spec D4, D4a). `distractors` goes from three to six, of which the
 // domain keeps three. That is the same trade as `entries` above, so it was

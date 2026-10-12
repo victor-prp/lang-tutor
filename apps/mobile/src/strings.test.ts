@@ -64,3 +64,10 @@ describe('second-try strings (phase 34 D9)', () => {
     expect(strings.retryAnotherMeaning).toBe('יש פירוש נוסף — נסו שוב');
   });
 });
+
+describe('typed gap hint strings (phase 38 D1, D3)', () => {
+  it('names what the hint shows, and says why it opened on a second try', () => {
+    expect(strings.sentenceHint).toBe('רמז: הצגת המשפט בעברית');
+    expect(strings.retryMeantAnother).toBe('אבל התכוונו למילה אחרת — היעזרו במשפט בעברית ונסו שוב');
+  });
+});

@@ -81,22 +81,23 @@ export const STUB_GAP_LEMMA = 'прочитать';
  *  (domain/distractors.ts taskFor), whichever position asks it: Hebrew wrong
  *  options for a choice of meanings (and a board's), Russian ones for a choice
  *  of words or of a gap, `alternatives` for a typed card, and the one stub
- *  sentence for a gap to type and a sentence to translate. */
-export function generationStub(alternatives: string[] = []): Record<string, Record<string, unknown>> {
+ *  sentence for a gap to type and a sentence to translate. Phase 38:
+ *  `gapAlternatives`, the words that also fit the typed gap. */
+export function generationStub(alternatives: string[] = [], gapAlternatives: string[] = []): Record<string, Record<string, unknown>> {
   return {
     meaning: { distractors: WRONG_HEBREW },
     word: { distractors: WRONG_RUSSIAN },
     gap: { distractors: WRONG_RUSSIAN },
     typed: { distractors: [], alternatives },
-    sentence: { distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] },
+    sentence: { distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: gapAlternatives },
     translate: { distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE },
   };
 }
 
 /** Registers the generation stub: every position's item answered by its task,
  *  for as many positions as a list session holds. */
-export async function expectGeneration(request: APIRequestContext, alternatives: string[] = []): Promise<void> {
-  await expectGeminiByTask(request, generationStub(alternatives), SESSION_LENGTH);
+export async function expectGeneration(request: APIRequestContext, alternatives: string[] = [], gapAlternatives: string[] = []): Promise<void> {
+  await expectGeminiByTask(request, generationStub(alternatives, gapAlternatives), SESSION_LENGTH);
 }
 
 /** Whether an option is one of the stub's wrong words. Case-blind: a gap's wrong

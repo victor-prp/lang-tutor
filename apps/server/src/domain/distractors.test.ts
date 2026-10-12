@@ -110,6 +110,14 @@ describe('parseLlmDistractors', () => {
     expect(parseLlmDistractors(JSON.stringify({ items: [{ distractors: [] }] }))).toBeNull();
   });
 
+  // Phase 38 (spec D2). A typed gap asks for ten, the schema's cap: one more must
+  // cost the surplus, never the session.
+  it('keeps the first ten alternatives of a longer list rather than refusing the answer', () => {
+    const many = Array.from({ length: 12 }, (_, index) => `word${index}`);
+    const parsed = parseLlmDistractors(JSON.stringify({ items: [{ key: 'q1', distractors: [], alternatives: many }] }));
+    expect(parsed?.items[0].alternatives).toEqual(many.slice(0, 10));
+  });
+
   // Phase 23, Review Focus 4: null is how structured output spells "none", and
   // a typed item has no wrong options to give. Neither may fail the parse; the
   // per-task validation decides what an empty list costs.
@@ -614,6 +622,12 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(prompt.system).toContain('3 to 12 words');
       expect(prompt.system).toContain('3 to 10 words');
       expect(prompt.system).toContain(DISTRACTOR_MARKER);
+    });
+    it('asks a sentence for every word that fits its gap read alone, at most ten (phase 38 D2)', () => {
+      expect(prompt.system).toContain('would fill the gap with the sentence read on its own, without its translation');
+      expect(prompt.system).toContain('at most 10');
+      expect(prompt.system).toContain('whatever it then means, not only words of the same meaning');
+      expect(prompt.system).toContain('agreeing in gender, number and case with the words around it');
     });
     it('sends the example, its translation and the sentences to avoid', () => {
       const sent = JSON.parse(prompt.user) as { items: Record<string, unknown>[] };

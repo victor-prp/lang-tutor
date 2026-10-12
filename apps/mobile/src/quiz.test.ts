@@ -225,6 +225,17 @@ describe('the second try (phase 34 D9)', () => {
     });
   });
 
+  describe('hint_opened (phase 38 D4)', () => {
+    it('goes with a first text answer, show the answer included', () => {
+      expect(nextStepRequest('c1', { text: 'spent' }, null, true)).toEqual({ question_id: 'c1', text: 'spent', hint_opened: true });
+      expect(nextStepRequest('c1', { text: '' }, null, false)).toEqual({ question_id: 'c1', text: '', hint_opened: false });
+    });
+    it('never with a retry, and not when the card has none', () => {
+      expect(nextStepRequest('c1', { text: 'spent' }, PENDING, true)).toEqual({ question_id: 'c1', text: 'spent', retry: true });
+      expect(nextStepRequest('c1', { text: 'spent' }, null)).toEqual({ question_id: 'c1', text: 'spent' });
+    });
+  });
+
   describe('the second submit', () => {
     it('goes without retry first, and with retry: true once the card is held', () => {
       const ready: QuizState = { ...ON_CARD, judging: 'idle' };

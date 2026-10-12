@@ -126,7 +126,7 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
           ) : null}
         </>
       ) : null}
-      {retry !== null && !answered ? <RetryNotice retry={retry} /> : null}
+      {retry !== null && !answered ? <RetryNotice retry={retry} type={question.type} /> : null}
       <TextInput
         ref={input}
         testID="typed-input"

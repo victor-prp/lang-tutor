@@ -1222,7 +1222,8 @@ export const JUDGE_CASES: JudgeCase[] = [
  *    (not degraded: a degrading prompt means a learner sees a typed translation
  *    instead of the card); tier 2 is that no `offSense` word, one that only the
  *    wrong sense of a polysemous word would bring, appears as a whole word in the
- *    sentence or its translation.
+ *    sentence or its translation. Phase 38 (spec D2): a sentence item also lists at
+ *    least one other word that fits its gap with the sentence read alone.
  */
 export type SentenceCaseItem = {
   form: string;

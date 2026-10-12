@@ -1,7 +1,9 @@
 import type { Question } from '@lang-tutor/core/api';
 import { isChoice, type ChoiceQuestion, type QuestionType } from '@lang-tutor/core/domain';
+import { asc, eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
+import { answers } from '../../src/db/schema';
 import { findGap } from '../../src/domain/cloze';
 import { NOTHING_GENERATED, generatedContent, type Generated, type QuestionContent } from '../../src/domain/distractors';
 import { LANGUAGES } from '../../src/domain/languages';
@@ -126,4 +128,15 @@ export async function insertListSession(
 export async function readStoredAnswers(db: Db, sessionId: string) {
   const record = await withTx(db, (tx) => createSessionRepo(tx).loadSession(sessionId));
   return record?.answers ?? [];
+}
+
+/** Phase 38 (spec D4). Each stored answer's hint_opened, by position. The domain's
+ *  answer record does not carry it: only a count over the table reads it. */
+export async function readHintOpened(db: Db, sessionId: string): Promise<(boolean | null)[]> {
+  const rows = await db
+    .select({ hintOpened: answers.hintOpened })
+    .from(answers)
+    .where(eq(answers.sessionId, sessionId))
+    .orderBy(asc(answers.position));
+  return rows.map((row) => row.hintOpened);
 }

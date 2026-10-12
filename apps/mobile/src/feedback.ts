@@ -95,11 +95,18 @@ function answerFeedback(question: Question, answer: CardAnswer): Feedback {
 
 /** Phase 34 (spec D9). What a card held for its second try says: the first
  *  answer was right, and another saved word, or on a typed meaning another
- *  meaning, is there to find. */
-export function retryNotice(pending: PendingRetry): { right: string; again: string } {
+ *  meaning, is there to find. Phase 38 (spec D3): on a typed gap, that another
+ *  word was meant and the Hebrew sentence shows which. The card's type decides,
+ *  so `wording` keeps the two values every app build can read. */
+export function retryNotice(type: Question['type'], pending: PendingRetry): { right: string; again: string } {
   return {
     right: strings.retryRight(pending.answer),
-    again: pending.wording === 'meaning' ? strings.retryAnotherMeaning : strings.retryAnotherWord,
+    again:
+      type === 'cloze_typed'
+        ? strings.retryMeantAnother
+        : pending.wording === 'meaning'
+          ? strings.retryAnotherMeaning
+          : strings.retryAnotherWord,
   };
 }
 

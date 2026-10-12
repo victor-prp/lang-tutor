@@ -759,10 +759,23 @@ function sentenceTier2(kase: SentenceCase, answer: LlmDistractors): Check[] {
         },
       ];
     }
-    if (!item.offSense?.length) return [];
+    // Phase 38 (spec D2). The typed gap hides its Hebrew, so its alternatives are the
+    // words that fit the sentence read alone; an everyday sentence admits one.
+    const fits: Check[] =
+      kase.task === 'sentence'
+        ? [
+            {
+              name: `${item.form}: lists another word that fits the gap read alone`,
+              ok: (got?.alternatives ?? []).length > 0,
+              detail: `${got?.sentence ?? '(none)'} +${(got?.alternatives ?? []).join('/')}`,
+            },
+          ]
+        : [];
+    if (!item.offSense?.length) return fits;
     const seen = new Set([...wordsOf(got?.sentence ?? ''), ...wordsOf(got?.translation ?? '')]);
     const offenders = item.offSense.filter((text) => seen.has(text.toLowerCase()));
     return [
+      ...fits,
       {
         name: `${item.form}: no word of another sense`,
         ok: offenders.length === 0,

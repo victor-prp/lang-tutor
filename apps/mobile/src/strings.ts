@@ -83,6 +83,8 @@ export const strings = {
   // Phase 27 (spec D5, D6): the gap and translation cards.
   questionInstructionCloze: 'איזו מילה חסרה?',
   questionInstructionClozeTyped: (language: string) => `השלימו את המילה החסרה ב${languageName(language)}`,
+  // Phase 38 (spec D1). The typed gap's Hebrew sentence is a hint, named by what it shows.
+  sentenceHint: 'רמז: הצגת המשפט בעברית',
   questionInstructionTranslate: (language: string) => `תרגמו ל${languageName(language)}`,
   translationReference: 'תרגום לדוגמה:',
   // Phase 25 (spec D7).
@@ -114,6 +116,9 @@ export const strings = {
   retryRight: (answer: string) => `✓ נכון, ⁨${answer}⁩ מתאים כאן.`,
   retryAnotherWord: 'יש מילה נוספת ששמרת — נסו שוב',
   retryAnotherMeaning: 'יש פירוש נוסף — נסו שוב',
+  // Phase 38 (spec D3). A typed gap's second try: the word fits, another was
+  // meant, and the Hebrew sentence, now open, says which.
+  retryMeantAnother: 'אבל התכוונו למילה אחרת — היעזרו במשפט בעברית ונסו שוב',
   resultsHeadlineGreat: 'מצוין!',
   resultsHeadlineGood: 'עבודה טובה!',
   resultsHeadlineKeepPractising: 'ממשיכים לתרגל',

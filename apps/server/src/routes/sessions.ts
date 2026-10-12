@@ -164,7 +164,7 @@ const nextStepRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current question',
   description:
-    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`. An answer that is right but is not the saved word (`alternative`) on a `typed_translation`, `say_translation` or `cloze_typed` card holds the card for one second try: the response carries the same card as `question`, with `pending_retry`, and the session does not move on or complete until the same card is answered again with `retry: true`, judged as the first answer was. An empty text, or a `pass` (`show_answer` or `skip`), with `retry: true` gives up. Without `retry`, an answer to the held card replays the first one.',
+    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`. An answer that is right but is not the saved word (`alternative`) on a `typed_translation`, `say_translation` or `cloze_typed` card holds the card for one second try: the response carries the same card as `question`, with `pending_retry`, and the session does not move on or complete until the same card is answered again with `retry: true`, judged as the first answer was. An empty text, or a `pass` (`show_answer` or `skip`), with `retry: true` gives up. Without `retry`, an answer to the held card replays the first one. A first `text` answer to a `cloze_typed` card may carry `hint_opened`, whether the learner opened its Hebrew sentence; it is stored with the answer and ignored on every other card and on a retry.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
@@ -318,7 +318,10 @@ export function createSessionsRouter(sessions: SessionService) {
     const answer =
       'text' in body ? { text: body.text } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index };
     try {
-      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer, { retry: body.retry ?? false });
+      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer, {
+        retry: body.retry ?? false,
+        hintOpened: 'text' in body ? body.hint_opened : undefined,
+      });
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
