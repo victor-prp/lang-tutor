@@ -43,6 +43,7 @@ import type {
   LlmTranslationSchema,
   MissedQuestionSchema,
   MultipleChoiceQuestionSchema,
+  NewMeaningQuestionSchema,
   NextStepRequestSchema,
   NextStepResponseSchema,
   PartOfSpeechSchema,
@@ -121,6 +122,7 @@ import type {
 // import of Zod, which is what lets ./index.ts stay a pure type barrel.
 
 export type MultipleChoiceQuestion = z.infer<typeof MultipleChoiceQuestionSchema>;
+export type NewMeaningQuestion = z.infer<typeof NewMeaningQuestionSchema>;
 export type ReverseChoiceQuestion = z.infer<typeof ReverseChoiceQuestionSchema>;
 export type TypedTranslationQuestion = z.infer<typeof TypedTranslationQuestionSchema>;
 export type ListenChoiceQuestion = z.infer<typeof ListenChoiceQuestionSchema>;

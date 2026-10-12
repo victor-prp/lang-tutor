@@ -44,6 +44,7 @@ export function dimensionRows(progress: GlossProgress, live: readonly Dimension[
 export function missedPair({ question, correct_answer }: MissedQuestion): { word: string; meaning: string } {
   switch (question.type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'listen_choice':
     case 'matching':
       return { word: question.question, meaning: correct_answer };

@@ -132,6 +132,25 @@ describe('NextStepRequestSchema', () => {
   });
 });
 
+// Phase 39 (spec D6).
+describe('NewMeaningQuestionSchema', () => {
+  const card = {
+    id: 'q', type: 'new_meaning', vocab_term_id: 'l', question: 'pick up', known_meanings: ['להרים'],
+    options: ['לאסוף', 'לבשל', 'לשבור', 'לנגן'], correct_option: 0, context: null,
+  };
+  it('parses in the question union, with its known meanings', () => {
+    const parsed = QuestionSchema.parse(card);
+    expect(parsed.type).toBe('new_meaning');
+    expect(QuestionSchema.safeParse({ ...card, context: { text: "She'll pick up the kids.", mark: { start: 6, end: 13 } } }).success).toBe(true);
+  });
+  it('rejects one without known_meanings, or without a context key', () => {
+    const { known_meanings: _known, ...bare } = card;
+    expect(QuestionSchema.safeParse(bare).success).toBe(false);
+    const { context: _context, ...noContext } = card;
+    expect(QuestionSchema.safeParse(noContext).success).toBe(false);
+  });
+});
+
 describe('QuestionSchema', () => {
   it('parses each of the three types', () => {
     expect(QuestionSchema.parse(QUESTION).type).toBe('multiple_choice');

@@ -47,6 +47,21 @@ const POOL: MultipleChoiceQuestion[] = Array.from({ length: 16 }, (_, i) => make
 // Phase 34 (spec D9). What every answer that opens no second try carries.
 const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
 
+// Phase 39 (spec D6). A new meaning is answered like a multiple choice.
+describe('new_meaning', () => {
+  const card: Question = {
+    id: 'n1', type: 'new_meaning', vocab_term_id: 'v1', question: 'pick up', known_meanings: ['להרים'],
+    options: ['לאסוף', 'לבשל', 'לשבור', 'לנגן'], correct_option: 0, context: null,
+  };
+  it('is a choice', () => {
+    expect(isChoice(card)).toBe(true);
+  });
+  it('is graded by option_index like a multiple choice', () => {
+    expect(evaluate(card, { option_index: 0 })).toMatchObject({ question_id: 'n1', is_correct: true, answer_string: 'לאסוף' });
+    expect(evaluate(card, { option_index: 2 })).toMatchObject({ is_correct: false, answer_string: 'לשבור' });
+  });
+});
+
 describe('pickQuestions', () => {
   it('returns exactly the requested number of questions', () => {
     expect(pickQuestions(POOL, SESSION_LENGTH, seededRng(1))).toHaveLength(SESSION_LENGTH);

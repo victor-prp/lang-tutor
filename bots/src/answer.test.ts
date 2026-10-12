@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import type { z } from 'zod';
 import type { QuestionSchema } from '@lang-tutor/core/api/schemas';
-import type { Dimension } from '@lang-tutor/core/domain';
+import { wrongScript, type Dimension } from '@lang-tutor/core/domain';
 
 import { rngFor } from './rng.ts';
 import { decide, matchCard, type Behaviour, type SavedWord } from './answer.ts';
@@ -278,6 +278,18 @@ test('an unmatchable card is marked unmatched and answered at random', () => {
   assert.equal(t.kind, 'text');
 });
 
+test('an unmatchable typed meaning is answered with a saved Hebrew meaning, never a target-language form', () => {
+  // Phase 39 (spec D10): the server refuses a Latin answer to a typed meaning (422 wrong_script),
+  // so answering one with a form would fail the day on every retry.
+  const card: Card = { ...base, type: 'typed_meaning', question: 'zebra', part_of_speech: 'noun', meaning: 'זברה', context: null };
+  const d = decide(card, memory(1), saved, always(0.5), calm);
+  assert.equal(d.detail.unmatched, true);
+  assert.equal(d.kind, 'text');
+  const text = d.kind === 'text' ? d.text : '';
+  assert.ok(saved.some((w) => w.meaning === text), `answered with a saved meaning, got "${text}"`);
+  assert.equal(wrongScript(text, 'he'), false);
+});
+
 test('the same inputs and rng give the same decision', () => {
   const rngA = (() => { let i = 0; return () => ((i++ * 0.37) % 1); })();
   const rngB = (() => { let i = 0; return () => ((i++ * 0.37) % 1); })();
@@ -292,4 +304,29 @@ test('a card that shows the lemma or the gloss key matches the word saved from a
   assert.equal(matchCard(listen, inflected)?.form, 'хочешь');
   const reverse: Card = { ...base, type: 'reverse_choice', question: 'לרצות', part_of_speech: 'verb', options: ['хотеть', 'мочь', 'знать', 'думать'], context: null };
   assert.equal(matchCard(reverse, inflected)?.form, 'хочешь');
+});
+
+const newMeaning: Card = {
+  ...base,
+  type: 'new_meaning',
+  question: 'cat',
+  known_meanings: ['חתול'],
+  options: ['כלב', 'חתולה', 'בית', 'סוס'],
+  correct_option: 1,
+  context: null,
+};
+
+test('a new-meaning card is a choice: answered right it picks the correct option', () => {
+  const d = decide(newMeaning, memory(0.9), saved, always(0.01), calm);
+  assert.equal(d.kind, 'option');
+  assert.equal((d as { index: number }).index, 1);
+  assert.equal(d.detail.outcome, 'right');
+  assert.deepEqual(d.detail.event, { type: 'new_meaning', correct: true });
+});
+
+test('a new-meaning card answered wrong picks another option', () => {
+  const d = decide(newMeaning, memory(0.1), saved, always(0.99), calm);
+  assert.equal(d.kind, 'option');
+  assert.notEqual((d as { index: number }).index, 1);
+  assert.equal(d.detail.outcome, 'wrong');
 });

@@ -214,3 +214,12 @@ test('(e) the mean true recall over every saved word and live dimension', () => 
   assert.equal(weekNumbers(state, 1, memory, [WR, WP]).e, (0.9 + 0.3 + 0.6 + 0) / 4);
   assert.equal(meanRecall(memory, [], [WR], 7), null);
 });
+
+test('a new-meaning card is placed as a written recognition choice and counts as one', () => {
+  // Phase 39 (spec D6): written receptive, rung 1; its right answer feeds memory like a choice's.
+  const log = [card(1, 'new_meaning', 'x', true), card(2, 'multiple_choice', 'x', true)];
+  const view = serverView(log);
+  assert.deepEqual(view[0], { dimension: WR, rung: 1, level: 1, r: null, implied: 1 });
+  assert.equal(view[1]?.dimension, WR);
+  assert.notEqual(view[1]?.r, null);
+});

@@ -8,6 +8,7 @@ import type { Logger } from './logger';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from './providers/gemini';
 import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
 import { createAuthRepo } from './repo/auth';
+import { createGlossFamiliesRepo } from './repo/glossFamilies';
 import { createGlossRepo } from './repo/glosses';
 import { createHealthRepo, type HealthRepo } from './repo/health';
 import { createMemoryRepo } from './repo/memory';
@@ -97,6 +98,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     vocabulary: createVocabularyRepo(tx),
     progress: createProgressRepo(tx),
     memory: createMemoryRepo(tx),
+    glossFamilies: createGlossFamiliesRepo(tx),
     jobs: boss ? createJobRepo(tx, boss) : NO_JOBS,
     photoImport: createPhotoImportRepo(tx),
     gloss: createGlossRepo(tx),

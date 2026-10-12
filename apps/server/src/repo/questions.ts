@@ -37,6 +37,9 @@ export type QuestionRow = {
   contextMarkEnd: number | null;
   sentenceMarkStart: number | null;
   sentenceMarkEnd: number | null;
+  /** Phase 39 (spec D6). The meanings a new_meaning card lists as known; null
+   *  on every other type (questions_known_meanings_valid). */
+  knownMeanings: string[] | null;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -62,6 +65,7 @@ export const questionColumns = {
   contextMarkEnd: questions.contextMarkEnd,
   sentenceMarkStart: questions.sentenceMarkStart,
   sentenceMarkEnd: questions.sentenceMarkEnd,
+  knownMeanings: questions.knownMeanings,
   form: dictVariants.form,
   lemma: dictLexemes.lemma,
   partOfSpeech: dictLexemes.partOfSpeech,
@@ -187,6 +191,9 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
     case 'listen_choice':
       // Phase 34 (spec D10): the part of speech, as the reverse card shows it.
       return { ...base, type: 'listen_choice', question: asked, part_of_speech: row.partOfSpeech, ...choice };
+    case 'new_meaning':
+      // Phase 39 (spec D6): a multiple choice's card, with the meanings already known.
+      return { ...base, type: 'new_meaning', question: asked, known_meanings: row.knownMeanings!, ...choice, context };
     case 'matching':
       return {
         ...base,
@@ -372,6 +379,10 @@ export function createQuestionRepo(tx: Tx) {
      * enrollment's last sessions showed, newest first by creation, so a new one
      * is never one of them (phase 27 D8's rule, as findRecentSentences). At most
      * `limit` per gloss and type; a gloss with none has no entry.
+     *
+     * Phase 39 (spec D6). A new_meaning is generated as a multiple choice and
+     * shows its sentence, so its sentences are a multiple choice's: one list,
+     * newest first across both, capped once.
      */
     findRecentContexts: async (input: {
       enrollmentId: string;
@@ -382,9 +393,12 @@ export function createQuestionRepo(tx: Tx) {
       if (input.glossIds.length === 0) return recent;
       const rows = await tx.execute<{ gloss_id: string; type: QuestionType; context: string }>(sql`
         SELECT gloss_id, type, context FROM (
-          SELECT q.gloss_id, q.type, q.context,
-                 row_number() OVER (PARTITION BY q.gloss_id, q.type ORDER BY q.created_at DESC, q.id DESC) AS recency
+          SELECT q.gloss_id, shown.type, q.context,
+                 row_number() OVER (PARTITION BY q.gloss_id, shown.type ORDER BY q.created_at DESC, q.id DESC) AS recency
           FROM questions q
+          CROSS JOIN LATERAL (
+            SELECT CASE WHEN q.type = 'new_meaning' THEN 'multiple_choice' ELSE q.type END AS type
+          ) shown
           WHERE q.enrollment_id = ${input.enrollmentId}
             AND q.context IS NOT NULL
             AND q.gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
@@ -512,6 +526,8 @@ export function createQuestionRepo(tx: Tx) {
         contextMarkEnd?: number | null;
         sentenceMarkStart?: number | null;
         sentenceMarkEnd?: number | null;
+        // Phase 39 (spec D6): a new_meaning's known meanings; null on every other type.
+        knownMeanings?: string[] | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -542,6 +558,7 @@ export function createQuestionRepo(tx: Tx) {
             contextMarkEnd: question.contextMarkEnd ?? null,
             sentenceMarkStart: question.sentenceMarkStart ?? null,
             sentenceMarkEnd: question.sentenceMarkEnd ?? null,
+            knownMeanings: question.knownMeanings ?? null,
           })),
         )
         .returning({ id: questions.id });
@@ -565,6 +582,7 @@ export function createQuestionRepo(tx: Tx) {
             contextMarkEnd: question.contextMarkEnd ?? null,
             sentenceMarkStart: question.sentenceMarkStart ?? null,
             sentenceMarkEnd: question.sentenceMarkEnd ?? null,
+            knownMeanings: question.knownMeanings ?? null,
             form: question.form,
             lemma: question.lemma,
             partOfSpeech: question.partOfSpeech,

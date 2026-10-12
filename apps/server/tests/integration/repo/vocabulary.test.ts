@@ -571,8 +571,14 @@ describe('the saved list for sessions (phase 19)', () => {
     const byGloss = <T extends { glossId: string }>(rows: T[]) => [...rows].sort((a, b) => a.glossId.localeCompare(b.glossId));
     expect(byGloss(await repo((r) => r.listSavedGlosses(E)))).toEqual(
       byGloss([
-        { glossId: word.glossIds[0], key: 'בצל', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS) },
-        { glossId: word.glossIds[1], key: 'קשת', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS) },
+        {
+          glossId: word.glossIds[0], key: 'בצל', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS),
+          lexemeId: word.lexemeId, lemma: 'onion', form: 'onion', order: [0, 0],
+        },
+        {
+          glossId: word.glossIds[1], key: 'קשת', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS),
+          lexemeId: word.lexemeId, lemma: 'onion', form: 'onion', order: [0, 1],
+        },
       ]),
     );
     expect(await repo((r) => r.countEntries(E))).toBe(2);
@@ -584,7 +590,10 @@ describe('the saved list for sessions (phase 19)', () => {
     const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'mouse', translations: ['עכבר', 'עכבר'] });
     expect(word.glossIds[1]).toBe(word.glossIds[0]);
     expect(await repo((r) => r.listSavedGlosses(E))).toEqual([
-      { glossId: word.glossIds[0], key: 'עכבר', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS) },
+      {
+        glossId: word.glossIds[0], key: 'עכבר', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS),
+        lexemeId: word.lexemeId, lemma: 'mouse', form: 'mouse', order: [0, 0],
+      },
     ]);
     expect(await repo((r) => r.countEntries(E))).toBe(1);
   });
@@ -595,6 +604,23 @@ describe('the saved list for sessions (phase 19)', () => {
     await t.db.execute(sql`UPDATE vocabulary_entries SET created_at = '2026-10-11 09:30:00.5+03' WHERE enrollment_id = ${E}`);
     const [gloss] = await repo((r) => r.listSavedGlosses(E));
     expect(gloss.savedAt).toBe('2026-10-11T06:30:00.500000Z');
+  });
+
+  // Phase 39 (spec D3, D4). The saved form is lowercased, and order is the saved
+  // variant's entry_rank then the best rank of the gloss's renderings on it.
+  it('lowercases the saved form, and orders by its variant then its best rendering rank', async () => {
+    const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'pick up', form: 'Picked Up', translations: ['לאסוף'] });
+    await t.db.execute(sql`UPDATE dict_variants SET entry_rank = 3 WHERE id = ${word.variantId}`);
+    await t.db.execute(sql`UPDATE dict_var_translations SET rank = 2 WHERE variant_id = ${word.variantId}`);
+    expect(await repo((r) => r.listSavedGlosses(E))).toEqual([
+      expect.objectContaining({ lexemeId: word.lexemeId, lemma: 'pick up', form: 'picked up', order: [3, 2] }),
+    ]);
+  });
+
+  it("ranks only renderings in the enrollment's source language, and 0 when there is none", async () => {
+    const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'onion', translations: ['בצל'] });
+    await t.db.execute(sql`UPDATE dict_var_translations SET rank = 5, user_language_code = 'fr' WHERE variant_id = ${word.variantId}`);
+    expect(await repo((r) => r.listSavedGlosses(E))).toEqual([expect.objectContaining({ order: [0, 0] })]);
   });
 
   it('lists and counts nothing for an enrollment that saved nothing', async () => {

@@ -47,13 +47,15 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   await expect(page.getByTestId('start-button')).toHaveText('התחל');
 
   // 5. Every card asks one of the saved words, whichever way round it asks.
+  // Phase 39 (spec D5): each word's two senses are a gloss family, and a
+  // session asks one gloss of a family, so two cards, one per word.
   await tapUntil(page, 'start-button', 'progress-label');
   const words: string[] = [];
-  for (let position = 1; position <= 4; position++) {
-    // Whatever type each card is: four words new to the memory model all take
-    // a choice of meanings today (phase 35, spec D6), but this test is about
+  for (let position = 1; position <= 2; position++) {
+    // Whatever type each card is: words new to the memory model all take a
+    // choice of meanings today (phase 35, spec D6), but this test is about
     // the words, not the types.
-    const card = await readCard(page, position, 4);
+    const card = await readCard(page, position, 2);
     if (card.kind === 'choice' || card.kind === 'meaning') {
       words.push(card.prompt);
       if (card.kind === 'choice') await answerChoice(page, card, true);
@@ -67,7 +69,7 @@ test('past the seed, a session is built from the saved words', async ({ page, re
     }
     await page.getByTestId('continue-button').click();
   }
-  expect(words.every((word) => ['прочитала', 'лук'].includes(word)), words.join(', ')).toBe(true);
+  expect([...words].sort(), words.join(', ')).toEqual(['лук', 'прочитала']);
 
   // 6. Results lead to the next session, back on home.
   await expect(page.getByTestId('results-score')).toBeVisible();

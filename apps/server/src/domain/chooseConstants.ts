@@ -44,3 +44,8 @@ export const RETURNS_PER_DAY = 3;
 
 /** Phase 37 (spec D4). Picks a session gives speaking when the device records. */
 export const SPEAKING_PER_SESSION = 1;
+
+/** Phase 39 (spec D2). Days of stability at which a skill counts as known: a skill is
+ *  known once remembered right on a later day. One right answer the next day lifts
+ *  the first day's 2.3 to 7.3. */
+export const KNOWN_STABILITY = 7;

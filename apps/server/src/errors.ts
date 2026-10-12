@@ -32,6 +32,18 @@ export class AnswerKindMismatch extends Error {
   }
 }
 
+// Phase 39 (spec D10). A typed answer written in another alphabet than the card's
+// answer language: refused ungraded, the card stays as it was.
+export class WrongScript extends Error {
+  constructor(
+    readonly questionId: string,
+    readonly language: string,
+  ) {
+    super(`the answer to ${questionId} is not written in ${language}'s alphabet`);
+    this.name = 'WrongScript';
+  }
+}
+
 export class UsernameTaken extends Error {
   constructor(readonly username: string) {
     super(`username ${username} is already taken`);

@@ -10,6 +10,7 @@ import { content, optionsFor } from '../../../src/db/content';
 import { dictGlosses, dictSenseGlosses, dictVariants } from '../../../src/db/schema';
 import { NOTHING_GENERATED, NO_EXTRAS, generatedContent, optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
 import { meaningRuleVerdict } from '../../../src/domain/judge';
+import { MAX_AVOID } from '../../../src/domain/sentences';
 import { asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createQuestionRepo } from '../../../src/repo/questions';
@@ -853,6 +854,35 @@ describe('phase 34: context sentences, marks and part of speech', () => {
       });
       expect(recent.has('other')).toBe(false);
       expect((await read(2, [])).size).toBe(0);
+    });
+
+    // Phase 39 (spec D6). A new_meaning showed a multiple choice's sentence and
+    // is generated as one: its sentences and a multiple choice's are one list,
+    // newest first across both, capped once.
+    it('counts a new_meaning’s sentences as a multiple choice’s: one list, newest first, at most limit', async () => {
+      const word = await savedSaw();
+      const ask = (type: QuestionType, context: string) =>
+        withTx(t.db, (tx) =>
+          createQuestionRepo(tx).insertGeneratedQuestions({
+            userId: 'u_1', enrollmentId: enrollmentOf('u_1'), targetLanguage: 'en', userLanguageCode: 'he',
+            questions: [
+              {
+                ...base(word, type),
+                ...(type === 'new_meaning' ? { prompt: null, options: generatedOptions('לנסר', ['a', 'b', 'c']), knownMeanings: ['לראות'] } : {}),
+                context,
+              },
+            ],
+          }),
+        );
+      await ask('multiple_choice', 'Saw one.');
+      await ask('new_meaning', 'Saw two.');
+      await ask('multiple_choice', 'Saw three.');
+      await ask('new_meaning', 'Saw four.');
+      await ask('multiple_choice', 'Saw five.');
+      const recent = await withTx(t.db, (tx) =>
+        createQuestionRepo(tx).findRecentContexts({ enrollmentId: enrollmentOf('u_1'), glossIds: [word.glossIds[0]], limit: MAX_AVOID }),
+      );
+      expect(recent.get(word.glossIds[0])).toEqual({ multiple_choice: ['Saw five.', 'Saw four.', 'Saw three.'] });
     });
   });
 

@@ -1242,6 +1242,22 @@ export function createDictRepo(tx: Tx) {
     return rows.rows.map((row) => ({ variantId: row.variant_id, senseId: row.sense_id, userLanguageCode: row.user_language_code }));
   };
 
+  /** Phase 39 (spec D1, D4). Every spelling of each lexeme, lowercased: its variants' forms
+   *  and its lemma, distinct. A family is joined by lexeme, and its forms are the words a
+   *  sentence may not show. */
+  const findLexemeForms = async (input: { lexemeIds: string[] }): Promise<{ lexemeId: string; form: string }[]> => {
+    if (input.lexemeIds.length === 0) return [];
+    const ids = sql.join(input.lexemeIds.map((id) => sql`${id}`), sql`, `);
+    const rows = await tx.execute<{ lexeme_id: string; form: string }>(sql`
+      SELECT DISTINCT lexeme_id, form FROM (
+        SELECT lexeme_id, lower(form) AS form FROM dict_variants WHERE lexeme_id IN (${ids})
+        UNION ALL
+        SELECT id AS lexeme_id, lower(lemma) AS form FROM dict_lexemes WHERE id IN (${ids})
+      ) f
+      ORDER BY lexeme_id, form`);
+    return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, form: row.form }));
+  };
+
   return {
     claimLemmaRenders,
     claimSavedLemmaRenders,
@@ -1249,6 +1265,7 @@ export function createDictRepo(tx: Tx) {
     findGlossRenderings,
     findKnownRight,
     findLexeme,
+    findLexemeForms,
     findRenderingForAccept,
     findUnacceptedSavedRenderings,
     findSenseVersion,

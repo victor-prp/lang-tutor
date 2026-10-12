@@ -823,13 +823,16 @@ export const questions = pgTable(
     // Phase 34 (spec D2). The form of the headword the card asks for when the
     // rendering it was built from has one of its own (`ore`); null = the variant's.
     answerForm: text('answer_form'),
+    // Phase 39 (spec D6). The meanings a new_meaning card listed as known, in family
+    // order; set on that type and null on every other (questions_known_meanings_valid).
+    knownMeanings: text('known_meanings').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     check('questions_options_valid', sql`${t.options} is null or question_options_valid(${t.options})`),
     check(
       'questions_type_known',
-      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning', 'cloze_choice', 'cloze_typed', 'sentence_translation')`,
+      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning', 'cloze_choice', 'cloze_typed', 'sentence_translation', 'new_meaning')`,
     ),
     // Phase 23 and 24. Each type's shape (spec D13, phase 24 §2): a choice has
     // options, every type but the Hebrew-option ones stores the Hebrew prompt,
@@ -846,6 +849,7 @@ export const questions = pgTable(
       'questions_shape_valid',
       sql`case ${t.type}
         when 'multiple_choice' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'new_meaning' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
         when 'listen_choice' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
         when 'matching' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
         when 'reverse_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
@@ -863,11 +867,18 @@ export const questions = pgTable(
           and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 10
         when 'sentence_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         else false end
-        and (${t.type} in ('typed_translation', 'say_translation', 'reverse_choice', 'typed_meaning', 'multiple_choice')
+        and (${t.type} in ('typed_translation', 'say_translation', 'reverse_choice', 'typed_meaning', 'multiple_choice', 'new_meaning')
           or (${t.context} is null and ${t.contextTranslation} is null
             and ${t.contextMarkStart} is null and ${t.contextMarkEnd} is null))
         and (${t.type} in ('cloze_typed', 'sentence_translation')
           or (${t.sentenceMarkStart} is null and ${t.sentenceMarkEnd} is null))`,
+    ),
+    // Phase 39 (spec D6). The card records the meanings it showed: some on a
+    // new_meaning, none on any other type. A new_meaning card also carries a context
+    // (the new meaning's example), as a multiple choice does.
+    check(
+      'questions_known_meanings_valid',
+      sql`(${t.type} = 'new_meaning') = (${t.knownMeanings} is not null and cardinality(${t.knownMeanings}) > 0)`,
     ),
     // Phase 34 (spec D6, D8). A mark names both ends or neither, and lies inside the
     // sentence it marks; a context's translation and mark need a context. Null marks
@@ -900,6 +911,81 @@ export const questions = pgTable(
     foreignKey({ name: 'questions_gloss_fk', columns: [t.glossId], foreignColumns: [dictGlosses.id] }),
     check('questions_owner_complete', sql`(${t.userId} is null) = (${t.enrollmentId} is null)`),
   ],
+);
+
+/**
+ * Phase 39 (spec D4). A family of two or more glosses of one lexeme in one
+ * enrollment, recorded so that it can be traced. The rule is derived on every
+ * session creation; these tables hold what it decided.
+ */
+export const glossFamilies = pgTable(
+  'gloss_families',
+  {
+    id: text('id').primaryKey(),
+    enrollmentId: text('enrollment_id')
+      .notNull()
+      .references(() => enrollments.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('gloss_families_enrollment_idx').on(t.enrollmentId)],
+);
+
+/**
+ * Phase 39 (spec D4). One row per saved gloss in a family. Keyed and referenced
+ * as gloss_progress is: through its vocabulary entry, so ADR 0011 holds and an
+ * unsaved gloss takes its row with it.
+ */
+export const glossFamilyMembers = pgTable(
+  'gloss_family_members',
+  {
+    enrollmentId: text('enrollment_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    familyId: text('family_id')
+      .notNull()
+      .references(() => glossFamilies.id, { onDelete: 'cascade' }),
+    state: text('state').notNull(),
+    position: integer('position').notNull(),
+    // The first time a refresh saw the gloss known (spec D2); null if never.
+    knownAt: timestamp('known_at', { withTimezone: true }),
+    since: timestamp('since', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'gloss_family_members_pkey', columns: [t.enrollmentId, t.glossId] }),
+    foreignKey({
+      name: 'gloss_family_members_entry_fk',
+      columns: [t.enrollmentId, t.glossId],
+      foreignColumns: [vocabularyEntries.enrollmentId, vocabularyEntries.glossId],
+    })
+      .onDelete('cascade')
+      .onUpdate('cascade'),
+    check('gloss_family_members_state_known', sql`${t.state} in ('known', 'current', 'waiting')`),
+    index('gloss_family_members_family_idx').on(t.familyId),
+  ],
+);
+
+/**
+ * Phase 39 (spec D4). Append-only: every change of a member and why. family_id and
+ * gloss_id carry no foreign key, so the log outlives a dissolved family and an
+ * unsaved gloss.
+ */
+export const glossFamilyEvents = pgTable(
+  'gloss_family_events',
+  {
+    id: text('id').primaryKey(),
+    enrollmentId: text('enrollment_id')
+      .notNull()
+      .references(() => enrollments.id, { onDelete: 'cascade' }),
+    familyId: text('family_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    sessionId: text('session_id').notNull(),
+    fromState: text('from_state'),
+    toState: text('to_state'),
+    evidence: jsonb('evidence').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('gloss_family_events_enrollment_at_idx').on(t.enrollmentId, t.at)],
 );
 
 export const sessions = pgTable(

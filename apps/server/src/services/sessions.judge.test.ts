@@ -12,7 +12,7 @@ import {
 import { testRng } from '../../tests/support/testRng';
 import { JUDGE_MARKER } from '../domain/judge';
 import type { SessionRecord } from '../domain/session';
-import { AccessDenied, AnswerKindMismatch, LlmUnavailable, QuestionDesynced } from '../errors';
+import { AccessDenied, AnswerKindMismatch, LlmUnavailable, QuestionDesynced, WrongScript } from '../errors';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { ProgressRepo } from '../repo/progress';
@@ -247,6 +247,36 @@ describe('answerJudged (spec D3)', () => {
 });
 
 // Phase 34 (spec D9). Another sense holds a meaning card open for one more try.
+// Phase 39 (spec D10). ENROLLMENT is Italian learned by a Hebrew speaker.
+describe('answerJudged, the wrong alphabet', () => {
+  it('refuses a typed meaning in Latin before any rule or judge, recording nothing', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const { service, inserted, logger } = setup(judge);
+    const refused = service.answerJudged('u1', SESSION, answer('degree'));
+    await expect(refused).rejects.toBeInstanceOf(WrongScript);
+    await expect(refused).rejects.toMatchObject({ questionId: 'm1', language: 'Hebrew' });
+    expect(judge.calls).toHaveLength(0);
+    expect(inserted).toEqual([]);
+    expect(logger.events).toContainEqual({ event: 'answer_wrong_script', session_id: SESSION, question_type: 'typed_meaning' });
+  });
+
+  it('refuses a sentence translation in Hebrew, and lets digits through to the judge', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const { service } = setup(judge, record([SENTENCE, CHOICE]));
+    await expect(service.answerJudged('u1', SESSION, { questionId: 's1', text: 'להזמין' })).rejects.toBeInstanceOf(WrongScript);
+    expect(judge.calls).toHaveLength(0);
+    await expect(service.answerJudged('u1', SESSION, { questionId: 's1', text: '1990' })).resolves.toBeDefined();
+  });
+
+  it('does not refuse Latin on a typed meaning whose own meaning is Latin ("DNA")', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const dna: Question = { ...MEANING, question: 'DNA', meaning: 'DNA' };
+    const { service, logger } = setup(judge, record([dna, CHOICE]), { ...CONTEXT, form: 'DNA', lemma: 'DNA', meaning: 'DNA' });
+    await expect(service.answerJudged('u1', SESSION, answer('DNA'))).resolves.toBeDefined();
+    expect(logger.events).not.toContainEqual(expect.objectContaining({ event: 'answer_wrong_script' }));
+  });
+});
+
 describe('answerJudged, the second try', () => {
   const first = { question_id: 'm1', is_correct: true, answer_string: 'ספר', verdict: 'alternative' as const };
   const pending = () => record([MEANING, CHOICE], [{ ...first, retry_state: 'pending', retry_answer_string: null, retry_verdict: null }]);

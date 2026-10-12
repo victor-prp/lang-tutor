@@ -8,7 +8,7 @@ import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/d
 
 /** Phase 24. The types answered by an option, and by a text with its verdict.
  *  Phase 25: a speaking card's answer is stored as a text with its verdict too. */
-export type ChoiceAnswerType = 'multiple_choice' | 'reverse_choice' | 'listen_choice' | 'matching' | 'cloze_choice';
+export type ChoiceAnswerType = 'multiple_choice' | 'new_meaning' | 'reverse_choice' | 'listen_choice' | 'matching' | 'cloze_choice';
 export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation' | 'typed_meaning' | 'cloze_typed' | 'sentence_translation';
 
 /** One answer as the rule reads it: which gloss, which exercise, and how it
@@ -102,6 +102,8 @@ export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
   });
   switch (answer.type) {
     case 'multiple_choice':
+    case 'new_meaning':
+      // Phase 39 (spec D6): a new meaning is read as a multiple choice.
       return [piece('written_receptive', answer.correct)];
     case 'reverse_choice':
     case 'cloze_choice':
