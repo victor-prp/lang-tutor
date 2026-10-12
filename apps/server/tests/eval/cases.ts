@@ -1139,6 +1139,12 @@ const enBank = {
   example: 'I went to the bank to take out money.', translation: 'הלכתי לבנק למשוך כסף.',
 };
 
+// Phase 42 (spec D2). One sense saved; a nearby idea is not another sense.
+const enImagination = {
+  form: 'imagination', pos: 'noun' as const, meaning: 'דמיון',
+  example: 'Her imagination helps her write stories.', translation: 'הדמיון שלה עוזר לה לכתוב סיפורים.',
+};
+
 // Phase 34 (spec D7). A generated pair, as findJudgeContext now gives it.
 const enSawCard = {
   form: 'saw', pos: 'verb' as const, meaning: 'לנסר',
@@ -1177,6 +1183,9 @@ export const JUDGE_CASES: JudgeCase[] = [
   judge('en', enBook, 'להזמן', 'exact', 'small typo'),
   judge('en', enBook, 'ספר', 'alternative', 'other sense'),
   judge('en', enBank, 'גדה', 'alternative', 'other sense'),
+  judge('en', enImagination, 'הזייה', 'wrong', 'a nearby idea, not a sense'),
+  judge('en', enImagination, 'יצירתיות', 'wrong', 'related but different'),
+  judge('en', enImagination, 'דמיון', 'exact', 'the saved meaning'),
   judge('en', enBook, 'לבטל', 'wrong', 'related but different'),
   judge('en', { form: 'tulip', pos: 'noun', meaning: 'צבעוני', example: 'She planted a red tulip.', translation: 'היא שתלה צבעוני אדום.' }, 'פרח', 'wrong', 'too general'),
   judge('en', { form: 'window', pos: 'noun', meaning: 'חלון', example: 'Please close the window.', translation: 'בבקשה סגור את החלון.' }, 'כלב', 'wrong', 'unrelated'),
