@@ -40,6 +40,8 @@ export type Families = {
   evidence: ReadonlyMap<string, FamilyEvidence>;
 };
 
+type MemoryRow = FamilyInput['memory'][number];
+
 /** Phase 39 (spec D2). Every live skill at KNOWN_STABILITY; speaking only when speakable. */
 export function knownNow(
   glossId: string,
@@ -47,11 +49,14 @@ export function knownNow(
   memory: FamilyInput['memory'],
   live: readonly Dimension[],
 ): boolean {
+  return knownFrom(speakable, memory.filter((m) => m.glossId === glossId), live);
+}
+
+/** knownNow over one gloss's own memory rows. */
+function knownFrom(speakable: boolean, rows: readonly MemoryRow[], live: readonly Dimension[]): boolean {
   return live.every((d) => {
     if (d === 'spoken_productive' && !speakable) return true;
-    return memory.some(
-      (m) => m.glossId === glossId && m.dimension === d && m.state.stability >= KNOWN_STABILITY,
-    );
+    return rows.some((m) => m.dimension === d && m.state.stability >= KNOWN_STABILITY);
   });
 }
 
@@ -96,7 +101,14 @@ export function glossFamilies(input: FamilyInput): Families {
     else groups.set(root, [g]);
   });
 
-  const practised = new Set(memory.map((m) => m.glossId));
+  // Each gloss's memory rows, grouped once: the members below look theirs up.
+  const rowsOf = new Map<string, MemoryRow[]>();
+  for (const m of memory) {
+    const rows = rowsOf.get(m.glossId);
+    if (rows) rows.push(m);
+    else rowsOf.set(m.glossId, [m]);
+  }
+  const practised: ReadonlySet<string> = new Set(rowsOf.keys());
   const compare = (a: FamilyGloss, b: FamilyGloss): number => {
     const pa = practised.has(a.glossId) ? 0 : 1;
     const pb = practised.has(b.glossId) ? 0 : 1;
@@ -127,13 +139,13 @@ export function glossFamilies(input: FamilyInput): Families {
     const known = new Set<string>();
     for (const g of members) {
       familyOf.set(g.glossId, index);
-      const rows = memory.filter((m) => m.glossId === g.glossId);
+      const rows = rowsOf.get(g.glossId) ?? [];
       const stability: Partial<Record<Dimension, number>> = {};
       for (const r of rows) stability[r.dimension] = r.state.stability;
       evidence.set(g.glossId, { live: [...live], stability });
 
       if (g.knownAt !== null) known.add(g.glossId);
-      else if (knownNow(g.glossId, g.speakable, memory, live)) {
+      else if (knownFrom(g.speakable, rows, live)) {
         known.add(g.glossId);
         newlyKnown.add(g.glossId);
       }
