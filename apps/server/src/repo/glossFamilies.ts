@@ -12,7 +12,9 @@ export type StoredMember = {
 };
 export type StoredFamily = { id: string; label: string; createdAt: string; members: StoredMember[] };
 export type FamilyWrite = {
-  /** Upserted. */
+  /** A new family (`isNew`) is inserted under an id the database makes; its `id` is
+   *  a placeholder that the write's members and events also name, replaced by the
+   *  real one. A kept family is updated in place. */
   families: { id: string; label: string; isNew: boolean }[];
   deleteFamilies: string[];
   /** Upserted; `since` moves only when `sinceChanged`. */
@@ -60,15 +62,23 @@ export function createGlossFamiliesRepo(tx: Tx) {
      *  Members leave before families go, so a family's delete cascades nothing the write
      *  still means to keep. */
     apply: async (enrollmentId: string, sessionId: string, write: FamilyWrite): Promise<void> => {
+      // Placeholder -> the id gen_random_uuid() gave the new family.
+      const created = new Map<string, string>();
       for (const family of write.families) {
-        await tx
-          .insert(glossFamilies)
-          .values({ id: family.id, enrollmentId, label: family.label })
-          .onConflictDoUpdate({
-            target: glossFamilies.id,
-            set: { label: family.label, updatedAt: sql`now()` },
-          });
+        if (family.isNew) {
+          const [row] = await tx
+            .insert(glossFamilies)
+            .values({ id: sql<string>`gen_random_uuid()::text`, enrollmentId, label: family.label })
+            .returning({ id: glossFamilies.id });
+          created.set(family.id, row.id);
+        } else {
+          await tx
+            .update(glossFamilies)
+            .set({ label: family.label, updatedAt: sql`now()` })
+            .where(and(eq(glossFamilies.enrollmentId, enrollmentId), eq(glossFamilies.id, family.id)));
+        }
       }
+      const idOf = (familyId: string) => created.get(familyId) ?? familyId;
       if (write.deleteMembers.length > 0) {
         await tx
           .delete(glossFamilyMembers)
@@ -76,7 +86,7 @@ export function createGlossFamiliesRepo(tx: Tx) {
       }
       for (const member of write.members) {
         const set = {
-          familyId: member.familyId,
+          familyId: idOf(member.familyId),
           state: member.state,
           position: member.position,
           knownAt: member.knownAt === null ? null : new Date(member.knownAt),
@@ -97,7 +107,7 @@ export function createGlossFamiliesRepo(tx: Tx) {
           write.events.map((event) => ({
             id: sql<string>`gen_random_uuid()::text`,
             enrollmentId,
-            familyId: event.familyId,
+            familyId: idOf(event.familyId),
             glossId: event.glossId,
             sessionId,
             fromState: event.fromState,

@@ -20,6 +20,7 @@ import { seedSavedSenses } from '../../support/vocabularyRows';
 const E = enrollmentOf('u_1');
 const NOW = '2026-03-04T10:00:00.000Z';
 const LIVE: Dimension[] = ['written_receptive', 'written_productive', 'spelling'];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 let t: TestDb;
 let boss: PgBoss;
 
@@ -76,13 +77,13 @@ async function known(glossId: string) {
 }
 
 describe('createNextSession records the gloss families (phase 39 D4, D5)', () => {
-  it('writes the family, its members and a joined event each, naming the session', async () => {
+  it('writes the family under an id the database made, its members and a joined event each, naming the session', async () => {
     const { lift, collect } = await savedFamily();
     const { sessionId } = await nextSession();
 
     const members = await readFamilyMembers(t.db, E);
     expect(members).toEqual([
-      { familyId: expect.any(String), label: 'pick up', glossId: lift, state: 'current', position: 0, knownAt: null },
+      { familyId: expect.stringMatching(UUID), label: 'pick up', glossId: lift, state: 'current', position: 0, knownAt: null },
       { familyId: members[0].familyId, label: 'pick up', glossId: collect, state: 'waiting', position: 1, knownAt: null },
     ]);
     // One transaction's events share their time: their order is not asserted.

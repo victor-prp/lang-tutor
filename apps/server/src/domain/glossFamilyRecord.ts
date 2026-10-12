@@ -21,7 +21,9 @@ export type FamilyEventEvidence =
 
 /** Phase 39 (spec D4). One refresh's writes, in the shape repo/glossFamilies' apply takes. */
 export type FamilyWrite = {
-  /** Upserted: new families, and kept ones whose label or members changed. */
+  /** Upserted: new families, and kept ones whose label or members changed. A new
+   *  family's id is a placeholder (`new:<index>`) its members and events carry too;
+   *  the repo creates the real id (ADR 0002: the domain draws no randomness). */
   families: { id: string; label: string; isNew: boolean }[];
   deleteFamilies: string[];
   /** Upserted; `since` moves only when `sinceChanged`. */
@@ -35,15 +37,15 @@ export type FamilyWrite = {
 /**
  * Phase 39 (spec D4). What to write so the tables show `computed`. A computed family
  * keeps the id of the stored family holding most of its members (ties: the older,
- * created first); one with no stored members gets `newId()`. A stored family left
- * with none is deleted. Every change of state or family is one event with the
- * member's evidence; a member joining a family, a merge's included, is `joined`.
- * `known_at` is the stored one, or `at` for `newlyKnown`. Pure.
+ * created first); one with no stored members gets the placeholder `new:<index>`,
+ * which apply turns into a real id. A stored family left with none is deleted.
+ * Every change of state or family is one event with the member's evidence; a
+ * member joining a family, a merge's included, is `joined`. `known_at` is the
+ * stored one, or `at` for `newlyKnown`. Pure.
  */
 export function familyChanges(
   stored: readonly StoredFamilyView[],
   computed: Families,
-  newId: () => string,
   at: string,
 ): FamilyWrite {
   const write: FamilyWrite = { families: [], deleteFamilies: [], members: [], deleteMembers: [], events: [] };
@@ -78,7 +80,7 @@ export function familyChanges(
   // Families whose members changed: their updated_at moves.
   const touched = new Set<string>();
 
-  const ids = computed.families.map((_, index) => kept.get(index)?.id ?? newId());
+  const ids = computed.families.map((_, index) => kept.get(index)?.id ?? `new:${index}`);
   computed.families.forEach((family, index) => {
     const familyId = ids[index];
     family.glossIds.forEach((glossId, position) => {

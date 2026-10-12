@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import type { AnswerRecord, Enrollment, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
@@ -376,7 +374,7 @@ export function createSessionService({
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
         // Phase 39 (spec D4). The refresh is recorded once the session exists, so
         // each event names it; one that changed nothing writes nothing.
-        const write = familyChanges(stored, families, randomUUID, new Date(at).toISOString());
+        const write = familyChanges(stored, families, new Date(at).toISOString());
         if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
         await jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,

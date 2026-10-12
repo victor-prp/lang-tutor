@@ -34,12 +34,6 @@ function mem(glossId: string, dimension: Dimension, stability: number) {
 }
 const knownMem = (id: string) => LIVE.map((d) => mem(id, d, 8));
 
-/** New ids in the order asked for. */
-function ids() {
-  let n = 0;
-  return () => `n${++n}`;
-}
-
 type Member = StoredFamilyView['members'][number];
 function family(id: string, members: Omit<Member, 'familyId' | 'position'>[], over: Partial<StoredFamilyView> = {}): StoredFamilyView {
   return {
@@ -58,19 +52,19 @@ const evidence = (stability: Partial<Record<Dimension, number>> = {}) => ({ live
 const PICK_UP = [gloss('a', 'pick up', ['pick up']), gloss('b', 'pick up', ['pick up'], { order: [0, 1] })];
 
 describe('familyChanges (phase 39 D4)', () => {
-  it('records a first refresh: the family, its members in family order, and a joined event each', () => {
+  it('records a first refresh: the family under a placeholder id, its members in family order, and a joined event each', () => {
     const computed = glossFamilies({ saved: PICK_UP, memory: [], live: LIVE });
-    expect(familyChanges([], computed, ids(), AT)).toEqual({
-      families: [{ id: 'n1', label: 'pick up', isNew: true }],
+    expect(familyChanges([], computed, AT)).toEqual({
+      families: [{ id: 'new:0', label: 'pick up', isNew: true }],
       deleteFamilies: [],
       members: [
-        { glossId: 'a', familyId: 'n1', state: 'current', position: 0, knownAt: null, sinceChanged: true },
-        { glossId: 'b', familyId: 'n1', state: 'waiting', position: 1, knownAt: null, sinceChanged: true },
+        { glossId: 'a', familyId: 'new:0', state: 'current', position: 0, knownAt: null, sinceChanged: true },
+        { glossId: 'b', familyId: 'new:0', state: 'waiting', position: 1, knownAt: null, sinceChanged: true },
       ],
       deleteMembers: [],
       events: [
-        { familyId: 'n1', glossId: 'a', fromState: null, toState: 'current', evidence: evidence() },
-        { familyId: 'n1', glossId: 'b', fromState: null, toState: 'waiting', evidence: evidence() },
+        { familyId: 'new:0', glossId: 'a', fromState: null, toState: 'current', evidence: evidence() },
+        { familyId: 'new:0', glossId: 'b', fromState: null, toState: 'waiting', evidence: evidence() },
       ],
     });
   });
@@ -78,7 +72,7 @@ describe('familyChanges (phase 39 D4)', () => {
   it('writes nothing when nothing changed', () => {
     const computed = glossFamilies({ saved: PICK_UP, memory: [mem('a', WR, 2)], live: LIVE });
     const stored = [family('f1', [member('a', 'current'), member('b', 'waiting')])];
-    const write = familyChanges(stored, computed, ids(), AT);
+    const write = familyChanges(stored, computed, AT);
     expect(write).toEqual({ families: [], deleteFamilies: [], members: [], deleteMembers: [], events: [] });
     expect(isEmptyFamilyWrite(write)).toBe(true);
   });
@@ -88,7 +82,7 @@ describe('familyChanges (phase 39 D4)', () => {
     const saved = [gloss('a', 'pick up', ['pick up'], { knownAt: KNOWN_AT }), PICK_UP[1]];
     const computed = glossFamilies({ saved, memory: [mem('a', WR, 1), ...knownMem('b')], live: LIVE });
     const stored = [family('f1', [member('a', 'known', KNOWN_AT), member('b', 'current')])];
-    const write = familyChanges(stored, computed, ids(), AT);
+    const write = familyChanges(stored, computed, AT);
     expect(write).toEqual({
       families: [{ id: 'f1', label: 'pick up', isNew: false }],
       deleteFamilies: [],
@@ -106,7 +100,7 @@ describe('familyChanges (phase 39 D4)', () => {
     const saved = [gloss('a', 'pick up', ['pick up'], { knownAt: KNOWN_AT }), PICK_UP[1]];
     const computed = glossFamilies({ saved, memory: [mem('b', WR, 1)], live: LIVE });
     const stored = [family('f1', [member('a', 'known', KNOWN_AT), member('b', 'current')])];
-    const write = familyChanges(stored, computed, ids(), AT);
+    const write = familyChanges(stored, computed, AT);
     expect(write.members).toEqual([
       { glossId: 'b', familyId: 'f1', state: 'current', position: 0, knownAt: null, sinceChanged: false },
       { glossId: 'a', familyId: 'f1', state: 'known', position: 1, knownAt: KNOWN_AT, sinceChanged: false },
@@ -128,7 +122,7 @@ describe('familyChanges (phase 39 D4)', () => {
       family('f_see', [member('s1', 'current'), member('s2', 'waiting')], { label: 'see', createdAt: OLD }),
       family('f_saw', [member('w1', 'current'), member('w2', 'waiting'), member('w3', 'waiting')], { label: 'saw' }),
     ];
-    const write = familyChanges(stored, computed, ids(), AT);
+    const write = familyChanges(stored, computed, AT);
     expect(write.families).toEqual([{ id: 'f_saw', label: 'saw / see', isNew: false }]);
     expect(write.deleteFamilies).toEqual(['f_see']);
     expect(write.deleteMembers).toEqual([]);
@@ -145,6 +139,47 @@ describe('familyChanges (phase 39 D4)', () => {
     ]);
   });
 
+  /** `see` (s1 known, s2 current) merging into the larger `saw` (w1 current, w2 and w3 waiting). */
+  function knownMerge() {
+    const saved = [
+      gloss('s1', 'see', ['see', 'saw'], { knownAt: KNOWN_AT }),
+      gloss('s2', 'see', ['see', 'saw'], { order: [0, 1] }),
+      gloss('w1', 'saw', ['saw'], { order: [1, 0] }),
+      gloss('w2', 'saw', ['saw'], { order: [1, 1] }),
+      gloss('w3', 'saw', ['saw'], { order: [1, 2] }),
+    ];
+    const computed = glossFamilies({ saved, memory: [mem('s1', WR, 1), mem('w1', WR, 1)], live: LIVE });
+    const stored = [
+      family('f_see', [member('s1', 'known', KNOWN_AT), member('s2', 'current')], { label: 'see', createdAt: OLD }),
+      family('f_saw', [member('w1', 'current'), member('w2', 'waiting'), member('w3', 'waiting')], { label: 'saw' }),
+    ];
+    return familyChanges(stored, computed, AT);
+  }
+
+  it('keeps a known member its known_at when a merge moves it to another family', () => {
+    const write = knownMerge();
+    expect(write.members.find((m) => m.glossId === 's1')).toEqual({
+      glossId: 's1',
+      familyId: 'f_saw',
+      state: 'known',
+      position: 0,
+      knownAt: KNOWN_AT,
+      sinceChanged: true,
+    });
+    expect(write.events.filter((e) => e.glossId === 's1')).toEqual([
+      { familyId: 'f_saw', glossId: 's1', fromState: null, toState: 'known', evidence: evidence({ [WR]: 1 }) },
+    ]);
+  });
+
+  it('logs one joined event, with the new state, for a member that moves family and changes state at once', () => {
+    // s2 was current in `see`; in the merged family w1 is current and s2 waits.
+    const write = knownMerge();
+    expect(write.members.find((m) => m.glossId === 's2')).toMatchObject({ familyId: 'f_saw', state: 'waiting', sinceChanged: true });
+    expect(write.events.filter((e) => e.glossId === 's2')).toEqual([
+      { familyId: 'f_saw', glossId: 's2', fromState: null, toState: 'waiting', evidence: evidence() },
+    ]);
+  });
+
   it('gives a tie to the older stored family', () => {
     const saved = [
       gloss('s1', 'see', ['see', 'saw']),
@@ -157,7 +192,7 @@ describe('familyChanges (phase 39 D4)', () => {
       family('f_saw', [member('w1', 'current'), member('w2', 'waiting')], { label: 'saw' }),
       family('f_see', [member('s1', 'current'), member('s2', 'waiting')], { label: 'see', createdAt: OLD }),
     ];
-    const write = familyChanges(stored, computed, ids(), AT);
+    const write = familyChanges(stored, computed, AT);
     expect(write.families).toEqual([{ id: 'f_see', label: 'saw / see', isNew: false }]);
     expect(write.deleteFamilies).toEqual(['f_saw']);
     expect(write.events.map((e) => [e.familyId, e.glossId, e.fromState])).toEqual([
@@ -179,20 +214,20 @@ describe('familyChanges (phase 39 D4)', () => {
     const stored = [
       family('f1', [member('a', 'current'), member('b', 'waiting'), member('c', 'waiting'), member('d', 'waiting')], { label: 'x' }),
     ];
-    const write = familyChanges(stored, computed, ids(), AT);
+    const write = familyChanges(stored, computed, AT);
     // f1 keeps its label, and is touched only because d left it.
     expect(write.families).toEqual([
       { id: 'f1', label: 'x', isNew: false },
-      { id: 'n1', label: 'y / z', isNew: true },
+      { id: 'new:1', label: 'y / z', isNew: true },
     ]);
     expect(write.deleteFamilies).toEqual([]);
     expect(write.members).toEqual([
-      { glossId: 'd', familyId: 'n1', state: 'current', position: 0, knownAt: null, sinceChanged: true },
-      { glossId: 'e', familyId: 'n1', state: 'waiting', position: 1, knownAt: null, sinceChanged: true },
+      { glossId: 'd', familyId: 'new:1', state: 'current', position: 0, knownAt: null, sinceChanged: true },
+      { glossId: 'e', familyId: 'new:1', state: 'waiting', position: 1, knownAt: null, sinceChanged: true },
     ]);
     expect(write.events.map((e) => [e.familyId, e.glossId, e.fromState, e.toState])).toEqual([
-      ['n1', 'd', null, 'current'],
-      ['n1', 'e', null, 'waiting'],
+      ['new:1', 'd', null, 'current'],
+      ['new:1', 'e', null, 'waiting'],
     ]);
   });
 
@@ -200,7 +235,7 @@ describe('familyChanges (phase 39 D4)', () => {
     // `b` was unsaved (its member row went with its entry): `a` is a family of one, so of none.
     const computed = glossFamilies({ saved: [PICK_UP[0]], memory: [], live: LIVE });
     const stored = [family('f1', [member('a', 'current')])];
-    expect(familyChanges(stored, computed, ids(), AT)).toEqual({
+    expect(familyChanges(stored, computed, AT)).toEqual({
       families: [],
       deleteFamilies: ['f1'],
       members: [],
@@ -211,7 +246,7 @@ describe('familyChanges (phase 39 D4)', () => {
 
   it('deletes a stored family left with no members at all', () => {
     const computed = glossFamilies({ saved: [PICK_UP[0]], memory: [], live: LIVE });
-    expect(familyChanges([family('f1', [])], computed, ids(), AT)).toEqual({
+    expect(familyChanges([family('f1', [])], computed, AT)).toEqual({
       families: [],
       deleteFamilies: ['f1'],
       members: [],
