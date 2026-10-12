@@ -27,6 +27,9 @@ async function expectBoldLanguage(page: Page) {
 
 async function expectAskedAgain(page: Page, typed: string) {
   await expect(page.getByTestId('wrong-script')).toBeVisible();
+  // A refusal in the app's error colour (colors.wrong), its language still bold.
+  await expect(page.getByTestId('wrong-script-language')).toHaveCSS('color', 'rgb(201, 42, 42)');
+  await expect(page.getByTestId('wrong-script-language')).toHaveCSS('font-weight', '700');
   await expect(page.getByTestId('typed-input')).toHaveValue(typed);
   await expect(page.getByTestId('feedback-correct')).not.toBeVisible();
   await expect(page.getByTestId('feedback-wrong')).not.toBeVisible();

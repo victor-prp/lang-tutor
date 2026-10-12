@@ -11,7 +11,7 @@ import type {
 } from '@lang-tutor/core/api';
 import { MAX_JUDGED_TEXT } from '@lang-tutor/core/domain';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle } from 'react-native';
 
 import { ContextLine } from '@/components/ContextLine';
 import { ListenPrompt } from '@/components/ListenPrompt';
@@ -168,7 +168,7 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
       />
       {wrongScriptShown && answerLanguage !== null && !answered ? (
         <View testID="wrong-script">
-          <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" />
+          <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" style={styles.wrongScript} />
         </View>
       ) : null}
       {answered ? null : (
@@ -204,9 +204,17 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
 }
 
 /** Phase 39 (spec D9). An instruction with the language it names in bold. */
-function InstructionText({ instruction: i, languageTestId = 'instruction-language' }: { instruction: Instruction; languageTestId?: string }) {
+function InstructionText({
+  instruction: i,
+  languageTestId = 'instruction-language',
+  style,
+}: {
+  instruction: Instruction;
+  languageTestId?: string;
+  style?: StyleProp<TextStyle>;
+}) {
   return (
-    <Text style={answerStyles.instruction}>
+    <Text style={[answerStyles.instruction, style]}>
       {i.before}
       <Text style={styles.instructionLanguage} testID={languageTestId}>
         {i.language}
@@ -264,6 +272,8 @@ export const answerStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: { gap: spacing.lg },
   instructionLanguage: { fontWeight: '700' },
+  // Phase 39 (spec D8): a refusal, in the colour of the app's other errors, not a second instruction.
+  wrongScript: { color: colors.wrong },
   // The answer's language decides: a target word left to right, a Hebrew meaning right to left (phase 27 D13).
   input: {
     borderWidth: 1.5,
