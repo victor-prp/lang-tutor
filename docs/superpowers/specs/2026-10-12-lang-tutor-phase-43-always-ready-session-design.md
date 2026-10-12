@@ -2,7 +2,10 @@
 
 - **Status:** Scoped with Victor on 2026-10-12 (one-pager), the approach and the skip question
   discussed, then "go till PR": the rest of the design is self-approved (CLAUDE.md, *Continue
-  till PR*). Rulings are at the end.
+  till PR*). Rulings are at the end. Implemented on branch `phase-43-always-ready-session` from
+  `docs/superpowers/plans/2026-10-12-phase-43-always-ready-session.md`. Building added R8 to R11
+  and the final review's fixes: create and the stock job take turns per enrollment, a save's
+  stock waits past the last save, and the device columns keep a default.
 - **Date:** 2026-10-12
 - **Source:** the one-pager `drafts/2026-10-12-always-ready-session-one-pager.md` (gitignored; its
   Done-means are restated below) and the design dialogue: "one in stock, refilled on first
@@ -75,9 +78,11 @@ meaning `preparing` or `ready`). "In progress" was not stored: it was `ready` wi
   status is `preparing` or `ready` and `started_at` is null. `sessions_one_started_per_enrollment`:
   unique `enrollment_id` where status is `ready` and `started_at` is not null. Every enrollment
   has at most one open session today, so both hold from the start.
-- **`sessions.listening`, `sessions.speaking`** (boolean, not null): what the session was built
-  for. Backfilled `false`; written on every insert from then on. A stock built with no device
-  in hand inherits the enrollment's newest session's (D3).
+- **`sessions.listening`, `sessions.speaking`** (boolean, not null, default `false`): what the
+  session was built for. Backfilled `false`; written on every insert from then on. The default
+  is for the old container, which still inserts without them for the minute it serves after the
+  migration (ADR 0010). A stock built with no device in hand inherits the enrollment's newest
+  session's (D3).
 - **Statuses do not change:** `preparing → ready → completed`, or `skipped` / `failed`.
 
 The service checks first for a clean error; the indexes are what hold under a race, as in phase
@@ -112,8 +117,12 @@ next trigger, or by the home screen (D7).
 | `start` | D2's start call, with the request's capabilities |
 | `answer` | a first answer that started the session |
 | `complete` | the last answer completed a session |
-| `skip` | a skip ended a session |
-| `save` | words were saved: the vocabulary save and the photo-import save; sent with a 30 s delay (R3) |
+| `skip` | a skip ended a list session (not the seed, R8) |
+| `save` | words were saved: the vocabulary save and the photo-import save; held 30 s past the last save (R3) |
+
+Create and the handler take a lock per enrollment (an advisory lock held to the end of the
+transaction), so a double tap, or a create racing the job, waits for the other and answers what
+it made.
 
 **The handler**, in one transaction: the enrollment exists; it has no stock; it has had a
 session (otherwise the seed comes next); it has saved words. Then `stockNext` (below), and it
@@ -209,15 +218,29 @@ Taken under "go till PR", for Victor to overturn.
   listen or speak (phases 24, 25), and with a stock the app no longer creates sessions, so
   without start the capabilities would be fixed at the seed forever. A stock with no device in
   hand inherits the newest session's: the same device, almost always.
-- **R3. A save stocks after 30 s.** Stocked at the first save, a first list session would hold
-  one word: a learner saves several in a row. Thirty seconds lets a burst become one session; a
-  learner back home sooner gets the home screen's create, which holds every word saved.
+- **R3. A save stocks 30 s after the last save.** Stocked at the first save, a first list session
+  would hold one word: a learner saves several in a row. Each save moves the held job on (pg-boss
+  `upsert`), so a burst becomes one session however long it lasts; a learner back home sooner gets
+  the home screen's create, which holds every word saved. `STOCK_SAVE_DELAY_SECONDS` sets the
+  delay; e2e sets it past any run, so a spec's first list session is the one home creates.
 - **R4. A failed stock is not retried by itself.** Retrying on failure would loop on a model
   outage. The next trigger, or the learner's **נסה שוב**, builds a new one.
 - **R5. A stale stock is played as is.** Built on an earlier day, its words were due then and are
   due still; rebuilding it would mean a wait or two stocks. Anything due since comes next.
 - **R6. No `API_LEVEL` change.** No field is removed or renamed and no request field becomes
-  required. `current` and create change only in cases an older app never reaches (D5, D6), and a
-  first answer starts a session for it (D2).
+  required. An older app's results screen calls create after every session, so it does meet the
+  200 for the stock: it accepts any success, ignores the body and goes home, as before. `current`
+  reads as it always did, and a first answer starts a session for it (D2). An older app never
+  sends start, so its stocks inherit the newest session's devices until it updates.
 - **R7. `started_at`, not a status.** A started session is still `ready` everywhere phase 19 reads
   it; a column the indexes can see was the only missing piece.
+- **R8. A seed skip asks for no stock.** The seed is played before anything is saved; a stock
+  built behind the first saves would hold one word and race them.
+- **R9. Create and start wait for the device's voices**, at most 3 s: home creates as soon as it
+  shows, before the voices may be read, and an unread list would say the device cannot listen.
+- **R10. The integration suites' default pg-boss drops stock requests** and still fails loudly for
+  every other queue: every first answer, ending and skip makes one. The stock job is proven
+  through a real pg-boss in `jobs/stockSession.test.ts`.
+- **R11. A save's stock has a key of its own** (`<enrollment>:save`), so a held save never
+  swallows a start's trigger and its devices. Two stock jobs may then run at once for one
+  enrollment; the lock and the stock index make the second a no-op.
