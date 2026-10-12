@@ -640,6 +640,10 @@ describe('the sentence tasks (phase 27 D5 to D10)', () => {
       expect(prompt.system).toContain('whatever it then means, not only words of the same meaning');
       expect(prompt.system).toContain('agreeing in gender, number and case with the words around it');
     });
+    it('asks for a sentence whose other words point to its word (phase 41 D1)', () => {
+      expect(prompt.system).toContain('its other words point to the word');
+      expect(prompt.system).toContain('Please ___ the file.');
+    });
     it('sends the example, its translation and the sentences to avoid', () => {
       const sent = JSON.parse(prompt.user) as { items: Record<string, unknown>[] };
       expect(sent.items[0]).toMatchObject({

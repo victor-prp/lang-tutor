@@ -11,6 +11,7 @@ import {
   LlmEntrySchema,
   MatchingBoardSchema,
   JudgedAnswerRequestSchema,
+  LlmFitJudgeSchema,
   LlmMeaningJudgeSchema,
   LlmTranslationJudgeSchema,
   GapSchema,
@@ -108,6 +109,16 @@ describe('NextStepRequestSchema', () => {
 
   it('rejects a hint_opened that is not a boolean', () => {
     expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'spent', hint_opened: 'yes' }).success).toBe(false);
+  });
+
+  // Phase 41 (spec D2). The app asks the server to check an unlisted typed-cloze word.
+  it('keeps check_fit on a text answer, and refuses one that is not a boolean', () => {
+    expect(NextStepRequestSchema.parse({ question_id: 'q1', text: 'edit', check_fit: true })).toEqual({
+      question_id: 'q1',
+      text: 'edit',
+      check_fit: true,
+    });
+    expect(NextStepRequestSchema.safeParse({ question_id: 'q1', text: 'edit', check_fit: 'yes' }).success).toBe(false);
   });
 
   it('rejects a negative option_index', () => {
@@ -1069,6 +1080,11 @@ describe('phase 27 Part A schemas', () => {
   it('the meaning judge answers one of three verdicts', () => {
     expect(LlmMeaningJudgeSchema.safeParse({ verdict: 'other_sense' }).success).toBe(true);
     expect(LlmMeaningJudgeSchema.safeParse({ verdict: 'misspelled' }).success).toBe(false);
+  });
+  it('the fit judge answers fits or wrong', () => {
+    expect(LlmFitJudgeSchema.safeParse({ verdict: 'fits' }).success).toBe(true);
+    expect(LlmFitJudgeSchema.safeParse({ verdict: 'wrong' }).success).toBe(true);
+    expect(LlmFitJudgeSchema.safeParse({ verdict: 'right' }).success).toBe(false);
   });
 });
 

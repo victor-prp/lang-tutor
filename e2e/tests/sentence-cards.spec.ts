@@ -220,7 +220,11 @@ test('a typed gap refuses the lemma of its inflected word', async ({ page, reque
     if (card.kind === 'cloze-typed') break;
     await pass(page, card);
   }
+  // Phase 41 (spec D2): a word the rule calls wrong is checked against the gap; the lemma does not fit it.
+  await expectJudge(request, 'wrong');
+  const sent = nextStepSent(page);
   await answerTyped(page, STUB_GAP_LEMMA);
+  expect((await sent).postDataJSON()).toMatchObject({ text: STUB_GAP_LEMMA, check_fit: true });
   await expect(page.getByTestId('feedback-wrong')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('התשובה הנכונה:');
   expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(STUB_GAP);
@@ -268,6 +272,36 @@ test('a typed gap takes a word that fits, opens its hint and asks again', async 
   await expect(page.getByTestId('feedback-correct')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
   await expect(page.getByTestId('retry-notice')).toHaveCount(0);
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 41 (spec D2, D3). A word the card's list missed, which the model says fits
+// the gap, is right as a listed one is: it says another was meant and asks again.
+test('a typed gap checks an unlisted word with the server, and one that fits asks again', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const UNLISTED = 'нашла';
+  await reachSentenceSession(page, request, 'e2e_sentences_fit_check_ru');
+
+  for (let position = 1; ; position++) {
+    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(6);
+    const card = await readCard(page, position, 6);
+    if (card.kind === 'cloze-typed') break;
+    await pass(page, card);
+  }
+  await expectJudge(request, 'fits');
+  const first = nextStepSent(page);
+  await answerTyped(page, UNLISTED);
+  expect((await first).postDataJSON()).toMatchObject({ text: UNLISTED, check_fit: true });
+  await expect(page.getByTestId('retry-notice')).toBeVisible();
+  expect(stripIsolates(await page.getByTestId('retry-right').textContent())).toBe(`✓ נכון, ${UNLISTED} מתאים כאן.`);
+  await expect(page.getByTestId('sentence-translation')).toBeVisible();
+
+  const second = nextStepSent(page);
+  await answerTyped(page, STUB_GAP);
+  expect((await second).postDataJSON()).not.toHaveProperty('check_fit');
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

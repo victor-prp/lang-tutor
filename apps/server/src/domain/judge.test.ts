@@ -2,10 +2,12 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   JUDGE_MARKER,
+  buildFitJudgePrompt,
   buildMeaningJudgePrompt,
   buildTranslationJudgePrompt,
   judgePrompt,
   meaningRuleVerdict,
+  parseFitJudge,
   parseJudge,
   parseMeaningJudge,
   parseTranslationJudge,
@@ -13,6 +15,7 @@ import {
   translationRuleVerdict,
   type JudgeContext,
 } from './judge';
+import type { ClozeTypedQuestion } from '@lang-tutor/core/api';
 
 const CONTEXT: JudgeContext = {
   language: 'it',
@@ -181,5 +184,48 @@ describe('meaningRuleVerdict over the stored alternatives (spec D13)', () => {
     expect(meaningRuleVerdict('מכונית', 'רֶכֶב', ['רכב'])).toBe('exact');
     expect(meaningRuleVerdict('מכונית', 'משאית', ['רכב'])).toBeNull();
     expect(meaningRuleVerdict('מכונית', 'מכונית', [])).toBe('exact');
+  });
+});
+
+// Phase 41 (spec D2). Whether an unlisted word fills a typed cloze's gap.
+describe('buildFitJudgePrompt', () => {
+  const CLOZE: ClozeTypedQuestion = {
+    id: 'c1',
+    type: 'cloze_typed',
+    vocab_term_id: 'v',
+    sentence: 'Please download the file.',
+    gap: { start: 7, end: 15 },
+    translation: 'בבקשה תוריד את הקובץ.',
+    meaning: 'להוריד',
+    answer: 'download',
+    alternatives: ['upload'],
+    mark: null,
+  };
+  const prompt = buildFitJudgePrompt(CLOZE, 'en', 'edit');
+  it('carries the marker MockServer matches on, and the language', () => {
+    expect(prompt.system).toContain(JUDGE_MARKER);
+    expect(prompt.system).toContain('English');
+  });
+  it('sends the sentence with its gap, the word meant and the answer, never the translation', () => {
+    expect(JSON.parse(prompt.user)).toEqual({ sentence: 'Please ___ the file.', word_meant: 'download', answer: 'edit' });
+    expect(prompt.user).not.toContain('הקובץ');
+  });
+  it('asks whether the sentence read alone is correct with the answer, in the form the gap needs', () => {
+    expect(prompt.system).toContain('whatever it then means');
+    expect(prompt.system).toContain('the form the gap needs');
+    for (const verdict of ['"fits"', '"wrong"']) expect(prompt.system).toContain(verdict);
+  });
+});
+
+describe('parseFitJudge', () => {
+  it('reads both verdicts, fenced or not', () => {
+    expect(parseFitJudge('{"verdict":"fits"}')).toBe('fits');
+    expect(parseFitJudge('{"verdict":"wrong"}')).toBe('wrong');
+    expect(parseFitJudge('```json\n{"verdict":"fits"}\n```')).toBe('fits');
+  });
+  it('is null for another verdict, empty or junk', () => {
+    expect(parseFitJudge('{"verdict":"right"}')).toBeNull();
+    expect(parseFitJudge('')).toBeNull();
+    expect(parseFitJudge('junk')).toBeNull();
   });
 });

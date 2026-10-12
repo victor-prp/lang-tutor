@@ -117,6 +117,13 @@ export function retryText(type: Question['type'], pending: PendingRetry | null):
   return pending !== null && type === 'sentence_translation' ? pending.answer : '';
 }
 
+/** Phase 41 (spec D3). A typed gap answer the phone calls wrong, not empty: the
+ *  server is asked whether it fills the gap, so its banner waits for the answer. */
+export function checksFit(question: Question, answer: CardAnswer): boolean {
+  if (question.type !== 'cloze_typed' || !('text' in answer) || 'judged' in answer || answer.text.trim() === '') return false;
+  return evaluate(question, answer).verdict === 'wrong';
+}
+
 /** Phase 34 (spec D9). Whether an answer the phone judges opens a second try.
  *  Its banner would name the saved word, so the card waits for the server to
  *  hold it instead. The `evaluate` the server runs decides, as for the banner. */

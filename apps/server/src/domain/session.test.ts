@@ -23,7 +23,7 @@ import {
 
 // Phase 39 (spec D10). `step` takes the enrollment's languages: Italian learned by a Hebrew speaker.
 const LANGUAGES = { target: 'it', learner: 'he' } as const;
-const step = (record: SessionRecord, questionId: string, answer: AnswerInput, options: { retry?: boolean } = {}) =>
+const step = (record: SessionRecord, questionId: string, answer: AnswerInput, options: { retry?: boolean; fits?: boolean } = {}) =>
   stepRaw(record, questionId, answer, { languages: LANGUAGES, ...options });
 
 function makeQuestion(n: number): MultipleChoiceQuestion {
@@ -544,5 +544,49 @@ describe('step, the wrong alphabet', () => {
     expect(step(makeRecord([q0]), q0.id, { option_index: 0 })).toMatchObject({ status: 'advanced' });
     const tiles = { id: 'l1', type: 'letter_tiles', vocab_term_id: 'v', question: 'חלון', answer: 'finestra', tiles: ['f'] } as unknown as Question;
     expect(step(makeRecord([tiles]), 'l1', { text: 'חלון' })).not.toEqual({ status: 'wrong_script' });
+  });
+});
+
+// Phase 41 (spec D2). A word the model found to fit the gap is recorded as a listed one is.
+describe('step, a typed cloze word that fits', () => {
+  const cloze: Question = {
+    id: 'c1',
+    type: 'cloze_typed',
+    vocab_term_id: 'v',
+    sentence: 'Please download the file.',
+    gap: { start: 7, end: 15 },
+    translation: 'בבקשה תוריד את הקובץ.',
+    meaning: 'להוריד',
+    answer: 'download',
+    alternatives: ['upload'],
+    mark: null,
+  };
+  const next = typedQuestion('t2');
+
+  it('records an unlisted word as alternative, pending, when it fits', () => {
+    const outcome = step(makeRecord([cloze, next]), 'c1', { text: 'edit' }, { fits: true });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.record.answers[0]).toMatchObject({ answer_string: 'edit', verdict: 'alternative', is_correct: true, retry_state: 'pending' });
+    expect(currentQuestion(outcome.record)).toBe(cloze);
+  });
+
+  it('records the same word as wrong without it', () => {
+    const outcome = step(makeRecord([cloze, next]), 'c1', { text: 'edit' });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.record.answers[0]).toMatchObject({ verdict: 'wrong', retry_state: null });
+  });
+
+  it('judges a retry by the rule alone', () => {
+    const held = step(makeRecord([cloze, next]), 'c1', { text: 'upload' });
+    if (held.status !== 'advanced') throw new Error(held.status);
+    const outcome = step(held.record, 'c1', { text: 'edit' }, { retry: true, fits: true });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.record.answers[0]).toMatchObject({ retry_state: 'resolved', retry_verdict: 'wrong' });
+  });
+
+  it('ignores fits on another card type', () => {
+    const outcome = step(makeRecord([next]), 't2', { text: 'porta' }, { fits: true });
+    if (outcome.status !== 'advanced') throw new Error(outcome.status);
+    expect(outcome.record.answers[0]).toMatchObject({ verdict: 'wrong' });
   });
 });

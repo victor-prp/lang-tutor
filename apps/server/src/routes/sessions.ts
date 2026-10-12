@@ -165,7 +165,7 @@ const nextStepRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current question',
   description:
-    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice`, `new_meaning` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`. An answer that is right but is not the saved word (`alternative`) on a `typed_translation`, `say_translation` or `cloze_typed` card holds the card for one second try: the response carries the same card as `question`, with `pending_retry`, and the session does not move on or complete until the same card is answered again with `retry: true`, judged as the first answer was. An empty text, or a `pass` (`show_answer` or `skip`), with `retry: true` gives up. Without `retry`, an answer to the held card replays the first one. A first `text` answer to a `cloze_typed` card may carry `hint_opened`, whether the learner opened its Hebrew sentence; it is stored with the answer and ignored on every other card and on a retry.',
+    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice`, `new_meaning` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`. An answer that is right but is not the saved word (`alternative`) on a `typed_translation`, `say_translation` or `cloze_typed` card holds the card for one second try: the response carries the same card as `question`, with `pending_retry`, and the session does not move on or complete until the same card is answered again with `retry: true`, judged as the first answer was. An empty text, or a `pass` (`show_answer` or `skip`), with `retry: true` gives up. Without `retry`, an answer to the held card replays the first one. A first `text` answer to a `cloze_typed` card may carry `hint_opened`, whether the learner opened its Hebrew sentence; it is stored with the answer and ignored on every other card and on a retry. Such an answer may also carry `check_fit: true`: when its text is not one of the card\'s accepted words, the server asks a language model, which costs money on every call, whether it fills the gap, and records one that does as `alternative`, holding the card for its second try; a failed call records it `wrong`. `check_fit` is ignored on every other card, on a retry and on a replay.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
@@ -318,13 +318,24 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(nextStepRoute, async (c) => {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
-    const answer =
-      'text' in body ? { text: body.text } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index };
     try {
-      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer, {
-        retry: body.retry ?? false,
-        hintOpened: 'text' in body ? body.hint_opened : undefined,
-      });
+      // Phase 41 (spec D2): a text answer may ask for a fit check, which answerText makes.
+      const record =
+        'text' in body
+          ? await sessions.answerText(c.var.actor, id, {
+              questionId: body.question_id,
+              text: body.text,
+              hintOpened: body.hint_opened,
+              checkFit: body.check_fit,
+              retry: body.retry ?? false,
+            })
+          : await sessions.submitAnswer(
+              c.var.actor,
+              id,
+              body.question_id,
+              'pass' in body ? { pass: body.pass } : { option_index: body.option_index },
+              { retry: body.retry ?? false },
+            );
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);

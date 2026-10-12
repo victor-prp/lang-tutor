@@ -19,6 +19,9 @@ const unreachableSessions: SessionService = {
   answerJudged: () => {
     throw new Error('the health route must not reach the session service');
   },
+  answerText: () => {
+    throw new Error('the health route must not reach the session service');
+  },
   answerBySpeech: () => {
     throw new Error('the health route must not reach the session service');
   },

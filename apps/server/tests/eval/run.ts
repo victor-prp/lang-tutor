@@ -30,13 +30,14 @@ import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient }
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
 import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askAccept, askCheck, askContext, askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
+import { askAccept, askCheck, askContext, askDistractors, askFitJudge, askGapGuesses, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
   ACCEPT_CASES,
   CASES,
   CHECK_CASES,
   CONTEXT_CASES,
   DISTRACTOR_CASES,
+  FIT_JUDGE_CASES,
   GAP_CASES,
   JUDGE_CASES,
   RENDERING_CASES,
@@ -49,6 +50,7 @@ import {
   type ContextCase,
   type DistractorCase,
   type EvalCase,
+  type FitJudgeCase,
   type JudgeCase,
   type RenderingCase,
   type SentenceCase,
@@ -866,13 +868,14 @@ async function main(): Promise<void> {
   const sentenceCases = SENTENCE_CASES.filter((kase) => matches(kase.label));
   const translateCases = TRANSLATE_CASES.filter((kase) => matches(kase.label));
   const tjudgeCases = TRANSLATION_JUDGE_CASES.filter((kase) => matches(kase.label));
+  const fitCases = FIT_JUDGE_CASES.filter((kase) => matches(kase.label));
   const contextCases = CONTEXT_CASES.filter((kase) => matches(kase.label));
   const checkCases = CHECK_CASES.filter((kase) => matches(kase.label));
   if (filter) console.log(`filter "${filter}"`);
   if (
     cases.length + renderingCases.length + acceptCases.length + distractorCases.length + transcriptionCases.length +
       photoCases.length + matchCases.length + judgeCases.length +
-      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + contextCases.length +
+      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + fitCases.length + contextCases.length +
       checkCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
@@ -1089,13 +1092,61 @@ async function main(): Promise<void> {
         label: kase.label,
         text,
         tier1: sentenceTier1(kase, answer),
-        tier2: sentenceTier2(kase, answer),
+        tier2: [...sentenceTier2(kase, answer), ...(kase.task === 'sentence' ? await pointsToWord(kase, answer) : [])],
         written: writtenBy(kase, answer),
       };
     } catch (error) {
       return {
         label: kase.label,
         text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  // Phase 41 (spec D1). Read alone, the gapped sentence's likeliest fills include its
+  // word: the gap as written, or the item's own form or lemma.
+  const pointsToWord = async (kase: SentenceCase, answer: LlmDistractors): Promise<Check[]> => {
+    // One item at a time, inside the row's own concurrency slot; a probe that fails
+    // is a failed tier 2 check of its own, never the row's tier 1 (review M4).
+    const items = sentenceItemsOf(kase);
+    const checks: Check[] = [];
+    for (const [index, item] of kase.items.entries()) {
+      const name = `${item.form}: the sentence points to its word`;
+      const got = answer.items.find((answered) => answered.key === items[index].key);
+      const at = got?.sentence && got.gap ? got.sentence.indexOf(got.gap) : -1;
+      if (!got?.sentence || !got.gap || at < 0) {
+        checks.push({ name, ok: false, detail: 'no sentence' });
+        continue;
+      }
+      const gapped = `${got.sentence.slice(0, at)}___${got.sentence.slice(at + got.gap.length)}`;
+      try {
+        const guesses = await askGapGuesses(judgeLlm, { language: kase.from as LanguageCode, sentence: gapped });
+        const target = { answer: got.gap, lemma: item.lemma, alternatives: [item.form] };
+        checks.push({ name, ok: guesses.some((guess) => judgeTyped(target, guess) !== 'wrong'), detail: `${gapped} → ${guesses.join(' / ')}` });
+      } catch (error) {
+        checks.push({ name, ok: false, detail: `the probe failed: ${(error as Error).message}` });
+      }
+    }
+    return checks;
+  };
+
+  const scoreFitJudge = async (kase: FitJudgeCase): Promise<Row> => {
+    try {
+      const verdict = await askFitJudge(judgeLlm, kase);
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the answer parses', ok: verdict !== null, detail: verdict === null ? 'unreadable' : undefined }],
+        tier2: [{ name: `judged ${kase.expect}`, ok: verdict === kase.expect, detail: `verdict ${verdict ?? 'none'}` }],
+        verdict: verdict ?? undefined,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text: kase.answer,
         tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
         tier2: [],
         error: (error as Error).message,
@@ -1164,7 +1215,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   const [
     translationRows, renderingRows, acceptRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
-    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows,
   ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
@@ -1181,10 +1232,11 @@ async function main(): Promise<void> {
     mapWithConcurrency(tjudgeCases, CONCURRENCY, scoreTranslationJudge),
     mapWithConcurrency(contextCases, CONCURRENCY, scoreContext),
     mapWithConcurrency(checkCases, CONCURRENCY, scoreCheck),
+    mapWithConcurrency(fitCases, CONCURRENCY, scoreFitJudge),
   ]);
   const rows = [
     ...translationRows, ...renderingRows, ...acceptRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
-    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows,
+    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows,
   ];
   const elapsedMs = Date.now() - started;
 
@@ -1216,6 +1268,9 @@ async function main(): Promise<void> {
     // Phase 34 (spec D5). The checker, a line of its own: a checker that says
     // yes to everything must fail here, not hide in the pooled score.
     { name: 'checker', rows: checkRows, passed: 0, total: 0 },
+    // Phase 41 (spec D2). The fit check, a line of its own: a judge that says
+    // fits to everything must fail here.
+    { name: 'fit judge', rows: fitRows, passed: 0, total: 0 },
   ];
 
   for (const row of rows) {
@@ -1320,7 +1375,7 @@ async function main(): Promise<void> {
       `${cases.length} translation + ${renderingCases.length} rendering + ${acceptCases.length} accept + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ` +
       `${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge + ` +
       `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge + ` +
-      `${contextCases.length} context + ${checkCases.length} checker cases in ` +
+      `${contextCases.length} context + ${checkCases.length} checker + ${fitCases.length} fit judge cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -1344,6 +1399,7 @@ async function main(): Promise<void> {
         translationJudgeScore: groupScore(groups[2]),
         contextScore: groupScore(groups[3]),
         checkerScore: groupScore(groups[4]),
+        fitJudgeScore: groupScore(groups[5]),
         rows,
       },
       null,

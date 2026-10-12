@@ -496,6 +496,53 @@ describe('api/client', () => {
   });
 });
 
+// Phase 41 (review I1). A next-step with check_fit waits on the server's model call,
+// so it is given up as a judged answer is, and the card offers "try again".
+describe('a fit-checked next-step', () => {
+  const stalled = () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const fetch = ((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        signals.push(init.signal ?? undefined);
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      })) as unknown as typeof globalThis.fetch;
+    const api = createApiClient({
+      baseUrl: 'http://api',
+      fetch,
+      sessionHeaders: async () => ({}),
+      credentials: 'omit',
+      onUnauthorized: () => {},
+      appHeaders: {},
+      onUpdateRequired: () => {},
+    });
+    return { api, signals };
+  };
+
+  it('is abandoned when it stalls', async () => {
+    jest.useFakeTimers();
+    try {
+      const { api } = stalled();
+      const outcome = expect(api.nextStep('s1', { question_id: 'q', text: 'edit', check_fit: true })).rejects.toThrow('aborted');
+      await jest.advanceTimersByTimeAsync(JUDGE_REQUEST_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('leaves every other next-step without a timeout', async () => {
+    jest.useFakeTimers();
+    try {
+      const { api, signals } = stalled();
+      void api.nextStep('s1', { question_id: 'q', text: 'edit' });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(signals).toEqual([undefined]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
 describe('photo imports', () => {
   it('uploads to the enrollment, patches a row, saves and discards', async () => {
     const calls: { url: string; method?: string; body?: unknown }[] = [];

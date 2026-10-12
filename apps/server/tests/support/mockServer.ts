@@ -442,7 +442,7 @@ export async function expectTranscription(ns: string, heard: string, opts: { onc
  * transcription stub in the same namespace cannot answer it. Consumed once, and
  * prioritised so it wins over a broader stub registered earlier.
  */
-export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' | 'wrong'): Promise<void> {
+export async function expectJudge(ns: string, verdict: 'right' | 'other_sense' | 'wrong' | 'fits'): Promise<void> {
   await expectation(ns, {
     match: { body: { type: 'REGEX', regex: `[\\s\\S]*${JUDGE_MARKER}[\\s\\S]*` } },
     action: {

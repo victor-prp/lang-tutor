@@ -160,11 +160,15 @@ export type StepOutcome =
 // holds the session on its card: the card stays current, and the session does
 // not complete on it. `retry` resolves it, judged by the same rule as the first
 // answer and checked the same way. attemptOf decides which a request is.
+//
+// Phase 41 (spec D2). `fits`: the model found a typed cloze's first answer to
+// fit its gap, so it is recorded as one of the card's alternatives. A retry is
+// judged by the rule alone (ruling R3).
 export function step(
   record: SessionRecord,
   questionId: string,
   answer: AnswerInput,
-  { retry = false, languages }: { retry?: boolean; languages: StepLanguages },
+  { retry = false, languages, fits = false }: { retry?: boolean; languages: StepLanguages; fits?: boolean },
 ): StepOutcome {
   const attempt = attemptOf(record, questionId, retry);
   switch (attempt.kind) {
@@ -176,12 +180,21 @@ export function step(
     case 'retry': {
       const refused = refusal(attempt.question, answer, languages);
       if (refused) return refused;
-      if (attempt.kind === 'answer') return advanced(record, [...record.answers, evaluate(attempt.question, answer)], 'answer');
+      if (attempt.kind === 'answer') return advanced(record, [...record.answers, evaluate(fitted(attempt.question, answer, fits), answer)], 'answer');
       const { answer_string, verdict } = evaluateRetry(attempt.question, answer);
       const resolved: AnswerRecord = { ...attempt.pending, retry_state: 'resolved', retry_answer_string: answer_string, retry_verdict: verdict };
       return advanced(record, [...record.answers.slice(0, -1), resolved], 'retry');
     }
   }
+}
+
+/** Phase 41 (spec D2). A typed cloze whose first answer the model found to fit
+ *  its gap: that answer is one more of its alternatives, so it is recorded as a
+ *  listed word is. Any other card, or no fit, is the card as it is. */
+function fitted(question: Question, answer: AnswerInput, fits: boolean): Question {
+  return fits && question.type === 'cloze_typed' && 'text' in answer
+    ? { ...question, alternatives: [...question.alternatives, answer.text] }
+    : question;
 }
 
 /** Why `answer` cannot be recorded for `question`, or null when it can. */

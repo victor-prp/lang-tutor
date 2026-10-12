@@ -342,3 +342,91 @@ describe('answerJudged, the second try', () => {
     expect(judge.calls).toHaveLength(0);
   });
 });
+
+// Phase 41 (spec D2). A typed cloze's first answer the rule calls wrong, checked by the model.
+describe('answerText, the fit check', () => {
+  const CLOZE: Question = {
+    id: 'z1',
+    type: 'cloze_typed',
+    vocab_term_id: 'l1',
+    sentence: 'Please download the file.',
+    gap: { start: 7, end: 15 },
+    translation: 'בבקשה תוריד את הקובץ.',
+    meaning: 'להוריד',
+    answer: 'download',
+    alternatives: ['upload'],
+    mark: null,
+  };
+  const cloze = (text: string, more: { checkFit?: boolean; retry?: boolean } = {}) => ({ questionId: 'z1', text, hintOpened: false, checkFit: true, ...more });
+
+  it('records an unlisted word that fits as alternative, held, after one call', async () => {
+    const judge = createFakeLlmClient('{"verdict":"fits"}');
+    const { service, inserted, logger } = setup(judge, record([CLOZE, CHOICE]));
+    const result = await service.answerText('u1', SESSION, cloze('edit'));
+    expect(result.answers[0]).toMatchObject({ answer_string: 'edit', verdict: 'alternative', retry_state: 'pending' });
+    expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'edit', verdict: 'alternative', pending: true, hintOpened: false }]]);
+    expect(judge.calls).toHaveLength(1);
+    expect(judge.calls[0].system).toContain(JUDGE_MARKER);
+    expect(JSON.parse(judge.calls[0].user)).toEqual({ sentence: 'Please ___ the file.', word_meant: 'download', answer: 'edit' });
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_fit_checked', verdict: 'fits', judge_ms: 400 }));
+  });
+
+  it('records a word that does not fit as wrong', async () => {
+    const { service, inserted } = setup(createFakeLlmClient('{"verdict":"wrong"}'), record([CLOZE, CHOICE]));
+    await service.answerText('u1', SESSION, cloze('banana'));
+    expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'banana', verdict: 'wrong', hintOpened: false }]]);
+  });
+
+  // Review Focus 3: a failed check costs what it cost before the phase, and the card still moves on.
+  it('records wrong when the call fails or cannot be read, and logs why', async () => {
+    for (const judge of [createFakeLlmClient(new Error('timeout')), createFakeLlmClient('junk')]) {
+      const { service, inserted, logger } = setup(judge, record([CLOZE, CHOICE]));
+      await service.answerText('u1', SESSION, cloze('edit'));
+      expect(inserted).toEqual([[SESSION, 0, 'z1', { text: 'edit', verdict: 'wrong', hintOpened: false }]]);
+      expect(logger.events).toContainEqual(expect.objectContaining({ event: 'answer_fit_check_failed', question_type: 'cloze_typed' }));
+    }
+  });
+
+  // Review Focus 4: nothing but a rule-wrong first answer to a typed cloze costs a call.
+  it('makes no call for a listed word, a slip, an empty text, no flag, a retry or another card', async () => {
+    const cases: [SessionRecord, ReturnType<typeof cloze>][] = [
+      [record([CLOZE, CHOICE]), cloze('upload')],
+      [record([CLOZE, CHOICE]), cloze('downlaod')],
+      [record([CLOZE, CHOICE]), cloze('  ')],
+      [record([CLOZE, CHOICE]), cloze('edit', { checkFit: false })],
+      [record([CHOICE, CLOZE]), { ...cloze('edit'), questionId: 'c2' }],
+    ];
+    for (const [loaded, input] of cases) {
+      const judge = createFakeLlmClient('{"verdict":"fits"}');
+      const { service } = setup(judge, loaded);
+      await service.answerText('u1', SESSION, input).catch(() => undefined);
+      expect(judge.calls).toHaveLength(0);
+    }
+    const held = record([CLOZE, CHOICE], [
+      { question_id: 'z1', is_correct: true, answer_string: 'upload', verdict: 'alternative', retry_state: 'pending', retry_answer_string: null, retry_verdict: null },
+    ]);
+    const judge = createFakeLlmClient('{"verdict":"fits"}');
+    const { service, resolved } = setup(judge, held);
+    await service.answerText('u1', SESSION, cloze('edit', { retry: true }));
+    expect(judge.calls).toHaveLength(0);
+    expect(resolved).toEqual([[SESSION, 0, { text: 'edit', verdict: 'wrong' }]]);
+  });
+
+  // Review Focus 1: a resent answer replays, never paying twice.
+  it('replays a recorded answer without a call', async () => {
+    const answered = record([CLOZE, CHOICE], [{ question_id: 'z1', is_correct: false, answer_string: 'edit', verdict: 'wrong', ...NO_RETRY }]);
+    const judge = createFakeLlmClient('{"verdict":"fits"}');
+    const { service, inserted } = setup(judge, answered);
+    await service.answerText('u1', SESSION, cloze('edit'));
+    expect(judge.calls).toHaveLength(0);
+    expect(inserted).toEqual([]);
+  });
+
+  // Review Focus 5: the wrong alphabet is refused before any call.
+  it('refuses a text in the wrong alphabet without a call', async () => {
+    const judge = createFakeLlmClient('{"verdict":"fits"}');
+    const { service } = setup(judge, record([CLOZE, CHOICE]));
+    await expect(service.answerText('u1', SESSION, cloze('חלון'))).rejects.toBeInstanceOf(WrongScript);
+    expect(judge.calls).toHaveLength(0);
+  });
+});

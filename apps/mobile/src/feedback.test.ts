@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { Question } from '@lang-tutor/core/api';
 
-import { feedbackFor, opensRetry, retryNotice, retryText } from './feedback';
+import { checksFit, feedbackFor, opensRetry, retryNotice, retryText } from './feedback';
 import { strings } from './strings';
 
 const choice: Question = {
@@ -313,6 +313,14 @@ describe('a second try (phase 34 D9)', () => {
     expect(retryText('typed_meaning', { answer: 'ספר', wording: 'meaning' })).toBe('');
     expect(retryText('sentence_translation', { answer: 'Combiniamo le forze.', wording: 'word' })).toBe('Combiniamo le forze.');
     expect(retryText('sentence_translation', null)).toBe('');
+  });
+
+  // Phase 41 (spec D3). The answers the server is asked to check against the gap.
+  it('a typed gap answer the phone calls wrong is checked for a fit, and nothing else', () => {
+    expect(checksFit(CLOZE, { text: 'cantavamo' })).toBe(true);
+    for (const text of ['parlavamo', 'parlavmo', 'chiacchieravamo', '', '  ']) expect(checksFit(CLOZE, { text })).toBe(false);
+    expect(checksFit(typed, { text: 'porta' })).toBe(false);
+    expect(checksFit(CLOZE, { pass: 'show_answer' })).toBe(false);
   });
 
   it('a typed answer that is another accepted word opens it, on the cards that have one', () => {
