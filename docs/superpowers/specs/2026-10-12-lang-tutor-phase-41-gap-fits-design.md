@@ -112,6 +112,10 @@ both phase 34's. `nextStepRequest` adds `check_fit: true` to that answer only. A
 the card opens the second try with phase 38's notice; any other lands as the wrong answer it is.
 A second try stays on the `banner` route (R3).
 
+`mayOpen` counts such an answer as one that may open the hold its response carries, as it counts a
+judged text. Without that, `metHold` would read the server's hold as one a lost earlier answer
+opened and resend this text as the second try.
+
 ### D4. Compatibility
 
 `check_fit` is optional: an older app never sends it, the server never calls the judge for it, and
@@ -129,8 +133,8 @@ request field, a removed field or a changed meaning raises it).
 - `apps/server/src/routes/sessions.ts`: the next-step route reads `check_fit` and calls
   `answerText`; its description names the field.
 - `apps/mobile/src/quiz.ts` (`answerRoute`, `nextStepRequest`) and `hooks/useSession.tsx`.
-- MockServer stubs (`apps/server/tests` and `e2e/tests/support`): a fit-judge expectation,
-  matched on the marker and a phrase of its own.
+- MockServer stubs (`apps/server/tests/support` and `e2e/tests/support`): `expectJudge` takes
+  `fits` as a verdict. The fit prompt carries `JUDGE_MARKER`, so the existing stub answers it.
 
 ## 3. Testing
 
