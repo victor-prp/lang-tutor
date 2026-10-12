@@ -37,6 +37,7 @@ import {
   SessionNotReady,
   SessionNotSkippable,
   SessionOpen,
+  WrongScript,
 } from '../errors';
 import type { SessionResult, SessionService } from '../services/sessions';
 import { forbidden, learnerResponses, type ActorEnv } from './actor';
@@ -182,6 +183,7 @@ const nextStepRoute = createRoute({
     409: failure(
       "`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`).",
     ),
+    422: failure("The text has letters but none in its answer language's alphabet. Nothing was recorded and the card stays current."),
     ...learnerResponses,
     403: NOT_YOURS,
   },
@@ -232,6 +234,7 @@ const judgedAnswerRoute = createRoute({
     400: failure('The request body did not validate, or the current card is not one the server judges.'),
     404: failure('No session has this id.'),
     409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`)."),
+    422: failure("The text has letters but none in its answer language's alphabet. Nothing was recorded, no model was called, and the card stays current."),
     502: failure('The judge failed or timed out; nothing was recorded, and the answer may be sent again.'),
     ...learnerResponses,
     403: NOT_YOURS,
@@ -336,6 +339,7 @@ export function createSessionsRouter(sessions: SessionService) {
       if (error instanceof AnswerKindMismatch) {
         return c.json({ error: 'the answer is not the kind this question takes' }, 400);
       }
+      if (error instanceof WrongScript) return c.json({ error: `the answer is not written in ${error.language}'s alphabet` }, 422);
       throw error; // anything else is a real failure: app.ts's onError makes it a 500
     }
   });
@@ -391,6 +395,7 @@ export function createSessionsRouter(sessions: SessionService) {
         return c.json({ error: "question_id does not match the session's current question" }, 409);
       }
       if (error instanceof AnswerKindMismatch) return c.json({ error: 'the current card is not judged by the server' }, 400);
+      if (error instanceof WrongScript) return c.json({ error: `the answer is not written in ${error.language}'s alphabet` }, 422);
       if (error instanceof LlmUnavailable) return c.json({ error: 'judge unavailable' }, 502);
       throw error;
     }

@@ -3,6 +3,7 @@ import type {
   MissedQuestion,
   PendingRetry,
   Position,
+  LanguageCode,
   Question,
   Score,
   SessionSource,
@@ -11,15 +12,18 @@ import type {
 import {
   SESSION_LENGTH,
   answerFits,
+  answerLanguage,
   evaluate,
   evaluateRetry,
   isChoice,
   isSpeaking,
+  isTypedAnswerType,
   missed,
   normaliseGloss,
   pickQuestions,
   score,
   spokenVerdict,
+  wrongScript,
   type AnswerInput,
 } from '@lang-tutor/core/domain';
 
@@ -121,11 +125,16 @@ export function attemptOf(record: SessionRecord, questionId: string, retry: bool
   return current && current.id === questionId ? { kind: 'answer', question: current } : { kind: 'desync' };
 }
 
+/** Phase 39 (spec D10). The enrollment's languages, for the wrong-alphabet check. */
+export type StepLanguages = { target: LanguageCode; learner: LanguageCode };
+
 export type StepOutcome =
   | { status: 'invalid_question' }
   | { status: 'out_of_range' }
   | { status: 'wrong_answer_kind' }
   | { status: 'unheard' }
+  // Phase 39 (spec D10): a typed answer whose letters are all in another alphabet.
+  | { status: 'wrong_script' }
   | { status: 'replayed'; record: SessionRecord; justCompleted: false }
   // Phase 34 (spec D9): `recorded` says whether a new answer was appended or the
   // pending one's retry resolved, which the caller writes differently.
@@ -145,6 +154,9 @@ export type StepOutcome =
 // `wrong_answer_kind` (phase 23). A replay ignores the answer entirely: the
 // record comes back unchanged, so there is nothing to judge.
 //
+// Phase 39 (spec D10). `languages` is the enrollment's: a typed card is checked
+// against the alphabet of the language it is answered in.
+//
 // Phase 34 (spec D9). An answer that opens a second try is recorded pending and
 // holds the session on its card: the card stays current, and the session does
 // not complete on it. `retry` resolves it, judged by the same rule as the first
@@ -153,7 +165,7 @@ export function step(
   record: SessionRecord,
   questionId: string,
   answer: AnswerInput,
-  { retry = false }: { retry?: boolean } = {},
+  { retry = false, languages }: { retry?: boolean; languages: StepLanguages },
 ): StepOutcome {
   const attempt = attemptOf(record, questionId, retry);
   switch (attempt.kind) {
@@ -163,7 +175,7 @@ export function step(
       return { status: 'replayed', record, justCompleted: false };
     case 'answer':
     case 'retry': {
-      const refused = refusal(attempt.question, answer);
+      const refused = refusal(attempt.question, answer, languages);
       if (refused) return refused;
       if (attempt.kind === 'answer') return advanced(record, [...record.answers, evaluate(attempt.question, answer)], 'answer');
       const { answer_string, verdict } = evaluateRetry(attempt.question, answer);
@@ -174,8 +186,14 @@ export function step(
 }
 
 /** Why `answer` cannot be recorded for `question`, or null when it can. */
-function refusal(question: Question, answer: AnswerInput): StepOutcome | null {
+function refusal(question: Question, answer: AnswerInput, languages: StepLanguages): StepOutcome | null {
   if (!answerFits(question, answer)) return { status: 'wrong_answer_kind' };
+  // Phase 39 (spec D7, D10). A typed answer with letters but none in the answer
+  // language's alphabet records nothing, a second try included. A spoken
+  // transcript has no `text` and is never checked.
+  if ('text' in answer && isTypedAnswerType(question.type) && wrongScript(answer.text, answerLanguage(question.type, languages.target, languages.learner))) {
+    return { status: 'wrong_script' };
+  }
   // Phase 25 (spec D5). A transcript that is not the word records nothing:
   // a recogniser's reject is no evidence and never wrong (phase 20).
   if ('heard' in answer && isSpeaking(question) && spokenVerdict(question, answer.heard) === 'unheard') {

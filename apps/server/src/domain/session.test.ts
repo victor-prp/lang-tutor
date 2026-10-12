@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import type { AnswerRecord, MultipleChoiceQuestion, Question, SessionStatus, TypedTranslationQuestion } from '@lang-tutor/core/api';
-import { SESSION_LENGTH } from '@lang-tutor/core/domain';
+import { SESSION_LENGTH, type AnswerInput } from '@lang-tutor/core/domain';
 
 import {
   askableRenderings,
@@ -15,11 +15,16 @@ import {
   shuffle,
   positionOf,
   sessionScore,
-  step,
+  step as stepRaw,
   type GlossRendering,
   type SavedGloss,
   type SessionRecord,
 } from './session';
+
+// Phase 39 (spec D10). `step` takes the enrollment's languages: Italian learned by a Hebrew speaker.
+const LANGUAGES = { target: 'it', learner: 'he' } as const;
+const step = (record: SessionRecord, questionId: string, answer: AnswerInput, options: { retry?: boolean } = {}) =>
+  stepRaw(record, questionId, answer, { languages: LANGUAGES, ...options });
 
 function makeQuestion(n: number): MultipleChoiceQuestion {
   return {
@@ -476,5 +481,59 @@ describe('step, the second try', () => {
     if (wrong.status !== 'advanced') throw new Error(wrong.status);
     expect(sessionScore(wrong.record)).toEqual({ correct: 1, total: 1 });
     expect(missedQuestions(wrong.record)).toEqual([]);
+  });
+});
+
+// Phase 39 (spec D7, D10). A typed answer in the wrong alphabet is refused, nothing recorded.
+describe('step, the wrong alphabet', () => {
+  const card = typedQuestion('t1');
+  const next = typedQuestion('t2');
+  const typed: Record<string, [Question, string]> = {
+    typed_translation: [card, 'חלון'],
+    say_translation: [{ ...card, type: 'say_translation' }, 'חלון'],
+    dictation: [{ id: 't1', type: 'dictation', vocab_term_id: 'v', question: 'finestra', meaning: 'חלון' }, 'חלון'],
+    cloze_typed: [
+      { id: 't1', type: 'cloze_typed', vocab_term_id: 'v', sentence: 'La finestra', gap: { start: 3, end: 11 }, translation: 'החלון', meaning: 'חלון', answer: 'finestra', alternatives: [], mark: null },
+      'חלון',
+    ],
+    sentence_translation: [
+      { id: 't1', type: 'sentence_translation', vocab_term_id: 'v', question: 'החלון פתוח', meaning: 'חלון', sentence: 'The window is open', gap: { start: 4, end: 10 }, answer: 'window', mark: null },
+      'חלון',
+    ],
+    typed_meaning: [{ id: 't1', type: 'typed_meaning', vocab_term_id: 'v', question: 'finestra', part_of_speech: 'noun', meaning: 'חלון', context: null }, 'window'],
+  };
+
+  it.each(Object.keys(typed))('refuses a %s answered in the wrong alphabet', (type) => {
+    const [question, text] = typed[type];
+    // The judged cards take the text the server already judged; the rest take it bare.
+    const answer = type === 'typed_meaning' || type === 'sentence_translation' ? { text, judged: 'exact' as const } : { text };
+    expect(step(makeRecord([question, next]), 't1', answer)).toEqual({ status: 'wrong_script' });
+  });
+
+  it('refuses a second try in the wrong alphabet like a first answer', () => {
+    const open = { ...card, alternatives: ['vetrata'] };
+    const first = step(makeRecord([open, next]), 't1', { text: 'vetrata' });
+    if (first.status !== 'advanced') throw new Error(first.status);
+    expect(step(first.record, 't1', { text: 'חלון' }, { retry: true })).toEqual({ status: 'wrong_script' });
+  });
+
+  it('does not refuse digits, punctuation, whitespace or an empty text', () => {
+    expect(step(makeRecord([card, next]), 't1', { text: '1990' })).toMatchObject({ status: 'advanced' });
+    expect(step(makeRecord([card, next]), 't1', { text: '...' })).toMatchObject({ status: 'advanced' });
+    expect(step(makeRecord([card, next]), 't1', { text: '' })).toMatchObject({ status: 'advanced' });
+    // On a pending second try an empty text still gives up.
+    const open = { ...card, alternatives: ['vetrata'] };
+    const first = step(makeRecord([open, next]), 't1', { text: 'vetrata' });
+    if (first.status !== 'advanced') throw new Error(first.status);
+    const gaveUp = step(first.record, 't1', { text: '' }, { retry: true });
+    if (gaveUp.status !== 'advanced') throw new Error(gaveUp.status);
+    expect(gaveUp.record.answers[0].retry_verdict).toBe('gave_up');
+  });
+
+  it('ignores a choice card and a letter-tile card', () => {
+    const q0 = makeQuestion(0);
+    expect(step(makeRecord([q0]), q0.id, { option_index: 0 })).toMatchObject({ status: 'advanced' });
+    const tiles = { id: 'l1', type: 'letter_tiles', vocab_term_id: 'v', question: 'חלון', answer: 'finestra', tiles: ['f'] } as unknown as Question;
+    expect(step(makeRecord([tiles]), 'l1', { text: 'חלון' })).not.toEqual({ status: 'wrong_script' });
   });
 });

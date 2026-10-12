@@ -3,8 +3,11 @@ import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/sc
 import {
   LIVE_DIMENSIONS,
   MAX_JUDGED_TEXT,
+  answerLanguage,
   isJudged,
   isSpeaking,
+  isTypedAnswerType,
+  wrongScript,
   shuffleSession,
   speakable,
   spokenVerdict,
@@ -100,6 +103,7 @@ import {
   SessionNotReady,
   SessionNotSkippable,
   SessionOpen,
+  WrongScript,
 } from '../errors';
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
@@ -469,7 +473,10 @@ export function createSessionService({
 
         // Four failure modes, four domain outcomes, four errors — the domain
         // decides what is wrong, this layer only names it.
-        const outcome = step(loaded, questionId, answer, { retry });
+        const outcome = step(loaded, questionId, answer, {
+          retry,
+          languages: { target: enrolled.target_language as LanguageCode, learner: enrolled.source_language as LanguageCode },
+        });
         if (outcome.status === 'invalid_question') throw new QuestionDesynced(questionId);
         if (outcome.status === 'wrong_answer_kind') throw new AnswerKindMismatch(questionId);
         if (outcome.status === 'out_of_range') {
@@ -477,6 +484,16 @@ export function createSessionService({
         }
         // answerBySpeech judges before it gets here, with the same pure function.
         if (outcome.status === 'unheard') throw new Error('an unheard transcript reached submitAnswer');
+        // Phase 39 (spec D10). `step` refuses before anything is recorded, so the
+        // card stays as it was; the log is the only trace of the refusal.
+        if (outcome.status === 'wrong_script') {
+          const question = loaded.questions.find((q) => q.id === questionId)!;
+          logger.info({ event: 'answer_wrong_script', session_id: sessionId, question_type: question.type });
+          const expected = isTypedAnswerType(question.type)
+            ? answerLanguage(question.type, enrolled.target_language as LanguageCode, enrolled.source_language as LanguageCode)
+            : (enrolled.target_language as LanguageCode);
+          throw new WrongScript(questionId, LANGUAGES[expected].name);
+        }
         // A replay reports justCompleted: false, so retrying a completed session
         // logs nothing and writes no progress.
         if (outcome.status === 'replayed') {
@@ -678,6 +695,13 @@ export function createSessionService({
       if ('replay' in checked) return checked.replay;
 
       const text = input.text.slice(0, MAX_JUDGED_TEXT);
+      // Phase 39 (spec D10). Before the rule and the judge, so no model is called
+      // for an answer in the wrong alphabet, and nothing is recorded.
+      const expected = answerLanguage(checked.current.type, checked.context.language, checked.context.explanation);
+      if (wrongScript(text, expected)) {
+        logger.info({ event: 'answer_wrong_script', session_id: sessionId, question_type: checked.current.type });
+        throw new WrongScript(input.questionId, LANGUAGES[expected].name);
+      }
       let verdict = ruleVerdict(checked.current, text, checked.context.alternatives);
       const judgedBy = verdict === null ? 'model' : 'rule';
       const started = now();
