@@ -28,7 +28,9 @@ export type NextSessionValue = {
   /** The first read for the active enrollment failed and nothing is shown. */
   loadFailed: boolean;
   reload: () => void;
-  create: () => Promise<CreateSessionResponse>;
+  /** `waitForVoices: false` for the seed, whose cards are fixed: tapping start
+   *  must not wait on the voices (phase 43). */
+  create: (options?: { waitForVoices?: boolean }) => Promise<CreateSessionResponse>;
   /** Phase 43 (spec D2). Has the next session built for this device; never
    *  throws, since a session's first answer starts it too. */
   start: (sessionId: string) => Promise<void>;
@@ -74,8 +76,8 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   // it knows whether it can record. Read where a session is built for it, once
   // the voices are read (phase 43): home builds one as soon as it shows.
   const devices = useCallback(
-    async (targetLanguage: string) => {
-      await voicesRead(speaker, VOICES_WAIT_MS);
+    async (targetLanguage: string, waitForVoices = true) => {
+      if (waitForVoices) await voicesRead(speaker, VOICES_WAIT_MS);
       return {
         listening: speaker.snapshot().tags.has(targetLanguage),
         speaking: await recorder.canRecord().catch(() => false),
@@ -84,10 +86,13 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
     [speaker, recorder],
   );
 
-  const create = useCallback(async () => {
+  const create = useCallback(async (options?: { waitForVoices?: boolean }) => {
     if (!active) throw new Error('cannot create a session with no active enrollment');
     try {
-      return await api.createSession({ enrollment_id: active.id, ...(await devices(active.target_language)) });
+      return await api.createSession({
+        enrollment_id: active.id,
+        ...(await devices(active.target_language, options?.waitForVoices ?? true)),
+      });
     } finally {
       reload();
     }

@@ -112,9 +112,11 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }
   }
 
+  // The seed's cards are fixed, so its create does not wait on the voices: the
+  // start it is entered with waits instead, without holding the tap.
   const startSeed = () =>
     run(async () => {
-      const created = await next.create();
+      const created = await next.create({ waitForVoices: false });
       if (created.status === 'ready') enterSession(created.session_id, true);
     });
   // Phase 43 (spec D7). Makes the next session without entering it: home shows
