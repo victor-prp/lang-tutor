@@ -1,12 +1,10 @@
 import { Redirect, router } from 'expo-router';
-import { useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LevelBadge } from '@/components/LevelBadge';
 import { SpeakButton } from '@/components/SpeakButton';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useNextSession } from '@/hooks/useNextSession';
 import { useSession } from '@/hooks/useSession';
 import { missedPair, practisedRows } from '@/progress';
 import { strings } from '@/strings';
@@ -21,15 +19,10 @@ function headlineFor(correct: number, total: number): string {
 
 export default function ResultsScreen() {
   const session = useSession();
-  const next = useNextSession();
   // Voice phase. A practised row's form and a missed row's word are in the
   // active enrollment's target language, whatever the card's type.
   const { active } = useCurrentUser();
   const language = active?.target_language ?? null;
-  // A ref guards re-entry (state is stale between two taps in one frame); the
-  // state only drives the disabled look.
-  const inFlight = useRef(false);
-  const [busy, setBusy] = useState(false);
 
   if (!session.hasSession) {
     return <Redirect href="/" />;
@@ -37,20 +30,11 @@ export default function ResultsScreen() {
 
   const { correctCount, total, missedQuestions, progress } = session;
 
-  // Creates the next session and goes home, rather than straight into a quiz:
-  // a list session is still preparing at this moment. Home shows its state,
-  // or why there is none (no saved words).
-  async function onNextSession() {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    try {
-      await next.create().catch(() => undefined);
-      router.dismissTo('/');
-    } finally {
-      inFlight.current = false;
-      setBusy(false);
-    }
+  // Phase 43 (spec D7). Home, where the next session waits in stock: it was
+  // built while this one was played. When it is not there, home makes it, or
+  // says why there is none (no saved words).
+  function onNextSession() {
+    router.dismissTo('/');
   }
 
   return (
@@ -117,9 +101,8 @@ export default function ResultsScreen() {
         <Pressable
           accessibilityRole="button"
           testID="results-next-session"
-          disabled={busy}
-          onPress={() => void onNextSession()}
-          style={[styles.primary, busy && styles.primaryDisabled]}
+          onPress={onNextSession}
+          style={styles.primary}
         >
           <Text style={styles.primaryLabel}>{strings.nextSession}</Text>
         </Pressable>
@@ -219,7 +202,6 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
-  primaryDisabled: { opacity: 0.6 },
   primaryLabel: {
     color: colors.onPrimary,
     fontSize: fontSizes.md,

@@ -25,6 +25,9 @@ export type NextSessionValue = {
   loadFailed: boolean;
   reload: () => void;
   create: () => Promise<CreateSessionResponse>;
+  /** Phase 43 (spec D2). Has the next session built for this device; never
+   *  throws, since a session's first answer starts it too. */
+  start: (sessionId: string) => Promise<void>;
   skip: (sessionId: string) => Promise<void>;
 };
 
@@ -62,22 +65,33 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
       .catch(() => setFailedFor(enrollmentId));
   }, [api, active]);
 
+  // Phase 24 (spec D5): only the device knows whether it can speak the target,
+  // so only it can ask for listening cards. Phase 25 (spec D4): likewise, only
+  // it knows whether it can record. Read where a session is built for it.
+  const devices = useCallback(
+    async (targetLanguage: string) => ({
+      listening: speaker.snapshot().tags.has(targetLanguage),
+      speaking: await recorder.canRecord().catch(() => false),
+    }),
+    [speaker, recorder],
+  );
+
   const create = useCallback(async () => {
     if (!active) throw new Error('cannot create a session with no active enrollment');
     try {
-      // Phase 24 (spec D5): only the device knows whether it can speak the
-      // target, so only it can ask for listening cards.
-      // Phase 25 (spec D4): likewise, only it knows whether it can record.
-      const speaking = await recorder.canRecord().catch(() => false);
-      return await api.createSession({
-        enrollment_id: active.id,
-        listening: speaker.snapshot().tags.has(active.target_language),
-        speaking,
-      });
+      return await api.createSession({ enrollment_id: active.id, ...(await devices(active.target_language)) });
     } finally {
       reload();
     }
-  }, [api, active, speaker, recorder, reload]);
+  }, [api, active, devices, reload]);
+
+  const start = useCallback(
+    async (sessionId: string) => {
+      if (!active) return;
+      await api.startSession(sessionId, await devices(active.target_language)).catch(() => undefined);
+    },
+    [api, active, devices],
+  );
 
   const skip = useCallback(
     async (sessionId: string) => {
@@ -91,8 +105,8 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   );
 
   const value = useMemo(
-    () => ({ current, loadFailed, reload, create, skip }),
-    [current, loadFailed, reload, create, skip],
+    () => ({ current, loadFailed, reload, create, start, skip }),
+    [current, loadFailed, reload, create, start, skip],
   );
   return <NextSessionContext.Provider value={value}>{children}</NextSessionContext.Provider>;
 }

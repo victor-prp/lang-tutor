@@ -30,6 +30,19 @@ export function homeActionOf(state: CurrentSessionResponse): HomeAction {
   return state.saved_count > 0 ? { kind: 'create' } : { kind: 'save-words-first' };
 }
 
+/** Phase 43 (spec D7). The `create` state is not a button: home sends create
+ *  itself, once per focus and enrollment (`attemptedFor` is the enrollment it
+ *  was sent for), so a create that keeps failing is never sent in a loop. */
+export function shouldAutoCreate(action: HomeAction | null, attemptedFor: string | null, activeId: string): boolean {
+  return action?.kind === 'create' && attemptedFor !== activeId;
+}
+
+/** Phase 43 (spec D7). What the `create` state shows: "preparing" while home's
+ *  create runs, and a retry once it failed for this enrollment. */
+export function createLook(failedFor: string | null, activeId: string): 'preparing' | 'retry' {
+  return failedFor === activeId ? 'retry' : 'preparing';
+}
+
 export function shouldPoll(state: CurrentSessionResponse | null): boolean {
   return state?.current?.status === 'preparing';
 }
