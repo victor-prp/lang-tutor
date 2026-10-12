@@ -72,6 +72,14 @@ const HARD_BELOW = 0.6;
 
 const SPEAKING: Dimension = 'spoken_productive';
 
+/** Phase 39 (spec D2). A session's live skills, in ORDER: listening and speaking
+ *  only when on. chooseWords and the families rule read the same list. */
+export function liveDimensions(listening: boolean, speaking: boolean): Dimension[] {
+  return ORDER.filter(
+    (dimension) => (dimension !== 'spoken_receptive' || listening) && (dimension !== SPEAKING || speaking),
+  );
+}
+
 /**
  * Spec D6, ruling 3. A card's chance of success: p = g + (1 − g)·R^e, with g the
  * guess floor of a four-option card and e the recognition exponent at rung 1.
@@ -111,10 +119,7 @@ type Candidate = {
 const byNeed = (a: Candidate, b: Candidate) => (a.need ?? 1) - (b.need ?? 1);
 
 export function chooseWords(input: ChoiceInput): ChosenPick[] {
-  const live = ORDER.filter(
-    (dimension) =>
-      (dimension !== 'spoken_receptive' || input.listening) && (dimension !== 'spoken_productive' || input.speaking),
-  );
+  const live = liveDimensions(input.listening, input.speaking);
 
   const memory = new Map<string, Map<Dimension, number>>();
   for (const row of input.memory) {

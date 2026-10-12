@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { AnswerRecord, Enrollment, SessionSource, SessionStatus, SpeechVerdict, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/schemas';
 import {
@@ -28,7 +30,7 @@ import {
   type CheckFinding,
   type CheckItem,
 } from '../domain/check';
-import { chooseWords } from '../domain/choose';
+import { chooseWords, liveDimensions } from '../domain/choose';
 import { findGap } from '../domain/cloze';
 import {
   buildContextPrompt,
@@ -61,6 +63,8 @@ import {
   type GenerationContext,
   type Generated,
 } from '../domain/distractors';
+import { glossFamilies } from '../domain/glossFamilies';
+import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
 import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { ACCEPT_RENDERING, PREPARE_SESSION, PrepareSessionPayloadSchema, acceptRenderingKey } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
@@ -294,9 +298,34 @@ export function createSessionService({
         // with what that day already asked and introduced. At most one gloss per
         // key, across headwords (phase 31 D18), is chooseWords' rule now.
         const glossIds = saved.map((gloss) => gloss.glossId);
-        const today = await learnerDay(repos, enrolled.user_id, now());
+        const at = now();
+        const today = await learnerDay(repos, enrolled.user_id, at);
         const memory = await repos.memory.findRows({ enrollmentId, glossIds });
         const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
+        // Phase 39 (spec D4, D5). The families, derived from the dictionary and
+        // memory with the session's live skills. Only known_at is read from the
+        // stored families: known once, known for the family (D2).
+        const forms = await dict.findLexemeForms({ lexemeIds: [...new Set(saved.map((gloss) => gloss.lexemeId))] });
+        const formsOf = new Map<string, string[]>();
+        for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
+        const stored = await repos.glossFamilies.load(enrollmentId);
+        const knownAt = new Map(stored.flatMap((family) => family.members.map((member) => [member.glossId, member.knownAt])));
+        const families = glossFamilies({
+          saved: saved.map((gloss) => ({
+            glossId: gloss.glossId,
+            lexemeId: gloss.lexemeId,
+            lemma: gloss.lemma,
+            key: gloss.key,
+            savedAt: gloss.savedAt,
+            forms: formsOf.get(gloss.lexemeId) ?? [],
+            order: gloss.order,
+            speakable: speakable(gloss.form),
+            knownAt: knownAt.get(gloss.glossId) ?? null,
+          })),
+          memory,
+          live: liveDimensions(options.listening, options.speaking),
+        });
+        const waiting = new Set([...families.state].filter(([, state]) => state === 'waiting').map(([glossId]) => glossId));
         // Phase 37 (spec D1, D7). Today's answers leave the returns owed and the
         // words done for the day.
         const introduced = await session.findIntroducedOn(enrollmentId, today);
@@ -312,8 +341,7 @@ export function createSessionService({
           listening: options.listening,
           speaking: options.speaking,
           rng,
-          // Phase 39 (spec D5): Task 4 wires the stored families in.
-          families: { familyOf: new Map(), waiting: new Set() },
+          families: { familyOf: families.familyOf, waiting },
         });
         // Spec D12. One rendering per gloss, uniformly over every form of every
         // member that agrees with the gloss, the saved form always among them.
@@ -328,10 +356,28 @@ export function createSessionService({
           if (!rendering) return [];
           const { dimension, rung, level, r } = choice;
           const step = choice.cls === 'STEP';
-          return [{ gloss_id: choice.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId, dimension, rung, level, r, step }];
+          // Phase 39 (spec D6). A family's next meaning, never asked, is introduced with the known ones.
+          const knownMeanings = families.introductions.get(choice.glossId);
+          return [
+            {
+              gloss_id: choice.glossId,
+              sense_id: rendering.senseId,
+              variant_id: rendering.variantId,
+              dimension,
+              rung,
+              level,
+              r,
+              step,
+              ...(knownMeanings ? { known_meanings: knownMeanings } : {}),
+            },
+          ];
         });
         if (picks.length === 0) throw new NoSavedWords(enrollmentId);
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
+        // Phase 39 (spec D4). The refresh is recorded once the session exists, so
+        // each event names it; one that changed nothing writes nothing.
+        const write = familyChanges(stored, families, randomUUID, new Date(at).toISOString());
+        if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
         await jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,
           picks,

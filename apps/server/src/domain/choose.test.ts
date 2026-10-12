@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { FSRS6_DEFAULT, SESSION_LENGTH, retrievability, type Dimension, type MemoryState } from '@lang-tutor/core/domain';
 
-import { chooseWords, expectedSuccess, rungFor, type ChoiceInput, type ChosenPick } from './choose';
+import { chooseWords, expectedSuccess, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
 import { DAY_NEW_CAP, HARD_CAP, NEW_PER_SESSION, PER_DIMENSION_CAP, RUNG_R, R_TARGET } from './chooseConstants';
 import type { Step } from './today';
 
@@ -118,6 +118,15 @@ describe('rungFor (phase 37 D2)', () => {
     expect(rungFor(1)).toBe(2);
     expect(rungFor(RUNG_R - 0.001)).toBe(1);
     expect(rungFor(null)).toBe(1);
+  });
+});
+
+describe('liveDimensions (phase 39 D2)', () => {
+  it('is ORDER, with listening and speaking only when on', () => {
+    expect(liveDimensions(false, false)).toEqual([WR, WP, SP]);
+    expect(liveDimensions(true, false)).toEqual([WR, WP, SR, SP]);
+    expect(liveDimensions(false, true)).toEqual([WR, WP, SP, SK]);
+    expect(liveDimensions(true, true)).toEqual([WR, WP, SR, SP, SK]);
   });
 });
 

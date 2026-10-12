@@ -111,11 +111,16 @@ describe('createNextSession', () => {
   it('after the seed, prepares a list session from at most ten saved senses', async () => {
     const { sessionId: seed } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
     await service.skipSession('u_1', seed);
-    const saved = await seedSavedSenses(t.db, {
-      enrollmentId: E,
-      lemma: 'tome',
-      translations: ['ספר', 'כרך', 'חיבור', 'מחברת', 'דף', 'עמוד', 'פרק', 'שער', 'כותר', 'ספרון', 'קובץ', 'גליון'],
-    });
+    // Phase 39 (spec D1): twelve words, not twelve meanings of one, which would be
+    // one family asking one meaning at a time.
+    const saved = { glossIds: [] as string[], senseIds: [] as string[] };
+    const words = ['tome', 'volume', 'treatise', 'notebook', 'leaf', 'column', 'chapter', 'gate', 'title', 'booklet', 'file', 'sheet'];
+    const translations = ['ספר', 'כרך', 'חיבור', 'מחברת', 'דף', 'עמוד', 'פרק', 'שער', 'כותר', 'ספרון', 'קובץ', 'גליון'];
+    for (const [i, lemma] of words.entries()) {
+      const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translations[i]] });
+      saved.glossIds.push(...word.glossIds);
+      saved.senseIds.push(...word.senseIds);
+    }
 
     const created = await service.createNextSession('u_1', E, { listening: true, speaking: false });
     expect(created).toMatchObject({ status: 'preparing', source: 'list' });
