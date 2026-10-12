@@ -246,16 +246,9 @@ export function missedQuestions(record: SessionRecord): MissedQuestion[] {
  *  per enrollment (sessions_one_started_per_enrollment,
  *  sessions_one_stock_per_enrollment). */
 export const OPEN_STATUSES: readonly SessionStatus[] = ['preparing', 'ready'];
-/** What the home screen shows as the current session. A failed one stays
- *  visible until the next create, so a failure is never silent. */
-export const CURRENT_STATUSES: readonly SessionStatus[] = ['preparing', 'ready', 'failed'];
 
 export function isOpen(status: SessionStatus): boolean {
   return OPEN_STATUSES.includes(status);
-}
-
-export function isCurrent(status: SessionStatus): boolean {
-  return CURRENT_STATUSES.includes(status);
 }
 
 /** The first session of an enrollment is the seed; every later one, after a

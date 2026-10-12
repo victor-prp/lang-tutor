@@ -12,6 +12,7 @@ import {
   READ_PHOTO_FAILED,
   RENDER_LEMMA,
   RENDER_LEMMA_FAILED,
+  STOCK_SESSION,
 } from './domain/jobs';
 import type { GlossService } from './services/glosses';
 import type { PhotoImportService } from './services/photoImports';
@@ -43,6 +44,15 @@ export async function registerWorkers(
     { localConcurrency: 4, pollingIntervalSeconds: options.pollingIntervalSeconds },
     async (jobs) => {
       for (const job of jobs) await sessions.prepareSession(job.data);
+    },
+  );
+  // Phase 43 (spec D3). Two at once per process: each is one transaction, and
+  // the queue keeps one job active per enrollment.
+  await boss.work(
+    STOCK_SESSION,
+    { localConcurrency: 2, pollingIntervalSeconds: options.pollingIntervalSeconds },
+    async (jobs) => {
+      for (const job of jobs) await sessions.stockSession(job.data);
     },
   );
   await boss.work(

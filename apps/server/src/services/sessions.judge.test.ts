@@ -62,6 +62,8 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
   const session = stub<SessionRepo>({
     loadSession: async () => loaded,
     findEnrollmentId: async () => 'e1',
+    // Phase 43 (spec D2). Started by its start call before any of these answers.
+    markStarted: async () => false,
     insertAnswer: async (...args) => {
       inserted.push(args);
     },
@@ -169,6 +171,8 @@ describe('answerJudged (spec D3)', () => {
     const session = stub<SessionRepo>({
       loadSession: async () => (++loads === 1 ? record() : stored),
       findEnrollmentId: async () => 'e1',
+      // Phase 43 (spec D2). Started by its start call before any of these answers.
+      markStarted: async () => false,
       insertAnswer: async () => undefined,
     });
     const service = createSessionService({

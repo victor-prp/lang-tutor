@@ -28,6 +28,12 @@ const unreachableSessions: SessionService = {
   createNextSession: () => {
     throw new Error('the health route must not reach the session service');
   },
+  startSession: () => {
+    throw new Error('the health route must not reach the session service');
+  },
+  stockSession: () => {
+    throw new Error('the health route must not reach the session service');
+  },
   getSession: () => {
     throw new Error('the health route must not reach the session service');
   },

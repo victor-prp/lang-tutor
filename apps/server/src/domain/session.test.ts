@@ -5,7 +5,6 @@ import { SESSION_LENGTH, type AnswerInput } from '@lang-tutor/core/domain';
 import {
   askableRenderings,
   currentQuestion,
-  isCurrent,
   isOpen,
   missedQuestions,
   newSessionRecord,
@@ -269,9 +268,8 @@ describe('nextSource and status sets', () => {
     expect(nextSource(true)).toBe('list');
   });
 
-  it('counts preparing and ready as open; failed is current but not open', () => {
+  it('counts preparing and ready as open', () => {
     expect(ALL.filter(isOpen)).toEqual(['preparing', 'ready']);
-    expect(ALL.filter(isCurrent)).toEqual(['preparing', 'ready', 'failed']);
   });
 });
 

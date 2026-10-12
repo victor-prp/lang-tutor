@@ -66,6 +66,8 @@ export function createFakeAppDeps(): AppDeps {
     answerText: unreachable,
     prepareSession: unreachable,
     failPreparation: unreachable,
+    startSession: unreachable,
+    stockSession: unreachable,
   };
   const users: UserService = {
     createProfile: unreachable,
@@ -180,7 +182,9 @@ export function createFakeGlossRepo(userLanguageCode = 'he') {
   };
 }
 
-export type FakeJobRepo = JobRepo & { enqueued: { name: string; data: unknown; options?: { singletonKey: string } }[] };
+export type FakeJobRepo = JobRepo & {
+  enqueued: { name: string; data: unknown; options?: { singletonKey?: string; startAfterSeconds?: number } }[];
+};
 
 /** Records what a use case enqueued. No queue behind it: a unit test asserts
  *  the call, the integration suite asserts the job row. Options are recorded

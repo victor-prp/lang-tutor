@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { Enrollment, MultipleChoiceQuestion, TypedTranslationQuestion } from '@lang-tutor/core/api';
 import { DIMENSIONS } from '@lang-tutor/core/domain';
 
-import { createFakeClock, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
+import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { ProgressRow, SnapshotRead } from '../domain/progress';
 import type { SessionRecord, SessionState } from '../domain/session';
@@ -104,7 +104,10 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     resolvePendingRetry: async () => {
       calls.steps.push('give up');
     },
+    // Phase 43 (spec D2). Started by its start call before any of these answers.
+    markStarted: async () => false,
   });
+  const jobs = createFakeJobRepo();
   const progress = stub<ProgressRepo>({
     lockSessionGlosses: async () => {
       calls.steps.push('lock');
@@ -139,6 +142,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
       memory,
       user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' }) }),
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
+      jobs,
     }),
     rng: testRng(7),
     logger: createFakeLogger(),
@@ -149,7 +153,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
   });
-  return { service, calls };
+  return { service, calls, jobs };
 }
 
 describe('progress when a session ends', () => {
@@ -173,6 +177,29 @@ describe('progress when a session ends', () => {
 
   // Phase 31 (spec D14). A merge of a practised gloss lands wholly before the
   // evidence is read or wholly after the progress is written.
+  // Phase 43 (spec D3). An ended session asks for the next one in stock.
+  it('completing a session asks for the next one in stock', async () => {
+    const { service, jobs } = world({ record: record(9) });
+    await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
+    expect(jobs.enqueued).toEqual([
+      { name: 'stock-session', data: { enrollment_id: 'e1', reason: 'complete' }, options: { singletonKey: 'e1' } },
+    ]);
+  });
+
+  it('an answer that ends nothing asks for nothing', async () => {
+    const { service, jobs } = world({ record: record(5) });
+    await service.submitAnswer('u1', SESSION, 'q5', { option_index: 0 });
+    expect(jobs.enqueued).toEqual([]);
+  });
+
+  it('a skip asks for the next one in stock', async () => {
+    const { service, jobs } = world({ record: record(4) });
+    await service.skipSession('u1', SESSION);
+    expect(jobs.enqueued).toEqual([
+      { name: 'stock-session', data: { enrollment_id: 'e1', reason: 'skip' }, options: { singletonKey: 'e1' } },
+    ]);
+  });
+
   it('share-locks the practised glosses before it reads the evidence', async () => {
     const { service, calls } = world({ record: record(9) });
     await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });

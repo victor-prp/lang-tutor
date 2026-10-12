@@ -89,8 +89,11 @@ describe('createNextSession', () => {
     await expect(service.createNextSession('u_1', 'e_nobody', { listening: false, speaking: false })).rejects.toBeInstanceOf(EnrollmentNotFound);
   });
 
-  it('refuses a second session while one is open', async () => {
-    await service.createNextSession('u_1', E, { listening: false, speaking: false });
+  // Phase 43 (spec D5).
+  it('answers the session not yet started to a second create, and refuses one while a session is started', async () => {
+    const first = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    expect(await service.createNextSession('u_1', E, { listening: false, speaking: false })).toEqual({ ...first, created: false });
+    await service.startSession('u_1', first.sessionId, { listening: false, speaking: false });
     await expect(service.createNextSession('u_1', E, { listening: false, speaking: false })).rejects.toBeInstanceOf(SessionOpen);
   });
 
