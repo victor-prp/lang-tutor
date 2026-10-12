@@ -45,8 +45,9 @@ proves before the next one starts.
    read -rs KEY && aws secretsmanager create-secret --region eu-central-1 \
      --name wordspal/prod/GEMINI_API_KEY --secret-string "$KEY"; unset KEY
    ```
-5. **Bootstrap**: `TF_VAR_state_bucket="$TF_STATE_BUCKET" ./scripts/infra.sh bootstrap apply`.
-   It prints the two role ARNs and the repository URL.
+5. **Bootstrap**: `TF_VAR_state_bucket="$TF_STATE_BUCKET" TF_VAR_alert_email="<your address>" ./scripts/infra.sh bootstrap apply`.
+   It prints the two role ARNs and the repository URL. Since phase 40 it also creates the bots'
+   hourly trigger, whose token the bots runbook's *The hourly trigger* sets.
 6. **GitHub variables** (variables, not secrets: none of these is secret):
 
    ```bash
@@ -159,6 +160,9 @@ aws lightsail get-container-log --region eu-central-1 --service-name wordspal --
 `aws secretsmanager put-secret-value --region eu-central-1 --secret-id wordspal/prod/<NAME> --secret-string ...`,
 then `./scripts/infra.sh prod apply`: the environment changed, so Terraform creates a new
 deployment of the live tag.
+
+The bots' GitHub token is not one of these: it lives in an EventBridge connection, and the bots
+runbook's *The hourly trigger* replaces it, with no apply.
 
 ## Behind Lightsail's proxy
 
