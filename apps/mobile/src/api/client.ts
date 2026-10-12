@@ -149,8 +149,20 @@ export function createApiClient({
     createProfile: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>
       postJson<CreateSessionResponse>('/api/sessions', request),
-    nextStep: (sessionId: string, request: NextStepRequest) =>
-      postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request),
+    nextStep: async (sessionId: string, request: NextStepRequest) => {
+      // Phase 41 (review I1). A fit check waits on the server's model call, so it
+      // is given up as a judged answer is, and the card offers "try again".
+      if (!('check_fit' in request && request.check_fit)) {
+        return postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request);
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), JUDGE_REQUEST_TIMEOUT_MS);
+      try {
+        return await postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request, { signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     answerBySpeech: async (sessionId: string, request: SpeechAnswerRequest) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), SPEECH_UPLOAD_TIMEOUT_MS);
