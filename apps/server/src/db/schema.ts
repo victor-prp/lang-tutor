@@ -1018,9 +1018,11 @@ export const sessions = pgTable(
     // nobody has started, which an open one in stock is.
     startedAt: timestamp('started_at', { withTimezone: true }),
     // Phase 43 (spec D1). What the session was built for: a device with a voice
-    // for the target, and one that can record. No default, as for status.
-    listening: boolean('listening').notNull(),
-    speaking: boolean('speaking').notNull(),
+    // for the target, and one that can record. Every insert here says which;
+    // the default is for the code before this phase, which the old container
+    // still runs for a minute after the new one migrates (ADR 0010).
+    listening: boolean('listening').notNull().default(false),
+    speaking: boolean('speaking').notNull().default(false),
   },
   (t) => [
     foreignKey({

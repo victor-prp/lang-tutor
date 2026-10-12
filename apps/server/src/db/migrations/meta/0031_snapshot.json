@@ -1,5 +1,5 @@
 {
-  "id": "f22a4d31-974f-456a-bad9-83f473444b8a",
+  "id": "0ac64a1b-9f99-49ee-a82b-9d2a65e1b4f5",
   "prevId": "8908c4b4-91e7-4d50-b344-7e58a6248dff",
   "version": "7",
   "dialect": "postgresql",
@@ -2855,13 +2855,15 @@
           "name": "listening",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": false
         },
         "speaking": {
           "name": "speaking",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": false
         }
       },
       "indexes": {

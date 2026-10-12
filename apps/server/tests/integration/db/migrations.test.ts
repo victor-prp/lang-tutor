@@ -1268,4 +1268,20 @@ describe('0031_always_ready_session', () => {
       db.execute(sql`update sessions set started_at = now() where id = '00000000-0000-4000-8000-00000000003c'`),
     ).rejects.toMatchObject({ cause: { constraint: 'sessions_one_started_per_enrollment' } });
   });
+
+  // Final review M1. ADR 0010: the old container serves for about a minute after
+  // the new one has migrated, and its inserts name neither column.
+  it('still takes a session inserted the way the code before it does', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0030_gloss_families'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+    `);
+    await runMigrations(db);
+
+    await db.execute(sql`insert into sessions (user_id, enrollment_id, status, source) values ('u_1', 'e_1', 'preparing', 'list')`);
+    expect((await db.execute(sql`select listening, speaking from sessions`)).rows).toEqual([{ listening: false, speaking: false }]);
+  });
 });
