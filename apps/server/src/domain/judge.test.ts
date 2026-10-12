@@ -68,6 +68,11 @@ describe('buildMeaningJudgePrompt (spec D4)', () => {
   it('names all three verdicts', () => {
     for (const verdict of ['"right"', '"other_sense"', '"wrong"']) expect(prompt.system).toContain(verdict);
   });
+  // Phase 42 (spec D2). הזייה for imagination was taken as another sense.
+  it('takes another sense only as one a dictionary lists, and a related word as wrong', () => {
+    expect(prompt.system).toContain('a dictionary would list as a sense of its own');
+    expect(prompt.system).toContain('only related, associated or near in meaning');
+  });
 });
 
 describe('parseMeaningJudge (spec D4)', () => {
