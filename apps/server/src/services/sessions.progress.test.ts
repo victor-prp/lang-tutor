@@ -70,7 +70,7 @@ const CHANGE = [
   { glossId: 's1', form: 'word0', translation: 'right0', levelBefore: 1, levelAfter: 1, raised: ['written_receptive'] },
 ];
 
-function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null; rows?: ProgressRow[] }) {
+function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null; rows?: ProgressRow[]; state?: SessionState }) {
   const calls = {
     completed: 0,
     // Phase 35. The practice_day each ending wrote.
@@ -91,7 +91,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
       calls.completed += 1;
       calls.endedOn.push(day);
     },
-    findState: async () => READY,
+    findState: async () => opts.state ?? READY,
     transition: async (_id, _from, _to, day) => {
       if (day !== undefined) calls.endedOn.push(day);
       return true;
@@ -189,6 +189,14 @@ describe('progress when a session ends', () => {
   it('an answer that ends nothing asks for nothing', async () => {
     const { service, jobs } = world({ record: record(5) });
     await service.submitAnswer('u1', SESSION, 'q5', { option_index: 0 });
+    expect(jobs.enqueued).toEqual([]);
+  });
+
+  // Phase 43 (ruling R8). The seed is played before anything is saved: skipping
+  // it asks for nothing, so no stock is built behind the first saves.
+  it('a skip of the seed asks for nothing', async () => {
+    const { service, jobs } = world({ record: record(4), state: { ...READY, source: 'seed' } });
+    await service.skipSession('u1', SESSION);
     expect(jobs.enqueued).toEqual([]);
   });
 

@@ -74,6 +74,7 @@ function setup(repos: Partial<Repos>) {
     },
     now: createFakeClock(NOW),
     logger,
+    stockSaveDelaySeconds: 30,
   });
   return { service, logger };
 }

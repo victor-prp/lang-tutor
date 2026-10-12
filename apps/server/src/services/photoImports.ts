@@ -42,7 +42,7 @@ import {
 import type { Logger } from '../logger';
 import type { ItemResult, PhotoImportItemRow, PhotoImportRow } from '../repo/photoImports';
 import { authorizeEnrollment } from './access';
-import { requestStock } from './stock';
+import { requestStockAfterSave } from './stock';
 import type { LlmClient, VisionClient } from './llm';
 import type { Repos, Transaction } from './transaction';
 
@@ -93,6 +93,7 @@ export function createPhotoImportService({
   lookup,
   now,
   logger,
+  stockSaveDelaySeconds,
 }: {
   transaction: Transaction;
   vision: VisionClient;
@@ -100,6 +101,8 @@ export function createPhotoImportService({
   lookup: (actorUserId: string, input: TranslationRequest) => Promise<TranslationResponse>;
   now: () => number;
   logger: Logger;
+  /** Phase 43 (ruling R3). How long a save's request for a stock waits. */
+  stockSaveDelaySeconds: number;
 }) {
   /** Phase 29. An import is addressed by its own id; its list decides. */
   const authorizeImport = (repos: Repos, actorUserId: string, row: PhotoImportRow) =>
@@ -260,7 +263,7 @@ export function createPhotoImportService({
           throw new PhotoImportConflict(importId, 'not ready to save');
         }
         // Phase 43 (spec D3, ruling R3). The next session in stock, if the list has none.
-        await requestStock(repos, { enrollment_id: row.enrollmentId, reason: 'save' });
+        await requestStockAfterSave(repos, row.enrollmentId, stockSaveDelaySeconds);
         return { entries, items, repeated: false };
       });
       if (!outcome.repeated) {

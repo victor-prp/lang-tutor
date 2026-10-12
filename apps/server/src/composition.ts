@@ -141,6 +141,8 @@ export function createServerDeps(io: {
   photoReadTimeoutMs: number;
   // Phase 27 (spec D4). One judged answer's budget: a learner is waiting on it.
   judgeTimeoutMs: number;
+  // Phase 43 (ruling R3). How long a save's request for a session in stock waits.
+  stockSaveDelaySeconds: number;
   identity: ServerIdentity;
   webDistDir: string | null;
   // Phase 35 (spec D12). BOT_SECRET, or null where it is unset.
@@ -269,7 +271,7 @@ export function createServerDeps(io: {
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),
     translations,
-    vocabulary: createVocabularyService({ transaction, logger: io.logger }),
+    vocabulary: createVocabularyService({ transaction, logger: io.logger, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
     grants: createGrantService({ transaction, logger: io.logger }),
     // Phase 26. Handed the lookup use case itself, so a row is looked up exactly
     // as a typed word is (spec D7). The match call shares the lookup's client
@@ -281,6 +283,7 @@ export function createServerDeps(io: {
       lookup: translations.translate,
       now: io.now,
       logger: io.logger,
+      stockSaveDelaySeconds: io.stockSaveDelaySeconds,
     }),
     // No model composed here: the tool's tier 2 is built by createGlossTools.
     glosses: createGlossService({ transaction, logger: io.logger, llm: null }),

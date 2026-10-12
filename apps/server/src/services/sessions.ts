@@ -506,8 +506,10 @@ export function createSessionService({
         if (changed) {
           await repos.session.resolvePendingRetry(sessionId, { text: '', verdict: 'gave_up' });
           await recordProgress(repos, sessionId);
-          // Phase 43 (spec D3). The next session in stock, if this was it.
-          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'skip' });
+          // Phase 43 (spec D3). The next session in stock, if this was it. Not
+          // after the seed (ruling R8): it is played before anything is saved,
+          // and a stock built behind the first saves would hold one word.
+          if (state.source === 'list') await requestStock(repos, { enrollment_id: enrolled.id, reason: 'skip' });
         }
         return changed;
       });

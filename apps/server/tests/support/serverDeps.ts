@@ -2,7 +2,13 @@ import type { PgBoss } from 'pg-boss';
 
 import { createServerDeps, type AppDeps } from '../../src/composition';
 import type { Db } from '../../src/db/client';
-import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from '../../src/domain/jobs';
+import {
+  CHECKER_CALL_BUDGET_MS,
+  CONTEXT_CALL_BUDGET_MS,
+  PHOTO_READ_BUDGET_MS,
+  SESSION_GENERATION_BUDGET_MS,
+  STOCK_SAVE_DELAY_SECONDS,
+} from '../../src/domain/jobs';
 import type { Logger } from '../../src/logger';
 import { unstartedBoss } from './jobs';
 
@@ -46,6 +52,8 @@ export function createTestServerDeps(io: {
   judgeTimeoutMs?: number;
   /** Phase 26. A read's budget; defaults to production's. */
   photoReadTimeoutMs?: number;
+  /** Phase 43. How long a save's stock waits; defaults to production's. */
+  stockSaveDelaySeconds?: number;
   /** Phase 35 (spec D12). Mounts the bot route; unset, as on every lane. */
   botSecret?: string | null;
 }): AppDeps {
@@ -75,6 +83,7 @@ export function createTestServerDeps(io: {
     speechTimeoutMs: io.speechTimeoutMs ?? 8_000,
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,
+    stockSaveDelaySeconds: io.stockSaveDelaySeconds ?? STOCK_SAVE_DELAY_SECONDS,
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test' },
     webDistDir: null,
     botSecret: io.botSecret ?? null,

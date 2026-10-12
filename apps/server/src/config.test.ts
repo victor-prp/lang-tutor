@@ -34,6 +34,7 @@ describe('loadConfig', () => {
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
+      stockSaveDelaySeconds: 30,
       version: 'dev',
       webDistDir: null,
     });
@@ -82,6 +83,7 @@ describe('loadConfig', () => {
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
+      stockSaveDelaySeconds: 30,
       version: 'dev',
       webDistDir: null,
     });
@@ -137,6 +139,13 @@ describe('loadConfig', () => {
     expect(loadConfig({}).photoReadTimeoutMs).toBe(120_000);
     expect(loadConfig({ PHOTO_READ_TIMEOUT_MS: '5000' }).photoReadTimeoutMs).toBe(5_000);
     expect(loadConfig({ PHOTO_READ_TIMEOUT_MS: '999999' }).photoReadTimeoutMs).toBe(120_000);
+  });
+
+  // Phase 43 (ruling R3). e2e holds a save's stock back for the length of a run.
+  it("reads how long a save's stock waits, half a minute by default", () => {
+    expect(loadConfig({}).stockSaveDelaySeconds).toBe(30);
+    expect(loadConfig({ STOCK_SAVE_DELAY_SECONDS: '3600' }).stockSaveDelaySeconds).toBe(3_600);
+    expect(loadConfig({ STOCK_SAVE_DELAY_SECONDS: 'nonsense' }).stockSaveDelaySeconds).toBe(30);
   });
 
   it('still works with no Gemini settings at all, so db:migrate is unaffected', () => {
