@@ -201,14 +201,24 @@ function expectNoWaitingGloss(sessions: readonly Session[]) {
   });
 }
 
-/** A list, its sessions, and what the day should meet in new words. */
-const DAYS: [string, DayList, number, (met: number) => void][] = [
-  ['lane 0, the nine sessions of 2026-10-11', LANE0_DAY, LANE0_DAY.sessions, (met) => expect(met).toBeGreaterThan(2)],
-  ['lane 0 over twenty sessions', LANE0_DAY, 20, (met) => expect(met).toBe(DAY_NEW_CAP)],
-  ['a new learner, thirty words saved and none met, over six sessions', FRESH, 6, (met) => expect(met).toBe(DAY_NEW_CAP)],
+/** Outcomes 6 and 7 are not vacuous: the runner computed families, and some gloss
+ *  waited in some session. False for a list of single-meaning words, which has none. */
+function familiesChecked(sessions: readonly Session[]): { families: boolean; waited: boolean } {
+  return {
+    families: sessions.some(({ families }) => families.families.length > 0),
+    waited: sessions.some(({ families }) => [...families.state.values()].includes('waiting')),
+  };
+}
+
+/** A list, its sessions, what the day should meet in new words, and whether it has
+ *  gloss families (phase 39). */
+const DAYS: [string, DayList, number, (met: number) => void, boolean][] = [
+  ['lane 0, the nine sessions of 2026-10-11', LANE0_DAY, LANE0_DAY.sessions, (met) => expect(met).toBeGreaterThan(2), true],
+  ['lane 0 over twenty sessions', LANE0_DAY, 20, (met) => expect(met).toBe(DAY_NEW_CAP), true],
+  ['a new learner, thirty words saved and none met, over six sessions', FRESH, 6, (met) => expect(met).toBe(DAY_NEW_CAP), false],
 ];
 
-describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet) => {
+describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet, withFamilies) => {
   const {
     log,
     sessions,
@@ -265,6 +275,10 @@ describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet) => {
       const asked = new Set(picks.map((pick) => pick.glossId));
       expect(others.map((pick) => pick.glossId).filter((glossId) => !asked.has(glossId))).toEqual([]);
     }
+  });
+
+  it('6 and 7 have families to check, and a gloss that waits, when the list has them (phase 39)', () => {
+    expect(familiesChecked(sessions)).toEqual({ families: withFamilies, waited: withFamilies });
   });
 
   it('6. never asks two glosses of one family in a session (phase 39)', () => {
@@ -326,6 +340,10 @@ const MISS_EVERY = 10;
 
 describe('families over days: ten days of six sessions (phase 39)', () => {
   const { log, sessions, knownIn } = runDays(FAMILIES, 10, 6, MISS_EVERY);
+
+  it('6 and 7 have families to check, and a gloss that waits', () => {
+    expect(familiesChecked(sessions)).toEqual({ families: true, waited: true });
+  });
 
   it('6. never asks two glosses of one family in a session', () => {
     expectOneGlossPerFamily(sessions);
