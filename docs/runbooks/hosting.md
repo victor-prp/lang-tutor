@@ -5,6 +5,16 @@ the image a `v*` tag built, against one Lightsail Postgres. Everything in AWS is
 under `terraform/`, run only through `scripts/infra.sh`. Design:
 [phase 30](../superpowers/specs/2026-10-08-lang-tutor-phase-30-hosting-design.md).
 
+Every `infra.sh` command reads the state bucket's name from `TF_STATE_BUCKET`, which go-live
+exported once. In a new terminal, first:
+
+```bash
+export TF_STATE_BUCKET="$(gh variable get TF_STATE_BUCKET)"
+```
+
+A `bootstrap` command also needs `TF_VAR_state_bucket="$TF_STATE_BUCKET"` and
+`TF_VAR_alert_email="$(gh variable get ALERT_EMAIL)"`.
+
 ## Go-live, once
 
 Run from the main checkout on `master`, after phase 30 has merged. Each step says what it
