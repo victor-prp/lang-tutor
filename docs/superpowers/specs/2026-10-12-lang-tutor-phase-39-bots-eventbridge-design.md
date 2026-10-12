@@ -162,26 +162,59 @@ There is no unit to test: this is Terraform, a workflow line and two runbooks.
     `FailedInvocations` 0 for that hour;
   - the bots' week issue gains the next day.
 
+## As built
+
+- **Checked against a real plan.** `infra.sh bootstrap plan` with the laptop's credentials, read
+  only: `Plan: 12 to add, 0 to change, 0 to destroy`, with the endpoint, cron, body, retry age,
+  alarm, deauthorization pattern and topic policy checked in its JSON. Before `bots.tf` the same
+  plan said "No changes".
+- **The final review** found no critical issue. Its important one: AWS does not promise that an
+  API destination whose connection was deauthorized becomes active again when the connection is
+  updated, and that recovery would first be needed when the token expires. So the rollout now lets
+  one :17 hit the placeholder on purpose (steps 5 and 6 below), and the runbook checks the
+  destination's state and has two commands that bring it back.
+- **The token command** keeps the token out of the shell history, not the process list (D3).
+
 ## Left for Victor
 
 1. **Create the token** at https://github.com/settings/personal-access-tokens/new: owner
    `victor-prp`, only `lang-tutor`, Repository permissions → Actions: Read and write, the longest
-   expiry offered. Keep it for step 3.
-2. **Merge the PR.** Until step 3 nothing starts the bots; `gh workflow run bots.yml` plays a day
+   expiry offered. Keep it for step 6.
+2. **Merge the PR.** Until step 6 nothing starts the bots; `gh workflow run bots.yml` plays a day
    by hand.
-3. **Apply and set the token, in the same hour, before :17** (otherwise the placeholder's 401 at
-   :17 deauthorizes the connection and step 3's second command re-authorizes it, after one alert
-   email). From the main checkout, on an up-to-date master:
+3. **Apply**, from the main checkout on an up-to-date master:
 
    ```bash
    TF_VAR_state_bucket="$TF_STATE_BUCKET" TF_VAR_alert_email="$(gh variable get ALERT_EMAIL)" \
      ./scripts/infra.sh bootstrap apply
+   ```
+4. **Confirm the subscription** before the next :17: the email "AWS Notification - Subscription
+   Confirmation".
+5. **Let one :17 hit the placeholder, on purpose.** It costs the bots one hour and is the only
+   rehearsal of a token that stops working before one really does, in about a year (final
+   review). Ten minutes after :17, expect an email with subject "AWS Notification Message" whose
+   body starts "GitHub refused the bots' trigger token", and:
+
+   ```bash
+   aws events describe-connection --region eu-central-1 --name wordspal-bots-dispatch --query ConnectionState
+   aws events describe-api-destination --region eu-central-1 --name wordspal-bots-dispatch --query ApiDestinationState
+   aws cloudwatch describe-alarms --region eu-central-1 --alarm-names wordspal-bots-dispatch-failed --query 'MetricAlarms[0].StateValue'
+   ```
+
+   `"DEAUTHORIZED"`, `"INACTIVE"`, and the alarm's state, whatever it is: it says whether signal 2
+   covers a refused token.
+6. **Set the token** (the token from step 1):
+
+   ```bash
    read -rs TOKEN && aws events update-connection --region eu-central-1 \
      --name wordspal-bots-dispatch --authorization-type API_KEY \
      --auth-parameters "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"Authorization\",\"ApiKeyValue\":\"Bearer $TOKEN\"}}"; unset TOKEN
    ```
-4. **Confirm the subscription**: the email "AWS Notification - Subscription Confirmation".
-5. After the next :17, ask Claude to run D6's checks.
+
+   Then the first two checks again: `"AUTHORIZED"` and `"ACTIVE"`. If the destination stays
+   `"INACTIVE"`, the bots runbook's *The hourly trigger* has the two commands that bring it back.
+7. After the next :17, ask Claude to run D6's checks, and tell it what steps 5 and 6 showed, so
+   the runbook keeps only the recovery that worked.
 
 ## Risks
 
