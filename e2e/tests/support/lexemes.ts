@@ -89,17 +89,17 @@ export const BOARD_WORDS = [
   single('ящерица', 'לטאה', 'lizard'),
 ];
 
-/** Phase 39 (spec D5). Four single-sense Russian nouns, so four words in four
- *  gloss families of their own: a session can ask all four. None is in the seed
- *  (checked against content.ts and content.generated.ts) or another fixture,
- *  each has five letters or more so a typed card can take a near miss, and each
- *  has its own meaning. */
-export const SINGLE_WORDS = [
-  single('кувшин', 'כד', 'jug'),
-  single('одеяло', 'שמיכה', 'blanket'),
-  single('верблюд', 'גמל', 'camel'),
-  single('мельница', 'טחנה', 'mill'),
-];
+/** Phase 39 (spec D5). Four single-sense Russian nouns, so four words in no
+ *  gloss family: a session can ask all four. None is in the seed (checked
+ *  against content.ts and content.generated.ts) or another fixture, each has
+ *  five letters or more so a typed card can take a near miss, and each has its
+ *  own meaning. */
+export const SINGLE_WORDS = {
+  jug: single('кувшин', 'כד', 'jug'),
+  blanket: single('одеяло', 'שמיכה', 'blanket'),
+  camel: single('верблюд', 'גמל', 'camel'),
+  mill: single('мельница', 'טחנה', 'mill'),
+};
 
 /** Phase 31. `mouse`: two senses, one Hebrew word, so one card with two examples.
  *  The rodent has one other word, which the lookup card and the word's page

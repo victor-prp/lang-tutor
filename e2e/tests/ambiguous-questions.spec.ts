@@ -29,7 +29,7 @@ const FORM_OF: Record<string, string> = {
 };
 
 // Phase 39 (spec D5). Single-sense words for the meaning card and the reversed card.
-const [, REVERSE, , MEANING] = SINGLE_WORDS;
+const { blanket: REVERSE, mill: MEANING } = SINGLE_WORDS;
 
 /** Another right word on every typed card: the batch's own alternative (spec
  *  D1), which no near miss of a saved form could be. */

@@ -15,12 +15,13 @@ test.setTimeout(180_000);
 
 // Phase 39 (spec D5). Four single-sense words, one per card type: two senses of
 // one form are a gloss family, and a session asks only one of them.
-const [CHOICE, REVERSE, TYPED, MEANING] = SINGLE_WORDS;
+const { jug: CHOICE, blanket: REVERSE, camel: TYPED, mill: MEANING } = SINGLE_WORDS;
+const WORDS = [CHOICE, REVERSE, TYPED, MEANING];
 
 // The saved form of each meaning: what a reversed card's right option and a
 // typed card's answer are. Every form has five letters or more, so a typed card
 // can always be answered with a near miss. Each form is its own lemma.
-const FORM_OF: Record<string, string> = Object.fromEntries(SINGLE_WORDS.map((w) => [w.translation, w.form]));
+const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.translation, w.form]));
 
 /**
  * Phase 35 (spec D5, D6). The memory that gives the four words four card
@@ -53,7 +54,7 @@ async function startMixedSession(page: Page, request: APIRequestContext, usernam
   await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
 
   await tapUntil(page, 'translate-entry', 'translate-input');
-  for (const [index, word] of SINGLE_WORDS.entries()) {
+  for (const [index, word] of WORDS.entries()) {
     if (index > 0) await page.getByTestId('translate-new-word').click();
     await lookUp(page, request, word.form, word.payload);
     // One sense, so its own save button: "save all" is for two or more.
