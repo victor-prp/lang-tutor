@@ -14,6 +14,10 @@ const isolateLtr = (text: string) => `\u2066${text}\u2069`;
 const LANGUAGE_NAMES: Record<string, string> = { he: 'עברית', en: 'אנגלית', ru: 'רוסית', it: 'איטלקית' };
 const languageName = (code: string): string => LANGUAGE_NAMES[code] ?? code;
 
+/** Phase 39 (spec D9). An instruction in three parts, so the card can set the language it asks for in bold. */
+export type Instruction = { before: string; language: string; after: string };
+const instruct = (before: string, language: string): Instruction => ({ before, language: languageName(language), after: '' });
+
 // Phase 23. The direction of a string written in `code`, for a line whose
 // language is known: Hebrew alone is right-to-left. Forcing rtl on a he → it
 // lookup's Italian put an example's full stop at the start of its line.
@@ -68,28 +72,31 @@ export const strings = {
   newMeaningQuestion: 'מה עוד זה אומר?',
   // Phase 23. The reversed and typed cards name the language they ask for.
   questionInstructionReverse: (language: string) => `איך אומרים ב${languageName(language)}?`,
-  questionInstructionTyped: (language: string) => `כתבו את המילה ב${languageName(language)}`,
+  questionInstructionTyped: (language: string): Instruction => instruct('כתבו את המילה ב', language),
   typedPlaceholder: 'התשובה שלך…',
   typedCheck: 'בדיקה',
   typedShowAnswer: 'הצגת התשובה',
   // Phase 24 (spec D14).
   questionInstructionListen: 'הקשיבו ובחרו את הפירוש',
-  questionInstructionDictation: (language: string) => `הקשיבו וכתבו ב${languageName(language)}`,
+  questionInstructionDictation: (language: string): Instruction => instruct('הקשיבו וכתבו ב', language),
   questionInstructionMatching: 'התאימו כל מילה לפירוש שלה',
   questionInstructionTiles: (language: string) => `הרכיבו את המילה ב${languageName(language)}`,
   listenAgain: 'השמעה חוזרת',
   listenNoVoice: 'אין במכשיר קול לשפה הזו, אז הנה המילה בכתב',
   boardResult: (right: number, total: number) => `בניסיון הראשון: ${right} מתוך ${total}`,
   // Phase 27 (spec D12).
-  questionInstructionMeaning: 'כתבו את הפירוש בעברית',
+  // Phase 39 (spec D9): names the learner's language, not always Hebrew.
+  questionInstructionMeaning: (learner: string): Instruction => instruct('כתבו את הפירוש ב', learner),
+  // Phase 39 (spec D8). A typed answer in the wrong alphabet is asked again, not sent.
+  wrongScriptNotice: (language: string): Instruction => instruct('התשובה צריכה להיות ב', language),
   feedbackSavedMeaning: 'נכון! הפירוש השמור:',
   feedbackOtherSense: 'נכון, אבל כאן תרגלנו:',
   // Phase 27 (spec D5, D6): the gap and translation cards.
   questionInstructionCloze: 'איזו מילה חסרה?',
-  questionInstructionClozeTyped: (language: string) => `השלימו את המילה החסרה ב${languageName(language)}`,
+  questionInstructionClozeTyped: (language: string): Instruction => instruct('השלימו את המילה החסרה ב', language),
   // Phase 38 (spec D1). The typed gap's Hebrew sentence is a hint, named by what it shows.
   sentenceHint: 'רמז: הצגת המשפט בעברית',
-  questionInstructionTranslate: (language: string) => `תרגמו ל${languageName(language)}`,
+  questionInstructionTranslate: (language: string): Instruction => instruct('תרגמו ל', language),
   translationReference: 'תרגום לדוגמה:',
   // Phase 25 (spec D7).
   questionInstructionReadAloud: 'קראו בקול',

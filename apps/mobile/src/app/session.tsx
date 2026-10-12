@@ -86,6 +86,7 @@ function ClozeTypedCard({ question, session, language }: { question: ClozeTypedQ
     <TypedAnswerView
       question={question}
       instruction={strings.questionInstructionClozeTyped(language)}
+          answerLanguage={language}
       language={language}
       answered={session.answered}
       verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -107,7 +108,7 @@ function ClozeTypedCard({ question, session, language }: { question: ClozeTypedQ
 // means a new case here plus a view component; the header, progress bar,
 // feedback banner and scoring are untouched, and the `never` below fails the
 // build for a type with no case.
-function renderQuestion(question: Question, session: SessionValue, language: string) {
+function renderQuestion(question: Question, session: SessionValue, language: string, learner: string) {
   switch (question.type) {
     case 'multiple_choice':
       return (
@@ -148,6 +149,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionTyped(language)}
+          answerLanguage={language}
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -177,6 +179,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionTranslate(language)}
+          answerLanguage={language}
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -192,7 +195,8 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       return (
         <TypedAnswerView
           question={question}
-          instruction={strings.questionInstructionMeaning}
+          instruction={strings.questionInstructionMeaning(learner)}
+          answerLanguage={learner}
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -218,6 +222,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionDictation(language)}
+          answerLanguage={language}
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -275,6 +280,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
             <TypedAnswerView
               question={question}
               instruction={strings.questionInstructionTyped(language)}
+          answerLanguage={language}
               language={language}
               answered={session.answered}
               verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -358,6 +364,8 @@ export default function SessionScreen() {
   // A session is always entered from home, which needs an active enrollment;
   // an empty language only drops the name from the instruction.
   const language = active?.target_language ?? '';
+  // Phase 39 (spec D9): a typed meaning is answered in the learner's language.
+  const learner = active?.source_language ?? 'he';
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -393,7 +401,7 @@ export default function SessionScreen() {
               {strings.noMicrophone}
             </Text>
           ) : null}
-          {renderQuestion(question, session, language)}
+          {renderQuestion(question, session, language, learner)}
         </ScrollView>
       </KeyboardAvoidingView>
 

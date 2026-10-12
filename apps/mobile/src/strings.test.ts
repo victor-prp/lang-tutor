@@ -5,8 +5,8 @@ import { strings } from './strings';
 describe('sentence-card strings (phase 27 D5, D6)', () => {
   it('words the three instructions and the reference label exactly', () => {
     expect(strings.questionInstructionCloze).toBe('איזו מילה חסרה?');
-    expect(strings.questionInstructionClozeTyped('it')).toBe('השלימו את המילה החסרה באיטלקית');
-    expect(strings.questionInstructionTranslate('it')).toBe('תרגמו לאיטלקית');
+    expect(strings.questionInstructionClozeTyped('it')).toEqual({ before: 'השלימו את המילה החסרה ב', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו ל', language: 'איטלקית', after: '' });
     expect(strings.translationReference).toBe('תרגום לדוגמה:');
   });
 });
@@ -50,7 +50,7 @@ describe('words from a photo', () => {
 
 describe('meaning-recall strings (phase 27 D12)', () => {
   it('words the instruction and both banners exactly', () => {
-    expect(strings.questionInstructionMeaning).toBe('כתבו את הפירוש בעברית');
+    expect(strings.questionInstructionMeaning('he')).toEqual({ before: 'כתבו את הפירוש ב', language: 'עברית', after: '' });
     expect(strings.feedbackSavedMeaning).toBe('נכון! הפירוש השמור:');
     expect(strings.feedbackOtherSense).toBe('נכון, אבל כאן תרגלנו:');
   });
@@ -77,5 +77,15 @@ describe('new-meaning strings (phase 39 D6)', () => {
     expect(strings.questionInstructionNewMeaning).toBe('פירוש חדש למילה שאתם מכירים');
     expect(strings.knownMeanings(['להרים', 'לאסוף'])).toBe('כבר למדתם: להרים, לאסוף');
     expect(strings.newMeaningQuestion).toBe('מה עוד זה אומר?');
+  });
+});
+
+describe('instructions with a bold language (phase 39 D9)', () => {
+  it('splits each typed instruction around the language name', () => {
+    expect(strings.questionInstructionTyped('it')).toEqual({ before: 'כתבו את המילה ב', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionDictation('ru')).toEqual({ before: 'הקשיבו וכתבו ב', language: 'רוסית', after: '' });
+    expect(strings.questionInstructionClozeTyped('it')).toEqual({ before: 'השלימו את המילה החסרה ב', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו ל', language: 'איטלקית', after: '' });
+    expect(strings.wrongScriptNotice('en')).toEqual({ before: 'התשובה צריכה להיות ב', language: 'אנגלית', after: '' });
   });
 });
