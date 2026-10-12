@@ -1109,22 +1109,28 @@ async function main(): Promise<void> {
   // Phase 41 (spec D1). Read alone, the gapped sentence's likeliest fills include its
   // word: the gap as written, or the item's own form or lemma.
   const pointsToWord = async (kase: SentenceCase, answer: LlmDistractors): Promise<Check[]> => {
+    // One item at a time, inside the row's own concurrency slot; a probe that fails
+    // is a failed tier 2 check of its own, never the row's tier 1 (review M4).
     const items = sentenceItemsOf(kase);
-    return Promise.all(
-      kase.items.map(async (item, index): Promise<Check> => {
-        const got = answer.items.find((answered) => answered.key === items[index].key);
-        const at = got?.sentence && got.gap ? got.sentence.indexOf(got.gap) : -1;
-        if (!got?.sentence || !got.gap || at < 0) return { name: `${item.form}: the sentence points to its word`, ok: false, detail: 'no sentence' };
-        const gapped = `${got.sentence.slice(0, at)}___${got.sentence.slice(at + got.gap.length)}`;
+    const checks: Check[] = [];
+    for (const [index, item] of kase.items.entries()) {
+      const name = `${item.form}: the sentence points to its word`;
+      const got = answer.items.find((answered) => answered.key === items[index].key);
+      const at = got?.sentence && got.gap ? got.sentence.indexOf(got.gap) : -1;
+      if (!got?.sentence || !got.gap || at < 0) {
+        checks.push({ name, ok: false, detail: 'no sentence' });
+        continue;
+      }
+      const gapped = `${got.sentence.slice(0, at)}___${got.sentence.slice(at + got.gap.length)}`;
+      try {
         const guesses = await askGapGuesses(judgeLlm, { language: kase.from as LanguageCode, sentence: gapped });
         const target = { answer: got.gap, lemma: item.lemma, alternatives: [item.form] };
-        return {
-          name: `${item.form}: the sentence points to its word`,
-          ok: guesses.some((guess) => judgeTyped(target, guess) !== 'wrong'),
-          detail: `${gapped} → ${guesses.join(' / ')}`,
-        };
-      }),
-    );
+        checks.push({ name, ok: guesses.some((guess) => judgeTyped(target, guess) !== 'wrong'), detail: `${gapped} → ${guesses.join(' / ')}` });
+      } catch (error) {
+        checks.push({ name, ok: false, detail: `the probe failed: ${(error as Error).message}` });
+      }
+    }
+    return checks;
   };
 
   const scoreFitJudge = async (kase: FitJudgeCase): Promise<Row> => {

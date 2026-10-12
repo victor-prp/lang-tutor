@@ -95,6 +95,7 @@ describe('check_fit (phase 41 D2)', () => {
     await expectJudge(ns, 'wrong');
     expect(await next({ question_id: questions[0].id, text: 'banana', check_fit: true })).toMatchObject({ pending_retry: null });
     expect(await readVerdicts(t.db, sessionId)).toEqual([{ verdict: 'wrong', retryState: null }]);
+    expect(await countGeminiRequests(ns)).toBe(1);
   });
 
   it('stores wrong when the call fails', async () => {
@@ -102,6 +103,7 @@ describe('check_fit (phase 41 D2)', () => {
     await expectGeminiStatus(ns, 500);
     await next({ question_id: questions[0].id, text: 'volume', check_fit: true });
     expect(await readVerdicts(t.db, sessionId)).toEqual([{ verdict: 'wrong', retryState: null }]);
+    expect(await countGeminiRequests(ns)).toBe(1);
   });
 
   it('asks nothing without the flag, or for a listed word', async () => {

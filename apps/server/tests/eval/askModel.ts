@@ -51,6 +51,7 @@ import {
   type StoredSense,
 } from '../../src/domain/translation';
 import { flattenEntries, mergeEntries, normalizeForm } from '../../src/domain/dictionary';
+import { LANGUAGES } from '../../src/domain/languages';
 import type { LlmClient } from '../../src/services/llm';
 import { z } from 'zod';
 
@@ -203,7 +204,7 @@ const GapGuessesSchema = z.object({ guesses: z.array(z.string()) });
 export async function askGapGuesses(llm: LlmClient, kase: { language: LanguageCode; sentence: string }): Promise<string[]> {
   const raw = await llm({
     system: [
-      `A ${kase.language} sentence has one word left out, marked ___.`,
+      `A ${LANGUAGES[kase.language].name} sentence has one word left out, marked ___.`,
       'Return JSON only, matching the supplied schema: in guesses, the three words a native reader would most likely put in the gap, likeliest first, each in the form the gap needs.',
     ].join('\n'),
     user: JSON.stringify({ sentence: kase.sentence }),
