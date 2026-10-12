@@ -153,8 +153,10 @@ export function decide(card: Card, memory: BotMemory, saved: readonly SavedWord[
     const d = detail({ outcome: 'unmatched', unmatched: true });
     if (choice && 'options' in card) return { kind: 'option', index: Math.floor(rng() * card.options.length), detail: d };
     if (speaks) return { kind: 'pass', pass: 'show_answer', detail: d };
+    // Phase 39 (spec D10): a typed meaning is answered in Hebrew; the server refuses a form there.
     const any = otherWord(saved, null, rng);
-    return { kind: 'text', text: any?.form ?? '', detail: d };
+    const text = card.type === 'typed_meaning' ? any?.meaning : any?.form;
+    return { kind: 'text', text: text ?? '', detail: d };
   }
 
   // Steps 2 and 3: the card's dimensions; the weakest decides, then a draw against that recall.

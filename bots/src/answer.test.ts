@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import type { z } from 'zod';
 import type { QuestionSchema } from '@lang-tutor/core/api/schemas';
-import type { Dimension } from '@lang-tutor/core/domain';
+import { wrongScript, type Dimension } from '@lang-tutor/core/domain';
 
 import { rngFor } from './rng.ts';
 import { decide, matchCard, type Behaviour, type SavedWord } from './answer.ts';
@@ -276,6 +276,18 @@ test('an unmatchable card is marked unmatched and answered at random', () => {
   const t = decide(typed, memory(1), saved, always(0.5), calm);
   assert.equal(t.detail.unmatched, true);
   assert.equal(t.kind, 'text');
+});
+
+test('an unmatchable typed meaning is answered with a saved Hebrew meaning, never a target-language form', () => {
+  // Phase 39 (spec D10): the server refuses a Latin answer to a typed meaning (422 wrong_script),
+  // so answering one with a form would fail the day on every retry.
+  const card: Card = { ...base, type: 'typed_meaning', question: 'zebra', part_of_speech: 'noun', meaning: 'זברה', context: null };
+  const d = decide(card, memory(1), saved, always(0.5), calm);
+  assert.equal(d.detail.unmatched, true);
+  assert.equal(d.kind, 'text');
+  const text = d.kind === 'text' ? d.text : '';
+  assert.ok(saved.some((w) => w.meaning === text), `answered with a saved meaning, got "${text}"`);
+  assert.equal(wrongScript(text, 'he'), false);
 });
 
 test('the same inputs and rng give the same decision', () => {
