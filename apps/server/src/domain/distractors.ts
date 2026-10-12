@@ -46,6 +46,7 @@ export type Task = 'meaning' | 'word' | 'typed' | 'gap' | 'sentence' | 'translat
 export function taskFor(type: QuestionType): Task | null {
   switch (type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'listen_choice':
       return 'meaning';
     case 'reverse_choice':
@@ -652,6 +653,7 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
   const answerForm = ASKS_FOR_FORM.has(type) ? row.answerForm : null;
   switch (type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'listen_choice':
       return { ...none, options: optionsFor(row.translation, generated.distractors), answerForm };
     case 'reverse_choice':

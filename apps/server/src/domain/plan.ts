@@ -20,7 +20,8 @@ import { READ_ALOUD_MAX_LEVEL } from './progress';
  *  word choice (D5): `r` is null for a dimension with no memory yet. `step`: a
  *  same-day return (phase 37 D1), asked after every other card (D6).
  *  `meanings`: phase 34 (spec D3), every meaning the dictionary knows for its
- *  word and the word's homographs; none when absent. */
+ *  word and the word's homographs; none when absent. `knownMeanings`: phase 39
+ *  (spec D6), the meanings already learned of a word whose new gloss this is. */
 export type PlanPick = {
   form: string;
   translation: string;
@@ -33,6 +34,7 @@ export type PlanPick = {
   r: number | null;
   step: boolean;
   meanings?: readonly string[];
+  knownMeanings?: readonly string[];
 };
 
 /** `listening`: the app said its device has a voice for the target (phase 24 D5).
@@ -69,7 +71,7 @@ export const BOARD_SIZE = 4;
 export const BOARD_MIN_PICKS = 7;
 
 /** The cards with four options to pick from: a guess is right one time in four. */
-const FOUR_OPTION: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'reverse_choice', 'cloze_choice', 'listen_choice']);
+const FOUR_OPTION: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'new_meaning', 'reverse_choice', 'cloze_choice', 'listen_choice']);
 
 const SPEAKING: ReadonlySet<QuestionType> = new Set(['read_aloud', 'say_translation']);
 
@@ -78,6 +80,7 @@ function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaki
   if (SPEAKING.has(type) && !speaking) return false;
   switch (type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'reverse_choice':
     case 'typed_translation':
     case 'typed_meaning':
@@ -163,6 +166,9 @@ function bestIn(
 /** The pick's rung, then the other rung, then multiple choice, always
  *  eligible. A new word has no R and takes multiple choice (spec D6). */
 function cardFor(pick: PlanPick, used: ReadonlyMap<QuestionType, number>, listening: boolean, speaking: boolean): Choice {
+  // Phase 39 (spec D6): a new gloss of a known word is a new_meaning, not chosen
+  // from a rung: it does not count toward MAX_PER_TYPE, nor go on a board.
+  if (pick.knownMeanings?.length) return { type: 'new_meaning', p: expectedSuccess(pick.r, true, 1), chosen: false };
   const multipleChoice = { type: 'multiple_choice' as const, p: expectedSuccess(pick.r, true, 1), chosen: false };
   if (pick.dimension === 'written_receptive' && pick.r === null) return multipleChoice;
   const other = pick.rung === 1 ? 2 : 1;

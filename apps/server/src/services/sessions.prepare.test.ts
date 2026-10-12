@@ -194,6 +194,8 @@ function world(opts: {
             return { ...base, type: q.type, question: q.form, part_of_speech: q.partOfSpeech, ...choice(), board };
           case 'multiple_choice':
             return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice(), context };
+          case 'new_meaning':
+            throw new Error('the prepare job does not draw a new_meaning yet (phase 39 task 6)');
           case 'listen_choice':
             return { ...base, type: q.type, question: q.answerForm ?? q.form, part_of_speech: q.partOfSpeech, ...choice() };
           case 'read_aloud':

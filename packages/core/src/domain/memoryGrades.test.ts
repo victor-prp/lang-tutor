@@ -14,6 +14,12 @@ describe('gradesFor, one test per row of the table', () => {
     expect(gradesFor({ type: 'multiple_choice', correct: true })).toEqual([p(WR, 3)]);
     expect(gradesFor({ type: 'multiple_choice', correct: false })).toEqual([p(WR, 1)]);
   });
+  it('new meaning grades as multiple choice (phase 39 D6)', () => {
+    for (const correct of [true, false]) {
+      expect(gradesFor({ type: 'new_meaning', correct })).toEqual(gradesFor({ type: 'multiple_choice', correct }));
+    }
+    expect(dimensionsTested('new_meaning')).toEqual(dimensionsTested('multiple_choice'));
+  });
   it('matching, first try', () => {
     expect(gradesFor({ type: 'matching', correct: true })).toEqual([p(WR, 2)]);
     expect(gradesFor({ type: 'matching', correct: false })).toEqual([p(WR, 1)]);

@@ -6,6 +6,7 @@ import type {
   MatchingQuestion,
   MissedQuestion,
   MultipleChoiceQuestion,
+  NewMeaningQuestion,
   Question,
   ReadAloudQuestion,
   ReverseChoiceQuestion,
@@ -37,7 +38,7 @@ export type AnswerInput =
   // Only the server builds it: the next-step schema has no `judged` field.
   | { text: string; judged: TypedVerdict };
 
-export type ChoiceQuestion = MultipleChoiceQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion | ClozeChoiceQuestion;
+export type ChoiceQuestion = MultipleChoiceQuestion | NewMeaningQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion | ClozeChoiceQuestion;
 /** Phase 25. The cards answered by voice. */
 export type SpeakingQuestion = ReadAloudQuestion | SayTranslationQuestion;
 /** Phase 24. A question answered by text: typed, heard, or built from tiles. */
@@ -48,6 +49,7 @@ type TextQuestion = Exclude<Question, ChoiceQuestion | SpeakingQuestion | Judged
 export function isChoice(question: Question): question is ChoiceQuestion {
   switch (question.type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'reverse_choice':
     case 'listen_choice':
     case 'matching':

@@ -122,6 +122,36 @@ describe('planCards: aiming at CARD_TARGET (spec D6)', () => {
   });
 });
 
+// Phase 39 (spec D6).
+describe('planCards: new_meaning', () => {
+  const meaning = (n: number, over: Partial<PlanPick> = {}) => at(n, WR, 1, { knownMeanings: ['להרים'], ...over });
+
+  it('turns a pick with known meanings into new_meaning, whatever its dimension or rung', () => {
+    expect(typeOf(meaning(0))).toBe('new_meaning');
+    expect(typeOf(pick(0, { knownMeanings: ['להרים'] }))).toBe('new_meaning');
+    expect(typeOf(at(0, WP, 2, { knownMeanings: ['להרים'] }))).toBe('new_meaning');
+    expect(typeOf(pick(0, { knownMeanings: [] }))).toBe('multiple_choice');
+  });
+
+  it('does not count toward MAX_PER_TYPE', () => {
+    const list = [...Array.from({ length: 5 }, (_, i) => meaning(i)), ...Array.from({ length: 4 }, (_, i) => at(10 + i, WR, 1, { form: 'same' }))];
+    const types = typesByPick(list);
+    expect(types.slice(0, 5)).toEqual(Array(5).fill('new_meaning'));
+    expect(types.slice(5)).toEqual(Array(4).fill('multiple_choice'));
+  });
+
+  it('is never on a board, in a ten-pick session', () => {
+    const list = [meaning(0), meaning(1), pick(2), pick(3), pick(4), pick(5), pick(6), meaning(7), meaning(8), pick(9)];
+    const plan = planCards(list, ALL);
+    expect(plan.board).not.toBeNull();
+    const start = plan.board!.start;
+    const onBoard = plan.order.slice(start, start + 4);
+    expect(onBoard.every((index) => list[index].knownMeanings === undefined)).toBe(true);
+    expect(count(plan.types, 'new_meaning')).toBe(4);
+    expect(count(plan.types, 'matching')).toBe(4);
+  });
+});
+
 describe('planCards: fallbacks (spec D6)', () => {
   it('takes the other rung when the chosen one has no eligible type', () => {
     // Dictation needs listening.

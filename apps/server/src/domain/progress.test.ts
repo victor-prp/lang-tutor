@@ -47,6 +47,15 @@ describe('evidenceFor', () => {
   });
 });
 
+// Phase 39 (spec D6): a new meaning is read as a multiple choice.
+describe('evidenceFor, new_meaning', () => {
+  it.each([true, false])('equals multiple choice when correct is %s', (correct) => {
+    expect(evidenceFor({ glossId: 's', type: 'new_meaning', correct })).toEqual(
+      evidenceFor({ glossId: 's', type: 'multiple_choice', correct }),
+    );
+  });
+});
+
 // Phase 23: spec D6, every row.
 describe('evidenceFor, every type and verdict', () => {
   it.each([
