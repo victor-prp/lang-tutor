@@ -54,7 +54,19 @@ describe('the second try (phase 34 D9)', () => {
   };
   const NEXT: Question = { ...TYPED, id: 't2', question: 'דלת', answer: 'porta', lemma: 'porta', alternatives: [] };
   const PENDING = { answer: 'vetrata', wording: 'word' } as const;
-  const response = (question: Question, pending: typeof PENDING | null): NextStepResponse => ({
+  const CLOZE: Question = {
+    id: 'z1',
+    type: 'cloze_typed',
+    vocab_term_id: 'l',
+    sentence: 'Please download the file.',
+    gap: { start: 7, end: 15 },
+    translation: 'בבקשה תוריד את הקובץ.',
+    meaning: 'להוריד',
+    answer: 'download',
+    alternatives: ['upload'],
+    mark: null,
+  };
+  const response = (question: Question, pending: PendingRetry | null): NextStepResponse => ({
     session_id: 's',
     question,
     position: { position: 3, total: 10 },
@@ -164,6 +176,14 @@ describe('the second try (phase 34 D9)', () => {
       expect(answerRoute({ retry: PENDING, judging: 'idle' }, TYPED, { text: '' })).toBe('banner');
     });
 
+    // Phase 41 (spec D3). The server checks it against the gap, so its banner waits.
+    it('a typed gap word the phone calls wrong waits for the server, but not on a second try', () => {
+      expect(answerRoute(FIRST, CLOZE, { text: 'edit' })).toBe('server');
+      expect(answerRoute(FIRST, CLOZE, { text: '' })).toBe('banner');
+      expect(answerRoute(FIRST, CLOZE, { text: 'download' })).toBe('banner');
+      expect(answerRoute({ retry: PENDING, judging: 'idle' }, CLOZE, { text: 'edit' })).toBe('banner');
+    });
+
     it('after a failed check, show the answer waits for the server, which may hold a first answer already', () => {
       expect(answerRoute({ retry: null, judging: 'failed' }, TYPED, { text: '' })).toBe('server');
       expect(answerRoute({ retry: null, judging: 'failed' }, TYPED, { text: 'finestra' })).toBe('server');
@@ -178,6 +198,11 @@ describe('the second try (phase 34 D9)', () => {
       expect(metHold(TYPED, { text: 'finestra' }, null, HELD)).toEqual(PENDING);
       expect(metHold(TYPED, { pass: 'show_answer' }, null, HELD)).toEqual(PENDING);
       expect(metHold(TYPED, { text: '', judged: 'alternative' }, null, HELD)).toEqual(PENDING);
+    });
+
+    // Review Focus 2: a checked word may be what opened the hold, so it is never resent as the second try.
+    it('is not, for a typed gap word the server checked', () => {
+      expect(metHold(CLOZE, { text: 'edit' }, null, response(CLOZE, { answer: 'edit', wording: 'word' }))).toBeNull();
     });
 
     it('is not, for an answer that may have opened it, or a second try, or no hold', () => {
@@ -229,6 +254,11 @@ describe('the second try (phase 34 D9)', () => {
     it('goes with a first text answer, show the answer included', () => {
       expect(nextStepRequest('c1', { text: 'spent' }, null, true)).toEqual({ question_id: 'c1', text: 'spent', hint_opened: true });
       expect(nextStepRequest('c1', { text: '' }, null, false)).toEqual({ question_id: 'c1', text: '', hint_opened: false });
+    });
+    it('check_fit goes with a first text answer when asked, never with a retry (phase 41 D3)', () => {
+      expect(nextStepRequest('c1', { text: 'edit' }, null, false, true)).toEqual({ question_id: 'c1', text: 'edit', hint_opened: false, check_fit: true });
+      expect(nextStepRequest('c1', { text: 'edit' }, PENDING, false, true)).toEqual({ question_id: 'c1', text: 'edit', retry: true });
+      expect(nextStepRequest('c1', { text: 'edit' }, null, false, false)).toEqual({ question_id: 'c1', text: 'edit', hint_opened: false });
     });
     it('never with a retry, and not when the card has none', () => {
       expect(nextStepRequest('c1', { text: 'spent' }, PENDING, true)).toEqual({ question_id: 'c1', text: 'spent', retry: true });

@@ -9,7 +9,7 @@ import type {
   SessionView,
 } from '@lang-tutor/core/api';
 
-import { opensRetry, type CardAnswer } from '@/feedback';
+import { checksFit, opensRetry, type CardAnswer } from '@/feedback';
 import type { JudgeAttempt } from '@/judging';
 import { IDLE_ATTEMPT, type SpeakingOff, type SpeechAttempt } from '@/speaking';
 
@@ -126,10 +126,13 @@ export function nextStepRequest(
   input: { option_index: number } | { text: string } | { pass: 'skip' | 'show_answer' },
   retry: PendingRetry | null,
   hintOpened?: boolean,
+  checkFit = false,
 ): NextStepRequest {
   const request = 'pass' in input ? { question_id: questionId, pass: passFor(input.pass, retry) } : { question_id: questionId, ...input };
   const hinted = 'text' in input && retry === null && hintOpened !== undefined ? { ...request, hint_opened: hintOpened } : request;
-  return retried(hinted, retry);
+  // Phase 41 (spec D3): only a first answer is checked against the gap.
+  const checked = 'text' in input && retry === null && checkFit ? { ...hinted, check_fit: true } : hinted;
+  return retried(checked, retry);
 }
 
 /** Phase 34 (spec D9). How an answer the phone judges goes out. `banner`: its
@@ -138,14 +141,16 @@ export function nextStepRequest(
  *  word, which holds the card for a second try whose banner must not name the
  *  saved word; and any answer after a failed check, since the server may hold
  *  a first answer already, and only its response says whether this answer is
- *  that card's second try (`settle`). A second try's banner shows at once. */
+ *  that card's second try (`settle`). A second try's banner shows at once.
+ *  Phase 41 (spec D3): a typed gap word the phone calls wrong, which the server
+ *  checks against the gap. */
 export function answerRoute(
   state: Pick<QuizState, 'retry' | 'judging'>,
   question: Question,
   answer: { option_index: number } | { text: string },
 ): 'banner' | 'server' {
   if (state.retry !== null) return 'banner';
-  return state.judging === 'failed' || opensRetry(question, answer) ? 'server' : 'banner';
+  return state.judging === 'failed' || opensRetry(question, answer) || checksFit(question, answer) ? 'server' : 'banner';
 }
 
 /** What a sent answer came back as: the answer the card shows, and the step. */
@@ -162,7 +167,8 @@ function mayOpen(question: Question, answer: CardAnswer): boolean {
   if ('pass' in answer) return false;
   if ('judged' in answer) return answer.text.trim() !== '';
   if ('heard' in answer || 'board' in answer) return true;
-  return opensRetry(question, answer);
+  // Phase 41 (spec D3): a word checked against the gap may be what the server held.
+  return opensRetry(question, answer) || checksFit(question, answer);
 }
 
 /** Phase 34 (spec D9). The hold a first answer's response carries when that

@@ -15,7 +15,7 @@ import { Alert } from 'react-native';
 
 import type { ApiClient } from '@/api/client';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import type { CardAnswer } from '@/feedback';
+import { checksFit, type CardAnswer } from '@/feedback';
 import type { Clip } from '@/recording';
 import { answerRoute, applyQueued, landed, nextStepRequest, queuedFrom, resumed, retried, settle, type QuizState, type Settled } from '@/quiz';
 import { canJudge, judgedAnswer, type JudgeAttempt } from '@/judging';
@@ -215,7 +215,7 @@ export function SessionProvider({ api, children }: { api: ApiClient; children: R
       // Phase 34 (spec D9): the second try at a held card carries retry: true,
       // and an answer meeting a hold it could not have opened goes again as one.
       const call = settle(question, retry, (as) =>
-        api.nextStep(sessionId, nextStepRequest(question.id, input, as, hintOpened)).then((next) => ({ answer: input, next })),
+        api.nextStep(sessionId, nextStepRequest(question.id, input, as, hintOpened, checksFit(question, input))).then((next) => ({ answer: input, next })),
       );
 
       // Phase 34 (spec D9). Another accepted word, or any answer after a failed
