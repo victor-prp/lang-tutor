@@ -1185,7 +1185,10 @@ export const JUDGE_CASES: JudgeCase[] = [
   judge('en', enBank, 'גדה', 'alternative', 'other sense'),
   judge('en', enImagination, 'הזייה', 'wrong', 'a nearby idea, not a sense'),
   judge('en', enImagination, 'יצירתיות', 'wrong', 'related but different'),
-  judge('en', enImagination, 'דמיון', 'exact', 'the saved meaning'),
+  // Review M1, M2. Held out of the prompt's own examples: a near idea of another
+  // word is still wrong, and a close synonym is still right.
+  judge('en', { form: 'memory', pos: 'noun', meaning: 'זיכרון', example: 'I have a clear memory of that day.', translation: 'יש לי זיכרון ברור מהיום ההוא.' }, 'נוסטלגיה', 'wrong', 'a nearby idea, not a sense'),
+  judge('en', { form: 'happy', pos: 'adjective', meaning: 'שמח', example: 'She is happy with her new job.', translation: 'היא שמחה בעבודה החדשה שלה.' }, 'מרוצה', 'exact', 'close synonym'),
   judge('en', enBook, 'לבטל', 'wrong', 'related but different'),
   judge('en', { form: 'tulip', pos: 'noun', meaning: 'צבעוני', example: 'She planted a red tulip.', translation: 'היא שתלה צבעוני אדום.' }, 'פרח', 'wrong', 'too general'),
   judge('en', { form: 'window', pos: 'noun', meaning: 'חלון', example: 'Please close the window.', translation: 'בבקשה סגור את החלון.' }, 'כלב', 'wrong', 'unrelated'),
