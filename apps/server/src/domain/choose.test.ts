@@ -483,6 +483,14 @@ describe('families (phase 39 D5)', () => {
     expect(ids(picks)).toEqual(['other']);
   });
 
+  it('reaches the speaking pass without taking a waiting gloss', () => {
+    // 'w' is the best speaking candidate (least known, silent in SK) but waits.
+    const words = [{ id: 'w', memory: { [WR]: 0.9 } }, { id: 'x', memory: { [WR]: 0.95 } }, { id: 'y', memory: { [WR]: 0.97 } }];
+    const picks = chooseWords(input(words, { speaking: true, ...family({}, ['w']) }));
+    expect(ids(picks).sort()).toEqual(['x', 'y']);
+    expect(picks.some((pick) => pick.cls === 'SPEAK')).toBe(true);
+  });
+
   it('picks one of two new glosses of a family', () => {
     expect(chooseWords(input([fresh('a'), fresh('b')], family({ a: 1, b: 1 })))).toHaveLength(1);
   });
@@ -528,6 +536,15 @@ describe('families (phase 39 D5)', () => {
     const members = Object.fromEntries(range(12, (i) => ({ id: `m${i}` })).map((w, i) => [w.id, Math.floor(i / 4)]));
     const words = [...range(12, (i) => fresh(`m${i}`)), fresh('s1'), fresh('s2')];
     expect(chooseWords(input(words, { newToday: 0, ...family(members) }))).toHaveLength(5);
+  });
+
+  it('asks no speaking pick of a session that can hold only one (n counts the family once)', () => {
+    // Three glosses of one family, distinct keys, each silent in SK: counting keys
+    // alone gives n = 3 and a speaking pick; one family gives n = 1 and none.
+    const words = range(3, (i) => ({ id: `g${i}`, memory: { [WR]: 0.95 } }));
+    const picks = chooseWords(input(words, { speaking: true, ...family({ g0: 1, g1: 1, g2: 1 }) }));
+    expect(picks).toHaveLength(1);
+    expect(picks[0].cls).toBe('EXPAND');
   });
 
   it('still picks one when every gloss is in one family', () => {

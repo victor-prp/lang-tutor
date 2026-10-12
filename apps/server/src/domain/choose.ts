@@ -206,7 +206,7 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   const keys = new Set<string>();
   // Phase 39 (spec D5). The families of the picks so far, and the families a return
   // claimed: a claimed family is free to its claiming return alone.
-  const families = new Set<number | string>();
+  const pickedFamilies = new Set<number | string>();
   const claims = new Map<number | string, string>();
   for (const candidate of returns) {
     if (candidate.family !== undefined && !claims.has(candidate.family)) claims.set(candidate.family, candidate.pick.glossId);
@@ -222,9 +222,9 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
     !taken.has(candidate.pick.glossId) &&
     !keys.has(candidate.key) &&
     (candidate.family === undefined ||
-      (!families.has(candidate.family) && (claims.get(candidate.family) ?? candidate.pick.glossId) === candidate.pick.glossId));
+      (!pickedFamilies.has(candidate.family) && (claims.get(candidate.family) ?? candidate.pick.glossId) === candidate.pick.glossId));
   const add = (candidate: Candidate) => {
-    if (candidate.family !== undefined) families.add(candidate.family);
+    if (candidate.family !== undefined) pickedFamilies.add(candidate.family);
     picks.push(candidate.pick);
     keys.add(candidate.key);
     taken.add(candidate.pick.glossId);
