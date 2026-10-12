@@ -280,7 +280,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
             <TypedAnswerView
               question={question}
               instruction={strings.questionInstructionTyped(language)}
-          answerLanguage={language}
+              answerLanguage={language}
               language={language}
               answered={session.answered}
               verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
