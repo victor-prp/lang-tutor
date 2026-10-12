@@ -108,8 +108,9 @@ EventBridge keeps it in a secret of its own (`events!connection/wordspal-bots-di
 - there is no `wordspal/prod/` entry for it, and no plan goes red before it exists;
 - replacing it is the same one command, with no apply.
 
-The runbook's command reads the token with `read -rs`, so it is in neither the shell history nor
-the process list.
+The runbook's command reads the token with `read -rs`, so it stays out of the shell history, as
+the hosting runbook's secret commands do. It is in the `aws` process's arguments for the second
+the call takes, which on a one-person laptop is the same trust those commands already accept.
 
 ## D4. Hearing when it stops
 

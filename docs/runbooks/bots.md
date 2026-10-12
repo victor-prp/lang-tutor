@@ -1,7 +1,8 @@
 # Bots runbook
 
 Six simulated learners (phase 35, spec D13–D22) play the app against production, one simulated
-day per hourly run of `.github/workflows/bots.yml`. What each bot really knows lives on the
+day per hourly run of `.github/workflows/bots.yml`, which an EventBridge rule starts at :17 (*The
+hourly trigger*). What each bot really knows lives on the
 orphan branch `bots-state`, one directory per bot (`state.json`, `log.jsonl`), never on the
 server. Every simulated week has a GitHub issue, label `bots`, titled "Bots — simulated week N".
 
@@ -100,6 +101,55 @@ gh variable set BOTS_ENABLED --body false     # or: gh variable delete BOTS_ENAB
 
 Every later run is skipped at once. A run already playing finishes its day. To start again,
 set it back to `true`: the bots resume at the day after the last one they finished.
+
+The EventBridge rule keeps starting a run every hour; the job's condition skips each one at once,
+at no cost. Nothing changes in AWS.
+
+## The hourly trigger
+
+An EventBridge rule, `wordspal-bots-hourly` in `eu-central-1`, starts `bots.yml` on master at :17
+every hour through GitHub's `workflow_dispatch` API (phase 39). GitHub's own schedule was late by
+hours or skipped slots altogether. The rule is Terraform in `terraform/bootstrap/bots.tf`, applied
+from the laptop like the rest of `bootstrap`. Its call carries a GitHub token kept in the
+EventBridge connection `wordspal-bots-dispatch`, never in Terraform or its state.
+
+**Is it working?**
+
+```bash
+gh run list --workflow bots.yml --event workflow_dispatch --limit 3
+aws events describe-connection --region eu-central-1 --name wordspal-bots-dispatch --query ConnectionState
+```
+
+A run created a minute or two after each :17, and `"AUTHORIZED"`.
+
+**Setting or replacing the token.** Create a fine-grained token at
+https://github.com/settings/personal-access-tokens/new: owner `victor-prp`, only the repository
+`lang-tutor`, Repository permissions → Actions: Read and write, the longest expiry offered. Then,
+with no apply:
+
+```bash
+read -rs TOKEN && aws events update-connection --region eu-central-1 \
+  --name wordspal-bots-dispatch --authorization-type API_KEY \
+  --auth-parameters "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"Authorization\",\"ApiKeyValue\":\"Bearer $TOKEN\"}}"; unset TOKEN
+```
+
+The first `bootstrap` apply creates the connection with a placeholder, `Bearer unset`. A :17 that
+comes before the token is set gets a 401 from GitHub: the connection is deauthorized and the first
+email below arrives. Setting the token authorizes it again.
+
+**The emails** go to `ALERT_EMAIL` through the SNS topic `wordspal-alerts`. SNS asks once to
+confirm the subscription, and nothing arrives before that.
+
+- **"GitHub refused the bots' trigger token …"**: the token expired, was revoked, or was never
+  set. Every hour fails until it is replaced; replace it as above. No day is lost: the next run
+  plays the day the bots are on.
+- **"ALARM: "wordspal-bots-dispatch-failed" …"**: a call failed: GitHub was down for the whole
+  50-minute retry window, `bots.yml` was renamed, or a refused token (this alarm backs up the
+  email above). An "OK" email follows the next good hour. `aws events describe-api-destination
+  --region eu-central-1 --name wordspal-bots-dispatch` shows whether the destination is still
+  `ACTIVE`.
+
+If no email came but the week's issue stopped gaining days, run the two checks above.
 
 ## Read the issue
 
