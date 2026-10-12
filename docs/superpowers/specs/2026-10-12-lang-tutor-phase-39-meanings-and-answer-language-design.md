@@ -586,8 +586,6 @@ renumbered (`npx drizzle-kit generate` on the merged schema).
 After merge, from the main checkout, in this order:
 
 ```bash
-rm e2e/tests/answer-language.spec.ts        # a stray copy, see below; git pull refuses to overwrite it
-rm -rf e2e/test-results apps/mobile/dist    # optional: ignored build output from the same mistake
 git pull
 npm install
 npm run db:migrate                          # lane 0 gets 0030
@@ -596,11 +594,6 @@ npm run db:migrate                          # lane 0 gets 0030
 
 Then release as usual. Installed apps below API level 3 see the update screen once and take the
 over-the-air update.
-
-**The stray file.** While building, one subagent ran an e2e spec from the main checkout by mistake.
-It left an untracked copy of this branch's new `answer-language.spec.ts` there, plus ignored build
-output. Lane 0's dev database and server were not touched. The permission system refused the
-subagent's own clean-up, and the session left it to you rather than work around that refusal.
 
 **What to expect on lane 0.** The first session after the deploy records 20 families. No gloss is yet
 known in all five skills, so in each family one gloss is current and the rest wait: 43 glosses, 29
@@ -618,6 +611,11 @@ debugging queries in D4 show who waits on what.
   once and its family's next meaning never arrives. Lane 0's list is large enough not to hit it in the day runs. If
   it shows, the knob is to count a skill once it has *reached* `KNOWN_STABILITY` (per-skill "known once"), which needs
   a per-skill record beside `known_at`.
+- **"Known once" covers only glosses already in a family.** `known_at` lives in `gloss_family_members`, so a meaning
+  learned on its own has none, and a gloss loses its own when its family dissolves (its sibling unsaved). Saving a
+  second meaning of a word learned weeks earlier judges the first from today's memory alone: if any of its skills
+  has lapsed, it is current again and the new meaning waits until it recovers. This is the stricter outcome, as
+  specified. The alternative is a `known_at` per saved gloss, for every saved gloss, stamped by the same refresh.
 - **Already-practised meanings fade while they wait** (D3). They are relearned when their turn comes,
   as ordinary cards. Exempting them is a one-line change in rule 4 if the cost shows.
 - **The bots' numbers move.** Fewer glosses are active, and families serialise their meanings, so
