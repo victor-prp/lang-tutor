@@ -217,13 +217,22 @@ async function openSession(deps: PlayDeps, enrollmentId: string): Promise<string
 async function firstQuestion(deps: PlayDeps, sessionId: string): Promise<Question | null> {
   const poll = deps.poll ?? DEFAULT_POLL;
   const path = `/sessions/${sessionId}`;
-  const deadline = Date.now() + poll.timeoutMs;
+  const started = Date.now();
+  const deadline = started + poll.timeoutMs;
+  let waited = false;
   for (;;) {
     const view = await deps.api.session(sessionId);
-    if (view.status === 'ready') return view.question;
+    if (view.status === 'ready') {
+      // Phase 43 (ruling R1). A bot plays a session faster than one is prepared,
+      // so it meets the next one in stock still preparing: each wait is logged,
+      // which counts them.
+      if (waited) deps.log(`${deps.profile.name}: waited ${Date.now() - started} ms for session ${sessionId} to prepare`);
+      return view.question;
+    }
     if (view.status === 'failed') throw failure(path, 'the session failed to prepare');
     if (view.status !== 'preparing') return null;
     if (Date.now() > deadline) throw failure(path, `still preparing after ${poll.timeoutMs} ms`);
+    waited = true;
     await sleep(poll.intervalMs);
   }
 }
