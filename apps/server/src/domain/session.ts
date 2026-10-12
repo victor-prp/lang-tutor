@@ -261,8 +261,20 @@ export type SessionSummary = {
 };
 
 /** Phase 31. A saved gloss as a session picks it: its key, and the form it was saved from.
- *  Phase 35: and when it was saved, a sortable UTC timestamp (newest new words first, D5). */
-export type SavedGloss = { glossId: string; key: string; variantId: string; savedAt: string };
+ *  Phase 35: and when it was saved, a sortable UTC timestamp (newest new words first, D5).
+ *  Phase 39 (spec D3, D4): its lexeme and lemma, the lowercased form it was saved from, and
+ *  the dictionary's order of this meaning: the saved variant's entry_rank, then the lowest
+ *  rank among its renderings on that variant in the learner's language (0 if none). */
+export type SavedGloss = {
+  glossId: string;
+  key: string;
+  variantId: string;
+  savedAt: string;
+  lexemeId: string;
+  lemma: string;
+  form: string;
+  order: [number, number];
+};
 
 /** Phase 31 (spec D12). One rendering of one member of a gloss, by one form, with
  *  the citation form the model gave it. */

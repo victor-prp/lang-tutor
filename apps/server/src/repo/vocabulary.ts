@@ -307,14 +307,44 @@ export function createVocabularyRepo(tx: Tx) {
      *  picks reproducibly. Phase 35 (spec D5): with when it was saved, in UTC to
      *  the microsecond and fixed width, so the text sorts by time. */
     listSavedGlosses: async (enrollmentId: string): Promise<SavedGloss[]> => {
-      const rows = await tx.execute<{ gloss_id: string; key: string; variant_id: string; saved_at: string }>(sql`
+      const rows = await tx.execute<{
+        gloss_id: string;
+        key: string;
+        variant_id: string;
+        saved_at: string;
+        lexeme_id: string;
+        lemma: string;
+        form: string;
+        entry_rank: number;
+        rendering_rank: number;
+      }>(sql`
         SELECT ve.gloss_id, g.key, ve.variant_id,
-               to_char(ve.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS saved_at
+               to_char(ve.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS saved_at,
+               ve.lexeme_id, ve.lemma, lower(v.form) AS form, v.entry_rank,
+               COALESCE((
+                 SELECT min(tr.rank)
+                 FROM dict_sense_glosses m
+                 JOIN dict_var_translations tr
+                   ON tr.sense_id = m.sense_id AND tr.user_language_code = m.user_language_code
+                 WHERE m.gloss_id = ve.gloss_id AND tr.variant_id = ve.variant_id
+                   AND tr.user_language_code = e.source_language
+               ), 0) AS rendering_rank
         FROM vocabulary_entries ve
         JOIN dict_glosses g ON g.id = ve.gloss_id
+        JOIN dict_variants v ON v.id = ve.variant_id
+        JOIN enrollments e ON e.id = ve.enrollment_id
         WHERE ve.enrollment_id = ${enrollmentId}
         ORDER BY ve.gloss_id`);
-      return rows.rows.map((row) => ({ glossId: row.gloss_id, key: row.key, variantId: row.variant_id, savedAt: row.saved_at }));
+      return rows.rows.map((row) => ({
+        glossId: row.gloss_id,
+        key: row.key,
+        variantId: row.variant_id,
+        savedAt: row.saved_at,
+        lexemeId: row.lexeme_id,
+        lemma: row.lemma,
+        form: row.form,
+        order: [row.entry_rank, row.rendering_rank],
+      }));
     },
 
     countEntries: async (enrollmentId: string): Promise<number> => {

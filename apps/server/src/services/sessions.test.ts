@@ -4,6 +4,7 @@ import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogg
 import { testRng } from '../../tests/support/testRng';
 import type { GlossRendering, SessionRecord } from '../domain/session';
 import { AnswerKindMismatch, NoSavedWords, SessionNotFound } from '../errors';
+import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
@@ -153,6 +154,9 @@ describe('repos', () => {
     repairVariantRenderings: () => {
       throw new Error('the session service must not write the dictionary tables');
     },
+    findLexemeForms: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
     findLexeme: () => {
       throw new Error('the session service must not read the dictionary tables');
     },
@@ -286,6 +290,7 @@ describe('repos', () => {
         vocabulary: vocabularyRepo,
         progress: progressRepo,
         memory: memoryRepo,
+        glossFamilies: stub<GlossFamiliesRepo>({}),
         photoImport: photoImportRepo,
         jobs: {
           enqueue: () => {
@@ -386,6 +391,8 @@ describe('repos', () => {
 // chooseWords, for a list with no history: no memory, no levels, nothing
 // answered or introduced today.
 const SAVED_AT = '2026-10-01T09:00:00.000000Z';
+/** Phase 39. The lexeme fields of a saved gloss, which these tests do not read. */
+const LEXEME = { lexemeId: 'l1', lemma: 'word', form: 'word', order: [0, 0] as [number, number] };
 const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn'> = { findAnswersOn: async () => [], findIntroducedOn: async () => [] };
 const noHistory = {
   user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const }) }),
@@ -397,9 +404,9 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
   const E = 'e1';
   const TODAY = '2026-10-11';
   const saved = [
-    { glossId: 'g_asked', key: 'כלב', variantId: 'v_asked', savedAt: '2026-10-11T08:00:00.000000Z' },
-    { glossId: 'g_due', key: 'עט', variantId: 'v_due', savedAt: '2026-09-01T08:00:00.000000Z' },
-    { glossId: 'g_new', key: 'חתול', variantId: 'v_new', savedAt: '2026-10-10T08:00:00.000000Z' },
+    { glossId: 'g_asked', key: 'כלב', variantId: 'v_asked', savedAt: '2026-10-11T08:00:00.000000Z', ...LEXEME },
+    { glossId: 'g_due', key: 'עט', variantId: 'v_due', savedAt: '2026-09-01T08:00:00.000000Z', ...LEXEME },
+    { glossId: 'g_new', key: 'חתול', variantId: 'v_new', savedAt: '2026-10-10T08:00:00.000000Z', ...LEXEME },
   ];
   const DUE_STATE = { stability: 1, difficulty: 5, lastDay: '2026-09-01', reps: 1, lapses: 0, params: 'fsrs6-default' };
   // Met this morning and missed: an Again leaves stability under a day.
@@ -500,7 +507,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
           ...nothingToday,
         }),
         vocabulary: stub<VocabularyRepo>({
-          listSavedGlosses: async () => [{ glossId: 'g1', key: 'עט', variantId: 'v1', savedAt: SAVED_AT }],
+          listSavedGlosses: async () => [{ glossId: 'g1', key: 'עט', variantId: 'v1', savedAt: SAVED_AT, ...LEXEME }],
         }),
         ...noHistory,
         // Phase 31 (spec D12). The saved form's rendering, agreeing with the key.
@@ -548,7 +555,7 @@ describe('createNextSession, phase 31 (spec D12)', () => {
           ...nothingToday,
         }),
         vocabulary: stub<VocabularyRepo>({
-          listSavedGlosses: async () => [{ glossId: 'g1', key: 'אצבע', variantId: 'v_fingers', savedAt: SAVED_AT }],
+          listSavedGlosses: async () => [{ glossId: 'g1', key: 'אצבע', variantId: 'v_fingers', savedAt: SAVED_AT, ...LEXEME }],
         }),
         ...noHistory,
         dict: stub<DictRepo>({

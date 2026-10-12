@@ -211,6 +211,13 @@
       "when": 1791755196837,
       "tag": "0029_hint_opened",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791798484150,
+      "tag": "0030_gloss_families",
+      "breakpoints": true
     }
   ]
 }
