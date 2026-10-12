@@ -9,7 +9,7 @@ export const WRONG_HEBREW = ['דלת', 'קיר', 'תקרה'];
 /** Wrong Russian words for a reversed card. None is a saved form or lemma. */
 export const WRONG_RUSSIAN = ['писать', 'дверь', 'стена'];
 
-export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning' | 'cloze-choice' | 'cloze-typed' | 'translate';
+export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning' | 'cloze-choice' | 'cloze-typed' | 'translate' | 'new-meaning';
 
 export type Card = { kind: CardKind; prompt: string; options: string[] };
 
@@ -28,6 +28,7 @@ async function kindOnScreen(page: Page): Promise<CardKind> {
   if (await has('meaning-card')) return 'meaning';
   if (await has('cloze-card')) return (await has('typed-input')) ? 'cloze-typed' : 'cloze-choice';
   if (await has('translate-card')) return 'translate';
+  if (await has('new-meaning-card')) return 'new-meaning';
   if (await has('typed-input')) return 'typed';
   const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
   return HEBREW.test(prompt) ? 'reverse' : 'choice';
@@ -48,7 +49,7 @@ export async function readCard(page: Page, position: number, total: number, expe
       ? stripIsolates(await page.getByTestId('question-prompt').textContent())
       : '';
   const options =
-    kind === 'choice' || kind === 'reverse' || kind === 'listen' || kind === 'cloze-choice'
+    kind === 'choice' || kind === 'new-meaning' || kind === 'reverse' || kind === 'listen' || kind === 'cloze-choice'
       ? await Promise.all([0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`option-${i}`).textContent())))
       : [];
   return { kind, prompt, options };

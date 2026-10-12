@@ -1,0 +1,78 @@
+import { expect, test } from '@playwright/test';
+
+import { API_URL } from '../urls';
+import { answerChoice, expectGeneration, readCard } from './support/cards';
+import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
+import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
+import { LUK } from './support/lexemes';
+import { seedMemory } from './support/memory';
+import { clearGemini, expectCheck, expectContext } from './support/mockServer';
+import { stripIsolates } from './support/text';
+import { openApp, signUpLearner } from './support/users';
+import { withVoices } from './support/voices';
+
+test.setTimeout(180_000);
+
+const SENTENCE = 'Мой лук и стрелы лежат дома';
+const SENTENCE_HEBREW = 'הקשת והחצים שלי נמצאים בבית';
+const SENTENCE_WORD = 'лук';
+const DIMENSIONS = ['written_receptive', 'written_productive', 'spelling', 'spoken_receptive', 'spoken_productive'] as const;
+
+// Phase 39 (spec D6). лук has two saved meanings, a family. בצל is known in every skill
+// (stability 30, reviewed yesterday), so קשת, never asked, is the family's current gloss and
+// is introduced as a new meaning of a word the learner knows.
+test('a new meaning of a known word: the card names what is known and shows the new example', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const username = 'e2e_new_meaning_ru';
+
+  page.on('dialog', (dialog) => void dialog.accept());
+  await withVoices(page, []);
+  await signUpLearner(page, username, 'ru');
+  await openApp(page);
+
+  await tapUntil(page, 'start-button', 'progress-label');
+  await page.getByTestId('session-skip').click();
+  await expect(page.getByTestId('save-words-first'), report()).toBeVisible();
+
+  await tapUntil(page, 'translate-entry', 'translate-input');
+  await lookUp(page, request, 'лук', LUK);
+  await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
+  await page.getByTestId('translate-back').click();
+  await seedMemory(
+    username,
+    DIMENSIONS.map((dimension) => ({ gloss: 'בצל', dimension, stability: 30, daysAgo: 1, level: 3 })),
+  );
+
+  await clearGemini(request);
+  await expectGeneration(request);
+  // The card's key follows its place in the plan, which the spec does not steer: every key answers.
+  const keys = Array.from({ length: 10 }, (_, i) => `q${i + 1}`);
+  await expectContext(
+    request,
+    keys.map((key) => ({ key, context: SENTENCE, context_translation: SENTENCE_HEBREW, context_word: SENTENCE_WORD })),
+  );
+  await expectCheck(request, Object.fromEntries(keys.map((key) => [`${key}c`, { context_meaning: 'קשת' }])));
+  await page.getByTestId('create-button').click();
+  await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
+  await tapUntil(page, 'start-button', 'progress-label');
+
+  const total = Number(/\/\s*(\d+)/.exec((await page.getByTestId('progress-label').textContent()) ?? '')?.[1]);
+  expect(total, 'the counter shows no total').toBeGreaterThan(0);
+  const card = await readCard(page, 1, total, 'new-meaning');
+
+  await expect(page.getByText('פירוש חדש למילה שאתם מכירים')).toBeVisible();
+  expect(card.prompt).toBe('лук');
+  expect(stripIsolates(await page.getByTestId('known-meanings').textContent())).toBe('כבר למדתם: בצל');
+  await expect(page.getByTestId('context-line')).toHaveText(SENTENCE);
+  await expect(page.getByTestId('context-line-mark')).toHaveText(SENTENCE_WORD);
+  await expect(page.getByTestId('new-meaning-question')).toHaveText('מה עוד זה אומר?');
+  // The context sentence is drawn once, in the prompt.
+  await expect(page.getByTestId('context-line')).toHaveCount(1);
+  expect(card.options).toContain('קשת');
+  expect(card.options).not.toContain('בצל');
+
+  await answerChoice(page, card, true);
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});

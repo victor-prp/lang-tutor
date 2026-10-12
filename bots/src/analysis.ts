@@ -54,6 +54,8 @@ export type CardView = { dimension: Dimension; rung: Rung; level: number; r: num
 
 /** The dimensions and rungs a card type can serve (D6). The board is made of multiple-choice picks. */
 function servedBy(type: QuestionType): { dimension: Dimension; rung: Rung }[] {
+  // Phase 39 (spec D6): a new-meaning card is written receptive, rung 1, as a multiple choice is; RUNGS does not list it.
+  if (type === 'new_meaning') return [{ dimension: 'written_receptive', rung: 1 }];
   if (type === 'matching') return [{ dimension: 'written_receptive', rung: 1 }];
   const out: { dimension: Dimension; rung: Rung }[] = [];
   for (const dimension of ORDER) {
@@ -64,7 +66,7 @@ function servedBy(type: QuestionType): { dimension: Dimension; rung: Rung }[] {
   return out;
 }
 
-const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'reverse_choice', 'listen_choice', 'matching', 'cloze_choice']);
+const CHOICE_TYPES: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'reverse_choice', 'listen_choice', 'matching', 'cloze_choice', 'new_meaning']);
 
 function answered(entry: CardEntry & { word: string }): AnsweredQuestion {
   if (CHOICE_TYPES.has(entry.type)) {

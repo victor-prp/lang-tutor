@@ -53,6 +53,7 @@ function shown(card: Card): { forms: string[]; meanings: string[] } {
   const marked = (c: { sentence: string; gap: { start: number; end: number } }) => c.sentence.slice(c.gap.start, c.gap.end);
   switch (card.type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'listen_choice':
     case 'dictation':
     case 'read_aloud':

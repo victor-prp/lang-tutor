@@ -71,3 +71,11 @@ describe('typed gap hint strings (phase 38 D1, D3)', () => {
     expect(strings.retryMeantAnother).toBe('אבל התכוונו למילה אחרת — היעזרו במשפט בעברית ונסו שוב');
   });
 });
+
+describe('new-meaning strings (phase 39 D6)', () => {
+  it('words the instruction, the known-meanings line and the question exactly', () => {
+    expect(strings.questionInstructionNewMeaning).toBe('פירוש חדש למילה שאתם מכירים');
+    expect(strings.knownMeanings(['להרים', 'לאסוף'])).toBe('כבר למדתם: להרים, לאסוף');
+    expect(strings.newMeaningQuestion).toBe('מה עוד זה אומר?');
+  });
+});

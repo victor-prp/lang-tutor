@@ -62,6 +62,10 @@ export const strings = {
   preparationFailed: 'יצירת השאלות נכשלה. אפשר לנסות שוב.',
   homeSavedLabel: (count: number, language: string) => `${count} משמעויות שמורות ב${language}`,
   questionInstruction: 'מה הפירוש?',
+  // Phase 39 (spec D6). A word the learner knows, asked for another meaning.
+  questionInstructionNewMeaning: 'פירוש חדש למילה שאתם מכירים',
+  knownMeanings: (meanings: readonly string[]) => `כבר למדתם: ${meanings.join(', ')}`,
+  newMeaningQuestion: 'מה עוד זה אומר?',
   // Phase 23. The reversed and typed cards name the language they ask for.
   questionInstructionReverse: (language: string) => `איך אומרים ב${languageName(language)}?`,
   questionInstructionTyped: (language: string) => `כתבו את המילה ב${languageName(language)}`,

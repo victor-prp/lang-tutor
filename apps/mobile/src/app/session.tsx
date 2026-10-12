@@ -9,6 +9,7 @@ import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { LetterTilesView } from '@/components/LetterTilesView';
 import { MatchingBoardView } from '@/components/MatchingBoardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
+import { NewMeaningPrompt } from '@/components/NewMeaningPrompt';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SentenceGap } from '@/components/SentenceGap';
 import { SpeakButton } from '@/components/SpeakButton';
@@ -113,6 +114,18 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstruction}
+          language={language}
+          selectedOption={session.selectedOption}
+          onSelect={session.select}
+        />
+      );
+    case 'new_meaning':
+      // Phase 39 (spec D6): a choice of meanings, under a prompt that names the ones already known.
+      return (
+        <MultipleChoiceView
+          question={question}
+          instruction={strings.questionInstructionNewMeaning}
+          prompt={<NewMeaningPrompt question={question} language={language} />}
           language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}

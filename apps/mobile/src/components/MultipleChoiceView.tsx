@@ -73,8 +73,9 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
           {partOfSpeech}
         </Text>
       ) : null}
-      {/* Phase 34 (spec D6): the sentence that pins the prompt's sense. */}
-      {'context' in question && question.context ? (
+      {/* Phase 34 (spec D6): the sentence that pins the prompt's sense. A card
+          that brings its own prompt (phase 39's new meaning) places it there. */}
+      {prompt === undefined && 'context' in question && question.context ? (
         <ContextLine context={question.context} language={contextLanguage(question.type, language)} />
       ) : null}
       <View style={styles.options}>

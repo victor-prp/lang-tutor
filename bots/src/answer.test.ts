@@ -293,3 +293,28 @@ test('a card that shows the lemma or the gloss key matches the word saved from a
   const reverse: Card = { ...base, type: 'reverse_choice', question: 'לרצות', part_of_speech: 'verb', options: ['хотеть', 'мочь', 'знать', 'думать'], context: null };
   assert.equal(matchCard(reverse, inflected)?.form, 'хочешь');
 });
+
+const newMeaning: Card = {
+  ...base,
+  type: 'new_meaning',
+  question: 'cat',
+  known_meanings: ['חתול'],
+  options: ['כלב', 'חתולה', 'בית', 'סוס'],
+  correct_option: 1,
+  context: null,
+};
+
+test('a new-meaning card is a choice: answered right it picks the correct option', () => {
+  const d = decide(newMeaning, memory(0.9), saved, always(0.01), calm);
+  assert.equal(d.kind, 'option');
+  assert.equal((d as { index: number }).index, 1);
+  assert.equal(d.detail.outcome, 'right');
+  assert.deepEqual(d.detail.event, { type: 'new_meaning', correct: true });
+});
+
+test('a new-meaning card answered wrong picks another option', () => {
+  const d = decide(newMeaning, memory(0.1), saved, always(0.99), calm);
+  assert.equal(d.kind, 'option');
+  assert.notEqual((d as { index: number }).index, 1);
+  assert.equal(d.detail.outcome, 'wrong');
+});
