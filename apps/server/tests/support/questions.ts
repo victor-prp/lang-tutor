@@ -130,8 +130,6 @@ export async function readStoredAnswers(db: Db, sessionId: string) {
   return record?.answers ?? [];
 }
 
-/** Phase 38 (spec D4). Each stored answer's hint_opened, by position. The domain's
- *  answer record does not carry it: only a count over the table reads it. */
 /** Phase 41. Each answer's stored verdict and retry state, in position order. */
 export async function readVerdicts(db: Db, sessionId: string): Promise<{ verdict: string | null; retryState: string | null }[]> {
   return db
@@ -141,6 +139,8 @@ export async function readVerdicts(db: Db, sessionId: string): Promise<{ verdict
     .orderBy(asc(answers.position));
 }
 
+/** Phase 38 (spec D4). Each stored answer's hint_opened, by position. The domain's
+ *  answer record does not carry it: only a count over the table reads it. */
 export async function readHintOpened(db: Db, sessionId: string): Promise<(boolean | null)[]> {
   const rows = await db
     .select({ hintOpened: answers.hintOpened })

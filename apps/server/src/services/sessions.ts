@@ -650,20 +650,6 @@ export function createSessionService({
     },
 
     /**
-     * Phase 27 (spec D3). A text answer the server judges. The card is checked
-     * first, so no model call is spent on a stale or wrong request; a rule
-     * decides an empty answer, the stored meaning and (phase 31, spec D13) its
-     * stored alternatives; otherwise the judge is called outside any
-     * transaction (ADR 0001 R8); and the verdict is recorded through
-     * submitAnswer, exactly as a next-step is. Another learner's session is
-     * refused before all of it (phase 29).
-     *
-     * Phase 34 (spec D9). A text with `retry` at a card held for its second try
-     * is the retry, judged as the first answer was; an empty one gives up, by
-     * rule. Without it, a text there replays the first answer, pending. So the
-     * judge is called at most twice per card.
-     */
-    /**
      * Phase 41 (spec D2). A typed answer through next-step. With `checkFit`, a
      * first answer to a typed cloze that the rule calls wrong is shown to the
      * model, which says whether it fills the gap: a word that fits is recorded
@@ -714,6 +700,20 @@ export function createSessionService({
       return service.submitAnswer(actorUserId, sessionId, input.questionId, { text: input.text }, { retry, hintOpened: input.hintOpened, fits });
     },
 
+    /**
+     * Phase 27 (spec D3). A text answer the server judges. The card is checked
+     * first, so no model call is spent on a stale or wrong request; a rule
+     * decides an empty answer, the stored meaning and (phase 31, spec D13) its
+     * stored alternatives; otherwise the judge is called outside any
+     * transaction (ADR 0001 R8); and the verdict is recorded through
+     * submitAnswer, exactly as a next-step is. Another learner's session is
+     * refused before all of it (phase 29).
+     *
+     * Phase 34 (spec D9). A text with `retry` at a card held for its second try
+     * is the retry, judged as the first answer was; an empty one gives up, by
+     * rule. Without it, a text there replays the first answer, pending. So the
+     * judge is called at most twice per card.
+     */
     answerJudged: async (
       actorUserId: string,
       sessionId: string,

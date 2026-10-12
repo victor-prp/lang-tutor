@@ -318,8 +318,6 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(nextStepRoute, async (c) => {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
-    const answer =
-      'text' in body ? { text: body.text } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index };
     try {
       // Phase 41 (spec D2): a text answer may ask for a fit check, which answerText makes.
       const record =
@@ -331,7 +329,13 @@ export function createSessionsRouter(sessions: SessionService) {
               checkFit: body.check_fit,
               retry: body.retry ?? false,
             })
-          : await sessions.submitAnswer(c.var.actor, id, body.question_id, answer, { retry: body.retry ?? false });
+          : await sessions.submitAnswer(
+              c.var.actor,
+              id,
+              body.question_id,
+              'pass' in body ? { pass: body.pass } : { option_index: body.option_index },
+              { retry: body.retry ?? false },
+            );
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
