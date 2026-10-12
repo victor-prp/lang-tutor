@@ -70,6 +70,8 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
   'post /api/sessions': () => ({ url: '/api/sessions', body: { enrollment_id: ids.enrollment } }),
   'get /api/sessions/{id}': () => ({ url: `/api/sessions/${ids.session}` }),
   'post /api/sessions/{id}/skip': () => ({ url: `/api/sessions/${ids.session}/skip` }),
+  // Phase 43 (spec D2).
+  'post /api/sessions/{id}/start': () => ({ url: `/api/sessions/${ids.session}/start`, body: {} }),
   'post /api/sessions/{id}/next-step': () => ({
     url: `/api/sessions/${ids.session}/next-step`,
     body: { question_id: 'q', option_index: 0 },

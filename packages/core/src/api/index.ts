@@ -84,6 +84,8 @@ export type {
   SessionView,
   PendingRetry,
   SkipSessionResponse,
+  StartSessionRequest,
+  StartSessionResponse,
   SpeechAnswerRequest,
   SpeechAnswerResponse,
   SpeechMimeType,

@@ -518,6 +518,19 @@ export const SkipSessionResponseSchema = z.object({
   status: z.literal('skipped'),
 });
 
+// Phase 43 (spec D2). Starting a session asks for the next one in stock, built
+// for the device that started it: whether it has a voice for the target and
+// whether it can record, each as on create. Absent means no.
+export const StartSessionRequestSchema = z.object({
+  listening: z.boolean().optional(),
+  speaking: z.boolean().optional(),
+});
+
+export const StartSessionResponseSchema = z.object({
+  session_id: z.string(),
+  status: SessionStatusSchema,
+});
+
 // The failure body every endpoint can return. Until this phase this shape lived
 // only inside handler code; declaring it here is what lets each route publish
 // its failures instead of documenting a happy path.

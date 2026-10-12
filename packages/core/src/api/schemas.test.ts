@@ -4,6 +4,8 @@ import {
   CreateEnrollmentRequestSchema,
   CreateSessionRequestSchema,
   CreateUserRequestSchema,
+  StartSessionRequestSchema,
+  StartSessionResponseSchema,
   LlmCheckSchema,
   LlmCorrectionSchema,
   LlmContextSchema,
@@ -78,6 +80,22 @@ describe('CreateSessionRequestSchema', () => {
 
   it('rejects an empty enrollment_id', () => {
     expect(CreateSessionRequestSchema.safeParse({ enrollment_id: '' }).success).toBe(false);
+  });
+});
+
+// Phase 43 (spec D2). The device's capabilities ride on start, each optional.
+describe('StartSessionRequestSchema', () => {
+  it('accepts no body fields, or both capabilities', () => {
+    expect(StartSessionRequestSchema.parse({})).toEqual({});
+    expect(StartSessionRequestSchema.parse({ listening: true, speaking: false })).toEqual({ listening: true, speaking: false });
+  });
+
+  it('refuses a capability that is not a boolean', () => {
+    expect(StartSessionRequestSchema.safeParse({ listening: 'yes' }).success).toBe(false);
+  });
+
+  it('answers the session and its status', () => {
+    expect(StartSessionResponseSchema.parse({ session_id: 's1', status: 'ready' })).toEqual({ session_id: 's1', status: 'ready' });
   });
 });
 

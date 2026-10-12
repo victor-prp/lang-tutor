@@ -19,9 +19,11 @@ describe('POST /api/sessions in the published document', () => {
     expect(doc.paths['/api/sessions'].post).toBeDefined();
   });
 
-  it('declares its 201, 400, 404 and 409, and the gate\'s 401 and 403', async () => {
+  // Phase 43 (spec D5): 200 answers the session in stock.
+  it('declares its 200, 201, 400, 404 and 409, and the gate\'s 401 and 403', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths['/api/sessions'].post.responses).sort()).toEqual([
+      '200',
       '201',
       '400',
       '401',
@@ -111,7 +113,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all twenty-seven paths and nothing else', async () => {
+  it('contains all twenty-eight paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -138,6 +140,7 @@ describe('the document as a whole', () => {
       NEXT_STEP,
       '/api/sessions/{id}/skip',
       '/api/sessions/{id}/speech',
+      '/api/sessions/{id}/start',
       '/api/translations',
       '/api/users',
       '/health',
