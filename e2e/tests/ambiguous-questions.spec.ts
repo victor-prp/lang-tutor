@@ -201,6 +201,8 @@ test('a wrong word on a second try shows the right answer in the red banner, and
   // The first answer was right and counts (spec R2); the wrong second try moves nothing.
   await expect(page.getByTestId('results-score')).toHaveText(/4\s*\/\s*4/);
   await expect(page.getByTestId('missed-row')).toHaveCount(0);
+  await expect(page.getByTestId('practised-row')).toHaveCount(4);
+  await expect(practisedRow(page, card.prompt)).toHaveCount(1);
   await expect(practisedRow(page, card.prompt).getByTestId(/^practised-(progressed|raised)$/)).toHaveCount(0);
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
