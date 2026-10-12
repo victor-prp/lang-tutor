@@ -4,6 +4,10 @@
   a second try should describe that try, not the first answer", asked for the judge fix with it,
   and said "go till PR": the design is self-approved (CLAUDE.md, *Continue till PR*). Rulings are
   at the end.
+  Implemented on branch `phase-42-honest-retry-banner`. The final review added one case D1 missed:
+  the first answer typed again on the second try (a gap word the fit check accepted, a translation
+  sent unchanged) keeps the first answer's banner, since a second try is never fit-checked and a
+  re-judged sentence may come back `wrong`. Measured: judge group 50/50, held-out cases included.
 - **Date:** 2026-10-12
 - **Builds on:** phase 34 D9 and ruling R16 (one second try; a given-up or wrong second try shows
   the first answer's banner), phase 27 D4 (the meaning judge's three verdicts).
@@ -69,6 +73,7 @@ Two causes:
 | another accepted word (`alternative`) | its own, as today: "right, the word we practised: …" |
 | **given up**: an empty text, or a `pass` | the first answer's, as today (R16) |
 | **wrong**: a non-empty text | **its own: `tone: 'wrong'`, התשובה הנכונה:, the saved word or meaning** |
+| the first answer again (review I1) | the first answer's: it was just told it is right |
 
 A judged card's given-up second try comes back from the server as `judged: 'wrong'` with an empty
 text (phase 34 ruling R15), so "given up" is decided by the text being empty, on every card.
