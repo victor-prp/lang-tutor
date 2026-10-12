@@ -3,6 +3,7 @@ import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/sc
 import {
   LIVE_DIMENSIONS,
   MAX_JUDGED_TEXT,
+  evaluate,
   gatesScript,
   isJudged,
   isSpeaking,
@@ -65,7 +66,7 @@ import {
 } from '../domain/distractors';
 import { glossFamilies } from '../domain/glossFamilies';
 import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
-import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
+import { buildFitJudgePrompt, judgePrompt, parseFitJudge, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { ACCEPT_RENDERING, PREPARE_SESSION, PrepareSessionPayloadSchema, acceptRenderingKey } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planCards } from '../domain/plan';
@@ -454,7 +455,7 @@ export function createSessionService({
       sessionId: string,
       questionId: string,
       answer: AnswerInput,
-      { retry = false, hintOpened }: { retry?: boolean; hintOpened?: boolean } = {},
+      { retry = false, hintOpened, fits = false }: { retry?: boolean; hintOpened?: boolean; fits?: boolean } = {},
     ): Promise<SessionResult> => {
       // The transaction returns its outcome and the log fires after it resolves:
       // a commit that fails after completeSession must not leave a log claiming a
@@ -474,6 +475,7 @@ export function createSessionService({
         // decides what is wrong, this layer only names it.
         const outcome = step(loaded, questionId, answer, {
           retry,
+          fits,
           languages: { target: enrolled.target_language as LanguageCode, learner: enrolled.source_language as LanguageCode },
         });
         if (outcome.status === 'invalid_question') throw new QuestionDesynced(questionId);
@@ -661,6 +663,57 @@ export function createSessionService({
      * rule. Without it, a text there replays the first answer, pending. So the
      * judge is called at most twice per card.
      */
+    /**
+     * Phase 41 (spec D2). A typed answer through next-step. With `checkFit`, a
+     * first answer to a typed cloze that the rule calls wrong is shown to the
+     * model, which says whether it fills the gap: a word that fits is recorded
+     * as one of the card's alternatives. The card is checked first, so no call
+     * is spent on a replay, a retry, a listed word, an empty text or the wrong
+     * alphabet; the call is made outside any transaction (ADR 0001 R8); and a
+     * failed call leaves the rule's verdict (ruling R2). Then it is recorded
+     * through submitAnswer, exactly as any next-step is.
+     */
+    answerText: async (
+      actorUserId: string,
+      sessionId: string,
+      input: { questionId: string; text: string; hintOpened?: boolean; checkFit?: boolean; retry?: boolean },
+    ): Promise<SessionResult> => {
+      const retry = input.retry ?? false;
+      const card =
+        input.checkFit && !retry
+          ? await transaction(async (repos) => {
+              const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
+              const loaded = await repos.session.loadSession(sessionId);
+              if (!loaded || (loaded.status !== 'ready' && loaded.status !== 'completed')) return null;
+              const attempt = attemptOf(loaded, input.questionId, false);
+              if (attempt.kind !== 'answer' || attempt.question.type !== 'cloze_typed' || input.text.trim() === '') return null;
+              const language = enrolled.target_language as LanguageCode;
+              const expected = gatesScript(attempt.question, language, enrolled.source_language as LanguageCode);
+              if (expected !== null && wrongScript(input.text, expected)) return null;
+              return evaluate(attempt.question, { text: input.text }).verdict === 'wrong' ? { question: attempt.question, language } : null;
+            })
+          : null;
+      let fits = false;
+      if (card) {
+        const started = now();
+        try {
+          const verdict = parseFitJudge(await judge(buildFitJudgePrompt(card.question, card.language, input.text)));
+          if (verdict === null) throw new LlmUnavailable('the verdict was unreadable');
+          fits = verdict === 'fits';
+          logger.info({ event: 'answer_fit_checked', session_id: sessionId, question_type: 'cloze_typed', verdict, judge_ms: now() - started, chars: input.text.length });
+        } catch (error) {
+          logger.info({
+            event: 'answer_fit_check_failed',
+            session_id: sessionId,
+            question_type: 'cloze_typed',
+            judge_ms: now() - started,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      return service.submitAnswer(actorUserId, sessionId, input.questionId, { text: input.text }, { retry, hintOpened: input.hintOpened, fits });
+    },
+
     answerJudged: async (
       actorUserId: string,
       sessionId: string,
