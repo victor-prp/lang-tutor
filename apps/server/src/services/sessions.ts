@@ -3,8 +3,10 @@ import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/sc
 import {
   LIVE_DIMENSIONS,
   MAX_JUDGED_TEXT,
+  gatesScript,
   isJudged,
   isSpeaking,
+  wrongScript,
   shuffleSession,
   speakable,
   spokenVerdict,
@@ -28,7 +30,7 @@ import {
   type CheckFinding,
   type CheckItem,
 } from '../domain/check';
-import { chooseWords } from '../domain/choose';
+import { chooseWords, liveDimensions } from '../domain/choose';
 import { findGap } from '../domain/cloze';
 import {
   buildContextPrompt,
@@ -61,6 +63,8 @@ import {
   type GenerationContext,
   type Generated,
 } from '../domain/distractors';
+import { glossFamilies } from '../domain/glossFamilies';
+import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
 import { judgePrompt, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
 import { ACCEPT_RENDERING, PREPARE_SESSION, PrepareSessionPayloadSchema, acceptRenderingKey } from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
@@ -98,6 +102,7 @@ import {
   SessionNotReady,
   SessionNotSkippable,
   SessionOpen,
+  WrongScript,
 } from '../errors';
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
@@ -110,6 +115,12 @@ export type { Transaction } from './transaction';
 
 /** Phase 34 (spec D4, D5). The cards that show wrong options, three of them. */
 const CHOSEN: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'listen_choice', 'reverse_choice', 'cloze_choice']);
+
+/** Phase 39 (spec D6). The type a card is generated as. A new_meaning goes
+ *  through exactly the multiple-choice paths: its distractor item, its context
+ *  item, its checker items, CHOSEN's surviving options and its stored content.
+ *  Only its stored row differs: its type, and the known meanings of its pick. */
+const generatedAs = (type: QuestionType): QuestionType => (type === 'new_meaning' ? 'multiple_choice' : type);
 
 // The one place a completed session is logged. Redundant with the database, kept
 // because it is output you can tail without opening psql — structured, so you
@@ -294,9 +305,34 @@ export function createSessionService({
         // with what that day already asked and introduced. At most one gloss per
         // key, across headwords (phase 31 D18), is chooseWords' rule now.
         const glossIds = saved.map((gloss) => gloss.glossId);
-        const today = await learnerDay(repos, enrolled.user_id, now());
+        const at = now();
+        const today = await learnerDay(repos, enrolled.user_id, at);
         const memory = await repos.memory.findRows({ enrollmentId, glossIds });
         const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
+        // Phase 39 (spec D4, D5). The families, derived from the dictionary and
+        // memory with the session's live skills. Only known_at is read from the
+        // stored families: known once, known for the family (D2).
+        const forms = await dict.findLexemeForms({ lexemeIds: [...new Set(saved.map((gloss) => gloss.lexemeId))] });
+        const formsOf = new Map<string, string[]>();
+        for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
+        const stored = await repos.glossFamilies.load(enrollmentId);
+        const knownAt = new Map(stored.flatMap((family) => family.members.map((member) => [member.glossId, member.knownAt])));
+        const families = glossFamilies({
+          saved: saved.map((gloss) => ({
+            glossId: gloss.glossId,
+            lexemeId: gloss.lexemeId,
+            lemma: gloss.lemma,
+            key: gloss.key,
+            savedAt: gloss.savedAt,
+            forms: formsOf.get(gloss.lexemeId) ?? [],
+            order: gloss.order,
+            speakable: speakable(gloss.form),
+            knownAt: knownAt.get(gloss.glossId) ?? null,
+          })),
+          memory,
+          live: liveDimensions(options.listening, options.speaking),
+        });
+        const waiting = new Set([...families.state].filter(([, state]) => state === 'waiting').map(([glossId]) => glossId));
         // Phase 37 (spec D1, D7). Today's answers leave the returns owed and the
         // words done for the day.
         const introduced = await session.findIntroducedOn(enrollmentId, today);
@@ -312,6 +348,7 @@ export function createSessionService({
           listening: options.listening,
           speaking: options.speaking,
           rng,
+          families: { familyOf: families.familyOf, waiting },
         });
         // Spec D12. One rendering per gloss, uniformly over every form of every
         // member that agrees with the gloss, the saved form always among them.
@@ -326,10 +363,28 @@ export function createSessionService({
           if (!rendering) return [];
           const { dimension, rung, level, r } = choice;
           const step = choice.cls === 'STEP';
-          return [{ gloss_id: choice.glossId, sense_id: rendering.senseId, variant_id: rendering.variantId, dimension, rung, level, r, step }];
+          // Phase 39 (spec D6). A family's next meaning, never asked, is introduced with the known ones.
+          const knownMeanings = families.introductions.get(choice.glossId);
+          return [
+            {
+              gloss_id: choice.glossId,
+              sense_id: rendering.senseId,
+              variant_id: rendering.variantId,
+              dimension,
+              rung,
+              level,
+              r,
+              step,
+              ...(knownMeanings ? { known_meanings: knownMeanings } : {}),
+            },
+          ];
         });
         if (picks.length === 0) throw new NoSavedWords(enrollmentId);
         const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
+        // Phase 39 (spec D4). The refresh is recorded once the session exists, so
+        // each event names it; one that changed nothing writes nothing.
+        const write = familyChanges(stored, families, new Date(at).toISOString());
+        if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
         await jobs.enqueue(PREPARE_SESSION, {
           session_id: sessionId,
           picks,
@@ -417,7 +472,10 @@ export function createSessionService({
 
         // Four failure modes, four domain outcomes, four errors — the domain
         // decides what is wrong, this layer only names it.
-        const outcome = step(loaded, questionId, answer, { retry });
+        const outcome = step(loaded, questionId, answer, {
+          retry,
+          languages: { target: enrolled.target_language as LanguageCode, learner: enrolled.source_language as LanguageCode },
+        });
         if (outcome.status === 'invalid_question') throw new QuestionDesynced(questionId);
         if (outcome.status === 'wrong_answer_kind') throw new AnswerKindMismatch(questionId);
         if (outcome.status === 'out_of_range') {
@@ -425,6 +483,17 @@ export function createSessionService({
         }
         // answerBySpeech judges before it gets here, with the same pure function.
         if (outcome.status === 'unheard') throw new Error('an unheard transcript reached submitAnswer');
+        // Phase 39 (spec D10). `step` refuses before anything is recorded, so the
+        // card stays as it was; the log is the only trace of the refusal.
+        if (outcome.status === 'wrong_script') {
+          const question = loaded.questions.find((q) => q.id === questionId)!;
+          logger.info({ event: 'answer_wrong_script', session_id: sessionId, question_type: question.type });
+          // `step` refused by this gate, so it names a language here.
+          const expected =
+            gatesScript(question, enrolled.target_language as LanguageCode, enrolled.source_language as LanguageCode) ??
+            (enrolled.target_language as LanguageCode);
+          throw new WrongScript(questionId, LANGUAGES[expected].name);
+        }
         // A replay reports justCompleted: false, so retrying a completed session
         // logs nothing and writes no progress.
         if (outcome.status === 'replayed') {
@@ -626,6 +695,14 @@ export function createSessionService({
       if ('replay' in checked) return checked.replay;
 
       const text = input.text.slice(0, MAX_JUDGED_TEXT);
+      // Phase 39 (spec D10). Before the rule and the judge, so no model is called
+      // for an answer in the wrong alphabet, and nothing is recorded. The gate is
+      // `step`'s, so a card whose own answer is in another alphabet is not checked.
+      const expected = gatesScript(checked.current, checked.context.language, checked.context.explanation);
+      if (expected !== null && wrongScript(text, expected)) {
+        logger.info({ event: 'answer_wrong_script', session_id: sessionId, question_type: checked.current.type });
+        throw new WrongScript(input.questionId, LANGUAGES[expected].name);
+      }
       let verdict = ruleVerdict(checked.current, text, checked.context.alternatives);
       const judgedBy = verdict === null ? 'model' : 'rule';
       const started = now();
@@ -776,7 +853,7 @@ export function createSessionService({
       const target = read.enrolled.target_language as LanguageCode;
       const plan = planCards(
         read.context.map((row, index) => {
-          const { dimension, rung, level, r, step } = read.picked[index];
+          const { dimension, rung, level, r, step, known_meanings } = read.picked[index];
           return {
             form: row.form,
             translation: row.translation,
@@ -793,12 +870,14 @@ export function createSessionService({
             level,
             r,
             step,
+            // Phase 39 (spec D6): a pick with them is a new_meaning card.
+            knownMeanings: known_meanings,
           };
         }),
         { listening: payload.listening, speaking: payload.speaking },
       );
       const ordered = plan.order.map((index) => read.context[index]);
-      const tasks = tasksFor(plan);
+      const tasks = tasksFor({ ...plan, types: plan.types.map(generatedAs) });
       const items = distractorItems(ordered, tasks, read.recent);
       // Phase 31 (spec D18). Another headword with this card's key is right where
       // the card asks for this one: off limits as a wrong option, and named to the
@@ -900,10 +979,11 @@ export function createSessionService({
       for (const card of cards) {
         const item = contextItemFor({
           key: keyOf(card.index),
-          type: card.type,
+          type: generatedAs(card.type),
           row: card.row,
           alternatives: card.answered.alternatives,
-          recent: read.recentContexts.get(card.row.glossId)?.[card.type] ?? [],
+          // Phase 39 (spec D6): findRecentContexts files a new_meaning's under multiple_choice.
+          recent: read.recentContexts.get(card.row.glossId)?.[generatedAs(card.type)] ?? [],
           sentence: sentenceOf(card.answered),
         });
         if (item) contextItems.set(card.index, item);
@@ -982,15 +1062,16 @@ export function createSessionService({
       for (const card of shown) {
         const key = keyOf(card.index);
         const { row } = card;
-        if (card.type === 'multiple_choice' || card.type === 'listen_choice') {
+        const type = generatedAs(card.type);
+        if (type === 'multiple_choice' || type === 'listen_choice') {
           checkItems.push({ key, task: 'choice', word: row.answerForm ?? row.form, options: candidatesOf(card.index) });
-        } else if (card.type === 'reverse_choice') {
+        } else if (type === 'reverse_choice') {
           checkItems.push({ key, task: 'choice', word: row.translation, options: candidatesOf(card.index) });
-        } else if (card.type === 'cloze_choice') {
+        } else if (type === 'cloze_choice') {
           const gap = gaps[card.index]!;
           const sentence = `${row.example!.slice(0, gap.start)}___${row.example!.slice(gap.end)}`;
           checkItems.push({ key, task: 'gap', sentence, options: candidatesOf(card.index) });
-        } else if (card.type === 'matching' && boardCandidates.length > 0) {
+        } else if (type === 'matching' && boardCandidates.length > 0) {
           checkItems.push({ key, task: 'choice', word: row.form, options: boardCandidates });
         }
         if (card.checkable && card.context) {
@@ -1009,7 +1090,7 @@ export function createSessionService({
           );
         }
         const hebrew = sentenceOf(card.answered)?.hebrew;
-        if ((card.type === 'cloze_typed' || card.type === 'sentence_translation') && hebrew) {
+        if ((type === 'cloze_typed' || type === 'sentence_translation') && hebrew) {
           checkItems.push({ key, task: 'translate', sentence: hebrew });
         }
       }
@@ -1038,7 +1119,7 @@ export function createSessionService({
         // Spec D4: a "yes" drops the option and the next spare takes its place;
         // fewer than three left fails the attempt, as fewer than three usable does.
         for (const card of shown) {
-          if (!CHOSEN.has(card.type)) continue;
+          if (!CHOSEN.has(generatedAs(card.type))) continue;
           const key = keyOf(card.index);
           const left = wrongOnly(candidatesOf(card.index), alsoRight(key));
           if (left.length < KEPT_DISTRACTORS) {
@@ -1136,7 +1217,7 @@ export function createSessionService({
           events.push({ event: 'sentence_degraded', session_id: sessionId, position: card.index, type: card.planned, reason: degradedReason });
         }
         // Spec D6: a sense saved without an example has nothing to fall back on.
-        if (!context && contextLanguageOf(type) !== null) {
+        if (!context && contextLanguageOf(generatedAs(type)) !== null) {
           events.push({ event: 'context_missing', session_id: sessionId, position: card.index, type });
         }
         return { row, index: card.index, type, answered, context, sentence };
@@ -1162,13 +1243,15 @@ export function createSessionService({
             partOfSpeech: row.partOfSpeech,
             lexemeId: row.lexemeId,
             type,
-            ...generatedContent(row, type, answered, {
+            ...generatedContent(row, generatedAs(type), answered, {
               tiles: type === 'letter_tiles' ? tilesFor(row.answerForm ?? row.form, LANGUAGES[target].alphabet, rng) : null,
               board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
               gap: gaps[index],
             }),
             // Phase 34 (spec D6, D8, D12): stored as shown.
-            ...contextColumns(type, context, sentence),
+            ...contextColumns(generatedAs(type), context, sentence),
+            // Phase 39 (spec D6): what a new_meaning lists as known, from its pick.
+            knownMeanings: type === 'new_meaning' ? (read.picked[plan.order[index]].known_meanings ?? null) : null,
           })),
         });
         // Each choice shuffled on its own, a board's words once together; the

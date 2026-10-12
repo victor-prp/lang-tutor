@@ -33,6 +33,13 @@ export type MemorySeed = {
   difficulty?: number;
 };
 
+/** Phase 39 (spec D2). The seeds that make `gloss` known in every skill, live or
+ *  not: stability 30, reviewed yesterday, so it is not due either. */
+export function knownSeeds(gloss: string): MemorySeed[] {
+  const dimensions: Dimension[] = ['written_receptive', 'written_productive', 'spelling', 'spoken_receptive', 'spoken_productive'];
+  return dimensions.map((dimension) => ({ gloss, dimension, stability: 30, daysAgo: 1, level: 3 }));
+}
+
 /** Today as the server reads a learner's day: the real UTC date (spec D10). */
 const today = (): string => new Date().toISOString().slice(0, 10);
 

@@ -1,5 +1,6 @@
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GlossRepo } from '../repo/glosses';
+import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { GrantRepo } from '../repo/grants';
 import type { JobRepo } from '../repo/jobs';
 import type { MemoryRepo } from '../repo/memory';
@@ -25,6 +26,7 @@ export type Repos = {
   vocabulary: VocabularyRepo;
   progress: ProgressRepo;
   memory: MemoryRepo;
+  glossFamilies: GlossFamiliesRepo;
   jobs: JobRepo;
   photoImport: PhotoImportRepo;
 };

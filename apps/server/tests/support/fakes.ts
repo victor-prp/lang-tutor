@@ -269,6 +269,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     vocabulary: repos.vocabulary ?? unreachableRepo('vocabulary repo'),
     progress: repos.progress ?? unreachableRepo('progress repo'),
     memory: repos.memory ?? unreachableRepo('memory repo'),
+    glossFamilies: repos.glossFamilies ?? unreachableRepo('gloss families repo'),
     jobs: repos.jobs ?? unreachableRepo('jobs repo'),
     photoImport: repos.photoImport ?? unreachableRepo('photo import repo'),
   };
@@ -376,6 +377,7 @@ export function createFakeDictRepo(): FakeDictRepo {
     // Phase 31 (spec D12). The render-lemma job's reads and the saves' claims;
     // a lookup reaches none of them.
     findLexeme: async () => undefined,
+    findLexemeForms: async () => [],
     hasLemmaRendering: async () => false,
     nextEntryRank: async () => 0,
     claimLemmaRenders: async () => [],

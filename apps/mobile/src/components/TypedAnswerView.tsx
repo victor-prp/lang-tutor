@@ -2,6 +2,7 @@ import type {
   AnswerVerdict,
   ClozeTypedQuestion,
   DictationQuestion,
+  LanguageCode,
   PendingRetry,
   SayTranslationQuestion,
   SentenceTranslationQuestion,
@@ -10,14 +11,15 @@ import type {
 } from '@lang-tutor/core/api';
 import { MAX_JUDGED_TEXT } from '@lang-tutor/core/domain';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type TextStyle } from 'react-native';
 
 import { ContextLine } from '@/components/ContextLine';
 import { ListenPrompt } from '@/components/ListenPrompt';
 import { RetryNotice } from '@/components/RetryNotice';
 import { contextLanguage } from '@/context';
 import { retryText } from '@/feedback';
-import { strings } from '@/strings';
+import { strings, type Instruction } from '@/strings';
+import { typedSubmit } from '@/typedSubmit';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 // The card roots the e2e flows find a card by (phase 27: the two sentence cards).
@@ -42,8 +44,12 @@ type Props = {
    *  sentence, a translation card's Hebrew sentence and, once answered, its
    *  reference). */
   prompt?: ReactNode;
-  /** What the card asks, naming the language: כתבו את המילה באיטלקית. */
-  instruction: string;
+  /** What the card asks, naming the language (set in bold): כתבו את המילה באיטלקית. */
+  instruction: Instruction;
+  /** Phase 39 (spec D7, D8). The language a typed answer must be in: the target's, or the
+   *  learner's on a typed meaning. Null when the card is not checked (`scriptGate`): its
+   *  own right answer is in another alphabet, or the app knows no script for it. */
+  answerLanguage: LanguageCode | null;
   /** The enrollment's target language: a dictation speaks its word in it. */
   language: string;
   /** Whether this card has been answered: the input locks once it has. */
@@ -69,14 +75,17 @@ type Props = {
  * right answer nor a right answer into a wrong one, so autocorrect, spellcheck
  * and autocapitalisation are off.
  */
-export function TypedAnswerView({ question, instruction, language, answered, verdict, onSubmit, direction, checking, failed, prompt, retry }: Props) {
+export function TypedAnswerView({ question, instruction, answerLanguage, language, answered, verdict, onSubmit, direction, checking, failed, prompt, retry }: Props) {
   const [text, setText] = useState('');
+  // Phase 39 (spec D8): the last send was in the wrong alphabet; the text stays.
+  const [wrongScriptShown, setWrongScriptShown] = useState(false);
   const input = useRef<TextInput>(null);
 
   // A new card, or the same card held for its second try, starts its input
   // again (spec D9).
   useEffect(() => {
     setText(retryText(question.type, retry));
+    setWrongScriptShown(false);
   }, [question.id, question.type, retry]);
 
   // The keyboard went down with the first answer: the second try brings it back.
@@ -89,6 +98,10 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
 
   function submit(value: string) {
     if (answered) return;
+    if (typedSubmit(value, answerLanguage) === 'wrong_script') {
+      setWrongScriptShown(true);
+      return;
+    }
     // The keyboard would cover the feedback banner.
     Keyboard.dismiss();
     onSubmit(value);
@@ -99,7 +112,7 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
 
   return (
     <View style={styles.container} testID={ROOT_TEST_IDS[question.type]}>
-      <Text style={answerStyles.instruction}>{instruction}</Text>
+      <InstructionText instruction={instruction} />
       {prompt !== undefined ? (
         prompt
       ) : question.type === 'dictation' ? (
@@ -131,7 +144,10 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
         ref={input}
         testID="typed-input"
         value={text}
-        onChangeText={setText}
+        onChangeText={(value) => {
+          setText(value);
+          setWrongScriptShown(false);
+        }}
         editable={!answered && !checking}
         autoFocus
         autoCapitalize="none"
@@ -150,6 +166,11 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
         placeholderTextColor={colors.muted}
         style={[styles.input, question.type === 'sentence_translation' && styles.inputMultiline, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }, border]}
       />
+      {wrongScriptShown && answerLanguage !== null && !answered ? (
+        <View testID="wrong-script">
+          <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" style={styles.wrongScript} />
+        </View>
+      ) : null}
       {answered ? null : (
         <View style={answerStyles.actions}>
           <Pressable
@@ -179,6 +200,27 @@ export function TypedAnswerView({ question, instruction, language, answered, ver
         </View>
       )}
     </View>
+  );
+}
+
+/** Phase 39 (spec D9). An instruction with the language it names in bold. */
+function InstructionText({
+  instruction: i,
+  languageTestId = 'instruction-language',
+  style,
+}: {
+  instruction: Instruction;
+  languageTestId?: string;
+  style?: StyleProp<TextStyle>;
+}) {
+  return (
+    <Text style={[answerStyles.instruction, style]}>
+      {i.before}
+      <Text style={styles.instructionLanguage} testID={languageTestId}>
+        {i.language}
+      </Text>
+      {i.after}
+    </Text>
   );
 }
 
@@ -229,6 +271,9 @@ export const answerStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { gap: spacing.lg },
+  instructionLanguage: { fontWeight: '700' },
+  // Phase 39 (spec D8): a refusal, in the colour of the app's other errors, not a second instruction.
+  wrongScript: { color: colors.wrong },
   // The answer's language decides: a target word left to right, a Hebrew meaning right to left (phase 27 D13).
   input: {
     borderWidth: 1.5,

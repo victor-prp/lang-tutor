@@ -37,6 +37,7 @@ import {
   SessionNotReady,
   SessionNotSkippable,
   SessionOpen,
+  WrongScript,
 } from '../errors';
 import type { SessionResult, SessionService } from '../services/sessions';
 import { forbidden, learnerResponses, type ActorEnv } from './actor';
@@ -164,7 +165,7 @@ const nextStepRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current question',
   description:
-    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`. An answer that is right but is not the saved word (`alternative`) on a `typed_translation`, `say_translation` or `cloze_typed` card holds the card for one second try: the response carries the same card as `question`, with `pending_retry`, and the session does not move on or complete until the same card is answered again with `retry: true`, judged as the first answer was. An empty text, or a `pass` (`show_answer` or `skip`), with `retry: true` gives up. Without `retry`, an answer to the held card replays the first one. A first `text` answer to a `cloze_typed` card may carry `hint_opened`, whether the learner opened its Hebrew sentence; it is stored with the answer and ignored on every other card and on a retry.',
+    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice`, `new_meaning` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`. An answer that is right but is not the saved word (`alternative`) on a `typed_translation`, `say_translation` or `cloze_typed` card holds the card for one second try: the response carries the same card as `question`, with `pending_retry`, and the session does not move on or complete until the same card is answered again with `retry: true`, judged as the first answer was. An empty text, or a `pass` (`show_answer` or `skip`), with `retry: true` gives up. Without `retry`, an answer to the held card replays the first one. A first `text` answer to a `cloze_typed` card may carry `hint_opened`, whether the learner opened its Hebrew sentence; it is stored with the answer and ignored on every other card and on a retry.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
@@ -182,6 +183,7 @@ const nextStepRoute = createRoute({
     409: failure(
       "`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`).",
     ),
+    422: failure("The text has letters but none in its answer language's alphabet. Nothing was recorded and the card stays current."),
     ...learnerResponses,
     403: NOT_YOURS,
   },
@@ -232,6 +234,7 @@ const judgedAnswerRoute = createRoute({
     400: failure('The request body did not validate, or the current card is not one the server judges.'),
     404: failure('No session has this id.'),
     409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`)."),
+    422: failure("The text has letters but none in its answer language's alphabet. Nothing was recorded, no model was called, and the card stays current."),
     502: failure('The judge failed or timed out; nothing was recorded, and the answer may be sent again.'),
     ...learnerResponses,
     403: NOT_YOURS,
@@ -336,6 +339,7 @@ export function createSessionsRouter(sessions: SessionService) {
       if (error instanceof AnswerKindMismatch) {
         return c.json({ error: 'the answer is not the kind this question takes' }, 400);
       }
+      if (error instanceof WrongScript) return c.json({ error: `the answer is not written in ${error.language}'s alphabet` }, 422);
       throw error; // anything else is a real failure: app.ts's onError makes it a 500
     }
   });
@@ -391,6 +395,7 @@ export function createSessionsRouter(sessions: SessionService) {
         return c.json({ error: "question_id does not match the session's current question" }, 409);
       }
       if (error instanceof AnswerKindMismatch) return c.json({ error: 'the current card is not judged by the server' }, 400);
+      if (error instanceof WrongScript) return c.json({ error: `the answer is not written in ${error.language}'s alphabet` }, 422);
       if (error instanceof LlmUnavailable) return c.json({ error: 'judge unavailable' }, 502);
       throw error;
     }

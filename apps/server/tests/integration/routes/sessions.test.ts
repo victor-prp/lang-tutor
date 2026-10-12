@@ -9,7 +9,7 @@ import {
   seedUser,
 } from '../../support/seedUser';
 import { saveSessionGlosses } from '../../support/progressRows';
-import { insertListSession } from '../../support/questions';
+import { insertListSession, readStoredAnswers } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
@@ -246,6 +246,28 @@ describe('POST /api/sessions/:id/next-step, phase 23', () => {
     expect(lantern).toMatchObject({ translation: 'פנס', raised: [] });
     const quill = body.progress.find((item: { form: string }) => item.form === 'quill');
     expect(quill).toMatchObject({ translation: 'נוצה', raised: ['written_receptive', 'written_productive'] });
+  });
+
+  // Phase 39 (spec D10). Hebrew in a card answered in the target language's alphabet.
+  it('422s a typed answer in the wrong alphabet and records nothing, a second try included', async () => {
+    const app = buildTestApp();
+    const { sessionId, questions } = await startMixed();
+    const step = (question_id: string, answer: object) =>
+      postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id, ...answer });
+    await step(questions[0].id, { option_index: 0 });
+    await step(questions[1].id, { option_index: 0 });
+
+    const refused = await step(questions[2].id, { text: 'פנס' });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({ error: "the answer is not written in English's alphabet" });
+    expect(await readStoredAnswers(t.db, sessionId)).toHaveLength(2);
+
+    const held = await (await step(questions[2].id, { text: 'lamp' })).json();
+    expect(held).toMatchObject({ pending_retry: { answer: 'lamp' } });
+    expect((await step(questions[2].id, { text: 'פנס', retry: true })).status).toBe(422);
+    const stored = await readStoredAnswers(t.db, sessionId);
+    expect(stored).toHaveLength(3);
+    expect(stored[2]).toMatchObject({ retry_state: 'pending', retry_answer_string: null });
   });
 
   it('400s an answer of the wrong kind, either way round', async () => {

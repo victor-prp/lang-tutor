@@ -66,6 +66,9 @@ export const PrepareSessionPayloadSchema = z.object({
         // Phase 37 (spec D6). A same-day return, asked after every other card.
         // Absent in a job enqueued before the deploy: no return.
         step: z.boolean().default(false),
+        // Phase 39 (spec D6). The known meanings a new_meaning card lists; absent
+        // before the deploy and on every other pick.
+        known_meanings: z.array(z.string()).optional(),
       }),
     )
     .min(1)

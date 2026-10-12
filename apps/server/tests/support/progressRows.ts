@@ -116,6 +116,23 @@ export async function insertGlossMemory(db: Db, rows: (typeof glossMemory.$infer
   await db.insert(glossMemory).values(rows);
 }
 
+/** Phase 39. One memory row's stability set directly: a lapse no session made. */
+export async function setMemoryStability(
+  db: Db,
+  input: { enrollmentId: string; glossId: string; dimension: Dimension; stability: number },
+): Promise<void> {
+  await db
+    .update(glossMemory)
+    .set({ stability: input.stability })
+    .where(
+      and(
+        eq(glossMemory.enrollmentId, input.enrollmentId),
+        eq(glossMemory.glossId, input.glossId),
+        eq(glossMemory.dimension, input.dimension),
+      ),
+    );
+}
+
 /** Puts one progress row at a level that last stepped on `lastStepOn`. */
 export async function setLastStep(
   db: Db,

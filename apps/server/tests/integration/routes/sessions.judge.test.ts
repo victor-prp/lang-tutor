@@ -73,6 +73,16 @@ async function startMeaning() {
 }
 
 describe('POST /api/sessions/:id/judged-answer', () => {
+  // Phase 39 (spec D10). A typed meaning is answered in the learner's language.
+  it('422s a typed meaning in Latin, with no model call and no answer recorded', async () => {
+    const app = buildTestApp(namespaceFor('judged-wrong-script'));
+    const { sessionId, questions } = await startMeaning();
+    const res = await postJson(app, `/api/sessions/${sessionId}/judged-answer`, { question_id: questions[0].id, text: 'degree' });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: "the answer is not written in Hebrew's alphabet" });
+    expect(await readStoredAnswers(t.db, sessionId)).toHaveLength(0);
+  });
+
   it('rules the stored meaning exact, with points, without a model call', async () => {
     const app = buildTestApp(namespaceFor('judged-rule'));
     const { sessionId, questions } = await startMeaning();

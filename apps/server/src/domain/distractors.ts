@@ -40,11 +40,21 @@ import { dropNulls, unfence } from './translation';
 /** What the model is asked to do for one item. */
 export type Task = 'meaning' | 'word' | 'typed' | 'gap' | 'sentence' | 'translate';
 
+/** Phase 39 (spec D6). A new_meaning is generated as a multiple choice: the
+ *  prepare job maps its type (services/sessions.ts, generatedAs) before any
+ *  generation step sees it, so a caller that skipped the mapping fails loudly
+ *  instead of generating a card unlike the multiple choice it is. */
+const refuseNewMeaning = (): never => {
+  throw new Error('a new_meaning is generated as a multiple choice: map its type first');
+};
+
 /** What the model is asked to do for one item, or null when a type needs
  *  nothing generated: a dictation, a tiles card, and a board word (its board
  *  asks through its first word, tasksFor). */
 export function taskFor(type: QuestionType): Task | null {
   switch (type) {
+    case 'new_meaning':
+      return refuseNewMeaning();
     case 'multiple_choice':
     case 'listen_choice':
       return 'meaning';
@@ -651,6 +661,8 @@ export function generatedContent(row: GenerationContext, type: QuestionType, gen
   // Phase 34 (spec D2, D12). Stored as shown: a later backfill changes no asked card.
   const answerForm = ASKS_FOR_FORM.has(type) ? row.answerForm : null;
   switch (type) {
+    case 'new_meaning':
+      return refuseNewMeaning();
     case 'multiple_choice':
     case 'listen_choice':
       return { ...none, options: optionsFor(row.translation, generated.distractors), answerForm };

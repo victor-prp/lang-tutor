@@ -30,6 +30,20 @@ export const MultipleChoiceQuestionSchema = z.object({
   context: ContextSchema.nullable(),
 });
 
+// Phase 39 (spec D6). A new meaning for a word the learner already knows:
+// the word, every meaning already learned (in family order), and four
+// meanings to pick the new one from. Answered and graded as a multiple choice.
+export const NewMeaningQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('new_meaning'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  known_meanings: z.array(z.string()),
+  options: z.array(z.string()),
+  correct_option: z.number().int(),
+  context: ContextSchema.nullable(),
+});
+
 // Phase 23. The same card turned round: the meaning, four target words.
 // `part_of_speech` disambiguates a Hebrew prompt (ספר is a book or "counted").
 export const ReverseChoiceQuestionSchema = z.object({
@@ -218,6 +232,7 @@ export const SentenceTranslationQuestionSchema = z.object({
 // the compiler finds every switch that has not learnt it.
 export const QuestionSchema = z.discriminatedUnion('type', [
   MultipleChoiceQuestionSchema,
+  NewMeaningQuestionSchema,
   ReverseChoiceQuestionSchema,
   TypedTranslationQuestionSchema,
   ListenChoiceQuestionSchema,

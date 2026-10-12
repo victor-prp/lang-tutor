@@ -467,6 +467,17 @@ describe('phase 24 generation (spec D2, D10)', () => {
     expect(board.options!.map((o) => o.is_correct)).toEqual([false, false, true, false, false]);
     expect(board.prompt).toBeNull();
   });
+
+  // Phase 39 (spec D6). A new_meaning is generated as a multiple choice, and
+  // services/sessions.ts maps it (generatedAs) before any of this sees it: a
+  // caller that skipped the mapping fails here, rather than generating a card
+  // that differs from the multiple choice it is.
+  it('refuses a new_meaning: it is generated as a multiple choice', () => {
+    expect(() => taskFor('new_meaning')).toThrow('generated as a multiple choice');
+    expect(() => generatedContent(CONTEXT[0], 'new_meaning', { ...NOTHING_GENERATED, distractors: ['א', 'ב', 'ג'] }, NO_EXTRAS)).toThrow(
+      'generated as a multiple choice',
+    );
+  });
 });
 
 // Review (final), Important 1: rows that ask the model nothing (a dictation, a

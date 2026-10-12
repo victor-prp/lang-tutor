@@ -62,6 +62,7 @@ describe(`POST ${NEXT_STEP} in the published document`, () => {
       '403',
       '404',
       '409',
+      '422',
     ]);
   });
 
@@ -407,7 +408,7 @@ describe('POST /api/sessions/{id}/judged-answer in the published document', () =
   it('declares every status it can return, and says it costs money', async () => {
     const doc = await openApiDocument();
     const op = doc.paths['/api/sessions/{id}/judged-answer'].post;
-    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '401', '403', '404', '409', '502']);
+    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '401', '403', '404', '409', '422', '502']);
     expect(op.description).toMatch(/costs money/);
   });
 });

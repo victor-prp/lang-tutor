@@ -1178,3 +1178,39 @@ describe('0029_hint_opened', () => {
     ).rejects.toMatchObject({ cause: { constraint: 'answers_hint_opened_typed' } });
   });
 });
+
+describe('0030_gloss_families', () => {
+  it('keeps every card, adds the three tables, and ties known_meanings to the new_meaning type', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0029_hint_opened'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'עפיפון');
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, prompt, alternatives)
+        values ('q1', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}');
+    `);
+
+    await runMigrations(db);
+
+    expect((await db.execute(sql`select known_meanings from questions`)).rows).toEqual([{ known_meanings: null }]);
+    for (const table of ['gloss_families', 'gloss_family_members', 'gloss_family_events']) {
+      expect((await db.execute(sql`select count(*)::int as n from ${sql.identifier(table)}`)).rows).toEqual([{ n: 0 }]);
+    }
+    const card = (type: string, knownMeanings: string) => sql`
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, options, known_meanings)
+      values (${`q_${type}_${knownMeanings.length}`}, 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', ${type}, '[{"position":0,"text":"a","is_correct":true},{"position":1,"text":"b","is_correct":false}]'::jsonb, ${sql.raw(knownMeanings)})`;
+    await expect(db.execute(card('new_meaning', 'null'))).rejects.toMatchObject({ cause: { constraint: 'questions_known_meanings_valid' } });
+    await expect(db.execute(card('new_meaning', `'{}'::text[]`))).rejects.toMatchObject({ cause: { constraint: 'questions_known_meanings_valid' } });
+    await expect(db.execute(card('multiple_choice', `ARRAY['x']::text[]`))).rejects.toMatchObject({
+      cause: { constraint: 'questions_known_meanings_valid' },
+    });
+    await db.execute(card('new_meaning', `ARRAY['x']::text[]`));
+    await db.execute(card('multiple_choice', 'null'));
+  });
+});
