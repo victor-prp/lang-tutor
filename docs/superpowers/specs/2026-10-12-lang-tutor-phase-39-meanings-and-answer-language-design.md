@@ -587,7 +587,6 @@ After merge, from the main checkout, in this order:
 
 ```bash
 git pull
-npm install
 npm run db:migrate                          # lane 0 gets 0030
 # restart lane 0's server (npm run server)
 ```
