@@ -108,7 +108,7 @@ at no cost. Nothing changes in AWS.
 ## The hourly trigger
 
 An EventBridge rule, `wordspal-bots-hourly` in `eu-central-1`, starts `bots.yml` on master at :17
-every hour through GitHub's `workflow_dispatch` API (phase 39). GitHub's own schedule was late by
+every hour through GitHub's `workflow_dispatch` API (phase 40). GitHub's own schedule was late by
 hours or skipped slots altogether. The rule is Terraform in `terraform/bootstrap/bots.tf`, applied
 from the laptop like the rest of `bootstrap`. Its call carries a GitHub token kept in the
 EventBridge connection `wordspal-bots-dispatch`, never in Terraform or its state.
@@ -149,7 +149,7 @@ TF_VAR_state_bucket="$TF_STATE_BUCKET" TF_VAR_alert_email="$(gh variable get ALE
 
 The first `bootstrap` apply creates the connection with a placeholder, `Bearer unset`. A :17 that
 comes before the token is set gets a 401 from GitHub: the connection is deauthorized, the
-destination goes inactive, the first email below arrives, and the alarm's may follow. The phase 39
+destination goes inactive, the first email below arrives, and the alarm's may follow. The phase 40
 rollout lets this happen once on purpose, to see both emails and the recovery work.
 
 **The emails** go to `ALERT_EMAIL` through the SNS topic `wordspal-alerts`. SNS asks once to

@@ -1,4 +1,4 @@
-# Phase 39 — The bots' hourly trigger moves to EventBridge: implementation plan
+# Phase 40 — The bots' hourly trigger moves to EventBridge: implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Terraform 1.16, hashicorp/aws 6.66.0 (pinned), GitHub Actions.
 
-**Spec:** `docs/superpowers/specs/2026-10-12-lang-tutor-phase-39-bots-eventbridge-design.md`
+**Spec:** `docs/superpowers/specs/2026-10-12-lang-tutor-phase-40-bots-eventbridge-design.md`
 
 ## Global Constraints
 
@@ -46,7 +46,7 @@
 
 ```hcl
 variable "alert_email" {
-  description = "Where the bots' trigger alerts go (phase 39): the GitHub variable ALERT_EMAIL, as prod's budget. Set TF_VAR_alert_email."
+  description = "Where the bots' trigger alerts go (phase 40): the GitHub variable ALERT_EMAIL, as prod's budget. Set TF_VAR_alert_email."
   type        = string
 }
 ```
@@ -54,7 +54,7 @@ variable "alert_email" {
 - [ ] **Step 2: Create `terraform/bootstrap/bots.tf`:**
 
 ```hcl
-# Phase 39. The bots' hourly trigger: an EventBridge rule that starts bots.yml
+# Phase 40. The bots' hourly trigger: an EventBridge rule that starts bots.yml
 # through GitHub's workflow_dispatch API at :17, because GitHub's own schedule
 # ran one slot in five on the bots' first evening. Here and not in prod for the
 # reason the roles are: only Victor changes what crosses between GitHub and AWS.
@@ -101,7 +101,7 @@ resource "aws_cloudwatch_event_api_destination" "bots_dispatch" {
 
 resource "aws_cloudwatch_event_rule" "bots_hourly" {
   name                = "wordspal-bots-hourly"
-  description         = "Starts the bots' run at :17 every hour (phase 39)"
+  description         = "Starts the bots' run at :17 every hour (phase 40)"
   schedule_expression = "cron(17 * * * ? *)"
 }
 
@@ -276,10 +276,10 @@ Change `main.tf`'s first two lines to:
 ```hcl
 # Phase 30 (spec D8, D9, D10). What GitHub needs before any release can run: a
 # way to reach AWS without stored keys, and a private registry for the image.
-# Phase 39 adds the other direction in bots.tf: AWS starting the bots' workflow.
+# Phase 40 adds the other direction in bots.tf: AWS starting the bots' workflow.
 ```
 
-In `terraform/README.md`, the bootstrap sentence becomes: "`bootstrap` holds what crosses between GitHub and AWS: what GitHub needs to reach AWS and the image repository, and the hourly trigger that starts the bots' workflow (phase 39)".
+In `terraform/README.md`, the bootstrap sentence becomes: "`bootstrap` holds what crosses between GitHub and AWS: what GitHub needs to reach AWS and the image repository, and the hourly trigger that starts the bots' workflow (phase 40)".
 
 - [ ] **Step 4: Verify.**
 
@@ -290,7 +290,7 @@ for s in bootstrap prod; do terraform -chdir=terraform/$s init -backend=false -i
 
 Expected: no fmt output; `Success! The configuration is valid.` twice. If AWS credentials and `TF_STATE_BUCKET` are available locally, also `TF_VAR_state_bucket=$TF_STATE_BUCKET TF_VAR_alert_email=$(gh variable get ALERT_EMAIL) ./scripts/infra.sh bootstrap plan -lock=false -out=<scratchpad>/bootstrap.tfplan`, then `terraform show -json` it and check: 12 creates, 0 updates, 0 deletes; the topic policy has the `DeauthorizedRule` and `FailedAlarm` statements; `maximum_event_age_in_seconds` is 3000.
 
-- [ ] **Step 5: Commit** `feat(infra): an EventBridge rule starts the bots hourly, with alerts (phase 39)`.
+- [ ] **Step 5: Commit** `feat(infra): an EventBridge rule starts the bots hourly, with alerts (phase 40)`.
 
 ### Task 2: `bots.yml` loses its cron; the runbooks
 
@@ -306,7 +306,7 @@ Expected: no fmt output; `Success! The configuration is valid.` twice. If AWS cr
 
 ```yaml
 on:
-  # Phase 39: started at :17 every hour by an EventBridge rule in terraform/bootstrap
+  # Phase 40: started at :17 every hour by an EventBridge rule in terraform/bootstrap
   # (bots.tf), through this trigger. GitHub's own schedule ran one slot in five on
   # the bots' first evening and is late by hours at night; a dispatched run starts
   # within seconds. Also how a failed day is rerun by hand: gh workflow run bots.yml.
@@ -323,7 +323,7 @@ Update the header's first comment paragraph so "each run plays one simulated day
 
 - [ ] **Step 3: `docs/runbooks/hosting.md`.** Go-live step 5 becomes `TF_VAR_state_bucket="$TF_STATE_BUCKET" TF_VAR_alert_email="<your address>" ./scripts/infra.sh bootstrap apply` (the variable `ALERT_EMAIL` is set in step 6, so step 5 names the address). *Changing a secret* gains: "The bots' GitHub token is not one of these: it lives in an EventBridge connection, and the bots runbook's *The hourly trigger* replaces it." Check: `grep -n "placeholder" docs/runbooks/bots.md` finds the note from step 2.
 
-- [ ] **Step 4: Commit** `feat(bots): bots.yml is started by EventBridge, not GitHub's cron (phase 39)`.
+- [ ] **Step 4: Commit** `feat(bots): bots.yml is started by EventBridge, not GitHub's cron (phase 40)`.
 
 ### Task 3: Verify, PR, CI
 

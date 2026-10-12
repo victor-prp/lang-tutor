@@ -10,7 +10,7 @@ name: Bots
 # Stop it without a code change: unset the repository variable BOTS_ENABLED, or set
 # it to anything but 'true'. docs/runbooks/bots.md has the rest.
 on:
-  # Phase 39: started at :17 every hour by an EventBridge rule in terraform/bootstrap
+  # Phase 40: started at :17 every hour by an EventBridge rule in terraform/bootstrap
   # (bots.tf), through this trigger. GitHub's own schedule ran one slot in five on
   # the bots' first evening and is late by hours at night; a dispatched run starts
   # within seconds. No schedule here as well: its late runs would come on top, more

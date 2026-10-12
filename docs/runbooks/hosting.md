@@ -46,7 +46,7 @@ proves before the next one starts.
      --name wordspal/prod/GEMINI_API_KEY --secret-string "$KEY"; unset KEY
    ```
 5. **Bootstrap**: `TF_VAR_state_bucket="$TF_STATE_BUCKET" TF_VAR_alert_email="<your address>" ./scripts/infra.sh bootstrap apply`.
-   It prints the two role ARNs and the repository URL. Since phase 39 it also creates the bots'
+   It prints the two role ARNs and the repository URL. Since phase 40 it also creates the bots'
    hourly trigger, whose token the bots runbook's *The hourly trigger* sets.
 6. **GitHub variables** (variables, not secrets: none of these is secret):
 

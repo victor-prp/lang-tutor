@@ -25,6 +25,6 @@ variable "secret_prefix" {
 }
 
 variable "alert_email" {
-  description = "Where the bots' trigger alerts go (phase 39): the GitHub variable ALERT_EMAIL, as prod's budget. Set TF_VAR_alert_email."
+  description = "Where the bots' trigger alerts go (phase 40): the GitHub variable ALERT_EMAIL, as prod's budget. Set TF_VAR_alert_email."
   type        = string
 }

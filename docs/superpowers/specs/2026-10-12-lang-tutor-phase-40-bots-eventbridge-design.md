@@ -1,8 +1,10 @@
-# Phase 39 — The bots' hourly trigger moves to EventBridge
+# Phase 40 — The bots' hourly trigger moves to EventBridge
 
 - **Status:** Designed on 2026-10-12. Victor chose EventBridge over four other external schedulers
   and the `bootstrap` stack over `prod` or a stack of its own, then said "go till PR": the rest of
   the design is self-approved (CLAUDE.md, *Continue till PR*).
+- **Number:** written as phase 39, renumbered 40 the same day when the meanings phase merged as 39
+  (PR #144). The branch, `phase-39-bots-eventbridge`, and its first commits keep the old number.
 - **Date:** 2026-10-12
 - **Builds on:** phase 35 (PR #132), whose D18 started the bots with GitHub's cron, and phase 30
   (the hosting design), whose D9 and D10 split Terraform into `bootstrap` and `prod`.

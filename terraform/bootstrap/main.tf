@@ -1,6 +1,6 @@
 # Phase 30 (spec D8, D9, D10). What GitHub needs before any release can run: a
 # way to reach AWS without stored keys, and a private registry for the image.
-# Phase 39 adds the other direction in bots.tf: AWS starting the bots' workflow.
+# Phase 40 adds the other direction in bots.tf: AWS starting the bots' workflow.
 
 data "aws_caller_identity" "current" {}
 

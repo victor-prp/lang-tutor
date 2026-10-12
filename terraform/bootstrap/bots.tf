@@ -1,4 +1,4 @@
-# Phase 39. The bots' hourly trigger: an EventBridge rule that starts bots.yml
+# Phase 40. The bots' hourly trigger: an EventBridge rule that starts bots.yml
 # through GitHub's workflow_dispatch API at :17, because GitHub's own schedule
 # ran one slot in five on the bots' first evening. Here and not in prod for the
 # reason the roles are: only Victor changes what crosses between GitHub and AWS.
@@ -45,7 +45,7 @@ resource "aws_cloudwatch_event_api_destination" "bots_dispatch" {
 
 resource "aws_cloudwatch_event_rule" "bots_hourly" {
   name                = "wordspal-bots-hourly"
-  description         = "Starts the bots' run at :17 every hour (phase 39)"
+  description         = "Starts the bots' run at :17 every hour (phase 40)"
   schedule_expression = "cron(17 * * * ? *)"
 }
 
