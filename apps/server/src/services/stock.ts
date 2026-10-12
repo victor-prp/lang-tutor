@@ -15,12 +15,13 @@ export async function requestStock(
 }
 
 /**
- * Phase 43 (ruling R3). After a save the stock waits `delaySeconds`, so a burst
- * of saves becomes one session, under a key of its own, so a save just before a
- * start never holds the start's job back.
+ * Phase 43 (ruling R3, review I1). After a save the stock waits `delaySeconds`
+ * past the last save of a burst, so the burst becomes one session holding every
+ * word of it. Under a key of its own, so a save just before a start never holds
+ * the start's job back.
  */
 export async function requestStockAfterSave(repos: Pick<Repos, 'jobs'>, enrollmentId: string, delaySeconds: number): Promise<void> {
-  await repos.jobs.enqueue(
+  await repos.jobs.enqueueOrPostpone(
     STOCK_SESSION,
     { enrollment_id: enrollmentId, reason: 'save' },
     { singletonKey: `${enrollmentId}:save`, startAfterSeconds: delaySeconds },

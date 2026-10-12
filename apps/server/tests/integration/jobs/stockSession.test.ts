@@ -50,6 +50,15 @@ async function stockJobs(): Promise<QueuedJob[]> {
   return rows.rows;
 }
 
+/** When the one held stock job may start, in epoch microseconds. */
+async function heldUntil(): Promise<number> {
+  const rows = await t.db.execute<{ at: string }>(
+    sql`select (extract(epoch from start_after) * 1000000)::bigint::text as at from ${sql.raw(JOB_SCHEMA)}.job where name = ${STOCK_SESSION}`,
+  );
+  expect(rows.rows).toHaveLength(1);
+  return Number(rows.rows[0].at);
+}
+
 async function savedWord(lemma: string, translation: string) {
   const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translation] });
   return { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: lemma, lemma, translation };
@@ -100,7 +109,7 @@ describe('the stock job', () => {
     expect(await jobPayloads(t.db, PREPARE_SESSION)).toHaveLength(1);
   });
 
-  it('holds a save back half a minute under a key of its own, and a burst of saves is one job', async () => {
+  it('holds a save back half a minute under a key of its own, and a burst of saves is one job, held past the last', async () => {
     const word = await insertLexeme(t.db, {
       lemma: 'kite',
       languageCode: 'en',
@@ -120,8 +129,12 @@ describe('the stock job', () => {
       ],
     });
     await vocabulary.save('u_1', E, [{ gloss_id: word.glossIds[0], variant_id: word.variantIds[0] }]);
+    const first = await heldUntil();
     await vocabulary.save('u_1', E, [{ gloss_id: word.glossIds[1], variant_id: word.variantIds[0] }]);
     expect(await stockJobs()).toEqual([{ singleton_key: `${E}:save`, held: true }]);
     expect(await jobPayloads(t.db, STOCK_SESSION)).toEqual([{ enrollment_id: E, reason: 'save' }]);
+    // Review I1. Each save moves the stock half a minute past itself, so the
+    // stock holds every word of a burst however long the burst lasts.
+    expect(await heldUntil()).toBeGreaterThan(first);
   });
 });

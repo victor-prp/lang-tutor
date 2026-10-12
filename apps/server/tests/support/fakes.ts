@@ -196,6 +196,10 @@ export function createFakeJobRepo(): FakeJobRepo {
     enqueue: async (name, data, options) => {
       enqueued.push({ name, data, ...(options ? { options } : {}) });
     },
+    // Phase 43. Recorded as a send: what it postpones is pg-boss's to prove.
+    enqueueOrPostpone: async (name, data, options) => {
+      enqueued.push({ name, data, options });
+    },
   };
 }
 

@@ -32,6 +32,23 @@ export function createJobRepo(tx: Tx, boss: PgBoss) {
         ...(options?.startAfterSeconds !== undefined ? { startAfter: options.startAfterSeconds } : {}),
       });
     },
+
+    /**
+     * Phase 43 (review I1). Enqueues the job, or, while the one with this key is
+     * still waiting to start, moves its start to `startAfterSeconds` from now:
+     * a trailing delay, so the job runs that long after the last of a burst.
+     */
+    enqueueOrPostpone: async <N extends JobName>(
+      name: N,
+      data: JobPayloads[N],
+      options: { singletonKey: string; startAfterSeconds: number },
+    ): Promise<void> => {
+      await boss.upsert(name, data, {
+        db: fromDrizzle(tx, sql),
+        singletonKey: options.singletonKey,
+        startAfter: options.startAfterSeconds,
+      });
+    },
   };
 }
 

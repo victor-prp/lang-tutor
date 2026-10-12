@@ -84,6 +84,9 @@ const NO_JOBS: JobRepo = {
   enqueue: async () => {
     throw new Error('this composition enqueues no job');
   },
+  enqueueOrPostpone: async () => {
+    throw new Error('this composition enqueues no job');
+  },
 };
 
 /** Every repository bound to one transaction: what a use case receives (R8). */

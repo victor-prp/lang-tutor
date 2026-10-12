@@ -38,12 +38,16 @@ export async function startTestBoss(db: Db): Promise<PgBoss> {
  *  request for the next session in stock is the one exception, dropped. Every
  *  first answer, ending and skip makes one, so a test about anything else would
  *  otherwise need a running queue; a test about the stock starts a real boss
- *  (jobs/stockSession.test.ts). The app only ever calls send() on it. */
+ *  (jobs/stockSession.test.ts). The app only ever calls send() and upsert()
+ *  on it. */
 export function unstartedBoss(db: Db): PgBoss {
   const boss = testBoss(db);
   const send = boss.send.bind(boss) as (...args: unknown[]) => Promise<string | null>;
+  const upsert = boss.upsert.bind(boss) as (...args: unknown[]) => Promise<unknown>;
   return {
     send: (name: string, ...rest: unknown[]) => (name === STOCK_SESSION ? Promise.resolve(null) : send(name, ...rest)),
+    upsert: (name: string, ...rest: unknown[]) =>
+      name === STOCK_SESSION ? Promise.resolve({ jobs: [], updated: 0, inserted: 0 }) : upsert(name, ...rest),
   } as unknown as PgBoss;
 }
 
