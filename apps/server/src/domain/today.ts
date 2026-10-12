@@ -63,3 +63,25 @@ export function dayState(answers: readonly DayAnswer[], introduced: ReadonlySet<
   done.sort((a, b) => a.answers - b.answers || a.last - b.last);
   return { steps: steps.sort((a, b) => a.opened - b.opened), done: new Set(done.map((gloss) => gloss.glossId)) };
 }
+
+/**
+ * Phase 43 (spec D4). The day as a stock picked beside a started session sees
+ * it: that session's glosses count as answered today, so the two sessions ask
+ * different words while the list has others. A return it asks leaves the
+ * returns, and each of its glosses is done, after today's own, so a short list
+ * still fills the stock with them, last. `extraNew` counts the ones it meets
+ * for the first time (not in `met`), which are today's new words too. The
+ * caller passes the saved glosses of the session in flight.
+ */
+export function withSessionInFlight(
+  day: { steps: readonly Step[]; done: ReadonlySet<string> },
+  inFlight: readonly string[],
+  met: ReadonlySet<string>,
+): { steps: Step[]; done: Set<string>; extraNew: number } {
+  const asked = new Set(inFlight);
+  return {
+    steps: day.steps.filter((step) => !asked.has(step.glossId)),
+    done: new Set([...day.done, ...asked]),
+    extraNew: [...asked].filter((glossId) => !met.has(glossId)).length,
+  };
+}

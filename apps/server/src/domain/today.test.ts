@@ -3,7 +3,7 @@ import type { AnswerVerdict } from '@lang-tutor/core/api';
 import type { QuestionType } from '@lang-tutor/core/domain';
 
 import { RETURNS_PER_DAY } from './chooseConstants';
-import { dayState, type DayAnswer } from './today';
+import { dayState, withSessionInFlight, type DayAnswer } from './today';
 
 const mc = (glossId: string, sessionId: string, right: boolean): DayAnswer => ({
   glossId,
@@ -88,5 +88,33 @@ describe('dayState (phase 37 D1)', () => {
       ['b', 1],
       ['a', 2],
     ]);
+  });
+});
+
+describe('withSessionInFlight (phase 43 D4)', () => {
+  const step = (glossId: string, opened: number) => ({ glossId, dimension: 'written_receptive' as const, opened });
+
+  it('takes a return the started session asks out of the returns, and makes it done', () => {
+    const day = { steps: [step('a', 0), step('b', 1)], done: new Set(['c']) };
+    expect(withSessionInFlight(day, ['a'], new Set(['a', 'b', 'c']))).toEqual({
+      steps: [step('b', 1)],
+      done: new Set(['c', 'a']),
+      extraNew: 0,
+    });
+  });
+
+  it("lists the session's glosses done after today's, and leaves one already done in its place", () => {
+    const { done } = withSessionInFlight({ steps: [], done: new Set(['c', 'd']) }, ['e', 'd', 'f'], new Set(['c', 'd', 'e', 'f']));
+    expect([...done]).toEqual(['c', 'd', 'e', 'f']);
+  });
+
+  it('counts each gloss the session meets for the first time once, as a new word today', () => {
+    const { extraNew } = withSessionInFlight({ steps: [], done: new Set() }, ['n1', 'n2', 'n1', 'old'], new Set(['old']));
+    expect(extraNew).toBe(2);
+  });
+
+  it('changes nothing with no session in flight', () => {
+    const day = { steps: [step('a', 0)], done: new Set(['c']) };
+    expect(withSessionInFlight(day, [], new Set())).toEqual({ steps: [step('a', 0)], done: new Set(['c']), extraNew: 0 });
   });
 });
