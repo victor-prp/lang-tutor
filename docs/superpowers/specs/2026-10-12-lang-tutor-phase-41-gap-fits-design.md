@@ -3,6 +3,11 @@
 - **Status:** Victor reported the bug on 2026-10-12, asked for both fixes as one small phase, named
   it phase 41 and said "go till PR": the design is self-approved (CLAUDE.md, *Continue till PR*).
   Rulings are at the end.
+  Implemented on branch `phase-41-gap-fits` from `docs/superpowers/plans/2026-10-12-phase-41-gap-fits.md`.
+  Building added one thing the spec missed: a `check_fit` next-step gets the app's judge timeout
+  (`JUDGE_REQUEST_TIMEOUT_MS`), as `/judged-answer` has, so a stalled check offers "try again"
+  instead of locking the card. Measured: fit judge tier 2 16/16; sentence tier 2 29/31 with D1's
+  pointing check, every group at or above 85%.
 - **Date:** 2026-10-12
 - **Builds on:** phase 38 (the typed fill-in card hides its Hebrew; D2's list of words that fit
   the sentence read alone, and its switch signal: "Victor finds fitting words marked wrong"),
