@@ -1,5 +1,5 @@
-import type { LanguageCode } from '../api/types';
-import type { QuestionType } from './quiz';
+import type { LanguageCode, Question } from '../api/types';
+import { rightAnswer, type QuestionType } from './quiz';
 
 /** Phase 39 (spec D7). The alphabet each language is written in. */
 export const SCRIPTS: Record<LanguageCode, 'Latin' | 'Hebrew' | 'Cyrillic'> = {
@@ -50,4 +50,14 @@ const IN_SCRIPT: Record<'Latin' | 'Hebrew' | 'Cyrillic', RegExp> = {
 export function wrongScript(text: string, language: LanguageCode): boolean {
   if (!/\p{L}/u.test(text)) return false;
   return !IN_SCRIPT[SCRIPTS[language]].test(text);
+}
+
+/** Phase 39 (spec D7, D10). The language a typed answer to `question` is checked in, or null when
+ *  it is not checked: a card that is not typed, or one whose own right answer is a wrong script in
+ *  that language (a Hebrew meaning stored as "DNA"), which no answer could pass. The phone and the
+ *  server both ask this, so they agree on every card. */
+export function gatesScript(question: Question, target: LanguageCode, learner: LanguageCode): LanguageCode | null {
+  if (!isTypedAnswerType(question.type)) return null;
+  const language = answerLanguage(question.type, target, learner);
+  return wrongScript(rightAnswer(question), language) ? null : language;
 }

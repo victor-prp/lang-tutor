@@ -12,12 +12,11 @@ import type {
 import {
   SESSION_LENGTH,
   answerFits,
-  answerLanguage,
   evaluate,
   evaluateRetry,
+  gatesScript,
   isChoice,
   isSpeaking,
-  isTypedAnswerType,
   missed,
   normaliseGloss,
   pickQuestions,
@@ -190,9 +189,11 @@ function refusal(question: Question, answer: AnswerInput, languages: StepLanguag
   if (!answerFits(question, answer)) return { status: 'wrong_answer_kind' };
   // Phase 39 (spec D7, D10). A typed answer with letters but none in the answer
   // language's alphabet records nothing, a second try included. A spoken
-  // transcript has no `text` and is never checked.
-  if ('text' in answer && isTypedAnswerType(question.type) && wrongScript(answer.text, answerLanguage(question.type, languages.target, languages.learner))) {
-    return { status: 'wrong_script' };
+  // transcript has no `text` and is never checked, and neither is a card whose
+  // own right answer is in another alphabet (gatesScript, as the phone asks).
+  if ('text' in answer) {
+    const gate = gatesScript(question, languages.target, languages.learner);
+    if (gate !== null && wrongScript(answer.text, gate)) return { status: 'wrong_script' };
   }
   // Phase 25 (spec D5). A transcript that is not the word records nothing:
   // a recogniser's reject is no evidence and never wrong (phase 20).

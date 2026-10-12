@@ -1,6 +1,7 @@
+import type { Question } from '@lang-tutor/core/api';
 import { describe, expect, it } from '@jest/globals';
 
-import { typedSubmit } from './typedSubmit';
+import { scriptGate, typedSubmit } from './typedSubmit';
 
 describe('typedSubmit (phase 39 D8)', () => {
   it('refuses Hebrew on an English card', () => {
@@ -18,8 +19,33 @@ describe('typedSubmit (phase 39 D8)', () => {
     expect(typedSubmit('ספר book', 'en')).toBe('send');
     expect(typedSubmit('лук', 'ru')).toBe('send');
   });
-  it('sends digits and punctuation, and an unknown language', () => {
+  it('sends digits and punctuation, and anything on a card that is not checked', () => {
     expect(typedSubmit('123 ?!', 'he')).toBe('send');
-    expect(typedSubmit('מציצה', '')).toBe('send');
+    expect(typedSubmit('מציצה', null)).toBe('send');
+  });
+});
+
+describe('scriptGate (phase 39 D7, D8)', () => {
+  const meaning = (text: string): Question => ({
+    id: 'q1',
+    type: 'typed_meaning',
+    vocab_term_id: 'g1',
+    question: 'DNA',
+    part_of_speech: 'noun',
+    meaning: text,
+    context: null,
+  });
+
+  it('checks a typed meaning in the learner language', () => {
+    expect(scriptGate(meaning('חתול'), 'en', 'he')).toBe('he');
+    expect(typedSubmit('cat', scriptGate(meaning('חתול'), 'en', 'he'))).toBe('wrong_script');
+  });
+  it('sends Latin to a typed meaning whose own meaning is Latin ("DNA"), as the server takes it', () => {
+    expect(scriptGate(meaning('DNA'), 'en', 'he')).toBeNull();
+    expect(typedSubmit('DNA', scriptGate(meaning('DNA'), 'en', 'he'))).toBe('send');
+  });
+  it('never checks a language the app has no script for', () => {
+    expect(scriptGate(meaning('חתול'), '', 'he')).toBeNull();
+    expect(scriptGate(meaning('חתול'), 'en', 'xx')).toBeNull();
   });
 });

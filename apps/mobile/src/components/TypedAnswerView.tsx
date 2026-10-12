@@ -2,6 +2,7 @@ import type {
   AnswerVerdict,
   ClozeTypedQuestion,
   DictationQuestion,
+  LanguageCode,
   PendingRetry,
   SayTranslationQuestion,
   SentenceTranslationQuestion,
@@ -45,9 +46,10 @@ type Props = {
   prompt?: ReactNode;
   /** What the card asks, naming the language (set in bold): כתבו את המילה באיטלקית. */
   instruction: Instruction;
-  /** Phase 39 (spec D8). The language a typed answer must be in: the target's, or the
-   *  learner's on a typed meaning. */
-  answerLanguage: string;
+  /** Phase 39 (spec D7, D8). The language a typed answer must be in: the target's, or the
+   *  learner's on a typed meaning. Null when the card is not checked (`scriptGate`): its
+   *  own right answer is in another alphabet, or the app knows no script for it. */
+  answerLanguage: LanguageCode | null;
   /** The enrollment's target language: a dictation speaks its word in it. */
   language: string;
   /** Whether this card has been answered: the input locks once it has. */
@@ -164,7 +166,7 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
         placeholderTextColor={colors.muted}
         style={[styles.input, question.type === 'sentence_translation' && styles.inputMultiline, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }, border]}
       />
-      {wrongScriptShown && !answered ? (
+      {wrongScriptShown && answerLanguage !== null && !answered ? (
         <View testID="wrong-script">
           <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" />
         </View>

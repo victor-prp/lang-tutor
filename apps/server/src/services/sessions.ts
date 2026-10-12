@@ -3,10 +3,9 @@ import { LlmTranscriptSchema, TypedVerdictSchema } from '@lang-tutor/core/api/sc
 import {
   LIVE_DIMENSIONS,
   MAX_JUDGED_TEXT,
-  answerLanguage,
+  gatesScript,
   isJudged,
   isSpeaking,
-  isTypedAnswerType,
   wrongScript,
   shuffleSession,
   speakable,
@@ -489,9 +488,10 @@ export function createSessionService({
         if (outcome.status === 'wrong_script') {
           const question = loaded.questions.find((q) => q.id === questionId)!;
           logger.info({ event: 'answer_wrong_script', session_id: sessionId, question_type: question.type });
-          const expected = isTypedAnswerType(question.type)
-            ? answerLanguage(question.type, enrolled.target_language as LanguageCode, enrolled.source_language as LanguageCode)
-            : (enrolled.target_language as LanguageCode);
+          // `step` refused by this gate, so it names a language here.
+          const expected =
+            gatesScript(question, enrolled.target_language as LanguageCode, enrolled.source_language as LanguageCode) ??
+            (enrolled.target_language as LanguageCode);
           throw new WrongScript(questionId, LANGUAGES[expected].name);
         }
         // A replay reports justCompleted: false, so retrying a completed session
@@ -696,9 +696,10 @@ export function createSessionService({
 
       const text = input.text.slice(0, MAX_JUDGED_TEXT);
       // Phase 39 (spec D10). Before the rule and the judge, so no model is called
-      // for an answer in the wrong alphabet, and nothing is recorded.
-      const expected = answerLanguage(checked.current.type, checked.context.language, checked.context.explanation);
-      if (wrongScript(text, expected)) {
+      // for an answer in the wrong alphabet, and nothing is recorded. The gate is
+      // `step`'s, so a card whose own answer is in another alphabet is not checked.
+      const expected = gatesScript(checked.current, checked.context.language, checked.context.explanation);
+      if (expected !== null && wrongScript(text, expected)) {
         logger.info({ event: 'answer_wrong_script', session_id: sessionId, question_type: checked.current.type });
         throw new WrongScript(input.questionId, LANGUAGES[expected].name);
       }

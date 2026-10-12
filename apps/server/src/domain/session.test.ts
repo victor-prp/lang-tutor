@@ -530,6 +530,15 @@ describe('step, the wrong alphabet', () => {
     expect(gaveUp.record.answers[0].retry_verdict).toBe('gave_up');
   });
 
+  it('does not refuse an answer to a card whose own right answer is in another alphabet', () => {
+    // A Hebrew meaning stored as "DNA": refusing Latin would ask again for ever.
+    const dna: Question = { id: 't1', type: 'typed_meaning', vocab_term_id: 'v', question: 'DNA', part_of_speech: 'noun', meaning: 'DNA', context: null };
+    expect(step(makeRecord([dna, next]), 't1', { text: 'DNA', judged: 'exact' })).toMatchObject({ status: 'advanced' });
+    // A normal meaning is still checked.
+    const window: Question = { ...dna, question: 'finestra', meaning: 'חלון' };
+    expect(step(makeRecord([window, next]), 't1', { text: 'DNA', judged: 'exact' })).toEqual({ status: 'wrong_script' });
+  });
+
   it('ignores a choice card and a letter-tile card', () => {
     const q0 = makeQuestion(0);
     expect(step(makeRecord([q0]), q0.id, { option_index: 0 })).toMatchObject({ status: 'advanced' });

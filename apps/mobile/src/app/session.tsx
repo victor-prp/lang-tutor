@@ -1,4 +1,4 @@
-import type { ClozeChoiceQuestion, ClozeTypedQuestion, Question, SentenceTranslationQuestion } from '@lang-tutor/core/api';
+import type { ClozeChoiceQuestion, ClozeTypedQuestion, LanguageCode, Question, SentenceTranslationQuestion } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -24,6 +24,7 @@ import { showsSentenceTranslation, splitAtGap } from '@/sentence';
 import { isSkip } from '@/speaking';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
+import { scriptGate } from '@/typedSubmit';
 
 // Phase 27 (spec D5). The gap card's prompt: the sentence with its blank, the
 // Hebrew line under it, and once answered the sentence spoken. Phase 34 (spec
@@ -80,13 +81,13 @@ function translatePrompt(question: SentenceTranslationQuestion, answered: boolea
 
 // Phase 38 (spec D1, D4). The typed gap card holds whether its hint is open, and
 // sends it with the first answer. Keyed by question id, so a new card starts closed.
-function ClozeTypedCard({ question, session, language }: { question: ClozeTypedQuestion; session: SessionValue; language: string }) {
+function ClozeTypedCard({ question, session, language, answerLanguage }: { question: ClozeTypedQuestion; session: SessionValue; language: string; answerLanguage: LanguageCode | null }) {
   const [hintOpen, setHintOpen] = useState(false);
   return (
     <TypedAnswerView
       question={question}
       instruction={strings.questionInstructionClozeTyped(language)}
-      answerLanguage={language}
+      answerLanguage={answerLanguage}
       language={language}
       answered={session.answered}
       verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -109,6 +110,8 @@ function ClozeTypedCard({ question, session, language }: { question: ClozeTypedQ
 // feedback banner and scoring are untouched, and the `never` below fails the
 // build for a type with no case.
 function renderQuestion(question: Question, session: SessionValue, language: string, learner: string) {
+  // Phase 39 (spec D7, D8): the language a typed card's answer is checked in, by the server's rule.
+  const answerLanguage = scriptGate(question, language, learner);
   switch (question.type) {
     case 'multiple_choice':
       return (
@@ -149,7 +152,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionTyped(language)}
-          answerLanguage={language}
+          answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -173,13 +176,13 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       );
     case 'cloze_typed':
       // Judged on the phone against the gap's word, as a typed translation is.
-      return <ClozeTypedCard key={question.id} question={question} session={session} language={language} />;
+      return <ClozeTypedCard key={question.id} question={question} session={session} language={language} answerLanguage={answerLanguage} />;
     case 'sentence_translation':
       return (
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionTranslate(language)}
-          answerLanguage={language}
+          answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -196,7 +199,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionMeaning(learner)}
-          answerLanguage={learner}
+          answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -222,7 +225,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionDictation(language)}
-          answerLanguage={language}
+          answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
           verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
@@ -280,7 +283,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
             <TypedAnswerView
               question={question}
               instruction={strings.questionInstructionTyped(language)}
-              answerLanguage={language}
+              answerLanguage={answerLanguage}
               language={language}
               answered={session.answered}
               verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}

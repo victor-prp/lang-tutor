@@ -26,7 +26,7 @@ export { bare as withoutLeadingWord, judgeTiles, judgeTyped, normaliseTyped } fr
 export type { TypedTarget } from './typed';
 export { DIMENSIONS, LIVE_DIMENSIONS, MAX_LEVEL, MIN_LEVEL, badge } from './progress';
 export type { Dimension } from './progress';
-export { SCRIPTS, answerLanguage, isTypedAnswerType, wrongScript } from './script';
+export { SCRIPTS, answerLanguage, gatesScript, isTypedAnswerType, wrongScript } from './script';
 export type { TypedAnswerType } from './script';
 export { normaliseGloss } from './gloss';
 export { FSRS6_DEFAULT, retrievability, review } from './memory';

@@ -267,6 +267,14 @@ describe('answerJudged, the wrong alphabet', () => {
     expect(judge.calls).toHaveLength(0);
     await expect(service.answerJudged('u1', SESSION, { questionId: 's1', text: '1990' })).resolves.toBeDefined();
   });
+
+  it('does not refuse Latin on a typed meaning whose own meaning is Latin ("DNA")', async () => {
+    const judge = createFakeLlmClient('{"verdict":"right"}');
+    const dna: Question = { ...MEANING, question: 'DNA', meaning: 'DNA' };
+    const { service, logger } = setup(judge, record([dna, CHOICE]), { ...CONTEXT, form: 'DNA', lemma: 'DNA', meaning: 'DNA' });
+    await expect(service.answerJudged('u1', SESSION, answer('DNA'))).resolves.toBeDefined();
+    expect(logger.events).not.toContainEqual(expect.objectContaining({ event: 'answer_wrong_script' }));
+  });
 });
 
 describe('answerJudged, the second try', () => {
