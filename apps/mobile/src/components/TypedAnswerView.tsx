@@ -166,7 +166,7 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
       />
       {wrongScriptShown && !answered ? (
         <View testID="wrong-script">
-          <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} />
+          <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" />
         </View>
       ) : null}
       {answered ? null : (
@@ -202,11 +202,11 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
 }
 
 /** Phase 39 (spec D9). An instruction with the language it names in bold. */
-function InstructionText({ instruction: i }: { instruction: Instruction }) {
+function InstructionText({ instruction: i, languageTestId = 'instruction-language' }: { instruction: Instruction; languageTestId?: string }) {
   return (
     <Text style={answerStyles.instruction}>
       {i.before}
-      <Text style={styles.instructionLanguage} testID="instruction-language">
+      <Text style={styles.instructionLanguage} testID={languageTestId}>
         {i.language}
       </Text>
       {i.after}

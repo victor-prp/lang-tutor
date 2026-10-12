@@ -9,6 +9,6 @@ import { SCRIPTS, wrongScript } from '@lang-tutor/core/domain';
  */
 export function typedSubmit(text: string, language: string): 'send' | 'wrong_script' | 'empty' {
   if (text.trim() === '') return 'empty';
-  if (language in SCRIPTS && wrongScript(text, language as LanguageCode)) return 'wrong_script';
+  if (Object.hasOwn(SCRIPTS, language) && wrongScript(text, language as LanguageCode)) return 'wrong_script';
   return 'send';
 }

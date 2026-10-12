@@ -86,7 +86,7 @@ function ClozeTypedCard({ question, session, language }: { question: ClozeTypedQ
     <TypedAnswerView
       question={question}
       instruction={strings.questionInstructionClozeTyped(language)}
-          answerLanguage={language}
+      answerLanguage={language}
       language={language}
       answered={session.answered}
       verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}

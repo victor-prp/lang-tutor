@@ -19,6 +19,8 @@ test.setTimeout(240_000);
 const WRONG_ALPHABET_FOR_RUSSIAN = 'מציצה';
 const MEANINGS_OF: Record<string, string[]> = { прочитала: ['קראה', 'הקריאה'], лук: ['בצל', 'קשת'] };
 
+const MEANING_CARDS = 2;
+
 async function expectBoldLanguage(page: Page) {
   await expect(page.getByTestId('instruction-language')).toHaveCSS('font-weight', '700');
 }
@@ -121,8 +123,9 @@ test('a meaning card: Latin in a Hebrew answer is asked again, then the meaning 
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
-  for (let position = 1; position <= 4; position++) {
-    const card = await readCard(page, position, 4);
+  // Each word's two senses are a gloss family, asked once a session: two cards.
+  for (let position = 1; position <= MEANING_CARDS; position++) {
+    const card = await readCard(page, position, MEANING_CARDS);
     if (card.kind === 'meaning') {
       await expectBoldLanguage(page);
       await answerMeaning(page, 'book');
