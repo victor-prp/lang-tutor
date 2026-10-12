@@ -1,4 +1,4 @@
-import type { LanguageCode, PartOfSpeech, SentenceTranslationQuestion, TranslationKind } from '@lang-tutor/core/api';
+import type { ClozeTypedQuestion, LanguageCode, PartOfSpeech, SentenceTranslationQuestion, TranslationKind } from '@lang-tutor/core/api';
 import type { QuestionType, TypedTarget } from '@lang-tutor/core/domain';
 
 import type { CheckItem } from '../../src/domain/check';
@@ -1739,4 +1739,65 @@ export const CHECK_CASES: CheckCase[] = [
     practised: ['università'],
     keep: true,
   },
+];
+
+/**
+ * Phase 41 (spec D2). Whether a word the card's list missed fills a typed gap,
+ * the sentence read alone. Each case is tier 2: a verdict either way is a call
+ * the card then records.
+ */
+export type FitJudgeCase = {
+  label: string;
+  question: ClozeTypedQuestion;
+  language: LanguageCode;
+  answer: string;
+  expect: 'fits' | 'wrong';
+};
+
+const fit = (language: LanguageCode, sentence: string, gap: string, answer: string, expect: FitJudgeCase['expect'], what: string): FitJudgeCase => {
+  const start = sentence.indexOf(gap);
+  return {
+    label: `fit ${language} ${what}: ${answer}`,
+    question: {
+      id: 'q',
+      type: 'cloze_typed',
+      vocab_term_id: 'v',
+      sentence,
+      gap: { start, end: start + gap.length },
+      translation: '',
+      meaning: '',
+      answer: gap,
+      alternatives: [],
+      mark: null,
+    },
+    language,
+    answer,
+    expect,
+  };
+};
+
+const enFile = 'Please download the file.';
+const enReading = 'She is reading a book in the garden.';
+const itHouse = 'Abbiamo comprato una nuova casa al mare.';
+const ruBought = 'Она купила новую машину вчера.';
+
+export const FIT_JUDGE_CASES: FitJudgeCase[] = [
+  // The bug that opened the phase: an open sentence, a common verb the list missed.
+  fit('en', enFile, 'download', 'edit', 'fits', 'another verb'),
+  fit('en', enFile, 'download', 'upload', 'fits', 'the opposite verb'),
+  fit('en', enFile, 'download', 'print', 'fits', 'another verb'),
+  fit('en', enFile, 'download', 'downloads', 'wrong', 'a form the gap cannot take'),
+  fit('en', enFile, 'download', 'banana', 'wrong', 'a noun'),
+  fit('en', enReading, 'reading', 'writing', 'fits', 'another verb'),
+  fit('en', enReading, 'reading', 'read', 'wrong', 'a form the gap cannot take'),
+  fit('en', enReading, 'reading', 'holding', 'fits', 'another meaning, still correct'),
+  fit('en', enReading, 'reading', 'eating', 'wrong', 'a sentence that makes no sense'),
+  // Gender and number decide in Italian and Russian.
+  fit('it', itHouse, 'casa', 'macchina', 'fits', 'another feminine noun'),
+  fit('it', itHouse, 'casa', 'barca', 'fits', 'another feminine noun'),
+  fit('it', itHouse, 'casa', 'fiore', 'wrong', 'a masculine noun'),
+  fit('it', itHouse, 'casa', 'case', 'wrong', 'the plural'),
+  fit('ru', ruBought, 'купила', 'продала', 'fits', 'another verb, same agreement'),
+  fit('ru', ruBought, 'купила', 'купил', 'wrong', 'the masculine past'),
+  fit('ru', ruBought, 'купила', 'купить', 'wrong', 'the infinitive'),
 ];

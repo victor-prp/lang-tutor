@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
 import type {
+  ClozeTypedQuestion,
   LanguageCode,
   LlmAccept,
   LlmCheck,
@@ -27,8 +28,10 @@ import {
   type DistractorItem,
 } from '../../src/domain/distractors';
 import {
+  buildFitJudgePrompt,
   buildMeaningJudgePrompt,
   buildTranslationJudgePrompt,
+  parseFitJudge,
   parseMeaningJudge,
   parseTranslationJudge,
   type JudgeContext,
@@ -44,10 +47,12 @@ import {
   parseLlmTranslation,
   resolveCorrection,
   resolveKind,
+  unfence,
   type StoredSense,
 } from '../../src/domain/translation';
 import { flattenEntries, mergeEntries, normalizeForm } from '../../src/domain/dictionary';
 import type { LlmClient } from '../../src/services/llm';
+import { z } from 'zod';
 
 /**
  * The real prompt, the real client, the real parser — everything
@@ -178,6 +183,34 @@ export async function askTranslationJudge(
   kase: { question: SentenceTranslationQuestion; context: JudgeContext; answer: string },
 ): Promise<TypedVerdict | null> {
   return parseTranslationJudge(await llm(buildTranslationJudgePrompt(kase.question, kase.context, kase.answer)));
+}
+
+/** Phase 41 (spec D2). The real fit prompt and parser, as answerText calls them. */
+export async function askFitJudge(
+  llm: LlmClient,
+  kase: { question: ClozeTypedQuestion; language: LanguageCode; answer: string },
+): Promise<'fits' | 'wrong' | null> {
+  return parseFitJudge(await llm(buildFitJudgePrompt(kase.question, kase.language, kase.answer)));
+}
+
+const GapGuessesSchema = z.object({ guesses: z.array(z.string()) });
+
+/**
+ * Phase 41 (spec D1). The eval's own probe, no call the app makes: the three
+ * words a reader would most likely put in a gapped sentence read alone. A
+ * sentence that points to its word has that word, or one of its meaning, here.
+ */
+export async function askGapGuesses(llm: LlmClient, kase: { language: LanguageCode; sentence: string }): Promise<string[]> {
+  const raw = await llm({
+    system: [
+      `A ${kase.language} sentence has one word left out, marked ___.`,
+      'Return JSON only, matching the supplied schema: in guesses, the three words a native reader would most likely put in the gap, likeliest first, each in the form the gap needs.',
+    ].join('\n'),
+    user: JSON.stringify({ sentence: kase.sentence }),
+    schema: GapGuessesSchema,
+  });
+  const parsed = GapGuessesSchema.safeParse(JSON.parse(unfence(raw)));
+  return parsed.success ? parsed.data.guesses.slice(0, 3) : [];
 }
 
 export async function askJudge(
