@@ -37,6 +37,9 @@ export type QuestionRow = {
   contextMarkEnd: number | null;
   sentenceMarkStart: number | null;
   sentenceMarkEnd: number | null;
+  /** Phase 39 (spec D6). The meanings a new_meaning card lists as known; null
+   *  on every other type (questions_known_meanings_valid). */
+  knownMeanings: string[] | null;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -62,6 +65,7 @@ export const questionColumns = {
   contextMarkEnd: questions.contextMarkEnd,
   sentenceMarkStart: questions.sentenceMarkStart,
   sentenceMarkEnd: questions.sentenceMarkEnd,
+  knownMeanings: questions.knownMeanings,
   form: dictVariants.form,
   lemma: dictLexemes.lemma,
   partOfSpeech: dictLexemes.partOfSpeech,
@@ -187,6 +191,9 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
     case 'listen_choice':
       // Phase 34 (spec D10): the part of speech, as the reverse card shows it.
       return { ...base, type: 'listen_choice', question: asked, part_of_speech: row.partOfSpeech, ...choice };
+    case 'new_meaning':
+      // Phase 39 (spec D6): a multiple choice's card, with the meanings already known.
+      return { ...base, type: 'new_meaning', question: asked, known_meanings: row.knownMeanings!, ...choice, context };
     case 'matching':
       return {
         ...base,
@@ -512,6 +519,8 @@ export function createQuestionRepo(tx: Tx) {
         contextMarkEnd?: number | null;
         sentenceMarkStart?: number | null;
         sentenceMarkEnd?: number | null;
+        // Phase 39 (spec D6): a new_meaning's known meanings; null on every other type.
+        knownMeanings?: string[] | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -542,6 +551,7 @@ export function createQuestionRepo(tx: Tx) {
             contextMarkEnd: question.contextMarkEnd ?? null,
             sentenceMarkStart: question.sentenceMarkStart ?? null,
             sentenceMarkEnd: question.sentenceMarkEnd ?? null,
+            knownMeanings: question.knownMeanings ?? null,
           })),
         )
         .returning({ id: questions.id });
@@ -565,6 +575,7 @@ export function createQuestionRepo(tx: Tx) {
             contextMarkEnd: question.contextMarkEnd ?? null,
             sentenceMarkStart: question.sentenceMarkStart ?? null,
             sentenceMarkEnd: question.sentenceMarkEnd ?? null,
+            knownMeanings: question.knownMeanings ?? null,
             form: question.form,
             lemma: question.lemma,
             partOfSpeech: question.partOfSpeech,

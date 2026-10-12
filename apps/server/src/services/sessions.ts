@@ -113,6 +113,12 @@ export type { Transaction } from './transaction';
 /** Phase 34 (spec D4, D5). The cards that show wrong options, three of them. */
 const CHOSEN: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'listen_choice', 'reverse_choice', 'cloze_choice']);
 
+/** Phase 39 (spec D6). The type a card is generated as. A new_meaning goes
+ *  through exactly the multiple-choice paths: its distractor item, its context
+ *  item, its checker items, CHOSEN's surviving options and its stored content.
+ *  Only its stored row differs: its type, and the known meanings of its pick. */
+const generatedAs = (type: QuestionType): QuestionType => (type === 'new_meaning' ? 'multiple_choice' : type);
+
 // The one place a completed session is logged. Redundant with the database, kept
 // because it is output you can tail without opening psql — structured, so you
 // can grep it.
@@ -822,7 +828,7 @@ export function createSessionService({
       const target = read.enrolled.target_language as LanguageCode;
       const plan = planCards(
         read.context.map((row, index) => {
-          const { dimension, rung, level, r, step } = read.picked[index];
+          const { dimension, rung, level, r, step, known_meanings } = read.picked[index];
           return {
             form: row.form,
             translation: row.translation,
@@ -839,12 +845,14 @@ export function createSessionService({
             level,
             r,
             step,
+            // Phase 39 (spec D6): a pick with them is a new_meaning card.
+            knownMeanings: known_meanings,
           };
         }),
         { listening: payload.listening, speaking: payload.speaking },
       );
       const ordered = plan.order.map((index) => read.context[index]);
-      const tasks = tasksFor(plan);
+      const tasks = tasksFor({ ...plan, types: plan.types.map(generatedAs) });
       const items = distractorItems(ordered, tasks, read.recent);
       // Phase 31 (spec D18). Another headword with this card's key is right where
       // the card asks for this one: off limits as a wrong option, and named to the
@@ -942,14 +950,21 @@ export function createSessionService({
         }
         return null;
       };
+      // Phase 39 (spec D6): the sentences the gloss last showed on a card
+      // generated as this one is, so a multiple choice and a new_meaning avoid
+      // each other's.
+      const recentContextsOf = (glossId: string, type: QuestionType): string[] =>
+        Object.entries(read.recentContexts.get(glossId) ?? {}).flatMap(([shown, texts]) =>
+          generatedAs(shown as QuestionType) === generatedAs(type) ? (texts ?? []) : [],
+        );
       const contextItems = new Map<number, ContextItem>();
       for (const card of cards) {
         const item = contextItemFor({
           key: keyOf(card.index),
-          type: card.type,
+          type: generatedAs(card.type),
           row: card.row,
           alternatives: card.answered.alternatives,
-          recent: read.recentContexts.get(card.row.glossId)?.[card.type] ?? [],
+          recent: recentContextsOf(card.row.glossId, card.type),
           sentence: sentenceOf(card.answered),
         });
         if (item) contextItems.set(card.index, item);
@@ -1028,15 +1043,16 @@ export function createSessionService({
       for (const card of shown) {
         const key = keyOf(card.index);
         const { row } = card;
-        if (card.type === 'multiple_choice' || card.type === 'listen_choice') {
+        const type = generatedAs(card.type);
+        if (type === 'multiple_choice' || type === 'listen_choice') {
           checkItems.push({ key, task: 'choice', word: row.answerForm ?? row.form, options: candidatesOf(card.index) });
-        } else if (card.type === 'reverse_choice') {
+        } else if (type === 'reverse_choice') {
           checkItems.push({ key, task: 'choice', word: row.translation, options: candidatesOf(card.index) });
-        } else if (card.type === 'cloze_choice') {
+        } else if (type === 'cloze_choice') {
           const gap = gaps[card.index]!;
           const sentence = `${row.example!.slice(0, gap.start)}___${row.example!.slice(gap.end)}`;
           checkItems.push({ key, task: 'gap', sentence, options: candidatesOf(card.index) });
-        } else if (card.type === 'matching' && boardCandidates.length > 0) {
+        } else if (type === 'matching' && boardCandidates.length > 0) {
           checkItems.push({ key, task: 'choice', word: row.form, options: boardCandidates });
         }
         if (card.checkable && card.context) {
@@ -1055,7 +1071,7 @@ export function createSessionService({
           );
         }
         const hebrew = sentenceOf(card.answered)?.hebrew;
-        if ((card.type === 'cloze_typed' || card.type === 'sentence_translation') && hebrew) {
+        if ((type === 'cloze_typed' || type === 'sentence_translation') && hebrew) {
           checkItems.push({ key, task: 'translate', sentence: hebrew });
         }
       }
@@ -1084,7 +1100,7 @@ export function createSessionService({
         // Spec D4: a "yes" drops the option and the next spare takes its place;
         // fewer than three left fails the attempt, as fewer than three usable does.
         for (const card of shown) {
-          if (!CHOSEN.has(card.type)) continue;
+          if (!CHOSEN.has(generatedAs(card.type))) continue;
           const key = keyOf(card.index);
           const left = wrongOnly(candidatesOf(card.index), alsoRight(key));
           if (left.length < KEPT_DISTRACTORS) {
@@ -1182,7 +1198,7 @@ export function createSessionService({
           events.push({ event: 'sentence_degraded', session_id: sessionId, position: card.index, type: card.planned, reason: degradedReason });
         }
         // Spec D6: a sense saved without an example has nothing to fall back on.
-        if (!context && contextLanguageOf(type) !== null) {
+        if (!context && contextLanguageOf(generatedAs(type)) !== null) {
           events.push({ event: 'context_missing', session_id: sessionId, position: card.index, type });
         }
         return { row, index: card.index, type, answered, context, sentence };
@@ -1208,13 +1224,15 @@ export function createSessionService({
             partOfSpeech: row.partOfSpeech,
             lexemeId: row.lexemeId,
             type,
-            ...generatedContent(row, type, answered, {
+            ...generatedContent(row, generatedAs(type), answered, {
               tiles: type === 'letter_tiles' ? tilesFor(row.answerForm ?? row.form, LANGUAGES[target].alphabet, rng) : null,
               board: type === 'matching' && board && meanings ? { meanings, own: index - board.start } : null,
               gap: gaps[index],
             }),
             // Phase 34 (spec D6, D8, D12): stored as shown.
-            ...contextColumns(type, context, sentence),
+            ...contextColumns(generatedAs(type), context, sentence),
+            // Phase 39 (spec D6): what a new_meaning lists as known, from its pick.
+            knownMeanings: type === 'new_meaning' ? (read.picked[plan.order[index]].known_meanings ?? null) : null,
           })),
         });
         // Each choice shuffled on its own, a board's words once together; the

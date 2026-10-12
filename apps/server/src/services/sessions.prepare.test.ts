@@ -195,7 +195,7 @@ function world(opts: {
           case 'multiple_choice':
             return { ...base, type: q.type, question: q.answerForm ?? q.form, ...choice(), context };
           case 'new_meaning':
-            throw new Error('the prepare job does not draw a new_meaning yet (phase 39 task 6)');
+            return { ...base, type: q.type, question: q.answerForm ?? q.form, known_meanings: q.knownMeanings!, ...choice(), context };
           case 'listen_choice':
             return { ...base, type: q.type, question: q.answerForm ?? q.form, part_of_speech: q.partOfSpeech, ...choice() };
           case 'read_aloud':
@@ -1624,5 +1624,153 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
       await overlapping.service.prepareSession(TEN_PAYLOAD);
       expect(boardOf(overlapping.calls)).toEqual(['ромашка', 'черепаха', 'зонтик', 'ведро']);
     });
+  });
+});
+
+// Phase 39 (spec D6). A new gloss of a word the learner already knows is a
+// new_meaning card. It goes through exactly the multiple-choice paths (its
+// distractor item, its context item, its checker items and the checker's
+// surviving options); only the stored row differs: its type, and the known
+// meanings its pick carries.
+describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
+  const ENGLISH: Enrollment = { ...ENROLLMENT, target_language: 'en' };
+  const STAMP = new Date('2026-10-11T10:00:00Z');
+  const row = (over: Partial<GenerationContext> & Pick<GenerationContext, 'form' | 'lemma' | 'translation'>, n: number): GenerationContext => ({
+    glossId: `g-n${n}`, senseId: `sn${n}`, variantId: `vn${n}`, lexemeId: `ln${n}`, partOfSpeech: 'verb',
+    example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: STAMP, ...over,
+  });
+  // pick up's new gloss, לאסוף; the learner already knows it as להרים.
+  const PICK_UP = row({ form: 'pick up', lemma: 'pick up', translation: 'לאסוף', example: 'Pick up your toys.', exampleTranslation: 'תאסוף את הצעצועים שלך.' }, 1);
+  const TABLE = row({ form: 'table', lemma: 'table', partOfSpeech: 'noun', translation: 'שולחן' }, 2);
+  const DOWNLOAD = row({ form: 'download', lemma: 'download', translation: 'להוריד', acceptedAnswers: ['get'] }, 3);
+  const pickOf = (r: GenerationContext) => ({ gloss_id: r.glossId, sense_id: r.senseId, variant_id: r.variantId });
+  /** A new word, a reversed card and a typed translation (THREE); the new word
+   *  is a new meaning of a known one when its pick carries `known`. */
+  const payloadOf = (rows: GenerationContext[], known?: string[]) => ({
+    ...PAYLOAD,
+    picks: rows.map((r, i) => ({ ...pickOf(r), ...THREE[i], ...(i === 0 && known ? { known_meanings: known } : {}) })),
+  });
+  // Phase 34 (spec D3): the dictionary knows להרים for pick up, so it is never a wrong option.
+  const KNOWN: KnownRight = { ...nothingKnown(), meaningsByLexeme: new Map([['ln1', ['להרים', 'לאסוף']]]) };
+  const BATCH = JSON.stringify({
+    items: [
+      { key: 'q1', distractors: ['להרים', 'לבשל', 'לשבור', 'לנגן', 'לכתוב', 'לשיר'] },
+      { key: 'q2', distractors: ['chair', 'door', 'wall'] },
+      { key: 'q3', distractors: [], alternatives: ['fetch'] },
+    ],
+  });
+  const SENTENCE = "She'll pick up the kids at five.";
+  const contextReply = (sentence: string, word: string) =>
+    JSON.stringify({
+      items: [
+        { key: 'q1', context: sentence, context_translation: 'היא תאסוף את הילדים בחמש.', context_word: word },
+        { key: 'q2', context: 'השולחן במטבח עשוי מעץ.', context_translation: 'The kitchen table is made of wood.', context_word: 'השולחן' },
+        { key: 'q3', context: 'אני רוצה להוריד את המשחק החדש הלילה.', context_translation: 'I want to download the new game tonight.', context_word: 'להוריד' },
+      ],
+    });
+  // The checker calls לבשל right too, and reads each sentence as the writer meant it.
+  const CHECK = checking({ q1: { options: [true, false, false, false, false] }, q1c: { context_meaning: 'לאסוף' }, q2c: { context_words: ['table'] }, q3c: { context_words: ['download'] } });
+  type Inserted = {
+    type: string; knownMeanings?: string[] | null; prompt: string | null; answerForm: string | null; options: { text: string; is_correct: boolean }[] | null;
+    context: string | null; contextTranslation: string | null; contextMarkStart: number | null; contextMarkEnd: number | null;
+  };
+  const insertedOf = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: Inserted[] }).questions;
+  const events = (logger: { events: unknown[] }, name: string) => (logger.events as { event: string }[]).filter((e) => e.event === name);
+  async function prepared(opts: { known?: string[]; first?: GenerationContext; sentence?: string; word?: string; recentContexts?: RecentContexts } = {}) {
+    const rows = [opts.first ?? PICK_UP, TABLE, DOWNLOAD];
+    const w = world({
+      enrollment: ENGLISH, context: rows, reply: BATCH, contextReply: contextReply(opts.sentence ?? SENTENCE, opts.word ?? 'pick up'),
+      checkReply: CHECK, known: KNOWN, recentContexts: opts.recentContexts,
+    });
+    await w.service.prepareSession(payloadOf(rows, opts.known));
+    return w;
+  }
+
+  it('stores a pick with known meanings as a new_meaning: the checked options, the sentence and the known meanings', async () => {
+    const { calls, logger } = await prepared({ known: ['להרים'] });
+    const [card] = insertedOf(calls);
+    const at = SENTENCE.indexOf('pick up');
+    expect(card).toMatchObject({
+      type: 'new_meaning',
+      knownMeanings: ['להרים'],
+      prompt: null,
+      context: SENTENCE,
+      contextTranslation: 'היא תאסוף את הילדים בחמש.',
+      contextMarkStart: at,
+      contextMarkEnd: at + 'pick up'.length,
+    });
+    // להרים is known right; the checker took לבשל, and the first spare took its place.
+    expect(card.options).toEqual([
+      { position: 0, text: 'לאסוף', is_correct: true },
+      { position: 1, text: 'לשבור', is_correct: false },
+      { position: 2, text: 'לנגן', is_correct: false },
+      { position: 3, text: 'לכתוב', is_correct: false },
+    ]);
+    expect(events(logger, 'checker_dropped')).toEqual([
+      { event: 'checker_dropped', session_id: SESSION, position: 0, type: 'new_meaning', kind: 'option', text: 'לבשל', reason: 'the checker calls it right' },
+    ]);
+    // As the card reaches the phone.
+    expect(calls.sessionQuestions[0][0]).toMatchObject({
+      type: 'new_meaning', question: 'pick up', known_meanings: ['להרים'], context: { text: SENTENCE, mark: { start: at, end: at + 'pick up'.length } },
+    });
+  });
+
+  it('asks the model what a multiple choice asks: a meaning item, a target sentence, a choice check and a meaning check', async () => {
+    const { llm, contextLlm, checkerLlm } = await prepared({ known: ['להרים'] });
+    expect(JSON.parse(llm.calls[0].user).items[0]).toMatchObject({ key: 'q1', task: 'meaning' });
+    expect(JSON.parse(contextLlm.calls[0].user).items[0]).toMatchObject({ key: 'q1', task: 'target' });
+    const checks = checksOf(checkerLlm.calls[0]).filter((item) => item.key === 'q1' || item.key === 'q1c');
+    expect(checks).toEqual([
+      { key: 'q1', task: 'choice', word: 'pick up', options: ['לבשל', 'לשבור', 'לנגן', 'לכתוב', 'לשיר'] },
+      { key: 'q1c', task: 'meaning', sentence: SENTENCE, word: 'pick up', candidates: expect.arrayContaining(['לאסוף', 'להרים']) },
+    ]);
+  });
+
+  it('is generated exactly as the multiple choice: the same requests, the same row but its type and known meanings', async () => {
+    const formed = { ...PICK_UP, answerForm: 'picked up' };
+    for (const opts of [{}, { first: formed, sentence: 'She picked up the kids at five.', word: 'picked up' }]) {
+      const meaning = await prepared({ ...opts, known: ['להרים'] });
+      const choice = await prepared(opts);
+      const asked = (llm: { calls: LlmJsonRequest[] }) => llm.calls.map(({ system, user }) => ({ system, user }));
+      expect(asked(meaning.llm)).toEqual(asked(choice.llm));
+      expect(asked(meaning.contextLlm)).toEqual(asked(choice.contextLlm));
+      expect(asked(meaning.checkerLlm)).toEqual(asked(choice.checkerLlm));
+      const [asMeaning, ...meaningRest] = insertedOf(meaning.calls);
+      const [asChoice, ...choiceRest] = insertedOf(choice.calls);
+      expect(asChoice.type).toBe('multiple_choice');
+      expect({ ...asMeaning, type: asChoice.type, knownMeanings: asChoice.knownMeanings }).toEqual(asChoice);
+      expect(meaningRest).toEqual(choiceRest);
+    }
+    // The answer form is asked and shown as on a multiple choice (phase 34 D2).
+    const { calls } = await prepared({ first: formed, sentence: 'She picked up the kids at five.', word: 'picked up', known: ['להרים'] });
+    expect(insertedOf(calls)[0]).toMatchObject({ type: 'new_meaning', answerForm: 'picked up' });
+    expect(calls.sessionQuestions[0][0]).toMatchObject({ type: 'new_meaning', question: 'picked up' });
+  });
+
+  it('logs a new_meaning left with no sentence, as it logs a multiple choice', async () => {
+    const bare = { ...PICK_UP, example: null, exampleTranslation: null };
+    const { calls, logger } = await prepared({ known: ['להרים'], first: bare, sentence: 'Nothing here uses it.' });
+    expect(insertedOf(calls)[0]).toMatchObject({ type: 'new_meaning', context: null });
+    expect(events(logger, 'context_missing')).toEqual([{ event: 'context_missing', session_id: SESSION, position: 0, type: 'new_meaning' }]);
+  });
+
+  it('avoids the sentences the gloss last showed as a multiple choice or a new_meaning, either way round', async () => {
+    const recentContexts: RecentContexts = new Map([[PICK_UP.glossId, { multiple_choice: ['An old choice sentence.'], new_meaning: ['An old new meaning sentence.'] }]]);
+    for (const known of [['להרים'], undefined]) {
+      const { contextLlm } = await prepared({ known, recentContexts });
+      expect(JSON.parse(contextLlm.calls[0].user).items[0].avoid).toEqual(expect.arrayContaining(['An old choice sentence.', 'An old new meaning sentence.']));
+    }
+  });
+
+  // Review Focus: a job enqueued before the deploy carries no known_meanings.
+  // An empty list is none.
+  it('prepares an old job’s pick, without known meanings, exactly as before: a multiple choice, with none stored', async () => {
+    for (const known of [undefined, []]) {
+      const { calls } = await prepared({ known });
+      const [card] = insertedOf(calls);
+      expect(card).toMatchObject({ type: 'multiple_choice', context: SENTENCE });
+      expect(card.knownMeanings ?? null).toBeNull();
+      expect(calls.sessionQuestions[0][0]).not.toHaveProperty('known_meanings');
+    }
   });
 });
