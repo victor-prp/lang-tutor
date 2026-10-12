@@ -1013,6 +1013,14 @@ export const sessions = pgTable(
     // Phase 35 (spec D10). The learner's day the session counts for, set from
     // services/learnerDay.ts in the transaction that ends it; null until then.
     practiceDay: date('practice_day', { mode: 'string' }),
+    // Phase 43 (spec D1). When the session was started: by its start call or its
+    // first answer, whichever came first; never cleared. Null for a session
+    // nobody has started, which an open one in stock is.
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    // Phase 43 (spec D1). What the session was built for: a device with a voice
+    // for the target, and one that can record. No default, as for status.
+    listening: boolean('listening').notNull(),
+    speaking: boolean('speaking').notNull(),
   },
   (t) => [
     foreignKey({
@@ -1029,12 +1037,16 @@ export const sessions = pgTable(
       'sessions_completed_consistent',
       sql`(${t.status} = 'completed') = (${t.completedAt} is not null)`,
     ),
-    // The one-open-session rule as a constraint. A concurrent second create
-    // fails here and becomes a 409, which no read-then-insert check could
-    // promise.
-    uniqueIndex('sessions_one_open_per_enrollment')
+    // Phase 43 (spec D1). Phase 19's one-open-session rule, split by started_at:
+    // one open session in stock and one started, per enrollment. A concurrent
+    // second of either fails here and becomes a 409, which no read-then-insert
+    // check could promise.
+    uniqueIndex('sessions_one_stock_per_enrollment')
       .on(t.enrollmentId)
-      .where(sql`${t.status} in ('preparing', 'ready')`),
+      .where(sql`${t.status} in ('preparing', 'ready') and ${t.startedAt} is null`),
+    uniqueIndex('sessions_one_started_per_enrollment')
+      .on(t.enrollmentId)
+      .where(sql`${t.status} = 'ready' and ${t.startedAt} is not null`),
     // The home screen's read: one enrollment's newest session. Nothing indexed
     // sessions by enrollment before, and this read runs on every focus and every
     // 3 s poll.

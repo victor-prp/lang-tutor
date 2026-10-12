@@ -1,9 +1,9 @@
 import type { AnswerRecord, AnswerVerdict, Question, SessionSource, SessionStatus } from '@lang-tutor/core/api';
 import { verdictCorrect } from '@lang-tutor/core/domain';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
-import type { SessionRecord, SessionState, SessionSummary } from '../domain/session';
+import type { Devices, SessionRecord, SessionState, SessionSummary } from '../domain/session';
 import type { DayAnswer } from '../domain/today';
 import {
   answers,
@@ -27,14 +27,16 @@ import { canonicalOptions, questionColumns, questionFrom, withBoards } from './q
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function createSessionRepo(tx: Tx) {
-  // The one-open-session index (sessions_one_open_per_enrollment) is the only
-  // unique constraint on this table, so a unique violation here means exactly
-  // "this enrollment already has an open session".
+  // The two open-session indexes (phase 43: one in stock, one started) are the
+  // only unique constraints on this table, so a unique violation here means
+  // exactly "this enrollment already has an open session of that kind".
   async function insertSessionRow(values: {
     userId: string;
     enrollmentId: string;
     status: SessionStatus;
     source: SessionSource;
+    listening: boolean;
+    speaking: boolean;
   }): Promise<string> {
     try {
       const [row] = await tx.insert(sessions).values(values).returning({ id: sessions.id });
@@ -87,20 +89,92 @@ export function createSessionRepo(tx: Tx) {
   }
 
   return {
-    /** A seed session: ready at once, its questions drawn from the shared pool. */
+    /** A seed session: ready at once, its questions drawn from the shared pool.
+     *  Phase 43 (spec D1): every session records what it was built for. */
     insertSession: async (
       userId: string,
       enrollmentId: string,
       picked: Question[],
+      devices: Devices,
     ): Promise<string> => {
-      const sessionId = await insertSessionRow({ userId, enrollmentId, status: 'ready', source: 'seed' });
+      const sessionId = await insertSessionRow({ userId, enrollmentId, status: 'ready', source: 'seed', ...devices });
       await insertSessionQuestions(sessionId, picked);
       return sessionId;
     },
 
     /** A list session: no questions until prepare-session writes them. */
-    insertPreparingSession: (userId: string, enrollmentId: string): Promise<string> =>
-      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list' }),
+    insertPreparingSession: (userId: string, enrollmentId: string, devices: Devices): Promise<string> =>
+      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', ...devices }),
+
+    /** Phase 43 (spec D2). Starts a ready session: true when this call started
+     *  it, false when it was started already, is not ready, or is unknown. A
+     *  second started session of the enrollment is SessionOpen. */
+    markStarted: async (sessionId: string): Promise<boolean> => {
+      if (!UUID_RE.test(sessionId)) return false;
+      // Read first: a failed statement aborts the transaction, so the error's
+      // enrollment cannot be read after the violation.
+      const [row] = await tx.select({ enrollmentId: sessions.enrollmentId }).from(sessions).where(eq(sessions.id, sessionId));
+      if (!row) return false;
+      try {
+        const rows = await tx
+          .update(sessions)
+          .set({ startedAt: sql`now()` })
+          .where(and(eq(sessions.id, sessionId), eq(sessions.status, 'ready'), isNull(sessions.startedAt)))
+          .returning({ id: sessions.id });
+        return rows.length > 0;
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new SessionOpen(row.enrollmentId);
+        throw error;
+      }
+    },
+
+    /** Phase 43 (spec D1, D6). The enrollment's open sessions: the started one
+     *  and the one in stock, each when there is one. */
+    findOpen: async (enrollmentId: string): Promise<{ started?: SessionSummary; stock?: SessionSummary }> => {
+      const rows = await tx.execute<{
+        id: string;
+        status: string;
+        source: string;
+        started: boolean;
+        answered: number;
+        total: number;
+      }>(sql`
+        SELECT s.id, s.status, s.source, s.started_at IS NOT NULL AS started,
+               (SELECT count(*) FROM answers a WHERE a.session_id = s.id)::int AS answered,
+               (SELECT count(*) FROM session_questions q WHERE q.session_id = s.id)::int AS total
+        FROM sessions s
+        WHERE s.enrollment_id = ${enrollmentId} AND s.status IN ('preparing', 'ready')`);
+      const open: { started?: SessionSummary; stock?: SessionSummary } = {};
+      for (const { started, ...row } of rows.rows) {
+        const summary = { ...row, status: row.status as SessionStatus, source: row.source as SessionSource };
+        if (started) open.started = summary;
+        else open.stock = summary;
+      }
+      return open;
+    },
+
+    /** Phase 43 (spec D4). The glosses a session asks, each once. */
+    findSessionGlosses: async (sessionId: string): Promise<string[]> => {
+      if (!UUID_RE.test(sessionId)) return [];
+      const rows = await tx
+        .selectDistinct({ glossId: questions.glossId })
+        .from(sessionQuestions)
+        .innerJoin(questions, eq(questions.id, sessionQuestions.questionId))
+        .where(eq(sessionQuestions.sessionId, sessionId));
+      return rows.map((row) => row.glossId);
+    },
+
+    /** Phase 43 (spec D3). What the enrollment's newest session was built for:
+     *  a stock built with no device in hand inherits it. */
+    findNewestDevices: async (enrollmentId: string): Promise<Devices | undefined> => {
+      const [row] = await tx
+        .select({ listening: sessions.listening, speaking: sessions.speaking })
+        .from(sessions)
+        .where(eq(sessions.enrollmentId, enrollmentId))
+        .orderBy(sql`${sessions.createdAt} desc, ${sessions.id} desc`)
+        .limit(1);
+      return row;
+    },
 
     insertSessionQuestions,
 
@@ -108,8 +182,9 @@ export function createSessionRepo(tx: Tx) {
      *  saved, in this enrollment's sessions that count for `day`, and in an open
      *  one, which counts as today; decoded as a session's evidence is. An answer
      *  from before the save is no evidence, as it writes no memory (phase 35 D4).
-     *  In answer order: sessions as they were created (one is open at a time),
-     *  each in its positions' order. */
+     *  In answer order: sessions as they were created (one is answered at a time,
+     *  and a stock is always created after the session it waits behind), each in
+     *  its positions' order. */
     findAnswersOn: async (enrollmentId: string, day: string): Promise<DayAnswer[]> => {
       const rows = await tx.execute<AnswerRow & { session_id: string }>(sql`
         SELECT s.id AS session_id, q.gloss_id, q.type, q.options, a.selected_option_position, a.verdict, a.retry_verdict
@@ -194,10 +269,9 @@ export function createSessionRepo(tx: Tx) {
       return rows.length > 0;
     },
 
-    /** The enrollment's newest session. At most one session is open, and a new
-     *  one can only start once it is closed, so an open session is always the
-     *  newest: this one read answers both "what is current" and "has there been
-     *  any". Served by sessions_enrollment_created_idx. */
+    /** The enrollment's newest session: whether there has been any, and
+     *  (phase 43, spec D6) whether the newest failed. Served by
+     *  sessions_enrollment_created_idx. */
     findLatest: async (enrollmentId: string): Promise<SessionSummary | undefined> => {
       const rows = await tx.execute<{
         id: string;

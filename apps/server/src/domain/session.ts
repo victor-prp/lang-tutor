@@ -242,8 +242,9 @@ export function missedQuestions(record: SessionRecord): MissedQuestion[] {
   return missed(record.questions, record.answers);
 }
 
-/** A session that blocks the next one: at most one per enrollment
- *  (sessions_one_open_per_enrollment). */
+/** An open session. Phase 43 (spec D1): at most one started and one in stock
+ *  per enrollment (sessions_one_started_per_enrollment,
+ *  sessions_one_stock_per_enrollment). */
 export const OPEN_STATUSES: readonly SessionStatus[] = ['preparing', 'ready'];
 /** What the home screen shows as the current session. A failed one stays
  *  visible until the next create, so a failure is never silent. */
@@ -282,7 +283,11 @@ export type SessionState = {
   source: SessionSource;
 };
 
-/** An enrollment's newest session, as the home screen needs it. `total` is the
+/** Phase 43 (spec D1). What a session is built for: whether the device has a
+ *  voice for the target (phase 24) and whether it can record (phase 25). */
+export type Devices = { listening: boolean; speaking: boolean };
+
+/** An enrollment's session, as the home screen needs it. `total` is the
  *  number of questions it holds: 0 while it is still preparing. */
 export type SessionSummary = {
   id: string;

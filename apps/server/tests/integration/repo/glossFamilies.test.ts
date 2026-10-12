@@ -19,7 +19,7 @@ beforeEach(async () => {
   await seedUser(t.db, 'u_1');
   ({ glossIds } = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'pick up', translations: ['להרים', 'לאסוף'] }));
   await t.db.execute(sql`
-    insert into sessions (id, user_id, enrollment_id, status, source) values (${SESSION}, 'u_1', ${E}, 'ready', 'list')`);
+    insert into sessions (id, user_id, enrollment_id, status, source, listening, speaking) values (${SESSION}, 'u_1', ${E}, 'ready', 'list', false, false)`);
 });
 afterEach(async () => {
   await t.close();

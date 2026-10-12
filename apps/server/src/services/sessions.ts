@@ -291,11 +291,7 @@ export function createSessionService({
           // 500: a language with no seeded questions is an answer, not a failure.
           if (pool.length < SESSION_LENGTH) throw new InsufficientQuestions(enrollmentId, pool.length);
           const record = newSessionRecord(enrolled.user_id, pool, rng);
-          const sessionId = await session.insertSession(
-            enrolled.user_id,
-            enrollmentId,
-            record.questions,
-          );
+          const sessionId = await session.insertSession(enrolled.user_id, enrollmentId, record.questions, options);
           return { sessionId, status: 'ready' as const, source: 'seed' as const };
         }
 
@@ -381,7 +377,7 @@ export function createSessionService({
           ];
         });
         if (picks.length === 0) throw new NoSavedWords(enrollmentId);
-        const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
+        const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, options);
         // Phase 39 (spec D4). The refresh is recorded once the session exists, so
         // each event names it; one that changed nothing writes nothing.
         const write = familyChanges(stored, families, new Date(at).toISOString());

@@ -43,6 +43,11 @@ describe('repos', () => {
       // Phase 34 (spec D9).
       resolveRetry: notStubbed,
       resolvePendingRetry: notStubbed,
+      // Phase 43 (spec D1–D4).
+      markStarted: notStubbed,
+      findOpen: notStubbed,
+      findSessionGlosses: notStubbed,
+      findNewestDevices: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
       findEnrollmentId: async () => 'e1',
       ...overrides,

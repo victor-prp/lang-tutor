@@ -9,6 +9,7 @@ import { createJobRepo } from '../../../src/repo/jobs';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { registerWorkers } from '../../../src/worker';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
+import { NO_DEVICES } from '../../support/questions';
 import { startTestBoss, stopTestBoss, waitFor } from '../../support/jobs';
 import {
   assertMockServerReachable,
@@ -112,7 +113,7 @@ async function enqueueSession(words: Record<string, string>, cards: Card[], opts
     });
   }
   return withTx(t.db, async (tx) => {
-    const sessionId = await createSessionRepo(tx).insertPreparingSession('u_1', E);
+    const sessionId = await createSessionRepo(tx).insertPreparingSession('u_1', E, NO_DEVICES);
     await createJobRepo(tx, boss).enqueue(PREPARE_SESSION, { session_id: sessionId, picks, listening: opts.listening, speaking: false });
     return sessionId;
   });

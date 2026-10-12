@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
-import { asChoice, insertListSession } from '../../support/questions';
+import { NO_DEVICES, asChoice, insertListSession } from '../../support/questions';
 import { testRng } from '../../support/testRng';
 import { insertLexeme } from '../../support/dictRows';
 import { seedSavedSenses } from '../../support/vocabularyRows';
@@ -39,7 +39,7 @@ async function startSession(tx: Tx, userId = 'u_1') {
   const questionRepo = createQuestionRepo(tx);
   const pool = await questionRepo.loadQuestionPool('en', 'he');
   const record = newSessionRecord(userId, pool, testRng(7));
-  const sessionId = await sessionRepo.insertSession(userId, enrollmentOf(userId), record.questions);
+  const sessionId = await sessionRepo.insertSession(userId, enrollmentOf(userId), record.questions, NO_DEVICES);
   return { sessionRepo, sessionId, record };
 }
 
@@ -178,7 +178,7 @@ describe('phase 23: typed answers', () => {
         },
       ],
     });
-    const sessionId = await sessionRepo.insertPreparingSession('u_1', enrollmentOf('u_1'));
+    const sessionId = await sessionRepo.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES);
     await sessionRepo.insertSessionQuestions(sessionId, [typed]);
     return { sessionRepo, sessionId, typed };
   }
@@ -269,19 +269,19 @@ describe('session state (phase 19)', () => {
     withTx(t.db, (tx) => fn(createSessionRepo(tx)));
 
   it('inserts a preparing list session, and refuses a second open one', async () => {
-    const id = await repo((r) => r.insertPreparingSession('u_1', E));
+    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES));
     const state = await repo((r) => r.findState(id));
     expect(state).toEqual({ id, userId: 'u_1', enrollmentId: E, status: 'preparing', source: 'list' });
-    await expect(repo((r) => r.insertPreparingSession('u_1', E))).rejects.toBeInstanceOf(SessionOpen);
+    await expect(repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES))).rejects.toBeInstanceOf(SessionOpen);
   });
 
   it('refuses a seed session while one is open, as SessionOpen', async () => {
-    await repo((r) => r.insertPreparingSession('u_1', E));
+    await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES));
     await expect(withTx(t.db, (tx) => startSession(tx))).rejects.toBeInstanceOf(SessionOpen);
   });
 
   it('transitions only from the statuses named', async () => {
-    const id = await repo((r) => r.insertPreparingSession('u_1', E));
+    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES));
     expect(await repo((r) => r.transition(id, ['ready'], 'skipped'))).toBe(false);
     expect(await repo((r) => r.transition(id, ['preparing'], 'ready'))).toBe(true);
     expect((await repo((r) => r.findState(id)))?.status).toBe('ready');
@@ -295,7 +295,7 @@ describe('session state (phase 19)', () => {
 
   // Phase 29 (spec D13): what a session-addressed use case authorizes against.
   it('names the enrollment a session belongs to, and none for an unknown id', async () => {
-    const id = await repo((r) => r.insertPreparingSession('u_1', E));
+    const id = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES));
     expect(await repo((r) => r.findEnrollmentId(id))).toBe(E);
     expect(await repo((r) => r.findEnrollmentId('00000000-0000-0000-0000-000000000000'))).toBeUndefined();
   });
@@ -317,6 +317,72 @@ describe('session state (phase 19)', () => {
     const { sessionId } = await withTx(t.db, (tx) => startSession(tx));
     const loaded = await repo((r) => r.loadSession(sessionId));
     expect(loaded).toMatchObject({ status: 'ready', source: 'seed' });
+  });
+});
+
+describe('phase 43: a started session and one in stock', () => {
+  const E = enrollmentOf('u_1');
+  const repo = <T>(fn: (r: ReturnType<typeof createSessionRepo>) => Promise<T>) =>
+    withTx(t.db, (tx) => fn(createSessionRepo(tx)));
+
+  it('keeps a stock beside a started session, and refuses a second of either', async () => {
+    const { sessionId: started } = await withTx(t.db, (tx) => startSession(tx));
+    expect(await repo((r) => r.markStarted(started))).toBe(true);
+    const stock = await repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES));
+    expect(await repo((r) => r.findOpen(E))).toEqual({
+      started: { id: started, status: 'ready', source: 'seed', answered: 0, total: SESSION_LENGTH },
+      stock: { id: stock, status: 'preparing', source: 'list', answered: 0, total: 0 },
+    });
+    await expect(repo((r) => r.insertPreparingSession('u_1', E, NO_DEVICES))).rejects.toBeInstanceOf(SessionOpen);
+
+    await repo((r) => r.transition(stock, ['preparing'], 'ready'));
+    await expect(repo((r) => r.markStarted(stock))).rejects.toBeInstanceOf(SessionOpen);
+  });
+
+  it('starts a session once', async () => {
+    const { sessionId } = await withTx(t.db, (tx) => startSession(tx));
+    expect(await repo((r) => r.markStarted(sessionId))).toBe(true);
+    expect(await repo((r) => r.markStarted(sessionId))).toBe(false);
+    expect(await repo((r) => r.markStarted('nope'))).toBe(false);
+  });
+
+  it('finds nothing open once both sessions end', async () => {
+    expect(await repo((r) => r.findOpen(E))).toEqual({});
+    const { sessionId } = await withTx(t.db, (tx) => startSession(tx));
+    expect(await repo((r) => r.findOpen(E))).toEqual({
+      stock: { id: sessionId, status: 'ready', source: 'seed', answered: 0, total: SESSION_LENGTH },
+    });
+    await repo((r) => r.transition(sessionId, ['ready'], 'skipped', '2026-10-12'));
+    expect(await repo((r) => r.findOpen(E))).toEqual({});
+  });
+
+  it("stores what a session was built for, and reads the enrollment's newest", async () => {
+    expect(await repo((r) => r.findNewestDevices(E))).toBeUndefined();
+    const first = await repo((r) => r.insertPreparingSession('u_1', E, { listening: true, speaking: false }));
+    expect(await repo((r) => r.findNewestDevices(E))).toEqual({ listening: true, speaking: false });
+    await repo((r) => r.transition(first, ['preparing'], 'failed'));
+    await repo((r) => r.insertPreparingSession('u_1', E, { listening: false, speaking: true }));
+    expect(await repo((r) => r.findNewestDevices(E))).toEqual({ listening: false, speaking: true });
+  });
+
+  it('names the glosses a session asks, each once', async () => {
+    const apple = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'apple', translations: ['תפוח'] });
+    const bread = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'bread', translations: ['לחם'] });
+    const word = (saved: typeof apple, lemma: string, translation: string) => ({
+      glossId: saved.glossIds[0],
+      variantId: saved.variantId,
+      lexemeId: saved.lexemeId,
+      form: lemma,
+      lemma,
+      translation,
+    });
+    const { sessionId } = await insertListSession(t.db, {
+      userId: 'u_1',
+      enrollmentId: E,
+      asked: [word(apple, 'apple', 'תפוח'), word(bread, 'bread', 'לחם'), word(apple, 'apple', 'תפוח')],
+      types: ['multiple_choice', 'multiple_choice', 'typed_translation'],
+    });
+    expect((await repo((r) => r.findSessionGlosses(sessionId))).sort()).toEqual([apple.glossIds[0], bread.glossIds[0]].sort());
   });
 });
 

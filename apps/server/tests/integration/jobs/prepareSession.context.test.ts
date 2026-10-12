@@ -10,6 +10,7 @@ import type { PrepareSessionPayload } from '../../../src/domain/jobs';
 import { JUDGE_MARKER } from '../../../src/domain/judge';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
+import { NO_DEVICES } from '../../support/questions';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import {
   assertMockServerReachable,
@@ -126,7 +127,7 @@ async function prepared(
   await expectDistractors(ns, batch);
   if (context !== null) await expectContext(ns, context, contextOpts);
   await expectCheck(ns, { overrides: check });
-  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN));
+  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN, NO_DEVICES));
   await deps.sessions.prepareSession({ session_id: sessionId, picks: steered(picks, cards), listening: false, speaking: false });
   const record = await deps.sessions.getSession('u_1', sessionId);
   expect(record.status).toBe('ready');

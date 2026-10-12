@@ -273,7 +273,7 @@ describe('answers.retry_* (spec D9)', () => {
                 { position: 3, text: 'string', is_correct: false },
               ])}::jsonb)`);
     const session = await t.db.execute<{ id: string }>(sql`
-      insert into sessions (user_id, enrollment_id, status, source) values ('u_1', ${E}, 'ready', 'list') returning id`);
+      insert into sessions (user_id, enrollment_id, status, source, listening, speaking) values ('u_1', ${E}, 'ready', 'list', false, false) returning id`);
     sessionId = session.rows[0].id;
     await t.db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)

@@ -1214,3 +1214,58 @@ describe('0030_gloss_families', () => {
     await db.execute(card('multiple_choice', 'null'));
   });
 });
+
+describe('0031_always_ready_session', () => {
+  it('starts every session that has an answer at its first, builds each for no device, and lets a stock sit beside a started one', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0030_gloss_families'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'עפיפון');
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, prompt, alternatives)
+        values ('q1', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}'),
+               ('q2', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}');
+      insert into sessions (id, user_id, enrollment_id, status, source, completed_at, practice_day)
+        values ('00000000-0000-4000-8000-00000000003a', 'u_1', 'e_1', 'completed', 'seed', '2026-10-10T09:00:00Z', '2026-10-10'),
+               ('00000000-0000-4000-8000-00000000003b', 'u_1', 'e_1', 'ready', 'list', null, null);
+      insert into session_questions (session_id, position, question_id, option_order)
+        values ('00000000-0000-4000-8000-00000000003a', 0, 'q1', '{}'),
+               ('00000000-0000-4000-8000-00000000003b', 0, 'q1', '{}'),
+               ('00000000-0000-4000-8000-00000000003b', 1, 'q2', '{}');
+      insert into answers (session_id, position, question_id, typed_text, verdict, answered_at)
+        values ('00000000-0000-4000-8000-00000000003a', 0, 'q1', 'kite', 'exact', '2026-10-10T08:55:00Z'),
+               ('00000000-0000-4000-8000-00000000003b', 1, 'q2', 'kite', 'exact', '2026-10-11T08:01:00Z'),
+               ('00000000-0000-4000-8000-00000000003b', 0, 'q1', 'kite', 'exact', '2026-10-11T08:00:00Z');
+    `);
+
+    await runMigrations(db);
+
+    const rows = await db.execute(
+      sql`select id, extract(epoch from started_at)::int as started, listening, speaking from sessions order by id`,
+    );
+    const epoch = (iso: string) => Date.parse(iso) / 1000;
+    expect(rows.rows).toEqual([
+      { id: '00000000-0000-4000-8000-00000000003a', started: epoch('2026-10-10T08:55:00Z'), listening: false, speaking: false },
+      { id: '00000000-0000-4000-8000-00000000003b', started: epoch('2026-10-11T08:00:00Z'), listening: false, speaking: false },
+    ]);
+    // The started one leaves room for one stock, and only one.
+    const stock = (id: string) => sql`
+      insert into sessions (id, user_id, enrollment_id, status, source, listening, speaking)
+      values (${id}, 'u_1', 'e_1', 'preparing', 'list', false, false)`;
+    await db.execute(stock('00000000-0000-4000-8000-00000000003c'));
+    await expect(db.execute(stock('00000000-0000-4000-8000-00000000003d'))).rejects.toMatchObject({
+      cause: { constraint: 'sessions_one_stock_per_enrollment' },
+    });
+    // And one started session: a second cannot start beside it.
+    await db.execute(sql`update sessions set status = 'ready' where id = '00000000-0000-4000-8000-00000000003c'`);
+    await expect(
+      db.execute(sql`update sessions set started_at = now() where id = '00000000-0000-4000-8000-00000000003c'`),
+    ).rejects.toMatchObject({ cause: { constraint: 'sessions_one_started_per_enrollment' } });
+  });
+});
