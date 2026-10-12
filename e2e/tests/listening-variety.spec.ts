@@ -94,9 +94,8 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
 
   await clearGemini(request);
   await expectGeneration(request);
-  // Past a skipped seed the home screen offers create, not start, so openApp's default landing does not fit.
-  await openApp(page, 'create-button');
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
+  await openApp(page, 'enrollment-switcher');
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   let before = (await spoken(page)).length;
   await tapUntil(page, 'start-button', 'progress-label');

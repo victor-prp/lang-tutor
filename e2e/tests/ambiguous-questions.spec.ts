@@ -88,14 +88,15 @@ async function reachTypedCard(page: Page, request: APIRequestContext, username: 
     await lookUp(page, request, word.form, word.payload);
     await tapAndWaitForWrite(page, page.getByTestId('translate-save'));
   }
-  await page.getByTestId('translate-back').click();
   await seedMemory(username, MEMORY);
 
   await clearGemini(request);
   await expectGeneration(request, [ALTERNATIVE]);
   await expectContext(request, [{ key: 'q2', context: CONTEXT, context_translation: CONTEXT_TRANSLATION }]);
   await expectCheck(request, { q2c: { context_words: ['прочитала', 'замок'] } });
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself, so the memory and the
+  // stubs are in place before going back.
+  await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 

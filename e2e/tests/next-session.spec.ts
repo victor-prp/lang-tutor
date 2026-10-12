@@ -37,12 +37,13 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   await page.getByTestId('translate-new-word').click();
   await lookUp(page, request, 'лук', LUK);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
-  await page.getByTestId('translate-back').click();
 
-  // 4. Create questions. The job turns the session ready, and home's poll sees it.
+  // 4. Home makes the session itself (phase 43, spec D7): no צור שאלות. The
+  // generation is stubbed before going back, the job turns the session ready,
+  // and home's poll sees it.
   await clearGemini(request);
   await expectGeneration(request);
-  await page.getByTestId('create-button').click();
+  await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('start-button')).toHaveText('התחל');
 
@@ -71,10 +72,13 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   }
   expect([...words].sort(), words.join(', ')).toEqual(['лук', 'прочитала']);
 
-  // 6. Results lead to the next session, back on home.
+  // 6. Results lead home, to the next session: built in stock while this one
+  // was played (phase 43, spec D2, D3), so home offers start, not create.
   await expect(page.getByTestId('results-score')).toBeVisible();
   await page.getByTestId('results-next-session').click();
-  await expect(page.getByTestId('preparing-label').or(page.getByTestId('start-button'))).toBeVisible();
+  await expect(page.getByTestId('results-score')).toBeHidden();
+  await expect(page.getByTestId('start-button'), `no session in stock\n${report()}`).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('start-button')).toHaveText('התחל');
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

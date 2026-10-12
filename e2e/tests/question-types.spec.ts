@@ -60,12 +60,13 @@ async function startMixedSession(page: Page, request: APIRequestContext, usernam
     // One sense, so its own save button: "save all" is for two or more.
     await tapAndWaitForWrite(page, page.getByTestId('translate-save'));
   }
-  await page.getByTestId('translate-back').click();
   await seedMemory(username, MEMORY);
 
   await clearGemini(request);
   await expectGeneration(request);
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself, so the memory and the
+  // stubs are in place before going back.
+  await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 }

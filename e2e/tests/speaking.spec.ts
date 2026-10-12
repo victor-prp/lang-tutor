@@ -103,8 +103,8 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
   // of their p, so each card is answered by its type.
   await clearGemini(request);
   await expectGeneration(request);
-  await openApp(page, 'create-button');
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
+  await openApp(page, 'enrollment-switcher');
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
@@ -156,8 +156,8 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
 
   await clearGemini(request);
   await expectGeneration(request);
-  await openApp(page, 'create-button');
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
+  await openApp(page, 'enrollment-switcher');
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
@@ -195,7 +195,8 @@ test("speaking: can't speak now passes the read aloud, and say the translation t
   // keep home's start button mounted behind them, so each ending is checked on its own.
   if (position < 4) {
     await page.getByTestId('session-skip').click();
-    await expect(page.getByTestId('create-button').or(page.getByTestId('start-button')).or(page.getByTestId('preparing-label'))).toBeVisible();
+    // Phase 43 (spec D2, D3): the next session in stock, built while this one was played.
+    await expect(page.getByTestId('start-button').or(page.getByTestId('preparing-label'))).toBeVisible();
   } else {
     await expect(page.getByTestId('results-score')).toBeVisible();
   }
