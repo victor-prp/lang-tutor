@@ -5,7 +5,7 @@ import { answerChoice, expectGeneration, readCard } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { lookUp, tapAndWaitForWrite, tapUntil } from './support/interactions';
 import { LUK } from './support/lexemes';
-import { seedMemory } from './support/memory';
+import { knownSeeds, seedMemory } from './support/memory';
 import { clearGemini, expectCheck, expectContext } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
@@ -16,7 +16,6 @@ test.setTimeout(180_000);
 const SENTENCE = 'Мой лук и стрелы лежат дома';
 const SENTENCE_HEBREW = 'הקשת והחצים שלי נמצאים בבית';
 const SENTENCE_WORD = 'лук';
-const DIMENSIONS = ['written_receptive', 'written_productive', 'spelling', 'spoken_receptive', 'spoken_productive'] as const;
 
 // Phase 39 (spec D6). лук has two saved meanings, a family. בצל is known in every skill
 // (stability 30, reviewed yesterday), so קשת, never asked, is the family's current gloss and
@@ -39,10 +38,7 @@ test('a new meaning of a known word: the card names what is known and shows the 
   await lookUp(page, request, 'лук', LUK);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
   await page.getByTestId('translate-back').click();
-  await seedMemory(
-    username,
-    DIMENSIONS.map((dimension) => ({ gloss: 'בצל', dimension, stability: 30, daysAgo: 1, level: 3 })),
-  );
+  await seedMemory(username, knownSeeds('בצל'));
 
   await clearGemini(request);
   await expectGeneration(request);

@@ -1,6 +1,9 @@
 // Strings the seed does not contain, so each lookup reaches MockServer once and
 // is written to the e2e database. The lexemes are new, so no reconciliation call.
 // Four senses of two words, shared by every spec that saves and then practises them.
+// Phase 39 (spec D1, D5): each of these words is a gloss family, so a session asks
+// one of its saved senses, never both. A spec that needs a card per sense saves
+// SINGLE_WORDS instead.
 export const PROCHITALA = {
   kind: 'word' as const,
   entries: [
@@ -49,7 +52,7 @@ export const ZNAT = {
 
 // Phase 23. Two senses of one five-letter form, so every card about it can be
 // a typed card answered with a near miss (one swap needs five letters). Used
-// only by question-types.spec.ts.
+// only by ambiguous-questions.spec.ts.
 export const ZAMOK = {
   kind: 'word' as const,
   entries: [
@@ -84,6 +87,18 @@ export const BOARD_WORDS = [
   single('кастрюля', 'סיר', 'pot'),
   single('фонарь', 'פנס', 'lantern'),
   single('ящерица', 'לטאה', 'lizard'),
+];
+
+/** Phase 39 (spec D5). Four single-sense Russian nouns, so four words in four
+ *  gloss families of their own: a session can ask all four. None is in the seed
+ *  (checked against content.ts and content.generated.ts) or another fixture,
+ *  each has five letters or more so a typed card can take a near miss, and each
+ *  has its own meaning. */
+export const SINGLE_WORDS = [
+  single('кувшин', 'כד', 'jug'),
+  single('одеяло', 'שמיכה', 'blanket'),
+  single('верблюд', 'גמל', 'camel'),
+  single('мельница', 'טחנה', 'mill'),
 ];
 
 /** Phase 31. `mouse`: two senses, one Hebrew word, so one card with two examples.
