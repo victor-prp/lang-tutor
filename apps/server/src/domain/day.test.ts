@@ -84,6 +84,7 @@ function runDay(list: DayList, count: number): { log: Asked[]; sessions: Session
       listening: true,
       speaking: true,
       rng: () => 0.5,
+      families: { familyOf: new Map(), waiting: new Set() },
     };
     const picks = chooseWords(input);
     sessions.push({ input, picks });

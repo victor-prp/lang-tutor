@@ -46,6 +46,8 @@ export type ChoiceInput = {
   listening: boolean;
   speaking: boolean;
   rng: () => number;
+  /** Phase 39 (spec D5). Each family member's family (any stable id), and the glosses that wait. */
+  families: { familyOf: ReadonlyMap<string, number | string>; waiting: ReadonlySet<string> };
 };
 
 /** Phase 37 (spec D3). `SPEAK` is a gloss the speaking pick moved to spoken
@@ -95,6 +97,8 @@ type Candidate = {
   pick: ChosenPick;
   /** The normalised key: one pick per key (phase 31 D18). */
   key: string;
+  /** Phase 39 (spec D5). The gloss's family, when it has one: a second mark beside the key. */
+  family: number | string | undefined;
   savedAt: string;
   /** R of the weakest live dimension with memory; null when none has any. */
   need: number | null;
@@ -131,7 +135,9 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   const steps = new Map(input.steps.filter((step) => live.includes(step.dimension)).map((step) => [step.glossId, step]));
   const waiting = new Set(input.steps.filter((step) => !live.includes(step.dimension)).map((step) => step.glossId));
 
+  // Phase 39 (spec D5). A waiting gloss is no candidate: no class, no pass.
   const candidates = input.saved
+    .filter((gloss) => !input.families.waiting.has(gloss.glossId))
     .map((gloss): Candidate => {
       const rows = memory.get(gloss.glossId);
       const owed = steps.get(gloss.glossId);
@@ -158,6 +164,7 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
       return {
         pick: pickOf(gloss.glossId, dimension, cls, rows),
         key: normaliseGloss(gloss.key),
+        family: input.families.familyOf.get(gloss.glossId),
         savedAt: gloss.savedAt,
         need,
         rows,
@@ -177,7 +184,19 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   const done = of('DONE').sort((a, b) => (doneOrder.get(a.pick.glossId) ?? Infinity) - (doneOrder.get(b.pick.glossId) ?? Infinity));
 
   // D3. The new-word reserve comes first and gives way to a backlog, down to NEW_FLOOR.
-  const n = Math.min(SESSION_LENGTH, new Set(candidates.map((candidate) => candidate.key)).size);
+  // Phase 39 (spec D5): n counts groups joined by either mark, a key or a family
+  // (union-find), so a list of a few large families promises no more picks than it can give.
+  const parent = candidates.map((_, index) => index);
+  const root = (index: number): number => (parent[index] === index ? index : (parent[index] = root(parent[index])));
+  const firstWith = new Map<string, number>();
+  candidates.forEach((candidate, index) => {
+    for (const mark of [`k${candidate.key}`, ...(candidate.family === undefined ? [] : [`f${candidate.family}`])]) {
+      const seen = firstWith.get(mark);
+      if (seen === undefined) firstWith.set(mark, index);
+      else parent[root(index)] = root(seen);
+    }
+  });
+  const n = Math.min(SESSION_LENGTH, new Set(candidates.map((_, index) => root(index))).size);
   const newLeft = Math.max(0, DAY_NEW_CAP - input.newToday);
   const speak = input.speaking && n >= 2 ? SPEAKING_PER_SESSION : 0;
   const room = n - speak - returns.length - due.length;
@@ -185,6 +204,13 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
 
   const picks: ChosenPick[] = [];
   const keys = new Set<string>();
+  // Phase 39 (spec D5). The families of the picks so far, and the families a return
+  // claimed: a claimed family is free to its claiming return alone.
+  const families = new Set<number | string>();
+  const claims = new Map<number | string, string>();
+  for (const candidate of returns) {
+    if (candidate.family !== undefined && !claims.has(candidate.family)) claims.set(candidate.family, candidate.pick.glossId);
+  }
   const taken = new Set<string>();
   const perDimension = new Map<Dimension, number>();
   let hard = 0;
@@ -192,8 +218,13 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
   // Held back by a cap: asked after everything but DONE (ruling 14).
   const deferred: Candidate[] = [];
 
-  const free = (candidate: Candidate) => !taken.has(candidate.pick.glossId) && !keys.has(candidate.key);
+  const free = (candidate: Candidate) =>
+    !taken.has(candidate.pick.glossId) &&
+    !keys.has(candidate.key) &&
+    (candidate.family === undefined ||
+      (!families.has(candidate.family) && (claims.get(candidate.family) ?? candidate.pick.glossId) === candidate.pick.glossId));
   const add = (candidate: Candidate) => {
+    if (candidate.family !== undefined) families.add(candidate.family);
     picks.push(candidate.pick);
     keys.add(candidate.key);
     taken.add(candidate.pick.glossId);

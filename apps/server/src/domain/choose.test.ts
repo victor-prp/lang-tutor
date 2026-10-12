@@ -48,6 +48,8 @@ type Word = {
   state?: Partial<Record<Dimension, MemoryState>>;
 };
 
+const NO_FAMILIES = { familyOf: new Map<string, number>(), waiting: new Set<string>() };
+
 const savedAt = (i: number) => `2026-01-01T00:${String(i).padStart(2, '0')}:00.000000Z`;
 
 /** Speaking is off unless a test turns it on: the speaking pick (phase 37 D4) has
@@ -73,6 +75,7 @@ function input(words: Word[], over: Partial<ChoiceInput> = {}): ChoiceInput {
     listening: true,
     speaking: false,
     rng: testRng(1),
+    families: NO_FAMILIES,
     ...over,
   };
 }
@@ -463,5 +466,73 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
   it('never asks one key twice when everything is new', () => {
     const picks = chooseWords(input([fresh('a', { key: 'Book' }), fresh('b', { key: 'book ' }), fresh('c', { key: 'pen' })]));
     expect(picks).toHaveLength(2);
+  });
+});
+
+describe('families (phase 39 D5)', () => {
+  const family = (members: Record<string, number>, waiting: string[] = []) => ({
+    families: { familyOf: new Map(Object.entries(members)), waiting: new Set(waiting) },
+  });
+
+  it('never picks a waiting gloss, in any pass', () => {
+    const speaking = { speaking: true };
+    const words = [fresh('new'), known('due', { [WR]: 0.4 }), { id: 'ret', memory: { [WR]: 1 } }, known('other'), known('done')];
+    const picks = chooseWords(
+      input(words, { ...speaking, steps: [step('ret', WR)], done: new Set(['done']), ...family({}, ['new', 'due', 'ret', 'done']) }),
+    );
+    expect(ids(picks)).toEqual(['other']);
+  });
+
+  it('picks one of two new glosses of a family', () => {
+    expect(chooseWords(input([fresh('a'), fresh('b')], family({ a: 1, b: 1 })))).toHaveLength(1);
+  });
+
+  it('picks one of two due glosses of a family', () => {
+    const picks = chooseWords(input([known('a', { [WR]: 0.4 }), known('b', { [WR]: 0.3 })], family({ a: 1, b: 1 })));
+    expect(ids(picks)).toEqual(['b']);
+  });
+
+  it('picks one of a new and a due gloss of a family', () => {
+    expect(chooseWords(input([fresh('a'), known('b', { [WR]: 0.4 })], family({ a: 1, b: 1 })))).toHaveLength(1);
+  });
+
+  it('lets a return claim its family ahead of a new gloss', () => {
+    const picks = chooseWords(input([{ id: 'a', memory: { [WR]: 1 } }, fresh('b')], { steps: [step('a', WR)], ...family({ a: 1, b: 1 }) }));
+    expect(ids(picks)).toEqual(['a']);
+  });
+
+  it('never gives the speaking pick a family a return claimed', () => {
+    const picks = chooseWords(
+      input([{ id: 'a', memory: { [WR]: 1 } }, known('b', { [SK]: 0.3 }), known('c')], {
+        speaking: true,
+        steps: [step('a', WR)],
+        ...family({ a: 1, b: 1 }),
+      }),
+    );
+    expect(ids(picks)).not.toContain('b');
+    expect(ids(picks)).toContain('a');
+  });
+
+  it('picks the earlier opened of two returns in a family', () => {
+    const words = [{ id: 'a', memory: { [WR]: 1 } }, { id: 'b', memory: { [WR]: 1 } }];
+    const picks = chooseWords(input(words, { steps: [step('a', WR, 5), step('b', WR, 2)], ...family({ a: 1, b: 1 }) }));
+    expect(ids(picks)).toEqual(['b']);
+  });
+
+  it('never picks a done gloss whose family is taken', () => {
+    const picks = chooseWords(input([known('a', { [WR]: 0.4 }), known('b')], { done: new Set(['b']), ...family({ a: 1, b: 1 }) }));
+    expect(ids(picks)).toEqual(['a']);
+  });
+
+  it('counts groups, not glosses, for the length of a session', () => {
+    const members = Object.fromEntries(range(12, (i) => ({ id: `m${i}` })).map((w, i) => [w.id, Math.floor(i / 4)]));
+    const words = [...range(12, (i) => fresh(`m${i}`)), fresh('s1'), fresh('s2')];
+    expect(chooseWords(input(words, { newToday: 0, ...family(members) }))).toHaveLength(5);
+  });
+
+  it('still picks one when every gloss is in one family', () => {
+    const words = range(6, (i) => fresh(`g${i}`));
+    const members = Object.fromEntries(words.map((w) => [w.id, 7]));
+    expect(chooseWords(input(words, family(members)))).toHaveLength(1);
   });
 });

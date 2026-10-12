@@ -312,6 +312,8 @@ export function createSessionService({
           listening: options.listening,
           speaking: options.speaking,
           rng,
+          // Phase 39 (spec D5): Task 4 wires the stored families in.
+          families: { familyOf: new Map(), waiting: new Set() },
         });
         // Spec D12. One rendering per gloss, uniformly over every form of every
         // member that agrees with the gloss, the saved form always among them.
