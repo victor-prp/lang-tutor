@@ -645,6 +645,13 @@ Rulings made while building. The text above stands unless a line here says other
 - **`MultipleChoiceView` draws its own context line only when no `prompt` is passed (D6)**; the `new_meaning` prompt
   draws it, once.
 - **The bots** read `new_meaning` as written receptive, rung 1, since `RUNGS` does not list it.
+- **No gate on a card whose own answer is in another alphabet (D7, D8, D10; final review).** Core's
+  `gatesScript(question, target, learner)` returns the card's answer language, or null for a card that is not typed
+  or whose `rightAnswer` is itself a wrong script there (a Hebrew meaning stored as "DNA"). The server's `refusal`,
+  `answerJudged` and the phone all use it, so they agree; `TypedAnswerView`'s `answerLanguage` is therefore
+  `LanguageCode | null`, null meaning no gate. The wrong-script notice is drawn in the theme's wrong colour.
+- **The bots** answer a typed-meaning card they cannot match with one of their saved Hebrew meanings, not a target
+  word, which the refusal would turn into a day that never ends.
 - **The wrong-script refusal (D10)** names the language in English in its 422 body ("Hebrew"). A first empty answer
   is still `wrong`, as before; only a pending second try gives up on empty text.
 - **e2e under families (Task 7b, added while building).** `support/lexemes.ts`'s shared fixtures are two-meaning
