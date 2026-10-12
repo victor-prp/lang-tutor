@@ -10,11 +10,11 @@ name: Bots
 # Stop it without a code change: unset the repository variable BOTS_ENABLED, or set
 # it to anything but 'true'. docs/runbooks/bots.md has the rest.
 on:
-  schedule:
-    # Hourly, off the hour: GitHub's schedule is busiest at :00. A skipped or late
-    # run is a slower week, never a lost day (D18).
-    - cron: '17 * * * *'
-  # Plays the next day now: how a failed day is rerun.
+  # Phase 40: started at :17 every hour by an EventBridge rule in terraform/bootstrap
+  # (bots.tf), through this trigger. GitHub's own schedule ran one slot in five on
+  # the bots' first evening and is late by hours at night; a dispatched run starts
+  # within seconds. No schedule here as well: its late runs would come on top, more
+  # than one day an hour. Also how a failed day is rerun by hand: gh workflow run bots.yml.
   workflow_dispatch:
 
 # One run at a time, and a late run queues behind the one before rather than
