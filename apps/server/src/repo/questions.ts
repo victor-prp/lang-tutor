@@ -379,6 +379,10 @@ export function createQuestionRepo(tx: Tx) {
      * enrollment's last sessions showed, newest first by creation, so a new one
      * is never one of them (phase 27 D8's rule, as findRecentSentences). At most
      * `limit` per gloss and type; a gloss with none has no entry.
+     *
+     * Phase 39 (spec D6). A new_meaning is generated as a multiple choice and
+     * shows its sentence, so its sentences are a multiple choice's: one list,
+     * newest first across both, capped once.
      */
     findRecentContexts: async (input: {
       enrollmentId: string;
@@ -389,9 +393,12 @@ export function createQuestionRepo(tx: Tx) {
       if (input.glossIds.length === 0) return recent;
       const rows = await tx.execute<{ gloss_id: string; type: QuestionType; context: string }>(sql`
         SELECT gloss_id, type, context FROM (
-          SELECT q.gloss_id, q.type, q.context,
-                 row_number() OVER (PARTITION BY q.gloss_id, q.type ORDER BY q.created_at DESC, q.id DESC) AS recency
+          SELECT q.gloss_id, shown.type, q.context,
+                 row_number() OVER (PARTITION BY q.gloss_id, shown.type ORDER BY q.created_at DESC, q.id DESC) AS recency
           FROM questions q
+          CROSS JOIN LATERAL (
+            SELECT CASE WHEN q.type = 'new_meaning' THEN 'multiple_choice' ELSE q.type END AS type
+          ) shown
           WHERE q.enrollment_id = ${input.enrollmentId}
             AND q.context IS NOT NULL
             AND q.gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})

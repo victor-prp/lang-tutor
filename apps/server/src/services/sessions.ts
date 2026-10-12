@@ -950,13 +950,6 @@ export function createSessionService({
         }
         return null;
       };
-      // Phase 39 (spec D6): the sentences the gloss last showed on a card
-      // generated as this one is, so a multiple choice and a new_meaning avoid
-      // each other's.
-      const recentContextsOf = (glossId: string, type: QuestionType): string[] =>
-        Object.entries(read.recentContexts.get(glossId) ?? {}).flatMap(([shown, texts]) =>
-          generatedAs(shown as QuestionType) === generatedAs(type) ? (texts ?? []) : [],
-        );
       const contextItems = new Map<number, ContextItem>();
       for (const card of cards) {
         const item = contextItemFor({
@@ -964,7 +957,8 @@ export function createSessionService({
           type: generatedAs(card.type),
           row: card.row,
           alternatives: card.answered.alternatives,
-          recent: recentContextsOf(card.row.glossId, card.type),
+          // Phase 39 (spec D6): findRecentContexts files a new_meaning's under multiple_choice.
+          recent: read.recentContexts.get(card.row.glossId)?.[generatedAs(card.type)] ?? [],
           sentence: sentenceOf(card.answered),
         });
         if (item) contextItems.set(card.index, item);

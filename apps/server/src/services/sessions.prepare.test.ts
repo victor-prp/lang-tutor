@@ -1754,11 +1754,13 @@ describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
     expect(events(logger, 'context_missing')).toEqual([{ event: 'context_missing', session_id: SESSION, position: 0, type: 'new_meaning' }]);
   });
 
+  // findRecentContexts files a new_meaning's sentences under multiple_choice,
+  // newest first across both and capped once (repo/questions.ts).
   it('avoids the sentences the gloss last showed as a multiple choice or a new_meaning, either way round', async () => {
-    const recentContexts: RecentContexts = new Map([[PICK_UP.glossId, { multiple_choice: ['An old choice sentence.'], new_meaning: ['An old new meaning sentence.'] }]]);
+    const recentContexts: RecentContexts = new Map([[PICK_UP.glossId, { multiple_choice: ['An old new meaning sentence.', 'An old choice sentence.'] }]]);
     for (const known of [['להרים'], undefined]) {
       const { contextLlm } = await prepared({ known, recentContexts });
-      expect(JSON.parse(contextLlm.calls[0].user).items[0].avoid).toEqual(expect.arrayContaining(['An old choice sentence.', 'An old new meaning sentence.']));
+      expect(JSON.parse(contextLlm.calls[0].user).items[0].avoid).toEqual(['Pick up your toys.', 'An old new meaning sentence.', 'An old choice sentence.']);
     }
   });
 
