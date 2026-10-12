@@ -152,3 +152,23 @@ export function createSpeaker({ engine, platform, prepareAudio }: SpeakerDeps) {
 }
 
 export type Speaker = ReturnType<typeof createSpeaker>;
+
+/** Phase 43 (spec D7). Resolves once the voices have been read, or after
+ *  `timeoutMs`, whichever comes first: home builds a session for this device as
+ *  soon as it shows, and an unread voice list would say it cannot listen. */
+export function voicesRead(speaker: Pick<Speaker, 'snapshot' | 'subscribe'>, timeoutMs: number): Promise<void> {
+  if (speaker.snapshot().loaded) return Promise.resolve();
+  return new Promise((resolve) => {
+    let unsubscribe = () => {};
+    const timer = setTimeout(() => {
+      unsubscribe();
+      resolve();
+    }, timeoutMs);
+    unsubscribe = speaker.subscribe(() => {
+      if (!speaker.snapshot().loaded) return;
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    });
+  });
+}

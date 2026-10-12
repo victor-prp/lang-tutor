@@ -13,6 +13,10 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useRecorder } from '@/hooks/useRecording';
 import { useSpeaker } from '@/hooks/useSpeech';
 import { currentFor, loadFailedFor, type StoredCurrent } from '@/nextSession';
+import { voicesRead } from '@/speech';
+
+/** Phase 43. The longest a session waits for the device's voices to be read. */
+const VOICES_WAIT_MS = 3_000;
 
 // Phase 19. The active enrollment's session state for the home screen: what
 // is current, where the next session comes from, and the two actions on it.
@@ -67,12 +71,16 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
 
   // Phase 24 (spec D5): only the device knows whether it can speak the target,
   // so only it can ask for listening cards. Phase 25 (spec D4): likewise, only
-  // it knows whether it can record. Read where a session is built for it.
+  // it knows whether it can record. Read where a session is built for it, once
+  // the voices are read (phase 43): home builds one as soon as it shows.
   const devices = useCallback(
-    async (targetLanguage: string) => ({
-      listening: speaker.snapshot().tags.has(targetLanguage),
-      speaking: await recorder.canRecord().catch(() => false),
-    }),
+    async (targetLanguage: string) => {
+      await voicesRead(speaker, VOICES_WAIT_MS);
+      return {
+        listening: speaker.snapshot().tags.has(targetLanguage),
+        speaking: await recorder.canRecord().catch(() => false),
+      };
+    },
     [speaker, recorder],
   );
 
