@@ -573,11 +573,11 @@ describe('the saved list for sessions (phase 19)', () => {
       byGloss([
         {
           glossId: word.glossIds[0], key: 'בצל', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS),
-          lexemeId: word.lexemeId, lemma: 'onion', form: 'onion', order: [0, 0],
+          lexemeId: word.lexemeId, lemma: 'onion', form: 'onion', order: [0, 0], knownAt: null,
         },
         {
           glossId: word.glossIds[1], key: 'קשת', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS),
-          lexemeId: word.lexemeId, lemma: 'onion', form: 'onion', order: [0, 1],
+          lexemeId: word.lexemeId, lemma: 'onion', form: 'onion', order: [0, 1], knownAt: null,
         },
       ]),
     );
@@ -592,10 +592,22 @@ describe('the saved list for sessions (phase 19)', () => {
     expect(await repo((r) => r.listSavedGlosses(E))).toEqual([
       {
         glossId: word.glossIds[0], key: 'עכבר', variantId: word.variantId, savedAt: expect.stringMatching(ISO_MICROS),
-        lexemeId: word.lexemeId, lemma: 'mouse', form: 'mouse', order: [0, 0],
+        lexemeId: word.lexemeId, lemma: 'mouse', form: 'mouse', order: [0, 0], knownAt: null,
       },
     ]);
     expect(await repo((r) => r.countEntries(E))).toBe(1);
+  });
+
+  // Phase 46 (spec D3). known_at is stamped once: a later markKnown leaves it.
+  it('stamps known_at on the named glosses where it is empty, and lists it', async () => {
+    const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'onion', translations: ['בצל', 'קשת'] });
+    const [onion, bow] = word.glossIds;
+    await repo((r) => r.markKnown({ enrollmentId: E, glossIds: [onion], at: '2026-10-01T09:00:00.000Z' }));
+    await repo((r) => r.markKnown({ enrollmentId: E, glossIds: [onion, bow], at: '2026-10-05T09:00:00.000Z' }));
+    const listed = await repo((r) => r.listSavedGlosses(E));
+    const knownAt = (glossId: string) => listed.find((gloss) => gloss.glossId === glossId)!.knownAt;
+    expect(knownAt(onion)).toBe('2026-10-01T09:00:00.000Z');
+    expect(knownAt(bow)).toBe('2026-10-05T09:00:00.000Z');
   });
 
   // Phase 35 (spec D5). New words are asked newest saved first.

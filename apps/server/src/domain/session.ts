@@ -304,6 +304,8 @@ export type SavedGloss = {
   lemma: string;
   form: string;
   order: [number, number];
+  /** Phase 46 (spec D3). When a refresh first saw this gloss known; null if never. */
+  knownAt: string | null;
 };
 
 /** Phase 31 (spec D12). One rendering of one member of a gloss, by one form, with

@@ -283,13 +283,12 @@ export function createSessionService({
     const memory = await repos.memory.findRows({ enrollmentId, glossIds });
     const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
     // Phase 39 (spec D4, D5). The families, derived from the dictionary and
-    // memory with the session's live skills. Only known_at is read from the
-    // stored families: known once, known for the family (D2).
+    // memory with the session's live skills. Phase 46 (spec D3): known_at is the
+    // gloss's own, family or not.
     const forms = await dict.findLexemeForms({ lexemeIds: [...new Set(saved.map((gloss) => gloss.lexemeId))] });
     const formsOf = new Map<string, string[]>();
     for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
     const stored = await repos.glossFamilies.load(enrollmentId);
-    const knownAt = new Map(stored.flatMap((family) => family.members.map((member) => [member.glossId, member.knownAt])));
     const families = glossFamilies({
       saved: saved.map((gloss) => ({
         glossId: gloss.glossId,
@@ -300,7 +299,7 @@ export function createSessionService({
         forms: formsOf.get(gloss.lexemeId) ?? [],
         order: gloss.order,
         speakable: speakable(gloss.form),
-        knownAt: knownAt.get(gloss.glossId) ?? null,
+        knownAt: gloss.knownAt,
       })),
       memory,
       live: liveDimensions(devices.listening, devices.speaking),
@@ -365,8 +364,12 @@ export function createSessionService({
     if (picks.length === 0) throw new NoSavedWords(enrollmentId);
     const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices);
     // Phase 39 (spec D4). The refresh is recorded once the session exists, so
-    // each event names it; one that changed nothing writes nothing.
-    const write = familyChanges(stored, families, new Date(at).toISOString());
+    // each event names it; one that changed nothing writes nothing. Phase 46
+    // (spec D3): every gloss known for the first time is stamped, family or not.
+    if (families.newlyKnown.size > 0) {
+      await vocabulary.markKnown({ enrollmentId, glossIds: [...families.newlyKnown], at: new Date(at).toISOString() });
+    }
+    const write = familyChanges(stored, families);
     if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
     await jobs.enqueue(PREPARE_SESSION, {
       session_id: sessionId,

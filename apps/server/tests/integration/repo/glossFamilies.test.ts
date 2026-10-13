@@ -28,15 +28,14 @@ afterEach(async () => {
 const repo = <T>(fn: (r: ReturnType<typeof createGlossFamiliesRepo>) => Promise<T>) =>
   withTx(t.db, (tx) => fn(createGlossFamiliesRepo(tx)));
 
-const KNOWN_AT = '2026-10-10T08:00:00.000Z';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** A new family, under the placeholder its members and events name too. */
 const write = (over: Partial<FamilyWrite> = {}): FamilyWrite => ({
   families: [{ id: 'new:0', label: 'pick up', isNew: true }],
   deleteFamilies: [],
   members: [
-    { glossId: glossIds[0], familyId: 'new:0', state: 'known', position: 0, knownAt: KNOWN_AT, sinceChanged: true },
-    { glossId: glossIds[1], familyId: 'new:0', state: 'current', position: 1, knownAt: null, sinceChanged: true },
+    { glossId: glossIds[0], familyId: 'new:0', state: 'known', position: 0, sinceChanged: true },
+    { glossId: glossIds[1], familyId: 'new:0', state: 'current', position: 1, sinceChanged: true },
   ],
   deleteMembers: [],
   events: [
@@ -55,7 +54,7 @@ describe('gloss_families repo (phase 39 D4)', () => {
     expect(await repo((r) => r.load(E))).toEqual([]);
   });
 
-  it('round-trips families, members and known_at, a new family under an id the database made', async () => {
+  it('round-trips families and members, a new family under an id the database made', async () => {
     const id = await created();
     expect(id).toMatch(UUID);
     const [family] = await repo((r) => r.load(E));
@@ -64,8 +63,8 @@ describe('gloss_families repo (phase 39 D4)', () => {
       label: 'pick up',
       createdAt: expect.any(String),
       members: [
-        { glossId: glossIds[0], familyId: id, state: 'known', position: 0, knownAt: new Date(KNOWN_AT).toISOString() },
-        { glossId: glossIds[1], familyId: id, state: 'current', position: 1, knownAt: null },
+        { glossId: glossIds[0], familyId: id, state: 'known', position: 0 },
+        { glossId: glossIds[1], familyId: id, state: 'current', position: 1 },
       ],
     });
   });
@@ -83,7 +82,7 @@ describe('gloss_families repo (phase 39 D4)', () => {
   it('gives each new family of one write its own id', async () => {
     const blowUp = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'blow up', translations: ['לפוצץ', 'להגדיל'] });
     const join = (glossId: string, familyId: string, position: number) =>
-      ({ glossId, familyId, state: 'waiting', position, knownAt: null, sinceChanged: true }) as const;
+      ({ glossId, familyId, state: 'waiting', position, sinceChanged: true }) as const;
     await repo((r) =>
       r.apply(E, SESSION, {
         families: [
@@ -118,8 +117,8 @@ describe('gloss_families repo (phase 39 D4)', () => {
         families: [{ id, label: 'pick up!', isNew: false }],
         deleteFamilies: [],
         members: [
-          { glossId: glossIds[0], familyId: id, state: 'known', position: 0, knownAt: KNOWN_AT, sinceChanged: false },
-          { glossId: glossIds[1], familyId: id, state: 'known', position: 1, knownAt: KNOWN_AT, sinceChanged: true },
+          { glossId: glossIds[0], familyId: id, state: 'known', position: 0, sinceChanged: false },
+          { glossId: glossIds[1], familyId: id, state: 'known', position: 1, sinceChanged: true },
         ],
         deleteMembers: [],
         events: [],

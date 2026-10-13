@@ -1,7 +1,7 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { glossFamilies, glossFamilyEvents, glossFamilyMembers } from '../../src/db/schema';
+import { glossFamilies, glossFamilyEvents, glossFamilyMembers, vocabularyEntries } from '../../src/db/schema';
 
 /**
  * Phase 39 (spec D4). Reads of the recorded gloss families. tests/support/ is the
@@ -18,10 +18,15 @@ export async function readFamilyMembers(db: Db, enrollmentId: string) {
       glossId: glossFamilyMembers.glossId,
       state: glossFamilyMembers.state,
       position: glossFamilyMembers.position,
-      knownAt: glossFamilyMembers.knownAt,
+      // Phase 46 (spec D3): a member's known_at is its gloss's own.
+      knownAt: vocabularyEntries.knownAt,
     })
     .from(glossFamilyMembers)
     .innerJoin(glossFamilies, eq(glossFamilies.id, glossFamilyMembers.familyId))
+    .innerJoin(
+      vocabularyEntries,
+      and(eq(vocabularyEntries.enrollmentId, glossFamilyMembers.enrollmentId), eq(vocabularyEntries.glossId, glossFamilyMembers.glossId)),
+    )
     .where(eq(glossFamilyMembers.enrollmentId, enrollmentId))
     .orderBy(asc(glossFamilies.label), asc(glossFamilyMembers.position));
   return rows.map((row) => ({ ...row, knownAt: row.knownAt ? row.knownAt.toISOString() : null }));

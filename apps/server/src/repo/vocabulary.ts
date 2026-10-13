@@ -317,6 +317,7 @@ export function createVocabularyRepo(tx: Tx) {
         form: string;
         entry_rank: number;
         rendering_rank: number;
+        known_at: string | null;
       }>(sql`
         SELECT ve.gloss_id, g.key, ve.variant_id,
                to_char(ve.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS saved_at,
@@ -328,7 +329,8 @@ export function createVocabularyRepo(tx: Tx) {
                    ON tr.sense_id = m.sense_id AND tr.user_language_code = m.user_language_code
                  WHERE m.gloss_id = ve.gloss_id AND tr.variant_id = ve.variant_id
                    AND tr.user_language_code = e.source_language
-               ), 0) AS rendering_rank
+               ), 0) AS rendering_rank,
+               to_char(ve.known_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS known_at
         FROM vocabulary_entries ve
         JOIN dict_glosses g ON g.id = ve.gloss_id
         JOIN dict_variants v ON v.id = ve.variant_id
@@ -344,7 +346,19 @@ export function createVocabularyRepo(tx: Tx) {
         lemma: row.lemma,
         form: row.form,
         order: [row.entry_rank, row.rendering_rank],
+        knownAt: row.known_at,
       }));
+    },
+
+    /** Phase 46 (spec D3). Stamps `at` as these glosses' known_at where none is set:
+     *  known once, known for good. */
+    markKnown: async (input: { enrollmentId: string; glossIds: string[]; at: string }): Promise<void> => {
+      if (input.glossIds.length === 0) return;
+      await tx.execute(sql`
+        UPDATE vocabulary_entries SET known_at = ${input.at}::timestamptz
+        WHERE enrollment_id = ${input.enrollmentId}
+          AND gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
+          AND known_at IS NULL`);
     },
 
     countEntries: async (enrollmentId: string): Promise<number> => {

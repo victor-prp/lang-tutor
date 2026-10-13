@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { Dimension } from '@lang-tutor/core/domain';
+import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
@@ -49,6 +50,14 @@ async function savedFamily() {
   return { lift, collect };
 }
 
+/** Phase 46. Every saved gloss's known_at, by gloss. */
+async function knownAtOf(): Promise<Map<string, string | null>> {
+  const rows = await t.db.execute<{ gloss_id: string; known_at: Date | null }>(
+    sql`select gloss_id, known_at from vocabulary_entries where enrollment_id = ${E}`,
+  );
+  return new Map(rows.rows.map((row) => [row.gloss_id, row.known_at ? new Date(row.known_at).toISOString() : null]));
+}
+
 /** Creates the next list session, and answers its id and its job's picks; the session is skipped. */
 async function nextSession(): Promise<{ sessionId: string; picks: PrepareSessionPayload['picks'] }> {
   const service = sessions();
@@ -87,7 +96,7 @@ describe('createNextSession records the gloss families (phase 39 D4, D5)', () =>
       { familyId: members[0].familyId, label: 'pick up', glossId: collect, state: 'waiting', position: 1, knownAt: null },
     ]);
     // One transaction's events share their time: their order is not asserted.
-    const evidence = { live: LIVE, stability: {}, known_stability: 7 };
+    const evidence = { live: LIVE, stability: {}, reached: {}, known_stability: 7 };
     const events = await readFamilyEvents(t.db, E);
     expect(events).toHaveLength(2);
     expect(events).toEqual(
@@ -147,5 +156,51 @@ describe('createNextSession records the gloss families (phase 39 D4, D5)', () =>
       { glossId: collect, state: 'current', knownAt: null },
     ]);
     expect(await readFamilyEvents(t.db, E)).toEqual(events);
+  });
+
+  // Phase 46 (spec D3). Known for good, in a family or not.
+  it('stamps known_at on a known gloss that is in no family', async () => {
+    await savedFamily();
+    const apple = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kiwi', translations: ['קיווי'] });
+    await known(apple.glossIds[0]);
+    await nextSession();
+    const knownAt = await knownAtOf();
+    expect(knownAt.get(apple.glossIds[0])).toBe(NOW);
+    expect([...knownAt.values()].filter((at) => at !== null)).toHaveLength(1);
+  });
+
+  it('keeps a meaning known before it had a sibling known, through a lapse, when the sibling is saved', async () => {
+    await savedFamily();
+    const first = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    const [toy] = first.glossIds;
+    await known(toy);
+    await nextSession();
+    // A typo, then the second meaning is saved: a homograph sharing the lemma.
+    await setMemoryStability(t.db, { enrollmentId: E, glossId: toy, dimension: 'spelling', stability: 1 });
+    const second = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', form: 'kites', partOfSpeech: 'verb', translations: ['להטיס'] });
+    const [fly] = second.glossIds;
+    const { picks } = await nextSession();
+
+    const kites = (await readFamilyMembers(t.db, E)).filter(({ glossId }) => glossId === toy || glossId === fly);
+    expect(kites.map(({ glossId, state }) => ({ glossId, state }))).toEqual([
+      { glossId: toy, state: 'known' },
+      { glossId: fly, state: 'current' },
+    ]);
+    expect(picks.find((pick) => pick.gloss_id === fly)).toMatchObject({ known_meanings: ['עפיפון'] });
+  });
+
+  it('counts a skill that reached the bar and has since slipped (spec D1, D2)', async () => {
+    const { lift, collect } = await savedFamily();
+    await known(lift);
+    // Spelling reached the bar on 2026-03-01 and has since slipped to about a day.
+    await setMemoryStability(t.db, { enrollmentId: E, glossId: lift, dimension: 'spelling', stability: 1 });
+    await t.db.execute(sql`update gloss_memory set reached_on = '2026-03-01' where enrollment_id = ${E} and gloss_id = ${lift}`);
+    await nextSession();
+    // Known despite spelling at 1: it reached the bar. Its slip makes it due, and a due
+    // meaning takes the family's slot in this session, so the state is the evidence.
+    expect((await readFamilyMembers(t.db, E)).map(({ glossId, state, knownAt }) => ({ glossId, state, knownAt }))).toEqual([
+      { glossId: lift, state: 'known', knownAt: NOW },
+      { glossId: collect, state: 'current', knownAt: null },
+    ]);
   });
 });

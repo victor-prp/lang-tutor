@@ -43,8 +43,8 @@ const summary = (id: string, status: SessionSummary['status'], source: SessionSu
 /** Two saved words, each a lexeme of its own; `g_a` saved last, so with nothing
  *  else to go on it is asked first (newest new words first, phase 35 D5). */
 const SAVED = [
-  { glossId: 'g_a', key: 'כלב', variantId: 'v_a', savedAt: '2026-10-11T09:00:00.000000Z', lexemeId: 'l_a', lemma: 'dog', form: 'dog', order: [0, 0] as [number, number] },
-  { glossId: 'g_b', key: 'חתול', variantId: 'v_b', savedAt: '2026-10-10T09:00:00.000000Z', lexemeId: 'l_b', lemma: 'cat', form: 'cat', order: [0, 0] as [number, number] },
+  { glossId: 'g_a', key: 'כלב', variantId: 'v_a', savedAt: '2026-10-11T09:00:00.000000Z', lexemeId: 'l_a', lemma: 'dog', form: 'dog', order: [0, 0] as [number, number], knownAt: null },
+  { glossId: 'g_b', key: 'חתול', variantId: 'v_b', savedAt: '2026-10-10T09:00:00.000000Z', lexemeId: 'l_b', lemma: 'cat', form: 'cat', order: [0, 0] as [number, number], knownAt: null },
 ];
 
 function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
@@ -65,7 +65,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
         },
         ...session,
       }),
-      vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => SAVED, countEntries: async () => SAVED.length }),
+      vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => SAVED, countEntries: async () => SAVED.length, markKnown: async () => {} }),
       memory: stub<MemoryRepo>({ findRows: async () => [] }),
       progress: stub<ProgressRepo>({ findRows: async () => [] }),
       glossFamilies: stub<GlossFamiliesRepo>({ load: async () => [] }),
