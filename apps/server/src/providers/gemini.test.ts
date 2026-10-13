@@ -6,7 +6,9 @@ import { z } from 'zod';
 import { LlmUnavailable } from '../errors';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient, toGeminiSchema } from './gemini';
 
-const request = { system: 'be helpful', user: 'book', schema: LlmTranslationSchema };
+const R = { kind: 'lookup' } as const;
+const ignore = async () => {};
+const request = { system: 'be helpful', user: 'book', schema: LlmTranslationSchema, record: R };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -26,6 +28,7 @@ function clientWith(fetchImpl: typeof globalThis.fetch) {
     apiKey: 'secret',
     model: 'test-model',
     timeoutMs: 50,
+    onCall: ignore,
   });
 }
 
@@ -219,9 +222,9 @@ describe('createGeminiTranscriber (phase 25)', () => {
       seen.push({ url, init });
       return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"heard":"gatto"}' }] } }] }), { status: 200 });
     }) as unknown as typeof globalThis.fetch;
-    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000 });
+    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore });
 
-    expect(await transcribe({ system: 'transcribe the spoken audio', audio: 'QUJD', mimeType: 'audio/aac', schema })).toBe('{"heard":"gatto"}');
+    expect(await transcribe({ system: 'transcribe the spoken audio', audio: 'QUJD', mimeType: 'audio/aac', schema, record: R })).toBe('{"heard":"gatto"}');
     expect(seen[0].url).toBe('http://g/v1beta/models/m:generateContent');
     expect((seen[0].init.headers as Record<string, string>)['x-goog-api-key']).toBe('k');
     const body = JSON.parse(String(seen[0].init.body));
@@ -232,28 +235,30 @@ describe('createGeminiTranscriber (phase 25)', () => {
 
   it('answers an empty candidate with the empty string', async () => {
     const fetch = (async () => new Response(JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } }), { status: 200 })) as unknown as typeof globalThis.fetch;
-    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000 });
-    expect(await transcribe({ system: 's', audio: 'QUJD', mimeType: 'audio/aac', schema })).toBe('');
+    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore });
+    expect(await transcribe({ system: 's', audio: 'QUJD', mimeType: 'audio/aac', schema, record: R })).toBe('');
   });
 
   it('turns a failure status and a timeout into LlmUnavailable', async () => {
     const failing = (async () => new Response('{}', { status: 400 })) as unknown as typeof globalThis.fetch;
     await expect(
-      createGeminiTranscriber({ fetch: failing, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000 })({
+      createGeminiTranscriber({ fetch: failing, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore })({
         system: 's',
         audio: 'QUJD',
         mimeType: 'audio/aac',
         schema,
+        record: R,
       }),
     ).rejects.toBeInstanceOf(LlmUnavailable);
     const hanging = ((_: string, init: RequestInit) =>
       new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(new Error('aborted'))))) as unknown as typeof globalThis.fetch;
     await expect(
-      createGeminiTranscriber({ fetch: hanging, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 10 })({
+      createGeminiTranscriber({ fetch: hanging, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 10, onCall: ignore })({
         system: 's',
         audio: 'QUJD',
         mimeType: 'audio/aac',
         schema,
+        record: R,
       }),
     ).rejects.toThrow(/timed out after 10ms/);
   });
@@ -265,9 +270,10 @@ describe('createGeminiVisionClient', () => {
     user: 'Language: Italian.',
     schema: LlmTranslationSchema,
     image: { data: 'QUJD', mimeType: 'image/jpeg' },
+    record: R,
   };
   const visionWith = (fetchImpl: typeof globalThis.fetch) =>
-    createGeminiVisionClient({ fetch: fetchImpl, baseUrl: 'https://example.test', apiKey: 'secret', model: 'test-model', timeoutMs: 50 });
+    createGeminiVisionClient({ fetch: fetchImpl, baseUrl: 'https://example.test', apiKey: 'secret', model: 'test-model', timeoutMs: 50, onCall: ignore });
 
   it('sends the image as inlineData before the text, with the system instruction and the schema', async () => {
     let sent: { url: string; body: Record<string, unknown> } | undefined;
@@ -309,7 +315,7 @@ describe('createGeminiClient thinkingBudget (phase 27)', () => {
       body = JSON.parse(String(init.body));
       return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }), { status: 200 });
     }) as unknown as typeof globalThis.fetch;
-    await createGeminiClient({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, thinkingBudget })({ system: 's', user: 'u', schema });
+    await createGeminiClient({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, thinkingBudget, onCall: ignore })({ system: 's', user: 'u', schema, record: R });
     return body!;
   };
 
@@ -319,5 +325,114 @@ describe('createGeminiClient thinkingBudget (phase 27)', () => {
 
   it('sends no thinkingConfig key without one', async () => {
     expect(Object.keys((await seenBody()).generationConfig)).not.toContain('thinkingConfig');
+  });
+});
+
+describe('every call is reported (phase 47)', () => {
+  type Seen = Parameters<Parameters<typeof createGeminiClient>[0]['onCall']>[0];
+  const record = { kind: 'session_generation', sessionId: 's1', attempt: 2, enrollmentId: 'e1', userId: 'u1' };
+  const reporting = (fetchImpl: typeof globalThis.fetch, timeoutMs = 50) => {
+    const seen: Seen[] = [];
+    const client = createGeminiClient({
+      fetch: fetchImpl,
+      baseUrl: 'https://example.test',
+      apiKey: 'secret',
+      model: 'test-model',
+      timeoutMs,
+      thinkingBudget: 1024,
+      onCall: async (call) => {
+        seen.push(call);
+      },
+    });
+    return { seen, call: () => client({ system: 'be helpful', user: 'book', schema: LlmTranslationSchema, record }) };
+  };
+
+  it('reports a success with its body, answer, tokens and finish reason', async () => {
+    const answer = {
+      ...geminiBody('{"kind":"word","entries":[]}'),
+      usageMetadata: { promptTokenCount: 1161, candidatesTokenCount: 419, thoughtsTokenCount: 802 },
+    };
+    const { seen, call } = reporting(async () => jsonResponse(answer));
+    await expect(call()).resolves.toBe('{"kind":"word","entries":[]}');
+    expect(seen).toEqual([
+      {
+        record,
+        model: 'test-model',
+        startedAt: expect.any(Date),
+        request: expect.objectContaining({
+          systemInstruction: { parts: [{ text: 'be helpful' }] },
+          contents: [{ role: 'user', parts: [{ text: 'book' }] }],
+          generationConfig: expect.objectContaining({ thinkingConfig: { thinkingBudget: 1024 } }),
+        }),
+        response: answer,
+        httpStatus: 200,
+        error: null,
+        durationMs: expect.any(Number),
+        promptTokens: 1161,
+        outputTokens: 419,
+        thinkingTokens: 802,
+        finishReason: 'STOP',
+      },
+    ]);
+    expect(JSON.stringify(seen[0].request)).not.toContain('secret');
+  });
+
+  it('reports a failure status with its body, then throws', async () => {
+    const { seen, call } = reporting(async () => jsonResponse({ error: { message: 'overloaded' } }, 503));
+    await expect(call()).rejects.toBeInstanceOf(LlmUnavailable);
+    expect(seen).toEqual([
+      expect.objectContaining({ httpStatus: 503, response: { error: { message: 'overloaded' } }, error: 'responded 503', thinkingTokens: null }),
+    ]);
+  });
+
+  it('reports a timeout with no response, then throws', async () => {
+    const { seen, call } = reporting(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+      10,
+    );
+    await expect(call()).rejects.toThrow('timed out after 10ms');
+    expect(seen).toEqual([expect.objectContaining({ response: null, httpStatus: null, error: 'timed out after 10ms', finishReason: null })]);
+  });
+
+  it('reports a network failure with no response, then throws', async () => {
+    const { seen, call } = reporting(async () => {
+      throw new TypeError('fetch failed');
+    });
+    await expect(call()).rejects.toThrow('network failure');
+    expect(seen).toEqual([expect.objectContaining({ response: null, httpStatus: null, error: 'network failure' })]);
+  });
+
+  it('reports an unreadable body as its text, then throws', async () => {
+    const { seen, call } = reporting(async () => new Response('<html>gateway</html>', { status: 200 }));
+    await expect(call()).rejects.toBeInstanceOf(LlmUnavailable);
+    expect(seen).toEqual([
+      expect.objectContaining({ response: { text: '<html>gateway</html>' }, httpStatus: 200, error: 'response body was not JSON' }),
+    ]);
+  });
+
+  it('reports audio and image calls with the media replaced by its type and size', async () => {
+    const seen: Seen[] = [];
+    const deps = {
+      fetch: (async () => jsonResponse(geminiBody('{}'))) as typeof globalThis.fetch,
+      baseUrl: 'http://g',
+      apiKey: 'k',
+      model: 'm',
+      timeoutMs: 1_000,
+      onCall: async (call: Seen) => {
+        seen.push(call);
+      },
+    };
+    await createGeminiTranscriber(deps)({ system: 's', audio: 'QUJDRA==', mimeType: 'audio/aac', schema: z.object({}), record: R });
+    await createGeminiVisionClient(deps)({ system: 's', user: 'u', schema: z.object({}), image: { data: 'QUJD', mimeType: 'image/jpeg' }, record: R });
+    expect((seen[0].request as { contents: unknown }).contents).toEqual([
+      { role: 'user', parts: [{ inlineData: { mimeType: 'audio/aac', bytes: 4 } }] },
+    ]);
+    expect((seen[1].request as { contents: unknown }).contents).toEqual([
+      { role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', bytes: 3 } }, { text: 'u' }] },
+    ]);
+    expect(JSON.stringify(seen)).not.toContain('QUJD');
   });
 });

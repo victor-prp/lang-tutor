@@ -38,7 +38,28 @@ export function toGeminiSchema(schema: ZodType): Record<string, unknown> {
   return strip(z.toJSONSchema(schema)) as Record<string, unknown>;
 }
 
-type GeminiDeps = {
+/**
+ * Phase 47 (spec D4). One request as this provider saw it, reported once
+ * whatever its outcome. The record is the caller's, passed through untouched:
+ * this layer neither reads nor shapes it. Satisfies services/llm.ts's ModelCall
+ * structurally; composition.ts is where that is checked (ADR 0001 R10, R11).
+ */
+export type GeminiCall<R> = {
+  record: R;
+  model: string;
+  startedAt: Date;
+  request: unknown;
+  response: unknown;
+  httpStatus: number | null;
+  error: string | null;
+  durationMs: number;
+  promptTokens: number | null;
+  outputTokens: number | null;
+  thinkingTokens: number | null;
+  finishReason: string | null;
+};
+
+type GeminiDeps<R> = {
   fetch: typeof globalThis.fetch;
   baseUrl: string;
   apiKey: string;
@@ -46,18 +67,66 @@ type GeminiDeps = {
   timeoutMs: number;
   // A setting, not a collaborator (ADR 0002 R5). Phase 27: 0 turns thinking off.
   thinkingBudget?: number;
+  // Phase 47 (spec D4). Told about every request, after it ended and before
+  // its answer is returned or its failure thrown. It never throws (spec D5).
+  onCall: (call: GeminiCall<R>) => Promise<void>;
 };
 
+type Envelope = {
+  candidates?: { content?: { parts?: { text?: unknown }[] }; finishReason?: unknown }[];
+  usageMetadata?: { promptTokenCount?: unknown; candidatesTokenCount?: unknown; thoughtsTokenCount?: unknown };
+};
+
+const count = (value: unknown): number | null => (typeof value === 'number' ? value : null);
+
+/** Phase 47 (spec D4, ruling R5). A body as recorded: each inline clip or photo
+ *  replaced by its type and decoded size, so no media reaches the record. */
+function withoutMedia(body: Record<string, unknown>): Record<string, unknown> {
+  const contents = body.contents as { role: string; parts: Record<string, unknown>[] }[];
+  return {
+    ...body,
+    contents: contents.map((content) => ({
+      ...content,
+      parts: content.parts.map((part) => {
+        const inline = part.inlineData as { mimeType: string; data: string } | undefined;
+        if (!inline) return part;
+        const padding = inline.data.endsWith('==') ? 2 : inline.data.endsWith('=') ? 1 : 0;
+        return { inlineData: { mimeType: inline.mimeType, bytes: (inline.data.length * 3) / 4 - padding } };
+      }),
+    })),
+  };
+}
+
 /** One generateContent call and its envelope: the budget, the key header, the
- *  failure mapping and the first candidate's text ('' for none). */
-async function generate(deps: GeminiDeps, body: Record<string, unknown>): Promise<string> {
+ *  failure mapping and the first candidate's text ('' for none). Since phase 47
+ *  it reports the call to `onCall` however it ends. */
+async function generate<R>(deps: GeminiDeps<R>, record: R, body: Record<string, unknown>): Promise<string> {
   const endpoint = `${deps.baseUrl}/v1beta/models/${deps.model}:generateContent`;
+  const startedAt = new Date();
+  const report = (outcome: { response: unknown; httpStatus: number | null; error: string | null }) => {
+    const envelope = (outcome.response ?? {}) as Envelope;
+    const usage = envelope.usageMetadata ?? {};
+    const finish = envelope.candidates?.[0]?.finishReason;
+    return deps.onCall({
+      record,
+      model: deps.model,
+      startedAt,
+      request: withoutMedia(body),
+      ...outcome,
+      durationMs: Date.now() - startedAt.getTime(),
+      promptTokens: count(usage.promptTokenCount),
+      outputTokens: count(usage.candidatesTokenCount),
+      thinkingTokens: count(usage.thoughtsTokenCount),
+      finishReason: typeof finish === 'string' ? finish : null,
+    });
+  };
   // One budget for the whole call. No retry: a learner who taps retry *is*
   // the retry, and three sequential ten-second waits would be worse than one.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), deps.timeoutMs);
 
   let response: Response;
+  let text: string;
   try {
     response = await deps.fetch(endpoint, {
       method: 'POST',
@@ -70,34 +139,44 @@ async function generate(deps: GeminiDeps, body: Record<string, unknown>): Promis
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+    // Read inside the budget: a body that stalls is as late as a header that does.
+    text = await response.text();
   } catch {
     // Abort and network failure arrive here identically. The message names the
     // cause and never the key.
-    throw new LlmUnavailable(controller.signal.aborted ? `timed out after ${deps.timeoutMs}ms` : 'network failure');
+    const error = controller.signal.aborted ? `timed out after ${deps.timeoutMs}ms` : 'network failure';
+    await report({ response: null, httpStatus: null, error });
+    throw new LlmUnavailable(error);
   } finally {
     clearTimeout(timer);
   }
 
-  if (!response.ok) throw new LlmUnavailable(`responded ${response.status}`);
-
   let json: unknown;
   try {
-    json = await response.json();
+    json = JSON.parse(text);
   } catch {
-    throw new LlmUnavailable('response body was not JSON');
+    const error = response.ok ? 'response body was not JSON' : `responded ${response.status}`;
+    await report({ response: { text }, httpStatus: response.status, error });
+    throw new LlmUnavailable(error);
   }
+
+  if (!response.ok) {
+    const error = `responded ${response.status}`;
+    await report({ response: json, httpStatus: response.status, error });
+    throw new LlmUnavailable(error);
+  }
+  await report({ response: json, httpStatus: response.status, error: null });
 
   // A safety block arrives as promptFeedback.blockReason with no candidate.
   // Empty string is the contract's "no content" — the input was refused, the
   // provider was not broken.
-  const text = (json as { candidates?: { content?: { parts?: { text?: unknown }[] } }[] })?.candidates?.[0]?.content
-    ?.parts?.[0]?.text;
-  return typeof text === 'string' ? text : '';
+  const answer = (json as Envelope)?.candidates?.[0]?.content?.parts?.[0]?.text;
+  return typeof answer === 'string' ? answer : '';
 }
 
-export function createGeminiClient(deps: GeminiDeps) {
-  return (request: { system: string; user: string; schema: ZodType }): Promise<string> =>
-    generate(deps, {
+export function createGeminiClient<R>(deps: GeminiDeps<R>) {
+  return (request: { system: string; user: string; schema: ZodType; record: R }): Promise<string> =>
+    generate(deps, request.record, {
       systemInstruction: { parts: [{ text: request.system }] },
       contents: [{ role: 'user', parts: [{ text: request.user }] }],
       generationConfig: {
@@ -115,9 +194,9 @@ export function createGeminiClient(deps: GeminiDeps) {
  * about 0.3 s of every call. `thinkingBudget` is the 2.5 family's field
  * (GEMINI_MODEL is gemini-2.5-flash); a change of model re-checks it.
  */
-export function createGeminiTranscriber(deps: GeminiDeps) {
-  return (request: { system: string; audio: string; mimeType: string; schema: ZodType }): Promise<string> =>
-    generate(deps, {
+export function createGeminiTranscriber<R>(deps: GeminiDeps<R>) {
+  return (request: { system: string; audio: string; mimeType: string; schema: ZodType; record: R }): Promise<string> =>
+    generate(deps, request.record, {
       systemInstruction: { parts: [{ text: request.system }] },
       contents: [{ role: 'user', parts: [{ inlineData: { mimeType: request.mimeType, data: request.audio } }] }],
       generationConfig: {
@@ -135,14 +214,15 @@ export function createGeminiTranscriber(deps: GeminiDeps) {
  * image would widen it for every caller. Wired only in composition.ts, where
  * the `: VisionClient` annotation checks it.
  */
-export function createGeminiVisionClient(deps: GeminiDeps) {
+export function createGeminiVisionClient<R>(deps: GeminiDeps<R>) {
   return (request: {
     system: string;
     user: string;
     schema: ZodType;
     image: { data: string; mimeType: string };
+    record: R;
   }): Promise<string> =>
-    generate(deps, {
+    generate(deps, request.record, {
       systemInstruction: { parts: [{ text: request.system }] },
       contents: [
         {
