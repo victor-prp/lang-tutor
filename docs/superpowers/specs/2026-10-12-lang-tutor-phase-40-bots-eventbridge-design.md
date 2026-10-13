@@ -176,6 +176,19 @@ There is no unit to test: this is Terraform, a workflow line and two runbooks.
   one :17 hit the placeholder on purpose (steps 5 and 6 below), and the runbook checks the
   destination's state and has two commands that bring it back.
 - **The token command** keeps the token out of the shell history, not the process list (D3).
+- **The rollout's rehearsal, 2026-10-12.** Instead of waiting for :17, the rule was pointed for one
+  firing at 14:45 UTC (`put-rule` with a one-time cron), then restored by a `bootstrap apply`
+  (2 to change: the schedule, and the role's trust policy, which names the rule and is re-read).
+  - The placeholder's call was refused: within a minute the connection was `DEAUTHORIZED` and the
+    destination `INACTIVE`.
+  - Both signals worked: the `Connection Deauthorized` rule matched and sent to SNS, and the alarm
+    went to ALARM and sent to SNS. So signal 2 does cover a refused token (Risks).
+  - Neither email arrived: the subscription was still `PendingConfirmation` (the confirmation
+    email had been opened, not its link clicked). The runbook now checks the subscription.
+  - `update-connection` with the real token: `AUTHORIZED` and `ACTIVE` within seconds, with no
+    other command. The runbook drops the two recovery commands it had prepared.
+  - The first hourly firing, 15:17 UTC, created a `workflow_dispatch` run at 15:17:05, which
+    played day 4 green.
 
 ## Left for Victor
 
