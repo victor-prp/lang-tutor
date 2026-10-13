@@ -871,6 +871,8 @@ export type DistractorCase = {
     synonyms: string[];
     alternatives?: string[];
   }[];
+  /** Phase 48 (spec D8). Also asks the real checker, and at least three wrong options must survive it. */
+  checked?: boolean;
 };
 
 export const DISTRACTOR_CASES: DistractorCase[] = [
@@ -986,6 +988,18 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
       { task: 'word', form: 'finestra', lemma: 'finestra', partOfSpeech: 'noun', translation: 'חלון', synonyms: ['finestrella'] },
       { task: 'typed', form: 'macchina', lemma: 'macchina', partOfSpeech: 'noun', translation: 'מכונית', synonyms: [], alternatives: ['auto', 'automobile'] },
       { task: 'meaning', form: 'acqua', lemma: 'acqua', partOfSpeech: 'noun', translation: 'מים', synonyms: [] },
+    ],
+  },
+  {
+    // Phase 48 (spec D8). The bots' 9cb1b1a8: vero's reversed card got Hebrew options, and broad
+    // words leave few wrong meanings the checker accepts.
+    label: 'vero, a broad Italian word, both ways',
+    from: 'it',
+    to: 'he',
+    checked: true,
+    items: [
+      { task: 'meaning', form: 'vero', lemma: 'vero', partOfSpeech: 'adjective', translation: 'אמיתי', synonyms: ['נכון', 'אמת', 'ממשי', 'מציאותי', 'אותנטי', 'כן', 'באמת', 'צודק', 'מדויק'] },
+      { task: 'word', form: 'vero', lemma: 'vero', partOfSpeech: 'adjective', translation: 'אמיתי', synonyms: ['giusto', 'esatto', 'corretto', 'certo', 'reale', 'autentico', 'verace', 'davvero', 'vera', 'sì'] },
     ],
   },
 ];
@@ -1275,6 +1289,8 @@ export type SentenceCase = {
   task: 'gap' | 'sentence' | 'translate';
   from: LanguageCode;
   items: SentenceCaseItem[];
+  /** Phase 48 (spec D8). Also asks the real checker, and at least three wrong options must survive it. */
+  checked?: boolean;
 };
 
 const word = (
@@ -1334,6 +1350,19 @@ export const GAP_CASES: SentenceCase[] = [
       }),
       word('tulip', 'tulip', 'noun', 'צבעוני', 'She planted a red tulip.', 'היא שתלה צבעוני אדום.', {
         fits: ['rose', 'flower', 'poppy', 'daisy', 'lily', 'geranium'],
+      }),
+    ],
+  },
+  {
+    // Phase 48 (spec D8). Lane 0's 38b003b4: the model offered sugar, salt, oil, water, bread, fruit;
+    // the checker said four fit, every attempt.
+    label: 'gap en (38b003b4): anything goes in coffee — cream',
+    task: 'gap',
+    from: 'en',
+    checked: true,
+    items: [
+      word('cream', 'cream', 'noun', 'שמנת', 'I like to put cream in my coffee.', 'אני אוהב לשים שמנת בקפה שלי.', {
+        fits: ['sugar', 'milk', 'honey', 'salt', 'water', 'oil', 'cinnamon', 'butter', 'syrup', 'ice', 'whiskey', 'chocolate', 'cocoa', 'vanilla', 'caramel', 'lemon', 'spice', 'foam', 'sweetener'],
       }),
     ],
   },
@@ -1719,6 +1748,12 @@ export const CHECK_CASES: CheckCase[] = [
     target: 'en',
     item: { key: 'q1', task: 'gap', sentence: 'She ___ the door and walked in.', options: ['unlocked', 'ate', 'slept'] },
     alsoRight: { unlocked: true, ate: false, slept: false },
+  },
+  {
+    label: 'checker gap (38b003b4): sugar still fits "put ___ in my coffee", chair and music do not',
+    target: 'en',
+    item: { key: 'q1', task: 'gap', sentence: 'I like to put ___ in my coffee.', options: ['sugar', 'chair', 'music'] },
+    alsoRight: { sugar: true, chair: false, music: false },
   },
   // Ruling R3, 71b0b407: the sentence the context call wrote for saw on 2026-10-11 (CONTEXT_CASES' first).
   {
