@@ -21,11 +21,13 @@ export const PREPARE_SESSION_FAILED = 'prepare-session-failed';
  *  (config.ts); tests do. */
 export const SESSION_GENERATION_BUDGET_MS = 120_000;
 
-/** Phase 47 (spec D1). The generation call's thinking budget, in tokens.
- *  Uncapped, gemini-2.5-flash once thought 62,910 tokens for four minutes and
- *  then wrote Hebrew options where English ones were asked; at 1024 the same
- *  request took 6.7 s and answered right three times out of three. */
-export const SESSION_GENERATION_THINKING = 1024;
+/** Phase 47 (spec D1, ruling R8). The generation call's thinking budget, in
+ *  tokens. Uncapped, gemini-2.5-flash once thought 62,910 tokens for four
+ *  minutes over one batch. 1024 failed the eval's gap group in five runs of
+ *  five, and 2048 wrote Hebrew options for that batch's English words five
+ *  times of five; at 4096 the gap group passed five of five and the batch
+ *  answered in English eight of eight, in 15–19 s. */
+export const SESSION_GENERATION_THINKING = 4096;
 
 /** Phase 34 (spec D6, D8, ruling R12). The most the context call may take, the
  *  call after the batch. A minute: measured at about 7 s for a full session, and

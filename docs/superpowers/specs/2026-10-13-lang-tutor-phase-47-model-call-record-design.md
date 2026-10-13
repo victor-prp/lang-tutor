@@ -2,7 +2,8 @@
 
 - **Status:** Scoped with Victor on 2026-10-13 (one-pager), the table, the approach (A) and the
   recording path discussed and approved; then "continue till PR": the prune and the rest are
-  self-approved (CLAUDE.md, *Continue till PR*). Rulings are at the end.
+  self-approved (CLAUDE.md, *Continue till PR*). Rulings are at the end. Implemented on branch
+  `phase-47-model-call-record`. Building moved the cap from 1024 to 4096 (R8).
 - **Date:** 2026-10-13
 - **Source:** the one-pager `drafts/2026-10-13-model-call-record-one-pager.md` (gitignored; its
   Done-means are restated below), lane 0's failed stocks of 2026-10-13, and the measurements
@@ -47,6 +48,7 @@ prune (D5); the attempt number (D6); an eval case for the century request (D7).
 
 **Out:**
 
+- the Hebrew options themselves: a prompt weakness (R8), for the next phase or a prompt change;
 - a failed card degrading instead of failing the session: Victor's next phase, from
   `drafts/2026-10-13-session-fails-on-one-card-brief.md`;
 - rebuilding a failed stock automatically: phase 43's R4 stands;
@@ -56,9 +58,9 @@ prune (D5); the attempt number (D6); an eval case for the century request (D7).
 
 ---
 
-## D1. The session-generation call: 1024 thinking tokens, 120 s
+## D1. The session-generation call: 4096 thinking tokens, 120 s
 
-`sessionLlm` gets `thinkingBudget: SESSION_GENERATION_THINKING` (1024), as phase 45 gave the
+`sessionLlm` gets `thinkingBudget: SESSION_GENERATION_THINKING` (4096, R8), as phase 45 gave the
 translation judge its 512. `SESSION_GENERATION_BUDGET_MS` drops from 300 s to 120 s, so Done-means
 1 holds by construction: a call the cap did not keep short is cut at 120 s and fails the attempt,
 which pg-boss retries as today. `PREPARE_SESSION_EXPIRY_SECONDS` follows from the budgets, from 840 s
@@ -68,6 +70,17 @@ Measured with the eval (one full run each, 18 session-generation calls, run side
 7.2 s median, 11.4 s slowest; 1024 5.7 s and 7.2 s; 4096 7.3 s and 17.5 s. The generation rows'
 tier 2 was 107, 106 and 108 of 109: within the run-to-run noise of the calls left unchanged. The
 eval's own client for this prompt gets the same cap.
+
+Building found 1024 too tight, and the cap is 4096 (R8). Five runs of the gap cases at each budget:
+
+| budget | gap tier 2, five runs | generation median / slowest | thinking median / max | century batch, English options |
+|---|---|---|---|---|
+| none | 9/9 ×5 | 11.4 s / 13.5 s | 2,089 / 2,710 | 1 of 3 (the other two ran away, 4 min) |
+| 1024 | 7, 7, 8, 7, 8 of 9 | 5.7 s / 6.1 s | 845 / 921 | 3 of 3 |
+| 2048 | 9/9 ×5 | 8.2 s / 9.2 s | 1,408 / 1,640 | **0 of 5** |
+| 4096 | 9/9 ×5 | 10.3 s / 12.8 s | 1,953 / 2,448 | 8 of 8, 15–19 s |
+
+The full eval at 4096 passes: tier 1 clean, tier 2 273/285, gap 9/9.
 
 ## D2. The table
 
@@ -155,7 +168,8 @@ hands it to the three calls of the attempt. Still one service call per handler (
 ## D7. An eval case for the century request
 
 A distractor case built from the century request's two "word" items (century → מאה, dish →
-צלחת), so the eval holds the one prompt known to run away. With the cap it must answer in English.
+צלחת) and its two typed items, so the eval holds the prompt known to run away. With the cap it
+answers in English; the existing "every wrong option is in English script" check fails it otherwise.
 
 ---
 
@@ -189,3 +203,11 @@ Taken under "continue till PR", for Victor to overturn.
   kind of data from a word list, and large.
 - **R6. The eval records nothing.** It has no database; its clients get a no-op `onCall`.
 - **R7. Retention is 7 days** (Victor, in brainstorming; first scoped as 30).
+- **R8. The cap is 4096, not the 1024 Victor approved.** 1024 failed the eval's gap group in every
+  one of five runs (a wrong option that also fits the blank: *mangio* for *compro*, *finish* for
+  *begin*), and the eval must pass without lowering `TIER2_THRESHOLD`. 2048 passed the gap group
+  but wrote Hebrew options for the century batch five times of five. 4096 passed both, and still
+  bounds the runaway: thinking never passed about 4k tokens, against 62,910 uncapped. The Hebrew
+  options are not a thinking problem: they come and go with the budget (1024 English, 2048 Hebrew,
+  4096 English), so the prompt or the next phase's degrade-the-card is their fix. 3072 answered
+  century in English five of five at about 12 s but was not run on the gap cases.

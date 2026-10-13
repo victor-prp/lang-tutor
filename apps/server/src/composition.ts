@@ -192,7 +192,7 @@ export function createServerDeps(io: {
     onCall,
     timeoutMs: io.sessionGenerationTimeoutMs,
     // Phase 47 (spec D1). Uncapped, its thinking once ran to 62,910 tokens and
-    // four minutes, and wrote Hebrew options where English ones were asked.
+    // four minutes over one batch.
     thinkingBudget: SESSION_GENERATION_THINKING,
   });
 
