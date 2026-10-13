@@ -5,7 +5,7 @@ import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
 import { CHECK_MARKER } from '../../../src/domain/check';
-import type { Task } from '../../../src/domain/distractors';
+import { DISTRACTOR_MARKER, type Task } from '../../../src/domain/distractors';
 import type { PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { insertLexeme } from '../../support/dictRows';
@@ -213,5 +213,33 @@ describe('the known-right set and the checker, through the database', () => {
     ).rejects.toThrow();
     expect((await deps.sessions.getSession('u_1', sessionId)).status).toBe('preparing');
     expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_preparation_attempt_failed', stage: 'checker' }));
+  });
+
+  // Phase 48 (spec Done-means 1 and 3). Lane 0's 38b003b4: the checker calls a card's options right, the same
+  // answer every attempt. Seven cards, so the one refused is dropped, in one attempt, with no retry. The new word
+  // is a multiple choice (p 1) and asked first; the six typed picks (p 0.7 each) are spread by the plan over the
+  // three typed types, a tie going to the type used least: a typed translation, a typed cloze and a sentence
+  // translation, twice each. That is what the stubbed tasks name, by position.
+  it('drops a card the checker calls entirely right, in one attempt, and keeps the other six', async () => {
+    const lemmas = ['blow up', 'table', 'lamp', 'river', 'bread', 'chair', 'window'];
+    const translations = ['לנפח', 'שולחן', 'מנורה', 'נהר', 'לחם', 'כיסא', 'חלון'];
+    const words: Saved[] = [];
+    // One at a time, as every other test here saves its words.
+    for (const [i, lemma] of lemmas.entries()) {
+      words.push(await saved(EN, lemma, [translations[i]], { partOfSpeech: i === 0 ? 'verb' : 'noun' }));
+    }
+    const SIX = ['לקפל', 'לשבור', 'לצבוע', 'לבשל', 'לכתוב', 'לשיר'];
+    const { questions } = await prepared(
+      EN,
+      words.map((word) => pick(word)),
+      [{}, ...Array.from({ length: 6 }, () => produce(0.7))],
+      { tasks: ['meaning', 'typed', 'sentence', 'translate', 'typed', 'sentence', 'translate'], overrides: { q1: { distractors: SIX } } },
+      { overrides: { q1: { options: SIX.map(() => true) } } },
+    );
+    expect(questions).toHaveLength(6);
+    expect(questions.map((q) => q.type)).not.toContain('multiple_choice');
+    expect(await countGeminiRequests(ns, DISTRACTOR_MARKER)).toBe(1);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'card_dropped', key: 'q1', stage: 'checker' }));
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 6, planned_count: 7, dropped_count: 1 }));
   });
 });
