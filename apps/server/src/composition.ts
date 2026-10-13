@@ -30,6 +30,7 @@ import { createPhotoImportService, type PhotoImportService } from './services/ph
 import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
+import { TRANSLATION_JUDGE_THINKING } from './domain/judge';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
 import { createGrantService, type GrantService } from './services/grants';
@@ -232,6 +233,17 @@ export function createServerDeps(io: {
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: 0,
   });
+  // Phase 45 (spec D3). The translation judge thinks before it answers: with thinking
+  // off it took "talk with everyone" for "communicate clearly with everyone". 512
+  // tokens measured about 2.4 s a call, inside the judge's own budget.
+  const translationJudge: LlmClient = createGeminiClient({
+    fetch: io.fetch,
+    baseUrl: io.gemini.baseUrl,
+    apiKey: io.gemini.apiKey,
+    model: io.gemini.model,
+    timeoutMs: io.judgeTimeoutMs,
+    thinkingBudget: TRANSLATION_JUDGE_THINKING,
+  });
 
   // Phase 29 (spec D16). The one place that names both the Resend provider and
   // the SendCode contract it satisfies (ADR 0001 R11).
@@ -270,6 +282,7 @@ export function createServerDeps(io: {
       checkerLlm,
       transcriber,
       judge,
+      translationJudge,
     }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),

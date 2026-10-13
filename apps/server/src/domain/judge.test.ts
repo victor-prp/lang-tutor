@@ -145,6 +145,9 @@ describe('buildTranslationJudgePrompt', () => {
     expect(prompt.system).toContain('one-letter or accent slip');
     expect(prompt.system).toContain('another word instead of it');
     expect(prompt.system).toContain('including the wrong form');
+    // Phase 45 (spec D2). "clearly" left out of a sentence about communicating clearly.
+    expect(prompt.system).toContain('changed or left out');
+    expect(prompt.system).toContain('how something is done, such as clearly, quickly or very');
   });
 });
 
