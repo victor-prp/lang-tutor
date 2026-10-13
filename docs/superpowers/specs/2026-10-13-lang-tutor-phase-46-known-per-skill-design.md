@@ -164,4 +164,21 @@ db:progress:recompute`, the hosting runbook's pattern).
 
 ## As built
 
-Rulings made while building go here.
+Rulings made while building. The text above stands unless a line here says otherwise.
+
+- **The gloss-merge tool keeps the earliest of each (D1, D3).** `repo/glosses.ts` folds two glosses one
+  enrollment saved; per dimension it still keeps the row with the larger stability, but `reached_on` becomes the
+  earlier of the two rows' dates, and the surviving entry's `known_at` the earlier of the two entries'. A skill
+  reached, or a gloss known, under either gloss was reached or known.
+- **`markKnown` runs only when something is newly known (D3)**, as the spec says; a refresh that stamps nothing
+  touches `vocabulary_entries` not at all.
+- **`familyChanges` no longer takes the clock.** Its `at` existed only for `known_at`, which `stockNext` now
+  stamps on the gloss with the same `now()`.
+- **The families-over-days run lasts twenty days, not ten (D6).** With phase 37's learner, missing every fifth
+  card, the five-meaning word is asked in all six sessions a day; it is known on day 20 (session 118) and its
+  second meaning on session 213, while the homograph unlocks on day 3. Under phase 39's rule (shown by removing
+  the reached arm) no second meaning ever came, sixty days included.
+- **Support helpers (ADR 0004).** The families service test reads `known_at` and dates `reached_on` through
+  `readKnownAt` and `setReachedOn` in `tests/support`, not raw SQL.
+- **No lane was free** while building: unit tests, typecheck and the ADR checks ran locally, every touched
+  integration file ran under its own `TEST_DB_PREFIX`, and CI runs the full integration and e2e suites.
