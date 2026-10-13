@@ -205,9 +205,10 @@ tier 2 is not lower than on master over the same runs, and the whole run stays a
   refused board drops four; a fill keeps a checker-refused card with survivors first; a fill
   turns a validation-refused card into a typed translation; unreadable answers and provider
   failures still throw.
-- **Integration (MockServer, ADR 0004):** in `prepareSession.checker.test.ts`, the cream case. A
-  checker answer calls four of a gap card's options right, and the session is prepared in one
-  attempt (one generation request), without that card. The existing "checker returns 500" test
+- **Integration (MockServer, ADR 0004):** in `prepareSession.checker.test.ts`, the cream case on
+  a choice card, which takes the same refusal path as a gap card. A checker answer calls every
+  option of one card in seven right, and the session is prepared in one attempt (one generation
+  request) with the other six. The gap card's path is pinned in the unit tests. The existing "checker returns 500" test
   still leaves the session `preparing` for a retry.
 - **e2e:** no new spec. The stubs are all good, so every existing spec must pass unchanged.
 - **Eval:** D8, run locally three times (`npx tsx tests/eval/run.ts <filter>`), and the full run
