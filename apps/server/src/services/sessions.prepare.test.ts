@@ -246,6 +246,7 @@ function world(opts: {
     checkerLlm,
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
+    translationJudge: createFakeLlmClient(''),
   });
   return { service, calls, llm, contextLlm, checkerLlm, logger, jobs };
 }

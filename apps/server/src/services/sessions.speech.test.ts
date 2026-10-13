@@ -66,6 +66,7 @@ function setup(transcriber: ReturnType<typeof createFakeTranscriber>, loaded: Se
     checkerLlm: createFakeLlmClient(''),
     transcriber,
     judge: createFakeLlmClient(''),
+    translationJudge: createFakeLlmClient(''),
   });
   return { service, inserted, resolved, logger };
 }
@@ -201,6 +202,7 @@ describe('answerBySpeech (spec D5)', () => {
       checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber('{"heard":"gatto"}'),
       judge: createFakeLlmClient(''),
+      translationJudge: createFakeLlmClient(''),
     });
     await expect(service.answerBySpeech('u1', SESSION, attempt)).rejects.toBeInstanceOf(QuestionDesynced);
     expect(logger.events.filter((e) => (e as { event?: string }).event === 'speech_judged')).toHaveLength(1);

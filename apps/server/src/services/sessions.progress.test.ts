@@ -152,6 +152,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     checkerLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
+    translationJudge: createFakeLlmClient(''),
   });
   return { service, calls, jobs };
 }

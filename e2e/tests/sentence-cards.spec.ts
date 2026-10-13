@@ -304,3 +304,31 @@ test('a typed gap checks an unlisted word with the server, and one that fits ask
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
+
+// Phase 45 (spec D1). Another word on the second try too: not "right", not wrong,
+// and the practised word named.
+test('a translation that uses another word on both tries is told it is still not the word', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  await reachSentenceSession(page, request, 'e2e_sentences_still_other_ru');
+
+  for (let position = 1; ; position++) {
+    expect(position, 'the session asked no translation').toBeLessThanOrEqual(6);
+    const card = await readCard(page, position, 6);
+    if (card.kind === 'translate') break;
+    await pass(page, card);
+  }
+  await expectJudge(request, 'other_word');
+  await answerTyped(page, 'Вчера она дочитала эту книгу');
+  await expect(page.getByTestId('retry-notice')).toBeVisible();
+
+  await expectJudge(request, 'other_word');
+  await answerTyped(page, 'Вчера она прочла эту книгу');
+  await expect(page.getByTestId('feedback-other')).toBeVisible();
+  await expect(page.getByTestId('feedback-correct')).toHaveCount(0);
+  await expect(page.getByTestId('feedback-wrong')).toHaveCount(0);
+  await expect(page.getByTestId('feedback-title')).toHaveText('עדיין לא המילה שתרגלנו:');
+  expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(STUB_GAP);
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});

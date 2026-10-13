@@ -246,6 +246,7 @@ export function createSessionService({
   checkerLlm,
   transcriber,
   judge,
+  translationJudge,
 }: {
   transaction: Transaction;
   rng: () => number;
@@ -260,6 +261,9 @@ export function createSessionService({
   checkerLlm: LlmClient;
   transcriber: SpeechTranscriber;
   judge: LlmClient;
+  /** Phase 45 (spec D3). The sentence translation's judge: it thinks before it
+   *  answers, which a dropped detail needs, and the meaning judge does not. */
+  translationJudge: LlmClient;
 }) {
   /**
    * Phase 43 (spec D3). Phase 19's list branch of create, shared by create and
@@ -846,7 +850,8 @@ export function createSessionService({
       const started = now();
       if (verdict === null) {
         try {
-          const raw = await judge(judgePrompt(checked.current, checked.context, text));
+          const client = checked.current.type === 'sentence_translation' ? translationJudge : judge;
+          const raw = await client(judgePrompt(checked.current, checked.context, text));
           verdict = parseJudge(checked.current.type, raw);
           if (verdict === null) throw new LlmUnavailable('the verdict was unreadable');
         } catch (error) {
