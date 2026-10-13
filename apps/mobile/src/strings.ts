@@ -120,6 +120,9 @@ export const strings = {
   // Phase 23. Both count as correct (spec D9).
   feedbackNearMiss: 'כמעט! כך כותבים:',
   feedbackAlternative: 'נכון! המילה שתרגלנו:',
+  // Phase 45 (spec D1). Another accepted word again, on the second try: not "right".
+  feedbackStillOther: 'עדיין לא המילה שתרגלנו:',
+  feedbackStillOtherSense: 'עדיין לא הפירוש שתרגלנו:',
   // Phase 34 (spec D9). A card held for its second try: the first answer, then
   // what is left to find. FSI/PDI around the answer, as in heardLine: a target
   // word, or a whole sentence, inside a Hebrew line.

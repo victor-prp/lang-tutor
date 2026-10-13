@@ -4,9 +4,10 @@ import { evaluate, normaliseHebrew, normaliseTyped, rightAnswer, type AnswerInpu
 import { strings } from '@/strings';
 
 /** What the banner says after an answer. `tone` picks its colours; a near miss
- *  and an alternative count as correct, so they are `correct`. */
+ *  and an alternative count as correct, so they are `correct`. Phase 45: `other`
+ *  is another accepted word again on a second try, neither right nor wrong. */
 export type Feedback = {
-  tone: 'correct' | 'wrong';
+  tone: 'correct' | 'wrong' | 'other';
   title: string;
   line: string | null;
   verdict: AnswerVerdict | null;
@@ -37,9 +38,17 @@ export type CardAnswer =
  */
 export function feedbackFor(question: Question, answer: CardAnswer, retry: PendingRetry | null): Feedback {
   const feedback = answerFeedback(question, answer);
-  return retry !== null && feedback.tone === 'wrong' && (gaveUp(answer) || repeats(question, answer, retry))
-    ? alternativeFeedback(question)
-    : feedback;
+  if (retry === null) return feedback;
+  if (feedback.tone === 'wrong' && (gaveUp(answer) || repeats(question, answer, retry))) return alternativeFeedback(question);
+  // Phase 45 (spec D1). Another accepted word again: the second try asked for the
+  // practised one, so it is not "right"; nor wrong, and its input is not coloured.
+  if (feedback.verdict === 'alternative' && !repeats(question, answer, retry)) return stillOtherFeedback(question);
+  return feedback;
+}
+
+function stillOtherFeedback(question: Question): Feedback {
+  const title = question.type === 'typed_meaning' ? strings.feedbackStillOtherSense : strings.feedbackStillOther;
+  return { tone: 'other', title, line: alternativeFeedback(question).line, verdict: null };
 }
 
 function gaveUp(answer: CardAnswer): boolean {
