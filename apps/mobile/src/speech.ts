@@ -110,6 +110,30 @@ export function createSpeaker({ engine, platform, prepareAudio }: SpeakerDeps) {
     for (const listener of listeners) listener();
   }
 
+  /** Phase 44 (spec D3). Speaks `text` after stopping whatever was speaking,
+   *  and never toggles off: a card's cue may repeat the text still playing. */
+  async function say(text: string, language: string): Promise<void> {
+    const tag = snapshot.tags.get(language);
+    if (!tag) return;
+    const mine = ++ticket;
+    update({ playing: { text, language } });
+    await engine.stop().catch(() => undefined);
+    // A later say, tap or stop took over while the engine stopped.
+    if (mine !== ticket) return;
+    const end = () => {
+      if (mine === ticket) update({ playing: null });
+    };
+    engine.speak(text, { language: tag, rate: 1, onDone: end, onStopped: end, onError: end });
+  }
+
+  /** Phase 44 (spec D3). Ends any utterance, and any say still waiting to speak. */
+  async function stop(): Promise<void> {
+    ++ticket;
+    if (!snapshot.playing) return;
+    update({ playing: null });
+    await engine.stop().catch(() => undefined);
+  }
+
   return {
     /** Once per launch. A failed audio mode costs only the silent-switch case;
      *  failed voices leave nothing speakable, which beats a wrong voice. */
@@ -129,24 +153,16 @@ export function createSpeaker({ engine, platform, prepareAudio }: SpeakerDeps) {
         listeners.delete(listener);
       };
     },
+    say,
+    stop,
     /**
      * Speaks `text` after stopping whatever was speaking; nothing is queued. A
      * tap on the text that is speaking stops it. A language without a voice
      * does nothing.
      */
-    toggle: async (text: string, language: string): Promise<void> => {
-      const tag = snapshot.tags.get(language);
-      if (!tag) return;
+    toggle: (text: string, language: string): Promise<void> => {
       const wasPlaying = snapshot.playing?.text === text && snapshot.playing.language === language;
-      const mine = ++ticket;
-      update({ playing: wasPlaying ? null : { text, language } });
-      await engine.stop().catch(() => undefined);
-      // Stopping was the point, or a later tap took over while the engine stopped.
-      if (wasPlaying || mine !== ticket) return;
-      const end = () => {
-        if (mine === ticket) update({ playing: null });
-      };
-      engine.speak(text, { language: tag, rate: 1, onDone: end, onStopped: end, onError: end });
+      return wasPlaying ? stop() : say(text, language);
     },
   };
 }
