@@ -261,7 +261,7 @@ export function createSessionService({
   checkerLlm: LlmClient;
   transcriber: SpeechTranscriber;
   judge: LlmClient;
-  /** Phase 45 (spec D2). The sentence translation's judge: it thinks before it
+  /** Phase 45 (spec D3). The sentence translation's judge: it thinks before it
    *  answers, which a dropped detail needs, and the meaning judge does not. */
   translationJudge: LlmClient;
 }) {

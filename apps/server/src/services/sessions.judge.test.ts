@@ -231,7 +231,7 @@ describe('answerJudged (spec D3)', () => {
     const sentence = (text: string) => ({ questionId: 's1', text });
     const first = () => record([SENTENCE, CHOICE]);
 
-    // Phase 45 (spec D2). The translation judge thinks before it answers; the meaning
+    // Phase 45 (spec D3). The translation judge thinks before it answers; the meaning
     // judge does not, so each card asks its own client and never the other.
     it('asks the translation client, and a meaning card the meaning client', async () => {
       const meaning = createFakeLlmClient('{"verdict":"right"}');

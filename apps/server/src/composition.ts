@@ -233,7 +233,7 @@ export function createServerDeps(io: {
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: 0,
   });
-  // Phase 45 (spec D2). The translation judge thinks before it answers: with thinking
+  // Phase 45 (spec D3). The translation judge thinks before it answers: with thinking
   // off it took "talk with everyone" for "communicate clearly with everyone". 512
   // tokens measured about 2.4 s a call, inside the judge's own budget.
   const translationJudge: LlmClient = createGeminiClient({

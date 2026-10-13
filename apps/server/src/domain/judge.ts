@@ -97,7 +97,7 @@ export function translationRuleVerdict(reference: string, text: string): TypedVe
   return typed === normaliseTyped(reference) ? 'exact' : null;
 }
 
-/** Phase 45 (spec D2). The translation judge's thinking budget, in tokens. With
+/** Phase 45 (spec D3). The translation judge's thinking budget, in tokens. With
  *  none it took "talk with everyone" for "communicate clearly with everyone";
  *  512 judged it wrong every time, at about 2.4 s a call. */
 export const TRANSLATION_JUDGE_THINKING = 512;
