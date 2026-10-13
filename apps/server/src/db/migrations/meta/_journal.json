@@ -225,6 +225,13 @@
       "when": 1791824296442,
       "tag": "0031_always_ready_session",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791879654166,
+      "tag": "0032_known_per_skill",
+      "breakpoints": true
     }
   ]
 }

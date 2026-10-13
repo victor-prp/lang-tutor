@@ -1285,3 +1285,47 @@ describe('0031_always_ready_session', () => {
     expect((await db.execute(sql`select listening, speaking from sessions`)).rows).toEqual([{ listening: false, speaking: false }]);
   });
 });
+
+describe('0032_known_per_skill', () => {
+  it('dates every skill at the bar, moves a member known_at to its gloss, and keeps the old column', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0031_always_ready_session'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'pick up', 'verb');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'pick up', 'word', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'להרים'), ('g2', 'l1', 'he', 'לאסוף');
+      insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, variant_id, lemma, added_by_user_id)
+        values ('e_1', 'g1', 'l1', 'v1', 'pick up', 'u_1'), ('e_1', 'g2', 'l1', 'v1', 'pick up', 'u_1');
+      insert into gloss_memory (enrollment_id, gloss_id, dimension, stability, difficulty, last_day, reps, lapses, params)
+        values ('e_1', 'g1', 'written_receptive', 8, 5, '2026-10-01', 3, 0, 'fsrs6-default'),
+               ('e_1', 'g1', 'spelling', 5, 5, '2026-10-02', 2, 1, 'fsrs6-default');
+      insert into gloss_families (id, enrollment_id, label) values ('f1', 'e_1', 'pick up');
+      insert into gloss_family_members (enrollment_id, gloss_id, family_id, state, position, known_at, since)
+        values ('e_1', 'g1', 'f1', 'known', 0, '2026-10-03T10:00:00Z', now()),
+               ('e_1', 'g2', 'f1', 'current', 1, null, now());
+    `);
+
+    await runMigrations(db);
+
+    expect(
+      (await db.execute(sql`select dimension, reached_on::text from gloss_memory order by dimension`)).rows,
+    ).toEqual([
+      { dimension: 'spelling', reached_on: null },
+      { dimension: 'written_receptive', reached_on: '2026-10-01' },
+    ]);
+    expect(
+      (await db.execute(sql`select gloss_id, known_at is not null as known from vocabulary_entries order by gloss_id`)).rows,
+    ).toEqual([
+      { gloss_id: 'g1', known: true },
+      { gloss_id: 'g2', known: false },
+    ]);
+    // ADR 0010: the old container still names this column for its rollout minute.
+    expect(
+      (await db.execute(sql`select count(*)::int as n from gloss_family_members where known_at is not null`)).rows,
+    ).toEqual([{ n: 1 }]);
+  });
+});
