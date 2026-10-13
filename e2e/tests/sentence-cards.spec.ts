@@ -185,7 +185,7 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'translate') {
       // Translate the Hebrew sentence; a different order is the judge's to accept.
-      await expect(page.getByText('תרגמו לרוסית')).toBeVisible();
+      await expect(page.getByText('תרגמו את המשפט לרוסית')).toBeVisible();
       // Phase 34 (spec D8): the sentence marks the practised word.
       await expect(page.getByTestId('sentence-translation')).toHaveText(STUB_SENTENCE_HEBREW);
       await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
