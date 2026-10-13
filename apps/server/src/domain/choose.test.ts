@@ -3,7 +3,7 @@ import { FSRS6_DEFAULT, SESSION_LENGTH, retrievability, type Dimension, type Mem
 
 import { chooseWords, expectedSuccess, liveDimensions, rungFor, type ChoiceInput, type ChosenPick } from './choose';
 import { DAY_NEW_CAP, HARD_CAP, NEW_PER_SESSION, PER_DIMENSION_CAP, RUNG_R, R_TARGET } from './chooseConstants';
-import type { Step } from './today';
+import { withSessionInFlight, type Step } from './today';
 
 // Not tests/support/testRng: ADR 0001 R3 greps domain/ for any parent-directory
 // import, test files included. Same LCG.
@@ -334,6 +334,18 @@ describe('chooseWords (spec D5, D6; phase 37 D3)', () => {
     it('comes in the order today gives it: the least practised first', () => {
       const words = [known('a'), known('b'), known('c')];
       expect(ids(chooseWords(input(words, { done: new Set(['c', 'a', 'b']) })))).toEqual(['c', 'a', 'b']);
+    });
+
+    // Phase 43 (spec D4). Once every word is done for the day, the stock picked
+    // beside a started session asked that session's words again.
+    it('asks other words than the session in flight, every word done today', () => {
+      const words = range(2 * SESSION_LENGTH, (i) => known(`w${i}`));
+      const day = { steps: [], done: new Set(words.map((word) => word.id)) };
+      const started = ids(chooseWords(input(words, { done: day.done })));
+      const { done } = withSessionInFlight(day, started, new Set(words.map((word) => word.id)));
+      const stock = ids(chooseWords(input(words, { done })));
+      expect(stock).toHaveLength(SESSION_LENGTH);
+      expect(stock.filter((id) => started.includes(id))).toEqual([]);
     });
 
     it('fills a session before a new word past the daily cap', () => {
