@@ -5,12 +5,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import { firstAttempts, meaningTaken, startBoard, tapMeaning, tapWord, type BoardState } from '@/board';
 import { OptionButton, type OptionVisualState } from '@/components/OptionButton';
 import { answerStyles } from '@/components/TypedAnswerView';
+import { useSpeaker } from '@/hooks/useSpeech';
 import { strings } from '@/strings';
 import { spacing } from '@/theme';
 
 type Props = {
   question: MatchingQuestion;
   instruction: string;
+  language: string;
   answered: boolean;
   onComplete: (firstAttempts: number[]) => void;
 };
@@ -21,7 +23,8 @@ type Props = {
  * tap. When the last word is matched, the board reports each word's first try.
  * Phase 34 (spec D10): each word shows its part of speech under it.
  */
-export function MatchingBoardView({ question, instruction, answered, onComplete }: Props) {
+export function MatchingBoardView({ question, instruction, language, answered, onComplete }: Props) {
+  const speaker = useSpeaker();
   const [state, setState] = useState<BoardState>(() => startBoard(question));
   const reported = useRef<string | null>(null);
 
@@ -78,7 +81,11 @@ export function MatchingBoardView({ question, instruction, answered, onComplete 
               note={strings.partOfSpeech(question.board.parts_of_speech[index] ?? '')}
               state={wordState(index)}
               disabled={answered || state.matched[index]}
-              onPress={() => setState((current) => tapWord(current, question, index))}
+              onPress={() => {
+                // Phase 44 (spec D5, R3): the board's target words speak when tapped.
+                void speaker.say(word, language);
+                setState((current) => tapWord(current, question, index));
+              }}
               onMeasure={() => undefined}
             />
           ))}

@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { SpeakButton } from '@/components/SpeakButton';
@@ -7,8 +6,6 @@ import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 type Props = {
-  /** The card's id: a new card plays again, a re-render does not. */
-  questionId: string;
   /** What is spoken, and shown once the card is answered. */
   text: string;
   language: string;
@@ -16,26 +13,15 @@ type Props = {
 };
 
 /**
- * Phase 24 (spec D6). A listening card's prompt. The word is spoken once on
- * arrival and on every tap, and shown only after the answer. A device with no
- * voice for the language shows it in writing, with a line saying why. Until
- * the device's voices are read nothing is known, so the card shows neither the
- * word nor that line: a disabled play button, then whichever applies.
+ * Phase 24 (spec D6). A listening card's prompt. The word is spoken on arrival by the session's
+ * card voice (phase 44 D2) and on every tap, and shown only after the answer. A device with no
+ * voice for the language shows it in writing, with a line saying why. Until the device's voices
+ * are read nothing is known, so the card shows neither the word nor that line: a disabled play
+ * button, then whichever applies.
  */
-export function ListenPrompt({ questionId, text, language, answered }: Props) {
+export function ListenPrompt({ text, language, answered }: Props) {
   const { canSpeak, voicesLoaded, isPlaying, toggle } = useSpeech();
   const voiced = canSpeak(language);
-  // Once per card. React's development double-run of effects would otherwise
-  // call toggle twice, and the second call stops the first.
-  const played = useRef<string | null>(null);
-
-  useEffect(() => {
-    // `voiced` is a dependency so a browser that loads its voices after the
-    // first render still plays the card when they arrive.
-    if (!voiced || played.current === questionId) return;
-    played.current = questionId;
-    void toggle(text, language);
-  }, [questionId, voiced, text, language, toggle]);
 
   if (!answered && !voicesLoaded) {
     return (

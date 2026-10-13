@@ -59,7 +59,7 @@ export function MultipleChoiceView({ question, instruction, language, selectedOp
       {prompt !== undefined ? (
         prompt
       ) : question.type === 'listen_choice' ? (
-        <ListenPrompt questionId={question.id} text={question.question} language={language} answered={answered} />
+        <ListenPrompt text={question.question} language={language} answered={answered} />
       ) : question.type === 'cloze_choice' ? null : (
         <View style={styles.promptRow}>
           <Text style={[styles.prompt, { writingDirection: reversed ? 'rtl' : 'ltr' }]} testID="question-prompt">

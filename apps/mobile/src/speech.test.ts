@@ -224,6 +224,58 @@ describe('createSpeaker', () => {
     expect(speaker.snapshot().playing).toEqual({ text: 'cane', language: 'it' });
   });
 
+  it('say stops whatever is speaking, then speaks with the tag', async () => {
+    const { speaker, calls, spoken } = await started();
+    await speaker.say('casa', 'it');
+    expect(calls).toEqual(['stop', 'speak casa']);
+    expect(spoken[0].options.language).toBe('it-IT');
+    expect(speaker.snapshot().playing).toEqual({ text: 'casa', language: 'it' });
+  });
+
+  it('say on the text that is playing speaks it again, never stops it', async () => {
+    const { speaker, calls } = await started();
+    await speaker.say('casa', 'it');
+    await speaker.say('casa', 'it');
+    expect(calls).toEqual(['stop', 'speak casa', 'stop', 'speak casa']);
+    expect(speaker.snapshot().playing).toEqual({ text: 'casa', language: 'it' });
+  });
+
+  it('say in a language with no voice does nothing', async () => {
+    const { speaker, calls } = await started();
+    await speaker.say('дом', 'ru');
+    expect(calls).toEqual([]);
+    expect(speaker.snapshot().playing).toBeNull();
+  });
+
+  it('stop ends the utterance and clears playing', async () => {
+    const { speaker, calls, spoken } = await started();
+    await speaker.say('casa', 'it');
+    await speaker.stop();
+    expect(calls).toEqual(['stop', 'speak casa', 'stop']);
+    expect(speaker.snapshot().playing).toBeNull();
+    // The stopped utterance's late callback changes nothing.
+    spoken[0].options.onStopped();
+    expect(speaker.snapshot().playing).toBeNull();
+  });
+
+  it('stop with nothing playing calls nothing', async () => {
+    const { speaker, calls } = await started();
+    await speaker.stop();
+    expect(calls).toEqual([]);
+  });
+
+  it('stop while a say waits on the engine keeps that say from speaking', async () => {
+    const fake = fakeEngine();
+    const { speaker, calls } = await started(fake);
+    fake.holdStops();
+    const pending = speaker.say('casa', 'it');
+    const stopping = speaker.stop();
+    await fake.releaseStops();
+    await Promise.all([pending, stopping]);
+    expect(calls.filter((call) => call.startsWith('speak'))).toEqual([]);
+    expect(speaker.snapshot().playing).toBeNull();
+  });
+
   it('a language with no voice does nothing', async () => {
     const { speaker, calls } = await started();
     await speaker.toggle('кот', 'ru');

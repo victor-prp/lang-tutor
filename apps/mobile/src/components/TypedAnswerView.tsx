@@ -117,7 +117,7 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
         prompt
       ) : question.type === 'dictation' ? (
         <>
-          <ListenPrompt questionId={question.id} text={question.question} language={language} answered={answered} />
+          <ListenPrompt text={question.question} language={language} answered={answered} />
           {answered ? (
             <Text style={answerStyles.partOfSpeech} testID="dictation-meaning">
               {question.meaning}
