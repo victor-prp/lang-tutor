@@ -338,6 +338,7 @@ async function main(): Promise<void> {
         // Tier 1 needs no model, so the Gemini settings are read only for --model.
         gemini: model ? loadGeminiConfig(process.env) : null,
         timeoutMs: 60_000,
+        now: Date.now,
       });
       const plan = await tools.planMerges({
         model,

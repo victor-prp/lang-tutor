@@ -891,6 +891,7 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
   });
   // Phase 47 (spec D1). The session-generation prompt on the client composition.ts
@@ -901,6 +902,7 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: SESSION_GENERATION_THINKING,
   });
@@ -912,6 +914,7 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: 0,
   });
@@ -922,6 +925,7 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: TRANSLATION_JUDGE_THINKING,
   });
@@ -931,6 +935,7 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
   });
   const vision = createGeminiVisionClient({
@@ -939,6 +944,7 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: PHOTO_TIMEOUT_MS,
   });
 
@@ -1419,7 +1425,6 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         model: gemini.model,
-    onCall: RECORDS_NOTHING,
         score,
         transcriptionScore,
         photoScore,

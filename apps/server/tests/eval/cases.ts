@@ -974,7 +974,7 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
       { task: 'word', form: 'century', lemma: 'century', partOfSpeech: 'noun', translation: 'מאה', synonyms: [] },
       { task: 'typed', form: 'drum', lemma: 'drum', partOfSpeech: 'noun', translation: 'תוף', synonyms: [], alternatives: [] },
       { task: 'word', form: 'dish', lemma: 'dish', partOfSpeech: 'noun', translation: 'צלחת', synonyms: ['plate'] },
-      { task: 'typed', form: 'train', lemma: 'train', partOfSpeech: 'verb', translation: 'לאמן', synonyms: [], alternatives: ['coach'] },
+      { task: 'typed', form: 'train', lemma: 'train', partOfSpeech: 'verb', translation: 'לאמן', synonyms: [], alternatives: [] },
     ],
   },
   {

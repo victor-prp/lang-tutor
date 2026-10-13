@@ -211,6 +211,7 @@ async function main(): Promise<number> {
     // Phase 47 (spec D1, ruling R6): production's cap, and nothing recorded.
     thinkingBudget: SESSION_GENERATION_THINKING,
     onCall: async () => {},
+    now: Date.now,
   });
 
   const sent = JSON.stringify(toGeminiSchema(schema));
@@ -279,6 +280,7 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
     // Production's budget for this call (ruling R12): a wait past it is a fallback there.
     timeoutMs: CONTEXT_CALL_BUDGET_MS,
     onCall: async () => {},
+    now: Date.now,
   });
   console.log(`model     ${gemini.model}`);
   console.log(`schema    LlmContextSchema (${JSON.stringify(toGeminiSchema(LlmContextSchema)).length} characters of responseSchema)`);
@@ -367,6 +369,7 @@ async function measureCheck(gemini: ReturnType<typeof loadGeminiConfig>, require
     model: gemini.model,
     timeoutMs: CHECKER_CALL_BUDGET_MS,
     onCall: async () => {},
+    now: Date.now,
   });
   console.log(`model     ${gemini.model}`);
   console.log(`schema    LlmCheckSchema${required ? ', every field required' : ''} (${JSON.stringify(toGeminiSchema(schema)).length} characters of responseSchema)`);

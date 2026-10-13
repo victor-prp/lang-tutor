@@ -28,7 +28,7 @@ function clientWith(fetchImpl: typeof globalThis.fetch) {
     apiKey: 'secret',
     model: 'test-model',
     timeoutMs: 50,
-    onCall: ignore,
+    onCall: ignore, now: Date.now,
   });
 }
 
@@ -222,7 +222,7 @@ describe('createGeminiTranscriber (phase 25)', () => {
       seen.push({ url, init });
       return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"heard":"gatto"}' }] } }] }), { status: 200 });
     }) as unknown as typeof globalThis.fetch;
-    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore });
+    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore, now: Date.now });
 
     expect(await transcribe({ system: 'transcribe the spoken audio', audio: 'QUJD', mimeType: 'audio/aac', schema, record: R })).toBe('{"heard":"gatto"}');
     expect(seen[0].url).toBe('http://g/v1beta/models/m:generateContent');
@@ -235,14 +235,14 @@ describe('createGeminiTranscriber (phase 25)', () => {
 
   it('answers an empty candidate with the empty string', async () => {
     const fetch = (async () => new Response(JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } }), { status: 200 })) as unknown as typeof globalThis.fetch;
-    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore });
+    const transcribe = createGeminiTranscriber({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore, now: Date.now });
     expect(await transcribe({ system: 's', audio: 'QUJD', mimeType: 'audio/aac', schema, record: R })).toBe('');
   });
 
   it('turns a failure status and a timeout into LlmUnavailable', async () => {
     const failing = (async () => new Response('{}', { status: 400 })) as unknown as typeof globalThis.fetch;
     await expect(
-      createGeminiTranscriber({ fetch: failing, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore })({
+      createGeminiTranscriber({ fetch: failing, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, onCall: ignore, now: Date.now })({
         system: 's',
         audio: 'QUJD',
         mimeType: 'audio/aac',
@@ -253,7 +253,7 @@ describe('createGeminiTranscriber (phase 25)', () => {
     const hanging = ((_: string, init: RequestInit) =>
       new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(new Error('aborted'))))) as unknown as typeof globalThis.fetch;
     await expect(
-      createGeminiTranscriber({ fetch: hanging, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 10, onCall: ignore })({
+      createGeminiTranscriber({ fetch: hanging, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 10, onCall: ignore, now: Date.now })({
         system: 's',
         audio: 'QUJD',
         mimeType: 'audio/aac',
@@ -273,7 +273,7 @@ describe('createGeminiVisionClient', () => {
     record: R,
   };
   const visionWith = (fetchImpl: typeof globalThis.fetch) =>
-    createGeminiVisionClient({ fetch: fetchImpl, baseUrl: 'https://example.test', apiKey: 'secret', model: 'test-model', timeoutMs: 50, onCall: ignore });
+    createGeminiVisionClient({ fetch: fetchImpl, baseUrl: 'https://example.test', apiKey: 'secret', model: 'test-model', timeoutMs: 50, onCall: ignore, now: Date.now });
 
   it('sends the image as inlineData before the text, with the system instruction and the schema', async () => {
     let sent: { url: string; body: Record<string, unknown> } | undefined;
@@ -315,7 +315,7 @@ describe('createGeminiClient thinkingBudget (phase 27)', () => {
       body = JSON.parse(String(init.body));
       return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }), { status: 200 });
     }) as unknown as typeof globalThis.fetch;
-    await createGeminiClient({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, thinkingBudget, onCall: ignore })({ system: 's', user: 'u', schema, record: R });
+    await createGeminiClient({ fetch, baseUrl: 'http://g', apiKey: 'k', model: 'm', timeoutMs: 1_000, thinkingBudget, onCall: ignore, now: Date.now })({ system: 's', user: 'u', schema, record: R });
     return body!;
   };
 
@@ -340,6 +340,7 @@ describe('every call is reported (phase 47)', () => {
       model: 'test-model',
       timeoutMs,
       thinkingBudget: 1024,
+      now: Date.now,
       onCall: async (call) => {
         seen.push(call);
       },
@@ -375,6 +376,26 @@ describe('every call is reported (phase 47)', () => {
       },
     ]);
     expect(JSON.stringify(seen[0].request)).not.toContain('secret');
+  });
+
+  // Review (ADR 0002): the clock is received, so a test or a shifted lane
+  // times the call by its own clock, and the prune agrees with the record.
+  it('times the call by the clock it was given', async () => {
+    const seen: Seen[] = [];
+    const ticks = [1_000, 1_250];
+    const client = createGeminiClient({
+      fetch: (async () => jsonResponse(geminiBody('{}'))) as typeof globalThis.fetch,
+      baseUrl: 'http://g',
+      apiKey: 'k',
+      model: 'm',
+      timeoutMs: 1_000,
+      now: () => ticks.shift()!,
+      onCall: async (call) => {
+        seen.push(call);
+      },
+    });
+    await client({ system: 's', user: 'u', schema: z.object({}), record: R });
+    expect([seen[0].startedAt, seen[0].durationMs]).toEqual([new Date(1_000), 250]);
   });
 
   it('reports a failure status with its body, then throws', async () => {
@@ -421,6 +442,7 @@ describe('every call is reported (phase 47)', () => {
       apiKey: 'k',
       model: 'm',
       timeoutMs: 1_000,
+      now: Date.now,
       onCall: async (call: Seen) => {
         seen.push(call);
       },

@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans (Victor: "continue till PR",
 > inline). Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** cap the session-generation call (1024 thinking tokens, 120 s) and record every model call in
+**Goal:** cap the session-generation call (1024 thinking tokens, 120 s; built as 4096, spec R8) and record every model call in
 one Postgres table, kept 7 days.
 
 **Architecture:** the provider reports each request to an injected `onCall`; `composition.ts` wires it
@@ -17,7 +17,7 @@ the eval in `apps/server/tests/ev?l/`.
 
 ## Global constraints
 
-- `SESSION_GENERATION_THINKING = 1024`; `SESSION_GENERATION_BUDGET_MS = 120_000`; `MODEL_CALL_RETENTION_DAYS = 7`.
+- `SESSION_GENERATION_THINKING = 1024` (built as 4096: spec R8); `SESSION_GENERATION_BUDGET_MS = 120_000`; `MODEL_CALL_RETENTION_DAYS = 7`.
 - ADR 0001 R10/R11: `providers/` imports no service type; `ModelCall` lives in `services/llm.ts`, satisfied structurally.
 - A recording never fails or changes the call it records.
 - No lane on this machine (all 9 taken): unit, typecheck, `lint:arch` and the eval run locally; integration and e2e in CI.

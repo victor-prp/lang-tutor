@@ -70,6 +70,9 @@ type GeminiDeps<R> = {
   // Phase 47 (spec D4). Told about every request, after it ended and before
   // its answer is returned or its failure thrown. It never throws (spec D5).
   onCall: (call: GeminiCall<R>) => Promise<void>;
+  // Phase 47 (review, ADR 0002). The clock a call is timed by: received, so
+  // the record's start and the recorder's prune read the same one.
+  now: () => number;
 };
 
 type Envelope = {
@@ -102,7 +105,7 @@ function withoutMedia(body: Record<string, unknown>): Record<string, unknown> {
  *  it reports the call to `onCall` however it ends. */
 async function generate<R>(deps: GeminiDeps<R>, record: R, body: Record<string, unknown>): Promise<string> {
   const endpoint = `${deps.baseUrl}/v1beta/models/${deps.model}:generateContent`;
-  const startedAt = new Date();
+  const startedAt = new Date(deps.now());
   const report = (outcome: { response: unknown; httpStatus: number | null; error: string | null }) => {
     const envelope = (outcome.response ?? {}) as Envelope;
     const usage = envelope.usageMetadata ?? {};
@@ -113,7 +116,7 @@ async function generate<R>(deps: GeminiDeps<R>, record: R, body: Record<string, 
       startedAt,
       request: withoutMedia(body),
       ...outcome,
-      durationMs: Date.now() - startedAt.getTime(),
+      durationMs: deps.now() - startedAt.getTime(),
       promptTokens: count(usage.promptTokenCount),
       outputTokens: count(usage.candidatesTokenCount),
       thinkingTokens: count(usage.thoughtsTokenCount),

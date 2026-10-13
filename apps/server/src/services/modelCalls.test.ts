@@ -82,6 +82,21 @@ describe('the model-call recorder (phase 47, spec D5)', () => {
     expect(inserted[0]).toMatchObject({ kind: 'accept', sessionId: null, attempt: null, enrollmentId: null, userId: null });
   });
 
+  // Review: drizzle's error message lists every parameter, the prompt and the
+  // answer among them; a log line must not carry them past the 7 days.
+  it("logs a failed write by its kind and the database's reason, never the prompt", async () => {
+    const { service, logger } = build({
+      insert: async () => {
+        throw new Error('Failed query: insert into "model_calls" params: LEARNER-TYPED-TEXT', {
+          cause: new Error('unsupported Unicode escape sequence'),
+        });
+      },
+    });
+    await service.record(CALL);
+    expect(logger.errors).toEqual([{ message: 'model_call_not_recorded', cause: 'session_generation: unsupported Unicode escape sequence' }]);
+    expect(JSON.stringify(logger.errors)).not.toContain('LEARNER-TYPED-TEXT');
+  });
+
   it('never fails the call it records: a failed write is logged and swallowed', async () => {
     const { service, logger } = build({
       insert: async () => {
@@ -89,6 +104,6 @@ describe('the model-call recorder (phase 47, spec D5)', () => {
       },
     });
     await expect(service.record(CALL)).resolves.toBeUndefined();
-    expect(logger.errors).toEqual([{ message: 'model_call_not_recorded', cause: expect.any(Error) }]);
+    expect(logger.errors).toEqual([{ message: 'model_call_not_recorded', cause: 'session_generation: connection terminated' }]);
   });
 });

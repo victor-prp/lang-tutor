@@ -57,7 +57,12 @@ export function createModelCallService({
           await modelCall.deleteBefore(new Date(now() - MODEL_CALL_RETENTION_DAYS * DAY_MS));
         });
       } catch (error) {
-        logger.error('model_call_not_recorded', error);
+        // The kind and the database's own reason, never the error itself: a
+        // failed query's message lists every parameter, the prompt and the
+        // answer among them, and a log line would keep them past the 7 days.
+        const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
+        const reason = cause instanceof Error ? cause.message : String(cause);
+        logger.error('model_call_not_recorded', `${call.record.kind}: ${reason.slice(0, 200)}`);
       }
     },
   };

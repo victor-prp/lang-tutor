@@ -136,10 +136,10 @@ export function createServerDeps(io: {
   // long answer, so it gets its own, longer than a lookup's.
   sessionGenerationTimeoutMs: number;
   // Phase 34 (ruling R12). The budget of the context call after the batch: its
-  // own and short, so a hang costs the sentences, not the batch's five minutes.
+  // own and short, so a hang costs the sentences, not the batch's two minutes.
   contextCallTimeoutMs: number;
   // Phase 34 (spec D5, ruling R12). The checker's budget, after the context call:
-  // its own, so its wait is bounded apart from the batch's five minutes.
+  // its own, so its wait is bounded apart from the batch's two minutes.
   checkerCallTimeoutMs: number;
   // Phase 25 (spec D13). One transcription's budget: short, because a learner
   // is waiting on a card.
@@ -179,6 +179,7 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     onCall,
+    now: io.now,
     timeoutMs: io.translationTimeoutMs,
   });
 
@@ -190,6 +191,7 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     onCall,
+    now: io.now,
     timeoutMs: io.sessionGenerationTimeoutMs,
     // Phase 47 (spec D1). Uncapped, its thinking once ran to 62,910 tokens and
     // four minutes over one batch.
@@ -204,6 +206,7 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     onCall,
+    now: io.now,
     timeoutMs: io.contextCallTimeoutMs,
   });
 
@@ -216,6 +219,7 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     onCall,
+    now: io.now,
     timeoutMs: io.checkerCallTimeoutMs,
   });
 
@@ -227,6 +231,7 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     onCall,
+    now: io.now,
     timeoutMs: io.speechTimeoutMs,
   });
 
@@ -238,6 +243,7 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     onCall,
+    now: io.now,
     timeoutMs: io.photoReadTimeoutMs,
   });
 
@@ -249,6 +255,7 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     onCall,
+    now: io.now,
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: 0,
   });
@@ -261,6 +268,7 @@ export function createServerDeps(io: {
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
     onCall,
+    now: io.now,
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: TRANSLATION_JUDGE_THINKING,
   });
@@ -346,10 +354,12 @@ export function createGlossTools(io: {
   fetch: typeof globalThis.fetch;
   gemini: GeminiConfig | null;
   timeoutMs: number;
+  // Phase 47 (review). The clock the model calls are timed and pruned by.
+  now: () => number;
 }): GlossService {
   const transaction = createTransaction(io.db, (tx) => bindRepos(tx, null));
   // Phase 47 (spec D5). The merge tool's calls are recorded as the server's are.
-  const onCall: ModelCallRecorder = createModelCallService({ transaction, logger: io.logger, now: () => Date.now() }).record;
+  const onCall: ModelCallRecorder = createModelCallService({ transaction, logger: io.logger, now: io.now }).record;
   const llm: LlmClient | null = io.gemini
     ? createGeminiClient({
         fetch: io.fetch,
@@ -357,6 +367,7 @@ export function createGlossTools(io: {
         apiKey: io.gemini.apiKey,
         model: io.gemini.model,
         onCall,
+        now: io.now,
         timeoutMs: io.timeoutMs,
       })
     : null;
