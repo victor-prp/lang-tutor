@@ -339,9 +339,9 @@ describe('a second try (phase 34 D9)', () => {
     expect(opensRetry(dictation, { text: 'parlo' })).toBe(false);
   });
 
-  // Ruling R16. A second try given up or wrong leaves the card where its first
-  // answer put it: right, another accepted word. Its banner is that answer's,
-  // with the saved word, never "the right answer was".
+  // Ruling R16, narrowed in phase 42 (spec D1). A second try given up leaves the
+  // card where its first answer put it: right, another accepted word, and its
+  // banner is that answer's, with the saved word. A wrong typed second try says so.
   const PENDING_WORD = { answer: 'vetrata', wording: 'word' } as const;
   const PENDING_MEANING = { answer: 'ספר', wording: 'meaning' } as const;
   const OTHER_WORD = { tone: 'correct', title: strings.feedbackAlternative, verdict: 'alternative' } as const;
@@ -351,6 +351,8 @@ describe('a second try (phase 34 D9)', () => {
     expect(feedbackFor(typed, { text: '' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'finestra' });
     expect(feedbackFor(CLOZE, { text: '' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'parlavamo' });
     expect(feedbackFor(SAY, { text: '' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'parlo' });
+    // Review Focus 2: blank is a give-up too; the server trims it to one.
+    expect(feedbackFor(typed, { text: '  ' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'finestra' });
     // Spoken: show the answer with retry.
     expect(feedbackFor(SAY, { pass: 'show_answer' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'parlo' });
     // Judged: the server reports a given-up retry as wrong (ruling R15). A
@@ -364,14 +366,27 @@ describe('a second try (phase 34 D9)', () => {
     });
   });
 
-  it('a wrong second try shows the same banner, so the input is not marked wrong', () => {
-    expect(feedbackFor(typed, { text: 'porta' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'finestra' });
-    expect(feedbackFor(TRANSLATE, { text: 'Andiamo.', judged: 'wrong' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'Uniamo' });
-    expect(feedbackFor(MEANING, { text: 'לקרוא', judged: 'wrong' }, PENDING_MEANING)).toMatchObject({
-      tone: 'correct',
-      title: strings.feedbackOtherSense,
-      verdict: 'alternative',
-    });
+  // Phase 42 (spec D1). The bug: יצירתיות, judged wrong, under "right, but here we practised".
+  it('a wrong typed second try shows the right answer as wrong, so its input is marked wrong', () => {
+    const wrong = (line: string) => ({ tone: 'wrong', title: strings.feedbackWrong, line, verdict: 'wrong' });
+    expect(feedbackFor(typed, { text: 'porta' }, PENDING_WORD)).toEqual(wrong('finestra'));
+    expect(feedbackFor(CLOZE, { text: 'cantavamo' }, PENDING_WORD)).toEqual(wrong('parlavamo'));
+    expect(feedbackFor(SAY, { text: 'dormo' }, PENDING_WORD)).toEqual(wrong('parlo'));
+    expect(feedbackFor(TRANSLATE, { text: 'Andiamo.', judged: 'wrong' }, PENDING_WORD)).toEqual(wrong('Uniamo'));
+    expect(feedbackFor(MEANING, { text: 'לקרוא', judged: 'wrong' }, PENDING_MEANING)).toEqual(wrong('להזמין'));
+  });
+
+  // Phase 42 review I1. The first answer typed again was told it fits a moment ago:
+  // the fit check never runs on a retry, so its banner must not turn red.
+  it('the first answer typed again keeps the first answer\'s banner', () => {
+    expect(feedbackFor(CLOZE, { text: ' Cantavamo ' }, { answer: 'cantavamo', wording: 'word' })).toEqual({ ...OTHER_WORD, line: 'parlavamo' });
+    expect(feedbackFor(TRANSLATE, { text: 'Uniamo le forze', judged: 'wrong' }, { answer: 'Uniamo le forze.', wording: 'word' })).toEqual({ ...OTHER_WORD, line: 'Uniamo' });
+    expect(feedbackFor(MEANING, { text: 'סֵפֶר', judged: 'wrong' }, PENDING_MEANING)).toMatchObject({ tone: 'correct', verdict: 'alternative' });
+  });
+
+  // Review Focus 3: another accepted word on the second try is still right.
+  it('another accepted word on the second try keeps its own right banner', () => {
+    expect(feedbackFor(typed, { text: 'vetrata' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'finestra' });
   });
 
   it('the saved word found on it gets the banner that answer gets today', () => {

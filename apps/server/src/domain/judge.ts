@@ -54,8 +54,8 @@ export function buildMeaningJudgePrompt(context: MeaningJudgeContext, answer: st
     'The meaning practised is saved_meaning, in the sense the example shows.',
     'Return JSON only, matching the supplied schema, with one field, verdict:',
     '- "right": the answer means the same as saved_meaning in this sense. Accept a synonym, another form, tense or person of it (for example לדבר, מדבר, דיבר), with or without a prefix such as ה, ל, ו or ש, with or without niqqud, and with small Hebrew spelling slips.',
-    '- "other_sense": the answer is a correct meaning of the word, but of a different sense than the one practised.',
-    '- "wrong": anything else, including an answer that is only related, too general, or the meaning of another word.',
+    '- "other_sense": the answer is a meaning the word really has in another context, one a dictionary would list as a sense of its own, but not the sense practised (for example, for "bank" practised as בנק: גדת נהר, a river bank).',
+    '- "wrong": anything else, including the meaning of another word, an answer too general, and one only related, associated or near in meaning, however close (for example, for "imagination" practised as דמיון: הזייה, a hallucination, or יצירתיות, creativity).',
   ].join('\n');
   const user = JSON.stringify({
     word: context.form,

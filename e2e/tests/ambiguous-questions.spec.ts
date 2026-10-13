@@ -181,6 +181,33 @@ test('a typed card shows its sentence, and an alternative answer gets a second t
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });
 
+// Phase 42 (spec D1). A wrong word typed on the second try is told it was wrong:
+// the first answer's green banner read as if this one were accepted.
+test('a wrong word on a second try shows the right answer in the red banner, and the score still counts the card', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const card = await reachTypedCard(page, request, 'e2e_second_try_wrong_ru', report);
+
+  await answerWithTheAlternative(page);
+  await answerTyped(page, 'неверно');
+  await expect(page.getByTestId('feedback-wrong')).toBeVisible();
+  await expect(page.getByTestId('feedback-correct')).toHaveCount(0);
+  await expect(page.getByTestId('feedback-title')).toHaveText('התשובה הנכונה:');
+  expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(FORM_OF[card.prompt]);
+  await page.getByTestId('continue-button').click();
+
+  await finishTheSession(page, request);
+
+  // The first answer was right and counts (spec R2); the wrong second try moves nothing.
+  await expect(page.getByTestId('results-score')).toHaveText(/4\s*\/\s*4/);
+  await expect(page.getByTestId('missed-row')).toHaveCount(0);
+  await expect(page.getByTestId('practised-row')).toHaveCount(4);
+  await expect(practisedRow(page, card.prompt)).toHaveCount(1);
+  await expect(practisedRow(page, card.prompt).getByTestId(/^practised-(progressed|raised)$/)).toHaveCount(0);
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
 test('"show the answer" on a second try names the saved word in the green banner, and the word does not move', async ({ page, request }) => {
   const diagnostics = attachDiagnostics(page, API_URL);
   const report = () => diagnosticReport(diagnostics);

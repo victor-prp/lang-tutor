@@ -1,5 +1,5 @@
 import type { AnswerVerdict, PendingRetry, Question } from '@lang-tutor/core/api';
-import { evaluate, normaliseHebrew, rightAnswer, type AnswerInput } from '@lang-tutor/core/domain';
+import { evaluate, normaliseHebrew, normaliseTyped, rightAnswer, type AnswerInput } from '@lang-tutor/core/domain';
 
 import { strings } from '@/strings';
 
@@ -25,14 +25,34 @@ export type CardAnswer =
  * runs, so what the learner is told is what the server records (spec D9).
  *
  * Phase 34 (spec D9, ruling R16). `retry` is the hold a second try answers, and
- * null for every other answer. A second try given up or wrong leaves the card
- * where its first answer put it: right, with another accepted word. So its
- * banner is that answer's, which names the saved word, never "the right answer
- * was", and the input it colours is not marked wrong either.
+ * null for every other answer. A second try given up leaves the card where its
+ * first answer put it: right, with another accepted word. So its banner is that
+ * answer's, which names the saved word, never "the right answer was".
+ *
+ * Phase 42 (spec D1). A wrong second try that was typed is told so, its input
+ * marked wrong: the first answer's "right" banner read as if this one were
+ * accepted. Given up is a blank text or a pass, since a judged card's give-up
+ * comes back `wrong` (phase 34 ruling R15); the first answer typed again keeps
+ * that answer's banner too.
  */
 export function feedbackFor(question: Question, answer: CardAnswer, retry: PendingRetry | null): Feedback {
   const feedback = answerFeedback(question, answer);
-  return retry !== null && feedback.tone === 'wrong' ? alternativeFeedback(question) : feedback;
+  return retry !== null && feedback.tone === 'wrong' && (gaveUp(answer) || repeats(question, answer, retry))
+    ? alternativeFeedback(question)
+    : feedback;
+}
+
+function gaveUp(answer: CardAnswer): boolean {
+  return 'pass' in answer || ('text' in answer && answer.text.trim() === '');
+}
+
+/** Phase 42 (review I1). The first answer typed again: it was told it is right a
+ *  moment ago (a fit-checked gap word, a translation sent unchanged), and a
+ *  second try is judged without that check, so it keeps the first answer's banner. */
+function repeats(question: Question, answer: CardAnswer, retry: PendingRetry): boolean {
+  if (!('text' in answer)) return false;
+  const same = question.type === 'typed_meaning' ? normaliseHebrew : normaliseTyped;
+  return same(answer.text) === same(retry.answer);
 }
 
 /** Today's banner for another accepted word on this card: another sense on a
