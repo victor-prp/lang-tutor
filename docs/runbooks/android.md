@@ -22,10 +22,10 @@ The job also skips, green, while steps 2–4 are not done.
 
 ## Where go-live stands
 
-Last updated 2026-10-11.
+Last updated 2026-10-13.
 
-- [ ] **1. Play Console.** The account is created and the ID documents are uploaded. **Waiting
-      for Google's identity email**, which can take a few days. Steps 1.2–1.4 come after it.
+- [ ] **1. Play Console.** 1.1 is done: Google confirmed the identity verification on
+      2026-10-13. **Next: steps 1.2–1.4** (create the app, the tester list, app content).
 - [x] **2. Expo account and project.** Done. The project is `@wordspal/lang-tutor`, owned by the
       `wordspal` Expo account, id `66fb04ba-7006-4095-92be-9c26592db6c7`. The `production`
       channel exists, and `app.json` has the project id, updates URL and owner (PR #130).
@@ -43,8 +43,8 @@ Releasing other phases meanwhile is safe. `ANDROID_RELEASE` is unset, so every r
 `android` as skipped. Do not set it to `on` before steps 1 and 3 are done: the job would build, then
 fail to submit to a Play app that does not exist.
 
-**Picking up from here:** when Google's email arrives, do steps 1.2–1.4, then step 3, then
-step 5.
+**Picking up from here:** do steps 1.2–1.4, then step 3, then step 5. Steps 1.2–1.4 and 3.1–3.2
+are clicks in Google's consoles; 3.3 and 5 are commands below.
 
 ## Go-live, once
 
@@ -56,23 +56,30 @@ proves before the next one starts.
       account for **Yourself**, not an organisation. An organisation account needs a D-U-N-S
       number and a registered business. It costs a one-time $25, and Google verifies your
       identity, which can take a few days. *(Account created and documents uploaded
-      2026-10-11; waiting for verification.)*
-   2. *Create app*: name **WordsPal**, default language Hebrew, App, Free.
+      2026-10-11; verified 2026-10-13.)*
+   2. *Create app*: name **WordsPal**, default language Hebrew, App, Free. If it asks for a
+      package name, enter `ai.wordspal.app`, the `android.package` in `apps/mobile/app.json`.
    3. *Testing → Internal testing → Testers*: create an email list with your friends'
       Google-account addresses, and your own. Keep the opt-in link it shows: friends open it
       once before installing.
    4. *App content*. Fill in every item it lists:
       - **Privacy policy:** `https://app.wordspal.ai/privacy.html`. Read the page first. Its
-        deletion contact is `code@wordspal.ai`; if that address does not receive mail, change it
+        deletion contact is `contact@wordspal.ai`; if that address does not receive mail, change it
         in `apps/mobile/public/privacy.html` and release before citing the page.
       - **Data safety:** the answers in [Data safety](#data-safety) below.
       - **Content rating:** the questionnaire. It is an education app with no violence, no user
         chat and no purchases.
       - **Target audience:** 13 and over.
       - **Ads:** no ads.
+      - **App access:** sign-in is by one-time email code, so a reviewer cannot use a real
+        account. The form names a placeholder reviewer account, `android_tester_0001@wordspal.ai`, that
+        the server does not accept yet. *(Entered 2026-10-13.)* Internal testing is rarely
+        reviewed, but **before the first production release** the server must accept a fixed
+        8-digit sign-in code for that account (the form's "password"; codes are 8 digits in
+        `SignInWithCodeRequestSchema`), or the entry must change to a mailbox you can share.
 
-   *Proves:* the app exists. Its package name is not set yet: Play takes it from the first
-   upload, and after that it can never change.
+   *Proves:* the app exists. Its package name, whether entered here or taken from the first
+   upload, can never change afterwards.
 
 2. **Expo account and project.** *(Done 2026-10-11.)* Create an account at
    [expo.dev](https://expo.dev), then:
