@@ -185,13 +185,19 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'translate') {
       // Translate the Hebrew sentence; a different order is the judge's to accept.
-      await expect(page.getByText('תרגמו לרוסית')).toBeVisible();
+      await expect(page.getByText('תרגמו את המשפט לרוסית')).toBeVisible();
       // Phase 34 (spec D8): the sentence marks the practised word.
       await expect(page.getByTestId('sentence-translation')).toHaveText(STUB_SENTENCE_HEBREW);
       await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
       await expect(page.getByTestId('translation-reference')).toHaveCount(0);
+      // The marked word alone is asked again as the whole sentence, not sent.
+      await answerTyped(page, STUB_GAP);
+      await expect(page.getByTestId('word-only')).toHaveText('כתבו את כל המשפט, לא רק את המילה');
+      await expect(page.getByTestId('typed-input')).toHaveValue(STUB_GAP);
+      await expect(page.getByTestId('feedback-wrong')).not.toBeVisible();
       await expectJudge(request, 'right');
       await answerTyped(page, 'Она прочитала эту книгу вчера');
+      await expect(page.getByTestId('word-only')).not.toBeVisible();
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
       await expect(page.getByText('תרגום לדוגמה:')).toBeVisible();

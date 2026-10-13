@@ -111,8 +111,12 @@ describe('translationRuleVerdict', () => {
   it('is exact for the reference in another case without the full stop', () => {
     expect(translationRuleVerdict('I want to book a table.', 'i want to BOOK a table')).toBe('exact');
   });
+  it('is wrong for one word on its own, with no model call', () => {
+    expect(translationRuleVerdict('This mushroom grew fast.', 'mushroom ')).toBe('wrong');
+  });
   it('leaves anything else to the model', () => {
     expect(translationRuleVerdict('I want to book a table.', 'I want a table')).toBeNull();
+    expect(translationRuleVerdict('Run!', 'go')).toBeNull();
   });
 });
 
@@ -182,7 +186,7 @@ describe('the dispatchers', () => {
     expect(ruleVerdict(MEANING_Q, 'רכב', ['רכב'])).toBe('exact');
     expect(ruleVerdict(MEANING_Q, 'רכב')).toBeNull();
     // A translation's reference is a sentence in the language being learned; the lists are words in the learner's.
-    expect(ruleVerdict(QUESTION, 'book', ['book'])).toBeNull();
+    expect(ruleVerdict(QUESTION, 'a book', ['a book'])).toBeNull();
   });
 });
 

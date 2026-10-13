@@ -25,6 +25,23 @@ describe('typedSubmit (phase 39 D8)', () => {
   });
 });
 
+describe('typedSubmit on a translation card', () => {
+  const reference = 'This mushroom grew fast.';
+  it('asks for the whole sentence when one word is typed', () => {
+    expect(typedSubmit('mushroom ', 'en', reference)).toBe('word_only');
+  });
+  it('sends a sentence', () => {
+    expect(typedSubmit('This mushroom grows fast', 'en', reference)).toBe('send');
+  });
+  it('names the wrong alphabet before the missing sentence, and gives up on empty text', () => {
+    expect(typedSubmit('פטריה', 'en', reference)).toBe('wrong_script');
+    expect(typedSubmit('  ', 'en', reference)).toBe('empty');
+  });
+  it('sends one word on a card with no sentence', () => {
+    expect(typedSubmit('mushroom', 'en')).toBe('send');
+  });
+});
+
 describe('scriptGate (phase 39 D7, D8)', () => {
   const meaning = (text: string): Question => ({
     id: 'q1',

@@ -6,7 +6,7 @@ describe('sentence-card strings (phase 27 D5, D6)', () => {
   it('words the three instructions and the reference label exactly', () => {
     expect(strings.questionInstructionCloze).toBe('איזו מילה חסרה?');
     expect(strings.questionInstructionClozeTyped('it')).toEqual({ before: 'השלימו את המילה החסרה ב', language: 'איטלקית', after: '' });
-    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו ל', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו את המשפט ל', language: 'איטלקית', after: '' });
     expect(strings.translationReference).toBe('תרגום לדוגמה:');
   });
 });
@@ -85,7 +85,13 @@ describe('instructions with a bold language (phase 39 D9)', () => {
     expect(strings.questionInstructionTyped('it')).toEqual({ before: 'כתבו את המילה ב', language: 'איטלקית', after: '' });
     expect(strings.questionInstructionDictation('ru')).toEqual({ before: 'הקשיבו וכתבו ב', language: 'רוסית', after: '' });
     expect(strings.questionInstructionClozeTyped('it')).toEqual({ before: 'השלימו את המילה החסרה ב', language: 'איטלקית', after: '' });
-    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו ל', language: 'איטלקית', after: '' });
+    expect(strings.questionInstructionTranslate('it')).toEqual({ before: 'תרגמו את המשפט ל', language: 'איטלקית', after: '' });
     expect(strings.wrongScriptNotice('en')).toEqual({ before: 'התשובה צריכה להיות ב', language: 'אנגלית', after: '' });
+  });
+});
+
+describe('the translation card asks for the whole sentence', () => {
+  it('words the notice for one word on its own', () => {
+    expect(strings.wordOnlyNotice).toBe('כתבו את כל המשפט, לא רק את המילה');
   });
 });
