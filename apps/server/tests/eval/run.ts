@@ -25,6 +25,7 @@ import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
 import { comparable, distractorItems, nothingKnown, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
+import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
@@ -898,6 +899,15 @@ async function main(): Promise<void> {
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: 0,
   });
+  // Phase 45 (spec D3). The translation judge's own client, as composition.ts builds it.
+  const translationJudgeLlm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    timeoutMs: TIMEOUT_MS,
+    thinkingBudget: TRANSLATION_JUDGE_THINKING,
+  });
   const transcriber = createGeminiTranscriber({
     fetch: globalThis.fetch,
     baseUrl: gemini.baseUrl,
@@ -1156,7 +1166,7 @@ async function main(): Promise<void> {
 
   const scoreTranslationJudge = async (kase: TranslationJudgeCase): Promise<Row> => {
     try {
-      const verdict = await askTranslationJudge(judgeLlm, kase);
+      const verdict = await askTranslationJudge(translationJudgeLlm, kase);
       return {
         label: kase.label,
         text: kase.answer,

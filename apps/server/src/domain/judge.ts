@@ -97,13 +97,18 @@ export function translationRuleVerdict(reference: string, text: string): TypedVe
   return typed === normaliseTyped(reference) ? 'exact' : null;
 }
 
+/** Phase 45 (spec D3). The translation judge's thinking budget, in tokens. With
+ *  none it took "talk with everyone" for "communicate clearly with everyone";
+ *  512 judged it wrong every time, at about 2.4 s a call. */
+export const TRANSLATION_JUDGE_THINKING = 512;
+
 export function buildTranslationJudgePrompt(question: SentenceTranslationQuestion, context: JudgeContext, answer: string) {
   const name = LANGUAGES[context.language].name;
   const source = LANGUAGES[context.explanation].name;
   const system = [
     `Your task: ${JUDGE_MARKER}. A ${source}-speaking learner of ${name} was shown a ${source} sentence and typed its translation into ${name}.`,
     'The word practised is word, in the sense of meaning. reference_translation is one good translation, not the only one.',
-    `Judge on conveying the ${source} sentence and on the practised word, in any form the sentence needs; ignore slips in other words, and small grammar slips that do not touch the practised word. Any other detail of the sentence changed (a number, a person, a tense, an object, a quality) means it is not conveyed.`,
+    `Judge on conveying the ${source} sentence and on the practised word, in any form the sentence needs; ignore slips in other words, and small grammar slips that do not touch the practised word. Any other detail of the sentence changed or left out (a number, a person, a tense, an object, a quality, or how something is done, such as clearly, quickly or very) means it is not conveyed.`,
     'Return JSON only, matching the supplied schema, with one field, verdict:',
     '- "right": the answer conveys the sentence and uses the practised word in a form the sentence needs.',
     '- "misspelled": as "right", but the practised word itself has a one-letter or accent slip. A slip in any other word is still "right".',

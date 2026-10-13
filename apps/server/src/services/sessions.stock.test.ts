@@ -85,6 +85,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
     checkerLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
+    translationJudge: createFakeLlmClient(''),
   });
   return { service, jobs, logger, inserted };
 }

@@ -376,17 +376,39 @@ describe('a second try (phase 34 D9)', () => {
     expect(feedbackFor(MEANING, { text: 'לקרוא', judged: 'wrong' }, PENDING_MEANING)).toEqual(wrong('להזמין'));
   });
 
-  // Phase 42 review I1. The first answer typed again was told it fits a moment ago:
-  // the fit check never runs on a retry, so its banner must not turn red.
-  it('the first answer typed again keeps the first answer\'s banner', () => {
-    expect(feedbackFor(CLOZE, { text: ' Cantavamo ' }, { answer: 'cantavamo', wording: 'word' })).toEqual({ ...OTHER_WORD, line: 'parlavamo' });
-    expect(feedbackFor(TRANSLATE, { text: 'Uniamo le forze', judged: 'wrong' }, { answer: 'Uniamo le forze.', wording: 'word' })).toEqual({ ...OTHER_WORD, line: 'Uniamo' });
-    expect(feedbackFor(MEANING, { text: 'סֵפֶר', judged: 'wrong' }, PENDING_MEANING)).toMatchObject({ tone: 'correct', verdict: 'alternative' });
+  // Phase 42 review I1, phase 45 review I1. The first answer sent again is still not
+  // the word: neither red (it was just told it fits) nor green (it is the bug), and the
+  // same on every card, typed or spoken, judged again or not.
+  it('the first answer sent again says it is still not the word', () => {
+    const still = (line: string) => ({ tone: 'other', title: strings.feedbackStillOther, line, verdict: null });
+    expect(feedbackFor(CLOZE, { text: ' Cantavamo ' }, { answer: 'cantavamo', wording: 'word' })).toEqual(still('parlavamo'));
+    expect(feedbackFor(typed, { text: 'vetrata' }, PENDING_WORD)).toEqual(still('finestra'));
+    expect(feedbackFor(TRANSLATE, { text: 'Uniamo le forze', judged: 'wrong' }, { answer: 'Uniamo le forze.', wording: 'word' })).toEqual(still('Uniamo'));
+    expect(feedbackFor(TRANSLATE, { text: 'Combiniamo le forze.', judged: 'alternative' }, { answer: 'Combiniamo le forze.', wording: 'word' })).toEqual(still('Uniamo'));
+    expect(feedbackFor(MEANING, { text: 'סֵפֶר', judged: 'wrong' }, PENDING_MEANING)).toMatchObject({ tone: 'other', title: strings.feedbackStillOtherSense });
   });
 
-  // Review Focus 3: another accepted word on the second try is still right.
-  it('another accepted word on the second try keeps its own right banner', () => {
-    expect(feedbackFor(typed, { text: 'vetrata' }, PENDING_WORD)).toEqual({ ...OTHER_WORD, line: 'finestra' });
+  // Phase 45 (spec D1). Another accepted word again missed what the second try asked
+  // for: not green, not red, and the input is not coloured.
+  it('another accepted word on the second try says it is still not the word, uncoloured', () => {
+    const still = (line: string) => ({ tone: 'other', title: strings.feedbackStillOther, line, verdict: null });
+    expect(feedbackFor(typed, { text: 'vetrata' }, { answer: 'vetri', wording: 'word' })).toEqual(still('finestra'));
+    expect(feedbackFor(CLOZE, { text: 'chiacchieravamo' }, { answer: 'cantavamo', wording: 'word' })).toEqual(still('parlavamo'));
+    // Review Focus 2: say the translation, typed and heard.
+    expect(feedbackFor(SAY, { text: 'dico' }, { answer: 'racconto', wording: 'word' })).toEqual(still('parlo'));
+    expect(feedbackFor(SAY, { heard: 'dico', verdict: 'alternative' }, { answer: 'racconto', wording: 'word' })).toEqual(still('parlo'));
+    expect(feedbackFor(TRANSLATE, { text: 'Combiniamo le forze.', judged: 'alternative' }, { answer: 'Uniamo i poteri.', wording: 'word' })).toEqual(still('Uniamo'));
+    expect(feedbackFor(MEANING, { text: 'ספר', judged: 'alternative' }, { answer: 'מפה', wording: 'meaning' })).toEqual({
+      tone: 'other',
+      title: strings.feedbackStillOtherSense,
+      line: 'להזמין',
+      verdict: null,
+    });
+  });
+
+  // Review Focus 1: a first answer that is another accepted word keeps its green banner.
+  it('another accepted word as a first answer keeps its right banner', () => {
+    expect(feedbackFor(typed, { text: 'vetrata' }, null)).toEqual({ ...OTHER_WORD, line: 'finestra' });
   });
 
   it('the saved word found on it gets the banner that answer gets today', () => {
