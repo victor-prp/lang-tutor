@@ -467,8 +467,8 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
           findRows: async (input) => {
             reads.memory = input;
             return [
-              { glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE },
-              { glossId: 'g_asked', dimension: 'written_receptive', state: MISSED_STATE },
+              { glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE, reachedOn: null },
+              { glossId: 'g_asked', dimension: 'written_receptive', state: MISSED_STATE, reachedOn: null },
             ];
           },
         }),

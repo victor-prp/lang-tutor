@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { Dimension, QuestionType } from '@lang-tutor/core/domain';
 
 import { chooseWords, liveDimensions, type ChoiceInput, type ChosenPick } from './choose';
-import { DAY_NEW_CAP, RETURNS_PER_DAY } from './chooseConstants';
+import { DAY_NEW_CAP, KNOWN_STABILITY, RETURNS_PER_DAY } from './chooseConstants';
 import { LANE0_DAY } from './day.fixture';
 import { glossFamilies, type Families, type FamilyGloss } from './glossFamilies';
 import { applySession, type MemoryRow } from './memoryUpdate';
@@ -53,7 +53,8 @@ type Session = { input: ChoiceInput; picks: ChosenPick[]; families: Families };
 type DayList = {
   today: string;
   saved: Omit<FamilyGloss, 'knownAt'>[];
-  memory: MemoryRow[];
+  /** Phase 46: the fixtures predate reachedOn; the runner dates it as migration 0032 does. */
+  memory: Omit<MemoryRow, 'reachedOn'>[];
   progress: ProgressRow[];
 };
 
@@ -97,7 +98,13 @@ function runDays(
   count: number,
   missEvery = 5,
 ): { log: Asked[]; sessions: Session[]; introduced: Set<string>[]; knownIn: ReadonlyMap<string, number> } {
-  const memory = new Map<string, MemoryRow>(list.memory.map((row) => [keyOf(row.glossId, row.dimension), row]));
+  // Phase 46 (spec D4): a fixture row at the bar has reached it on its last day, as the backfill dates it.
+  const memory = new Map<string, MemoryRow>(
+    list.memory.map((row) => [
+      keyOf(row.glossId, row.dimension),
+      { ...row, reachedOn: row.state.stability >= KNOWN_STABILITY ? row.state.lastDay : null },
+    ]),
+  );
   const progress = new Map<string, ProgressRow>(list.progress.map((row) => [keyOf(row.glossId, row.dimension), row]));
   const met = new Set(list.memory.map((row) => row.glossId));
   /** Phase 39 (spec D2). The session each gloss was first seen known in: its known_at. */

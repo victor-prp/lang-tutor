@@ -752,6 +752,10 @@ export const glossMemory = pgTable(
     reps: integer('reps').notNull(),
     lapses: integer('lapses').notNull(),
     params: text('params').notNull(),
+    // Phase 46 (spec D1). The learner day this skill's stability first reached
+    // KNOWN_STABILITY; kept after a lapse. Set by applySession, so the recompute
+    // rebuilds it.
+    reachedOn: date('reached_on', { mode: 'string' }),
   },
   (t) => [
     primaryKey({ name: 'gloss_memory_pkey', columns: [t.enrollmentId, t.glossId, t.dimension] }),
