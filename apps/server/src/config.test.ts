@@ -28,7 +28,7 @@ describe('loadConfig', () => {
       port: 3001,
       poolMax: 5,
       translationTimeoutMs: 25_000,
-      sessionGenerationTimeoutMs: 300_000,
+      sessionGenerationTimeoutMs: 120_000,
       contextCallTimeoutMs: 60_000,
       checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
@@ -77,7 +77,7 @@ describe('loadConfig', () => {
       port: 8080,
       poolMax: 20,
       translationTimeoutMs: 12_000,
-      sessionGenerationTimeoutMs: 300_000,
+      sessionGenerationTimeoutMs: 120_000,
       contextCallTimeoutMs: 60_000,
       checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
@@ -95,14 +95,14 @@ describe('loadConfig', () => {
     expect(loadConfig({ TRANSLATION_TIMEOUT_MS: 'nonsense' }).translationTimeoutMs).toBe(25_000);
   });
 
-  it('defaults the session generation budget to five minutes and reads SESSION_GENERATION_TIMEOUT_MS', () => {
-    expect(loadConfig({}).sessionGenerationTimeoutMs).toBe(300_000);
+  it('defaults the session generation budget to two minutes (phase 47 D1) and reads SESSION_GENERATION_TIMEOUT_MS', () => {
+    expect(loadConfig({}).sessionGenerationTimeoutMs).toBe(120_000);
     expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '5000' }).sessionGenerationTimeoutMs).toBe(5_000);
   });
 
   // Victor's cap: the job's expiry is twice the sum of the budgets and depends on it.
-  it('never lets SESSION_GENERATION_TIMEOUT_MS raise the budget above five minutes', () => {
-    expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '600000' }).sessionGenerationTimeoutMs).toBe(300_000);
+  it('never lets SESSION_GENERATION_TIMEOUT_MS raise the budget above two minutes', () => {
+    expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '600000' }).sessionGenerationTimeoutMs).toBe(120_000);
   });
 
   // Phase 24 (spec D16): expiry detects a crashed worker and must never cut a
@@ -118,7 +118,7 @@ describe('loadConfig', () => {
 
   it('expires a prepare-session job at exactly twice the batch’s, the context call’s and the checker’s budgets (ruling R12)', () => {
     expect(PREPARE_SESSION_CALL_BUDGETS_MS).toEqual([SESSION_GENERATION_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, CHECKER_CALL_BUDGET_MS]);
-    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (300_000 + 60_000 + 60_000)) / 1000);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (120_000 + 60_000 + 60_000)) / 1000);
   });
 
   it('defaults the checker’s budget to a minute, reads CHECKER_CALL_TIMEOUT_MS, and never above a minute', () => {

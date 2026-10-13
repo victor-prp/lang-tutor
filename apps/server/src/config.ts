@@ -58,10 +58,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     port: Number(env.PORT) || 3001,
     poolMax: Number(env.PG_POOL_MAX) || 5,
     translationTimeoutMs: Number(env.TRANSLATION_TIMEOUT_MS) || DEFAULT_TRANSLATION_TIMEOUT_MS,
-    // Victor's cap: five minutes at most. The prepare-session job expires at
-    // twice the sum of its calls' budgets (PREPARE_SESSION_CALL_BUDGETS_MS), so
-    // a call longer than its budget would be cut off by the expiry rather than
-    // by its own timeout: each is capped at its budget, never above.
+    // Victor's cap: two minutes at most (phase 47 D1; five before it). The
+    // prepare-session job expires at twice the sum of its calls' budgets
+    // (PREPARE_SESSION_CALL_BUDGETS_MS), so a call longer than its budget would
+    // be cut off by the expiry rather than by its own timeout: each is capped
+    // at its budget, never above.
     sessionGenerationTimeoutMs: Math.min(
       Number(env.SESSION_GENERATION_TIMEOUT_MS) || SESSION_GENERATION_BUDGET_MS,
       SESSION_GENERATION_BUDGET_MS,

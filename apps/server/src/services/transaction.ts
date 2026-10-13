@@ -4,6 +4,7 @@ import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { GrantRepo } from '../repo/grants';
 import type { JobRepo } from '../repo/jobs';
 import type { MemoryRepo } from '../repo/memory';
+import type { ModelCallRepo } from '../repo/modelCalls';
 import type { PhotoImportRepo } from '../repo/photoImports';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
@@ -29,6 +30,8 @@ export type Repos = {
   glossFamilies: GlossFamiliesRepo;
   jobs: JobRepo;
   photoImport: PhotoImportRepo;
+  // Phase 47 (spec D5). Written only by the model-call recorder.
+  modelCall: ModelCallRepo;
 };
 
 /**

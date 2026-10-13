@@ -1261,3 +1261,45 @@ export const photoImportItems = pgTable(
     check('photo_import_items_tick_needs_gloss', sql`not ${t.ticked} or ${t.chosenGlossId} is not null`),
   ],
 );
+
+// Phase 47 (spec D2). One row per request to a model, whatever its outcome:
+// what was sent, what came back and how long it took, so a prompt can be
+// read, replayed and measured afterwards. A log, not part of the data model:
+// no foreign keys, so a record never fails on a session a reseed deleted
+// mid-call and never holds back a deletion (ruling R2), and no check on
+// `kind`, whose values are the server's ModelCallKind. Kept 7 days: each
+// record deletes what is older (ruling R3).
+export const modelCalls = pgTable(
+  'model_calls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    kind: text('kind').notNull(),
+    model: text('model').notNull(),
+    sessionId: uuid('session_id'),
+    attempt: integer('attempt'),
+    enrollmentId: text('enrollment_id'),
+    userId: text('user_id'),
+    // The body as sent, with audio and image data replaced by their type and
+    // size; the key travels in a header and is never here.
+    request: jsonb('request').notNull(),
+    // The body as received; null when none arrived (a timeout, a network failure).
+    response: jsonb('response'),
+    httpStatus: integer('http_status'),
+    // The message LlmUnavailable carries, when the call failed.
+    error: text('error'),
+    durationMs: integer('duration_ms').notNull(),
+    // From the response's usageMetadata, so they count without reading the JSON.
+    promptTokens: integer('prompt_tokens'),
+    outputTokens: integer('output_tokens'),
+    thinkingTokens: integer('thinking_tokens'),
+    finishReason: text('finish_reason'),
+  },
+  (t) => [
+    index('model_calls_session_idx').on(t.sessionId, t.startedAt),
+    index('model_calls_enrollment_idx').on(t.enrollmentId, t.startedAt),
+    index('model_calls_user_idx').on(t.userId, t.startedAt),
+    index('model_calls_kind_idx').on(t.kind, t.startedAt),
+    index('model_calls_started_idx').on(t.startedAt),
+  ],
+);

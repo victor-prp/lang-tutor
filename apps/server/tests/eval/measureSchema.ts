@@ -48,7 +48,7 @@ import { LlmCheckSchema, LlmContextSchema, LlmDistractorsSchema } from '@lang-tu
 
 import { loadGeminiConfig } from '../../src/config';
 import { buildCheckPrompt, parseCheck, readCheck, type CheckItem } from '../../src/domain/check';
-import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS } from '../../src/domain/jobs';
+import { CHECKER_CALL_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
 import {
   buildContextPrompt,
   contextItemFor,
@@ -208,6 +208,10 @@ async function main(): Promise<number> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     timeoutMs: TIMEOUT_MS,
+    // Phase 47 (spec D1, ruling R6): production's cap, and nothing recorded.
+    thinkingBudget: SESSION_GENERATION_THINKING,
+    onCall: async () => {},
+    now: Date.now,
   });
 
   const sent = JSON.stringify(toGeminiSchema(schema));
@@ -218,7 +222,7 @@ async function main(): Promise<number> {
   const started = Date.now();
   let raw: string;
   try {
-    raw = await llm({ system: prompt.system, user: prompt.user, schema });
+    raw = await llm({ system: prompt.system, user: prompt.user, schema, record: { kind: 'session_generation' } });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.log(`after     ${Date.now() - started} ms`);
@@ -275,6 +279,8 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
     model: gemini.model,
     // Production's budget for this call (ruling R12): a wait past it is a fallback there.
     timeoutMs: CONTEXT_CALL_BUDGET_MS,
+    onCall: async () => {},
+    now: Date.now,
   });
   console.log(`model     ${gemini.model}`);
   console.log(`schema    LlmContextSchema (${JSON.stringify(toGeminiSchema(LlmContextSchema)).length} characters of responseSchema)`);
@@ -282,7 +288,7 @@ async function measureContext(gemini: ReturnType<typeof loadGeminiConfig>): Prom
   const started = Date.now();
   let raw: string;
   try {
-    raw = await llm(prompt);
+    raw = await llm({ ...prompt, record: { kind: 'context' } });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.log(`after     ${Date.now() - started} ms`);
@@ -362,6 +368,8 @@ async function measureCheck(gemini: ReturnType<typeof loadGeminiConfig>, require
     apiKey: gemini.apiKey,
     model: gemini.model,
     timeoutMs: CHECKER_CALL_BUDGET_MS,
+    onCall: async () => {},
+    now: Date.now,
   });
   console.log(`model     ${gemini.model}`);
   console.log(`schema    LlmCheckSchema${required ? ', every field required' : ''} (${JSON.stringify(toGeminiSchema(schema)).length} characters of responseSchema)`);
@@ -369,7 +377,7 @@ async function measureCheck(gemini: ReturnType<typeof loadGeminiConfig>, require
   const started = Date.now();
   let raw: string;
   try {
-    raw = await llm({ ...prompt, schema: schema as typeof LlmCheckSchema });
+    raw = await llm({ ...prompt, schema: schema as typeof LlmCheckSchema, record: { kind: 'checker' } });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.log(`after     ${Date.now() - started} ms`);

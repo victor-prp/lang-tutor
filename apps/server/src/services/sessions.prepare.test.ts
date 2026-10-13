@@ -261,6 +261,17 @@ describe('prepareSession', () => {
     );
   });
 
+  // Phase 47 (spec D3, D6): an attempt's three calls name what they are for,
+  // the session, the attempt, and whose they are, so the record can join them.
+  it('names each call of an attempt: its kind, the session, the attempt, the enrollment and the learner', async () => {
+    const { service, llm, contextLlm, checkerLlm } = world({});
+    await service.prepareSession(PAYLOAD, { attempt: 2 });
+    const handles = { sessionId: SESSION, attempt: 2, enrollmentId: 'e1', userId: 'u1' };
+    expect(llm.calls.map((call) => call.record)).toEqual([{ kind: 'session_generation', ...handles }]);
+    expect(contextLlm.calls.map((call) => call.record)).toEqual([{ kind: 'context', ...handles }]);
+    expect(checkerLlm.calls.map((call) => call.record)).toEqual([{ kind: 'checker', ...handles }]);
+  });
+
   it('generates every pick, flips the session to ready, and writes its questions', async () => {
     const { service, calls, llm, contextLlm } = world({});
     await service.prepareSession(PAYLOAD);

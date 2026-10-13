@@ -222,7 +222,7 @@ describe('context sentences and marks, through the database', () => {
   });
 
   // Ruling R12: the context call has its own short budget, so a hang costs the
-  // sentences (R11), never the session, and never the batch's five minutes.
+  // sentences (R11), never the session, and never the batch's two minutes.
   it('falls back, and prepares the session, when the context call outruns its own budget', async () => {
     deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns), contextCallTimeoutMs: 500 });
     const w = await words();

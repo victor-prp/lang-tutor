@@ -963,6 +963,21 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
     ],
   },
   {
+    // Phase 47 (spec D7). The word items of lane 0's failed stock c0c71c16
+    // (2026-10-13), with its two typed items. Uncapped, gemini-2.5-flash once
+    // thought 62,910 tokens over this batch and offered Hebrew wrong options
+    // for both words to pick. At 4096 it answered in English (spec D1).
+    label: 'English words to pick where the model once answered in Hebrew (century, dish)',
+    from: 'en',
+    to: 'he',
+    items: [
+      { task: 'word', form: 'century', lemma: 'century', partOfSpeech: 'noun', translation: 'מאה', synonyms: [] },
+      { task: 'typed', form: 'drum', lemma: 'drum', partOfSpeech: 'noun', translation: 'תוף', synonyms: [], alternatives: [] },
+      { task: 'word', form: 'dish', lemma: 'dish', partOfSpeech: 'noun', translation: 'צלחת', synonyms: ['plate'] },
+      { task: 'typed', form: 'train', lemma: 'train', partOfSpeech: 'verb', translation: 'לאמן', synonyms: [], alternatives: [] },
+    ],
+  },
+  {
     label: 'A mixed session, as prepare-session sends it',
     from: 'it',
     to: 'he',

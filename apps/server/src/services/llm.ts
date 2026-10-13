@@ -25,7 +25,66 @@ export type LlmJsonRequest = {
    * a provider.
    */
   schema: ZodType;
+  /** Phase 47 (spec D3). What the call is for and whom it serves, for its record.
+   *  Required, so a call site that names no kind does not compile. */
+  record: ModelCallRecord;
 };
+
+/**
+ * Phase 47 (spec D3). One kind per call site, so calls can be counted by what
+ * they are for. One client may serve several (`llm` serves the lookup, the
+ * rendering calls, accept and the sense match), which is why the call site
+ * names its kind and the client does not (ruling R1).
+ */
+export type ModelCallKind =
+  | 'lookup'
+  | 'rendering'
+  | 'accept'
+  | 'sense_match'
+  | 'photo_read'
+  | 'transcription'
+  | 'judge'
+  | 'translation_judge'
+  | 'fit_judge'
+  | 'session_generation'
+  | 'context'
+  | 'checker'
+  | 'gloss_merge';
+
+/** Phase 47 (spec D3). A handle the call site does not have is left out. */
+export type ModelCallRecord = {
+  kind: ModelCallKind;
+  sessionId?: string;
+  attempt?: number;
+  enrollmentId?: string;
+  userId?: string;
+};
+
+/**
+ * Phase 47 (spec D4). One request to a model as its provider saw it, reported
+ * once whatever its outcome: what was sent (media replaced by its type and
+ * size), what came back, and how long it took. Declared here, beside
+ * LlmClient, and satisfied structurally by the provider (ADR 0001 R10, R11).
+ */
+export type ModelCall = {
+  record: ModelCallRecord;
+  model: string;
+  startedAt: Date;
+  request: unknown;
+  /** The body as received; null when none arrived. */
+  response: unknown;
+  httpStatus: number | null;
+  /** The message the call's LlmUnavailable carries, when it failed. */
+  error: string | null;
+  durationMs: number;
+  promptTokens: number | null;
+  outputTokens: number | null;
+  thinkingTokens: number | null;
+  finishReason: string | null;
+};
+
+/** Phase 47 (spec D5). Never throws: a recording never fails the call it records. */
+export type ModelCallRecorder = (call: ModelCall) => Promise<void>;
 
 /**
  * Returns the model's raw JSON text. Parsing and validation happen once, in

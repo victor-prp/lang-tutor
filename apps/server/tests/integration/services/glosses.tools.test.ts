@@ -30,6 +30,7 @@ const tools = () =>
     db: t.db,
     logger: createFakeLogger(),
     fetch: globalThis.fetch,
+    now: Date.now,
     gemini: { baseUrl: geminiBaseUrlFor(ns), apiKey: 'test', model: 'test' },
     // A lookup's production budget, as createTestServerDeps gives every other
     // model call: under the full suite one MockServer answer outlived 5 s.
@@ -69,6 +70,7 @@ describe('dict:glosses:merge (spec D7)', () => {
       db: t.db,
       logger: createFakeLogger(),
       fetch: globalThis.fetch,
+    now: Date.now,
       gemini: null,
       timeoutMs: 25_000,
     });

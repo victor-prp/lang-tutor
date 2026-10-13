@@ -26,6 +26,7 @@ import { normalizeForm } from '../../src/domain/dictionary';
 import { comparable, distractorItems, nothingKnown, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
+import { SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
@@ -64,6 +65,8 @@ import { contextItemOf, contextTier1, contextTier2, contextWritten } from './con
 import { MATCH_CASES, PHOTO_CASES, type MatchCase, type PhotoCase } from './photoCases';
 
 const TIER2_THRESHOLD = 0.85;
+/** Phase 47 (ruling R6). The eval has no database: its calls are not recorded. */
+const RECORDS_NOTHING = async (): Promise<void> => {};
 const TIMEOUT_MS = 30_000;
 /** A photo read's production budget. */
 const PHOTO_TIMEOUT_MS = 120_000;
@@ -887,7 +890,21 @@ async function main(): Promise<void> {
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
+  });
+  // Phase 47 (spec D1). The session-generation prompt on the client composition.ts
+  // gives it: thinking capped. The rest of the prompts keep the plain client.
+  const sessionLlm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
+    timeoutMs: TIMEOUT_MS,
+    thinkingBudget: SESSION_GENERATION_THINKING,
   });
   // Matches the options composition.ts gives the judge client, except the
   // timeout: the eval uses its own TIMEOUT_MS (30 s), not production's budget.
@@ -896,6 +913,8 @@ async function main(): Promise<void> {
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: 0,
   });
@@ -905,6 +924,8 @@ async function main(): Promise<void> {
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: TRANSLATION_JUDGE_THINKING,
   });
@@ -913,6 +934,8 @@ async function main(): Promise<void> {
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
   });
   const vision = createGeminiVisionClient({
@@ -920,6 +943,8 @@ async function main(): Promise<void> {
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: PHOTO_TIMEOUT_MS,
   });
 
@@ -1011,7 +1036,7 @@ async function main(): Promise<void> {
   const scoreDistractors = async (kase: DistractorCase): Promise<Row> => {
     const text = kase.items.map((item) => item.form).join(', ');
     try {
-      const answer = await askDistractors(llm, { from: kase.from, to: kase.to, items: itemsOf(kase) });
+      const answer = await askDistractors(sessionLlm, { from: kase.from, to: kase.to, items: itemsOf(kase) });
       return {
         label: kase.label,
         text,
@@ -1097,7 +1122,7 @@ async function main(): Promise<void> {
   const scoreSentences = async (kase: SentenceCase): Promise<Row> => {
     const text = kase.items.map((item) => item.form).join(', ');
     try {
-      const answer = await askDistractors(llm, { from: kase.from, to: 'he', items: sentenceItemsOf(kase) });
+      const answer = await askDistractors(sessionLlm, { from: kase.from, to: 'he', items: sentenceItemsOf(kase) });
       return {
         label: kase.label,
         text,
