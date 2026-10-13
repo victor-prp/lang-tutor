@@ -112,12 +112,14 @@ export type CheckFinding =
   | { task: 'words'; words: string[] }
   | { task: 'translate'; translation: string };
 
-export type CheckReading = { ok: true; byKey: Map<string, CheckFinding> } | { ok: false; reason: string };
+/** Phase 48 (spec D2). Every item's finding; a choice or gap item the checker left unnumbered is unjudged, with why. */
+export type CheckReading = { byKey: Map<string, CheckFinding>; unjudged: Map<string, string> };
 
 /**
  * The answer, item by item. A choice or gap item whose booleans are missing, or
- * do not number its options, is unreadable: which option is right could only be
- * guessed, so the batch fails and is retried. A sentence item with no answer
+ * do not number its options, is unjudged (phase 48, spec D2, ruling R3): which
+ * option is right could only be guessed, so the item gets no finding and every
+ * other item is still read. A sentence item with no answer
  * reads as an empty one, which the rules below then refuse: a hint the checker
  * did not confirm is dropped, never kept on trust. Keys the model added are
  * ignored, and of two answers for one key the first counts.
@@ -126,6 +128,7 @@ export function readCheck(items: readonly CheckItem[], answer: LlmCheck): CheckR
   const answered = new Map<string, LlmCheck['items'][number]>();
   for (const item of answer.items) if (!answered.has(item.key)) answered.set(item.key, item);
   const byKey = new Map<string, CheckFinding>();
+  const unjudged = new Map<string, string>();
   for (const item of items) {
     const got = answered.get(item.key);
     switch (item.task) {
@@ -133,7 +136,8 @@ export function readCheck(items: readonly CheckItem[], answer: LlmCheck): CheckR
       case 'gap': {
         const said = item.task === 'choice' ? got?.options : got?.gap_fits;
         if (!said || said.length !== item.options.length) {
-          return { ok: false, reason: `the checker did not say which of ${item.key}'s ${item.options.length} options are right` };
+          unjudged.set(item.key, `the checker did not say which of ${item.key}'s ${item.options.length} options are right`);
+          break;
         }
         byKey.set(item.key, { task: item.task, alsoRight: said });
         break;
@@ -149,7 +153,7 @@ export function readCheck(items: readonly CheckItem[], answer: LlmCheck): CheckR
         break;
     }
   }
-  return { ok: true, byKey };
+  return { byKey, unjudged };
 }
 
 /** One reading the checker wrote, split where it listed several. */

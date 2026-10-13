@@ -218,9 +218,8 @@ export type Generated = {
   degraded: string | null;
 };
 
-export type DistractorVerdict =
-  | { ok: true; byKey: Map<string, Generated> }
-  | { ok: false; reason: string };
+/** Phase 48 (spec D1). Every item's content, and why each refused item was refused. A refused item has no byKey entry. */
+export type DistractorVerdict = { byKey: Map<string, Generated>; refused: Map<string, string> };
 
 /** Spec D5, D6: the sentences an item must not repeat. A gap sentence avoids
  *  the saved example (the model is shown it) and the last sessions' sentences;
@@ -488,15 +487,16 @@ function cleanAlternatives(item: DistractorItem, found: string[] | undefined, ex
 }
 
 /**
- * All or nothing for the choice tasks: a session is either fully generated or
- * the attempt fails and pg-boss retries it. A typed item cannot fail, and nor
- * can a sentence or translate item: it comes back `degraded` with the reason,
- * and the service turns that card into a typed translation (phase 27, spec
- * D5, D6), which is why it needs the `target` language its sentences are
- * written in. A gap item is a choice task like the others. Keys the
- * model added beyond the items asked are ignored. `explanation` is the
- * language the meanings are in (the enrollment's source): a reversed card's
- * wrong words and a typed card's alternatives must not be in its script.
+ * Phase 48 (spec D1): per item, not all or nothing. A choice item with fewer
+ * than three usable wrong options, or none answered, is refused with why, and
+ * the batch goes on. A typed item cannot fail, and nor can a sentence or
+ * translate item: it comes back `degraded` with the reason, and the service
+ * turns that card into a typed translation (phase 27, spec D5, D6), which is
+ * why it needs the `target` language its sentences are written in. A gap item
+ * is a choice task like the others. Keys the model added beyond the items
+ * asked are ignored. `explanation` is the language the meanings are in (the
+ * enrollment's source): a reversed card's wrong words and a typed card's
+ * alternatives must not be in its script.
  * `others` are the session's rows that ask the model nothing: their other
  * meanings and their words are as off limits as an item's own.
  *
@@ -516,6 +516,7 @@ export function validateDistractors(
   const explanationLetters = language(explanation).letters;
   const answered = new Map(answer.items.map((item) => [item.key, item]));
   const byKey = new Map<string, Generated>();
+  const refused = new Map<string, string>();
   for (const item of items) {
     const found = answered.get(item.key);
     if (item.task === 'sentence' || item.task === 'translate') {
@@ -537,22 +538,24 @@ export function validateDistractors(
       );
       continue;
     }
-    if (!found) return { ok: false, reason: `no answer for ${item.key}` };
     if (item.task === 'typed') {
-      byKey.set(item.key, {
-        ...NOTHING_GENERATED,
-        alternatives: cleanAlternatives(item, found.alternatives, explanationLetters),
-      });
+      // A typed item cannot fail: unanswered, it keeps no alternatives (phase 48, spec D1).
+      byKey.set(item.key, { ...NOTHING_GENERATED, alternatives: cleanAlternatives(item, found?.alternatives, explanationLetters) });
+      continue;
+    }
+    if (!found) {
+      refused.set(item.key, `no answer for ${item.key}`);
       continue;
     }
     const { usable, refusal } = usableChoices(item, items, others, found.distractors, explanationLetters, known);
     if (usable.length < KEPT_DISTRACTORS) {
-      return {
-        ok: false,
-        reason: refusal
+      refused.set(
+        item.key,
+        refusal
           ? `${refusal} (${usable.length} of ${found.distractors.length} usable, ${KEPT_DISTRACTORS} needed)`
           : `${item.key} needs three non-empty wrong answers`,
-      };
+      );
+      continue;
     }
     byKey.set(item.key, {
       ...NOTHING_GENERATED,
@@ -560,7 +563,7 @@ export function validateDistractors(
       spares: usable.slice(KEPT_DISTRACTORS, ASKED_DISTRACTORS),
     });
   }
-  return { ok: true, byKey };
+  return { byKey, refused };
 }
 
 /** A generated question's options as stored: correct first. The shown order is

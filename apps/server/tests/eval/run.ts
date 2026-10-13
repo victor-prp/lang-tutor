@@ -645,7 +645,7 @@ const answeredItem = (kase: DistractorCase, answer: LlmDistractors, index: numbe
 function distractorTier1(kase: DistractorCase, answer: LlmDistractors): Check[] {
   const verdict = validateDistractors(itemsOf(kase), answer, kase.to, [], kase.from as LanguageCode, nothingKnown());
   const checks: Check[] = [
-    { name: 'every item answered as its task asks', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
+    { name: 'every item answered as its task asks', ok: verdict.refused.size === 0, detail: verdict.refused.size ? [...verdict.refused.values()].join('; ') : undefined },
   ];
   // The options' language: Hebrew meanings on today's card, learned-language
   // words on the reversed card and in a typed card's alternatives.
@@ -727,7 +727,7 @@ const wordsOf = (text: string): Set<string> =>
 function sentenceTier1(kase: SentenceCase, answer: LlmDistractors): Check[] {
   const items = sentenceItemsOf(kase);
   const verdict = validateDistractors(items, answer, 'he', [], kase.from as LanguageCode, nothingKnown());
-  if (!verdict.ok) return [{ name: 'every item answered as its task asks', ok: false, detail: verdict.reason }];
+  if (verdict.refused.size > 0) return [{ name: 'every item answered as its task asks', ok: false, detail: [...verdict.refused.values()].join('; ') }];
   if (kase.task === 'gap') {
     return [
       { name: 'every item answered as its task asks', ok: true },

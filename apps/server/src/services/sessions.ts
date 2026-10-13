@@ -1062,7 +1062,7 @@ export function createSessionService({
 
       const started = now();
       let modelMs = 0;
-      let verdict: Extract<DistractorVerdict, { ok: true }>;
+      let verdict: DistractorVerdict;
       const board = plan.board;
       try {
         const raw = await llm({
@@ -1076,7 +1076,8 @@ export function createSessionService({
         if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
         // Phase 34 (spec D3, D4): the first three usable of six, none known right.
         const checked = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
-        if (!checked.ok) throw new InvalidDistractors(sessionId, checked.reason);
+        const firstRefusal = [...checked.refused.values()][0];
+        if (firstRefusal) throw new InvalidDistractors(sessionId, firstRefusal);
         verdict = checked;
         // Spec D10: a board with no usable fifth meaning fails here, before the
         // context call and the checker are paid for; the checker can only take
@@ -1278,7 +1279,8 @@ export function createSessionService({
             throw new InvalidDistractors(sessionId, raw === '' ? 'the checker returned no content' : 'the checker answer was unreadable');
           }
           const reading = readCheck(checkItems, answer);
-          if (!reading.ok) throw new InvalidDistractors(sessionId, reading.reason);
+          const unjudged = [...reading.unjudged.values()][0];
+          if (unjudged) throw new InvalidDistractors(sessionId, unjudged);
           findings = reading.byKey;
         }
         const alsoRight = (key: string): boolean[] => {
