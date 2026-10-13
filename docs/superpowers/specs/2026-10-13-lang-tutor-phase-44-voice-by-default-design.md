@@ -3,6 +3,9 @@
 - **Status:** Scoped with Victor on 2026-10-13 (one-pager), then "go till PR, subagents", with
   Duolingo as the reference for every open question: the design is self-approved (CLAUDE.md,
   *Continue till PR*). Rulings are at the end.
+  Implemented on branch `phase-44-voice-by-default` from
+  `docs/superpowers/plans/2026-10-13-phase-44-voice-by-default.md`. The final review added R12 and
+  two fixes: leaving the session stops speech, and R1 now says it overrules phase 25 D2.
 - **Date:** 2026-10-13
 - **Source:** the one-pager `drafts/2026-10-13-voice-by-default-one-pager.md` (gitignored; its
   Done-means are restated below).
@@ -80,7 +83,7 @@ showing.
   nothing.
 - **Once per card:** a card that spoke on arrival does not speak again after the answer (R7). Its
   speaker button still replays.
-- **Next card:** moving on stops any speech still playing (R8).
+- **Next card:** moving on, or leaving the session, stops any speech still playing (R8).
 
 `ListenPrompt` loses its own auto-play effect: listening cards play through the same step, so one
 place decides when a card speaks (R2).
@@ -128,6 +131,8 @@ Made under *Continue till PR*, with Duolingo as the reference.
 
 - **R1. Read aloud plays its word on arrival.** Duolingo plays the sentence before the learner
   repeats it. The word is already on screen, so hearing it gives a model, not the answer.
+  It overrules phase 25 D2 ("no speaker before the answer, or reading becomes repeating"): Victor
+  made Duolingo the reference, and the one-pager did not list read aloud among the silent cards.
 - **R2. Listening cards keep their audio, moved into D2.** Their sound is the question (phase 24
   D6); one mechanism now plays every card.
 - **R3. The board speaks a target word when tapped.** Its target words are the board's prompts,
@@ -140,8 +145,12 @@ Made under *Continue till PR*, with Duolingo as the reference.
 - **R6. No after cue on a second-try hold:** it would give the second try away (phase 42).
 - **R7. Once per card.** A target-to-Hebrew card does not replay its word after the answer, as on
   Duolingo. The button is there for more.
-- **R8. Moving on stops speech:** an answer still playing does not run into the next card.
+- **R8. Moving on stops speech:** an answer still playing does not run into the next card, or onto
+  Results or home.
 - **R9. The microphone stops speech first,** or the recorder would hear the app.
 - **R10. No `API_LEVEL` change:** nothing on the wire changes (ADR 0012).
 - **R11. All nine lanes were taken,** so integration and e2e ran in CI only; nothing was retired
   to free one.
+- **R12. Read aloud can replay its word before the answer.** Duolingo's speaking exercise has a
+  replay, and D2 promises the button is there for more. It hides while the microphone listens, so a
+  tap cannot be recorded.
