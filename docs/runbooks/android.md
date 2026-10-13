@@ -24,27 +24,26 @@ The job also skips, green, while steps 2–4 are not done.
 
 Last updated 2026-10-13.
 
-- [ ] **1. Play Console.** 1.1 is done: Google confirmed the identity verification on
-      2026-10-13. **Next: steps 1.2–1.4** (create the app, the tester list, app content).
+- [x] **1. Play Console.** Done 2026-10-13: identity verified, app created, tester list and
+      app content filled in.
 - [x] **2. Expo account and project.** Done. The project is `@wordspal/lang-tutor`, owned by the
       `wordspal` Expo account, id `66fb04ba-7006-4095-92be-9c26592db6c7`. The `production`
       channel exists, and `app.json` has the project id, updates URL and owner (PR #130).
-- [ ] **3. Play service account.** Not started. 3.1 (Google Cloud) can be done now; 3.2 waits
-      for Play.
+- [x] **3. Play service account.** Done 2026-10-13. `play-publisher@gen-lang-client-0339599374`
+      in the `words-ai-teacher` Cloud project, its key held by EAS.
 - [x] **4. The GitHub secret.** Done. `EXPO_TOKEN` is a **Developer** robot token of the
       `wordspal` account.
-- [ ] **5. The first release.** Waits for steps 1 and 3. `ANDROID_RELEASE` is not set yet,
-      so releases until then skip Android.
-- [ ] **6. Back up the upload key.** After step 5.
-- [ ] **7. Check it on your phone.** After step 5.
-- [ ] **8. Invite friends.** After step 7.
+- [x] **5. The first release.** Done 2026-10-13: `v2026.10.13`, build
+      `ec913d7c-281e-4caa-aa89-69bcbf5889c6`, versionCode 2, submitted to the internal track and
+      its update published, with no draft-app detour. `ANDROID_RELEASE` is `on`.
+- [ ] **6. Back up the upload key.** Next.
+- [ ] **7. Check it on your phone.** Next.
+- [ ] **8. Invite friends.** After step 7. The tester list already holds four addresses.
 
-Releasing other phases meanwhile is safe. `ANDROID_RELEASE` is unset, so every release shows
-`android` as skipped. Do not set it to `on` before steps 1 and 3 are done: the job would build, then
-fail to submit to a Play app that does not exist.
+Every release now ships the app. The tag `v2026.10.13` was cut before PR #160 merged, so the
+live privacy page still names the old contact until the next release.
 
-**Picking up from here:** do steps 1.2–1.4, then step 3, then step 5. Steps 1.2–1.4 and 3.1–3.2
-are clicks in Google's consoles; 3.3 and 5 are commands below.
+**Picking up from here:** step 6, then step 7, then step 8.
 
 ## Go-live, once
 
@@ -218,13 +217,20 @@ over-the-air update first and offers Play and "check again".
 
 What the app sends, for Play Console's *Data safety* form:
 
-| Data type | Collected | Shared | Why | Optional |
-|---|---|---|---|---|
-| Email address | yes | no | account management | no |
-| Name (display name), other info (age) | yes | no | app functionality | no |
-| App activity: in-app actions (saved words, answers) | yes | no | app functionality | no |
-| Audio: voice recordings | yes, processed and not stored | no | app functionality | yes |
-| Photos | yes, deleted once read | no | app functionality | yes |
+| Play data type | Collected | Shared | Ephemeral | Required | Purposes |
+|---|---|---|---|---|---|
+| Personal info → Email address | yes | no | no | yes | app functionality, account management |
+| Personal info → Name, Other info (age) | yes | no | no | yes | app functionality |
+| Personal info → User IDs (account id) | yes | no | no | yes | account management |
+| App activity → App interactions, Other user-generated content | yes | no | no | yes | app functionality |
+| Audio files → Voice or sound recordings | yes | no | **yes**: transcribed, never stored | no | app functionality |
+| Photos and videos → Photos | yes | no | no: held in a row until read, then cleared | no | app functionality |
+| Device or other IDs | yes | no | no | yes | app functionality: expo-updates sends a per-install id to Expo |
+
+Account creation: *Username and other authentication* (email plus a one-time code). Deletion:
+by request at the privacy page, which also covers deleting some data without closing the account
+(saved words can be removed in the app). *(Filled in 2026-10-13.)* When gender is added to
+onboarding, it joins age under *Other info*, and the privacy page's list must name it.
 
 - All of it is encrypted in transit.
 - Users can ask for deletion by email.
