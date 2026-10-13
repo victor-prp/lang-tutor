@@ -47,12 +47,10 @@ describe('keepCards (phase 48, spec D3)', () => {
   });
 
   it('adds a board whole, even past six', () => {
-    // 4 board + 3 singles = 7 planned; the board and one single refused: 2 pass, the board makes 6, the single stays dropped or not by the draw, never a part of the board.
-    const units: CardUnit[] = [{ indexes: [0, 1, 2, 3], refusal: CHECKER }, single(4), single(5), single(6, CHECKER)];
-    const out = keepCards(units, testRng(5));
-    const board = out.filter((c) => c.index < 4).map((c) => c.fate);
-    expect(new Set(board).size).toBe(1);
-    expect(out.filter((c) => c.fate !== 'drop').length).toBeGreaterThanOrEqual(6);
+    // 9 planned, so the target is 6. Five singles pass and the board is the only refused unit:
+    // it is the one fill, and its four cards take the count to 9, past the target, never a part of it.
+    const units: CardUnit[] = [...singles(5), { indexes: [5, 6, 7, 8], refusal: CHECKER }];
+    expect(fates(units)).toEqual(['0:keep', '1:keep', '2:keep', '3:keep', '4:keep', '5:as_generated', '6:as_generated', '7:as_generated', '8:as_generated']);
   });
 
   it('keeps every card when fewer than six were planned', () => {
