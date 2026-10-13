@@ -337,16 +337,16 @@ const FAMILIES: DayList = {
   progress: [],
 };
 
-/** Phase 39 (spec D2, D12). A learner who misses one card in ten. At six sessions a
- *  day the seven glosses not waiting are each asked in every session, so the phase 37
- *  learner, missing one card in five, misses each of them about once a day. A miss
- *  drops the skill it tests, even on a day the skill was already right, and a second
- *  right answer that day adds nothing: no gloss of this list is then ever known in all
- *  five skills (none in sixty days), and no second meaning ever comes. */
-const MISS_EVERY = 10;
+/** Phase 46 (spec D6). Phase 37's learner, missing one card in five. Under phase 39's
+ *  rule, every skill at the bar at the same moment, this learner never got a gloss of
+ *  this list known: a miss drops the skill it tests, and at six sessions a day each of
+ *  the seven glosses not waiting is missed about once a day. A skill now counts once it
+ *  has reached the bar (D1, D2), so the second meanings come. */
+const MISS_EVERY = 5;
 
-describe('families over days: ten days of six sessions (phase 39)', () => {
-  const { log, sessions, knownIn } = runDays(FAMILIES, 10, 6, MISS_EVERY);
+describe('families over days: twenty days of six sessions, phase 37\'s learner (phase 39, phase 46)', () => {
+  // Phase 46 (spec D6): the five-meaning word, asked in every session, is known on day 20.
+  const { log, sessions, knownIn } = runDays(FAMILIES, 20, 6, MISS_EVERY);
 
   it('6 and 7 have families to check, and a gloss that waits', () => {
     expect(familiesChecked(sessions)).toEqual({ families: true, waited: true });
