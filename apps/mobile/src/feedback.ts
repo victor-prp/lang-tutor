@@ -33,16 +33,19 @@ export type CardAnswer =
  * Phase 42 (spec D1). A wrong second try that was typed is told so, its input
  * marked wrong: the first answer's "right" banner read as if this one were
  * accepted. Given up is a blank text or a pass, since a judged card's give-up
- * comes back `wrong` (phase 34 ruling R15); the first answer typed again keeps
- * that answer's banner too.
+ * comes back `wrong` (phase 34 ruling R15). Phase 45: the first answer sent again,
+ * and another accepted word again, are "still not the word", neither green nor red.
  */
 export function feedbackFor(question: Question, answer: CardAnswer, retry: PendingRetry | null): Feedback {
   const feedback = answerFeedback(question, answer);
   if (retry === null) return feedback;
-  if (feedback.tone === 'wrong' && (gaveUp(answer) || repeats(question, answer, retry))) return alternativeFeedback(question);
-  // Phase 45 (spec D1). Another accepted word again: the second try asked for the
-  // practised one, so it is not "right"; nor wrong, and its input is not coloured.
-  if (feedback.verdict === 'alternative' && !repeats(question, answer, retry)) return stillOtherFeedback(question);
+  if (feedback.tone === 'wrong' && gaveUp(answer)) return alternativeFeedback(question);
+  // Phase 45 (spec D1, review I1). Another accepted word again, or the first answer
+  // sent again: the second try asked for the practised word, so it is not "right";
+  // nor wrong, since it was just told it fits, and its input is not coloured.
+  if (feedback.verdict === 'alternative' || (feedback.tone === 'wrong' && repeats(question, answer, retry))) {
+    return stillOtherFeedback(question);
+  }
   return feedback;
 }
 
@@ -57,7 +60,7 @@ function gaveUp(answer: CardAnswer): boolean {
 
 /** Phase 42 (review I1). The first answer typed again: it was told it is right a
  *  moment ago (a fit-checked gap word, a translation sent unchanged), and a
- *  second try is judged without that check, so it keeps the first answer's banner. */
+ *  second try is judged without that check, so it is never shown as wrong. */
 function repeats(question: Question, answer: CardAnswer, retry: PendingRetry): boolean {
   if (!('text' in answer)) return false;
   const same = question.type === 'typed_meaning' ? normaliseHebrew : normaliseTyped;
