@@ -243,8 +243,10 @@ export class SessionNotReady extends Error {
   }
 }
 
-/** Phase 19. The model's distractors were unreadable or failed validation.
- *  Thrown inside the job so pg-boss retries it; never on the wire. */
+/** Phase 19. The model's distractors were unreadable or empty, or no dictionary
+ *  rows are left for any pick. A card that fails validation is refused, not thrown
+ *  (phase 48, spec D1, D5). Thrown inside the job so pg-boss retries it; never on
+ *  the wire. */
 export class InvalidDistractors extends Error {
   constructor(
     readonly sessionId: string,

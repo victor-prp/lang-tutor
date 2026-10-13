@@ -1023,7 +1023,8 @@ describe('phase 34: the known-right set and the spares (spec D3, D4)', () => {
   });
 
   // Review, fix round 1: the checker numbers what it is asked, and a miscount
-  // fails the attempt, so it is never asked more than the six the prompt asks for.
+  // leaves that card unjudged and refused (phase 48, spec D2, ruling R3), so it is
+  // never asked more than the six the prompt asks for.
   it('keeps at most six usable wrong options, three shown and three spares, whatever the model returns', () => {
     const eight = ['לכתוב', 'לשיר', 'לרקוד', 'לבשל', 'לישון', 'לקרוא', 'לצייר', 'לשחות'];
     // Past the parser, which already refuses a seventh (LlmDistractorsSchema).

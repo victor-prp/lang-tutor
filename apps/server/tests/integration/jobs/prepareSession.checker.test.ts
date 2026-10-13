@@ -216,11 +216,11 @@ describe('the known-right set and the checker, through the database', () => {
   });
 
   // Phase 48 (spec Done-means 1 and 3). Lane 0's 38b003b4: the checker calls a card's options right, the same
-  // answer every attempt. Seven cards, so the one refused is dropped, in one attempt, with no retry. The new word
+  // answer every attempt. Seven cards, so the one refused is dropped and the call resolves with the session ready. The new word
   // is a multiple choice (p 1) and asked first; the six typed picks (p 0.7 each) are spread by the plan over the
   // three typed types, a tie going to the type used least: a typed translation, a typed cloze and a sentence
   // translation, twice each. That is what the stubbed tasks name, by position.
-  it('drops a card the checker calls entirely right, in one attempt, and keeps the other six', async () => {
+  it('drops a card the checker calls entirely right, and keeps the other six', async () => {
     const lemmas = ['blow up', 'table', 'lamp', 'river', 'bread', 'chair', 'window'];
     const translations = ['לנפח', 'שולחן', 'מנורה', 'נהר', 'לחם', 'כיסא', 'חלון'];
     const words: Saved[] = [];

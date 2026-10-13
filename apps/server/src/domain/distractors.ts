@@ -100,12 +100,14 @@ export const MAX_CARD_ALTERNATIVES = 10;
 export const DISTRACTOR_MARKER = 'six wrong answers';
 
 /** Phase 34 (spec D4). How many wrong options a choice card shows, and how many
- *  of the six asked must survive D3 and the checker for the batch to stand. */
+ *  of the six asked must survive D3 and the checker for the card to stand; with
+ *  fewer, the card is refused (phase 48, spec D1, D2), not the batch. */
 export const KEPT_DISTRACTORS = 3;
 
 /** Phase 34 (spec D4, D5). How many wrong options a choice item asks for, and the
  *  most it keeps, spares included: the checker numbers every one it is sent, and a
- *  miscount fails the attempt, so a longer list from the model is cut here. */
+ *  miscount leaves that card unjudged, which the checker refuses (phase 48, spec
+ *  D2, ruling R3), so a longer list from the model is cut here. */
 export const ASKED_DISTRACTORS = 6;
 
 /**
