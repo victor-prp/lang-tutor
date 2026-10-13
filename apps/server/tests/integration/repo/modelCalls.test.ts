@@ -43,11 +43,15 @@ const row = (overrides: Partial<ModelCallRow> = {}): ModelCallRow => ({
 describe('model calls repository (phase 47)', () => {
   it('stores a call as given, its request and response as JSON', async () => {
     await repo((r) => r.insert(row()));
-    const result = await t.db.execute<Record<string, unknown>>(sql`select * from model_calls`);
+    // A raw select reads timestamptz as text, so the instant is compared in SQL.
+    const result = await t.db.execute<Record<string, unknown>>(
+      sql`select *, started_at = ${NOW.toISOString()}::timestamptz as started_as_given from model_calls`,
+    );
     expect(result.rows).toEqual([
       {
         id: expect.any(String),
-        started_at: NOW,
+        started_at: expect.anything(),
+        started_as_given: true,
         kind: 'session_generation',
         model: 'gemini-2.5-flash',
         session_id: '0b5e7c1e-6a4f-4f4b-9a39-2f8e7f2b1c11',
