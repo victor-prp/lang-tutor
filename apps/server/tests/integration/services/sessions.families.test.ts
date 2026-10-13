@@ -1,18 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { Dimension } from '@lang-tutor/core/domain';
-import { sql } from 'drizzle-orm';
 import type { PgBoss } from 'pg-boss';
 
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { readFamilyEvents, readFamilyMembers } from '../../support/familyRows';
 import { createFakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stopTestBoss } from '../../support/jobs';
-import { insertGlossMemory, setMemoryStability } from '../../support/progressRows';
+import { insertGlossMemory, setMemoryStability, setReachedOn } from '../../support/progressRows';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
-import { seedSavedSenses } from '../../support/vocabularyRows';
+import { readKnownAt, seedSavedSenses } from '../../support/vocabularyRows';
 
 // Phase 39 (spec D4, D5). Creating a list session derives the gloss families from
 // memory and the dictionary, records them in the same transaction, and keeps a
@@ -50,13 +49,7 @@ async function savedFamily() {
   return { lift, collect };
 }
 
-/** Phase 46. Every saved gloss's known_at, by gloss. */
-async function knownAtOf(): Promise<Map<string, string | null>> {
-  const rows = await t.db.execute<{ gloss_id: string; known_at: Date | null }>(
-    sql`select gloss_id, known_at from vocabulary_entries where enrollment_id = ${E}`,
-  );
-  return new Map(rows.rows.map((row) => [row.gloss_id, row.known_at ? new Date(row.known_at).toISOString() : null]));
-}
+
 
 /** Creates the next list session, and answers its id and its job's picks; the session is skipped. */
 async function nextSession(): Promise<{ sessionId: string; picks: PrepareSessionPayload['picks'] }> {
@@ -164,7 +157,7 @@ describe('createNextSession records the gloss families (phase 39 D4, D5)', () =>
     const apple = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kiwi', translations: ['קיווי'] });
     await known(apple.glossIds[0]);
     await nextSession();
-    const knownAt = await knownAtOf();
+    const knownAt = await readKnownAt(t.db, E);
     expect(knownAt.get(apple.glossIds[0])).toBe(NOW);
     expect([...knownAt.values()].filter((at) => at !== null)).toHaveLength(1);
   });
@@ -194,7 +187,7 @@ describe('createNextSession records the gloss families (phase 39 D4, D5)', () =>
     await known(lift);
     // Spelling reached the bar on 2026-03-01 and has since slipped to about a day.
     await setMemoryStability(t.db, { enrollmentId: E, glossId: lift, dimension: 'spelling', stability: 1 });
-    await t.db.execute(sql`update gloss_memory set reached_on = '2026-03-01' where enrollment_id = ${E} and gloss_id = ${lift}`);
+    await setReachedOn(t.db, { enrollmentId: E, glossId: lift, reachedOn: '2026-03-01' });
     await nextSession();
     // Known despite spelling at 1: it reached the bar. Its slip makes it due, and a due
     // meaning takes the family's slot in this session, so the state is the evidence.
