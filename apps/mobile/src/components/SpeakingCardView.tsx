@@ -10,6 +10,7 @@ import { answerStyles } from '@/components/TypedAnswerView';
 import { contextLanguage } from '@/context';
 import type { CardAnswer } from '@/feedback';
 import { useRecorder } from '@/hooks/useRecording';
+import { useSpeaker } from '@/hooks/useSpeech';
 import { MAX_RECORDING_SECONDS, secondsLeft, type Clip } from '@/recording';
 import { attemptNotice, type SpeechAttempt } from '@/speaking';
 import { strings } from '@/strings';
@@ -40,6 +41,7 @@ type Props = {
  */
 export function SpeakingCardView({ question, instruction, language, answer, speech, onClip, onRetry, onPass, onCantSpeak, onRecordFailed, retry }: Props) {
   const recorder = useRecorder();
+  const speaker = useSpeaker();
   const [recording, setRecording] = useState(false);
   const [left, setLeft] = useState(MAX_RECORDING_SECONDS);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -105,6 +107,8 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
     starting.current = true;
     let started: 'recording' | 'denied';
     try {
+      // Phase 44 (spec D4): the card's own voice must not be recorded as the answer.
+      await speaker.stop();
       started = await recorder.start();
     } catch {
       // Could not begin: say so, rather than leave a button that does nothing.

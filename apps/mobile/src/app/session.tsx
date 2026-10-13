@@ -17,6 +17,7 @@ import { SpeakingCardView } from '@/components/SpeakingCardView';
 import { TypedAnswerView } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
 import { feedbackFor } from '@/feedback';
+import { useCardVoice } from '@/hooks/useCardVoice';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession, type SessionValue } from '@/hooks/useSession';
@@ -252,6 +253,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           key={question.id}
           question={question}
           instruction={strings.questionInstructionMatching}
+          language={language}
           answered={session.answered}
           onComplete={session.submitBoard}
         />
@@ -325,6 +327,15 @@ export default function SessionScreen() {
   const { active } = useCurrentUser();
   // Re-entry guard: a fast double tap on skip must not stack two confirms.
   const skipping = useRef(false);
+  // A session is always entered from home, which needs an active enrollment;
+  // an empty language only drops the name from the instruction.
+  const language = active?.target_language ?? '';
+  // Phase 44 (spec D2): the card reads itself aloud.
+  useCardVoice(session.question ?? null, {
+    language,
+    banner: session.answer !== null && !isSkip(session.answer),
+    speaking: session.speakingOff === null,
+  });
   // Phase 27: what a meaning card last sent, so "try again" sends the same text.
 
   // Results replaces Session in the stack, so backing out of Results reaches
@@ -364,9 +375,6 @@ export default function SessionScreen() {
     return null;
   }
 
-  // A session is always entered from home, which needs an active enrollment;
-  // an empty language only drops the name from the instruction.
-  const language = active?.target_language ?? '';
   // Phase 39 (spec D9): a typed meaning is answered in the learner's language.
   const learner = active?.source_language ?? 'he';
 
