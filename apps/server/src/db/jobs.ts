@@ -19,6 +19,8 @@ import {
   RENDER_LEMMA,
   RENDER_LEMMA_EXPIRY_SECONDS,
   RENDER_LEMMA_FAILED,
+  STOCK_SESSION,
+  STOCK_SESSION_EXPIRY_SECONDS,
   type JobName,
 } from '../domain/jobs';
 import type { Db } from './client';
@@ -123,6 +125,20 @@ export const JOB_QUEUES: QueueDefinition[] = [
       expireInSeconds: ACCEPT_RENDERING_EXPIRY_SECONDS,
       deleteAfterSeconds: 86_400,
       deadLetter: ACCEPT_RENDERING_FAILED,
+    },
+  },
+  // Phase 43 (spec D3). `stately`: one job queued and one active per enrollment
+  // (the singleton key), so a burst of triggers is one job and a trigger that
+  // arrives mid-run is queued rather than lost. No dead letter: a stock never
+  // built is built by the next trigger, or by the home screen's create.
+  {
+    name: STOCK_SESSION,
+    policy: 'stately',
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: STOCK_SESSION_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
     },
   },
 ];

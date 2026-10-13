@@ -42,7 +42,7 @@ like any other caller.
 | # | Subject | May | Must not |
 |---|---|---|---|
 | R1 | `pg-boss` import | `src/index.ts`, `src/composition.ts`, `src/worker.ts`, `src/db/jobs.ts`, `src/repo/jobs.ts` | any other file; `new PgBoss` anywhere but `src/index.ts` and `src/db/jobs.ts` |
-| R2 | enqueue | `src/repo/jobs.ts` | `boss.send(`, `boss.insert(`, `boss.sendAfter(`, `boss.sendThrottled(`, `boss.sendDebounced(` or `boss.flow(` anywhere else |
+| R2 | enqueue | `src/repo/jobs.ts` | `boss.send(`, `boss.insert(`, `boss.sendAfter(`, `boss.sendThrottled(`, `boss.sendDebounced(`, `boss.upsert(` (phase 43) or `boss.flow(` anywhere else |
 | R3 | handler registration | `src/worker.ts` | `.work(` anywhere else |
 
 ## Rules that are not import rules
@@ -67,7 +67,7 @@ grep -rn "new PgBoss" apps/server/src --include='*.ts' \
   | grep -vE '^apps/server/src/index\.ts:|^apps/server/src/db/jobs\.ts:'
 
 # R2 — jobs are enqueued only through repo/jobs.ts
-grep -rnE "boss\??\.(send|insert|sendAfter|sendThrottled|sendDebounced|flow)\(" apps/server/src --include='*.ts' \
+grep -rnE "boss\??\.(send|insert|sendAfter|sendThrottled|sendDebounced|upsert|flow)\(" apps/server/src --include='*.ts' \
   | grep -v '^apps/server/src/repo/jobs\.ts:'
 
 # R3 — handlers are registered only in worker.ts

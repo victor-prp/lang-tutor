@@ -166,7 +166,7 @@ describe('the migrated schema', () => {
     await seedUser(db, 'u_fk');
     const [session] = await db
       .insert(sessions)
-      .values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk'), status: 'skipped', source: 'seed' })
+      .values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk'), status: 'skipped', source: 'seed', listening: false, speaking: false })
       .returning();
     await db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)
@@ -183,7 +183,7 @@ describe('the migrated schema', () => {
   it('rejects a second answer at the same position', async () => {
     const [session] = await db
       .insert(sessions)
-      .values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk'), status: 'skipped', source: 'seed' })
+      .values({ userId: 'u_fk', enrollmentId: enrollmentOf('u_fk'), status: 'skipped', source: 'seed', listening: false, speaking: false })
       .returning();
     await db.execute(sql`
       insert into session_questions (session_id, position, question_id, option_order)
@@ -364,37 +364,50 @@ describe('sessions status (phase 19)', () => {
     return { first: enrollmentOf(id), second: `${enrollmentOf(id)}_ru` };
   }
 
-  it('allows one open session per enrollment', async () => {
+  // Phase 43 (spec D1): one open session in stock, and one started beside it.
+  it('allows one unstarted open session per enrollment', async () => {
     const { first } = await learner('u_open');
-    await db.execute(sql`insert into sessions (user_id, enrollment_id, status, source)
-                         values ('u_open', ${first}, 'ready', 'seed')`);
+    await db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
+                         values ('u_open', ${first}, 'ready', 'seed', false, false)`);
     await expect(
-      db.execute(sql`insert into sessions (user_id, enrollment_id, status, source)
-                     values ('u_open', ${first}, 'preparing', 'list')`),
-    ).rejects.toMatchObject({ cause: { code: '23505' } });
+      db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
+                     values ('u_open', ${first}, 'preparing', 'list', false, false)`),
+    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_stock_per_enrollment' } });
+  });
+
+  it('allows one started session per enrollment, beside the one in stock', async () => {
+    const { first } = await learner('u_started');
+    await db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking, started_at)
+                         values ('u_started', ${first}, 'ready', 'seed', false, false, now())`);
+    await db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
+                         values ('u_started', ${first}, 'preparing', 'list', false, false)`);
+    await expect(
+      db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking, started_at)
+                     values ('u_started', ${first}, 'ready', 'list', false, false, now())`),
+    ).rejects.toMatchObject({ cause: { code: '23505', constraint: 'sessions_one_started_per_enrollment' } });
   });
 
   it('does not count skipped, failed or completed sessions as open', async () => {
     const { first, second } = await learner('u_closed');
     await db.execute(sql`
-      insert into sessions (user_id, enrollment_id, status, source, completed_at) values
-        ('u_closed', ${first}, 'skipped', 'seed', null),
-        ('u_closed', ${first}, 'failed', 'list', null),
-        ('u_closed', ${first}, 'completed', 'list', now()),
-        ('u_closed', ${first}, 'ready', 'list', null),
-        ('u_closed', ${second}, 'preparing', 'list', null)`);
+      insert into sessions (user_id, enrollment_id, status, source, completed_at, listening, speaking) values
+        ('u_closed', ${first}, 'skipped', 'seed', null, false, false),
+        ('u_closed', ${first}, 'failed', 'list', null, false, false),
+        ('u_closed', ${first}, 'completed', 'list', now(), false, false),
+        ('u_closed', ${first}, 'ready', 'list', null, false, false),
+        ('u_closed', ${second}, 'preparing', 'list', null, false, false)`);
   });
 
   it('rejects an unknown status or source, and a completed status without completed_at', async () => {
     const { first } = await learner('u_checks');
     for (const values of [
-      sql`('u_checks', ${first}, 'paused', 'seed', null)`,
-      sql`('u_checks', ${first}, 'ready', 'quiz', null)`,
-      sql`('u_checks', ${first}, 'completed', 'seed', null)`,
-      sql`('u_checks', ${first}, 'ready', 'seed', now())`,
+      sql`('u_checks', ${first}, 'paused', 'seed', null, false, false)`,
+      sql`('u_checks', ${first}, 'ready', 'quiz', null, false, false)`,
+      sql`('u_checks', ${first}, 'completed', 'seed', null, false, false)`,
+      sql`('u_checks', ${first}, 'ready', 'seed', now(), false, false)`,
     ]) {
       await expect(
-        db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, completed_at)
+        db.execute(sql`insert into sessions (user_id, enrollment_id, status, source, completed_at, listening, speaking)
                        values ${values}`),
       ).rejects.toMatchObject({ cause: { code: '23514' } });
     }

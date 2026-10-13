@@ -11,7 +11,7 @@ import { dictGlosses, dictSenseGlosses, dictVariants } from '../../../src/db/sch
 import { NOTHING_GENERATED, NO_EXTRAS, generatedContent, optionsFor as generatedOptions, type QuestionOption } from '../../../src/domain/distractors';
 import { meaningRuleVerdict } from '../../../src/domain/judge';
 import { MAX_AVOID } from '../../../src/domain/sentences';
-import { asChoice, insertListSession } from '../../support/questions';
+import { NO_DEVICES, asChoice, insertListSession } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createQuestionRepo } from '../../../src/repo/questions';
 import { createSessionRepo } from '../../../src/repo/sessions';
@@ -551,7 +551,7 @@ describe('phase 27 Part B: sentence cards', () => {
     // loadSession reads the same shapes from the stored rows.
     const sessionId = await withTx(t.db, async (tx) => {
       const sessions = createSessionRepo(tx);
-      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'));
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES);
       await sessions.insertSessionQuestions(id, [choice, typed, translation]);
       await sessions.transition(id, ['preparing'], 'ready');
       return id;
@@ -671,7 +671,7 @@ describe('phase 34: the answer form a card asks for', () => {
         })),
       });
       const sessions = createSessionRepo(tx);
-      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'));
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES);
       await sessions.insertSessionQuestions(id, made);
       await sessions.transition(id, ['preparing'], 'ready');
       return { sessionId: id };
@@ -749,7 +749,7 @@ describe('phase 34: context sentences, marks and part of speech', () => {
         userId: 'u_1', enrollmentId: enrollmentOf('u_1'), targetLanguage: 'en', userLanguageCode: 'he', questions: rows,
       });
       const sessions = createSessionRepo(tx);
-      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'));
+      const id = await sessions.insertPreparingSession('u_1', enrollmentOf('u_1'), NO_DEVICES);
       await sessions.insertSessionQuestions(id, made);
       await sessions.transition(id, ['preparing'], 'ready');
       return { sessionId: id, made };

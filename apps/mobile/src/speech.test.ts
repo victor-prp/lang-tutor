@@ -5,6 +5,7 @@ import {
   createSpeaker,
   isVoiced,
   VOICE_TAGS,
+  voicesRead,
   voiceTags,
   type SpeakOptions,
   type SpeechEngine,
@@ -244,5 +245,28 @@ describe('createSpeaker', () => {
     unsubscribe();
     await speaker.toggle('gatto', 'it');
     expect(heard).toBe(1);
+  });
+});
+
+// Phase 43 (spec D7). Home builds a session for the device as soon as it shows,
+// so it waits for the voices to be read before it says whether it can listen.
+describe('voicesRead', () => {
+  it('resolves at once when the voices were read', async () => {
+    const speaker = createSpeaker({ engine: fakeEngine().engine, platform: 'ios', prepareAudio: async () => undefined });
+    await speaker.start();
+    await expect(voicesRead(speaker, 10_000)).resolves.toBeUndefined();
+  });
+
+  it('resolves once start has read them, with the voices in hand', async () => {
+    const speaker = createSpeaker({ engine: fakeEngine().engine, platform: 'ios', prepareAudio: async () => undefined });
+    const read = voicesRead(speaker, 10_000).then(() => speaker.snapshot().tags.size);
+    void speaker.start();
+    await expect(read).resolves.toBeGreaterThan(0);
+  });
+
+  it('gives up waiting after its timeout', async () => {
+    const speaker = createSpeaker({ engine: fakeEngine().engine, platform: 'ios', prepareAudio: async () => undefined });
+    await expect(voicesRead(speaker, 5)).resolves.toBeUndefined();
+    expect(speaker.snapshot().loaded).toBe(false);
   });
 });

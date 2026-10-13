@@ -69,6 +69,8 @@ import type {
   SessionViewSchema,
   PendingRetrySchema,
   SkipSessionResponseSchema,
+  StartSessionRequestSchema,
+  StartSessionResponseSchema,
   TypedTranslationQuestionSchema,
   ListenChoiceQuestionSchema,
   DictationQuestionSchema,
@@ -187,6 +189,8 @@ export type KnowledgeDimension = z.infer<typeof KnowledgeDimensionSchema>;
 export type GlossProgress = z.infer<typeof GlossProgressSchema>;
 export type SessionProgressItem = z.infer<typeof SessionProgressItemSchema>;
 export type SkipSessionResponse = z.infer<typeof SkipSessionResponseSchema>;
+export type StartSessionRequest = z.infer<typeof StartSessionRequestSchema>;
+export type StartSessionResponse = z.infer<typeof StartSessionResponseSchema>;
 export type ReadAloudQuestion = z.infer<typeof ReadAloudQuestionSchema>;
 export type SayTranslationQuestion = z.infer<typeof SayTranslationQuestionSchema>;
 export type SpokenVerdict = z.infer<typeof SpokenVerdictSchema>;

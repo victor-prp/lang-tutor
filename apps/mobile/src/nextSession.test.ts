@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import type { CurrentSessionResponse } from '@lang-tutor/core/api';
 
-import { currentFor, homeActionOf, loadFailedFor, shouldPoll } from './nextSession';
+import { createLook, currentFor, homeActionOf, loadFailedFor, shouldAutoCreate, shouldPoll } from './nextSession';
 
 const none = (next_source: 'seed' | 'list', saved_count = 0): CurrentSessionResponse => ({
   current: null,
@@ -74,5 +74,33 @@ describe('loadFailedFor', () => {
   it('is false with no failure, or no active enrollment', () => {
     expect(loadFailedFor(null, 'en', null)).toBe(false);
     expect(loadFailedFor('en', undefined, null)).toBe(false);
+  });
+});
+
+// Phase 43 (spec D7). Home makes a missing session itself, once per focus and
+// enrollment, and offers a retry only after that create failed.
+describe('shouldAutoCreate', () => {
+  it('sends create for the create state, once per enrollment', () => {
+    expect(shouldAutoCreate({ kind: 'create' }, null, 'e1')).toBe(true);
+    expect(shouldAutoCreate({ kind: 'create' }, 'e1', 'e1')).toBe(false);
+    expect(shouldAutoCreate({ kind: 'create' }, 'e2', 'e1')).toBe(true);
+  });
+
+  it('sends nothing for any other state', () => {
+    expect(shouldAutoCreate({ kind: 'start', sessionId: 's1' }, null, 'e1')).toBe(false);
+    expect(shouldAutoCreate({ kind: 'failed' }, null, 'e1')).toBe(false);
+    expect(shouldAutoCreate({ kind: 'save-words-first' }, null, 'e1')).toBe(false);
+    expect(shouldAutoCreate(null, null, 'e1')).toBe(false);
+  });
+});
+
+describe('createLook', () => {
+  it('shows preparing while the create runs or has not failed', () => {
+    expect(createLook(null, 'e1')).toBe('preparing');
+    expect(createLook('e2', 'e1')).toBe('preparing');
+  });
+
+  it('offers a retry once the create for this enrollment failed, never a second create of its own', () => {
+    expect(createLook('e1', 'e1')).toBe('retry');
   });
 });

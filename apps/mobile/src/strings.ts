@@ -55,7 +55,6 @@ export const strings = {
   homeSetLabel: (count: number, language: string) => `${count} מילים ב${language}`,
   start: 'התחל',
   resume: 'המשך',
-  createQuestions: 'צור שאלות',
   preparingQuestions: 'מכין שאלות…',
   skip: 'דלג',
   cancel: 'ביטול',

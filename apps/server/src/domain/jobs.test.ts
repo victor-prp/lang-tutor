@@ -9,6 +9,8 @@ import {
   PrepareSessionPayloadSchema,
   READ_PHOTO_EXPIRY_SECONDS,
   ReadPhotoPayloadSchema,
+  STOCK_SAVE_DELAY_SECONDS,
+  StockSessionPayloadSchema,
   acceptRenderingKey,
 } from './jobs';
 
@@ -73,5 +75,26 @@ describe('phase 34 accept queue (spec D1)', () => {
     const payload = AcceptRenderingPayloadSchema.parse({ variant_id: 'v1', sense_id: 's1', user_language_code: 'he' });
     expect(acceptRenderingKey(payload)).toBe('v1:s1:he');
     expect(AcceptRenderingPayloadSchema.safeParse({ variant_id: 'v1', sense_id: 's1' }).success).toBe(false);
+  });
+});
+
+describe('StockSessionPayloadSchema (phase 43 D3)', () => {
+  it('carries the device only on a start', () => {
+    expect(StockSessionPayloadSchema.parse({ enrollment_id: 'e', reason: 'start', listening: true, speaking: false })).toEqual({
+      enrollment_id: 'e',
+      reason: 'start',
+      listening: true,
+      speaking: false,
+    });
+    expect(StockSessionPayloadSchema.parse({ enrollment_id: 'e', reason: 'complete' })).toEqual({ enrollment_id: 'e', reason: 'complete' });
+  });
+
+  it('refuses a reason it does not know, and an empty enrollment', () => {
+    expect(StockSessionPayloadSchema.safeParse({ enrollment_id: 'e', reason: 'whim' }).success).toBe(false);
+    expect(StockSessionPayloadSchema.safeParse({ enrollment_id: '', reason: 'save' }).success).toBe(false);
+  });
+
+  it('waits half a minute after a save (ruling R3)', () => {
+    expect(STOCK_SAVE_DELAY_SECONDS).toBe(30);
   });
 });

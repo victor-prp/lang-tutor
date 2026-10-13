@@ -37,7 +37,6 @@ test('a new meaning of a known word: the card names what is known and shows the 
   await tapUntil(page, 'translate-entry', 'translate-input');
   await lookUp(page, request, 'лук', LUK);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
-  await page.getByTestId('translate-back').click();
   await seedMemory(username, knownSeeds('בצל'));
 
   await clearGemini(request);
@@ -49,7 +48,9 @@ test('a new meaning of a known word: the card names what is known and shows the 
     keys.map((key) => ({ key, context: SENTENCE, context_translation: SENTENCE_HEBREW, context_word: SENTENCE_WORD })),
   );
   await expectCheck(request, Object.fromEntries(keys.map((key) => [`${key}c`, { context_meaning: 'קשת' }])));
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself, so the memory and the
+  // stubs are in place before going back.
+  await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 

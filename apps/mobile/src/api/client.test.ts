@@ -158,6 +158,17 @@ describe('api/client', () => {
     expect(mockFetch).toHaveBeenNthCalledWith(3, 'http://test.local/api/enrollments/e1/sessions/current', expect.objectContaining({ method: 'GET' }));
   });
 
+  // Phase 43 (spec D2, D7).
+  it('startSession posts the device to the session’s start', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ session_id: 's1', status: 'ready' }) }));
+    const result = await buildClient(mockFetch).startSession('s1', { listening: true, speaking: false });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/sessions/s1/start',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ listening: true, speaking: false }) }),
+    );
+    expect(result).toEqual({ session_id: 's1', status: 'ready' });
+  });
+
   it("carries a failure's error code, so the app can tell two 409s apart", async () => {
     const mockFetch = jest.fn(async () => ({ ok: false, status: 409, json: async () => ({ error: 'no_saved_words' }) }));
     await expect(buildClient(mockFetch).createSession({ enrollment_id: 'e1' })).rejects.toMatchObject({

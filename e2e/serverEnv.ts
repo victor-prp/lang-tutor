@@ -27,4 +27,8 @@ export const serverEnv = {
   RESEND_API_KEY: 'e2e',
   RESEND_BASE_URL: `${MOCKSERVER_URL}/${E2E_MOCK_NAMESPACE}`,
   MAIL_FROM: 'e2e@example.com',
+  // Phase 43 (ruling R3). A save's request for a session in stock waits past any
+  // run, so a spec's first list session is the one home creates, with the stubs
+  // and memory the spec set up by then, never one built behind its back.
+  STOCK_SAVE_DELAY_SECONDS: '3600',
 };

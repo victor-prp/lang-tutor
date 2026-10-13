@@ -13,6 +13,9 @@ import { createSessionRepo } from '../../src/repo/sessions';
 import { testRng } from './testRng';
 import { withTx } from './withTx';
 
+/** Phase 43. A session built for a device that can neither listen nor speak. */
+export const NO_DEVICES = { listening: false, speaking: false };
+
 /**
  * Phase 23. A question a test knows is a choice, narrowed so it can read the
  * options: every seed question is one, as is the first of a list session
@@ -116,7 +119,7 @@ export async function insertListSession(
         ),
       })),
     });
-    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId);
+    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId, NO_DEVICES);
     await sessionRepo.insertSessionQuestions(sessionId, generated);
     await sessionRepo.transition(sessionId, ['preparing'], 'ready');
     return { sessionId, questions: generated };

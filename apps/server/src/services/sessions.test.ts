@@ -43,6 +43,12 @@ describe('repos', () => {
       // Phase 34 (spec D9).
       resolveRetry: notStubbed,
       resolvePendingRetry: notStubbed,
+      // Phase 43 (spec D1–D4).
+      markStarted: notStubbed,
+      lockNextSession: notStubbed,
+      findOpen: notStubbed,
+      findSessionGlosses: notStubbed,
+      findNewestDevices: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
       findEnrollmentId: async () => 'e1',
       ...overrides,
@@ -292,13 +298,11 @@ describe('repos', () => {
         memory: memoryRepo,
         glossFamilies: stub<GlossFamiliesRepo>({}),
         photoImport: photoImportRepo,
-        jobs: {
-          enqueue: () => {
-            throw new Error('the submit-answer use case must not enqueue a job');
-          },
-        },
+        // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
+        jobs,
       });
   }
+  let jobs = createFakeJobRepo();
 
   it('throws SessionNotFound when the repository reports no such session', async () => {
     const service = createSessionService({
@@ -346,6 +350,7 @@ describe('repos', () => {
 
   it('stores a typed answer with the verdict the learner was shown', async () => {
     const inserted: unknown[] = [];
+    jobs = createFakeJobRepo();
     const service = createSessionService({
       transaction: fakeTransaction(
         sessionRepoWith({
@@ -353,6 +358,8 @@ describe('repos', () => {
           insertAnswer: async (...args) => {
             inserted.push(args);
           },
+          // Phase 43 (spec D2). No start call came first: this answer starts it.
+          markStarted: async () => true,
         }),
       ),
       rng: testRng(7),
@@ -368,6 +375,10 @@ describe('repos', () => {
     const result = await service.submitAnswer('u1', 's1', 't1', { text: 'finestar' });
     expect(inserted).toEqual([['s1', 0, 't1', { text: 'finestar', verdict: 'near_miss' }]]);
     expect(result.answers[0]).toMatchObject({ is_correct: true, verdict: 'near_miss' });
+    // Phase 43 (spec D2, D3). A first answer that started the session asks for the next in stock.
+    expect(jobs.enqueued).toEqual([
+      { name: 'stock-session', data: { enrollment_id: 'e1', reason: 'answer' }, options: { singletonKey: 'e1' } },
+    ]);
   });
 
   it('refuses an option index on a typed card, writing nothing', async () => {
@@ -397,7 +408,13 @@ const lexeme = (lexemeId: string) => ({ lexemeId, lemma: lexemeId, form: lexemeI
 const LEXEME = lexeme('l1');
 /** Phase 39 (spec D4). No family stored yet. */
 const noFamilies = { glossFamilies: stub<GlossFamiliesRepo>({ load: async () => [] }) };
-const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn'> = { findAnswersOn: async () => [], findIntroducedOn: async () => [] };
+// Phase 43 (spec D4, D5): and no session open, so create builds one with nothing in flight.
+const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn' | 'findOpen' | 'lockNextSession'> = {
+  findAnswersOn: async () => [],
+  findIntroducedOn: async () => [],
+  findOpen: async () => ({}),
+  lockNextSession: async () => {},
+};
 const noHistory = {
   ...noFamilies,
   user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const }) }),
@@ -433,6 +450,8 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
         }),
         session: stub<SessionRepo>({
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'list' }) as never,
+          findOpen: async () => ({}),
+          lockNextSession: async () => {},
           insertPreparingSession: async () => 's1',
           findAnswersOn: async (enrollmentId, day) => {
             reads.answers = [enrollmentId, day];

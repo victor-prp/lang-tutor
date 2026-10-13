@@ -12,6 +12,8 @@ import {
   SkipSessionResponseSchema,
   SpeechAnswerRequestSchema,
   SpeechAnswerResponseSchema,
+  StartSessionRequestSchema,
+  StartSessionResponseSchema,
 } from '@lang-tutor/core/api/schemas';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -105,13 +107,17 @@ const createSessionRoute = createRoute({
   method: 'post',
   path: '/sessions',
   tags: ['sessions'],
-  summary: 'Create the next session',
+  summary: 'The next session to play',
   description:
-    "An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, listening cards only when the request says `listening: true`, and speaking cards only when it says `speaking: true`. Read it with GET /sessions/{id}.",
+    "The session in stock, the one not yet started, when there is one: answered as it is, built for the device that asked first, so this request's `listening` and `speaking` do not change it. Otherwise one is created. An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, listening cards only when the request says `listening: true`, and speaking cards only when it says `speaking: true`. Read it with GET /sessions/{id}.",
   request: {
     body: { required: true, content: { 'application/json': { schema: CreateSessionRequestSchema } } },
   },
   responses: {
+    200: {
+      content: { 'application/json': { schema: CreateSessionResponseSchema } },
+      description: 'The session in stock, not yet started: the next one to play.',
+    },
     201: {
       content: { 'application/json': { schema: CreateSessionResponseSchema } },
       description: 'The session was created.',
@@ -119,7 +125,7 @@ const createSessionRoute = createRoute({
     400: failure('The request body did not validate.'),
     404: failure('No enrollment has this `enrollment_id`.'),
     409: failure(
-      'An open session exists (`session_open`), the saved list is empty (`no_saved_words`), or the seed has too few questions for this pair (`not enough questions`).',
+      'A session is started (`session_open`), which is continued rather than replaced, the saved list is empty (`no_saved_words`), or the seed has too few questions for this pair (`not enough questions`).',
     ),
     ...learnerResponses,
     403: NOT_YOURS,
@@ -159,6 +165,29 @@ const skipSessionRoute = createRoute({
   },
 });
 
+const startSessionRoute = createRoute({
+  method: 'post',
+  path: '/sessions/{id}/start',
+  tags: ['sessions'],
+  summary: 'Start a session',
+  description:
+    "Marks a ready session started, and has the next session prepared in the background, built for this device: listening cards only when the request says `listening: true`, speaking cards only when it says `speaking: true`. Starting a started session is a no-op. A session's first answer starts it too, for a client that never sends this.",
+  request: {
+    params: sessionIdParam,
+    body: { required: true, content: { 'application/json': { schema: StartSessionRequestSchema } } },
+  },
+  responses: {
+    200: { content: { 'application/json': { schema: StartSessionResponseSchema } }, description: 'The session is started.' },
+    400: failure('The request body did not validate.'),
+    404: failure('No session has this id.'),
+    409: failure(
+      'The session is not ready: preparing, completed, skipped or failed (`session_not_ready`), or another session of the enrollment is started (`session_open`).',
+    ),
+    ...learnerResponses,
+    403: NOT_YOURS,
+  },
+});
+
 const nextStepRoute = createRoute({
   method: 'post',
   path: '/sessions/{id}/next-step',
@@ -181,7 +210,7 @@ const nextStepRoute = createRoute({
     ),
     404: failure('No session has this id.'),
     409: failure(
-      "`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`).",
+      "`question_id` is not the session's current question, `retry` was sent where no second try is pending, the session is not ready (`session_not_ready`), or another session of the enrollment is started, so this one cannot start (`session_open`).",
     ),
     422: failure("The text has letters but none in its answer language's alphabet. Nothing was recorded and the card stays current."),
     ...learnerResponses,
@@ -207,7 +236,7 @@ const speechRoute = createRoute({
     },
     400: failure('The request body did not validate, or the current card is not a speaking card.'),
     404: failure('No session has this id.'),
-    409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`)."),
+    409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, the session is not ready (`session_not_ready`), or another session of the enrollment is started, so this one cannot start (`session_open`)."),
     413: failure('The body is over 300 KB.'),
     502: failure('The transcription failed or timed out; the card may be tried again.'),
     ...learnerResponses,
@@ -233,7 +262,7 @@ const judgedAnswerRoute = createRoute({
     },
     400: failure('The request body did not validate, or the current card is not one the server judges.'),
     404: failure('No session has this id.'),
-    409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, or the session is not ready (`session_not_ready`)."),
+    409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, the session is not ready (`session_not_ready`), or another session of the enrollment is started, so this one cannot start (`session_open`)."),
     422: failure("The text has letters but none in its answer language's alphabet. Nothing was recorded, no model was called, and the card stays current."),
     502: failure('The judge failed or timed out; nothing was recorded, and the answer may be sent again.'),
     ...learnerResponses,
@@ -247,7 +276,7 @@ const currentSessionRoute = createRoute({
   tags: ['sessions'],
   summary: "An enrollment's current session",
   description:
-    'The newest session while it is preparing, ready or failed; where the next one will come from; and how many glosses are saved.',
+    'The started session, else the one in stock (not yet started: preparing or ready), else the newest session if it failed; where the next one will come from; and how many glosses are saved.',
   request: { params: z.object({ id: z.string() }) },
   responses: {
     200: {
@@ -273,14 +302,13 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(createSessionRoute, async (c) => {
     const { enrollment_id, listening, speaking } = c.req.valid('json');
     try {
-      const created = await sessions.createNextSession(c.var.actor, enrollment_id, {
+      const next = await sessions.createNextSession(c.var.actor, enrollment_id, {
         listening: listening ?? false,
         speaking: speaking ?? false,
       });
-      return c.json(
-        { session_id: created.sessionId, status: created.status, source: created.source },
-        201,
-      );
+      const body = { session_id: next.sessionId, status: next.status, source: next.source };
+      // Phase 43 (spec D5): the stock is answered, not created.
+      return next.created ? c.json(body, 201) : c.json(body, 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
@@ -315,6 +343,21 @@ export function createSessionsRouter(sessions: SessionService) {
     }
   });
 
+  router.openapi(startSessionRoute, async (c) => {
+    const { id } = c.req.valid('param');
+    const { listening, speaking } = c.req.valid('json');
+    try {
+      const started = await sessions.startSession(c.var.actor, id, { listening: listening ?? false, speaking: speaking ?? false });
+      return c.json({ session_id: started.sessionId, status: started.status }, 200);
+    } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
+      if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
+      if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
+      throw error;
+    }
+  });
+
   router.openapi(nextStepRoute, async (c) => {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
@@ -341,6 +384,8 @@ export function createSessionsRouter(sessions: SessionService) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      // Phase 43 (spec D2): this answer would start a second session.
+      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
       if (error instanceof QuestionDesynced) {
         return c.json({ error: "question_id does not match the session's current question" }, 409);
       }
@@ -383,6 +428,8 @@ export function createSessionsRouter(sessions: SessionService) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      // Phase 43 (spec D2): this answer would start a second session.
+      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
       if (error instanceof QuestionDesynced) {
         return c.json({ error: "question_id does not match the session's current question" }, 409);
       }
@@ -402,6 +449,8 @@ export function createSessionsRouter(sessions: SessionService) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      // Phase 43 (spec D2): this answer would start a second session.
+      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
       if (error instanceof QuestionDesynced) {
         return c.json({ error: "question_id does not match the session's current question" }, 409);
       }

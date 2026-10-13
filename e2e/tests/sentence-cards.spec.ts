@@ -120,9 +120,8 @@ async function reachSentenceSession(page: Page, request: APIRequestContext, user
     request,
     [1, 2, 3, 4, 5, 6].map((position) => ({ key: `q${position}`, sentence_word: MARKED })),
   );
-  // Past a skipped seed the home screen offers create, not start, so openApp's default landing does not fit.
-  await openApp(page, 'create-button');
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
+  await openApp(page, 'enrollment-switcher');
   await expect(page.getByTestId('start-button')).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 }

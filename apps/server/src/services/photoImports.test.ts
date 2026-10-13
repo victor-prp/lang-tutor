@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import type { Enrollment } from '@lang-tutor/core/api';
 
 import { IMPORT_TTL_MS } from '../domain/photoImports';
-import { READ_PHOTO, RENDER_LEMMA } from '../domain/jobs';
+import { READ_PHOTO, RENDER_LEMMA, STOCK_SESSION } from '../domain/jobs';
 import {
   AccessDenied,
   EnrollmentNotFound,
@@ -74,6 +74,7 @@ function setup(repos: Partial<Repos>) {
     },
     now: createFakeClock(NOW),
     logger,
+    stockSaveDelaySeconds: 30,
   });
   return { service, logger };
 }
@@ -230,7 +231,11 @@ describe('save', () => {
     // Every saved word's lemma render is claimed in the list's learner language,
     // and only what the claim returns is enqueued.
     expect(claims).toEqual([[{ lexemeId: 'l1', userLanguageCode: 'he' }, { lexemeId: 'l2', userLanguageCode: 'he' }]]);
-    expect(jobs.enqueued).toEqual([{ name: RENDER_LEMMA, data: { lexeme_id: 'l2', user_language_code: 'he' } }]);
+    // Phase 43 (spec D3, ruling R3). And the next session in stock, half a minute on.
+    expect(jobs.enqueued).toEqual([
+      { name: RENDER_LEMMA, data: { lexeme_id: 'l2', user_language_code: 'he' } },
+      { name: STOCK_SESSION, data: { enrollment_id: 'e1', reason: 'save' }, options: { singletonKey: 'e1:save', startAfterSeconds: 30 } },
+    ]);
   });
 
   it('answers a repeated save with the same ids and writes nothing', async () => {

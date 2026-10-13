@@ -10,6 +10,7 @@ import type { PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
+import { NO_DEVICES } from '../../support/questions';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import {
   assertMockServerReachable,
@@ -95,7 +96,7 @@ async function prepared(
   await clearNamespace(ns);
   await expectDistractors(ns, batch);
   await expectCheck(ns, check);
-  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', enrollmentId));
+  const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', enrollmentId, NO_DEVICES));
   await deps.sessions.prepareSession({ session_id: sessionId, picks: steered(picks, cards), listening: false, speaking: false });
   const record = await deps.sessions.getSession('u_1', sessionId);
   expect(record.status).toBe('ready');
@@ -206,7 +207,7 @@ describe('the known-right set and the checker, through the database', () => {
     const lamp = await saved(EN, 'lamp', ['מנורה'], { partOfSpeech: 'noun' });
     await expectDistractors(ns, { tasks: CHOICE_TASKS });
     await expectCheck(ns, { status: 500 });
-    const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN));
+    const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN, NO_DEVICES));
     await expect(
       deps.sessions.prepareSession({ session_id: sessionId, picks: steered([pick(blowUp), pick(table), pick(lamp)], THREE), listening: false, speaking: false }),
     ).rejects.toThrow();

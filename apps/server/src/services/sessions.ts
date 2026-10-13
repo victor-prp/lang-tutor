@@ -67,18 +67,23 @@ import {
 import { glossFamilies } from '../domain/glossFamilies';
 import { familyChanges, isEmptyFamilyWrite } from '../domain/glossFamilyRecord';
 import { buildFitJudgePrompt, judgePrompt, parseFitJudge, parseJudge, ruleVerdict, type JudgeContext } from '../domain/judge';
-import { ACCEPT_RENDERING, PREPARE_SESSION, PrepareSessionPayloadSchema, acceptRenderingKey } from '../domain/jobs';
+import {
+  ACCEPT_RENDERING,
+  PREPARE_SESSION,
+  PrepareSessionPayloadSchema,
+  StockSessionPayloadSchema,
+  acceptRenderingKey,
+} from '../domain/jobs';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planCards } from '../domain/plan';
-import { dayState } from '../domain/today';
+import { dayState, withSessionInFlight } from '../domain/today';
 import { applySession } from '../domain/memoryUpdate';
 import { evaluateSession, progressChanges, type ProgressChange } from '../domain/progress';
-import type { SessionRecord, SessionSummary } from '../domain/session';
+import type { Devices, SessionRecord, SessionSummary } from '../domain/session';
 import {
   SESSION_LENGTH,
   askableRenderings,
   attemptOf,
-  isCurrent,
   isOpen,
   newSessionRecord,
   nextSource,
@@ -110,6 +115,7 @@ import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
 import type { LlmClient } from './llm';
 import type { SpeechTranscriber } from './speech';
+import { requestStock } from './stock';
 import type { Repos, Transaction } from './transaction';
 
 export type { Transaction } from './transaction';
@@ -255,22 +261,138 @@ export function createSessionService({
   transcriber: SpeechTranscriber;
   judge: LlmClient;
 }) {
+  /**
+   * Phase 43 (spec D3). Phase 19's list branch of create, shared by create and
+   * the stock job: the words, the session inserted preparing for `devices`, the
+   * families' refresh, and its preparation enqueued in the same transaction, so
+   * the row and its job commit together. NoSavedWords when the list has nothing
+   * to ask.
+   */
+  async function stockNext(repos: Repos, enrolled: Enrollment, devices: Devices): Promise<string> {
+    const { session, vocabulary, dict, jobs } = repos;
+    const enrollmentId = enrolled.id;
+    const saved = await vocabulary.listSavedGlosses(enrollmentId);
+    if (saved.length === 0) throw new NoSavedWords(enrollmentId);
+    // Phase 35 (spec D5, D10). The words, each with a dimension and a rung,
+    // from what the learner knows: memory and levels, on the owner's day,
+    // with what that day already asked and introduced. At most one gloss per
+    // key, across headwords (phase 31 D18), is chooseWords' rule now.
+    const glossIds = saved.map((gloss) => gloss.glossId);
+    const at = now();
+    const today = await learnerDay(repos, enrolled.user_id, at);
+    const memory = await repos.memory.findRows({ enrollmentId, glossIds });
+    const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
+    // Phase 39 (spec D4, D5). The families, derived from the dictionary and
+    // memory with the session's live skills. Only known_at is read from the
+    // stored families: known once, known for the family (D2).
+    const forms = await dict.findLexemeForms({ lexemeIds: [...new Set(saved.map((gloss) => gloss.lexemeId))] });
+    const formsOf = new Map<string, string[]>();
+    for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
+    const stored = await repos.glossFamilies.load(enrollmentId);
+    const knownAt = new Map(stored.flatMap((family) => family.members.map((member) => [member.glossId, member.knownAt])));
+    const families = glossFamilies({
+      saved: saved.map((gloss) => ({
+        glossId: gloss.glossId,
+        lexemeId: gloss.lexemeId,
+        lemma: gloss.lemma,
+        key: gloss.key,
+        savedAt: gloss.savedAt,
+        forms: formsOf.get(gloss.lexemeId) ?? [],
+        order: gloss.order,
+        speakable: speakable(gloss.form),
+        knownAt: knownAt.get(gloss.glossId) ?? null,
+      })),
+      memory,
+      live: liveDimensions(devices.listening, devices.speaking),
+    });
+    const waiting = new Set([...families.state].filter(([, state]) => state === 'waiting').map(([glossId]) => glossId));
+    // Phase 37 (spec D1, D7). Today's answers leave the returns owed and the
+    // words done for the day.
+    const introduced = await session.findIntroducedOn(enrollmentId, today);
+    // Phase 43 (spec D4). Picked beside the started session, whose saved
+    // glosses count as answered today: the two ask different words while the
+    // list has others, and its first meetings are today's new words too.
+    const { started } = await session.findOpen(enrollmentId);
+    const inFlight = started ? (await session.findSessionGlosses(started.id)).filter((glossId) => glossIds.includes(glossId)) : [];
+    const met = new Set([...memory.map((row) => row.glossId), ...introduced]);
+    const { steps, done, extraNew } = withSessionInFlight(
+      dayState(await session.findAnswersOn(enrollmentId, today), new Set(introduced)),
+      inFlight,
+      met,
+    );
+    const chosen = chooseWords({
+      saved,
+      memory,
+      levels,
+      today,
+      steps,
+      done,
+      newToday: introduced.length + extraNew,
+      listening: devices.listening,
+      speaking: devices.speaking,
+      rng,
+      families: { familyOf: families.familyOf, waiting },
+    });
+    // Spec D12. One rendering per gloss, uniformly over every form of every
+    // member that agrees with the gloss, the saved form always among them.
+    // No model call: a lemma form not yet rendered joins once its job lands.
+    const renderings = await dict.findGlossRenderings({
+      glossIds: chosen.map((choice) => choice.glossId),
+      userLanguageCode: enrolled.source_language,
+    });
+    const savedById = new Map(saved.map((gloss) => [gloss.glossId, gloss]));
+    const picks = chosen.flatMap((choice) => {
+      const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
+      if (!rendering) return [];
+      const { dimension, rung, level, r } = choice;
+      const step = choice.cls === 'STEP';
+      // Phase 39 (spec D6). A family's next meaning, never asked, is introduced with the known ones.
+      const knownMeanings = families.introductions.get(choice.glossId);
+      return [
+        {
+          gloss_id: choice.glossId,
+          sense_id: rendering.senseId,
+          variant_id: rendering.variantId,
+          dimension,
+          rung,
+          level,
+          r,
+          step,
+          ...(knownMeanings ? { known_meanings: knownMeanings } : {}),
+        },
+      ];
+    });
+    if (picks.length === 0) throw new NoSavedWords(enrollmentId);
+    const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices);
+    // Phase 39 (spec D4). The refresh is recorded once the session exists, so
+    // each event names it; one that changed nothing writes nothing.
+    const write = familyChanges(stored, families, new Date(at).toISOString());
+    if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
+    await jobs.enqueue(PREPARE_SESSION, {
+      session_id: sessionId,
+      picks,
+      listening: devices.listening,
+      speaking: devices.speaking,
+    });
+    return sessionId;
+  }
+
   const service = {
     /**
-     * The next session of an enrollment. The first is the seed, ready at once.
-     * Every later one is built from the saved list: it is inserted as
-     * `preparing`, and its prepare-session job is enqueued in this same
-     * transaction, so the row and its job commit together. The open-session
-     * check here gives the clean error; the unique index (repo -> SessionOpen)
-     * is what holds under a race.
+     * The next session to play (phase 43, spec D5). A started session is
+     * resumed, not replaced: SessionOpen. The stock is the next one, answered
+     * as it is, built for whichever device asked first. Otherwise the first
+     * session is the seed, ready at once, and every later one is built here
+     * from the saved list, preparing. The indexes (repo -> SessionOpen) are what
+     * hold under a race.
      */
-    createNextSession: (
+    createNextSession: async (
       actorUserId: string,
       enrollmentId: string,
-      options: { listening: boolean; speaking: boolean },
-    ): Promise<{ sessionId: string; status: SessionStatus; source: SessionSource }> =>
-      transaction(async (repos) => {
-        const { session, question, vocabulary, dict, jobs } = repos;
+      options: Devices,
+    ): Promise<{ sessionId: string; status: SessionStatus; source: SessionSource; created: boolean }> => {
+      const next = await transaction(async (repos) => {
+        const { session, question } = repos;
         // No implicit creation: an unknown enrollment is a 404, another
         // learner's a 403, both before anything is written.
         const enrolled = await authorizeEnrollment(repos, logger, {
@@ -279,9 +401,15 @@ export function createSessionService({
           permission: 'session.practice',
         });
 
-        const latest = await session.findLatest(enrollmentId);
-        if (latest && isOpen(latest.status)) throw new SessionOpen(enrollmentId);
+        // Review C1. A double tap, or the stock job, waits here for the other.
+        await session.lockNextSession(enrollmentId);
+        const open = await session.findOpen(enrollmentId);
+        if (open.started) throw new SessionOpen(enrollmentId);
+        if (open.stock) {
+          return { sessionId: open.stock.id, status: open.stock.status, source: open.stock.source, created: false };
+        }
 
+        const latest = await session.findLatest(enrollmentId);
         if (nextSource(latest !== undefined) === 'seed') {
           const pool = await question.loadQuestionPool(
             enrolled.target_language,
@@ -291,109 +419,38 @@ export function createSessionService({
           // 500: a language with no seeded questions is an answer, not a failure.
           if (pool.length < SESSION_LENGTH) throw new InsufficientQuestions(enrollmentId, pool.length);
           const record = newSessionRecord(enrolled.user_id, pool, rng);
-          const sessionId = await session.insertSession(
-            enrolled.user_id,
-            enrollmentId,
-            record.questions,
-          );
-          return { sessionId, status: 'ready' as const, source: 'seed' as const };
+          const sessionId = await session.insertSession(enrolled.user_id, enrollmentId, record.questions, options);
+          return { sessionId, status: 'ready' as const, source: 'seed' as const, created: true };
         }
 
-        const saved = await vocabulary.listSavedGlosses(enrollmentId);
-        if (saved.length === 0) throw new NoSavedWords(enrollmentId);
-        // Phase 35 (spec D5, D10). The words, each with a dimension and a rung,
-        // from what the learner knows: memory and levels, on the owner's day,
-        // with what that day already asked and introduced. At most one gloss per
-        // key, across headwords (phase 31 D18), is chooseWords' rule now.
-        const glossIds = saved.map((gloss) => gloss.glossId);
-        const at = now();
-        const today = await learnerDay(repos, enrolled.user_id, at);
-        const memory = await repos.memory.findRows({ enrollmentId, glossIds });
-        const levels = await repos.progress.findRows({ enrollmentId, glossIds, savedBy: null });
-        // Phase 39 (spec D4, D5). The families, derived from the dictionary and
-        // memory with the session's live skills. Only known_at is read from the
-        // stored families: known once, known for the family (D2).
-        const forms = await dict.findLexemeForms({ lexemeIds: [...new Set(saved.map((gloss) => gloss.lexemeId))] });
-        const formsOf = new Map<string, string[]>();
-        for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
-        const stored = await repos.glossFamilies.load(enrollmentId);
-        const knownAt = new Map(stored.flatMap((family) => family.members.map((member) => [member.glossId, member.knownAt])));
-        const families = glossFamilies({
-          saved: saved.map((gloss) => ({
-            glossId: gloss.glossId,
-            lexemeId: gloss.lexemeId,
-            lemma: gloss.lemma,
-            key: gloss.key,
-            savedAt: gloss.savedAt,
-            forms: formsOf.get(gloss.lexemeId) ?? [],
-            order: gloss.order,
-            speakable: speakable(gloss.form),
-            knownAt: knownAt.get(gloss.glossId) ?? null,
-          })),
-          memory,
-          live: liveDimensions(options.listening, options.speaking),
-        });
-        const waiting = new Set([...families.state].filter(([, state]) => state === 'waiting').map(([glossId]) => glossId));
-        // Phase 37 (spec D1, D7). Today's answers leave the returns owed and the
-        // words done for the day.
-        const introduced = await session.findIntroducedOn(enrollmentId, today);
-        const { steps, done } = dayState(await session.findAnswersOn(enrollmentId, today), new Set(introduced));
-        const chosen = chooseWords({
-          saved,
-          memory,
-          levels,
-          today,
-          steps,
-          done,
-          newToday: introduced.length,
-          listening: options.listening,
-          speaking: options.speaking,
-          rng,
-          families: { familyOf: families.familyOf, waiting },
-        });
-        // Spec D12. One rendering per gloss, uniformly over every form of every
-        // member that agrees with the gloss, the saved form always among them.
-        // No model call: a lemma form not yet rendered joins once its job lands.
-        const renderings = await dict.findGlossRenderings({
-          glossIds: chosen.map((choice) => choice.glossId),
-          userLanguageCode: enrolled.source_language,
-        });
-        const savedById = new Map(saved.map((gloss) => [gloss.glossId, gloss]));
-        const picks = chosen.flatMap((choice) => {
-          const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
-          if (!rendering) return [];
-          const { dimension, rung, level, r } = choice;
-          const step = choice.cls === 'STEP';
-          // Phase 39 (spec D6). A family's next meaning, never asked, is introduced with the known ones.
-          const knownMeanings = families.introductions.get(choice.glossId);
-          return [
-            {
-              gloss_id: choice.glossId,
-              sense_id: rendering.senseId,
-              variant_id: rendering.variantId,
-              dimension,
-              rung,
-              level,
-              r,
-              step,
-              ...(knownMeanings ? { known_meanings: knownMeanings } : {}),
-            },
-          ];
-        });
-        if (picks.length === 0) throw new NoSavedWords(enrollmentId);
-        const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId);
-        // Phase 39 (spec D4). The refresh is recorded once the session exists, so
-        // each event names it; one that changed nothing writes nothing.
-        const write = familyChanges(stored, families, new Date(at).toISOString());
-        if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
-        await jobs.enqueue(PREPARE_SESSION, {
-          session_id: sessionId,
-          picks,
-          listening: options.listening,
-          speaking: options.speaking,
-        });
-        return { sessionId, status: 'preparing' as const, source: 'list' as const };
-      }),
+        const sessionId = await stockNext(repos, enrolled, options);
+        return { sessionId, status: 'preparing' as const, source: 'list' as const, created: true };
+      });
+      if (next.created && next.source === 'list') {
+        logger.info({ event: 'session_stocked', enrollment_id: enrollmentId, session_id: next.sessionId, reason: 'create' });
+      }
+      return next;
+    },
+
+    /**
+     * Phase 43 (spec D2). Starts a ready session, and asks for the next one in
+     * stock, built for the device that started this one (ruling R2). Started
+     * already: a no-op. A session that is not ready has nothing to start;
+     * another started session of the enrollment is SessionOpen.
+     */
+    startSession: async (actorUserId: string, sessionId: string, devices: Devices): Promise<{ sessionId: string; status: SessionStatus }> => {
+      const started = await transaction(async (repos) => {
+        const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
+        const state = await repos.session.findState(sessionId);
+        if (!state) throw new SessionNotFound(sessionId);
+        if (state.status !== 'ready') throw new SessionNotReady(sessionId, state.status);
+        const changed = await repos.session.markStarted(sessionId);
+        if (changed) await requestStock(repos, { enrollment_id: enrolled.id, reason: 'start', ...devices });
+        return changed;
+      });
+      if (started) logger.info({ event: 'session_started', session_id: sessionId, by: 'start' });
+      return { sessionId, status: 'ready' };
+    },
 
     /** Resume and the poll both read through this. A completed session also
      *  carries what it did to the saved words. */
@@ -405,20 +462,31 @@ export function createSessionService({
         return { ...record, progress: await progressOf(repos, sessionId, record) };
       }),
 
-    /** What the home screen needs in one read. */
-    currentSession: (
+    /** What the home screen needs in one read. Phase 43 (spec D6): the started
+     *  session, else the stock, else the newest session if it failed, so a
+     *  failure is never silent. Spec D8: an unstarted list session offered is
+     *  logged with its status, which counts how often a learner found it ready. */
+    currentSession: async (
       actorUserId: string,
       enrollmentId: string,
-    ): Promise<{ current: SessionSummary | null; nextSource: SessionSource; savedCount: number }> =>
-      transaction(async (repos) => {
+    ): Promise<{ current: SessionSummary | null; nextSource: SessionSource; savedCount: number }> => {
+      const read = await transaction(async (repos) => {
         await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
+        const open = await repos.session.findOpen(enrollmentId);
         const latest = await repos.session.findLatest(enrollmentId);
         return {
-          current: latest && isCurrent(latest.status) ? latest : null,
+          current: open.started ?? open.stock ?? (latest?.status === 'failed' ? latest : null),
+          offered: open.started ? undefined : open.stock,
           nextSource: nextSource(latest !== undefined),
           savedCount: await repos.vocabulary.countEntries(enrollmentId),
         };
-      }),
+      });
+      const { offered, ...home } = read;
+      if (offered && offered.source === 'list') {
+        logger.info({ event: 'session_offered', enrollment_id: enrollmentId, session_id: offered.id, status: offered.status });
+      }
+      return home;
+    },
 
     /**
      * Ends a preparing or ready session. Idempotent on `skipped`. A job still
@@ -440,6 +508,10 @@ export function createSessionService({
         if (changed) {
           await repos.session.resolvePendingRetry(sessionId, { text: '', verdict: 'gave_up' });
           await recordProgress(repos, sessionId);
+          // Phase 43 (spec D3). The next session in stock, if this was it. Not
+          // after the seed (ruling R8): it is played before anything is saved,
+          // and a stock built behind the first saves would hold one word.
+          if (state.source === 'list') await requestStock(repos, { enrollment_id: enrolled.id, reason: 'skip' });
         }
         return changed;
       });
@@ -530,9 +602,19 @@ export function createSessionService({
           );
         }
 
+        // Phase 43 (spec D2). A first answer starts a session no start call
+        // started (an older app, a bot), and asks for the next one in stock.
+        // Another started session refuses it here, before anything commits.
+        if (outcome.recorded === 'answer' && loaded.answers.length === 0 && (await repos.session.markStarted(sessionId))) {
+          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'answer' });
+        }
+
         if (outcome.justCompleted) {
           await repos.session.completeSession(sessionId, await learnerDay(repos, enrolled.user_id, now()));
           await recordProgress(repos, sessionId);
+          // Phase 43 (spec D3). A stock that failed, or was never built, is
+          // built now; one already there makes this a no-op.
+          await requestStock(repos, { enrollment_id: enrolled.id, reason: 'complete' });
         }
 
         const progress = await progressOf(repos, sessionId, outcome.record);
@@ -1325,6 +1407,44 @@ export function createSessionService({
         checker_ms: checkerMs,
         ...(written ? {} : { stage: 'write' }),
       });
+    },
+
+    /**
+     * Phase 43 (spec D3). The stock job: builds the enrollment's next session in
+     * stock when it has none, has had a session (else the seed comes next) and
+     * has words to ask. Anything else is a no-op, logged with why; so is a race
+     * lost to another stock. Built for the start's device when the trigger was a
+     * start, else the newest session's (ruling R2).
+     */
+    stockSession: async (data: unknown): Promise<void> => {
+      const payload = StockSessionPayloadSchema.parse(data);
+      const enrollmentId = payload.enrollment_id;
+      type Stocked = { sessionId: string } | { why: 'no_enrollment' | 'stocked' | 'seed_next' | 'no_saved_words' };
+      let outcome: Stocked;
+      try {
+        outcome = await transaction(async (repos): Promise<Stocked> => {
+          const enrolled = await repos.enrollment.findById(enrollmentId);
+          if (!enrolled) return { why: 'no_enrollment' };
+          // Review C1. A create running now finishes first, and its stock is seen.
+          await repos.session.lockNextSession(enrollmentId);
+          if ((await repos.session.findOpen(enrollmentId)).stock) return { why: 'stocked' };
+          if (!(await repos.session.findLatest(enrollmentId))) return { why: 'seed_next' };
+          const devices =
+            payload.listening !== undefined && payload.speaking !== undefined
+              ? { listening: payload.listening, speaking: payload.speaking }
+              : ((await repos.session.findNewestDevices(enrollmentId)) ?? { listening: false, speaking: false });
+          return { sessionId: await stockNext(repos, enrolled, devices) };
+        });
+      } catch (error) {
+        if (error instanceof SessionOpen) outcome = { why: 'stocked' };
+        else if (error instanceof NoSavedWords) outcome = { why: 'no_saved_words' };
+        else throw error;
+      }
+      logger.info(
+        'sessionId' in outcome
+          ? { event: 'session_stocked', enrollment_id: enrollmentId, session_id: outcome.sessionId, reason: payload.reason }
+          : { event: 'session_stock_skipped', enrollment_id: enrollmentId, reason: payload.reason, why: outcome.why },
+      );
     },
 
     /** The dead-letter handler: retries are spent or the job expired. Marks the

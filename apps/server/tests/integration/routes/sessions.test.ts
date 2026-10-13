@@ -451,12 +451,65 @@ describe('phase 19 session routes', () => {
     }
   });
 
-  it('a second create while one is open is 409 session_open', async () => {
+  // Phase 43 (spec D5). An unstarted session is the next one: create answers it.
+  it('a second create answers the session not yet started, 200', async () => {
     const app = buildTestApp();
-    await postJson(app, '/api/sessions', { enrollment_id: E() });
+    const first = await (await postJson(app, '/api/sessions', { enrollment_id: E() })).json();
+    const res = await postJson(app, '/api/sessions', { enrollment_id: E() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(first);
+  });
+
+  it('a create while a session is started is 409 session_open', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    await postJson(app, `/api/sessions/${seed.session_id}/next-step`, { question_id: seed.question.id, option_index: 0 });
     const res = await postJson(app, '/api/sessions', { enrollment_id: E() });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'session_open' });
+  });
+
+  // Phase 43 (spec D2).
+  it('start is 200, and 200 again once started', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    for (let i = 0; i < 2; i++) {
+      const res = await postJson(app, `/api/sessions/${seed.session_id}/start`, { listening: true, speaking: false });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ session_id: seed.session_id, status: 'ready' });
+    }
+    // Started: a second create is refused, as for a session with answers.
+    expect((await postJson(app, '/api/sessions', { enrollment_id: E() })).status).toBe(409);
+  });
+
+  it('start takes an empty body', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    expect((await postJson(app, `/api/sessions/${seed.session_id}/start`, {})).status).toBe(200);
+  });
+
+  it('start of a skipped session is 409 session_not_ready, of an unknown one 404, of another learner’s 403', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    await postJson(app, `/api/sessions/${seed.session_id}/skip`, {});
+    const skipped = await postJson(app, `/api/sessions/${seed.session_id}/start`, {});
+    expect(skipped.status).toBe(409);
+    expect(await skipped.json()).toEqual({ error: 'session_not_ready' });
+    expect((await postJson(app, '/api/sessions/00000000-0000-0000-0000-000000000000/start', {})).status).toBe(404);
+    const other = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_2') }, 'u_2')).json();
+    expect((await postJson(app, `/api/sessions/${other.session_id}/start`, {})).status).toBe(403);
+  });
+
+  it('answering a session in stock while another is started is 409 session_open, and records nothing', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    await postJson(app, `/api/sessions/${seed.session_id}/start`, {});
+    const { sessionId: stock, questions } = await startMixed();
+    const res = await postJson(app, `/api/sessions/${stock}/next-step`, { question_id: questions[0].id, option_index: 0 });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'session_open' });
+    expect(await readStoredAnswers(t.db, stock)).toEqual([]);
+    expect((await postJson(app, `/api/sessions/${stock}/start`, {})).status).toBe(409);
   });
 
   it('skip is 200 twice, and then the next create asks for saved words', async () => {

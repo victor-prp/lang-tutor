@@ -185,3 +185,13 @@ test('a spoken card held for its second try is spoken again, and an unheard seco
   // A second try given up leaves the first answer where it was: right, and the verdict kept.
   assert.deepEqual([state.log[0].verdict, state.log[0].correct], ['alternative', true]);
 });
+
+// Phase 43 (ruling R1). A bot plays faster than a session is prepared, so it
+// meets the next one still preparing; each such session is logged once.
+test('logs each session it found still preparing, once', async () => {
+  const server = new FakeServer({ cardsFor: () => [choiceCard('q1', 'alpha')] });
+  const { notes } = await play(server, async () => null);
+  const waits = notes.filter((note) => note.includes('to prepare'));
+  assert.equal(waits.length, 1);
+  assert.match(waits[0], /^.+: waited \d+ ms for session \S+ to prepare$/);
+});

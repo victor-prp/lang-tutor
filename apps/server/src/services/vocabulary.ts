@@ -20,6 +20,7 @@ import {
 import { EnrollmentNotFound, GlossLanguageMismatch, InvalidCursor, InvalidVocabularyEntry, WordNotFound } from '../errors';
 import type { Logger } from '../logger';
 import { authorize, authorizeEnrollment } from './access';
+import { requestStockAfterSave } from './stock';
 import type { Repos, Transaction } from './transaction';
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -41,9 +42,12 @@ async function enrollmentOrThrow(repos: Repos, enrollmentId: string): Promise<En
 export function createVocabularyService({
   transaction,
   logger,
+  stockSaveDelaySeconds,
 }: {
   transaction: Transaction;
   logger: Logger;
+  /** Phase 43 (ruling R3). How long a save's request for a stock waits. */
+  stockSaveDelaySeconds: number;
 }) {
   return {
     /**
@@ -105,6 +109,9 @@ export function createVocabularyService({
         for (const pair of claimed) {
           await repos.jobs.enqueue(RENDER_LEMMA, { lexeme_id: pair.lexemeId, user_language_code: pair.userLanguageCode });
         }
+        // Phase 43 (spec D3). A list with no session in stock gets one, once the
+        // burst of saves this may be the first of has landed (ruling R3).
+        await requestStockAfterSave(repos, enrollmentId, stockSaveDelaySeconds);
       });
       logger.info({ event: 'vocabulary_saved', enrollment_id: enrollmentId, entry_count: asked.length, by });
       return { saved_gloss_ids: asked.map((entry) => entry.gloss_id) };

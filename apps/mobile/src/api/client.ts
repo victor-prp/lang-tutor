@@ -22,6 +22,8 @@ import type {
   SaveVocabularyResponse,
   SessionView,
   SkipSessionResponse,
+  StartSessionRequest,
+  StartSessionResponse,
   SpeechAnswerRequest,
   SpeechAnswerResponse,
   TranslationRequest,
@@ -193,6 +195,9 @@ export function createApiClient({
       getJson<SessionView>(`/api/sessions/${encodeURIComponent(sessionId)}`),
     skipSession: (sessionId: string) =>
       postJson<SkipSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/skip`, {}),
+    // Phase 43 (spec D2). Starting a session has the next one built for this device.
+    startSession: (sessionId: string, request: StartSessionRequest) =>
+      postJson<StartSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/start`, request),
     currentSession: (enrollmentId: string) =>
       getJson<CurrentSessionResponse>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/sessions/current`),
     translate: (request: TranslationRequest) =>

@@ -54,15 +54,15 @@ test('a session moves the words it practised up the ladder, and the list filters
   await page.getByTestId('translate-new-word').click();
   await lookUp(page, request, 'лук', LUK);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
-  await page.getByTestId('translate-back').click();
   await seedMemory('e2e_progress_ru', MEMORY);
 
   // 2. A list session: лук answered right, прочитала wrong. Both cards are a
   // choice among four at p 1, so which comes first is not fixed; each is
-  // answered by its kind.
+  // answered by its kind. Home makes it on the way back (phase 43, spec D7), so
+  // the memory and the generation are in place before.
   await clearGemini(request);
   await expectGeneration(request);
-  await page.getByTestId('create-button').click();
+  await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
   for (let position = 1; position <= 2; position++) {

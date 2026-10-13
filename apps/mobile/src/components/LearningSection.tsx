@@ -1,6 +1,6 @@
 import type { Enrollment } from '@lang-tutor/core/api';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError } from '@/api/client';
@@ -9,7 +9,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
-import { POLL_INTERVAL_MS, homeActionOf, shouldPoll, type HomeAction } from '@/nextSession';
+import { POLL_INTERVAL_MS, createLook, homeActionOf, shouldAutoCreate, shouldPoll, type HomeAction } from '@/nextSession';
 import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
@@ -40,6 +40,11 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // state only drives the disabled look.
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
+  // Phase 43 (spec D7). The enrollment home sent its own create for in this
+  // focus, and the one whose create failed: a missing session is made once per
+  // focus, then offered as a retry.
+  const attemptedFor = useRef<string | null>(null);
+  const [makeFailedFor, setMakeFailedFor] = useState<string | null>(null);
 
   // Fresh on every focus: back from a session, from translate, after a switch.
   // Both reloads change with the active enrollment, so a switch runs this
@@ -48,6 +53,8 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const { reload } = next;
   useFocusEffect(
     useCallback(() => {
+      attemptedFor.current = null;
+      setMakeFailedFor(null);
       reload();
       reloadPhotos();
     }, [reload, reloadPhotos]),
@@ -77,7 +84,10 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
   const photoCard = homePhotoCard(imports);
 
-  function enterSession(sessionId: string) {
+  // Phase 43 (spec D2). A session not yet answered is started, which has the
+  // next one built for this device. Not waited on: its first answer starts it too.
+  function enterSession(sessionId: string, fresh: boolean) {
+    if (fresh) void next.start(sessionId);
     enter(sessionId);
     router.push('/session');
   }
@@ -102,12 +112,41 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }
   }
 
-  const create = () =>
+  // The seed's cards are fixed, so its create does not wait on the voices: the
+  // start it is entered with waits instead, without holding the tap.
+  const startSeed = () =>
     run(async () => {
-      const created = await next.create();
-      if (created.status === 'ready') enterSession(created.session_id);
+      const created = await next.create({ waitForVoices: false });
+      if (created.status === 'ready') enterSession(created.session_id, true);
     });
-  const skip = (sessionId: string) => run(() => next.skip(sessionId));
+  // Phase 43 (spec D7). Makes the next session without entering it: home shows
+  // it preparing, then offers it.
+  const makeNext = (enrollmentId: string) =>
+    run(async () => {
+      try {
+        await next.create();
+        setMakeFailedFor(null);
+      } catch (error) {
+        setMakeFailedFor(enrollmentId);
+        throw error;
+      }
+    });
+  // A skip from home can leave no session at all (the one in stock skipped):
+  // home may make the next one again in this focus.
+  const skip = (sessionId: string) =>
+    run(async () => {
+      await next.skip(sessionId);
+      attemptedFor.current = null;
+    });
+
+  // Phase 43 (spec D7). A missing session is made, not offered as a button.
+  // After every render: the guard sends it once per focus and enrollment, and
+  // waits out another action in flight rather than being swallowed by it.
+  useEffect(() => {
+    if (inFlight.current || !shouldAutoCreate(action, attemptedFor.current, active.id)) return;
+    attemptedFor.current = active.id;
+    void makeNext(active.id);
+  });
 
   return (
     <>
@@ -176,7 +215,9 @@ export function LearningSection({ active }: { active: Enrollment }) {
         loadFailed={next.loadFailed}
         busy={busy}
         onRetry={reload}
-        onCreate={create}
+        makeFailed={createLook(makeFailedFor, active.id) === 'retry'}
+        onStartSeed={startSeed}
+        onMake={() => void makeNext(active.id)}
         onEnter={enterSession}
         onSkip={skip}
       />
@@ -235,7 +276,9 @@ function SessionAction({
   loadFailed,
   busy,
   onRetry,
-  onCreate,
+  makeFailed,
+  onStartSeed,
+  onMake,
   onEnter,
   onSkip,
 }: {
@@ -243,8 +286,11 @@ function SessionAction({
   loadFailed: boolean;
   busy: boolean;
   onRetry: () => void;
-  onCreate: () => void;
-  onEnter: (sessionId: string) => void;
+  /** Phase 43 (spec D7). Home's own create for the `create` state failed. */
+  makeFailed: boolean;
+  onStartSeed: () => void;
+  onMake: () => void;
+  onEnter: (sessionId: string, fresh: boolean) => void;
   onSkip: (sessionId: string) => void;
 }) {
   const primary = (testID: string, label: string, onPress: () => void) => (
@@ -269,6 +315,22 @@ function SessionAction({
       <Text style={styles.secondaryButtonLabel}>{strings.skip}</Text>
     </Pressable>
   );
+  const preparingLabel = (
+    <View testID="preparing-label" style={[styles.button, styles.buttonDisabled, styles.preparing]}>
+      <ActivityIndicator color={colors.onPrimary} />
+      <Text style={styles.buttonLabel}>{strings.preparingQuestions}</Text>
+    </View>
+  );
+  // Phase 43 (spec D7). Making the next session failed: say so and offer
+  // "try again", which makes it again; no button names creating questions.
+  const retry = (
+    <>
+      <Text testID="preparation-failed" style={styles.notice}>
+        {strings.preparationFailed}
+      </Text>
+      {primary('home-make-retry', strings.translateRetry, onMake)}
+    </>
+  );
 
   if (!action) {
     if (!loadFailed) return <ActivityIndicator testID="home-loading" />;
@@ -290,9 +352,10 @@ function SessionAction({
   }
   switch (action.kind) {
     case 'start-seed':
-      return primary('start-button', strings.start, onCreate);
+      return primary('start-button', strings.start, onStartSeed);
     case 'create':
-      return primary('create-button', strings.createQuestions, onCreate);
+      // Phase 43 (spec D7). Home sends create itself: this is how it looks.
+      return makeFailed ? retry : preparingLabel;
     case 'save-words-first':
       return (
         <Text testID="save-words-first" style={styles.notice}>
@@ -302,10 +365,7 @@ function SessionAction({
     case 'preparing':
       return (
         <>
-          <View testID="preparing-label" style={[styles.button, styles.buttonDisabled, styles.preparing]}>
-            <ActivityIndicator color={colors.onPrimary} />
-            <Text style={styles.buttonLabel}>{strings.preparingQuestions}</Text>
-          </View>
+          {preparingLabel}
           {skip(action.sessionId)}
         </>
       );
@@ -314,20 +374,13 @@ function SessionAction({
       return (
         <>
           {primary('start-button', action.kind === 'start' ? strings.start : strings.resume, () =>
-            onEnter(action.sessionId),
+            onEnter(action.sessionId, action.kind === 'start'),
           )}
           {skip(action.sessionId)}
         </>
       );
     case 'failed':
-      return (
-        <>
-          <Text testID="preparation-failed" style={styles.notice}>
-            {strings.preparationFailed}
-          </Text>
-          {primary('create-button', strings.createQuestions, onCreate)}
-        </>
-      );
+      return retry;
   }
 }
 

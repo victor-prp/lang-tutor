@@ -44,6 +44,8 @@ function setup(transcriber: ReturnType<typeof createFakeTranscriber>, loaded: Se
   const session = stub<SessionRepo>({
     loadSession: async () => loaded,
     findEnrollmentId: async () => 'e1',
+    // Phase 43 (spec D2). Started by its start call before any of these answers.
+    markStarted: async () => false,
     insertAnswer: async (...args) => {
       inserted.push(args);
     },
@@ -185,6 +187,8 @@ describe('answerBySpeech (spec D5)', () => {
     const session = stub<SessionRepo>({
       loadSession: async () => (++loads === 1 ? record() : { ...record(), questions: [CHOICE] }),
       findEnrollmentId: async () => 'e1',
+      // Phase 43 (spec D2). Started by its start call before any of these answers.
+      markStarted: async () => false,
       insertAnswer: async () => {},
     });
     const service = createSessionService({

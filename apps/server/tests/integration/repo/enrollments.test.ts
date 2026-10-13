@@ -83,8 +83,8 @@ describe('enrollments repository', () => {
     const [ofU2] = await repo((r) => r.listByUser('u_2'));
     await expect(
       t.db.execute(
-        sql`insert into sessions (user_id, enrollment_id, status, source)
-            values ('u_1', ${ofU2.id}, 'skipped', 'seed')`,
+        sql`insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
+            values ('u_1', ${ofU2.id}, 'skipped', 'seed', false, false)`,
       ),
     ).rejects.toMatchObject({ cause: { code: '23503', constraint: 'sessions_enrollment_fk' } });
   });

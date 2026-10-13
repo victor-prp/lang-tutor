@@ -158,7 +158,30 @@ export type AcceptRenderingPayload = z.infer<typeof AcceptRenderingPayloadSchema
 export const acceptRenderingKey = (payload: AcceptRenderingPayload): string =>
   `${payload.variant_id}:${payload.sense_id}:${payload.user_language_code}`;
 
+/** Phase 43 (spec D3). Builds an enrollment's next session in stock, when it
+ *  has none: the list branch of create, run beside the session in progress. */
+export const STOCK_SESSION = 'stock-session';
+/** One transaction of reads, a few writes and an enqueue: a minute is generous. */
+export const STOCK_SESSION_EXPIRY_SECONDS = 60;
+/** Phase 43 (ruling R3). How long a save waits before it stocks, so a burst of
+ *  saves becomes one session rather than a session of the first word. */
+export const STOCK_SAVE_DELAY_SECONDS = 30;
+
+/** What asked for the stock: logged with it, so a stock can be traced to its cause. */
+export const STOCK_REASONS = ['start', 'answer', 'complete', 'skip', 'save'] as const;
+
+export const StockSessionPayloadSchema = z.object({
+  enrollment_id: z.string().min(1),
+  reason: z.enum(STOCK_REASONS),
+  // Ruling R2. Only a start carries the device; every other stock inherits the
+  // enrollment's newest session's.
+  listening: z.boolean().optional(),
+  speaking: z.boolean().optional(),
+});
+export type StockSessionPayload = z.infer<typeof StockSessionPayloadSchema>;
+
 export type JobPayloads = {
+  [STOCK_SESSION]: StockSessionPayload;
   [PREPARE_SESSION]: PrepareSessionPayload;
   [PREPARE_SESSION_FAILED]: PrepareSessionPayload;
   [READ_PHOTO]: ReadPhotoPayload;

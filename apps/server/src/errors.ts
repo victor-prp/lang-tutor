@@ -202,8 +202,9 @@ export class InvalidCursor extends Error {
   }
 }
 
-/** Phase 19. The enrollment already has a preparing or ready session
- *  (sessions_one_open_per_enrollment). */
+/** Phase 19. The enrollment already has an open session of the kind asked
+ *  for. Phase 43: a started one (sessions_one_started_per_enrollment) or one in
+ *  stock (sessions_one_stock_per_enrollment). */
 export class SessionOpen extends Error {
   constructor(readonly enrollmentId: string) {
     super(`enrollment ${enrollmentId} already has an open session`);

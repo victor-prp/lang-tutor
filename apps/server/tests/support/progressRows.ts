@@ -242,6 +242,8 @@ export async function insertAnsweredSession(
       status: input.status,
       source: 'list',
       completedAt: input.status === 'completed' ? sql`now()` : null,
+      listening: false,
+      speaking: false,
     })
     .returning({ id: sessions.id });
   await db.insert(sessionQuestions).values(
