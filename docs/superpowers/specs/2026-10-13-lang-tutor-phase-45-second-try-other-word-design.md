@@ -77,8 +77,13 @@ practised word or meaning>, verdict: null }`
 - `verdict: null` leaves the input uncoloured: it is neither the right word nor wrong.
 
 The banner draws the `other` tone on the plain surface with a border, its title in the text
-colour, testID `feedback-other`. Every other banner is unchanged, phase 42's included: a repeat
-of the first answer and a give-up keep the first answer's banner.
+colour, testID `feedback-other`.
+
+The first answer sent again gets the same `other` banner, whatever it is judged (review I1): a
+translation's second try opens with its first sentence in the input, so checking it unchanged is
+the likeliest repeat, and phase 42's green first-answer banner there was this bug again. It is
+never red either, the reason phase 42 kept it from `wrong`. A give-up keeps the first answer's
+banner (phase 34 R16).
 
 ### D2. A left-out or changed manner word is a changed detail
 
@@ -139,5 +144,7 @@ judge keep thinking off: their eval groups are at 100%, and they wait on shorter
 - **R5.** Thinking for the translation judge only (D3): it is the one whose eval failed, and each
   judge's wait is paid only where it buys a right verdict. Switch signal: the meaning judge's group
   drops below 100%.
+- **R6.** Switch signal for D3's cost: `answer_judged.judge_ms` for `sentence_translation` (already
+  logged) at a p99 above 5 s, against the 8 s budget.
 - **R4.** The prompt's manner examples are general words (*clearly*, *quickly*, *very*); the eval's
   held-out case checks the rule beyond them.
