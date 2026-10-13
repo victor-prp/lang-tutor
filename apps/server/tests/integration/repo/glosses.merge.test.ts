@@ -116,6 +116,38 @@ describe('mergeGlosses (spec D7)', () => {
     );
   });
 
+  // Phase 46 (spec D1, D3). A skill reached under either gloss was reached, and a
+  // gloss known under either is known: the fold keeps the earliest of each.
+  it('keeps the earliest reached_on per dimension and the earliest known_at when an enrollment saved both', async () => {
+    const w = await twoGlosses();
+    const e1 = enrollmentOf('u_1');
+    await save(e1, w.other, w.fingers, w.lexemeId, '2026-01-01');
+    await save(e1, w.survivor, w.finger, w.lexemeId, '2026-02-01');
+    const remember = (glossId: string, dimension: string, stability: number, reachedOn: string | null) =>
+      t.db.execute(sql`
+        insert into gloss_memory (enrollment_id, gloss_id, dimension, stability, difficulty, last_day, reps, lapses, params, reached_on)
+        values (${e1}, ${glossId}, ${dimension}, ${stability}, 5, '2026-09-01', 2, 0, 'fsrs6-default', ${reachedOn}::date)`);
+    // WP: the survivor is stronger now, the other reached the bar first and has since slipped.
+    await remember(w.other, 'written_productive', 2, '2026-05-01');
+    await remember(w.survivor, 'written_productive', 9, '2026-08-01');
+    // WR: the other is stronger and never reached; the survivor reached it.
+    await remember(w.other, 'written_receptive', 6, null);
+    await remember(w.survivor, 'written_receptive', 3, '2026-07-01');
+    await t.db.execute(sql`update vocabulary_entries set known_at = '2026-06-01T10:00:00Z' where enrollment_id = ${e1} and gloss_id = ${w.other}`);
+
+    await merge(w.lexemeId, w.survivor, w.other);
+
+    const memory = await t.db.execute<{ dimension: string; stability: number; reached_on: string | null }>(sql`
+      select dimension, stability, reached_on::text from gloss_memory where enrollment_id = ${e1} order by dimension`);
+    expect(memory.rows).toEqual([
+      { dimension: 'written_productive', stability: 9, reached_on: '2026-05-01' },
+      { dimension: 'written_receptive', stability: 6, reached_on: '2026-07-01' },
+    ]);
+    const entry = await t.db.execute<{ known: string | null }>(sql`
+      select known_at::text as known from vocabulary_entries where enrollment_id = ${e1} and gloss_id = ${w.survivor}`);
+    expect(entry.rows[0].known).not.toBeNull();
+  });
+
   it('is idempotent: a second run changes nothing', async () => {
     const w = await twoGlosses();
     await merge(w.lexemeId, w.survivor, w.other);

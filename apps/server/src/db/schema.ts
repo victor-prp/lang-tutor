@@ -640,6 +640,10 @@ export const vocabularyEntries = pgTable(
     // means "the owner"; the migration backfilled older rows to the owner.
     addedByUserId: text('added_by_user_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Phase 46 (spec D3). When a session's refresh first saw this gloss known: every
+    // live skill had reached KNOWN_STABILITY. Known for good from then on, in a family
+    // or not; null if never.
+    knownAt: timestamp('known_at', { withTimezone: true }),
   },
   (t) => [
     primaryKey({ name: 'vocabulary_entries_pkey', columns: [t.enrollmentId, t.glossId] }),
@@ -752,6 +756,10 @@ export const glossMemory = pgTable(
     reps: integer('reps').notNull(),
     lapses: integer('lapses').notNull(),
     params: text('params').notNull(),
+    // Phase 46 (spec D1). The learner day this skill's stability first reached
+    // KNOWN_STABILITY; kept after a lapse. Set by applySession, so the recompute
+    // rebuilds it.
+    reachedOn: date('reached_on', { mode: 'string' }),
   },
   (t) => [
     primaryKey({ name: 'gloss_memory_pkey', columns: [t.enrollmentId, t.glossId, t.dimension] }),
@@ -947,7 +955,10 @@ export const glossFamilyMembers = pgTable(
       .references(() => glossFamilies.id, { onDelete: 'cascade' }),
     state: text('state').notNull(),
     position: integer('position').notNull(),
-    // The first time a refresh saw the gloss known (spec D2); null if never.
+    // Phase 39's known_at. Since phase 46 (spec D4) neither read nor written: the
+    // gloss's own vocabulary_entries.known_at took its place. It stays only because
+    // the old container still names it for its rollout minute (ADR 0010); a later
+    // phase drops it.
     knownAt: timestamp('known_at', { withTimezone: true }),
     since: timestamp('since', { withTimezone: true }).notNull().defaultNow(),
   },

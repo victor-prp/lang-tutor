@@ -30,6 +30,7 @@ export function createMemoryRepo(tx: Tx) {
           lapses: row.lapses,
           params: row.params,
         },
+        reachedOn: row.reachedOn,
       }));
     },
 
@@ -43,6 +44,7 @@ export function createMemoryRepo(tx: Tx) {
             glossId: row.glossId,
             dimension: row.dimension,
             ...row.state,
+            reachedOn: row.reachedOn,
           })),
         )
         .onConflictDoUpdate({
@@ -54,6 +56,7 @@ export function createMemoryRepo(tx: Tx) {
             reps: sql`excluded.reps`,
             lapses: sql`excluded.lapses`,
             params: sql`excluded.params`,
+            reachedOn: sql`excluded.reached_on`,
           },
         });
     },

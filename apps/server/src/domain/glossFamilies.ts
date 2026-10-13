@@ -17,20 +17,27 @@ export type FamilyGloss = {
   order: readonly [number, number];
   /** One to four words: it can ever get speaking memory (D2). */
   speakable: boolean;
-  /** When a refresh first saw it known (D2, D4); null if never. */
+  /** When a refresh first saw it known (D2, D4); null if never. Phase 46 (spec D3):
+   *  the gloss's own vocabulary_entries.known_at, family or not. */
   knownAt: string | null;
 };
 
 export type FamilyInput = {
   saved: readonly FamilyGloss[];
-  memory: readonly { glossId: string; dimension: Dimension; state: MemoryState }[];
+  /** Phase 46 (spec D1): `reachedOn`, the day the skill first reached KNOWN_STABILITY. */
+  memory: readonly { glossId: string; dimension: Dimension; state: MemoryState; reachedOn: string | null }[];
   /** The session's live skills, as chooseWords computes them. */
   live: readonly Dimension[];
 };
 
 export type GlossFamily = { glossIds: string[]; label: string };
 export type FamilyState = 'known' | 'current' | 'waiting';
-export type FamilyEvidence = { live: Dimension[]; stability: Partial<Record<Dimension, number>> };
+export type FamilyEvidence = {
+  live: Dimension[];
+  stability: Partial<Record<Dimension, number>>;
+  /** Phase 46 (spec D5): the day each skill reached the bar, for those that have. */
+  reached: Partial<Record<Dimension, string>>;
+};
 export type Families = {
   families: GlossFamily[];
   familyOf: ReadonlyMap<string, number>;
@@ -42,7 +49,8 @@ export type Families = {
 
 type MemoryRow = FamilyInput['memory'][number];
 
-/** Phase 39 (spec D2). Every live skill at KNOWN_STABILITY; speaking only when speakable. */
+/** Phase 39 (spec D2), phase 46 (spec D2). Every live skill has reached KNOWN_STABILITY:
+ *  a reachedOn, or stability at the bar now; speaking only when speakable. */
 export function knownNow(
   glossId: string,
   speakable: boolean,
@@ -56,14 +64,15 @@ export function knownNow(
 function knownFrom(speakable: boolean, rows: readonly MemoryRow[], live: readonly Dimension[]): boolean {
   return live.every((d) => {
     if (d === 'spoken_productive' && !speakable) return true;
-    return rows.some((m) => m.dimension === d && m.state.stability >= KNOWN_STABILITY);
+    return rows.some((m) => m.dimension === d && (m.reachedOn !== null || m.state.stability >= KNOWN_STABILITY));
   });
 }
 
 /**
  * Phase 39 (spec D1-D3). Groups a learner's saved glosses into families (same lexeme or a
  * shared variant spelling, transitively), and says which member of each is known, current
- * or waiting. Pure (ADR 0001 R3).
+ * or waiting. Phase 46 (spec D2, D3): `newlyKnown` covers every saved gloss, family or not.
+ * Pure (ADR 0001 R3).
  */
 export function glossFamilies(input: FamilyInput): Families {
   const { saved, memory, live } = input;
@@ -122,7 +131,12 @@ export function glossFamilies(input: FamilyInput): Families {
   const families: GlossFamily[] = [];
   const familyOf = new Map<string, number>();
   const state = new Map<string, FamilyState>();
+  // Phase 46 (spec D3): every saved gloss, in a family or not, is stamped known
+  // the first time it is.
   const newlyKnown = new Set<string>();
+  for (const g of saved) {
+    if (g.knownAt === null && knownFrom(g.speakable, rowsOf.get(g.glossId) ?? [], live)) newlyKnown.add(g.glossId);
+  }
   const introductions = new Map<string, string[]>();
   const evidence = new Map<string, FamilyEvidence>();
 
@@ -141,14 +155,14 @@ export function glossFamilies(input: FamilyInput): Families {
       familyOf.set(g.glossId, index);
       const rows = rowsOf.get(g.glossId) ?? [];
       const stability: Partial<Record<Dimension, number>> = {};
-      for (const r of rows) stability[r.dimension] = r.state.stability;
-      evidence.set(g.glossId, { live: [...live], stability });
-
-      if (g.knownAt !== null) known.add(g.glossId);
-      else if (knownFrom(g.speakable, rows, live)) {
-        known.add(g.glossId);
-        newlyKnown.add(g.glossId);
+      const reached: Partial<Record<Dimension, string>> = {};
+      for (const r of rows) {
+        stability[r.dimension] = r.state.stability;
+        if (r.reachedOn !== null) reached[r.dimension] = r.reachedOn;
       }
+      evidence.set(g.glossId, { live: [...live], stability, reached });
+
+      if (g.knownAt !== null || newlyKnown.has(g.glossId)) known.add(g.glossId);
     }
 
     let current: FamilyGloss | undefined;

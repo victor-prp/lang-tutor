@@ -3,6 +3,7 @@ import type { Question } from '@lang-tutor/core/api';
 import { sql } from 'drizzle-orm';
 
 import { recomputeProgress } from '../../../src/db/progressRecompute';
+import { KNOWN_STABILITY } from '../../../src/domain/chooseConstants';
 import { insertLexeme } from '../../support/dictRows';
 import { createFakeLogger } from '../../support/fakes';
 import {
@@ -320,6 +321,46 @@ describe('recomputeProgress', () => {
     expect(before).toHaveLength(2);
     expect(before.map((row) => row.reps)).toEqual([3, 3]);
     expect(before.some((row) => row.lapses > 0)).toBe(true);
+
+    expect(await recomputeProgress(t.db)).toEqual({ sessions: 3 });
+    expect(await readMemory(t.db, E)).toEqual(before);
+  });
+
+  // Phase 46 (spec D1). A skill right on day 0 and day 1 reaches the bar on day 1;
+  // a miss on day 4 drops it below, and the date stays. The recompute replays the
+  // same applySession, so it writes back the date the live path wrote.
+  it('dates the day a skill reached the bar, keeps it after a lapse, and rebuilds it', async () => {
+    let clock = Date.parse('2026-03-04T09:00:00Z');
+    const { sessions: live } = createTestServerDeps({
+      db: t.db,
+      logger: createFakeLogger(),
+      rng: testRng(7),
+      now: () => clock,
+    });
+    const saved = await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'tome', translations: ['ספר'] });
+    const word = { glossId: saved.glossIds[0], variantId: saved.variantId, lexemeId: saved.lexemeId, form: 'tome', lemma: 'tome', translation: 'ספר' };
+    const play = async (right: boolean) => {
+      const { sessionId, questions } = await insertListSession(t.db, {
+        userId: 'u_1',
+        enrollmentId: E,
+        asked: [word],
+        types: ['multiple_choice'],
+      });
+      const q = asChoice(questions[0]);
+      await live.submitAnswer('u_1', sessionId, q.id, {
+        option_index: right ? q.correct_option : (q.correct_option + 1) % q.options.length,
+      });
+    };
+    await play(true);
+    clock += 24 * 3_600_000;
+    await play(true);
+    clock += 3 * 24 * 3_600_000;
+    await play(false);
+
+    const before = await readMemory(t.db, E);
+    expect(before).toHaveLength(1);
+    expect(before[0].stability).toBeLessThan(KNOWN_STABILITY);
+    expect(before[0].reachedOn).toBe('2026-03-05');
 
     expect(await recomputeProgress(t.db)).toEqual({ sessions: 3 });
     expect(await readMemory(t.db, E)).toEqual(before);

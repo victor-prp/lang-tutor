@@ -8,7 +8,6 @@ export type StoredMember = {
   familyId: string;
   state: 'known' | 'current' | 'waiting';
   position: number;
-  knownAt: string | null;
 };
 export type StoredFamily = { id: string; label: string; createdAt: string; members: StoredMember[] };
 export type FamilyWrite = {
@@ -18,7 +17,7 @@ export type FamilyWrite = {
   families: { id: string; label: string; isNew: boolean }[];
   deleteFamilies: string[];
   /** Upserted; `since` moves only when `sinceChanged`. */
-  members: { glossId: string; familyId: string; state: string; position: number; knownAt: string | null; sinceChanged: boolean }[];
+  members: { glossId: string; familyId: string; state: string; position: number; sinceChanged: boolean }[];
   /** Gloss ids. */
   deleteMembers: string[];
   events: { familyId: string; glossId: string; fromState: string | null; toState: string | null; evidence: unknown }[];
@@ -53,7 +52,6 @@ export function createGlossFamiliesRepo(tx: Tx) {
             familyId: member.familyId,
             state: member.state as StoredMember['state'],
             position: member.position,
-            knownAt: member.knownAt ? member.knownAt.toISOString() : null,
           })),
       }));
     },
@@ -89,7 +87,6 @@ export function createGlossFamiliesRepo(tx: Tx) {
           familyId: idOf(member.familyId),
           state: member.state,
           position: member.position,
-          knownAt: member.knownAt === null ? null : new Date(member.knownAt),
           ...(member.sinceChanged ? { since: sql`now()` } : {}),
         };
         await tx

@@ -30,7 +30,7 @@ function gloss(
   };
 }
 
-function mem(glossId: string, dimension: Dimension, stability: number) {
+function mem(glossId: string, dimension: Dimension, stability: number, reachedOn: string | null = null) {
   const state: MemoryState = {
     stability,
     difficulty: 5,
@@ -39,7 +39,7 @@ function mem(glossId: string, dimension: Dimension, stability: number) {
     lapses: 0,
     params: 'fsrs6-default',
   } as MemoryState;
-  return { glossId, dimension, state };
+  return { glossId, dimension, state, reachedOn };
 }
 
 const knownMem = (id: string, dims: Dimension[] = LIVE) => dims.map((d) => mem(id, d, 8));
@@ -249,7 +249,58 @@ describe('glossFamilies: evidence', () => {
       memory: [mem('a', WR, 2.3), mem('a', SP, 5)],
       live: LIVE,
     });
-    expect(r.evidence.get('a')).toEqual({ live: LIVE, stability: { [WR]: 2.3, [SP]: 5 } });
-    expect(r.evidence.get('b')).toEqual({ live: LIVE, stability: {} });
+    expect(r.evidence.get('a')).toEqual({ live: LIVE, stability: { [WR]: 2.3, [SP]: 5 }, reached: {} });
+    expect(r.evidence.get('b')).toEqual({ live: LIVE, stability: {}, reached: {} });
+  });
+});
+
+describe('phase 46: a skill counts once it reached the bar', () => {
+  it('counts a lapsed skill that has a reachedOn', () => {
+    const memory = [mem('a', WR, 9), mem('a', WP, 1.2, '2026-09-20'), mem('a', SP, 8)];
+    expect(knownNow('a', true, memory, LIVE)).toBe(true);
+  });
+
+  it('does not count a lapsed skill that never reached the bar', () => {
+    const memory = [mem('a', WR, 9), mem('a', WP, 1.2), mem('a', SP, 8)];
+    expect(knownNow('a', true, memory, LIVE)).toBe(false);
+  });
+});
+
+describe('phase 46: known for good, per gloss', () => {
+  it('a known gloss in no family is newly known', () => {
+    const r = glossFamilies({ saved: [gloss('solo', 'kite', ['kite'])], memory: knownMem('solo'), live: LIVE });
+    expect(r.families).toHaveLength(0);
+    expect([...r.newlyKnown]).toEqual(['solo']);
+  });
+
+  it('a gloss with knownAt stays known once every skill lapsed, and is not newly known', () => {
+    const lapsed = LIVE.map((d) => mem('a', d, 1.1));
+    const r = glossFamilies({
+      saved: [gloss('a', 'pick up', ['pick up'], { knownAt: '2026-09-01T00:00:00Z' }), gloss('b', 'pick up', ['pick up'])],
+      memory: lapsed,
+      live: LIVE,
+    });
+    expect(r.state.get('a')).toBe('known');
+    expect(r.state.get('b')).toBe('current');
+    expect(r.newlyKnown.size).toBe(0);
+  });
+
+  it('an enrollment with no memory knows nothing', () => {
+    const r = glossFamilies({
+      saved: [gloss('a', 'pick up', ['pick up']), gloss('b', 'pick up', ['pick up']), gloss('solo', 'kite', ['kite'])],
+      memory: [],
+      live: LIVE,
+    });
+    expect(r.newlyKnown.size).toBe(0);
+    expect(r.state.get('a')).toBe('current');
+  });
+
+  it('evidence holds the day each skill reached the bar', () => {
+    const r = glossFamilies({
+      saved: [gloss('a', 'pick up', ['pick up']), gloss('b', 'pick up', ['pick up'])],
+      memory: [mem('a', WR, 9, '2026-09-10'), mem('a', WP, 2)],
+      live: LIVE,
+    });
+    expect(r.evidence.get('a')!.reached).toEqual({ [WR]: '2026-09-10' });
   });
 });

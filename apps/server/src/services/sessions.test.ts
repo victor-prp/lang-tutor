@@ -238,6 +238,7 @@ describe('repos', () => {
     findWordsPage: forbidden,
     findWordSummaries: forbidden,
     findLemmaLexemes: forbidden,
+    markKnown: forbidden,
     findLemmaRenderings: forbidden,
     findSavedInLemma: forbidden,
     listSavedGlosses: forbidden,
@@ -407,7 +408,7 @@ describe('repos', () => {
 const SAVED_AT = '2026-10-01T09:00:00.000000Z';
 /** Phase 39. The lexeme fields of a saved gloss: a lexeme of its own, so that no
  *  two glosses here make a family (spec D1). */
-const lexeme = (lexemeId: string) => ({ lexemeId, lemma: lexemeId, form: lexemeId, order: [0, 0] as [number, number] });
+const lexeme = (lexemeId: string) => ({ lexemeId, lemma: lexemeId, form: lexemeId, order: [0, 0] as [number, number], knownAt: null });
 const LEXEME = lexeme('l1');
 /** Phase 39 (spec D4). No family stored yet. */
 const noFamilies = { glossFamilies: stub<GlossFamiliesRepo>({ load: async () => [] }) };
@@ -470,8 +471,8 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
           findRows: async (input) => {
             reads.memory = input;
             return [
-              { glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE },
-              { glossId: 'g_asked', dimension: 'written_receptive', state: MISSED_STATE },
+              { glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE, reachedOn: null },
+              { glossId: 'g_asked', dimension: 'written_receptive', state: MISSED_STATE, reachedOn: null },
             ];
           },
         }),

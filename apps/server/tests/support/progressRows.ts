@@ -286,3 +286,11 @@ export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss
         for each row execute function fail_insert();`),
   );
 }
+
+/** Phase 46. The day a memory row reached the bar, set directly for every one of a gloss's rows. */
+export async function setReachedOn(db: Db, input: { enrollmentId: string; glossId: string; reachedOn: string }): Promise<void> {
+  await db
+    .update(glossMemory)
+    .set({ reachedOn: input.reachedOn })
+    .where(and(eq(glossMemory.enrollmentId, input.enrollmentId), eq(glossMemory.glossId, input.glossId)));
+}

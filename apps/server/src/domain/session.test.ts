@@ -324,7 +324,7 @@ describe('phase 25 speaking cards in step', () => {
   });
 });
 
-const saved = (glossId: string, key: string, variantId = `v-${glossId}`): SavedGloss => ({ glossId, key, variantId, savedAt: '', lexemeId: 'l', lemma: key, form: key, order: [0, 0] });
+const saved = (glossId: string, key: string, variantId = `v-${glossId}`): SavedGloss => ({ glossId, key, variantId, savedAt: '', lexemeId: 'l', lemma: key, form: key, order: [0, 0], knownAt: null });
 const rendering = (glossId: string, variantId: string, gloss: string, senseId = 's1', form = variantId): GlossRendering => ({
   glossId, senseId, variantId, form, gloss, rank: 0,
 });

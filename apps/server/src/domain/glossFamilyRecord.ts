@@ -9,14 +9,19 @@ export type StoredFamilyView = {
   id: string;
   label: string;
   createdAt: string;
-  members: readonly { glossId: string; familyId: string; state: FamilyState; position: number; knownAt: string | null }[];
+  members: readonly { glossId: string; familyId: string; state: FamilyState; position: number }[];
 };
 
 /** Phase 39 (spec D4). Why a member is where it is: the session's live skills, its
- *  stability in each, and the bar. Empty for a member that left: its family went,
- *  not its memory. */
+ *  stability in each, the day each reached the bar (phase 46 D5), and the bar. Empty
+ *  for a member that left: its family went, not its memory. */
 export type FamilyEventEvidence =
-  | { live: Dimension[]; stability: Partial<Record<Dimension, number>>; known_stability: number }
+  | {
+      live: Dimension[];
+      stability: Partial<Record<Dimension, number>>;
+      reached: Partial<Record<Dimension, string>>;
+      known_stability: number;
+    }
   | Record<string, never>;
 
 /** Phase 39 (spec D4). One refresh's writes, in the shape repo/glossFamilies' apply takes. */
@@ -26,8 +31,9 @@ export type FamilyWrite = {
    *  the repo creates the real id (ADR 0002: the domain draws no randomness). */
   families: { id: string; label: string; isNew: boolean }[];
   deleteFamilies: string[];
-  /** Upserted; `since` moves only when `sinceChanged`. */
-  members: { glossId: string; familyId: string; state: FamilyState; position: number; knownAt: string | null; sinceChanged: boolean }[];
+  /** Upserted; `since` moves only when `sinceChanged`. Phase 46 (spec D3): known_at is the
+   *  gloss's own (vocabulary_entries), not the member's. */
+  members: { glossId: string; familyId: string; state: FamilyState; position: number; sinceChanged: boolean }[];
   /** Gloss ids. */
   deleteMembers: string[];
   /** `fromState` null: joined the family; `toState` null: left it. */
@@ -40,14 +46,10 @@ export type FamilyWrite = {
  * created first); one with no stored members gets the placeholder `new:<index>`,
  * which apply turns into a real id. A stored family left with none is deleted.
  * Every change of state or family is one event with the member's evidence; a
- * member joining a family, a merge's included, is `joined`. `known_at` is the
- * stored one, or `at` for `newlyKnown`. Pure.
+ * member joining a family, a merge's included, is `joined`. Phase 46 (spec D3): a gloss's
+ * known_at is stamped on the gloss by the caller, not here. Pure.
  */
-export function familyChanges(
-  stored: readonly StoredFamilyView[],
-  computed: Families,
-  at: string,
-): FamilyWrite {
+export function familyChanges(stored: readonly StoredFamilyView[], computed: Families): FamilyWrite {
   const write: FamilyWrite = { families: [], deleteFamilies: [], members: [], deleteMembers: [], events: [] };
   const before = new Map(stored.flatMap((family) => family.members.map((member) => [member.glossId, member] as const)));
 
@@ -74,8 +76,8 @@ export function familyChanges(
   }
 
   const evidenceOf = (glossId: string): FamilyEventEvidence => {
-    const { live, stability } = computed.evidence.get(glossId)!;
-    return { live, stability, known_stability: KNOWN_STABILITY };
+    const { live, stability, reached } = computed.evidence.get(glossId)!;
+    return { live, stability, reached, known_stability: KNOWN_STABILITY };
   };
   // Families whose members changed: their updated_at moves.
   const touched = new Set<string>();
@@ -86,12 +88,11 @@ export function familyChanges(
     family.glossIds.forEach((glossId, position) => {
       const state = computed.state.get(glossId)!;
       const old = before.get(glossId);
-      const knownAt = old?.knownAt ?? (computed.newlyKnown.has(glossId) ? at : null);
       // Null: it joined this family, new to the tables or from another family.
       const fromState = old?.familyId === familyId ? old.state : null;
       const changed = fromState !== state;
-      if (!changed && old?.position === position && old.knownAt === knownAt) return;
-      write.members.push({ glossId, familyId, state, position, knownAt, sinceChanged: changed });
+      if (!changed && old?.position === position) return;
+      write.members.push({ glossId, familyId, state, position, sinceChanged: changed });
       touched.add(familyId);
       if (old && old.familyId !== familyId) touched.add(old.familyId);
       if (changed) write.events.push({ familyId, glossId, fromState, toState: state, evidence: evidenceOf(glossId) });
