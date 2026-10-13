@@ -221,8 +221,9 @@ describe('the known-right set and the checker, through the database', () => {
   // three typed types, a tie going to the type used least: a typed translation, a typed cloze and a sentence
   // translation, twice each. That is what the stubbed tasks name, by position.
   it('drops a card the checker calls entirely right, and keeps the other six', async () => {
-    const lemmas = ['blow up', 'table', 'lamp', 'river', 'bread', 'chair', 'window'];
-    const translations = ['לנפח', 'שולחן', 'מנורה', 'נהר', 'לחם', 'כיסא', 'חלון'];
+    // None of them in the seeded content, whose dictionary already holds window.
+    const lemmas = ['blow up', 'table', 'lamp', 'river', 'bread', 'chair', 'pebble'];
+    const translations = ['לנפח', 'שולחן', 'מנורה', 'נהר', 'לחם', 'כיסא', 'חלוק'];
     const words: Saved[] = [];
     // One at a time, as every other test here saves its words.
     for (const [i, lemma] of lemmas.entries()) {
