@@ -148,8 +148,8 @@ export function SpeakingCardView({ question, instruction, language, answer, spee
           <Text style={styles.form} testID="question-prompt">
             {question.question}
           </Text>
-          {/* Spec D2: no speaker before the answer, or reading becomes repeating. */}
-          {answered || notice ? <SpeakButton text={form} language={language} testID="speak-form" /> : null}
+          {/* Phase 44 (spec R1, R12): the word is said on arrival and can be replayed, except while the microphone listens. */}
+          {!recording || answered || notice ? <SpeakButton text={form} language={language} testID="speak-form" /> : null}
         </View>
       ) : (
         <>

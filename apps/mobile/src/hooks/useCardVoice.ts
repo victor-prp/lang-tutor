@@ -8,7 +8,8 @@ import { useSpeaker } from '@/hooks/useSpeech';
  * Phase 44 (spec D2). Plays the card's cues through the speaker. It subscribes
  * to whether the language has a voice, not to every utterance, so the session
  * screen does not re-render each time something plays. Nothing waits for the
- * voices: a cue plays when they arrive (phase 43 R9).
+ * voices: a cue plays when they arrive (phase 43 R9). Leaving the session
+ * stops whatever is still playing.
  */
 export function useCardVoice(
   question: Question | null,
@@ -33,4 +34,13 @@ export function useCardVoice(
     if (step.cue?.kind === 'say') void speaker.say(step.cue.text, language);
     else if (step.cue?.kind === 'stop') void speaker.stop();
   }, [id, arrival, after, voiced, banner, language, speaker]);
+
+  // Leaving the session (Results, back, skip) ends what the card was saying (R8).
+  useEffect(
+    () => () => {
+      state.current = NO_CUE;
+      void speaker.stop();
+    },
+    [speaker],
+  );
 }

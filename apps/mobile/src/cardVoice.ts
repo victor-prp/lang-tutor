@@ -71,7 +71,7 @@ export function nextCue(state: CueState, input: CueInput): { state: CueState; cu
   const current: CueState = fresh ? { id: input.id, arrived: false, answered: false } : state;
 
   if (input.banner) {
-    if (current.answered) return { state: current, cue: fresh ? { kind: 'stop' } : null };
+    if (current.answered) return { state: current, cue: null };
     const next = { ...current, answered: true };
     const after = !current.arrived && input.voiced ? input.voice.after : null;
     if (after !== null) return { state: next, cue: { kind: 'say', text: after } };
