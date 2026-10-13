@@ -89,3 +89,9 @@ describe('instructions with a bold language (phase 39 D9)', () => {
     expect(strings.wrongScriptNotice('en')).toEqual({ before: 'התשובה צריכה להיות ב', language: 'אנגלית', after: '' });
   });
 });
+
+describe('the translation card asks for the whole sentence', () => {
+  it('words the notice for one word on its own', () => {
+    expect(strings.wordOnlyNotice).toBe('כתבו את כל המשפט, לא רק את המילה');
+  });
+});

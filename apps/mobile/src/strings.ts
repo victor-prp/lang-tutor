@@ -97,6 +97,8 @@ export const strings = {
   sentenceHint: 'רמז: הצגת המשפט בעברית',
   // The whole sentence, by name: the marked word invited typing it alone.
   questionInstructionTranslate: (language: string): Instruction => instruct('תרגמו את המשפט ל', language),
+  // One word on a translation card is asked again, not sent.
+  wordOnlyNotice: 'כתבו את כל המשפט, לא רק את המילה',
   translationReference: 'תרגום לדוגמה:',
   // Phase 25 (spec D7).
   questionInstructionReadAloud: 'קראו בקול',

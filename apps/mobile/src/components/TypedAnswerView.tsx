@@ -77,15 +77,16 @@ type Props = {
  */
 export function TypedAnswerView({ question, instruction, answerLanguage, language, answered, verdict, onSubmit, direction, checking, failed, prompt, retry }: Props) {
   const [text, setText] = useState('');
-  // Phase 39 (spec D8): the last send was in the wrong alphabet; the text stays.
-  const [wrongScriptShown, setWrongScriptShown] = useState(false);
+  // Phase 39 (spec D8): the last send was in the wrong alphabet, or one word
+  // for a whole sentence; the text stays.
+  const [refused, setRefused] = useState<'wrong_script' | 'word_only' | null>(null);
   const input = useRef<TextInput>(null);
 
   // A new card, or the same card held for its second try, starts its input
   // again (spec D9).
   useEffect(() => {
     setText(retryText(question.type, retry));
-    setWrongScriptShown(false);
+    setRefused(null);
   }, [question.id, question.type, retry]);
 
   // The keyboard went down with the first answer: the second try brings it back.
@@ -98,8 +99,9 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
 
   function submit(value: string) {
     if (answered) return;
-    if (typedSubmit(value, answerLanguage) === 'wrong_script') {
-      setWrongScriptShown(true);
+    const outcome = typedSubmit(value, answerLanguage, question.type === 'sentence_translation' ? question.sentence : null);
+    if (outcome === 'wrong_script' || outcome === 'word_only') {
+      setRefused(outcome);
       return;
     }
     // The keyboard would cover the feedback banner.
@@ -146,7 +148,7 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
         value={text}
         onChangeText={(value) => {
           setText(value);
-          setWrongScriptShown(false);
+          setRefused(null);
         }}
         editable={!answered && !checking}
         autoFocus
@@ -166,10 +168,15 @@ export function TypedAnswerView({ question, instruction, answerLanguage, languag
         placeholderTextColor={colors.muted}
         style={[styles.input, question.type === 'sentence_translation' && styles.inputMultiline, { textAlign: direction === 'rtl' ? 'right' : 'left', writingDirection: direction }, border]}
       />
-      {wrongScriptShown && answerLanguage !== null && !answered ? (
+      {refused === 'wrong_script' && answerLanguage !== null && !answered ? (
         <View testID="wrong-script">
           <InstructionText instruction={strings.wrongScriptNotice(answerLanguage)} languageTestId="wrong-script-language" style={styles.wrongScript} />
         </View>
+      ) : null}
+      {refused === 'word_only' && !answered ? (
+        <Text style={styles.wrongScript} testID="word-only">
+          {strings.wordOnlyNotice}
+        </Text>
       ) : null}
       {answered ? null : (
         <View style={answerStyles.actions}>

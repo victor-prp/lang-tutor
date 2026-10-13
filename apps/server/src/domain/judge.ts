@@ -1,6 +1,6 @@
 import type { ClozeTypedQuestion, SentenceTranslationQuestion, TypedVerdict } from '@lang-tutor/core/api';
 import { LlmFitJudgeSchema, LlmMeaningJudgeSchema, LlmTranslationJudgeSchema } from '@lang-tutor/core/api/schemas';
-import { normaliseHebrew, normaliseTyped, type JudgedQuestion } from '@lang-tutor/core/domain';
+import { normaliseHebrew, normaliseTyped, wordOnly, type JudgedQuestion } from '@lang-tutor/core/domain';
 
 import { LANGUAGES, type LanguageCode } from './languages';
 import { unfence } from './translation';
@@ -90,10 +90,12 @@ export function parseMeaningJudge(raw: string): TypedVerdict | null {
 export type JudgeContext = MeaningJudgeContext;
 
 /** The translation card's rule: empty is "show me the answer"; the reference
- *  is right as typed, whatever its case or full stop. Null: only the model can tell. */
+ *  is right as typed, whatever its case or full stop; one word for a longer
+ *  sentence is wrong, as the model judged it (the app asks for the whole
+ *  sentence instead of sending it). Null: only the model can tell. */
 export function translationRuleVerdict(reference: string, text: string): TypedVerdict | null {
   const typed = normaliseTyped(text);
-  if (typed === '') return 'wrong';
+  if (typed === '' || wordOnly(typed, reference)) return 'wrong';
   return typed === normaliseTyped(reference) ? 'exact' : null;
 }
 
