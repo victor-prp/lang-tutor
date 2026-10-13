@@ -221,8 +221,14 @@ tier 2 is not lower than on master over the same runs, and the whole run stays a
 - **R1. A validation-refused card fills as a typed translation, not as generated.** Victor chose
   ambiguous cards over a failed session. A validation-refused card's options are not ambiguous,
   they are broken (missing, repeated, wrong script, or known right), so it is shown as phase 27's
-  degraded card instead. This keeps Done-means 1 and 2 without ever showing broken options. It is
-  needed only when 5 or more cards are refused, which no recorded session has had.
+  degraded card instead. This keeps Done-means 1 and 2 without ever showing broken options. The
+  fill is needed when fewer cards are left than the target: 6, or every planned card when 6 or
+  fewer were planned. With 10 planned that takes 5 or more refused; with 6 or fewer, one. A board
+  refused at validation in a session of 7 to 9 cards needs it too, and is filled as four typed
+  translations, words that are usually new to the learner. These cases are rare: validation
+  refusals were 1 of the 16 failed attempts in production, and short sessions come from short
+  lists, which are new learners. The alternative, dropping a validation-refused first meeting even
+  below the floor, was left for Victor.
 - **R2. The board is one unit.** Its fifth meaning is shared by four words, and `withBoards`
   rebuilds a board from any run of matching rows. Dropping one word would silently leave a
   three-word board.
