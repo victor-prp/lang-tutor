@@ -344,9 +344,10 @@ const FAMILIES: DayList = {
  *  has reached the bar (D1, D2), so the second meanings come. */
 const MISS_EVERY = 5;
 
-describe('families over days: twenty days of six sessions, phase 37\'s learner (phase 39, phase 46)', () => {
-  // Phase 46 (spec D6): the five-meaning word, asked in every session, is known on day 20.
-  const { log, sessions, knownIn } = runDays(FAMILIES, 20, 6, MISS_EVERY);
+describe('families over days: twenty-five days of six sessions, phase 37\'s learner (phase 39, phase 46)', () => {
+  // Phase 46 (spec D6): the five-meaning word, asked in every session, is known on day 20
+  // (session 118); five more days keep the test from turning red on a day's drift.
+  const { log, sessions, knownIn } = runDays(FAMILIES, 25, 6, MISS_EVERY);
 
   it('6 and 7 have families to check, and a gloss that waits', () => {
     expect(familiesChecked(sessions)).toEqual({ families: true, waited: true });

@@ -78,6 +78,13 @@ describe('applySession: the day a skill reached the bar (phase 46 D1)', () => {
     expect(wr(day4).reachedOn).toBe('2026-03-02');
   });
 
+  it('keeps the date when the same session lapses the skill after reaching the bar', () => {
+    const day0 = applySession([], [choice('g1', true)], '2026-03-01');
+    const out = applySession(day0, [choice('g1', true), choice('g1', false)], '2026-03-02');
+    expect(wr(out).state.stability).toBeLessThan(KNOWN_STABILITY);
+    expect(wr(out).reachedOn).toBe('2026-03-02');
+  });
+
   it('never moves a date the row already has', () => {
     const strong = review(review(null, 3, '2026-03-01'), 3, '2026-03-03');
     const prior: MemoryRow[] = [{ glossId: 'g1', dimension: 'written_receptive', state: strong, reachedOn: '2026-01-15' }];
