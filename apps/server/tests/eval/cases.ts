@@ -1444,6 +1444,13 @@ const enTable: Sentence = { hebrew: 'אני רוצה להזמין שולחן ל�
 const enYesterday: Sentence = { hebrew: 'הזמנתי אתמול שולחן לשניים.', reference: 'I booked a table for two yesterday.', gap: 'booked' };
 const enBookWord = { form: 'book', pos: 'verb' as const, meaning: 'להזמין' };
 
+// Phase 45 (spec D2). A manner word left out is a changed detail. Lane 0's card,
+// and a held-out one on a word the prompt does not name.
+const enClearly: Sentence = { hebrew: 'חשוב לתקשר בבירור עם כולם.', reference: 'It is important to communicate clearly with everyone.', gap: 'communicate' };
+const enCommunicate = { form: 'communicate', pos: 'verb' as const, meaning: 'לתקשר' };
+const ruFast: Sentence = { hebrew: 'הוא רץ מהר.', reference: 'Он быстро бегает.', gap: 'бегает' };
+const ruRun = { form: 'бегать', pos: 'verb' as const, meaning: 'לרוץ' };
+
 export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('it', itBook, itTable, 'Vorrei prenotare un tavolo per due persone.', 'exact', 'paraphrase'),
   tjudge('it', itBook, itTable, 'Desidero prenotare un tavolo per due.', 'exact', 'paraphrase'),
@@ -1474,6 +1481,11 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('en', enBookWord, enTable, 'I want to book a table for four.', 'wrong', 'missed meaning'),
   tjudge('en', enBookWord, enTable, 'table', 'wrong', 'not a sentence'),
   tjudge('en', enBookWord, enTable, 'I want to book a tabel for two.', 'exact', 'slip in another word'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to talk with everyone.', 'wrong', 'manner word left out'),
+  tjudge('en', enCommunicate, enClearly, "It's important to communicate clearly with everyone.", 'exact', 'contraction'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to talk clearly with everyone.', 'alternative', 'other word, every detail kept'),
+  tjudge('ru', ruRun, ruFast, 'Он бегает.', 'wrong', 'manner word left out'),
+  tjudge('ru', ruRun, ruFast, 'Он бегает быстро.', 'exact', 'other word order'),
 ];
 
 /**
