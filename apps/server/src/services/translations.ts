@@ -38,7 +38,7 @@ import { LlmUnavailable, PairNotEnrolled, TranslationUnreadable } from '../error
 import type { Logger } from '../logger';
 import type { RepairedRendering } from '../repo/dictionary';
 import { authorizeEnrollment } from './access';
-import type { LlmClient } from './llm';
+import type { LlmClient, ModelCallRecord } from './llm';
 import type { Transaction } from './transaction';
 
 /** One rendering of the second call as the entry it becomes: the model's fields,
@@ -73,6 +73,12 @@ function entrySense(rendering: LlmRendering & { translation: string }): SenseToS
  * answer whose storage failed, this one prevents storing an answer known to be
  * wrong.
  */
+/** Phase 47 (spec D3). `client`, with `handles` added to every call's record:
+ *  the lookup's helpers name their kind, and the lookup knows whom it serves. */
+function withHandles(client: LlmClient, handles: Omit<ModelCallRecord, 'kind'>): LlmClient {
+  return (request) => client({ ...request, record: { ...request.record, ...handles } });
+}
+
 async function reconcile(input: {
   llm: LlmClient;
   form: string;
@@ -94,8 +100,9 @@ async function reconcile(input: {
       // to rename what it just named.
       if (storedSenses.length === 0) return entry;
 
-      const raw = await input.llm(
-        buildRenderingPrompt({
+      const raw = await input.llm({
+        record: { kind: 'rendering' },
+        ...buildRenderingPrompt({
           form: input.form,
           from: input.from,
           to: input.to,
@@ -103,7 +110,7 @@ async function reconcile(input: {
           partOfSpeech: entry.part_of_speech,
           storedSenses,
         }),
-      );
+      });
 
       const parsed = parseLlmReconciliation(raw);
       if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
@@ -219,8 +226,9 @@ async function repairForm({
     stale.map(async (lexeme, index) => {
       const { senseVersion, senses: stored } = storedPerLexeme[index];
 
-      const raw = await llm(
-        buildRenderingPrompt({
+      const raw = await llm({
+        record: { kind: 'rendering' },
+        ...buildRenderingPrompt({
           form,
           from,
           to,
@@ -228,7 +236,7 @@ async function repairForm({
           partOfSpeech: lexeme.partOfSpeech as PartOfSpeech,
           storedSenses: stored,
         }),
-      );
+      });
 
       const parsed = parseLlmReconciliation(raw);
       if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
@@ -318,9 +326,10 @@ async function addHeadwordToForm({
     repos.dict.findSensesByLexeme({ lemma: lexeme.lemma, partOfSpeech, languageCode: from, userLanguageCode: to }),
   );
   if (stored.length === 0) return;
-  const raw = await llm(
-    buildRenderingPrompt({ form: lexeme.lemma, from, to, lemma: lexeme.lemma, partOfSpeech, storedSenses: stored }),
-  );
+  const raw = await llm({
+    record: { kind: 'rendering' },
+    ...buildRenderingPrompt({ form: lexeme.lemma, from, to, lemma: lexeme.lemma, partOfSpeech, storedSenses: stored }),
+  });
   const parsed = parseLlmReconciliation(raw);
   if (!parsed) throw new TranslationUnreadable(raw.slice(0, 200));
   const seen = new Set<string>();
@@ -483,7 +492,14 @@ export function createTranslationService({
   // Phase 34. Stamps the accept job's write (spec D1).
   now: () => number;
 }) {
-  const lookup = async (input: TranslationRequest): Promise<TranslationResponse> => {
+  const baseLlm = llm;
+  const lookup = async (
+    input: TranslationRequest,
+    handles: Omit<ModelCallRecord, 'kind'> = {},
+  ): Promise<TranslationResponse> => {
+    // Phase 47 (spec D3). Every call this lookup makes, its own and its
+    // helpers', carries the learner it serves; each still names its own kind.
+    const llm = withHandles(baseLlm, handles);
     // The schema already trimmed this, but the service must not depend on the
     // order validators ran in.
     const text = input.text.trim();
@@ -563,7 +579,7 @@ export function createTranslationService({
       // "the model declines" note.
     }
 
-    const raw = await llm(buildPrompt({ text, from, to }));
+    const raw = await llm({ record: { kind: 'lookup' }, ...buildPrompt({ text, from, to }) });
 
     // An empty string is the contract's "no content" — a safety block, or a
     // candidate with no text. The input was refused; nothing is broken, and
@@ -826,7 +842,7 @@ export function createTranslationService({
         throw new PairNotEnrolled(enrollment.id, input.from, input.to);
       }
 
-      const response = await lookup(input);
+      const response = await lookup(input, { userId: actorUserId, enrollmentId: enrollment?.id });
       if (!enrollment || input.from !== enrollment.target_language) return response;
 
       const glossIds = response.senses.flatMap((sense) => (sense.gloss_id ? [sense.gloss_id] : []));
@@ -943,8 +959,9 @@ export function createTranslationService({
       let answers: string[];
       let answerForm: string | null;
       try {
-        const raw = await llm(
-          buildAcceptPrompt({
+        const raw = await llm({
+          record: { kind: 'accept' },
+          ...buildAcceptPrompt({
             form: rendering.form,
             lemma: rendering.lemma,
             partOfSpeech: rendering.partOfSpeech,
@@ -954,7 +971,7 @@ export function createTranslationService({
             target,
             explanation,
           }),
-        );
+        });
         if (raw === '') throw new LlmUnavailable('the model returned no content');
         const answer = parseAccept(raw);
         if (!answer) throw new TranslationUnreadable(raw.slice(0, 200));

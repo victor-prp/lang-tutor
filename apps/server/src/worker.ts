@@ -43,7 +43,8 @@ export async function registerWorkers(
     // Four at once per process: one model call each, kept under the quota.
     { localConcurrency: 4, pollingIntervalSeconds: options.pollingIntervalSeconds },
     async (jobs) => {
-      for (const job of jobs) await sessions.prepareSession(job.data);
+      // Phase 47 (spec D6). The attempt, 1 to 3, names this run's model calls.
+      for (const job of jobs) await sessions.prepareSession(job.data, { attempt: job.retryCount + 1 });
     },
   );
   // Phase 43 (spec D3). Two at once per process: each is one transaction, and

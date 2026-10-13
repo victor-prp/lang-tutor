@@ -313,7 +313,9 @@ export function createPhotoImportService({
         const photo = await photoImport.findPhoto(importId);
         if (photo === null) return undefined;
         const enrolled = await enrollment.findById(row.enrollmentId);
-        return enrolled ? { photo, target: enrolled.target_language as LanguageCode } : undefined;
+        return enrolled
+          ? { photo, target: enrolled.target_language as LanguageCode, owner: { enrollmentId: enrolled.id, userId: enrolled.user_id } }
+          : undefined;
       });
       if (!read) {
         logger.info({ event: 'photo_read_dropped', import_id: importId, stage: 'read' });
@@ -326,6 +328,8 @@ export function createPhotoImportService({
         const raw = await vision({
           ...buildPhotoReadingPrompt(read.target),
           image: { data: read.photo, mimeType: 'image/jpeg' },
+          // Phase 47 (spec D3, ruling R5): the photo itself is never recorded.
+          record: { kind: 'photo_read', ...read.owner },
         });
         // An empty string is the provider's "no content": no words, not a failure.
         const parsed = raw === '' ? { items: [], mergedCount: 0, droppedCount: 0 } : parsePhotoReading(raw);
@@ -412,9 +416,10 @@ export function createPhotoImportService({
       } else {
         let choice = firstChoice(item.hebrew, options);
         if (choice === 'ask_model') {
-          const raw = await llm(
-            buildSenseMatchPrompt({ word: correctedForm ?? item.text, target, hebrew: item.hebrew ?? '', options }),
-          );
+          const raw = await llm({
+            ...buildSenseMatchPrompt({ word: correctedForm ?? item.text, target, hebrew: item.hebrew ?? '', options }),
+            record: { kind: 'sense_match', enrollmentId: enrolled.id, userId: enrolled.user_id },
+          });
           const answer = parseSenseMatch(raw, options.length);
           if (answer === null) throw new SenseMatchUnreadable(importId, position);
           choice = choiceFromModel(answer);

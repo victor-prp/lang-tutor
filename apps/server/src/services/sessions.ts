@@ -113,7 +113,7 @@ import {
 import type { Logger } from '../logger';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
-import type { LlmClient } from './llm';
+import type { LlmClient, ModelCallRecord } from './llm';
 import type { SpeechTranscriber } from './speech';
 import { requestStock } from './stock';
 import type { Repos, Transaction } from './transaction';
@@ -654,7 +654,7 @@ export function createSessionService({
       input: { questionId: string; audio: string; mimeType: string; retry?: boolean },
     ): Promise<SpeechResult> => {
       const retry = input.retry ?? false;
-      type Checked = { replay: SpeechResult } | { current: SpeakingQuestion; language: LanguageCode };
+      type Checked = { replay: SpeechResult } | { current: SpeakingQuestion; language: LanguageCode; record: ModelCallRecord };
       const checked = await transaction(async (repos): Promise<Checked> => {
         const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const loaded = await repos.session.loadSession(sessionId);
@@ -682,7 +682,12 @@ export function createSessionService({
           return { replay };
         }
         if (!isSpeaking(attempt.question)) throw new AnswerKindMismatch(input.questionId);
-        return { current: attempt.question, language: enrolled.target_language as LanguageCode };
+        return {
+          current: attempt.question,
+          language: enrolled.target_language as LanguageCode,
+          // Phase 47 (spec D3).
+          record: { kind: 'transcription', sessionId, enrollmentId: enrolled.id, userId: enrolled.user_id },
+        };
       });
       if ('replay' in checked) return checked.replay;
 
@@ -695,6 +700,7 @@ export function createSessionService({
             audio: input.audio,
             mimeType: input.mimeType,
             schema: LlmTranscriptSchema,
+            record: checked.record,
           });
           const parsed = parseTranscript(raw);
           if (parsed === null) throw new LlmUnavailable('the transcript was unreadable');
@@ -765,14 +771,16 @@ export function createSessionService({
               const language = enrolled.target_language as LanguageCode;
               const expected = gatesScript(attempt.question, language, enrolled.source_language as LanguageCode);
               if (expected !== null && wrongScript(input.text, expected)) return null;
-              return evaluate(attempt.question, { text: input.text }).verdict === 'wrong' ? { question: attempt.question, language } : null;
+              // Phase 47 (spec D3): the record's handles travel with the card.
+              const record: ModelCallRecord = { kind: 'fit_judge', sessionId, enrollmentId: enrolled.id, userId: enrolled.user_id };
+              return evaluate(attempt.question, { text: input.text }).verdict === 'wrong' ? { question: attempt.question, language, record } : null;
             })
           : null;
       let fits = false;
       if (card) {
         const started = now();
         try {
-          const verdict = parseFitJudge(await judge(buildFitJudgePrompt(card.question, card.language, input.text)));
+          const verdict = parseFitJudge(await judge({ ...buildFitJudgePrompt(card.question, card.language, input.text), record: card.record }));
           if (verdict === null) throw new LlmUnavailable('the verdict was unreadable');
           fits = verdict === 'fits';
           logger.info({ event: 'answer_fit_checked', session_id: sessionId, question_type: 'cloze_typed', verdict, judge_ms: now() - started, chars: input.text.length });
@@ -811,7 +819,7 @@ export function createSessionService({
       const retry = input.retry ?? false;
       type Checked =
         | { replay: JudgedResult }
-        | { current: JudgedQuestion; context: JudgeContext };
+        | { current: JudgedQuestion; context: JudgeContext; owner: { enrollmentId: string; userId: string } };
       const checked = await transaction(async (repos): Promise<Checked> => {
         const enrolled = await authorizeSession(repos, logger, actorUserId, sessionId);
         const loaded = await repos.session.loadSession(sessionId);
@@ -832,7 +840,11 @@ export function createSessionService({
         if (!isJudged(current)) throw new AnswerKindMismatch(input.questionId);
         const found = await repos.question.findJudgeContext(current.id);
         if (!found) throw new SessionNotFound(sessionId);
-        return { current, context: { language: enrolled.target_language as LanguageCode, explanation: enrolled.source_language as LanguageCode, ...found } };
+        return {
+          current,
+          context: { language: enrolled.target_language as LanguageCode, explanation: enrolled.source_language as LanguageCode, ...found },
+          owner: { enrollmentId: enrolled.id, userId: enrolled.user_id },
+        };
       });
       if ('replay' in checked) return checked.replay;
 
@@ -850,8 +862,12 @@ export function createSessionService({
       const started = now();
       if (verdict === null) {
         try {
-          const client = checked.current.type === 'sentence_translation' ? translationJudge : judge;
-          const raw = await client(judgePrompt(checked.current, checked.context, text));
+          const translating = checked.current.type === 'sentence_translation';
+          const client = translating ? translationJudge : judge;
+          const raw = await client({
+            ...judgePrompt(checked.current, checked.context, text),
+            record: { kind: translating ? 'translation_judge' : 'judge', sessionId, ...checked.owner },
+          });
           verdict = parseJudge(checked.current.type, raw);
           if (verdict === null) throw new LlmUnavailable('the verdict was unreadable');
         } catch (error) {
@@ -895,7 +911,7 @@ export function createSessionService({
      * `data` is parsed here rather than in worker.ts, which holds no logic. A
      * payload from an older deploy fails loudly instead of half-working.
      */
-    prepareSession: async (data: unknown): Promise<void> => {
+    prepareSession: async (data: unknown, job: { attempt?: number } = {}): Promise<void> => {
       const payload = PrepareSessionPayloadSchema.parse(data);
       const sessionId = payload.session_id;
 
@@ -994,6 +1010,14 @@ export function createSessionService({
       // rung, level and R, and the order of the picks, before the model is asked
       // anything.
       const target = read.enrolled.target_language as LanguageCode;
+      // Phase 47 (spec D3, D6). The handles of this attempt's three calls.
+      const record = (kind: ModelCallRecord['kind']): ModelCallRecord => ({
+        kind,
+        sessionId,
+        attempt: job.attempt,
+        enrollmentId: read.enrolled.id,
+        userId: read.enrolled.user_id,
+      });
       const plan = planCards(
         read.context.map((row, index) => {
           const { dimension, rung, level, r, step, known_meanings } = read.picked[index];
@@ -1041,9 +1065,10 @@ export function createSessionService({
       let verdict: Extract<DistractorVerdict, { ok: true }>;
       const board = plan.board;
       try {
-        const raw = await llm(
-          buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others }),
-        );
+        const raw = await llm({
+          ...buildDistractorPrompt({ items, from: target, to: read.enrolled.source_language, others }),
+          record: record('session_generation'),
+        });
         modelMs = now() - started;
         // An empty string is the provider's "no content" (a safety block). Here,
         // unlike a lookup, there is nothing useful to serve without it.
@@ -1137,9 +1162,10 @@ export function createSessionService({
         const contextStarted = now();
         let failure: string | null = null;
         try {
-          const raw = await contextLlm(
-            buildContextPrompt({ items: [...contextItems.values()], from: target, to: read.enrolled.source_language }),
-          );
+          const raw = await contextLlm({
+            ...buildContextPrompt({ items: [...contextItems.values()], from: target, to: read.enrolled.source_language }),
+            record: record('context'),
+          });
           contextAnswer = raw === '' ? null : parseLlmContext(raw);
           if (!contextAnswer) failure = raw === '' ? 'the model returned no content' : 'the context answer was unreadable';
         } catch (error) {
@@ -1245,7 +1271,7 @@ export function createSessionService({
       const survivors = new Map<number, string[]>();
       try {
         if (checkItems.length > 0) {
-          const raw = await checkerLlm(buildCheckPrompt(checkItems, target, read.enrolled.source_language));
+          const raw = await checkerLlm({ ...buildCheckPrompt(checkItems, target, read.enrolled.source_language), record: record('checker') });
           checkerMs = now() - checkerStarted;
           const answer = raw === '' ? null : parseCheck(raw);
           if (!answer) {

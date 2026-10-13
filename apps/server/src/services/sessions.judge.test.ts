@@ -240,6 +240,9 @@ describe('answerJudged (spec D3)', () => {
       expect([meaning.calls.length, translation.calls.length]).toEqual([0, 1]);
       await setup(meaning, record(), CONTEXT, translation).service.answerJudged('u1', SESSION, answer('לשריין'));
       expect([meaning.calls.length, translation.calls.length]).toEqual([1, 1]);
+      // Phase 47 (spec D3): each call names its own kind, with the session and its learner.
+      expect(translation.calls[0].record).toEqual({ kind: 'translation_judge', sessionId: SESSION, enrollmentId: 'e1', userId: 'u1' });
+      expect(meaning.calls[0].record).toEqual({ kind: 'judge', sessionId: SESSION, enrollmentId: 'e1', userId: 'u1' });
     });
 
     it('rules the reference exact, without a call', async () => {

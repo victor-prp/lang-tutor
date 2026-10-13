@@ -26,12 +26,14 @@ import { createModelCallRepo } from './repo/modelCalls';
 import { createBotService, type BotService, type MintSession } from './services/bots';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
 import { createGlossService, type GlossService } from './services/glosses';
-import type { LlmClient, VisionClient } from './services/llm';
+import type { LlmClient, ModelCallRecorder, VisionClient } from './services/llm';
+import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
 import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
 import { TRANSLATION_JUDGE_THINKING } from './domain/judge';
+import { SESSION_GENERATION_THINKING } from './domain/jobs';
 import { createTranslationService, type TranslationService } from './services/translations';
 import { createUserService, type UserService } from './services/users';
 import { createGrantService, type GrantService } from './services/grants';
@@ -162,6 +164,11 @@ export function createServerDeps(io: {
   // than a database.
   const transaction = createTransaction(io.db, (tx) => bindRepos(tx, io.boss));
 
+  // Phase 47 (spec D5). Every model client reports each request here, so the
+  // prompt, the answer and the time of every call can be read afterwards. The
+  // annotation checks that the recorder takes what the provider reports.
+  const onCall: ModelCallRecorder = createModelCallService({ transaction, logger: io.logger, now: io.now }).record;
+
   // The one place in the repo that names both `createGeminiClient` and
   // `LlmClient` (ADR 0001 R11). The annotation below is what checks that the
   // provider satisfies the contract — providers/ cannot import it, exactly as
@@ -171,6 +178,7 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
+    onCall,
     timeoutMs: io.translationTimeoutMs,
   });
 
@@ -181,7 +189,11 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
+    onCall,
     timeoutMs: io.sessionGenerationTimeoutMs,
+    // Phase 47 (spec D1). Uncapped, its thinking once ran to 62,910 tokens and
+    // four minutes, and wrote Hebrew options where English ones were asked.
+    thinkingBudget: SESSION_GENERATION_THINKING,
   });
 
   // Phase 34 (spec D6, D8, ruling R12). The same provider for the context call,
@@ -191,6 +203,7 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
+    onCall,
     timeoutMs: io.contextCallTimeoutMs,
   });
 
@@ -202,6 +215,7 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
+    onCall,
     timeoutMs: io.checkerCallTimeoutMs,
   });
 
@@ -212,6 +226,7 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
+    onCall,
     timeoutMs: io.speechTimeoutMs,
   });
 
@@ -222,6 +237,7 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
+    onCall,
     timeoutMs: io.photoReadTimeoutMs,
   });
 
@@ -232,6 +248,7 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
+    onCall,
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: 0,
   });
@@ -243,6 +260,7 @@ export function createServerDeps(io: {
     baseUrl: io.gemini.baseUrl,
     apiKey: io.gemini.apiKey,
     model: io.gemini.model,
+    onCall,
     timeoutMs: io.judgeTimeoutMs,
     thinkingBudget: TRANSLATION_JUDGE_THINKING,
   });
@@ -330,12 +348,15 @@ export function createGlossTools(io: {
   timeoutMs: number;
 }): GlossService {
   const transaction = createTransaction(io.db, (tx) => bindRepos(tx, null));
+  // Phase 47 (spec D5). The merge tool's calls are recorded as the server's are.
+  const onCall: ModelCallRecorder = createModelCallService({ transaction, logger: io.logger, now: () => Date.now() }).record;
   const llm: LlmClient | null = io.gemini
     ? createGeminiClient({
         fetch: io.fetch,
         baseUrl: io.gemini.baseUrl,
         apiKey: io.gemini.apiKey,
         model: io.gemini.model,
+        onCall,
         timeoutMs: io.timeoutMs,
       })
     : null;
