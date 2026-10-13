@@ -14,9 +14,18 @@ export const PREPARE_SESSION = 'prepare-session';
  *  expired. pg-boss copies the job's `data` across unchanged. */
 export const PREPARE_SESSION_FAILED = 'prepare-session-failed';
 
-/** Phase 24 (spec D16). The most one generation call may take: five minutes,
- *  Victor's cap. The environment may lower it (config.ts); tests do. */
-export const SESSION_GENERATION_BUDGET_MS = 300_000;
+/** Phase 24 (spec D16). The most one generation call may take. Five minutes
+ *  until phase 47 (spec D1), two since: with its thinking capped the call
+ *  takes seconds, and a call the cap did not keep short fails its attempt
+ *  rather than hold the learner for minutes. The environment may lower it
+ *  (config.ts); tests do. */
+export const SESSION_GENERATION_BUDGET_MS = 120_000;
+
+/** Phase 47 (spec D1). The generation call's thinking budget, in tokens.
+ *  Uncapped, gemini-2.5-flash once thought 62,910 tokens for four minutes and
+ *  then wrote Hebrew options where English ones were asked; at 1024 the same
+ *  request took 6.7 s and answered right three times out of three. */
+export const SESSION_GENERATION_THINKING = 1024;
 
 /** Phase 34 (spec D6, D8, ruling R12). The most the context call may take, the
  *  call after the batch. A minute: measured at about 7 s for a full session, and
