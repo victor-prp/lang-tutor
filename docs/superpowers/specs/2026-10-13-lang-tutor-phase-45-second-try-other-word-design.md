@@ -3,11 +3,16 @@
 - **Status:** Victor tested phase 42 on 2026-10-13, found the bug below on a sentence translation
   card, numbered it phase 45 and said "go till the end": the design is self-approved (CLAUDE.md,
   *Continue till PR*). Rulings are at the end.
+  Implemented on branch `phase-45-second-try-other-word`. Building changed D2: the prompt wording
+  alone did not fix the judge. Three tightened prompts all still called *talk with everyone*
+  `other_word`, every run; with thinking on (512 tokens) the first prompt called it `wrong` every
+  run. So the translation judge got its own client with thinking (D3), at a median 2.4 s a call
+  against 0.6 s. Measured: translation judge tier 2 32/32 in three runs, up from 25/27 on master.
 - **Date:** 2026-10-13
 - **Builds on:** phase 34 D9 (one second try after another accepted word), phase 42 D1 (a second
   try's banner says what that try was), phase 27 D4 (the translation judge).
 - **Touches:** `feedbackFor` and the feedback banner in the app, one string pair; the translation
-  judge's prompt and its eval cases. No server logic, no wire change, no migration, no
+  judge's prompt, its own model client (D3) and its eval cases. No wire change, no migration, no
   `API_LEVEL` change.
 
 ---
@@ -82,12 +87,31 @@ or left out (a number, a person, a tense, an object, a quality, or how something
 *clearly*, *quickly* or *very*) means it is not conveyed. The marker, schema and verdicts are
 unchanged, so no stub changes.
 
+### D3. The translation judge thinks before it answers
+
+The judge client runs with thinking off (phase 27 D4: the learner waits). For the translation judge
+that is what failed: comparing every detail of two sentences needs the model to reason first. It
+gets a client of its own, `translationJudge`, with `TRANSLATION_JUDGE_THINKING` = 512 tokens
+(`domain/judge.ts`), built in `composition.ts` beside `judge` with the same timeout. Measured on
+lane 0's card, three rounds:
+
+| thinking | median | max | *talk with everyone* |
+|---|---|---|---|
+| 0 | 0.58 s | 0.80 s | `other_word` 3/3 |
+| 128 | 1.22 s | 1.31 s | `other_word` 3/3 |
+| 512 | 2.38 s | 2.58 s | `wrong` 3/3 |
+
+2.6 s is inside the server's 8 s judge budget and the app's 15 s. The meaning judge and the fit
+judge keep thinking off: their eval groups are at 100%, and they wait on shorter inputs.
+
 ## 2. Changes
 
 - `apps/mobile/src/feedback.ts`: the `other` tone and its case in `feedbackFor`.
 - `apps/mobile/src/strings.ts`: `feedbackStillOther`, `feedbackStillOtherSense`.
 - `apps/mobile/src/components/FeedbackBanner.tsx`: the third tone.
-- `apps/server/src/domain/judge.ts`: D2's sentence; `judge.test.ts`.
+- `apps/server/src/domain/judge.ts`: D2's sentence, `TRANSLATION_JUDGE_THINKING`; `judge.test.ts`.
+- `apps/server/src/composition.ts`, `services/sessions.ts`: the `translationJudge` client, used for
+  a `sentence_translation` card (D3); `sessions.judge.test.ts`.
 - `apps/server/tests/eval/cases.ts`: the *communicate* cases.
 - `e2e/tests/sentence-cards.spec.ts`: a translation's second try with another word again.
 
@@ -112,5 +136,8 @@ unchanged, so no stub changes.
 - **R2.** Score and memory unchanged, as phase 42 R2.
 - **R3.** The input is uncoloured (`verdict: null`): its green border was the other half of
   "right".
+- **R5.** Thinking for the translation judge only (D3): it is the one whose eval failed, and each
+  judge's wait is paid only where it buys a right verdict. Switch signal: the meaning judge's group
+  drops below 100%.
 - **R4.** The prompt's manner examples are general words (*clearly*, *quickly*, *very*); the eval's
   held-out case checks the rule beyond them.
