@@ -55,7 +55,12 @@ const record = (questions: Question[] = [MEANING, CHOICE], answers: SessionRecor
   source: 'list',
 });
 
-function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRecord = record(), context: typeof CONTEXT = CONTEXT) {
+function setup(
+  judge: ReturnType<typeof createFakeLlmClient>,
+  loaded: SessionRecord = record(),
+  context: typeof CONTEXT = CONTEXT,
+  translationJudge: ReturnType<typeof createFakeLlmClient> = judge,
+) {
   const inserted: unknown[] = [];
   const resolved: unknown[] = [];
   const logger = createFakeLogger();
@@ -86,6 +91,7 @@ function setup(judge: ReturnType<typeof createFakeLlmClient>, loaded: SessionRec
     checkerLlm: createFakeLlmClient(''),
     transcriber: createFakeTranscriber(''),
     judge,
+    translationJudge,
   });
   return { service, inserted, resolved, logger };
 }
@@ -189,6 +195,7 @@ describe('answerJudged (spec D3)', () => {
       checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge,
+      translationJudge: judge,
     });
     const result = await service.answerJudged('u1', SESSION, answer('לשריין'));
     expect(judge.calls).toHaveLength(1);
@@ -223,6 +230,17 @@ describe('answerJudged (spec D3)', () => {
   describe('a sentence_translation card', () => {
     const sentence = (text: string) => ({ questionId: 's1', text });
     const first = () => record([SENTENCE, CHOICE]);
+
+    // Phase 45 (spec D2). The translation judge thinks before it answers; the meaning
+    // judge does not, so each card asks its own client and never the other.
+    it('asks the translation client, and a meaning card the meaning client', async () => {
+      const meaning = createFakeLlmClient('{"verdict":"right"}');
+      const translation = createFakeLlmClient('{"verdict":"right"}');
+      await setup(meaning, first(), CONTEXT, translation).service.answerJudged('u1', SESSION, sentence('I wish to reserve a table'));
+      expect([meaning.calls.length, translation.calls.length]).toEqual([0, 1]);
+      await setup(meaning, record(), CONTEXT, translation).service.answerJudged('u1', SESSION, answer('לשריין'));
+      expect([meaning.calls.length, translation.calls.length]).toEqual([1, 1]);
+    });
 
     it('rules the reference exact, without a call', async () => {
       const judge = createFakeLlmClient('{"verdict":"wrong"}');
