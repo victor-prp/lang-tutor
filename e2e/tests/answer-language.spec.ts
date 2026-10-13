@@ -92,6 +92,9 @@ test('a dictation: Hebrew in a Russian answer is asked again, then the right wor
       return;
     }
     expect(card.kind, `position ${position}`).toBe('choice');
+    // Phase 44 (spec D2): a choice of meanings reads its word on arrival. Only
+    // once it has is the count settled for the next card's spokenAfter.
+    await expect.poll(async () => (await spoken(page)).slice(before)).toEqual([{ text: card.prompt, lang: 'ru-RU' }]);
     await answerChoice(page, card, true);
     before = (await spoken(page)).length;
     await page.getByTestId('continue-button').click();

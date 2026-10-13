@@ -80,6 +80,11 @@ test('a session prompt speaks', async ({ page, request }) => {
 
   const prompt = (await page.getByTestId('question-prompt').textContent()) ?? '';
   expect(prompt).not.toBe('');
+  // Phase 44 (spec D2): the card reads its word on arrival, with no tap.
+  await expect.poll(() => spoken(page)).toEqual([{ text: prompt, lang: 'it-IT' }]);
+  // A tap while that word still plays would stop it (toggle), so wait for the
+  // fake to end it: the button shows playing until then.
+  await expect(page.getByTestId('speak-prompt')).toHaveAttribute('aria-selected', 'false');
   await tapAndHear(page, page.getByTestId('speak-prompt'), { text: prompt, lang: 'it-IT' });
 });
 
