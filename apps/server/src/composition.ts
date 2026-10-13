@@ -22,6 +22,7 @@ import { createGrantRepo } from './repo/grants';
 import { createUserRepo } from './repo/users';
 import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
+import { createModelCallRepo } from './repo/modelCalls';
 import { createBotService, type BotService, type MintSession } from './services/bots';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
 import { createGlossService, type GlossService } from './services/glosses';
@@ -106,6 +107,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     jobs: boss ? createJobRepo(tx, boss) : NO_JOBS,
     photoImport: createPhotoImportRepo(tx),
     gloss: createGlossRepo(tx),
+    modelCall: createModelCallRepo(tx),
   };
 }
 

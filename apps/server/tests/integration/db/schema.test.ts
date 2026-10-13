@@ -39,6 +39,7 @@ afterAll(async () => {
 
 const TABLES = [
   'users',
+  'model_calls',
   'enrollments',
   'dict_lexemes',
   'dict_variants',
