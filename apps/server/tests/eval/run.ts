@@ -899,7 +899,7 @@ async function main(): Promise<void> {
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: 0,
   });
-  // Phase 45 (spec D2). The translation judge's own client, as composition.ts builds it.
+  // Phase 45 (spec D3). The translation judge's own client, as composition.ts builds it.
   const translationJudgeLlm = createGeminiClient({
     fetch: globalThis.fetch,
     baseUrl: gemini.baseUrl,

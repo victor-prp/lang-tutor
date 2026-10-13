@@ -1484,6 +1484,11 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('en', enCommunicate, enClearly, 'It is important to talk with everyone.', 'wrong', 'manner word left out'),
   tjudge('en', enCommunicate, enClearly, "It's important to communicate clearly with everyone.", 'exact', 'contraction'),
   tjudge('en', enCommunicate, enClearly, 'It is important to talk clearly with everyone.', 'alternative', 'other word, every detail kept'),
+  // Review M1. The detail rule must spare a slip in the manner word, a synonym of it,
+  // and its other place.
+  tjudge('en', enCommunicate, enClearly, 'It is important to communicate clerly with everyone.', 'exact', 'slip in the manner word'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to communicate plainly with everyone.', 'exact', 'synonym of the manner word'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to clearly communicate with everyone.', 'exact', 'other adverb order'),
   tjudge('ru', ruRun, ruFast, 'Он бегает.', 'wrong', 'manner word left out'),
   tjudge('ru', ruRun, ruFast, 'Он бегает быстро.', 'exact', 'other word order'),
 ];
