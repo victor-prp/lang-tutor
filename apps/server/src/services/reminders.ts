@@ -3,6 +3,30 @@ import { ReminderNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { Transaction } from './transaction';
 
+/** One notification for one phone. `data` reaches the app when the learner taps it. */
+export type PushMessage = { to: string; title: string; body: string; channelId: string; data: Record<string, string> };
+
+/** What the push service answers a message with: accepted for delivery under an id, or refused. */
+export type PushTicket =
+  | { status: 'ok'; id: string }
+  | { status: 'error'; message: string; details?: { error?: string } };
+
+/** What the push service later says of a delivery the ticket accepted. */
+export type PushReceipt = { status: 'ok' } | { status: 'error'; message: string; details?: { error?: string } };
+
+/**
+ * Phase 52 (spec D7). The push service as the tick sees it. Declared here, not in the provider
+ * that satisfies it, because providers/ may not be imported by a consumer (ADR 0001 R11):
+ * composition.ts is where `createExpoPushClient` is checked against it. Both methods throw
+ * PushUnavailable when the service cannot be reached or does not answer in time.
+ */
+export type PushSender = {
+  /** One ticket per message, in the order the messages came. */
+  send(messages: PushMessage[]): Promise<PushTicket[]>;
+  /** The receipts the service has so far, by ticket id; an id it has none for yet is absent. */
+  receipts(ids: string[]): Promise<Record<string, PushReceipt>>;
+};
+
 /** A learner's schedule and the zone its times are read in. */
 export type ReminderView = { settings: ReminderSettings; timeZone: string };
 
@@ -30,6 +54,8 @@ export function createReminderService({
   now,
 }: {
   transaction: Transaction;
+  // The tick sends through it; the learner's use cases below do not.
+  push: PushSender;
   logger: Logger;
   // The tap's moment. The repository takes it from here, not from its own clock, so a test
   // that pins the clock pins the stored instant.

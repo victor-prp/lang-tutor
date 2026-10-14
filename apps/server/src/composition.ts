@@ -5,6 +5,7 @@ import type { AuthConfig, GeminiConfig } from './config';
 import type { Db, Tx } from './db/client';
 import { createTransaction } from './db/transaction';
 import type { Logger } from './logger';
+import { createExpoPushClient, PUSH_TIMEOUT_MS } from './providers/expoPush';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from './providers/gemini';
 import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
 import { createAuthRepo } from './repo/auth';
@@ -31,7 +32,7 @@ import { createGlossService, type GlossService } from './services/glosses';
 import type { LlmClient, ModelCallRecorder, VisionClient } from './services/llm';
 import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
-import { createReminderService, type ReminderService } from './services/reminders';
+import { createReminderService, type PushSender, type ReminderService } from './services/reminders';
 import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
@@ -166,6 +167,11 @@ export function createServerDeps(io: {
   webDistDir: string | null;
   // Phase 35 (spec D12). BOT_SECRET, or null where it is unset.
   botSecret: string | null;
+  // Phase 52 (spec D7). Expo's push service; tests and e2e point it at MockServer.
+  pushBaseUrl: string;
+  // Phase 52 (spec D5, D9). REMINDER_SECRET, or null where it is unset: the tick route's
+  // secret, which leaves the route unmounted, as botSecret does.
+  reminderSecret: string | null;
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
   boss: PgBoss;
@@ -294,6 +300,13 @@ export function createServerDeps(io: {
     timeoutMs: RESEND_TIMEOUT_MS,
   });
   const sendCode: SendCode = mailer.sendSignInCode;
+  // Phase 52 (spec D7). The one place that names both the Expo provider and the PushSender
+  // contract it satisfies (ADR 0001 R11); the annotation is what checks it.
+  const push: PushSender = createExpoPushClient({
+    fetch: io.fetch,
+    baseUrl: io.pushBaseUrl,
+    timeoutMs: PUSH_TIMEOUT_MS,
+  });
   const authModule = createAuth({
     db: io.db,
     authRepo: createAuthRepo(io.db),
@@ -329,7 +342,7 @@ export function createServerDeps(io: {
     translations,
     vocabulary: createVocabularyService({ transaction, logger: io.logger, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
     grants: createGrantService({ transaction, logger: io.logger }),
-    reminders: createReminderService({ transaction, logger: io.logger, now: io.now }),
+    reminders: createReminderService({ transaction, push, logger: io.logger, now: io.now }),
     // Phase 26. Handed the lookup use case itself, so a row is looked up exactly
     // as a typed word is (spec D7). The match call shares the lookup's client
     // and budget.

@@ -335,6 +335,16 @@ export class EmailNotSent extends Error {
   }
 }
 
+/** Phase 52 (spec D7). Expo's push service could not be reached, refused the request, ran out
+ *  of time, or answered with something other than tickets or receipts. One error for every
+ *  cause; the tick records it against the learner's reminder and goes on to the next. */
+export class PushUnavailable extends Error {
+  constructor(readonly detail: number | 'timeout' | 'network' | 'unreadable') {
+    super(`push service unavailable (${detail})`);
+    this.name = 'PushUnavailable';
+  }
+}
+
 /** Phase 52 (spec D1). The app reported a time zone `Intl` does not know. The
  *  route answers 400; a wrong zone would give the learner the wrong day. */
 export class InvalidTimeZone extends Error {

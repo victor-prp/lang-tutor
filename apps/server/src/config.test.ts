@@ -7,6 +7,7 @@ import {
   loadBotSecret,
   loadConfig,
   loadGeminiConfig,
+  loadReminderSecret,
   maintenanceUrlFor,
   redactDatabaseUrl,
 } from './config';
@@ -39,6 +40,7 @@ describe('loadConfig', () => {
       version: 'dev',
       commit: 'unknown',
       webDistDir: null,
+      pushBaseUrl: 'https://exp.host',
     });
   });
 
@@ -58,6 +60,12 @@ describe('loadConfig', () => {
     expect(loadConfig({ APP_COMMIT: 'e91c0aa-dirty' }).commit).toBe('e91c0aa-dirty');
     expect(loadConfig({ APP_COMMIT: '  ' }).commit).toBe('unknown');
     expect(loadConfig({}).commit).toBe('unknown');
+  });
+
+  it('reads the push base URL, defaulting to Expo (phase 52)', () => {
+    expect(loadConfig({}).pushBaseUrl).toBe('https://exp.host');
+    expect(loadConfig({ PUSH_BASE_URL: ' http://localhost:1080/ns ' }).pushBaseUrl).toBe('http://localhost:1080/ns');
+    expect(loadConfig({ PUSH_BASE_URL: '  ' }).pushBaseUrl).toBe('https://exp.host');
   });
 
   it('reads the speech budget, defaulting to 8 s (phase 25)', () => {
@@ -102,6 +110,7 @@ describe('loadConfig', () => {
       version: 'dev',
       commit: 'unknown',
       webDistDir: null,
+      pushBaseUrl: 'https://exp.host',
     });
   });
 
@@ -295,6 +304,24 @@ describe('assertDatabaseIdentifier', () => {
     for (const bad of ['', 'Lang', '1lane', 'a-b', 'a b', 'a";drop', 'a'.repeat(64)]) {
       expect(() => assertDatabaseIdentifier(bad)).toThrow('database identifier');
     }
+  });
+});
+
+// Phase 52 (spec D5, D9). The tick route is mounted only when this is set.
+describe('loadReminderSecret', () => {
+  it('is null when REMINDER_SECRET is unset or blank, as on every lane', () => {
+    expect(loadReminderSecret({})).toBeNull();
+    expect(loadReminderSecret({ REMINDER_SECRET: '   ' })).toBeNull();
+  });
+
+  it('reads it, trimmed', () => {
+    const secret = 'x'.repeat(32);
+    expect(loadReminderSecret({ REMINDER_SECRET: ` ${secret} ` })).toBe(secret);
+  });
+
+  it('refuses a secret shorter than 32 characters, naming the variable but not the value', () => {
+    expect(() => loadReminderSecret({ REMINDER_SECRET: 'short-secret' })).toThrow(/REMINDER_SECRET/);
+    expect(() => loadReminderSecret({ REMINDER_SECRET: 'short-secret' })).not.toThrow(/short-secret/);
   });
 });
 

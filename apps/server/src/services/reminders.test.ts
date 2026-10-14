@@ -10,7 +10,7 @@ import {
 import { DEFAULT_REMINDER_SETTINGS, type ReminderSettings } from '../domain/reminders';
 import { ReminderNotFound } from '../errors';
 import type { ReminderRepo } from '../repo/reminders';
-import { createReminderService } from './reminders';
+import { createReminderService, type PushSender } from './reminders';
 
 // The other half of this file's tests is tests/integration/routes/reminders.test.ts, which covers
 // what only a real session and Postgres can decide: the gate, the constraints, the 404s.
@@ -44,6 +44,8 @@ function build(opts: { tapOwners?: Record<string, string> } = {}) {
   const logger = createFakeLogger();
   const service = createReminderService({
     transaction: createFakeTransaction({ reminders, user }),
+    // The learner's use cases send nothing; a call to the stub would fail the test.
+    push: stub<PushSender>({}),
     logger,
     now: createFakeClock(NOW),
   });
