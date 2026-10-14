@@ -31,7 +31,8 @@ function withCommit(version: string, commit: string | null | undefined): string 
 export function mobileAppLine({ version, commit, native }: AppRelease): string {
   // Spec R1: the bundle inside a new binary is built on Expo's servers, where
   // the release's variables never reach. An update replaces it within minutes.
-  if (version === null && native.kind === 'build' && native.embedded) return 'built-in';
+  // Its commit is known there (metro.config.js), so it is named when present.
+  if (version === null && native.kind === 'build' && native.embedded) return withCommit('built-in', commit);
   return withCommit(version ?? 'dev', commit);
 }
 

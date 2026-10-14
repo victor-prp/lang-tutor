@@ -44,6 +44,14 @@ describe('mobileAppLine', () => {
     ).toBe('built-in');
   });
 
+  // The binary's own bundle knows its commit: metro.config.js reads it from
+  // EAS_BUILD_GIT_COMMIT_HASH on Expo's build servers.
+  it('names the commit of the bundle inside a new binary', () => {
+    expect(mobileAppLine(app({ version: null, commit: 'cac24f2', native: { ...build, embedded: true } }))).toBe(
+      'built-in (cac24f2)',
+    );
+  });
+
   it('still names an inlined tag on an embedded launch', () => {
     expect(mobileAppLine(app({ native: { ...build, embedded: true } }))).toBe('v2026.10.14.2 (a3f9c21)');
   });
