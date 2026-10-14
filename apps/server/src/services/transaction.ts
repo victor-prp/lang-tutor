@@ -11,6 +11,7 @@ import type { ProgressRepo } from '../repo/progress';
 import type { ReminderRepo } from '../repo/reminders';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
+import type { TargetRepo } from '../repo/targets';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
 import type { VocabularyRepo } from '../repo/vocabulary';
@@ -38,6 +39,8 @@ export type Repos = {
   pronunciation: PronunciationRepo;
   // Phase 52 (spec D2, D4, D6). Settings, devices and the log of each tick's decisions.
   reminders: ReminderRepo;
+  // Phase 53 (spec D1, D8). Targets, their words, their log and each session's split.
+  target: TargetRepo;
 };
 
 /**

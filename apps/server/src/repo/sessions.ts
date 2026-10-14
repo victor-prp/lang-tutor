@@ -37,6 +37,7 @@ export function createSessionRepo(tx: Tx) {
     source: SessionSource;
     listening: boolean;
     speaking: boolean;
+    chosenOn?: string;
   }): Promise<string> {
     try {
       const [row] = await tx.insert(sessions).values(values).returning({ id: sessions.id });
@@ -102,9 +103,10 @@ export function createSessionRepo(tx: Tx) {
       return sessionId;
     },
 
-    /** A list session: no questions until prepare-session writes them. */
-    insertPreparingSession: (userId: string, enrollmentId: string, devices: Devices): Promise<string> =>
-      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', ...devices }),
+    /** A list session: no questions until prepare-session writes them. Phase 53 (spec
+     *  D12): `chosenOn` is the learner day its words were chosen. */
+    insertPreparingSession: (userId: string, enrollmentId: string, devices: Devices, chosenOn: string): Promise<string> =>
+      insertSessionRow({ userId, enrollmentId, status: 'preparing', source: 'list', chosenOn, ...devices }),
 
     /** Phase 43 (review C1). Serializes, per enrollment, the use cases that make
      *  its next session, create and the stock job: the second waits for the
@@ -182,6 +184,42 @@ export function createSessionRepo(tx: Tx) {
         .orderBy(sql`${sessions.createdAt} desc, ${sessions.id} desc`)
         .limit(1);
       return row;
+    },
+
+    /** Phase 53 (spec D12). What a session was chosen for: the learner day its words were
+     *  chosen (null for a seed and for a session from before this phase) and the devices it
+     *  was built for, which a rebuilt stock inherits. Undefined for an unknown or malformed id. */
+    findStockChoice: async (
+      sessionId: string,
+    ): Promise<{ chosenOn: string | null; listening: boolean; speaking: boolean } | undefined> => {
+      if (!UUID_RE.test(sessionId)) return undefined;
+      const [row] = await tx
+        .select({ chosenOn: sessions.chosenOn, listening: sessions.listening, speaking: sessions.speaking })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId));
+      return row;
+    },
+
+    /** Phase 53 (spec D12). Retires a stock: only a list session nobody has started, in
+     *  stock (preparing or ready), becomes skipped; true when this call did it. It is
+     *  conditional like markStarted, so a start that wins the race leaves the session
+     *  alone and this answers false. No practice_day: a retired stock never counted for a
+     *  day, which is also what tells it from a session the learner skipped. */
+    retireStock: async (sessionId: string): Promise<boolean> => {
+      if (!UUID_RE.test(sessionId)) return false;
+      const rows = await tx
+        .update(sessions)
+        .set({ status: 'skipped' })
+        .where(
+          and(
+            eq(sessions.id, sessionId),
+            inArray(sessions.status, ['preparing', 'ready']),
+            isNull(sessions.startedAt),
+            eq(sessions.source, 'list'),
+          ),
+        )
+        .returning({ id: sessions.id });
+      return rows.length > 0;
     },
 
     insertSessionQuestions,

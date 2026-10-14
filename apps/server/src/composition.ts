@@ -18,6 +18,7 @@ import { createPhotoImportRepo } from './repo/photoImports';
 import { createProgressRepo } from './repo/progress';
 import { createQuestionRepo } from './repo/questions';
 import { createSessionRepo } from './repo/sessions';
+import { createTargetRepo } from './repo/targets';
 import { createEnrollmentRepo } from './repo/enrollments';
 import { createGrantRepo } from './repo/grants';
 import { createUserRepo } from './repo/users';
@@ -123,6 +124,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     modelCall: createModelCallRepo(tx),
     pronunciation: createPronunciationRepo(tx),
     reminders: createReminderRepo(tx),
+    target: createTargetRepo(tx),
   };
 }
 

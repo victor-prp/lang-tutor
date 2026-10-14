@@ -31,6 +31,8 @@ import type { Repos } from './transaction';
 // or by create; started by the start call; offered by current.
 
 const E = 'e1';
+// The learner day the world's clock reads (2026-10-12T10:00Z, in UTC): what a stock records as chosen_on (phase 53).
+const TODAY = '2026-10-12';
 const ENROLLMENT: Enrollment = { id: E, user_id: 'u1', source_language: 'he', target_language: 'en', created_at: '' };
 const summary = (id: string, status: SessionSummary['status'], source: SessionSummary['source'] = 'list'): SessionSummary => ({
   id,
@@ -114,7 +116,7 @@ describe('stockSession (spec D3, D4)', () => {
 
     expect(asked).toEqual(['s_started']);
     expect(pickedGlosses(jobs)).toEqual(['g_b', 'g_a']);
-    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }]]);
+    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY]]);
     expect(jobs.enqueued.find((job) => job.name === PREPARE_SESSION)?.data).toMatchObject({
       session_id: 's_new',
       listening: true,
@@ -130,7 +132,7 @@ describe('stockSession (spec D3, D4)', () => {
       findNewestDevices: async () => ({ listening: false, speaking: true }),
     });
     await service.stockSession({ enrollment_id: E, reason: 'complete' });
-    expect(inserted).toEqual([['u1', E, { listening: false, speaking: true }]]);
+    expect(inserted).toEqual([['u1', E, { listening: false, speaking: true }, TODAY]]);
   });
 
   it.each([
@@ -194,7 +196,7 @@ describe('createNextSession (spec D5)', () => {
       source: 'list',
       created: true,
     });
-    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }]]);
+    expect(inserted).toEqual([['u1', E, { listening: true, speaking: false }, TODAY]]);
     expect(eventsOf(logger, 'session_stocked')).toEqual([{ event: 'session_stocked', enrollment_id: E, session_id: 's_new', reason: 'create' }]);
   });
 

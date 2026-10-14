@@ -1039,6 +1039,11 @@ export const sessions = pgTable(
     // still runs for a minute after the new one migrates (ADR 0010).
     listening: boolean('listening').notNull().default(false),
     speaking: boolean('speaking').notNull().default(false),
+    // Phase 53 (spec D12). The learner day a list session's words were chosen,
+    // which the stale-stock check compares with today's: a stock chosen on an
+    // earlier day is replaced when the day's split no longer matches the one in
+    // session_targets. Null for a seed and for every session before this phase.
+    chosenOn: date('chosen_on', { mode: 'string' }),
   },
   (t) => [
     foreignKey({
@@ -1400,5 +1405,105 @@ export const reminders = pgTable(
     unique('reminders_user_day_slot_key').on(t.userId, t.localDay, t.slot),
     check('reminders_outcome_known', sql`${t.outcome} in ('claimed', 'sent', 'skip_target_met', 'failed')`),
     index('reminders_user_day_idx').on(t.userId, t.localDay),
+  ],
+);
+
+// Phase 53 (spec D1). A learner's preparation for homework or a test: a kind, a
+// due date and words (target_words). `due_on` is a learner day (ADR 0013). A
+// target is active while today is before `due_on` and `ended_at` is null: on
+// `due_on` it ends by itself and nothing is written for that, bar the
+// `ended_on_date` event the first session chosen after it records (D8).
+// `ended_at` is the learner ending it early. The kind is a fact the picker reads
+// (domain/targets.ts TARGET_KINDS), never a skill filter (D3).
+export const targets = pgTable(
+  'targets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    enrollmentId: text('enrollment_id').notNull(),
+    kind: text('kind').notNull(),
+    dueOn: date('due_on', { mode: 'string' }).notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', tz),
+  },
+  (t) => [
+    foreignKey({ name: 'targets_enrollment_fk', columns: [t.enrollmentId], foreignColumns: [enrollments.id] }),
+    check('targets_kind_known', sql`${t.kind} in ('homework', 'exam')`),
+    // The picker's read on every session: one enrollment's targets by date.
+    index('targets_enrollment_due_idx').on(t.enrollmentId, t.dueOn),
+  ],
+);
+
+// Phase 53 (spec D1). A gloss in a target. A target word is always a saved word,
+// and the service keeps that true, not the schema: unsaving a word removes it from
+// every target (repo/targets.ts removeGlossFromTargets), and a gloss merge moves it
+// to the survivor (repo/glosses.ts mergeGlosses). The key is on dict_glosses because
+// ADR 0011 has every learner table hold a gloss.
+export const targetWords = pgTable(
+  'target_words',
+  {
+    targetId: uuid('target_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    addedAt: timestamp('added_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'target_words_pkey', columns: [t.targetId, t.glossId] }),
+    foreignKey({ name: 'target_words_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+    foreignKey({ name: 'target_words_gloss_fk', columns: [t.glossId], foreignColumns: [dictGlosses.id] }),
+    // Unsaving and a merge both find a gloss's targets.
+    index('target_words_gloss_idx').on(t.glossId),
+  ],
+);
+
+// Phase 53 (spec D8). Append-only: every change of a target, with the values
+// before and after and who made it. `session_id` is the session whose choosing
+// recorded `ended_on_date`; it and `actor_user_id` carry no foreign key, so the
+// log outlives both, as gloss_family_events does. `before` and `after` are the
+// service's own shapes, per kind.
+export const targetEvents = pgTable(
+  'target_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    targetId: uuid('target_id').notNull(),
+    kind: text('kind').notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    actorUserId: text('actor_user_id'),
+    sessionId: uuid('session_id'),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'target_events_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+    check(
+      'target_events_kind_known',
+      sql`${t.kind} in ('created', 'words_added', 'words_removed', 'date_changed', 'ended_early', 'ended_on_date')`,
+    ),
+    index('target_events_target_created_idx').on(t.targetId, t.createdAt),
+  ],
+);
+
+// Phase 53 (spec D8). One row per session and target it served: what the target
+// wished, the slots it was given, how many words came from it, why (a ShareReason
+// of domain/targets.ts) and the readiness the wish came from. Written in the
+// transaction that chooses the session's words; read back only by the stale-stock
+// check (D12). Nothing ties `picked` to `slots`: a target is handed slots the main
+// path could not use in a second pass, so it can pick more than it was given.
+export const sessionTargets = pgTable(
+  'session_targets',
+  {
+    sessionId: uuid('session_id').notNull(),
+    targetId: uuid('target_id').notNull(),
+    wish: integer('wish').notNull(),
+    slots: integer('slots').notNull(),
+    picked: integer('picked').notNull(),
+    reason: text('reason').notNull(),
+    daysLeft: integer('days_left').notNull(),
+    readyCount: integer('ready_count').notNull(),
+    wordCount: integer('word_count').notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'session_targets_pkey', columns: [t.sessionId, t.targetId] }),
+    foreignKey({ name: 'session_targets_session_fk', columns: [t.sessionId], foreignColumns: [sessions.id] }).onDelete('cascade'),
+    foreignKey({ name: 'session_targets_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+    check('session_targets_reason_known', sql`${t.reason} in ('exclusive', 'run_up', 'not_ready', 'steady')`),
   ],
 );

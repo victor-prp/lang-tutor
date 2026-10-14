@@ -14,6 +14,8 @@ export type MergeCounts = {
   snapshots: number;
   questions: number;
   memberships: number;
+  /** Phase 53. Target words moved to the survivor, and those folded into a row the target already held. */
+  targetWords: number;
 };
 
 /** One lexeme and learner language the tool looks at: two or more live glosses,
@@ -114,8 +116,8 @@ export function createGlossRepo(tx: Tx) {
   /**
    * Spec D7. Folds `other` into `survivor`, both live glosses of one lexeme and
    * language: entries (an enrollment holding both keeps one, the earlier save,
-   * at each dimension's best), session snapshots, questions and memberships move
-   * to the survivor; the survivor takes the other's key and alternatives as its
+   * at each dimension's best), session snapshots, questions, memberships and target
+   * words move to the survivor; the survivor takes the other's key and alternatives as its
    * own alternatives; the other forwards to it, and so does anything that
    * forwarded to the other. Photo rows are left alone: their options are a
    * snapshot, and a stale id resolves when the import is saved.
@@ -143,6 +145,16 @@ export function createGlossRepo(tx: Tx) {
     if (survivor.lexeme_id !== other.lexeme_id || survivor.user_language_code !== other.user_language_code) {
       throw new Error(`glosses ${input.otherId} and ${input.survivorId} are not of one lexeme and language`);
     }
+
+    // 0. Targets (phase 53, spec D1): a target holding the other keeps the word under
+    //    the survivor, and one holding both keeps the survivor's row alone, since
+    //    target_words_pkey allows a gloss once per target. The count is moved and
+    //    folded rows together, as the snapshots' below.
+    const foldedTargetWords = await tx.execute(sql`
+      DELETE FROM target_words o
+      WHERE o.gloss_id = ${input.otherId}
+        AND EXISTS (SELECT 1 FROM target_words s WHERE s.target_id = o.target_id AND s.gloss_id = ${input.survivorId})`);
+    const movedTargetWords = await tx.execute(sql`UPDATE target_words SET gloss_id = ${input.survivorId} WHERE gloss_id = ${input.otherId}`);
 
     // 1. Enrollments holding both: fold the progress and the memory onto the
     //    survivor's rows, keep the earlier save, drop the other entry (what is
@@ -272,6 +284,7 @@ export function createGlossRepo(tx: Tx) {
       snapshots: (snapshots.rowCount ?? 0) + sessions.rows.length,
       questions: questions.rowCount ?? 0,
       memberships: memberships.rowCount ?? 0,
+      targetWords: (movedTargetWords.rowCount ?? 0) + (foldedTargetWords.rowCount ?? 0),
     };
   };
 

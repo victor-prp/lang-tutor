@@ -12,6 +12,7 @@ import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
+import type { TargetRepo } from '../repo/targets';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
@@ -52,6 +53,9 @@ describe('repos', () => {
       findOpen: notStubbed,
       findSessionGlosses: notStubbed,
       findNewestDevices: notStubbed,
+      // Phase 53 (spec D12).
+      findStockChoice: notStubbed,
+      retireStock: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
       findEnrollmentId: async () => 'e1',
       ...overrides,
@@ -311,6 +315,7 @@ describe('repos', () => {
         modelCall: stub<ModelCallRepo>({}),
         pronunciation: stub<PronunciationRepo>({}),
         reminders: stub<ReminderRepo>({}),
+        target: stub<TargetRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,
       });

@@ -16,6 +16,10 @@ import { withTx } from './withTx';
 /** Phase 43. A session built for a device that can neither listen nor speak. */
 export const NO_DEVICES = { listening: false, speaking: false };
 
+/** Phase 53. The learner day a test's stock says its words were chosen on, where the day is
+ *  no part of what the test is about. */
+export const CHOSEN_ON = '2026-10-14';
+
 /**
  * Phase 23. A question a test knows is a choice, narrowed so it can read the
  * options: every seed question is one, as is the first of a list session
@@ -119,7 +123,7 @@ export async function insertListSession(
         ),
       })),
     });
-    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId, NO_DEVICES);
+    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId, NO_DEVICES, CHOSEN_ON);
     await sessionRepo.insertSessionQuestions(sessionId, generated);
     await sessionRepo.transition(sessionId, ['preparing'], 'ready');
     return { sessionId, questions: generated };

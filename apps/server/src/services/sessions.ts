@@ -433,7 +433,7 @@ export function createSessionService({
       ];
     });
     if (picks.length === 0) throw new NoSavedWords(enrollmentId);
-    const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices);
+    const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices, today);
     // Phase 39 (spec D4). The refresh is recorded once the session exists, so
     // each event names it; one that changed nothing writes nothing. Phase 46
     // (spec D3): every gloss known for the first time is stamped, family or not.

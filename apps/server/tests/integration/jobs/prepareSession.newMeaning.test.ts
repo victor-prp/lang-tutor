@@ -8,7 +8,7 @@ import { createSessionRepo } from '../../../src/repo/sessions';
 import { createSessionsRouter } from '../../../src/routes/sessions';
 import { ACT_AS, actAs } from '../../support/actAs';
 import { createFakeLogger } from '../../support/fakes';
-import { NO_DEVICES } from '../../support/questions';
+import { CHOSEN_ON, NO_DEVICES } from '../../support/questions';
 import {
   STUB_WRONG_HEBREW,
   assertMockServerReachable,
@@ -78,7 +78,7 @@ describe('a new_meaning card, prepared, stored and answered', () => {
       { key: 'q2', context: RUN_SENTENCE, context_translation: 'אני מנהל את החנות עם אחי.', context_word: 'run' },
     ]);
     await expectCheck(ns, { overrides: { q1c: { context_meaning: 'לאסוף' }, q2c: { context_meaning: 'לנהל' } } });
-    const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN, NO_DEVICES));
+    const sessionId = await withTx(t.db, (tx) => createSessionRepo(tx).insertPreparingSession('u_1', EN, NO_DEVICES, CHOSEN_ON));
     await deps.sessions.prepareSession({ session_id: sessionId, picks: [pickUp, run], listening: false, speaking: false });
 
     // Stored as a new_meaning, with the known meanings its pick carried.
