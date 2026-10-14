@@ -71,7 +71,9 @@ needs the Android phone.
 4. **After the release: the rule and its key.** Only now, because a rule that runs against a
    container without the secret gets a 404 every five minutes and the alarm below fires. The
    apply creates the connection with a placeholder key, `Bearer unset`; the second command sets
-   the real one. Run them one after the other: a call that goes out with the placeholder is
+   the real one. Start only when step 5's first `curl` prints `{"error":"unauthorized"}`; the
+   release's `apply` job is what makes it so, and its `android` job need not have finished.
+   Run them one after the other: a call that goes out with the placeholder is
    refused with a 401 and deauthorizes the connection (as in the bots' rollout, see
    [the bots runbook](bots.md#the-hourly-trigger)), and the alert emails then arrive. Setting the
    key restores it.
@@ -101,11 +103,18 @@ needs the Android phone.
 5. **Check the route.**
 
    ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' -X POST https://app.wordspal.ai/api/internal/reminders/tick
+   curl -s -w '\n%{http_code}\n' -X POST https://app.wordspal.ai/api/internal/reminders/tick
    ```
 
-   answers 401 once the route is mounted; 404 means the container has no `REMINDER_SECRET`
-   (`./scripts/infra.sh prod apply` hands it over, hosting runbook, *Changing a secret*). With
+   Read the body, not only the code, because a server from before phase 52 also answers 401:
+
+   | Body | Meaning |
+   |---|---|
+   | `{"error":"unauthorized"}`, 401 | the route is mounted: the release is live and has the secret |
+   | `{"error":"not found"}`, 404 | phase 52 is live, but the container has no `REMINDER_SECRET` (`./scripts/infra.sh prod apply` hands it over, hosting runbook, *Changing a secret*) |
+   | `{"error":"not signed in"}`, 401 | the server predates phase 52: its session gate caught the path |
+
+   With
    the secret it answers 202, the same call the rule makes (it also runs a tick, which sends
    whatever is due):
 
