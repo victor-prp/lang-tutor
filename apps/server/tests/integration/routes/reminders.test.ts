@@ -64,12 +64,15 @@ const ANDROID = (token: string) => ({ token, platform: 'android' });
 const UNKNOWN_UUID = '3f2b8c1e-5a4d-4e6f-9b7a-1c2d3e4f5a6b';
 
 describe('the gate', () => {
-  const routes: [string, string, string, unknown?][] = [
-    ['GET /api/me/reminders', 'GET', '/api/me/reminders'],
+  // Every row carries all four elements, a body of `undefined` included: jest-each reads a test
+  // function with more parameters than the row has elements as one that takes a `done` callback,
+  // and then waits for a done() that never comes.
+  const routes: [label: string, method: string, url: string, body: unknown][] = [
+    ['GET /api/me/reminders', 'GET', '/api/me/reminders', undefined],
     ['PUT /api/me/reminders', 'PUT', '/api/me/reminders', SCHEDULE],
     ['PUT /api/me/push-devices', 'PUT', '/api/me/push-devices', ANDROID('ExponentPushToken[a]')],
     ['POST /api/me/push-devices/unregister', 'POST', '/api/me/push-devices/unregister', { token: 'ExponentPushToken[a]' }],
-    ['POST /api/me/reminders/{id}/tap', 'POST', `/api/me/reminders/${UNKNOWN_UUID}/tap`],
+    ['POST /api/me/reminders/{id}/tap', 'POST', `/api/me/reminders/${UNKNOWN_UUID}/tap`, undefined],
   ];
 
   it.each(routes)('%s answers 401 without a session', async (_label, method, url, body) => {
