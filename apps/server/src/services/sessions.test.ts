@@ -7,6 +7,7 @@ import { AnswerKindMismatch, NoSavedWords, SessionNotFound } from '../errors';
 import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { ModelCallRepo } from '../repo/modelCalls';
 import type { PronunciationRepo } from '../repo/pronunciationScores';
+import type { ReminderRepo } from '../repo/reminders';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
@@ -306,6 +307,7 @@ describe('repos', () => {
         photoImport: photoImportRepo,
         modelCall: stub<ModelCallRepo>({}),
         pronunciation: stub<PronunciationRepo>({}),
+        reminders: stub<ReminderRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,
       });

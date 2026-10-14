@@ -306,6 +306,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     photoImport: repos.photoImport ?? unreachableRepo('photo import repo'),
     modelCall: repos.modelCall ?? unreachableRepo('model call repo'),
     pronunciation: repos.pronunciation ?? unreachableRepo('pronunciation repo'),
+    reminders: repos.reminders ?? unreachableRepo('reminders repo'),
   };
   return (run) => run(bound);
 }

@@ -24,6 +24,7 @@ import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
 import { createModelCallRepo } from './repo/modelCalls';
 import { createPronunciationRepo } from './repo/pronunciationScores';
+import { createReminderRepo } from './repo/reminders';
 import { createBotService, type BotService, type MintSession } from './services/bots';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
 import { createGlossService, type GlossService } from './services/glosses';
@@ -114,6 +115,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     gloss: createGlossRepo(tx),
     modelCall: createModelCallRepo(tx),
     pronunciation: createPronunciationRepo(tx),
+    reminders: createReminderRepo(tx),
   };
 }
 
