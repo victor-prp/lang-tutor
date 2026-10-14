@@ -4,7 +4,8 @@
   first design (the transcriber lists homophones) that he rejected because an LLM's list can be
   incomplete or wrong, then a second (a stored check of one pair) that he approved with one
   correction: a 0–1 score rather than yes or no, with a configurable threshold starting at 0.95.
-  Waiting for his review of this spec.
+  Then "go till PR": the plan was executed inline, and the calls it needed are the rulings at
+  the end.
 - **Date:** 2026-10-14
 - **Source:** Victor's report: "When I had to say 'cell' I did it well but it interpreted it as
   'sell'. Any retry still interprets it as 'sell', so the pronunciation of this gloss never
@@ -108,9 +109,9 @@ the two are **when said aloud in the language's standard pronunciation**: 0 comp
   the same.
 - **Pure** (ADR 0001 R3): a new `apps/server/src/domain/soundAlike.ts` holds the prompt, its
   marker for MockServer (`how alike they sound`), and the parse. The schema,
-  `LlmSoundAlikeSchema` in core, is `{ scores: [{ a, b, score }] }`, every field required (an
-  optional string can hang a Gemini call). Each score is matched back to its pair by its two
-  words, never by position. A score outside 0–1, a pair not asked about, or a pair asked about and
+  `LlmSoundAlikeSchema` in core, is `{ scores: [{ key, score }] }`, every field required (an
+  optional string can hang a Gemini call). Each score is matched back to its pair by the short key
+  it was sent with (`p1`, `p2`, …), never by position (ruling R1). A score outside 0–1, a pair not asked about, or a pair asked about and
   missing is dropped: that pair is unscored, which counts as below the threshold.
 - **A new model-call kind**, `sound_alike` (phase 47 D3). It runs on the `judge` client: a learner
   is waiting on it, as on the meaning judge, and the judge's 8 s budget applies.
@@ -229,3 +230,34 @@ whether they should land at or above the default threshold (`same`) or below it 
   letters (phase 25 D6, low confidence there too).
 - **Accent is not judged here.** The transcriber heard the learner; this compares two standard
   pronunciations. A learner whose `ship` is heard as `sheep` stays unheard, which is the point.
+
+## Rulings
+
+Made while executing the plan; each with what it costs if wrong.
+
+- **R1. Scores come back under a short key, not the two words** (D2). Phase 19's reason: a key
+  is one the model cannot mistype, and an echoed word can come back respelled. Costs nothing if
+  wrong.
+- **R2. The order check compares under `COLLATE "C"`** (D3). The server orders a pair by code
+  point; the database's own collation could order it the other way and refuse the insert. Wrong
+  only for a letter outside the Basic Multilingual Plane, which no target language uses.
+- **R3. The threshold is a required dependency**, of the session service and of the composition,
+  as `stockSaveDelaySeconds` is (ADR 0002 R5 forbids defaulted collaborators). Only the test
+  helpers and `config.ts` default it.
+- **R4. One catch covers the read, the call and the write** (D6). A database failure in the
+  second look leaves the transcript unheard and logs `sound_alike_failed`, as a model failure
+  does. If wrong, an outage reads as "not understood" for that attempt rather than as a 500.
+- **R5. The prompt's 0.8 anchor names one consonant for another and a consonant held long or
+  short** (D2, D8). The first eval run scored `taught`/`thought` and `gato`/`gatto` at 1: the
+  over-credit this phase guards against most. The anchor now gives `thin`/`tin` and Italian
+  `nono`/`nonno`, and says a difference a native listener can hear is never 1. After it the group
+  passed 33/33 in three runs. If wrong, a true homophone scored below 1 stays unheard, as today.
+- **R6. Integration and e2e run in CI only.** All nine lanes were in use, so this worktree has
+  none; unit tests, typechecks, the ADR checks and the sound-alike eval ran locally.
+
+## Measured
+
+The eval's sound-alike group, three runs on 2026-10-14, every score identical across runs:
+homophones 1; one sound apart 0.8; `work`/`walk` 0.5. The scores sit on the prompt's anchors and
+nowhere else, so today any threshold between 0.8 and 1 draws the same line, and 0.95 means "the
+model said identical". Each call took about 0.6 s (31 calls in 5 s at a concurrency of 4).
