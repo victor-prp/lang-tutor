@@ -254,6 +254,25 @@ export async function expectTranscription(request: APIRequestContext, heard: str
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
 
+/** Phase 50 (spec D2). The sound-alike call's answer for one pair, matched on
+ *  the server's SOUND_ALIKE_MARKER (apps/server/src/domain/soundAlike.ts) and
+ *  on the heard word, so two queued answers cannot swap. Consumed once. */
+export async function expectSoundAlike(request: APIRequestContext, heard: string, score: number): Promise<void> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      priority: 10,
+      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: `(?=[\\s\\S]*how alike they sound)[\\s\\S]*${heard}[\\s\\S]*` } },
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: envelope({ scores: [{ key: 'p1', score }] }),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
+
 /**
  * Phase 26. A model answer for the one call whose request body matches
  * `bodyRegex`. A photo import makes several calls at once (the read, a lookup
