@@ -35,6 +35,7 @@ describe('loadConfig', () => {
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
       stockSaveDelaySeconds: 30,
+      soundAlikeThreshold: 0.95,
       version: 'dev',
       webDistDir: null,
     });
@@ -55,6 +56,11 @@ describe('loadConfig', () => {
     expect(loadConfig({}).speechTimeoutMs).toBe(8_000);
     expect(loadConfig({ SPEECH_TIMEOUT_MS: '3000' }).speechTimeoutMs).toBe(3_000);
     expect(loadConfig({ SPEECH_TIMEOUT_MS: 'nonsense' }).speechTimeoutMs).toBe(8_000);
+  });
+
+  it('reads the sound-alike threshold, defaulting to 0.95 (phase 50 D4)', () => {
+    expect(loadConfig({ SOUND_ALIKE_THRESHOLD: '0.9' }).soundAlikeThreshold).toBe(0.9);
+    expect(loadConfig({ SOUND_ALIKE_THRESHOLD: '2' }).soundAlikeThreshold).toBe(0.95);
   });
 
   it('reads the judge budget, defaulting to 8 s (phase 27)', () => {
@@ -84,6 +90,7 @@ describe('loadConfig', () => {
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
       stockSaveDelaySeconds: 30,
+      soundAlikeThreshold: 0.95,
       version: 'dev',
       webDistDir: null,
     });

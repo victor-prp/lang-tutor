@@ -5,6 +5,7 @@ import {
   SESSION_GENERATION_BUDGET_MS,
   STOCK_SAVE_DELAY_SECONDS,
 } from './domain/jobs';
+import { soundAlikeThreshold } from './domain/soundAlike';
 
 // A pure function of its argument: it reads no global, so a test hands it a
 // literal object rather than mutating the process environment.
@@ -22,6 +23,9 @@ export type Config = {
   photoReadTimeoutMs: number;
   // Phase 43 (ruling R3). How long a save's request for a session in stock waits.
   stockSaveDelaySeconds: number;
+  // Phase 50 (spec D4). The pronunciation score at which an unheard transcript
+  // is the card's word.
+  soundAlikeThreshold: number;
   // Phase 30 (spec D2). The release tag the image was built from, published on
   // /health so a release can prove which image answers. `dev` everywhere else.
   version: string;
@@ -88,6 +92,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     // Phase 43 (ruling R3). e2e sets it past the length of a run, so only the
     // home screen's create builds a spec's first list session.
     stockSaveDelaySeconds: Number(env.STOCK_SAVE_DELAY_SECONDS) || STOCK_SAVE_DELAY_SECONDS,
+    soundAlikeThreshold: soundAlikeThreshold(env.SOUND_ALIKE_THRESHOLD),
     version: env.APP_VERSION?.trim() || 'dev',
     webDistDir: env.WEB_DIST_DIR?.trim() || null,
   };
