@@ -17,6 +17,7 @@
     "image:build": "bash scripts/lane-env.sh bash scripts/image-build.sh",
     "image:run": "bash scripts/lane-env.sh bash scripts/image-run.sh",
     "server": "bash scripts/lane-env.sh bash scripts/with-commit.sh npm run dev --workspace apps/server",
+    "rerun": "bash scripts/lane-env.sh bash scripts/rerun.sh",
     "e2e": "bash scripts/lane-env.sh bash scripts/with-commit.sh npm run e2e --workspace e2e",
     "e2e:image": "E2E_TARGET=image bash scripts/lane-env.sh bash scripts/with-commit.sh npm run e2e --workspace e2e",
     "test": "npm run test:unit && echo '' && echo 'Note: unit tests only. Run npm run test:all before pushing - database-backed tests did not run.'",
