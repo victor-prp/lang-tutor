@@ -52,6 +52,7 @@ const OPEN = new Set([
 /** Operations that never address another user's things: each acts on the caller's own. */
 const OWN_ONLY = new Set([
   'get /api/me',
+  'put /api/me/time-zone', // acts on c.var.actor only (phase 52)
   'post /api/users',
   'get /api/enrollments',
   'post /api/enrollments',
