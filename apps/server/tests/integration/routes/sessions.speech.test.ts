@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { createFakeLogger } from '../../support/fakes';
@@ -11,7 +10,7 @@ import {
   geminiBaseUrlFor,
   mockNamespace,
 } from '../../support/mockServer';
-import { insertListSession, readStoredAnswers, type AskedGloss } from '../../support/questions';
+import { insertListSession, readPronunciationScores, readStoredAnswers, type AskedGloss } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -111,10 +110,7 @@ describe('POST /api/sessions/:id/speech', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ heard: 'tohm', verdict: 'understood', next: { complete: false } });
     expect(await readStoredAnswers(t.db, sessionId)).toEqual([expect.objectContaining({ answer_string: 'tohm', verdict: 'understood' })]);
-    const { rows } = await t.db.execute<{ language_code: string; form_a: string; form_b: string; score: number }>(
-      sql`select language_code, form_a, form_b, score from pronunciation_scores`,
-    );
-    expect(rows).toEqual([{ language_code: 'en', form_a: 'tohm', form_b: 'tome', score: 1 }]);
+    expect(await readPronunciationScores(t.db)).toEqual([{ language: 'en', a: 'tohm', b: 'tome', score: 1 }]);
   });
 
   it('answers say the translation with an alternative, then completes with a skip left out of the score', async () => {
