@@ -76,3 +76,8 @@ export async function copyText(copy: (text: string) => Promise<boolean>, text: s
     return false;
   }
 }
+
+/** Copying waits for /health, so a report never says `Server: …` (review M1). */
+export function canCopy(server: ServerRelease): boolean {
+  return server.state !== 'loading';
+}

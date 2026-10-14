@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 import {
   ApiError,
+  HEALTH_TIMEOUT_MS,
   JUDGE_REQUEST_TIMEOUT_MS,
   PHOTO_UPLOAD_TIMEOUT_MS,
   SPEECH_UPLOAD_TIMEOUT_MS,
@@ -42,6 +43,26 @@ describe('api/client', () => {
     const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => body }));
     await expect(buildClient(mockFetch).health()).resolves.toEqual(body);
     expect(mockFetch).toHaveBeenCalledWith('http://test.local/health', expect.objectContaining({ method: 'GET' }));
+  });
+
+  // Phase 49 (review I1). React Native's Android client has no timeout of its
+  // own, so a server that accepts and never answers would leave About at "…".
+  it('gives up on a /health that never answers', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetch = jest.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          }),
+      );
+      const pending = buildClient(fetch as unknown as jest.Mock).health();
+      const outcome = expect(pending).rejects.toThrow('aborted');
+      await jest.advanceTimersByTimeAsync(HEALTH_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('reports a 401 and still throws it', async () => {

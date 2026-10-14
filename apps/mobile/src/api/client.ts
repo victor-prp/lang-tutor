@@ -67,6 +67,10 @@ export const JUDGE_REQUEST_TIMEOUT_MS = 15_000;
  *  for a retry, instead of waiting with both buttons disabled. */
 export const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
 
+/** Phase 49 (review I1). React Native sets no timeout of its own; past this the
+ *  About screen's Server line reads "not reachable" instead of waiting forever. */
+export const HEALTH_TIMEOUT_MS = 5_000;
+
 export type ApiClientDeps = {
   baseUrl: string;
   fetch: typeof globalThis.fetch;
@@ -149,7 +153,16 @@ export function createApiClient({
 
   return {
     /** Phase 49 (spec D1). The server's own release, for the About screen. */
-    health: () => getJson<HealthResponse>('/health'),
+    health: async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+      try {
+        const res = await send('GET', '/health', { signal: controller.signal });
+        return (await res.json()) as HealthResponse;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     me: () => getJson<MeResponse>('/api/me'),
     createProfile: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>

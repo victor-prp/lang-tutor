@@ -37,8 +37,17 @@ echo
 expect "a clean tree: the 7-character commit" "$head" "$(run APP_COMMIT)"
 expect "the app's bundle gets the same value" "$head" "$(run EXPO_PUBLIC_APP_COMMIT)"
 
-echo change > file
-expect "an untracked file marks the tree dirty" "$head-dirty" "$(run APP_COMMIT)"
+# Untracked files do not count, as with `git describe --dirty`: the main
+# checkout keeps untracked notes, and would otherwise always read dirty.
+echo note > untracked
+expect "an untracked file leaves the tree clean" "$head" "$(run APP_COMMIT)"
+
+echo one > file
+git add file
+git -c user.email=t@t -c user.name=t commit -q -m two
+head=$(git rev-parse --short=7 HEAD)
+echo changed > file
+expect "a changed tracked file marks the tree dirty" "$head-dirty" "$(run APP_COMMIT)"
 
 expect "a commit already set is kept" "a3f9c21" "$(run APP_COMMIT APP_COMMIT=a3f9c21)"
 expect "and reaches the bundle too" "a3f9c21" "$(run EXPO_PUBLIC_APP_COMMIT APP_COMMIT=a3f9c21)"

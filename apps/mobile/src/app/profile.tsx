@@ -168,7 +168,8 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl' },
   rowValue: { fontSize: fontSizes.md, color: colors.text, fontWeight: '700' },
-  link: { color: colors.primary, writingDirection: 'ltr' },
+  // Review M6: `dev (e91c0aa, uncommitted changes)` is wider than a small phone's row.
+  link: { flexShrink: 1, color: colors.primary, writingDirection: 'ltr' },
   button: {
     backgroundColor: colors.primary,
     borderRadius: radii.md,

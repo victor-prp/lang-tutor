@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  canCopy,
   copyText,
   mobileAppLine,
   nativeLine,
@@ -137,5 +138,14 @@ describe('copyText', () => {
         throw new Error('denied');
       }, 'report'),
     ).resolves.toBe(false);
+  });
+});
+
+// Phase 49 (review M1). A report copied before /health answers would say "Server: …".
+describe('canCopy', () => {
+  it('waits for the server line', () => {
+    expect(canCopy({ state: 'loading' })).toBe(false);
+    expect(canCopy({ state: 'unreachable' })).toBe(true);
+    expect(canCopy({ state: 'ok', version: 'v1' })).toBe(true);
   });
 });

@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useApi } from '@/hooks/useApi';
 import { useAppRelease } from '@/hooks/useAppUpdates';
 import {
+  canCopy,
   copyText,
   mobileAppLine,
   nativeLine,
@@ -61,7 +62,13 @@ export default function AboutScreen() {
         <Line label="Native" value={nativeLine(release.native)} testID="about-native" />
       </View>
 
-      <Pressable accessibilityRole="button" testID="about-copy" onPress={onCopy} style={styles.button}>
+      <Pressable
+        accessibilityRole="button"
+        testID="about-copy"
+        disabled={!canCopy(server)}
+        onPress={onCopy}
+        style={[styles.button, !canCopy(server) && styles.disabled]}
+      >
         <Text style={styles.buttonLabel}>{copied ? strings.aboutCopied : strings.aboutCopy}</Text>
       </Pressable>
 
@@ -106,6 +113,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
+  disabled: { opacity: 0.5 },
   buttonLabel: {
     color: colors.onPrimary,
     fontSize: fontSizes.md,
