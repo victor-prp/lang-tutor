@@ -97,7 +97,8 @@ the Mobile App and Server lines against `APP_COMMIT`, Native `web`, and the copi
   release's shell variables never reach, so the bundle inside a new binary carries no tag. When
   the app runs that bundle (`Updates.isEmbeddedLaunch`, updates enabled, no version inlined), the
   Mobile App line reads `built-in`, not `dev`. The same release run publishes an update for that
-  build minutes later.
+  build minutes later. *Amended after release:* `metro.config.js` maps EAS Build's
+  `EAS_BUILD_GIT_COMMIT_HASH` to `EXPO_PUBLIC_APP_COMMIT`, so the line reads `built-in (cac24f2)`.
 - **R2 — Copy uses `expo-clipboard`, not the share sheet.** One tap was the agreed scope.
   `Share` would avoid a native module, but it is two taps on Android and has no fallback on
   desktop web. The price: the fingerprint changes, so the first release after this builds and
