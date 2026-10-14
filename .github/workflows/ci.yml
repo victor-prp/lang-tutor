@@ -67,6 +67,8 @@ jobs:
       - run: ./scripts/test-android-release.sh
       # Phase 49. The commit the server and the app name, against a throwaway repository.
       - run: ./scripts/test-with-commit.sh
+      # Phase 51. npm run rerun's steps and refusals, against a stub npm and real listeners.
+      - run: ./scripts/test-rerun.sh
 
   check-types:
     runs-on: ubuntu-latest

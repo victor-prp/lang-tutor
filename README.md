@@ -220,6 +220,16 @@ npm run server       # terminal 1
 npm run mobile       # terminal 2
 ```
 
+**After a merge**, `npm run rerun` in the main checkout does the rest in one terminal. It pulls
+`master` (fast-forward only), runs `npm install` when `package-lock.json` changed, then
+`npm run db:migrate`, then stops the server and Metro this checkout is running, and starts
+both again: the server in the background with its lines prefixed `[server]`, Metro in the
+foreground with its QR code and keys. Metro starts only once `/health` names the commit just
+pulled, and Ctrl-C stops both. The first step that fails stops it and names itself, and
+nothing is stopped before pull, install and migrate succeed. It never stops a process
+started outside this checkout, or one whose process group a shell leads; it names those for
+you to stop yourself. It runs only in lane 0 on `master`.
+
 > **Migrations `0003` and `0005` each clear the dictionary and the quiz.** Both run
 > `TRUNCATE dict_lexemes, sessions CASCADE` before restructuring, so applying either drops
 > every seeded and looked-up word, every question, and all session history — `answers`,
