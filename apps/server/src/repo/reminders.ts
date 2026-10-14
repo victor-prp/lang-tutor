@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, count, eq, exists, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
 import { enrollments, pushDevices, reminderSettings, reminders, sessions, users } from '../db/schema';
@@ -60,9 +60,11 @@ export function createReminderRepo(tx: Tx) {
     },
 
     /**
-     * Every learner with at least one device, in id order: their time zone, their stored
-     * schedule (null when they have none), and their tokens in token order. `users` is not
-     * a table this repository owns; its time zone is read here and written in repo/users.ts.
+     * Every learner with at least one device and at least one enrollment, in id order: their
+     * time zone, their stored schedule (null when they have none), and their tokens in token
+     * order. A tutor with students and no course of their own has nothing to practise, so no
+     * reminder (phase 52, final review I2). `users` and `enrollments` are not tables this
+     * repository owns; the zone is read here and written in repo/users.ts.
      */
     candidates: async (): Promise<
       { userId: string; timeZone: string; settings: ReminderSettings | null; tokens: string[] }[]
@@ -80,6 +82,7 @@ export function createReminderRepo(tx: Tx) {
         .from(pushDevices)
         .innerJoin(users, eq(users.id, pushDevices.userId))
         .leftJoin(reminderSettings, eq(reminderSettings.userId, pushDevices.userId))
+        .where(exists(tx.select({ one: sql`1` }).from(enrollments).where(eq(enrollments.userId, users.id))))
         .orderBy(asc(pushDevices.userId), asc(pushDevices.token));
       const byUser = new Map<
         string,

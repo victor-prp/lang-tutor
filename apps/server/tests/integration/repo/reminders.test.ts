@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import { enrollments, pushDevices, reminders, reminderSettings, sessions, users } from '../../../src/db/schema';
 import type { ReminderSettings } from '../../../src/domain/reminders';
 import { createReminderRepo, type ReminderResult } from '../../../src/repo/reminders';
-import { enrollmentOf, seedEnrollment, seedUser, setTimeZone } from '../../support/seedUser';
+import { enrollmentOf, seedEnrollment, seedUser, seedUserWithoutEnrollment, setTimeZone } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { withTx } from '../../support/withTx';
 
@@ -164,6 +164,31 @@ describe('candidates (D5)', () => {
 
   it('is empty when no learner has a device', async () => {
     expect(await repo((r) => r.candidates())).toEqual([]);
+  });
+
+  // Final review I2: a tutor with students and no course of their own has nothing to practise.
+  it('leaves out a user with a device and no enrollment, and lists them once they own one', async () => {
+    await seedUserWithoutEnrollment(t.db, 'u_tutor');
+    await repo((r) => r.upsertDevice({ token: 'ExponentPushToken[t]', userId: 'u_tutor', platform: 'android' }));
+    await repo((r) => r.upsertDevice({ token: 'ExponentPushToken[a]', userId: 'u_1', platform: 'android' }));
+
+    expect((await repo((r) => r.candidates())).map((c) => c.userId)).toEqual(['u_1']);
+
+    await seedEnrollment(t.db, { id: 'e_u_tutor', userId: 'u_tutor', targetLanguage: 'en' });
+    expect(await repo((r) => r.candidates())).toEqual([
+      { userId: 'u_1', timeZone: 'UTC', settings: null, tokens: ['ExponentPushToken[a]'] },
+      { userId: 'u_tutor', timeZone: 'UTC', settings: null, tokens: ['ExponentPushToken[t]'] },
+    ]);
+  });
+
+  it('lists a learner with several enrollments once, with every token', async () => {
+    await seedEnrollment(t.db, { id: 'e_u_1_it', userId: 'u_1', targetLanguage: 'it' });
+    await repo((r) => r.upsertDevice({ token: 'ExponentPushToken[a]', userId: 'u_1', platform: 'android' }));
+    await repo((r) => r.upsertDevice({ token: 'ExponentPushToken[b]', userId: 'u_1', platform: 'android' }));
+
+    expect(await repo((r) => r.candidates())).toEqual([
+      { userId: 'u_1', timeZone: 'UTC', settings: null, tokens: ['ExponentPushToken[a]', 'ExponentPushToken[b]'] },
+    ]);
   });
 });
 

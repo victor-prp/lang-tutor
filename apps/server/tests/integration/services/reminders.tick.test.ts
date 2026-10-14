@@ -12,7 +12,7 @@ import {
   stubPushSend,
 } from '../../support/mockServer';
 import { allReminders, devicesOf, pinDecidedAt, remindersOf, seedCompletedSession } from '../../support/reminderRows';
-import { seedUser, setTimeZone } from '../../support/seedUser';
+import { seedUser, seedUserWithoutEnrollment, setTimeZone } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
@@ -85,7 +85,7 @@ describe('the tick', () => {
     expect(rows).toHaveLength(1);
     const [row] = rows;
     expect(await pushSends(ns)).toEqual([
-      { to: tokenOf('u_1'), title: TITLE, body: BODY, channelId: 'reminders', data: { reminder_id: row.id } },
+      { to: tokenOf('u_1'), title: TITLE, body: BODY, channelId: 'reminders', priority: 'high', data: { reminder_id: row.id } },
     ]);
     expect(row).toMatchObject({
       localDay: DAY,
@@ -196,6 +196,24 @@ describe('the tick', () => {
     expect(await allReminders(t.db)).toEqual([]);
     expect(await pushSends(ns)).toEqual([]);
     expect(ticks()).toEqual([{ event: 'reminder_tick', candidates: 2, claimed: 0, sent: 0, skipped: 0, failed: 0 }]);
+  });
+});
+
+describe('who is reminded', () => {
+  // Final review I2: a tutor who only teaches has a phone and nothing to practise.
+  it('sends nothing to a user with a phone and no enrollment, and the learner beside them is still sent', async () => {
+    await seedUserWithoutEnrollment(t.db, 'u_tutor');
+    await setTimeZone(t.db, 'u_tutor', ZONE);
+    await service.registerDevice('u_tutor', { token: tokenOf('u_tutor'), platform: 'android' });
+    await learnerWithPhone('u_1');
+    await stubPushSend(ns, [{ status: 'ok', id: 'ticket-1' }]);
+
+    await service.tick();
+
+    expect(await rowsOf('u_tutor')).toEqual([]);
+    expect((await rowsOf('u_1')).map((row) => row.outcome)).toEqual(['sent']);
+    expect((await pushSends(ns)).map((message) => message.to)).toEqual([tokenOf('u_1')]);
+    expect(ticks()).toEqual([{ event: 'reminder_tick', candidates: 1, claimed: 1, sent: 1, skipped: 0, failed: 0 }]);
   });
 });
 
