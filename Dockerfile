@@ -25,8 +25,10 @@ COPY . .
 ARG EXPO_PUBLIC_API_URL=
 # Phase 32 (spec D10). The release tag, shown on the profile screen.
 ARG APP_VERSION=dev
+# Phase 49 (spec D2). Its commit, shown beside it: .git is not in the context.
+ARG APP_COMMIT=unknown
 RUN if [ -z "$EXPO_PUBLIC_API_URL" ]; then unset EXPO_PUBLIC_API_URL; fi \
- && EXPO_PUBLIC_APP_VERSION="$APP_VERSION" npm run build:web --workspace apps/mobile \
+ && EXPO_PUBLIC_APP_VERSION="$APP_VERSION" EXPO_PUBLIC_APP_COMMIT="$APP_COMMIT" npm run build:web --workspace apps/mobile \
  && npm run build --workspace apps/server
 
 # --- runtime: production dependencies, the bundle and the export -------------
@@ -49,7 +51,8 @@ COPY --from=build /repo/apps/mobile/dist web
 # file as its sslrootcert.
 ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem certs/rds-global-bundle.pem
 ARG APP_VERSION=dev
-ENV APP_VERSION=$APP_VERSION WEB_DIST_DIR=/app/web
+ARG APP_COMMIT=unknown
+ENV APP_VERSION=$APP_VERSION APP_COMMIT=$APP_COMMIT WEB_DIST_DIR=/app/web
 USER node
 WORKDIR /app/apps/server
 # ADR 0010: migrate, then serve. A failed migration exits non-zero, the server

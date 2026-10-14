@@ -54,7 +54,7 @@ case "$1" in
     [ "$SUBMIT_FAILS" = 1 ] && { echo "submission failed" >&2; exit 1; }
     exit 0 ;;
   update)
-    echo "eas $* APP_VERSION=${EXPO_PUBLIC_APP_VERSION:-unset}" >> "$LOG" ;;
+    echo "eas $* APP_VERSION=${EXPO_PUBLIC_APP_VERSION:-unset} APP_COMMIT=${EXPO_PUBLIC_APP_COMMIT:-unset}" >> "$LOG" ;;
   *) echo "eas $*" >> "$LOG"; exit 2 ;;
 esac
 STUB
@@ -101,6 +101,9 @@ expect_calls "same fingerprint, on Play: publishes an update only" 0 \
   "yes:eas update --branch production" "no:eas build " "no:eas submit"
 expect_calls "the update carries the tag and the build it targets as its message, and the tag as the app version" 0 \
   "yes:--message v2026.10.11.1 for build b1" "yes:APP_VERSION=v2026.10.11.1" "yes:--environment production"
+# Phase 49 (spec D2): the tag's commit, as the About screen shows it.
+commit=$(cd "$REPO" && git rev-parse --short=7 HEAD)
+expect_calls "the update carries the tag's commit" 0 "yes:APP_COMMIT=$commit"
 expect_calls "the marker is asked for this fingerprint on production" 0 \
   "yes:update:list --branch production --runtime-version fp1"
 
