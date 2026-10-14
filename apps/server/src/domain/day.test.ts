@@ -9,7 +9,7 @@ import { applySession, type MemoryRow } from './memoryUpdate';
 import { RUNGS, planCards } from './plan';
 import { daysBetween, evaluateSession, type AnsweredQuestion, type ProgressRow } from './progress';
 import { chooseWithTargets, type ActiveTarget, type TargetSplit } from './targetSession';
-import { owedNew, readinessOf, recallOnDue, splitSlots, targetWish, type TargetKind } from './targets';
+import { owedNew, readinessOf, recallOnDue, splitSlots, targetWish, type ShareReason, type TargetKind } from './targets';
 import { dayState, type DayAnswer } from './today';
 
 /**
@@ -506,10 +506,11 @@ const dayIndex = (date: string) => daysBetween(LANE0_DAY.today, date);
  * Spec D4–D6, as amended by the graded wish. Each session's recorded split, recomputed from the
  * session's own input: daysLeft and the word count from the target, the ready count from the
  * memory the session read, the wish from targetWish, the slots from splitSlots over the wishes.
- * Then the picks: each target, in pool order, picks at least its slots and the slots the targets
- * before it could not use, or all its words when it has fewer (they are all free: no family, no
- * shared key); exactly that whenever the main path filled its share, as no slot then comes back to
- * the targets in a second pass (ruling R-D6).
+ * Then the picks, exactly: each target, in pool order, its slots and the slots the targets before
+ * it could not use, or all its words when it has fewer (they are all free: no family, no shared
+ * key); the main path its share, the session's other slots. Lane 0's list always leaves the main
+ * path words it has not answered today, so it fills its share, and no slot comes back to the
+ * targets in a second pass (ruling R-D6): a target that took the main path's share fails here.
  */
 function expectSplitsByTheRules(run: TargetRun) {
   run.sessions.forEach((session, at) => {
@@ -546,11 +547,10 @@ function expectSplitsByTheRules(run: TargetRun) {
       return fills;
     });
     const mainShare = SESSION_LENGTH - [...slots.values()].reduce((sum, n) => sum + n, 0) + carried;
-    const mainFilled = mainPicks(run, at).length >= mainShare;
-    targets.forEach((target, i) => {
-      const picked = picksOf(session, target.glossIds).length;
-      expect({ at, target: target.id, picked: Math.min(picked, least[i]) }).toEqual({ at, target: target.id, picked: least[i] });
-      if (mainFilled) expect({ at, target: target.id, picked }).toEqual({ at, target: target.id, picked: least[i] });
+    expect({ at, picked: targets.map((target) => picksOf(session, target.glossIds).length), main: mainPicks(run, at).length }).toEqual({
+      at,
+      picked: least,
+      main: mainShare,
     });
   });
 }
@@ -580,10 +580,12 @@ function itKeepsTheSessionRules(run: TargetRun, end: string) {
     expectOneGlossPerFamily(run.sessions);
   });
 
-  it('makes the speaking pick once a session at most', () => {
+  it('makes the speaking pick once a session at most, and makes it', () => {
     run.sessions.forEach(({ picks }, at) => {
       expect({ at, speak: picks.filter((pick) => pick.cls === 'SPEAK').length <= SPEAKING_PER_SESSION }).toEqual({ at, speak: true });
     });
+    // The check above has something to check: the run makes speaking picks.
+    expect(run.sessions.some(({ picks }) => picks.some((pick) => pick.cls === 'SPEAK'))).toBe(true);
   });
 
   it("asks the main path's due words again on each day after the date", () => {
@@ -670,10 +672,10 @@ describe("a target, phase 37's learner: homework due in 14 days, the same twenty
   itKeepsTheSessionRules(run, homework.dueOn);
 });
 
-describe.each<[TargetKind, number]>([
-  ['exam', 5],
-  ['homework', 3],
-])('a target, a learner who never misses: %s due in 14 days, twenty words (phase 53, spec §2 rows 1 and 2)', (kind, steady) => {
+describe.each<[TargetKind, number, ShareReason, number]>([
+  ['exam', 5, 'exclusive', 10],
+  ['homework', 3, 'run_up', 7],
+])('a target, a learner who never misses: %s due in 14 days, twenty words (phase 53, spec §2 rows 1 and 2)', (kind, steady, lastReason, lastShare) => {
   const target: ActiveTarget = { id: kind, kind, dueOn: dueIn(14), glossIds: listIds(1, 20) };
   const run = runTargets(withList(20), 15, () => [target], NEVER_MISSES);
 
@@ -689,6 +691,19 @@ describe.each<[TargetKind, number]>([
         at,
         target: steady,
         main: SESSION_LENGTH - steady,
+      });
+    }
+  });
+
+  it(`asks ${lastShare} of 10 on its last day, all ready (${lastReason}), the main path the rest`, () => {
+    const last = run.sessions.flatMap((session, at) => (session.split[0]?.daysLeft === 1 ? [{ session, at }] : []));
+    expect(last).toHaveLength(SESSIONS_A_DAY);
+    for (const { session, at } of last) {
+      expect({ at, split: session.split[0], target: picksOf(session, target.glossIds).length, main: mainPicks(run, at).length }).toEqual({
+        at,
+        split: expect.objectContaining({ reason: lastReason, readyCount: target.glossIds.length }),
+        target: lastShare,
+        main: SESSION_LENGTH - lastShare,
       });
     }
   });
