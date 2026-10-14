@@ -215,7 +215,8 @@ const reminders = createReminders({
   engine: {
     setChannel: async () => {
       await Notifications.setNotificationChannelAsync('reminders', {
-        name: 'Reminders',
+        // The name Android's notification settings show, so Hebrew like the rest (the importance cannot change later).
+        name: 'תזכורות',
         importance: Notifications.AndroidImportance.DEFAULT,
       });
     },
