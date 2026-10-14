@@ -14,6 +14,7 @@ import { createEnrollmentsRouter } from './routes/enrollments';
 import { createGrantsRouter } from './routes/grants';
 import { createMeRouter } from './routes/me';
 import { createPhotoImportsRouter } from './routes/photoImports';
+import { createRemindersRouter } from './routes/reminders';
 import { createSessionsRouter } from './routes/sessions';
 import { createTranslationsRouter } from './routes/translations';
 import { createUsersRouter } from './routes/users';
@@ -93,6 +94,7 @@ export function createApp(deps: AppDeps) {
     }),
   );
   app.route('/api', createMeRouter(deps.users));
+  app.route('/api', createRemindersRouter(deps.reminders));
   app.route('/api', createUsersRouter(deps.users));
   app.route('/api', createEnrollmentsRouter(deps.enrollments));
   app.route('/api', createGrantsRouter(deps.grants));

@@ -102,6 +102,9 @@ describe('repos', () => {
     setTimeZone: () => {
       throw new Error('the session service must not set a time zone');
     },
+    findTimeZone: () => {
+      throw new Error('the session service must not read a time zone');
+    },
     setBotDay: () => {
       throw new Error("the session service must not move a bot's day");
     },

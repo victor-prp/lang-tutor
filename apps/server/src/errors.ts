@@ -344,6 +344,16 @@ export class InvalidTimeZone extends Error {
   }
 }
 
+/** Phase 52 (spec D6). The reminder a tap reports is not the caller's, or does not exist, or
+ *  the id is not even a uuid. One error for all three, so the route's 404 cannot tell a
+ *  stranger's reminder from a missing one (ADR 0009 R7). */
+export class ReminderNotFound extends Error {
+  constructor(readonly reminderId: string) {
+    super(`no reminder ${reminderId}`);
+    this.name = 'ReminderNotFound';
+  }
+}
+
 /** Phase 29 (spec D12). The signed-in user already has a profile. */
 export class ProfileExists extends Error {
   constructor(readonly userId: string) {

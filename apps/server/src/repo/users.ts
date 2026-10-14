@@ -87,6 +87,13 @@ export function createUserRepo(tx: Tx) {
       await tx.update(users).set({ timeZone }).where(eq(users.id, userId));
     },
 
+    /** Phase 52 (spec D2). The zone the learner's schedule is read in: what the app last reported,
+     *  UTC until it has. Undefined for an id with no profile. */
+    findTimeZone: async (userId: string): Promise<string | undefined> => {
+      const [row] = await tx.select({ timeZone: users.timeZone }).from(users).where(eq(users.id, userId));
+      return row?.timeZone;
+    },
+
     /**
      * Phase 35 (spec D11). A bot profile under the id of its sign-in identity,
      * on `day`. Only `npm run db:bots:create` calls it (db/bots.ts). A learner

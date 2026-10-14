@@ -72,6 +72,10 @@ import type {
   StartSessionRequestSchema,
   StartSessionResponseSchema,
   TimeZoneRequestSchema,
+  ReminderSettingsSchema,
+  ReminderSettingsResponseSchema,
+  PushDeviceRequestSchema,
+  PushDeviceUnregisterRequestSchema,
   TypedTranslationQuestionSchema,
   ListenChoiceQuestionSchema,
   DictationQuestionSchema,
@@ -149,6 +153,10 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type User = z.infer<typeof UserSchema>;
 export type CreateUserRequest = z.infer<typeof CreateUserRequestSchema>;
 export type TimeZoneRequest = z.infer<typeof TimeZoneRequestSchema>;
+export type ReminderSettings = z.infer<typeof ReminderSettingsSchema>;
+export type ReminderSettingsResponse = z.infer<typeof ReminderSettingsResponseSchema>;
+export type PushDeviceRequest = z.infer<typeof PushDeviceRequestSchema>;
+export type PushDeviceUnregisterRequest = z.infer<typeof PushDeviceUnregisterRequestSchema>;
 export type TranslationGuardReason = z.infer<typeof TranslationGuardReasonSchema>;
 export type TranslationKind = z.infer<typeof TranslationKindSchema>;
 export type PartOfSpeech = z.infer<typeof PartOfSpeechSchema>;

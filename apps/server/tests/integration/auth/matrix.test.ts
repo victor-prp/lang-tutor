@@ -53,6 +53,15 @@ const OPEN = new Set([
 const OWN_ONLY = new Set([
   'get /api/me',
   'put /api/me/time-zone', // acts on c.var.actor only (phase 52)
+  // Phase 52 (spec D2, D4, D6). Each acts on c.var.actor and no one else. The tap names a reminder
+  // in its path, but it finds it only under the caller's id: a stranger's reminder answers 404, the
+  // same as a missing one, so it has no 403 for the stranger fixtures to expect. Asserted in
+  // routes/reminders.test.ts.
+  'get /api/me/reminders',
+  'put /api/me/reminders',
+  'put /api/me/push-devices',
+  'post /api/me/push-devices/unregister',
+  'post /api/me/reminders/{id}/tap',
   'post /api/users',
   'get /api/enrollments',
   'post /api/enrollments',

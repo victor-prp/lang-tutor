@@ -16,6 +16,7 @@ import type { PronunciationRepo } from '../../src/repo/pronunciationScores';
 import type { CorrectionRow, PersistEntriesInput, DictRepo, GlossCounts, MergePair } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { PhotoImportService } from '../../src/services/photoImports';
+import type { ReminderService } from '../../src/services/reminders';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
 import type { SessionService } from '../../src/services/sessions';
@@ -91,6 +92,13 @@ export function createFakeAppDeps(): AppDeps {
     wordDetail: unreachable,
   };
   const grants: GrantService = { invite: unreachable, list: unreachable, accept: unreachable, end: unreachable };
+  const reminders: ReminderService = {
+    settings: unreachable,
+    putSettings: unreachable,
+    registerDevice: unreachable,
+    unregisterDevice: unreachable,
+    tap: unreachable,
+  };
   const photoImports: PhotoImportService = {
     create: unreachable,
     list: unreachable,
@@ -110,6 +118,7 @@ export function createFakeAppDeps(): AppDeps {
     translations,
     vocabulary,
     grants,
+    reminders,
     photoImports,
     glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },
@@ -252,6 +261,8 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
     setTimeZone: async (userId, timeZone) => {
       timeZones.set(userId, timeZone);
     },
+    findTimeZone: async (userId) =>
+      rows.some((row) => row.id === userId) ? (timeZones.get(userId) ?? 'UTC') : undefined,
     findByUsername: async (username) => rows.find((row) => row.username === username),
     findById: async (id) => rows.find((row) => row.id === id),
     // Phase 35. Every row here is a learner, so no name names a bot.

@@ -130,4 +130,17 @@ describe('createUserRepo', () => {
   it('returns undefined for an id nobody has', async () => {
     expect(await withTx(t.db, (tx) => createUserRepo(tx).findById('no-such-id'))).toBeUndefined();
   });
+
+  // Phase 52 (spec D1, D2).
+  it('stores UTC until a zone is reported, and then the latest report', async () => {
+    await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findTimeZone('u_dana'))).toBe('UTC');
+
+    await withTx(t.db, (tx) => createUserRepo(tx).setTimeZone('u_dana', 'Asia/Jerusalem'));
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findTimeZone('u_dana'))).toBe('Asia/Jerusalem');
+  });
+
+  it('has no time zone for an id nobody has', async () => {
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findTimeZone('no-such-id'))).toBeUndefined();
+  });
 });

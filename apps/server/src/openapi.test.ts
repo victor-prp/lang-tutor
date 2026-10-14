@@ -113,7 +113,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all twenty-nine paths and nothing else', async () => {
+  it('contains all thirty-three paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -130,6 +130,10 @@ describe('the document as a whole', () => {
       '/api/grants/{id}',
       '/api/grants/{id}/accept',
       '/api/me',
+      '/api/me/push-devices',
+      '/api/me/push-devices/unregister',
+      '/api/me/reminders',
+      '/api/me/reminders/{id}/tap',
       '/api/me/time-zone',
       '/api/photo-imports/{id}',
       '/api/photo-imports/{id}/discard',
@@ -239,6 +243,58 @@ describe('sign-in in the published document (phase 29)', () => {
     expect(Object.keys(op.responses).sort()).toEqual(['204', '400', '401', '403']);
     expect(op.responses['204'].content).toBeUndefined();
     expect(op.requestBody.required).toBe(true);
+  });
+});
+
+// Phase 52 (spec D2, D4, D6, D10). Every reminder endpoint acts on the signed-in user, so each
+// needs a profile (403) and a session (401), and none names a user in its path or body.
+describe('the reminder endpoints in the published document (phase 52)', () => {
+  it.each([
+    ['/api/me/reminders', 'get', ['200', '401', '403']],
+    ['/api/me/reminders', 'put', ['200', '400', '401', '403']],
+    ['/api/me/push-devices', 'put', ['204', '400', '401', '403']],
+    ['/api/me/push-devices/unregister', 'post', ['204', '400', '401', '403']],
+    ['/api/me/reminders/{id}/tap', 'post', ['204', '401', '403', '404']],
+  ])('declares every status %s %s can return', async (path, method, statuses) => {
+    const doc = await openApiDocument();
+    const operation = doc.paths[path as string][method as string];
+    expect(Object.keys(operation.responses).sort()).toEqual(statuses);
+  });
+
+  it('publishes the settings in snake_case, with the time zone on the response only', async () => {
+    const doc = await openApiDocument();
+    const request = doc.paths['/api/me/reminders'].put.requestBody.content['application/json'].schema;
+    expect(request.required.sort()).toEqual(['daily_target', 'days', 'enabled', 'times']);
+    const response = doc.paths['/api/me/reminders'].get.responses['200'].content['application/json'].schema;
+    expect(response.required.sort()).toEqual(['daily_target', 'days', 'enabled', 'time_zone', 'times']);
+  });
+
+  it('answers the device and tap calls with no body, and a tap names only the reminder', async () => {
+    const doc = await openApiDocument();
+    for (const [path, method] of [
+      ['/api/me/push-devices', 'put'],
+      ['/api/me/push-devices/unregister', 'post'],
+      ['/api/me/reminders/{id}/tap', 'post'],
+    ]) {
+      expect(doc.paths[path][method].responses['204'].content).toBeUndefined();
+    }
+    expect(doc.paths['/api/me/reminders/{id}/tap'].post.parameters).toEqual([
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+    ]);
+  });
+
+  it('describes the 404 and the 400s with the error body the server returns', async () => {
+    const doc = await openApiDocument();
+    const cases: [string, string, string][] = [
+      ['/api/me/reminders/{id}/tap', 'post', '404'],
+      ['/api/me/reminders', 'put', '400'],
+      ['/api/me/push-devices', 'put', '400'],
+      ['/api/me/push-devices/unregister', 'post', '400'],
+    ];
+    for (const [path, method, status] of cases) {
+      const schema = doc.paths[path][method].responses[status].content['application/json'].schema;
+      expect(schema.required).toEqual(['error']);
+    }
   });
 });
 

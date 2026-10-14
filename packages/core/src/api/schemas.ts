@@ -595,6 +595,23 @@ export const CreateUserRequestSchema = z.object({
 // name is one is the server's to decide (it asks Intl), so the wire only bounds it.
 export const TimeZoneRequestSchema = z.object({ time_zone: z.string().min(1).max(64) });
 
+// Phase 52 (spec D2, D4). A learner's reminder schedule on the wire. `days` are ISO
+// weekdays (1 = Monday ... 7 = Sunday) and may be empty (no day); `times` are
+// 'HH:MM' on the learner's own clock, at most eight before the server sorts them
+// and drops repeats. The response adds the zone those times are read in.
+export const ReminderSettingsSchema = z.object({
+  enabled: z.boolean(),
+  daily_target: z.number().int().min(1).max(10),
+  days: z.array(z.number().int().min(1).max(7)).max(7),
+  times: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)).min(1).max(8),
+});
+export const ReminderSettingsResponseSchema = ReminderSettingsSchema.extend({ time_zone: z.string() });
+
+// Phase 52 (spec D4). An Expo push token, registered after the permission is granted.
+// Android only; a later platform widens the literal.
+export const PushDeviceRequestSchema = z.object({ token: z.string().min(1).max(256), platform: z.literal('android') });
+export const PushDeviceUnregisterRequestSchema = z.object({ token: z.string().min(1).max(256) });
+
 // A course of study: one target language, explained in one source language.
 // Language fields are plain strings for the reason UserSchema's are.
 export const EnrollmentSchema = z.object({

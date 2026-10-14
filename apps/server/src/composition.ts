@@ -31,6 +31,7 @@ import { createGlossService, type GlossService } from './services/glosses';
 import type { LlmClient, ModelCallRecorder, VisionClient } from './services/llm';
 import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
+import { createReminderService, type ReminderService } from './services/reminders';
 import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
@@ -63,6 +64,8 @@ export type AppDeps = {
   translations: TranslationService;
   vocabulary: VocabularyService;
   grants: GrantService;
+  // Phase 52 (spec D2, D4, D6). A learner's reminder schedule, their phones, and the tap.
+  reminders: ReminderService;
   photoImports: PhotoImportService;
   // Phase 31 (spec D7). The merge job's use case; no route reaches it. The
   // tool's plan and apply come with the type, unused here and composed with a
@@ -326,6 +329,7 @@ export function createServerDeps(io: {
     translations,
     vocabulary: createVocabularyService({ transaction, logger: io.logger, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
     grants: createGrantService({ transaction, logger: io.logger }),
+    reminders: createReminderService({ transaction, logger: io.logger, now: io.now }),
     // Phase 26. Handed the lookup use case itself, so a row is looked up exactly
     // as a typed word is (spec D7). The match call shares the lookup's client
     // and budget.

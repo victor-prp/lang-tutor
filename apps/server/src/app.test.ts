@@ -130,6 +130,7 @@ const unreachablePhotoImports = createFakeAppDeps().photoImports;
 function depsWithPing(ok: boolean): AppDeps {
   return {
     grants: unreachableGrants,
+    reminders: createFakeAppDeps().reminders,
     sessions: unreachableSessions,
     users: unreachableUsers,
     enrollments: unreachableEnrollments,

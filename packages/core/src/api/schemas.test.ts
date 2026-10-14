@@ -41,6 +41,10 @@ import {
   TranslationRequestSchema,
   TranslationResponseSchema,
   TimeZoneRequestSchema,
+  PushDeviceRequestSchema,
+  PushDeviceUnregisterRequestSchema,
+  ReminderSettingsResponseSchema,
+  ReminderSettingsSchema,
   TranslationSenseSchema,
   UserSchema,
   UsernameSchema,
@@ -481,6 +485,72 @@ describe('TimeZoneRequestSchema', () => {
     ['a number', { time_zone: 3 }],
   ])('rejects %s', (_label, body) => {
     expect(TimeZoneRequestSchema.safeParse(body).success).toBe(false);
+  });
+});
+
+// Phase 52 (spec D2, D4, D10). The reminder wire: snake_case, bounded on every side.
+describe('ReminderSettingsSchema', () => {
+  const valid = { enabled: true, daily_target: 2, days: [1, 3, 5], times: ['08:00', '21:30'] };
+
+  it('accepts a schedule, and one with no day at all', () => {
+    expect(ReminderSettingsSchema.safeParse(valid).success).toBe(true);
+    expect(ReminderSettingsSchema.safeParse({ ...valid, days: [] }).success).toBe(true);
+  });
+
+  it('accepts the edges: target 1 and 10, weekdays 1 and 7, 00:00 and 23:59, eight times', () => {
+    expect(ReminderSettingsSchema.safeParse({ ...valid, daily_target: 1 }).success).toBe(true);
+    expect(ReminderSettingsSchema.safeParse({ ...valid, daily_target: 10 }).success).toBe(true);
+    expect(ReminderSettingsSchema.safeParse({ ...valid, days: [1, 7] }).success).toBe(true);
+    expect(ReminderSettingsSchema.safeParse({ ...valid, times: ['00:00', '23:59'] }).success).toBe(true);
+    const eight = ['06:00', '08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'];
+    expect(ReminderSettingsSchema.safeParse({ ...valid, times: eight }).success).toBe(true);
+  });
+
+  it.each([
+    ['a target of 0', { daily_target: 0 }],
+    ['a target of 11', { daily_target: 11 }],
+    ['a fractional target', { daily_target: 1.5 }],
+    ['weekday 0', { days: [0] }],
+    ['weekday 8', { days: [8] }],
+    ['eight weekdays', { days: [1, 2, 3, 4, 5, 6, 7, 7] }],
+    ['no time', { times: [] }],
+    ['nine times', { times: ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00'] }],
+    ['the hour 25', { times: ['25:00'] }],
+    ['the minute 60', { times: ['12:60'] }],
+    ['a time without its leading zero', { times: ['8:00'] }],
+    ['a time with seconds', { times: ['08:00:00'] }],
+    ['a camelCase field in place of daily_target', { daily_target: undefined, dailyTarget: 1 }],
+  ])('rejects %s', (_label, patch) => {
+    expect(ReminderSettingsSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
+  });
+
+  it('adds the time zone in the response', () => {
+    expect(ReminderSettingsResponseSchema.safeParse({ ...valid, time_zone: 'Asia/Jerusalem' }).success).toBe(true);
+    expect(ReminderSettingsResponseSchema.safeParse(valid).success).toBe(false);
+  });
+});
+
+describe('the push device requests', () => {
+  it('accepts an Android token, and a bare token to unregister', () => {
+    expect(PushDeviceRequestSchema.safeParse({ token: 'ExponentPushToken[abc]', platform: 'android' }).success).toBe(true);
+    expect(PushDeviceUnregisterRequestSchema.safeParse({ token: 'ExponentPushToken[abc]' }).success).toBe(true);
+  });
+
+  it.each([
+    ['another platform', { token: 't', platform: 'ios' }],
+    ['no platform', { token: 't' }],
+    ['an empty token', { token: '', platform: 'android' }],
+    ['a token over 256 characters', { token: 't'.repeat(257), platform: 'android' }],
+  ])('rejects registering with %s', (_label, body) => {
+    expect(PushDeviceRequestSchema.safeParse(body).success).toBe(false);
+  });
+
+  it.each([
+    ['an empty token', { token: '' }],
+    ['a token over 256 characters', { token: 't'.repeat(257) }],
+    ['no token', {}],
+  ])('rejects unregistering with %s', (_label, body) => {
+    expect(PushDeviceUnregisterRequestSchema.safeParse(body).success).toBe(false);
   });
 });
 
