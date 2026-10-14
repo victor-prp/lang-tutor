@@ -155,10 +155,16 @@ proves before the next one starts.
       ```bash
       git checkout <tag>
       cd apps/mobile
-      EXPO_PUBLIC_APP_VERSION=<tag> npx eas-cli@24.8.0 update --branch production --platform android \
+      EXPO_PUBLIC_APP_VERSION=<tag> EXPO_PUBLIC_APP_COMMIT=$(git rev-parse --short=7 HEAD) \
+        EXPO_PUBLIC_API_URL=https://app.wordspal.ai \
+        npx eas-cli@24.8.0 update --branch production --platform android \
         --environment production --message "<tag> for build <build id>"
       git checkout master
       ```
+
+      `eas update --environment` reads no `.env` file, so every `EXPO_PUBLIC_` value the app
+      needs is passed on the command line. An update without `EXPO_PUBLIC_API_URL` crashes at
+      launch, and phones quietly keep the build's own bundle.
 
       That message is the marker later releases look for: an update naming the newest build means
       the build reached Play. From then on, releases publish over the air on their own.

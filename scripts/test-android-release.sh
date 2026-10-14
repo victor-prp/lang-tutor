@@ -54,16 +54,20 @@ case "$1" in
     [ "$SUBMIT_FAILS" = 1 ] && { echo "submission failed" >&2; exit 1; }
     exit 0 ;;
   update)
-    echo "eas $* APP_VERSION=${EXPO_PUBLIC_APP_VERSION:-unset} APP_COMMIT=${EXPO_PUBLIC_APP_COMMIT:-unset}" >> "$LOG" ;;
+    echo "eas $* APP_VERSION=${EXPO_PUBLIC_APP_VERSION:-unset} APP_COMMIT=${EXPO_PUBLIC_APP_COMMIT:-unset} API_URL=${EXPO_PUBLIC_API_URL:-unset}" >> "$LOG" ;;
   *) echo "eas $*" >> "$LOG"; exit 2 ;;
 esac
 STUB
 chmod +x "$STUB/npx" "$STUB/eas"
 
-# A mobile directory with what the script reads: app.json and eas.json.
+# A mobile directory with what the script reads: app.json, eas.json and .env.production.
 MOBILE="$FIXTURE/mobile"
 mkdir -p "$MOBILE"
-with_project() { printf '{"expo":{"extra":{"eas":{"projectId":"p1"}}}}\n' > "$MOBILE/app.json"; echo '{}' > "$MOBILE/eas.json"; }
+with_project() {
+  printf '{"expo":{"extra":{"eas":{"projectId":"p1"}}}}\n' > "$MOBILE/app.json"
+  echo '{}' > "$MOBILE/eas.json"
+  printf '# a comment\nEXPO_PUBLIC_API_URL=https://app.example\n' > "$MOBILE/.env.production"
+}
 with_project
 
 OUT="$FIXTURE/out"
@@ -104,6 +108,11 @@ expect_calls "the update carries the tag and the build it targets as its message
 # Phase 49 (spec D2): the tag's commit, as the About screen shows it.
 commit=$(cd "$REPO" && git rev-parse --short=7 HEAD)
 expect_calls "the update carries the tag's commit" 0 "yes:APP_COMMIT=$commit"
+# eas update --environment production reads no .env file, so an update built
+# without this crashed at launch ("EXPO_PUBLIC_API_URL is not set") and every
+# phone stayed on the build's own bundle.
+expect_calls "the update carries the production API address from .env.production" 0 \
+  "yes:API_URL=https://app.example"
 expect_calls "the marker is asked for this fingerprint on production" 0 \
   "yes:update:list --branch production --runtime-version fp1"
 
@@ -164,6 +173,16 @@ with_project
 
 fixture fp1 b1 fp1 b1; rm "$MOBILE/eas.json"; run
 expect_calls "a tag from before phase 32 (no eas.json): skips, green" 0 "no:eas " "no:npx "
+with_project
+
+fixture fp1 b1 fp1 b1; printf '# nothing\n' > "$MOBILE/.env.production"; run
+expect_calls "no API address in .env.production: fails before asking EAS anything" 1 "no:eas " "no:npx "
+grep -q 'EXPO_PUBLIC_API_URL' "$OUT" && ok "and the error names the variable" || fail "and the error names the variable" "$(cat "$OUT")"
+with_project
+
+fixture fp1 b1 fp1 b1; rm "$MOBILE/.env.production"; run
+expect_calls "no .env.production at all: fails the same way" 1 "no:eas " "no:npx "
+grep -q '::error::.*EXPO_PUBLIC_API_URL' "$OUT" && ok "with the same error" || fail "with the same error" "$(cat "$OUT")"
 with_project
 
 # Review finding: a rerun after a reverted native change whose submit failed.
