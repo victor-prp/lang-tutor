@@ -9,6 +9,7 @@ import { DISTRACTOR_MARKER, type Task } from '../../src/domain/distractors';
 import { JUDGE_MARKER } from '../../src/domain/judge';
 import { PHOTO_READING_MARKER } from '../../src/domain/photoReading';
 import { SENSE_MATCH_MARKER } from '../../src/domain/senseMatching';
+import { SOUND_ALIKE_MARKER } from '../../src/domain/soundAlike';
 import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
 import { geminiBlockedResponse, geminiResponse } from './geminiResponse';
 
@@ -433,6 +434,26 @@ export async function expectTranscription(ns: string, heard: string, opts: { onc
         body: JSON.stringify(geminiResponse({ heard })),
       },
       ...(opts.once ? { times: { remainingTimes: 1, unlimited: false } } : {}),
+    },
+  });
+}
+
+/**
+ * Phase 50 (spec D2). The sound-alike call's answer: `scores` in the order the
+ * pairs were sent, under their keys p1, p2, …. Matched on SOUND_ALIKE_MARKER,
+ * consumed once, and prioritised over a broader stub.
+ */
+export async function expectSoundAlike(ns: string, ...scores: number[]): Promise<void> {
+  await expectation(ns, {
+    match: { body: { type: 'REGEX', regex: `[\\s\\S]*${SOUND_ALIKE_MARKER}[\\s\\S]*` } },
+    action: {
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(geminiResponse({ scores: scores.map((score, index) => ({ key: `p${index + 1}`, score })) })),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+      priority: 10,
     },
   });
 }

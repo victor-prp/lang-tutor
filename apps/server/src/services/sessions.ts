@@ -9,7 +9,9 @@ import {
   isSpeaking,
   wrongScript,
   shuffleSession,
+  soundPairs,
   speakable,
+  spokenTarget,
   spokenVerdict,
   type AnswerInput,
   type JudgedQuestion,
@@ -94,6 +96,7 @@ import {
 } from '../domain/session';
 import { MAX_AVOID } from '../domain/sentences';
 import type { Mark } from '../domain/marks';
+import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
@@ -150,6 +153,11 @@ export type SessionResult = SessionRecord & { progress: ProgressChange[] };
 /** Phase 25. What one spoken attempt came to: the transcript, how it was
  *  judged, and the session when the answer was recorded (null when not). */
 export type SpeechResult = { heard: string; verdict: SpeechVerdict; session: SessionResult | null };
+
+/** Phase 50 (spec D7). What the second look at an unheard transcript found:
+ *  its best pair's score and form (null when no pair came back scored),
+ *  whether the model was asked, and the wait. */
+type SoundLook = { score: number | null; form: string | null; called: boolean; ms: number };
 
 /** Phase 27. A judged answer: its verdict, and the session it was recorded in. */
 export type JudgedResult = { verdict: TypedVerdict; session: SessionResult };
@@ -248,6 +256,7 @@ export function createSessionService({
   transcriber,
   judge,
   translationJudge,
+  soundAlikeThreshold,
 }: {
   transaction: Transaction;
   rng: () => number;
@@ -265,7 +274,63 @@ export function createSessionService({
   /** Phase 45 (spec D3). The sentence translation's judge: it thinks before it
    *  answers, which a dropped detail needs, and the meaning judge does not. */
   translationJudge: LlmClient;
+  /** Phase 50 (spec D4). The pronunciation score at which an unheard
+   *  transcript is the card's word; its pairs are scored on `judge`. */
+  soundAlikeThreshold: number;
 }) {
+  /**
+   * Phase 50 (spec D1–D3, D6). The second look at an unheard transcript: its
+   * pairs with the card's forms, scored by how alike they sound. The stored
+   * scores are read first and only the missing pairs are asked, in one call;
+   * the read, the call and the write each stand alone, outside any other
+   * transaction (ADR 0001 R8). Null when there is nothing to pair, and when it
+   * fails, which is logged: the transcript stays unheard, as before.
+   */
+  async function soundAlike(
+    question: SpeakingQuestion,
+    heard: string,
+    language: LanguageCode,
+    record: ModelCallRecord,
+    sessionId: string,
+  ): Promise<SoundLook | null> {
+    const pairs = soundPairs(spokenTarget(question), heard);
+    if (pairs.length === 0) return null;
+    const started = now();
+    const keyOf = ({ a, b }: OrderedPair) => `${a}\n${b}`;
+    const asked = [...new Map(pairs.map(orderedPair).map((pair) => [keyOf(pair), pair])).values()];
+    try {
+      const stored = await transaction((repos) => repos.pronunciation.find(language, asked));
+      const scores = new Map(stored.map((row) => [keyOf(row), row.score]));
+      const missing = asked.filter((pair) => !scores.has(keyOf(pair)));
+      if (missing.length > 0) {
+        const raw = await judge({ ...buildSoundAlikePrompt(language, missing), record: { ...record, kind: 'sound_alike' } });
+        const answered = parseSoundAlike(raw, missing.length);
+        if (answered === null) throw new LlmUnavailable('the scores were unreadable');
+        const fresh = missing.flatMap((pair, index) => {
+          const score = answered[index];
+          return score === null ? [] : [{ ...pair, score }];
+        });
+        await transaction((repos) => repos.pronunciation.insert(language, fresh));
+        for (const row of fresh) scores.set(keyOf(row), row.score);
+      }
+      let best: { score: number; form: string } | null = null;
+      for (const pair of pairs) {
+        const score = scores.get(keyOf(orderedPair(pair)));
+        if (score !== undefined && (best === null || score > best.score)) best = { score, form: pair.form };
+      }
+      return { score: best?.score ?? null, form: best?.form ?? null, called: missing.length > 0, ms: now() - started };
+    } catch (error) {
+      logger.info({
+        event: 'sound_alike_failed',
+        session_id: sessionId,
+        question_type: question.type,
+        sound_ms: now() - started,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
   /**
    * Phase 43 (spec D3). Phase 19's list branch of create, shared by create and
    * the stock job: the words, the session inserted preparing for `devices`, the
@@ -723,7 +788,12 @@ export function createSessionService({
       const transcribed = input.audio.length >= MIN_AUDIO_CHARS;
       const transcribeMs = now() - started;
 
-      const verdict = spokenVerdict(checked.current, heard);
+      const letters = spokenVerdict(checked.current, heard);
+      // Phase 50 (spec D1, D5). A transcript whose letters are not the word gets
+      // a second look by sound; at the threshold it is the word, understood.
+      const look = letters === 'unheard' ? await soundAlike(checked.current, heard, checked.language, checked.record, sessionId) : null;
+      const soundsLike = look !== null && look.score !== null && look.score >= soundAlikeThreshold ? look.form : null;
+      const verdict: SpeechVerdict = soundsLike !== null ? 'understood' : letters;
       // Logged before the answer is recorded: it is the model's judgement, which
       // was paid for even when submitAnswer then throws on a desync race. A clip
       // too short for a call made none, so it has no wait to report.
@@ -739,9 +809,12 @@ export function createSessionService({
         mime_type: input.mimeType,
         // Phase 34 (spec D9): a second try's call, the one more a card may cost.
         ...(retry ? { retry: true } : {}),
+        // Phase 50 (spec D7).
+        ...(look ? { sound_score: look.score, sounds_like: look.form, sound_ms: look.ms, sound_called: look.called } : {}),
       });
+      const answer: AnswerInput = soundsLike !== null ? { heard, sounds_like: soundsLike } : { heard };
       const session =
-        verdict === 'unheard' ? null : await service.submitAnswer(actorUserId, sessionId, input.questionId, { heard }, { retry });
+        verdict === 'unheard' ? null : await service.submitAnswer(actorUserId, sessionId, input.questionId, answer, { retry });
       return { heard, verdict, session };
     },
 

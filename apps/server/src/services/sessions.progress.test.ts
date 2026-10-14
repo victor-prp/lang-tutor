@@ -153,6 +153,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
     translationJudge: createFakeLlmClient(''),
+    soundAlikeThreshold: 0.95,
   });
   return { service, calls, jobs };
 }

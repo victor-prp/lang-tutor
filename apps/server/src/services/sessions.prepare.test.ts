@@ -247,6 +247,7 @@ function world(opts: {
     transcriber: createFakeTranscriber(''),
     judge: createFakeLlmClient(''),
     translationJudge: createFakeLlmClient(''),
+    soundAlikeThreshold: 0.95,
   });
   return { service, calls, llm, contextLlm, checkerLlm, logger, jobs };
 }

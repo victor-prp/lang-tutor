@@ -323,6 +323,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await expect(
@@ -377,6 +378,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     const result = await service.submitAnswer('u1', 's1', 't1', { text: 'finestar' });
@@ -400,6 +402,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await expect(service.submitAnswer('u1', 's1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
@@ -503,6 +506,7 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await service.createNextSession('u1', E, { listening: false, speaking: false });
@@ -561,6 +565,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await service.createNextSession('u1', E, { listening: true, speaking });
@@ -613,6 +618,7 @@ describe('createNextSession, phase 31 (spec D12)', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
     return { service, jobs, reads };
   }

@@ -153,6 +153,8 @@ export function createServerDeps(io: {
   judgeTimeoutMs: number;
   // Phase 43 (ruling R3). How long a save's request for a session in stock waits.
   stockSaveDelaySeconds: number;
+  // Phase 50 (spec D4). The pronunciation score at which an unheard transcript is the word.
+  soundAlikeThreshold: number;
   identity: ServerIdentity;
   webDistDir: string | null;
   // Phase 35 (spec D12). BOT_SECRET, or null where it is unset.
@@ -313,6 +315,7 @@ export function createServerDeps(io: {
       transcriber,
       judge,
       translationJudge,
+      soundAlikeThreshold: io.soundAlikeThreshold,
     }),
     users: createUserService({ transaction, logger: io.logger }),
     enrollments: createEnrollmentService({ transaction, logger: io.logger }),

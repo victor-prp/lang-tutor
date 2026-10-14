@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { createFakeLogger } from '../../support/fakes';
 import {
   clearNamespace,
   expectGeminiStatus,
+  expectSoundAlike,
   expectTranscription,
   geminiBaseUrlFor,
   mockNamespace,
@@ -81,6 +83,8 @@ describe('POST /api/sessions/:id/speech', () => {
   it('records an understood attempt and carries the next step; an unheard one records nothing', async () => {
     const ns = namespaceFor('speech-understood');
     await expectTranscription(ns, 'tomb', { once: true });
+    // Phase 50: tomb is not said as tome is.
+    await expectSoundAlike(ns, 0.6);
     await expectTranscription(ns, 'the tome', { once: true });
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
@@ -94,6 +98,23 @@ describe('POST /api/sessions/:id/speech', () => {
     const heard = await speak();
     const body = await heard.json();
     expect(body).toMatchObject({ heard: 'the tome', verdict: 'understood', next: { complete: false, question: { type: 'say_translation' } } });
+  });
+
+  // Phase 50 (spec D1–D5). The read-aloud card's word, heard as its homophone.
+  it('understands a transcript that sounds like the form, and stores its score once', async () => {
+    const ns = namespaceFor('speech-sounds-alike');
+    await expectTranscription(ns, 'tohm');
+    await expectSoundAlike(ns, 1);
+    const app = buildTestApp(ns);
+    const { sessionId, questions } = await startSpeaking();
+    const res = await postJson(app, `/api/sessions/${sessionId}/speech`, { question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ heard: 'tohm', verdict: 'understood', next: { complete: false } });
+    expect(await readStoredAnswers(t.db, sessionId)).toEqual([expect.objectContaining({ answer_string: 'tohm', verdict: 'understood' })]);
+    const { rows } = await t.db.execute<{ language_code: string; form_a: string; form_b: string; score: number }>(
+      sql`select language_code, form_a, form_b, score from pronunciation_scores`,
+    );
+    expect(rows).toEqual([{ language_code: 'en', form_a: 'tohm', form_b: 'tome', score: 1 }]);
   });
 
   it('answers say the translation with an alternative, then completes with a skip left out of the score', async () => {

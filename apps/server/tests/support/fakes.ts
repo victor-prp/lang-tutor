@@ -12,6 +12,7 @@ import { ProfileExists, UsernameTaken } from '../../src/errors';
 import type { Logger } from '../../src/logger';
 import type { UserRepo } from '../../src/repo/users';
 import type { JobRepo } from '../../src/repo/jobs';
+import type { PronunciationRepo } from '../../src/repo/pronunciationScores';
 import type { CorrectionRow, PersistEntriesInput, DictRepo, GlossCounts, MergePair } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { PhotoImportService } from '../../src/services/photoImports';
@@ -163,6 +164,21 @@ export function createFakeTranscriber(...replies: (string | Error)[]) {
     return next;
   };
   return Object.assign(transcriber, { calls });
+}
+
+/** Phase 50 (spec D3). Stored pronunciation scores in memory: `rows` is what
+ *  a test seeds and reads back, and the first score of a pair stands. */
+export function createFakePronunciationRepo(rows: { language: string; a: string; b: string; score: number }[] = []) {
+  const same = (language: string, pair: { a: string; b: string }) => (row: (typeof rows)[number]) =>
+    row.language === language && row.a === pair.a && row.b === pair.b;
+  const repo: PronunciationRepo = {
+    find: async (language, pairs) =>
+      rows.filter((row) => pairs.some((pair) => same(language, pair)(row))).map(({ a, b, score }) => ({ a, b, score })),
+    insert: async (language, inserted) => {
+      for (const row of inserted) if (!rows.some(same(language, row))) rows.push({ language, ...row });
+    },
+  };
+  return Object.assign(repo, { rows });
 }
 
 /** Phase 31. resolveGlosses as the identity, in one learner language: no merge
