@@ -40,6 +40,7 @@ afterAll(async () => {
 const TABLES = [
   'users',
   'model_calls',
+  'pronunciation_scores',
   'enrollments',
   'dict_lexemes',
   'dict_variants',

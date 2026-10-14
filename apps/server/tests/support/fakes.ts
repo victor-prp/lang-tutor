@@ -282,6 +282,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     jobs: repos.jobs ?? unreachableRepo('jobs repo'),
     photoImport: repos.photoImport ?? unreachableRepo('photo import repo'),
     modelCall: repos.modelCall ?? unreachableRepo('model call repo'),
+    pronunciation: repos.pronunciation ?? unreachableRepo('pronunciation repo'),
   };
   return (run) => run(bound);
 }

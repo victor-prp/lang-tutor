@@ -6,6 +6,7 @@ import type { JobRepo } from '../repo/jobs';
 import type { MemoryRepo } from '../repo/memory';
 import type { ModelCallRepo } from '../repo/modelCalls';
 import type { PhotoImportRepo } from '../repo/photoImports';
+import type { PronunciationRepo } from '../repo/pronunciationScores';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
@@ -32,6 +33,8 @@ export type Repos = {
   photoImport: PhotoImportRepo;
   // Phase 47 (spec D5). Written only by the model-call recorder.
   modelCall: ModelCallRepo;
+  // Phase 50 (spec D3). Read before and written after a sound-alike call.
+  pronunciation: PronunciationRepo;
 };
 
 /**

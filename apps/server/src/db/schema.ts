@@ -1303,3 +1303,30 @@ export const modelCalls = pgTable(
     index('model_calls_started_idx').on(t.startedAt),
   ],
 );
+
+// Phase 50 (spec D3). How alike two words sound in a language, 0 to 1, asked
+// of a model once per pair and shared by every learner of the language: the
+// second look an unheard transcript gets. The score is stored, not a verdict,
+// so a new threshold applies to every row with no call. Keyed by what a
+// learner said, not by a dictionary entry, so it is no dict_ table, and
+// db:reseed leaves it alone. `form_a < form_b`: (sell, cell) and (cell, sell)
+// are one row. Written ON CONFLICT DO NOTHING: the first score stands.
+export const pronunciationScores = pgTable(
+  'pronunciation_scores',
+  {
+    languageCode: varchar('language_code', { length: 10 }).notNull(),
+    formA: text('form_a').notNull(),
+    formB: text('form_b').notNull(),
+    score: real('score').notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'pronunciation_scores_pkey', columns: [t.languageCode, t.formA, t.formB] }),
+    // "C": byte order, which is the code-point order orderedPair uses. The
+    // database's own collation could order a pair the other way.
+    check('pronunciation_scores_ordered', sql`${t.formA} < ${t.formB} collate "C"`),
+    check('pronunciation_scores_form_a_length', sql`length(${t.formA}) between 1 and 100`),
+    check('pronunciation_scores_form_b_length', sql`length(${t.formB}) between 1 and 100`),
+    check('pronunciation_scores_score_range', sql`${t.score} between 0 and 1`),
+  ],
+);
