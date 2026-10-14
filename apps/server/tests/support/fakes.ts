@@ -98,6 +98,8 @@ export function createFakeAppDeps(): AppDeps {
     registerDevice: unreachable,
     unregisterDevice: unreachable,
     tap: unreachable,
+    requestTick: unreachable,
+    tick: unreachable,
   };
   const photoImports: PhotoImportService = {
     create: unreachable,
@@ -129,6 +131,7 @@ export function createFakeAppDeps(): AppDeps {
     signedIn: { sessionOf: async () => null },
     webOrigins: ['https://web.example.test'],
     bots: null,
+    reminderTick: null,
   };
 }
 
@@ -139,6 +142,11 @@ export function createFakeBots(): NonNullable<AppDeps['bots']> {
   };
   const service: BotService = { signIn: unreachable, setDay: unreachable };
   return { secret: 'x'.repeat(32), service };
+}
+
+/** Phase 52. The reminder tick's deps for a document-shape test: mounted, unreachable. */
+export function createFakeReminderTick(): NonNullable<AppDeps['reminderTick']> {
+  return { secret: 'y'.repeat(32), service: createFakeAppDeps().reminders };
 }
 
 /**

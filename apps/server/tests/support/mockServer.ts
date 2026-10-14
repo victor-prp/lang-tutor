@@ -551,12 +551,26 @@ export function pushBaseUrlFor(ns: string): string {
 const PUSH_SEND_PATH = '/--/api/v2/push/send';
 const PUSH_RECEIPTS_PATH = '/--/api/v2/push/getReceipts';
 
-async function stubPush(ns: string, path: string, data: unknown): Promise<void> {
+/**
+ * Phase 52 (task 6). `status` other than 200 answers that status with an error body instead of
+ * `data`, as Expo does when it is down. `times` answers only that many requests and is then
+ * spent, and it outranks an unlimited stub, whichever was registered first: a test registers
+ * "the first send fails" beside "every send succeeds", and the second learner gets the second.
+ */
+type PushStubOptions = { status?: number; times?: number };
+
+async function stubPush(ns: string, path: string, data: unknown, opts: PushStubOptions): Promise<void> {
+  const status = opts.status ?? 200;
   await admin(
     'expectation',
     {
       httpRequest: { method: 'POST', path: `/${ns}${path}` },
-      httpResponse: { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: JSON.stringify({ data }) },
+      httpResponse: {
+        statusCode: status,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(status === 200 ? { data } : { errors: [{ code: 'INTERNAL_SERVER_ERROR', message: 'upstream' }] }),
+      },
+      ...(opts.times !== undefined ? { times: { remainingTimes: opts.times, unlimited: false }, priority: 10 } : {}),
     },
     [200, 201],
   );
@@ -564,13 +578,24 @@ async function stubPush(ns: string, path: string, data: unknown): Promise<void> 
 
 /** Expo's answer to every send in this namespace: these tickets, whatever was sent. A test
  *  that sends N messages stubs N tickets; the provider refuses an answer of another length. */
-export async function stubPushSend(ns: string, tickets: PushTicket[]): Promise<void> {
-  await stubPush(ns, PUSH_SEND_PATH, tickets);
+export async function stubPushSend(ns: string, tickets: PushTicket[], opts: PushStubOptions = {}): Promise<void> {
+  await stubPush(ns, PUSH_SEND_PATH, tickets, opts);
 }
 
 /** Expo's answer to every receipt request in this namespace: these receipts, by ticket id. */
-export async function stubPushReceipts(ns: string, receipts: Record<string, PushReceipt>): Promise<void> {
-  await stubPush(ns, PUSH_RECEIPTS_PATH, receipts);
+export async function stubPushReceipts(
+  ns: string,
+  receipts: Record<string, PushReceipt>,
+  opts: PushStubOptions = {},
+): Promise<void> {
+  await stubPush(ns, PUSH_RECEIPTS_PATH, receipts, opts);
+}
+
+/** Every receipt request this namespace was asked, as the ids each asked for, in arrival order. */
+export async function pushReceiptRequests(ns: string): Promise<string[][]> {
+  const res = await admin('retrieve?type=REQUESTS&format=JSON', { method: 'POST', path: `/${ns}${PUSH_RECEIPTS_PATH}` }, [200]);
+  const requests = (await res.json()) as { body: { json?: unknown } }[];
+  return requests.map((r) => ((typeof r.body.json === 'string' ? JSON.parse(r.body.json) : r.body.json) as { ids: string[] }).ids);
 }
 
 /** Every message this namespace was asked to send, in the order they arrived, across requests. */

@@ -16,6 +16,8 @@ import {
   READ_PHOTO,
   READ_PHOTO_EXPIRY_SECONDS,
   READ_PHOTO_FAILED,
+  REMIND,
+  REMIND_EXPIRY_SECONDS,
   RENDER_LEMMA,
   RENDER_LEMMA_EXPIRY_SECONDS,
   RENDER_LEMMA_FAILED,
@@ -140,6 +142,16 @@ export const JOB_QUEUES: QueueDefinition[] = [
       expireInSeconds: STOCK_SESSION_EXPIRY_SECONDS,
       deleteAfterSeconds: 86_400,
     },
+  },
+  // Phase 52 (spec D5). `exclusive`: one run queued or active, under the
+  // singleton key the tick route sends, so two overlapping ticks (a rollout
+  // runs two containers, ADR 0010) make one run. No retry and no dead letter:
+  // the next tick, five minutes on, does what a retry would, and the claims
+  // keep a slot from being sent twice either way.
+  {
+    name: REMIND,
+    policy: 'exclusive',
+    options: { retryLimit: 0, expireInSeconds: REMIND_EXPIRY_SECONDS, deleteAfterSeconds: 86_400 },
   },
 ];
 

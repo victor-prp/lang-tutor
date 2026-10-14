@@ -1,8 +1,9 @@
 import { asc, eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { pushDevices, reminders } from '../../src/db/schema';
+import { pushDevices, reminders, sessions } from '../../src/db/schema';
 import { createReminderRepo, type ReminderResult } from '../../src/repo/reminders';
+import { enrollmentOf } from './seedUser';
 import { withTx } from './withTx';
 
 /**
@@ -49,4 +50,36 @@ export async function devicesOf(db: Db): Promise<{ token: string; userId: string
     .select({ token: pushDevices.token, userId: pushDevices.userId })
     .from(pushDevices)
     .orderBy(asc(pushDevices.token));
+}
+
+/** Phase 52 (task 6). A learner's reminder rows as the table holds them, in slot order. */
+export async function remindersOf(db: Db, userId: string) {
+  return db.select().from(reminders).where(eq(reminders.userId, userId)).orderBy(asc(reminders.slot));
+}
+
+/** Every reminder row, whoever's. */
+export async function allReminders(db: Db) {
+  return db.select().from(reminders).orderBy(asc(reminders.userId), asc(reminders.slot));
+}
+
+/**
+ * Moves a reminder's decided_at. The database stamps it with its own clock, so a test that pins
+ * the tick's clock puts the decision at the tick's instant before it asks about receipts.
+ */
+export async function pinDecidedAt(db: Db, id: string, at: Date): Promise<void> {
+  await db.update(reminders).set({ decidedAt: at }).where(eq(reminders.id, id));
+}
+
+/** A session the learner finished on their seeded enrollment, counting for `day`. */
+export async function seedCompletedSession(db: Db, input: { userId: string; day: string; completedAt: Date }): Promise<void> {
+  await db.insert(sessions).values({
+    userId: input.userId,
+    enrollmentId: enrollmentOf(input.userId),
+    status: 'completed',
+    source: 'list',
+    completedAt: input.completedAt,
+    practiceDay: input.day,
+    listening: false,
+    speaking: false,
+  });
 }

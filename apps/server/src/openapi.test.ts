@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { tmpdir } from 'node:os';
 
 import { createApp } from './app';
-import { createFakeAppDeps, createFakeBots } from '../tests/support/fakes';
+import { createFakeAppDeps, createFakeBots, createFakeReminderTick } from '../tests/support/fakes';
 
 // The "documentation cannot drift" proof, and a unit test: after phase 5
 // createApp accepts fakes, so generating the document needs no database.
@@ -183,6 +183,37 @@ describe('the bot route in the published document', () => {
     expect(Object.keys(day.responses).sort()).toEqual(['204', '400', '401', '404']);
     expect(signIn.requestBody.content['application/json'].schema.required).toEqual(['name']);
     expect(day.requestBody.content['application/json'].schema.required.sort()).toEqual(['day', 'name']);
+  });
+});
+
+// Phase 52 (spec D5). The reminder tick is published only where it is mounted, as the bot route is.
+describe('the reminder tick in the published document', () => {
+  const TICK = '/api/internal/reminders/tick';
+  const withTick = async () => {
+    const res = await createApp({ ...createFakeAppDeps(), reminderTick: createFakeReminderTick() }).request('/openapi.json');
+    return await res.json();
+  };
+
+  it('is absent where REMINDER_SECRET is unset', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths).filter((p) => p.startsWith('/api/internal'))).toEqual([]);
+    expect(doc.components?.securitySchemes?.reminderSecret).toBeUndefined();
+  });
+
+  it('adds exactly its one path where it is mounted', async () => {
+    const plain = Object.keys((await openApiDocument()).paths);
+    const doc = await withTick();
+    expect(Object.keys(doc.paths).sort()).toEqual([...plain, TICK].sort());
+  });
+
+  it('declares the bearer secret, not the session, a 202 and a 401, and no body', async () => {
+    const doc = await withTick();
+    expect(doc.components.securitySchemes.reminderSecret).toMatchObject({ type: 'http', scheme: 'bearer' });
+    const tick = doc.paths[TICK].post;
+    expect(tick.security).toEqual([{ reminderSecret: [] }]);
+    expect(Object.keys(tick.responses).sort()).toEqual(['202', '401']);
+    expect(tick.responses['202'].content['application/json'].schema.required).toEqual(['queued']);
+    expect(tick.requestBody).toBeUndefined();
   });
 });
 

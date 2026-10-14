@@ -191,7 +191,19 @@ export const StockSessionPayloadSchema = z.object({
 });
 export type StockSessionPayload = z.infer<typeof StockSessionPayloadSchema>;
 
+/** Phase 52 (spec D5). Decides and sends the practice reminders that are due.
+ *  EventBridge asks for one run every five minutes, through the tick route. */
+export const REMIND = 'remind';
+/** Under the five minutes between ticks: a run that hung expires before the
+ *  next tick asks for another, and is not retried (the next tick covers it). */
+export const REMIND_EXPIRY_SECONDS = 240;
+
+/** The run reads everything it needs from the database: no payload. */
+export const RemindPayloadSchema = z.object({});
+export type RemindPayload = z.infer<typeof RemindPayloadSchema>;
+
 export type JobPayloads = {
+  [REMIND]: RemindPayload;
   [STOCK_SESSION]: StockSessionPayload;
   [PREPARE_SESSION]: PrepareSessionPayload;
   [PREPARE_SESSION_FAILED]: PrepareSessionPayload;

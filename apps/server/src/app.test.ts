@@ -146,6 +146,7 @@ function depsWithPing(ok: boolean): AppDeps {
     signedIn: createFakeAppDeps().signedIn,
     webOrigins: createFakeAppDeps().webOrigins,
     bots: null,
+    reminderTick: null,
   };
 }
 

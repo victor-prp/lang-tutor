@@ -76,6 +76,7 @@ export type {
   ReadAloudQuestion,
   ReminderSettings,
   ReminderSettingsResponse,
+  ReminderTickResponse,
   ReverseChoiceQuestion,
   SaveVocabularyRequest,
   SaveVocabularyResponse,

@@ -1,5 +1,16 @@
-import { DEFAULT_REMINDER_SETTINGS, normalizeSettings, type ReminderSettings } from '../domain/reminders';
-import { ReminderNotFound } from '../errors';
+import { REMIND } from '../domain/jobs';
+import { isTimeZone } from '../domain/learnerClock';
+import {
+  decide,
+  DEFAULT_REMINDER_SETTINGS,
+  dueSlots,
+  normalizeSettings,
+  REMINDER_BODY,
+  REMINDER_CHANNEL,
+  REMINDER_TITLE,
+  type ReminderSettings,
+} from '../domain/reminders';
+import { PushUnavailable, ReminderNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { Transaction } from './transaction';
 
@@ -34,6 +45,36 @@ export type ReminderView = { settings: ReminderSettings; timeZone: string };
 // is not one would reach the `uuid` column as error 22P02 and answer 500 instead of 404.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** What one tick did, logged as its summary line. */
+export type TickSummary = { candidates: number; claimed: number; sent: number; skipped: number; failed: number };
+
+/** Expo needs a while to produce a receipt, and keeps it about a day: the tick asks for receipts
+ *  of reminders sent between these two ages, once. */
+const RECEIPTS_AFTER_MS = 15 * 60_000;
+const RECEIPTS_UNTIL_MS = 23 * 60 * 60_000;
+
+/** Expo's word for a token that will never receive again: its device is deleted. */
+const DEVICE_NOT_REGISTERED = 'DeviceNotRegistered';
+
+const goneFor = (answer: PushTicket | PushReceipt | undefined): boolean =>
+  answer?.status === 'error' && answer.details?.error === DEVICE_NOT_REGISTERED;
+
+const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * The tickets Expo accepted, out of a sent reminder's stored ones: each ticket's id, and the
+ * token the tick stored beside it, because a receipt names only the ticket and a
+ * DeviceNotRegistered receipt must find its device. Read defensively: the column is jsonb.
+ */
+function acceptedTickets(tickets: unknown): { id: string; to: string | null }[] {
+  if (!Array.isArray(tickets)) return [];
+  return tickets.flatMap((ticket: unknown) => {
+    if (typeof ticket !== 'object' || ticket === null) return [];
+    const { status, id, to } = ticket as { status?: unknown; id?: unknown; to?: unknown };
+    return status === 'ok' && typeof id === 'string' ? [{ id, to: typeof to === 'string' ? to : null }] : [];
+  });
+}
+
 /** A learner who never saved a schedule has the defaults, copied so no caller can change them. */
 const defaults = (): ReminderSettings => ({
   ...DEFAULT_REMINDER_SETTINGS,
@@ -42,25 +83,59 @@ const defaults = (): ReminderSettings => ({
 });
 
 /**
- * Phase 52 (spec D2, D4, D6). Practice reminders: a learner's own schedule, the phones that
- * can be notified, and the report that a notification was tapped. One transaction each
- * (ADR 0001 R8). Every use case takes the signed-in user's id and touches only their rows
- * (ADR 0009 R7): a schedule and a device are the caller's by construction, and a reminder
- * is found only under the caller's id, so a stranger's is as absent as a missing one.
+ * Phase 52 (spec D2, D4, D5, D6). Practice reminders: a learner's own schedule, the phones
+ * that can be notified, the report that a notification was tapped, and the tick that sends
+ * them. The learner's use cases are one transaction each (ADR 0001 R8), take the signed-in
+ * user's id and touch only their rows (ADR 0009 R7): a schedule and a device are the caller's
+ * by construction, and a reminder is found only under the caller's id, so a stranger's is as
+ * absent as a missing one. The tick acts for no one and reads every learner with a phone.
  */
 export function createReminderService({
   transaction,
+  push,
   logger,
   now,
 }: {
   transaction: Transaction;
-  // The tick sends through it; the learner's use cases below do not.
+  // The tick sends through it; the learner's use cases do not.
   push: PushSender;
   logger: Logger;
-  // The tap's moment. The repository takes it from here, not from its own clock, so a test
-  // that pins the clock pins the stored instant.
+  // The tap's moment and the tick's. The repository takes them from here, not from its own
+  // clock, so a test that pins the clock pins the stored instant and the slots that are due.
   now: () => number;
 }) {
+  /**
+   * Receipts for reminders sent between 15 minutes and 23 hours before `at`, not yet fetched:
+   * one call for all of them, then each reminder stores its own, and the devices Expo says are
+   * gone are deleted with it. Whatever fails here, the tick logs, and the reminders not yet
+   * stored are asked about again by the next tick.
+   */
+  async function fetchReceipts(at: number): Promise<void> {
+    const awaiting = await transaction(({ reminders }) =>
+      reminders.awaitingReceipts({ olderThan: new Date(at - RECEIPTS_AFTER_MS), newerThan: new Date(at - RECEIPTS_UNTIL_MS) }),
+    );
+    if (awaiting.length === 0) return;
+    const rows = awaiting.map((row) => ({ id: row.id, tickets: acceptedTickets(row.tickets) }));
+    const ids = rows.flatMap((row) => row.tickets.map((ticket) => ticket.id));
+
+    const receipts = ids.length > 0 ? await push.receipts(ids) : {};
+
+    for (const row of rows) {
+      const mine: Record<string, PushReceipt> = {};
+      const gone: string[] = [];
+      for (const ticket of row.tickets) {
+        const receipt = receipts[ticket.id];
+        if (receipt === undefined) continue;
+        mine[ticket.id] = receipt;
+        if (goneFor(receipt) && ticket.to !== null) gone.push(ticket.to);
+      }
+      await transaction(async ({ reminders }) => {
+        await reminders.recordReceipts(row.id, mine, new Date(at));
+        await reminders.deleteDevicesByToken(gone);
+      });
+    }
+  }
+
   return {
     /** GET /api/me/reminders: the stored schedule, or the defaults, and the learner's time zone. */
     settings: (actorUserId: string): Promise<ReminderView> =>
@@ -100,6 +175,112 @@ export function createReminderService({
       // After the transaction resolves, as logCompletedSession: a commit that fails must not
       // leave a log of a tap the database never got.
       logger.info({ event: 'reminder_tapped', user_id: actorUserId, reminder_id: id });
+    },
+
+    /**
+     * POST /api/internal/reminders/tick (spec D5): asks for one run of the reminder job. The
+     * queue is exclusive under this key, so a tick while a run is queued or active adds nothing.
+     */
+    requestTick: (): Promise<void> => transaction(({ jobs }) => jobs.enqueue(REMIND, {}, { singletonKey: REMIND })),
+
+    /**
+     * The `remind` job (spec D5, D6). Every learner with a phone: each slot of their schedule
+     * that is due now is claimed, decided, sent or skipped, and recorded. Then the receipts of
+     * reminders sent a while ago are fetched. One learner's failure is logged and the next
+     * learner is still reminded.
+     *
+     * The claim and the result are two transactions with the push call between them, never
+     * one held across it (ADR 0001 R8): each is idempotent, and a run that dies between them
+     * leaves the slot `claimed`, which no later run claims again. That costs one reminder,
+     * never a duplicate.
+     */
+    tick: async (): Promise<TickSummary> => {
+      const at = now();
+      const summary: TickSummary = { candidates: 0, claimed: 0, sent: 0, skipped: 0, failed: 0 };
+      const candidates = await transaction(({ reminders }) => reminders.candidates());
+      summary.candidates = candidates.length;
+
+      for (const { userId, timeZone, settings: stored, tokens } of candidates) {
+        try {
+          // A zone the runtime does not know would make every clock read throw. The route that
+          // stores one checks it; this is for a row that got one another way.
+          if (!isTimeZone(timeZone)) {
+            logger.info({ event: 'reminder_time_zone_invalid', user_id: userId, time_zone: timeZone });
+            continue;
+          }
+          const settings = stored ?? DEFAULT_REMINDER_SETTINGS;
+          for (const { localDay, slot } of dueSlots(settings, timeZone, at)) {
+            const { id, completed } = await transaction(async ({ reminders }) => {
+              const claimed = await reminders.claim({ userId, localDay, slot });
+              return { id: claimed, completed: claimed === null ? 0 : await reminders.countCompletedOnDay(userId, localDay) };
+            });
+            if (id === null) continue;
+            summary.claimed += 1;
+
+            const decision = decide({
+              completedToday: completed,
+              dailyTarget: settings.dailyTarget,
+              timeZone,
+              devices: tokens.length,
+            });
+            if (decision.kind === 'skip_target_met') {
+              await transaction(({ reminders }) =>
+                reminders.record(id, { outcome: 'skip_target_met', evidence: decision.evidence, tickets: null }),
+              );
+              summary.skipped += 1;
+              continue;
+            }
+
+            let tickets: PushTicket[];
+            try {
+              tickets = await push.send(
+                tokens.map((to) => ({
+                  to,
+                  title: REMINDER_TITLE,
+                  body: REMINDER_BODY,
+                  channelId: REMINDER_CHANNEL,
+                  data: { reminder_id: id },
+                })),
+              );
+            } catch (error) {
+              if (!(error instanceof PushUnavailable)) throw error;
+              await transaction(({ reminders }) =>
+                reminders.record(id, {
+                  outcome: 'failed',
+                  evidence: { ...decision.evidence, error: error.message },
+                  tickets: null,
+                }),
+              );
+              summary.failed += 1;
+              continue;
+            }
+            // The provider answers one ticket per message, in order, so a ticket's token is the
+            // one at its position.
+            const gone = tokens.filter((_, index) => goneFor(tickets[index]));
+            await transaction(async ({ reminders }) => {
+              await reminders.record(id, {
+                outcome: 'sent',
+                evidence: decision.evidence,
+                tickets: tickets.map((ticket, index) => ({ ...ticket, to: tokens[index] })),
+              });
+              await reminders.deleteDevicesByToken(gone);
+            });
+            summary.sent += 1;
+          }
+        } catch (error) {
+          logger.info({ event: 'reminder_tick_error', user_id: userId, error: reasonOf(error) });
+        }
+      }
+
+      try {
+        await fetchReceipts(at);
+      } catch (error) {
+        // A push service that cannot answer, or a write that failed: the sends above stand, and
+        // every reminder whose receipts were not stored is still awaiting them.
+        logger.info({ event: 'reminder_receipts_error', error: reasonOf(error) });
+      }
+      logger.info({ event: 'reminder_tick', ...summary });
+      return summary;
     },
   };
 }

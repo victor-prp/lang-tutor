@@ -89,6 +89,9 @@ export type AppDeps = {
   // Phase 35 (spec D12). The bot route's secret and use cases, or null, which
   // leaves the route unmounted: every lane, CI and every test that sets none.
   bots: { secret: string; service: BotService } | null;
+  // Phase 52 (spec D5). The reminder tick's secret and the service it asks for a run, or null,
+  // which leaves the route unmounted: every lane, CI and every test that sets none.
+  reminderTick: { secret: string; service: ReminderService } | null;
 };
 
 // A tool that enqueues nothing gets a jobs repository that says so.
@@ -319,6 +322,7 @@ export function createServerDeps(io: {
   });
 
   const translations = createTranslationService({ llm, transaction, logger: io.logger, now: io.now });
+  const reminders = createReminderService({ transaction, push, logger: io.logger, now: io.now });
   // Phase 35 (spec D12). The one place that hands Better Auth's session minting
   // to the use case that needs it (ADR 0001 R13).
   const mintSession: MintSession = authModule.mintSession;
@@ -342,7 +346,7 @@ export function createServerDeps(io: {
     translations,
     vocabulary: createVocabularyService({ transaction, logger: io.logger, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
     grants: createGrantService({ transaction, logger: io.logger }),
-    reminders: createReminderService({ transaction, push, logger: io.logger, now: io.now }),
+    reminders,
     // Phase 26. Handed the lookup use case itself, so a row is looked up exactly
     // as a typed word is (spec D7). The match call shares the lookup's client
     // and budget.
@@ -365,6 +369,7 @@ export function createServerDeps(io: {
     signedIn: { sessionOf: authModule.sessionOf },
     webOrigins: io.auth.webOrigins,
     bots: io.botSecret ? { secret: io.botSecret, service: createBotService({ transaction, mintSession }) } : null,
+    reminderTick: io.reminderSecret ? { secret: io.reminderSecret, service: reminders } : null,
   };
 }
 

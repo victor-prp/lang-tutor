@@ -12,6 +12,7 @@ import { registerAuthDocs } from './routes/authDocs';
 import { createBotsRouter } from './routes/bots';
 import { createEnrollmentsRouter } from './routes/enrollments';
 import { createGrantsRouter } from './routes/grants';
+import { createInternalRemindersRouter } from './routes/internalReminders';
 import { createMeRouter } from './routes/me';
 import { createPhotoImportsRouter } from './routes/photoImports';
 import { createRemindersRouter } from './routes/reminders';
@@ -80,6 +81,23 @@ export function createApp(deps: AppDeps) {
     app.route('/api', createBotsRouter({ secret: deps.bots.secret, bots: deps.bots.service, logger: deps.logger }));
   }
   app.all('/api/bots/*', (c) => c.json({ error: 'not found' }, 404));
+
+  // Phase 52 (spec D5; ADR 0003's third exception). The reminder tick, only
+  // where REMINDER_SECRET is set, and before the session middleware for the
+  // bot route's reason: its bearer secret is its credential. Every other
+  // /api/internal path, and the tick itself where it is unmounted, is a plain
+  // 404 that never reaches the session middleware.
+  if (deps.reminderTick) {
+    app.route(
+      '/api',
+      createInternalRemindersRouter({
+        secret: deps.reminderTick.secret,
+        reminders: deps.reminderTick.service,
+        logger: deps.logger,
+      }),
+    );
+  }
+  app.all('/api/internal/*', (c) => c.json({ error: 'not found' }, 404));
 
   // Phase 29 (spec D11). Everything under /api past this point needs a
   // session; all but PROFILE_EXEMPT also need a profile. Registered after the

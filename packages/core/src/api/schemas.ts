@@ -612,6 +612,10 @@ export const ReminderSettingsResponseSchema = ReminderSettingsSchema.extend({ ti
 export const PushDeviceRequestSchema = z.object({ token: z.string().min(1).max(256), platform: z.literal('android') });
 export const PushDeviceUnregisterRequestSchema = z.object({ token: z.string().min(1).max(256) });
 
+// Phase 52 (spec D5). The reminder tick's answer, to EventBridge: a run is queued,
+// or one already was. Mounted only where REMINDER_SECRET is set.
+export const ReminderTickResponseSchema = z.object({ queued: z.literal(true) });
+
 // A course of study: one target language, explained in one source language.
 // Language fields are plain strings for the reason UserSchema's are.
 export const EnrollmentSchema = z.object({
