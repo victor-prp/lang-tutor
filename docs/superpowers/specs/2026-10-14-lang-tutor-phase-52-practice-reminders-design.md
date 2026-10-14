@@ -144,9 +144,9 @@ outlives the session, as `gloss_family_events` does). It is unique on
   `POST /api/me/reminders/{id}/tap`, which sets `tapped_at` once on a reminder the actor owns, and
   answers 404 for anyone else's (ADR 0009 R7).
 - **Session:** inside `submitAnswer`'s completing transaction, the latest `sent` reminder of the
-  learner's `practice_day` with `decided_at <= now` and no `session_id` gets this session. That
-  is "finished before the next reminder or the end of the day", and a second session in the same
-  gap marks nothing more. It is a dependent write of the completion, so it shares the transaction.
+  learner's `practice_day` with `decided_at <= now` gets this session, unless it already has one.
+  That is "finished before the next reminder or the end of the day". A second session in the same
+  gap marks nothing more, and never an earlier reminder. It is a dependent write of the completion, so it shares the transaction.
 
 Counts are queries over this table. The runbook gets the three queries.
 
