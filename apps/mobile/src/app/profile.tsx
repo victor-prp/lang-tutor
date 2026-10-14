@@ -1,6 +1,6 @@
 import type { Grant } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { confirm } from '@/confirm';
@@ -57,103 +57,113 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <Text style={styles.title}>{strings.profileTitle}</Text>
+      {/* Phase 52 (final review I3): the reminders card made the screen taller than a small phone, which clipped Back and Sign out. */}
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.title}>{strings.profileTitle}</Text>
 
-      <View style={styles.card}>
-        <Row label={strings.profileUsernameLabel} value={user.username} testID="profile-username" />
-        <Row label={strings.profileNameLabel} value={user.display_name} testID="profile-name" />
-        <Row label={strings.profileAgeLabel} value={String(user.age)} testID="profile-age" />
-        <Row
-          label={strings.onboardingNativeLabel}
-          value={strings.languageName(user.native_language)}
-          testID="profile-native"
-        />
-        <Row
-          label={strings.onboardingTargetLabel}
-          value={
-            enrollments.map((enrollment) => strings.languageName(enrollment.target_language)).join(', ') ||
-            strings.noneYet
-          }
-          testID="profile-target"
-        />
-        {/* Phase 32 (spec D10): the release this phone runs. Phase 49 (spec D4):
-            a tap opens About, which names the server and the native layer too. */}
-        <Pressable
-          accessibilityRole="button"
-          testID="app-version"
-          onPress={() => router.push('/about')}
-          style={styles.row}
-        >
-          <Text style={styles.rowLabel}>{strings.appVersionLabel}</Text>
-          <Text style={[styles.rowValue, styles.link]}>{mobileAppLine(release)}</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.card}>
-        {/* Phase 52 (spec D8): the practice reminders' schedule. */}
-        <Pressable
-          accessibilityRole="button"
-          testID="profile-reminders"
-          onPress={() => router.push('/reminders')}
-          style={styles.inlineButton}
-        >
-          <Text style={styles.secondaryLabel}>{strings.remindersEntry}</Text>
-        </Pressable>
-      </View>
-
-      {tutors.length > 0 ? (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>{strings.tutorsTitle}</Text>
-          {tutors.map((g) => (
-            <View key={g.id} testID={`tutor-${g.grantee.username}`} style={styles.row}>
-              <Text style={styles.rowLabel}>
-                {strings.personAndLanguage(g.grantee.display_name, g.enrollment.target_language)}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                testID={`tutor-end-${g.grantee.username}`}
-                onPress={() => onEndTutor(g)}
-                style={styles.inlineButton}
-              >
-                <Text style={styles.secondaryLabel}>{strings.endTutor}</Text>
-              </Pressable>
-            </View>
-          ))}
+          <Row label={strings.profileUsernameLabel} value={user.username} testID="profile-username" />
+          <Row label={strings.profileNameLabel} value={user.display_name} testID="profile-name" />
+          <Row label={strings.profileAgeLabel} value={String(user.age)} testID="profile-age" />
+          <Row
+            label={strings.onboardingNativeLabel}
+            value={strings.languageName(user.native_language)}
+            testID="profile-native"
+          />
+          <Row
+            label={strings.onboardingTargetLabel}
+            value={
+              enrollments.map((enrollment) => strings.languageName(enrollment.target_language)).join(', ') ||
+              strings.noneYet
+            }
+            testID="profile-target"
+          />
+          {/* Phase 32 (spec D10): the release this phone runs. Phase 49 (spec D4):
+              a tap opens About, which names the server and the native layer too. */}
+          <Pressable
+            accessibilityRole="button"
+            testID="app-version"
+            onPress={() => router.push('/about')}
+            style={styles.row}
+          >
+            <Text style={styles.rowLabel}>{strings.appVersionLabel}</Text>
+            <Text style={[styles.rowValue, styles.link]}>{mobileAppLine(release)}</Text>
+          </Pressable>
         </View>
-      ) : null}
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>{strings.teachingTitle}</Text>
+        <View style={styles.card}>
+          {/* Phase 52 (spec D8): the practice reminders' schedule. */}
+          <Pressable
+            accessibilityRole="button"
+            testID="profile-reminders"
+            onPress={() => router.push('/reminders')}
+            style={styles.inlineButton}
+          >
+            <Text style={styles.secondaryLabel}>{strings.remindersEntry}</Text>
+          </Pressable>
+        </View>
+
+        {tutors.length > 0 ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>{strings.tutorsTitle}</Text>
+            {tutors.map((g) => (
+              <View key={g.id} testID={`tutor-${g.grantee.username}`} style={styles.row}>
+                <Text style={styles.rowLabel}>
+                  {strings.personAndLanguage(g.grantee.display_name, g.enrollment.target_language)}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  testID={`tutor-end-${g.grantee.username}`}
+                  onPress={() => onEndTutor(g)}
+                  style={styles.inlineButton}
+                >
+                  <Text style={styles.secondaryLabel}>{strings.endTutor}</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>{strings.teachingTitle}</Text>
+          <Pressable
+            accessibilityRole="button"
+            testID="profile-invite"
+            onPress={() => router.push('/students/invite')}
+            style={styles.inlineButton}
+          >
+            <Text style={styles.secondaryLabel}>{strings.inviteStudent}</Text>
+          </Pressable>
+        </View>
+
         <Pressable
           accessibilityRole="button"
-          testID="profile-invite"
-          onPress={() => router.push('/students/invite')}
-          style={styles.inlineButton}
+          testID="sign-out-button"
+          onPress={onSignOut}
+          style={styles.button}
         >
-          <Text style={styles.secondaryLabel}>{strings.inviteStudent}</Text>
+          <Text style={styles.buttonLabel}>{strings.signOut}</Text>
         </Pressable>
-      </View>
 
-      <Pressable
-        accessibilityRole="button"
-        testID="sign-out-button"
-        onPress={onSignOut}
-        style={styles.button}
-      >
-        <Text style={styles.buttonLabel}>{strings.signOut}</Text>
-      </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}>
+          <Text style={styles.secondaryLabel}>{strings.back}</Text>
+        </Pressable>
 
-      <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}>
-        <Text style={styles.secondaryLabel}>{strings.back}</Text>
-      </Pressable>
-
-      <View style={styles.spacer} />
+        <View style={styles.spacer} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.md },
+  screen: { flex: 1 },
+  content: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.lg,
+    gap: spacing.md,
+  },
   title: {
     fontSize: fontSizes.xxl,
     lineHeight: lineHeights.xxl,

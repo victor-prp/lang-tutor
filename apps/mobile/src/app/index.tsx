@@ -18,21 +18,29 @@ export default function HomeScreen() {
   const shown = status === 'signed_in' && user !== null && !needsEnrollScreen(enrollments, grants);
 
   // Phase 52 (spec D1, D4). Once per learner while Home is shown: report the
-  // zone their day follows, and ask to send reminders (or register again, once
-  // granted). Neither throws, and nothing here waits on them.
-  // Reset while Home is not shown, so a sign-out and a sign-in on this same Home
-  // report and register again (both calls are idempotent).
-  const remindedFor = useRef<string | null>(null);
+  // zone their day follows, and, if they have a course of their own, ask to send
+  // reminders (or register again, once granted). A tutor with no enrollment has
+  // nothing to practise, and the server leaves them out of the tick as well; they
+  // are asked when an enrollment arrives. Neither call throws, and nothing here
+  // waits on them. Both are reset while Home is not shown, so a sign-out and a
+  // sign-in on this same Home report and register again (both are idempotent).
+  const reportedFor = useRef<string | null>(null);
+  const promptedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!shown) {
-      remindedFor.current = null;
+      reportedFor.current = null;
+      promptedFor.current = null;
       return;
     }
-    if (remindedFor.current === user.id) return;
-    remindedFor.current = user.id;
-    void reminders.reportTimeZone();
-    void reminders.promptOnce();
-  }, [shown, user, reminders]);
+    if (reportedFor.current !== user.id) {
+      reportedFor.current = user.id;
+      void reminders.reportTimeZone();
+    }
+    if (active && promptedFor.current !== user.id) {
+      promptedFor.current = user.id;
+      void reminders.promptOnce();
+    }
+  }, [shown, user, active, reminders]);
 
   // Phase 52 (spec D8). A tapped reminder opens Home with start=reminder, which
   // LearningSection acts on. A learner with no enrollment has nothing to start,
