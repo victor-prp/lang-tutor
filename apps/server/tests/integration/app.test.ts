@@ -139,10 +139,12 @@ describe('the app as production assembles it', () => {
       const profile = { username: 'newcomer', display_name: 'חדש', age: 30, native_language: 'he' };
       const created = await app.request('/api/users', json(profile, as));
       expect(created.status).toBe(201);
-      expect(await created.json()).toEqual({ id: fresh.userId, ...profile });
+      // Phase 52: a new profile starts on UTC until the app reports its zone.
+      const stored = { id: fresh.userId, ...profile, time_zone: 'UTC' };
+      expect(await created.json()).toEqual(stored);
 
       const after = await app.request('/api/me', { headers: as });
-      expect(await after.json()).toEqual({ email: 'new@example.com', user: { id: fresh.userId, ...profile } });
+      expect(await after.json()).toEqual({ email: 'new@example.com', user: stored });
       expect((await app.request('/api/enrollments', { headers: as })).status).toBe(200);
     });
 
