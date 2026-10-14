@@ -109,8 +109,8 @@ overlapping ticks (a rollout runs two containers, ADR 0010) to one run.
 
 The job's use case, `reminders.tick(now)`:
 
-1. **Due slots.** It reads every learner with at least one device, with their settings and time
-   zone. The pure `dueSlots(settings, timeZone, now)` returns the slots of today that started in
+1. **Due slots.** It reads every learner with at least one device who owns at least one
+   enrollment (ruling 9), with their settings and time zone. The pure `dueSlots(settings, timeZone, now)` returns the slots of today that started in
    the last 30 minutes (`0 <= localMinutes − slot < 30`) on an enabled weekday. A tick that was
    missed is caught up by the next one inside that window, and a slot left out longer than that is
    skipped.
@@ -121,7 +121,8 @@ The job's use case, `reminders.tick(now)`:
    `{ completed_today, daily_target, time_zone, devices }`.
 4. **Send and record.** On `send` it posts one message per device to Expo with title "הגיע הזמן
    לתרגל" (ruled Hebrew in Task 9, like the app), a fixed body "כמה דקות עכשיו, והמילים נשארות
-   בזיכרון.", channel `reminders`, and data `{ reminder_id }`. The outcome is
+   בזיכרון.", channel `reminders`, priority `high` (so Doze does not hold it back), and data
+   `{ reminder_id }`. The outcome is
    `sent`, or `failed` with the error, and the tickets are stored. A ticket of
    `DeviceNotRegistered` deletes that device.
 5. **Receipts.** In the same run it fetches receipts for `sent` rows decided between 15 minutes
@@ -247,3 +248,15 @@ stays 3.
    hours are whole hours.
 6. **A conditional `app.config.js`** (mine, D8). The PR can merge before the Firebase file
    exists without breaking the Android release.
+7. **Hebrew copy** (mine, made in Task 9). The app's whole UI is Hebrew under forced RTL, so the
+   Reminders screen and the push itself are Hebrew. The spec's English strings were a mistake.
+   The day chips run Sunday first, the Israeli week, with ISO values unchanged.
+8. **A `preview` build, not a dev client** (mine, D8). A `development` profile needs
+   `expo-dev-client`, a second change to the native layer. A release-mode internal APK receives
+   pushes with no new package. The cost is rebuilding instead of reloading through Metro.
+9. **Only learners who own an enrollment are reminded** (mine, from the final review). A tutor
+   with students but no list of their own has nothing to practise, and their count would stay 0
+   forever. Home asks for the permission only with an active enrollment.
+10. **The tap returns to Home with `dismissTo`** (mine). `push` would stack a second Home over an
+    open session. Home acts only on a read made after the tap, so a reminder tapped after
+    finishing one session of two opens the next one, not the finished one.

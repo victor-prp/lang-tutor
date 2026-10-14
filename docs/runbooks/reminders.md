@@ -240,6 +240,8 @@ means:
 - **No `push_devices` row.** The learner is not a candidate, so no row is ever written for them.
   The permission was refused, they use Expo Go or the web, they signed out (that unregisters the
   phone), the app predates reminders, or Firebase is not set up (step 1; the token call fails).
+- **A phone, but no list of their own.** A user who owns no enrollment (a tutor only) is not a
+  candidate either: they have nothing to practise (spec ruling 9).
 - **A phone, and no `reminders` row.** The settings are off or leave out today's weekday (1 is
   Monday, on the learner's clock), or no slot fell in the last 30 minutes of a tick that ran. A
   learner who never reported a time zone is read in UTC (`time_zone` says `UTC`).
