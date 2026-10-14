@@ -312,6 +312,13 @@ describe('phase 25 speaking cards in step', () => {
     expect(step(record(), 'r1', { heard: 'cane' })).toEqual({ status: 'unheard' });
   });
 
+  // Phase 50 (spec D5). A transcript the server scored as sounding like the form.
+  it('records a transcript that sounds like the form, though its letters are unheard', () => {
+    const outcome = step(record(), 'r1', { heard: 'gato', sounds_like: 'gatto' });
+    expect(outcome).toMatchObject({ status: 'advanced' });
+    if (outcome.status === 'advanced') expect(outcome.record.answers[0]).toMatchObject({ answer_string: 'gato', verdict: 'understood' });
+  });
+
   it('passes a read-aloud card with skip, and refuses show_answer there', () => {
     expect(step(record(), 'r1', { pass: 'skip' })).toMatchObject({ status: 'advanced' });
     expect(step(record(), 'r1', { pass: 'show_answer' })).toEqual({ status: 'wrong_answer_kind' });
@@ -431,6 +438,9 @@ describe('step, the second try', () => {
     if (pending.status !== 'advanced') throw new Error(pending.status);
     expect(pending.record.answers[0]).toMatchObject({ verdict: 'alternative', retry_state: 'pending' });
     expect(step(pending.record, 's1', { heard: 'cane' }, { retry: true })).toEqual({ status: 'unheard' });
+    const sounded = step(pending.record, 's1', { heard: 'finestre', sounds_like: 'finestra' }, { retry: true });
+    if (sounded.status !== 'advanced') throw new Error(sounded.status);
+    expect(sounded.record.answers[0]).toMatchObject({ retry_state: 'resolved', retry_answer_string: 'finestre', retry_verdict: 'understood' });
     expect(step(pending.record, 's1', { heard: 'la finestra' }, { retry: true })).toMatchObject({ status: 'advanced', recorded: 'retry' });
     const typed = step(pending.record, 's1', { text: 'finestra' }, { retry: true });
     if (typed.status !== 'advanced') throw new Error(typed.status);

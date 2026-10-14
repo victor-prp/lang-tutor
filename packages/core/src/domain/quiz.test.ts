@@ -319,6 +319,18 @@ describe('phase 25 speaking cards', () => {
     expect(() => evaluate(READ, { heard: 'cane' })).toThrow(/unheard/);
   });
 
+  // Phase 50 (spec D5). Only the server builds it, after a pronunciation score.
+  it('records a transcript that sounds like the form as understood, storing what was heard', () => {
+    expect(evaluate(READ, { heard: 'gato', sounds_like: 'gatto' })).toEqual({
+      question_id: 'r1',
+      is_correct: true,
+      answer_string: 'gato',
+      verdict: 'understood',
+      ...NO_RETRY,
+    });
+    expect(evaluateRetry(SAY, { heard: 'barlo', sounds_like: 'parlo' })).toEqual({ answer_string: 'barlo', verdict: 'understood' });
+  });
+
   it('stores at most 100 characters of a transcript', () => {
     const heard = `gatto ${'a'.repeat(200)}`;
     expect(evaluate(READ, { heard }).answer_string).toHaveLength(100);

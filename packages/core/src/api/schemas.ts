@@ -1050,6 +1050,14 @@ export const LlmAcceptSchema = z.object({
 // empty string for nothing intelligible.
 export const LlmTranscriptSchema = z.object({ heard: z.string() });
 
+// Phase 50 (spec D2). How alike each pair sounds, 0 to 1, under the short key
+// it was sent with: a key the model cannot mistype, where an echoed word could
+// come back respelled. The range is the domain's check: a plain number is all
+// the schema says, as the other answers' counts are.
+export const LlmSoundAlikeSchema = z.object({
+  scores: z.array(z.object({ key: z.string(), score: z.number() })),
+});
+
 // Phase 27 (spec D4). The model's verdict on a meaning-recall answer. Mapped
 // to a typed verdict in the server (domain/judge.ts).
 export const LlmMeaningJudgeSchema = z.object({
