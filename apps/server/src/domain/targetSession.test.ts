@@ -3,7 +3,7 @@ import { FSRS6_DEFAULT, SESSION_LENGTH, type Dimension, type MemoryState } from 
 
 import { choosePools, chooseWords, expectedSuccess, type ChoiceInput, type ChosenPick } from './choose';
 import { DAY_NEW_CAP, HARD_CAP, NEW_FLOOR, PER_DIMENSION_CAP } from './chooseConstants';
-import { chooseWithTargets, targetSplit, type ActiveTarget, type TargetSessionInput } from './targetSession';
+import { chooseWithTargets, splitChanged, targetSplit, type ActiveTarget, type TargetSessionInput, type TargetSplit } from './targetSession';
 import { owedNew, type TargetKind } from './targets';
 import type { Step } from './today';
 
@@ -584,5 +584,38 @@ describe('choosePools (ruling R-D6)', () => {
     expect(choosePools(input([known('a'), ...news], capSpent), pools('a', 0)).map(ids)).toEqual([['a'], []]);
     // Nothing picked in either pass: new words past the cap, each pool's in turn.
     expect(choosePools(input(news, capSpent), pools('n0')).map(ids)).toEqual([['n0'], ['n2', 'n1']]);
+  });
+});
+
+describe('splitChanged (spec D12)', () => {
+  const row = (targetId: string, slots: number, over: Partial<TargetSplit> = {}): TargetSplit => ({
+    targetId,
+    wish: 10,
+    slots,
+    picked: slots,
+    reason: 'not_ready',
+    daysLeft: 5,
+    readyCount: 0,
+    wordCount: 8,
+    ...over,
+  });
+
+  it('reads only the slots each target is given: a day nearer, more words ready, the same share', () => {
+    const recorded = [row('a', 5), row('b', 5)];
+    const today = [row('b', 5, { daysLeft: 3, readyCount: 4, picked: 2 }), row('a', 5, { wish: 7, reason: 'run_up', daysLeft: 2 })];
+    expect(splitChanged(recorded, today)).toBe(false);
+  });
+
+  it('is unchanged with no target on either side', () => {
+    expect(splitChanged([], [])).toBe(false);
+  });
+
+  it.each([
+    ['a target is given other slots', [row('a', 10), row('b', 0)]],
+    ['a target is no longer served', [row('a', 5)]],
+    ['a target is served that was not', [row('a', 5), row('b', 5), row('c', 0)]],
+    ['another target takes the place of one', [row('a', 5), row('c', 5)]],
+  ])('changes when %s', (_, today) => {
+    expect(splitChanged([row('a', 5), row('b', 5)], today)).toBe(true);
   });
 });

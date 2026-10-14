@@ -84,6 +84,16 @@ export function targetSplit(input: TargetSessionInput): TargetSplit[] {
 }
 
 /**
+ * Spec D12. Whether a session chosen with `recorded` would be split another way today: a
+ * target given other slots, or a target served on one side only. Only the slots count: a
+ * day nearer or a word more ready that leaves every share as it was changes nothing.
+ */
+export function splitChanged(recorded: readonly TargetSplit[], today: readonly TargetSplit[]): boolean {
+  const slots = new Map(recorded.map((row) => [row.targetId, row.slots]));
+  return recorded.length !== today.length || today.some((row) => slots.get(row.targetId) !== row.slots);
+}
+
+/**
  * One session: the targets' pools, then the main path with the slots they left, in one
  * call of the picker. A target fills its slots with its own words, those answered today
  * included, before passing any on; slots the main path cannot use go back to the targets;

@@ -89,6 +89,10 @@ describe('StockSessionPayloadSchema (phase 43 D3)', () => {
     expect(StockSessionPayloadSchema.parse({ enrollment_id: 'e', reason: 'complete' })).toEqual({ enrollment_id: 'e', reason: 'complete' });
   });
 
+  it('takes a change to a target as a reason (phase 53, ruling R-D12b)', () => {
+    expect(StockSessionPayloadSchema.parse({ enrollment_id: 'e', reason: 'target' })).toEqual({ enrollment_id: 'e', reason: 'target' });
+  });
+
   it('refuses a reason it does not know, and an empty enrollment', () => {
     expect(StockSessionPayloadSchema.safeParse({ enrollment_id: 'e', reason: 'whim' }).success).toBe(false);
     expect(StockSessionPayloadSchema.safeParse({ enrollment_id: '', reason: 'save' }).success).toBe(false);

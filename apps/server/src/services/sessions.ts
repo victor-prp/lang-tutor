@@ -33,7 +33,7 @@ import {
   type CheckFinding,
   type CheckItem,
 } from '../domain/check';
-import { chooseWords, liveDimensions } from '../domain/choose';
+import { liveDimensions } from '../domain/choose';
 import { findGap } from '../domain/cloze';
 import {
   buildContextPrompt,
@@ -75,6 +75,7 @@ import {
   PrepareSessionPayloadSchema,
   StockSessionPayloadSchema,
   acceptRenderingKey,
+  type StockSessionPayload,
 } from '../domain/jobs';
 import { keepCards, type CardUnit, type Refusal } from '../domain/keepCards';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
@@ -99,6 +100,7 @@ import { MAX_AVOID } from '../domain/sentences';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
 import { MIN_AUDIO_CHARS, parseTranscript, transcriptionSystem } from '../domain/speech';
+import { chooseWithTargets, splitChanged, targetSplit, type TargetSessionInput } from '../domain/targetSession';
 import { tileEligible, tilesFor } from '../domain/tiles';
 import {
   AnswerKindMismatch,
@@ -162,6 +164,16 @@ type SoundLook = { score: number | null; form: string | null; called: boolean; m
 
 /** Phase 27. A judged answer: its verdict, and the session it was recorded in. */
 export type JudgedResult = { verdict: TypedVerdict; session: SessionResult };
+
+/** Phase 43 (spec D5). The session create answers, and whether this call made it. */
+type NextSession = { sessionId: string; status: SessionStatus; source: SessionSource; created: boolean };
+
+/** Phase 53 (spec D8). A stock written: its session, and the targets its choice found ended
+ *  on their date, whose events name it. Logged once its transaction commits. */
+type Stocked = { sessionId: string; endedOnDate: string[] };
+
+/** Phase 53 (ruling R-D12). A stale stock retired, and the stock built in its place. */
+type Replaced = Stocked & { retired: string };
 
 /**
  * Phase 20. Runs the progress rule over an ended session's answers, inside the
@@ -333,17 +345,17 @@ export function createSessionService({
   }
 
   /**
-   * Phase 43 (spec D3). Phase 19's list branch of create, shared by create and
-   * the stock job: the words, the session inserted preparing for `devices`, the
-   * families' refresh, and its preparation enqueued in the same transaction, so
-   * the row and its job commit together. NoSavedWords when the list has nothing
-   * to ask.
+   * Phase 53 (spec D6, D7, D12). What a stock's words are chosen from, read on the owner's
+   * learner day: the picker's input, with the targets active that day, and the families the
+   * choice refreshes. Null when the list is empty, before anything else is read. A stock and
+   * the stale check both read through here, so the split the check compares is the split a
+   * stock built now would record.
    */
-  async function stockNext(repos: Repos, enrolled: Enrollment, devices: Devices): Promise<string> {
-    const { session, vocabulary, dict, jobs } = repos;
+  async function readChoice(repos: Repos, enrolled: Enrollment, devices: Devices) {
+    const { session, vocabulary, dict } = repos;
     const enrollmentId = enrolled.id;
     const saved = await vocabulary.listSavedGlosses(enrollmentId);
-    if (saved.length === 0) throw new NoSavedWords(enrollmentId);
+    if (saved.length === 0) return null;
     // Phase 35 (spec D5, D10). The words, each with a dimension and a rung,
     // from what the learner knows: memory and levels, on the owner's day,
     // with what that day already asked and introduced. At most one gloss per
@@ -360,21 +372,18 @@ export function createSessionService({
     const formsOf = new Map<string, string[]>();
     for (const row of forms) formsOf.set(row.lexemeId, [...(formsOf.get(row.lexemeId) ?? []), row.form]);
     const stored = await repos.glossFamilies.load(enrollmentId);
-    const families = glossFamilies({
-      saved: saved.map((gloss) => ({
-        glossId: gloss.glossId,
-        lexemeId: gloss.lexemeId,
-        lemma: gloss.lemma,
-        key: gloss.key,
-        savedAt: gloss.savedAt,
-        forms: formsOf.get(gloss.lexemeId) ?? [],
-        order: gloss.order,
-        speakable: speakable(gloss.form),
-        knownAt: gloss.knownAt,
-      })),
-      memory,
-      live: liveDimensions(devices.listening, devices.speaking),
-    });
+    const members = saved.map((gloss) => ({
+      glossId: gloss.glossId,
+      lexemeId: gloss.lexemeId,
+      lemma: gloss.lemma,
+      key: gloss.key,
+      savedAt: gloss.savedAt,
+      forms: formsOf.get(gloss.lexemeId) ?? [],
+      order: gloss.order,
+      speakable: speakable(gloss.form),
+      knownAt: gloss.knownAt,
+    }));
+    const families = glossFamilies({ saved: members, memory, live: liveDimensions(devices.listening, devices.speaking) });
     const waiting = new Set([...families.state].filter(([, state]) => state === 'waiting').map(([glossId]) => glossId));
     // Phase 37 (spec D1, D7). Today's answers leave the returns owed and the
     // words done for the day.
@@ -390,34 +399,53 @@ export function createSessionService({
       inFlight,
       met,
     );
-    const chosen = chooseWords({
-      saved,
-      memory,
-      levels,
-      today,
-      steps,
-      done,
-      newToday: introduced.length + extraNew,
-      listening: devices.listening,
-      speaking: devices.speaking,
-      rng,
-      families: { familyOf: families.familyOf, waiting },
-    });
-    // Spec D12. One rendering per gloss, uniformly over every form of every
-    // member that agrees with the gloss, the saved form always among them.
+    // Phase 53 (spec D1, D7, ruling R-D4). The targets active on the day; whether each word
+    // can be said, as the families read it; and the words first met on the day, the session
+    // in flight's first meetings (extraNew's) among them.
+    const input: TargetSessionInput = {
+      choice: {
+        saved,
+        memory,
+        levels,
+        today,
+        steps,
+        done,
+        newToday: introduced.length + extraNew,
+        listening: devices.listening,
+        speaking: devices.speaking,
+        rng,
+        families: { familyOf: families.familyOf, waiting },
+      },
+      targets: await repos.target.listActive(enrollmentId, today),
+      speakable: new Map(members.map((member) => [member.glossId, member.speakable])),
+      introducedToday: new Set([...introduced, ...inFlight.filter((glossId) => !met.has(glossId))]),
+    };
+    return { at, today, saved, families, stored, input };
+  }
+  type ChoiceRead = NonNullable<Awaited<ReturnType<typeof readChoice>>>;
+
+  /**
+   * Phase 53 (spec D6, D8). A stock's words, chosen from `read`: the picks its preparation is
+   * given, in the order chosen, and the split they were chosen with. Null when no chosen
+   * gloss has a rendering to ask.
+   */
+  async function choosePicks(repos: Repos, enrolled: Enrollment, read: ChoiceRead) {
+    const { picks: chosen, split } = chooseWithTargets(read.input);
+    // Phase 31 (spec D12). One rendering per gloss, uniformly over every form of
+    // every member that agrees with the gloss, the saved form always among them.
     // No model call: a lemma form not yet rendered joins once its job lands.
-    const renderings = await dict.findGlossRenderings({
+    const renderings = await repos.dict.findGlossRenderings({
       glossIds: chosen.map((choice) => choice.glossId),
       userLanguageCode: enrolled.source_language,
     });
-    const savedById = new Map(saved.map((gloss) => [gloss.glossId, gloss]));
+    const savedById = new Map(read.saved.map((gloss) => [gloss.glossId, gloss]));
     const picks = chosen.flatMap((choice) => {
       const rendering = pickRendering(askableRenderings(savedById.get(choice.glossId)!, renderings), rng);
       if (!rendering) return [];
       const { dimension, rung, level, r } = choice;
       const step = choice.cls === 'STEP';
       // Phase 39 (spec D6). A family's next meaning, never asked, is introduced with the known ones.
-      const knownMeanings = families.introductions.get(choice.glossId);
+      const knownMeanings = read.families.introductions.get(choice.glossId);
       return [
         {
           gloss_id: choice.glossId,
@@ -432,8 +460,36 @@ export function createSessionService({
         },
       ];
     });
-    if (picks.length === 0) throw new NoSavedWords(enrollmentId);
+    return picks.length === 0 ? null : { picks, split };
+  }
+  type ChosenStock = NonNullable<Awaited<ReturnType<typeof choosePicks>>>;
+
+  /**
+   * Phase 43 (spec D3). A stock chosen from `read`, written: the session inserted preparing
+   * for `devices`, the families' refresh, and its preparation enqueued in the same
+   * transaction, so the row and its job commit together. Phase 53 (spec D8, D12): the
+   * session records the learner day its words were chosen on and the split they were chosen
+   * with, and each target whose date has come is recorded as ended on it, naming the session.
+   */
+  async function writeStock(repos: Repos, enrolled: Enrollment, devices: Devices, read: ChoiceRead, chosen: ChosenStock): Promise<Stocked> {
+    const { session, vocabulary, jobs } = repos;
+    const enrollmentId = enrolled.id;
+    const { at, today, families, stored } = read;
     const sessionId = await session.insertPreparingSession(enrolled.user_id, enrollmentId, devices, today);
+    if (chosen.split.length > 0) await repos.target.insertSessionSplit(sessionId, chosen.split);
+    // Phase 53 (spec D8). A target ends on its date by itself; the first stock chosen from
+    // that day on writes its ended_on_date.
+    const endedOnDate = await repos.target.listEndedUnrecorded(enrollmentId, today);
+    for (const target of endedOnDate) {
+      await repos.target.insertEvent({
+        targetId: target.id,
+        kind: 'ended_on_date',
+        before: null,
+        after: { due_on: target.dueOn },
+        actorUserId: null,
+        sessionId,
+      });
+    }
     // Phase 39 (spec D4). The refresh is recorded once the session exists, so
     // each event names it; one that changed nothing writes nothing. Phase 46
     // (spec D3): every gloss known for the first time is stamped, family or not.
@@ -444,11 +500,71 @@ export function createSessionService({
     if (!isEmptyFamilyWrite(write)) await repos.glossFamilies.apply(enrollmentId, sessionId, write);
     await jobs.enqueue(PREPARE_SESSION, {
       session_id: sessionId,
-      picks,
+      picks: chosen.picks,
       listening: devices.listening,
       speaking: devices.speaking,
     });
-    return sessionId;
+    return { sessionId, endedOnDate: endedOnDate.map((target) => target.id) };
+  }
+
+  /**
+   * Phase 43 (spec D3). Phase 19's list branch of create, shared by create and
+   * the stock job: the words read and chosen, then written. NoSavedWords when
+   * the list has nothing to ask. Phase 53 (spec D6): the words serve the
+   * targets active on the learner day.
+   */
+  async function stockNext(repos: Repos, enrolled: Enrollment, devices: Devices): Promise<Stocked> {
+    const read = await readChoice(repos, enrolled, devices);
+    const chosen = read ? await choosePicks(repos, enrolled, read) : null;
+    if (!read || !chosen) throw new NoSavedWords(enrolled.id);
+    return writeStock(repos, enrolled, devices, read, chosen);
+  }
+
+  /**
+   * Phase 53 (ruling R-D12). The cheap half of the stale check: a list stock whose words were
+   * chosen on an earlier learner day than today. A seed, a stock from before phase 53 (no
+   * chosen_on) and today's never are. Answers today and the devices the stock was built
+   * for, or null. `stock` is unstarted: findOpen's.
+   */
+  async function choseEarlier(repos: Repos, enrolled: Enrollment, stock: SessionSummary) {
+    if (stock.source !== 'list') return null;
+    const choice = await repos.session.findStockChoice(stock.id);
+    if (!choice || choice.chosenOn === null) return null;
+    const today = await learnerDay(repos, enrolled.user_id, now());
+    return choice.chosenOn < today ? { today, devices: { listening: choice.listening, speaking: choice.speaking } } : null;
+  }
+
+  /**
+   * Phase 53 (spec D12, ruling R-D12). A stock chosen on an earlier learner day is played as
+   * it is (phase 43 R5) unless today's split differs from the one it recorded: then it is
+   * retired and the next is built in its place, for the devices it was built for. With no
+   * target active and none recorded, R5 holds without the list being read. A list with
+   * nothing to ask leaves the stock as it is, and so does a start that took it first. The
+   * caller holds lockNextSession and read `stock` under it. Answers the stock built, or null.
+   */
+  async function replaceIfStale(repos: Repos, enrolled: Enrollment, stock: SessionSummary): Promise<Replaced | null> {
+    const earlier = await choseEarlier(repos, enrolled, stock);
+    if (!earlier) return null;
+    const recorded = await repos.target.findSessionSplit(stock.id);
+    if (recorded.length === 0 && (await repos.target.listActive(enrolled.id, earlier.today)).length === 0) return null;
+    const read = await readChoice(repos, enrolled, earlier.devices);
+    if (!read || !splitChanged(recorded, targetSplit(read.input))) return null;
+    const chosen = await choosePicks(repos, enrolled, read);
+    if (!chosen || !(await repos.session.retireStock(stock.id))) return null;
+    return { retired: stock.id, ...(await writeStock(repos, enrolled, earlier.devices, read, chosen)) };
+  }
+
+  /** Phase 43 (spec D3). A stock made, once its transaction committed. Phase 53 (spec D8):
+   *  each target its choice found ended on its date, first. */
+  function logStocked(enrollmentId: string, stocked: Stocked, reason: StockSessionPayload['reason'] | 'create' | 'stale_split'): void {
+    for (const targetId of stocked.endedOnDate) logger.info({ event: 'target_ended', target_id: targetId, how: 'on_date' });
+    logger.info({ event: 'session_stocked', enrollment_id: enrollmentId, session_id: stocked.sessionId, reason });
+  }
+
+  /** Phase 53 (ruling R-D12). A stale stock retired, and the stock built in its place. */
+  function logReplaced(enrollmentId: string, replaced: Replaced): void {
+    logger.info({ event: 'session_retired', enrollment_id: enrollmentId, session_id: replaced.retired, reason: 'stale_split' });
+    logStocked(enrollmentId, replaced, 'stale_split');
   }
 
   const service = {
@@ -458,14 +574,11 @@ export function createSessionService({
      * as it is, built for whichever device asked first. Otherwise the first
      * session is the seed, ready at once, and every later one is built here
      * from the saved list, preparing. The indexes (repo -> SessionOpen) are what
-     * hold under a race.
+     * hold under a race. Phase 53 (ruling R-D12): a stock chosen on an earlier
+     * day whose split is stale is replaced first, and the new one answered.
      */
-    createNextSession: async (
-      actorUserId: string,
-      enrollmentId: string,
-      options: Devices,
-    ): Promise<{ sessionId: string; status: SessionStatus; source: SessionSource; created: boolean }> => {
-      const next = await transaction(async (repos) => {
+    createNextSession: async (actorUserId: string, enrollmentId: string, options: Devices): Promise<NextSession> => {
+      const { stocked, replaced, ...next } = await transaction(async (repos): Promise<NextSession & { stocked?: Stocked; replaced?: Replaced }> => {
         const { session, question } = repos;
         // No implicit creation: an unknown enrollment is a 404, another
         // learner's a 403, both before anything is written.
@@ -480,6 +593,9 @@ export function createSessionService({
         const open = await session.findOpen(enrollmentId);
         if (open.started) throw new SessionOpen(enrollmentId);
         if (open.stock) {
+          // Phase 53 (ruling R-D12). Answered as it is, unless its split is stale.
+          const replaced = await replaceIfStale(repos, enrolled, open.stock);
+          if (replaced) return { sessionId: replaced.sessionId, status: 'preparing', source: 'list', created: true, replaced };
           return { sessionId: open.stock.id, status: open.stock.status, source: open.stock.source, created: false };
         }
 
@@ -494,15 +610,14 @@ export function createSessionService({
           if (pool.length < SESSION_LENGTH) throw new InsufficientQuestions(enrollmentId, pool.length);
           const record = newSessionRecord(enrolled.user_id, pool, rng);
           const sessionId = await session.insertSession(enrolled.user_id, enrollmentId, record.questions, options);
-          return { sessionId, status: 'ready' as const, source: 'seed' as const, created: true };
+          return { sessionId, status: 'ready', source: 'seed', created: true };
         }
 
-        const sessionId = await stockNext(repos, enrolled, options);
-        return { sessionId, status: 'preparing' as const, source: 'list' as const, created: true };
+        const stocked = await stockNext(repos, enrolled, options);
+        return { sessionId: stocked.sessionId, status: 'preparing', source: 'list', created: true, stocked };
       });
-      if (next.created && next.source === 'list') {
-        logger.info({ event: 'session_stocked', enrollment_id: enrollmentId, session_id: next.sessionId, reason: 'create' });
-      }
+      if (replaced) logReplaced(enrollmentId, replaced);
+      if (stocked) logStocked(enrollmentId, stocked, 'create');
       return next;
     },
 
@@ -539,23 +654,37 @@ export function createSessionService({
     /** What the home screen needs in one read. Phase 43 (spec D6): the started
      *  session, else the stock, else the newest session if it failed, so a
      *  failure is never silent. Spec D8: an unstarted list session offered is
-     *  logged with its status, which counts how often a learner found it ready. */
+     *  logged with its status, which counts how often a learner found it ready.
+     *  Phase 53 (ruling R-D12): home learns of the stock here, so a stock chosen
+     *  on an earlier day is checked here, and offered replaced when its split is
+     *  stale. Create's lock is taken only when the cheap half holds, and the
+     *  stock is read again under it. */
     currentSession: async (
       actorUserId: string,
       enrollmentId: string,
     ): Promise<{ current: SessionSummary | null; nextSource: SessionSource; savedCount: number }> => {
       const read = await transaction(async (repos) => {
-        await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
-        const open = await repos.session.findOpen(enrollmentId);
+        const enrolled = await authorizeEnrollment(repos, logger, { actorUserId, enrollmentId, permission: 'session.practice' });
+        let open = await repos.session.findOpen(enrollmentId);
+        let replaced: Replaced | null = null;
+        // Phase 53 (ruling R-D12). The lock only on a day the stock was chosen before.
+        if (!open.started && open.stock && (await choseEarlier(repos, enrolled, open.stock))) {
+          await repos.session.lockNextSession(enrollmentId);
+          open = await repos.session.findOpen(enrollmentId);
+          replaced = !open.started && open.stock ? await replaceIfStale(repos, enrolled, open.stock) : null;
+          if (replaced) open = { stock: { id: replaced.sessionId, status: 'preparing', source: 'list', answered: 0, total: 0 } };
+        }
         const latest = await repos.session.findLatest(enrollmentId);
         return {
           current: open.started ?? open.stock ?? (latest?.status === 'failed' ? latest : null),
           offered: open.started ? undefined : open.stock,
           nextSource: nextSource(latest !== undefined),
           savedCount: await repos.vocabulary.countEntries(enrollmentId),
+          replaced,
         };
       });
-      const { offered, ...home } = read;
+      const { offered, replaced, ...home } = read;
+      if (replaced) logReplaced(enrollmentId, replaced);
       if (offered && offered.source === 'list') {
         logger.info({ event: 'session_offered', enrollment_id: enrollmentId, session_id: offered.id, status: offered.status });
       }
@@ -1620,10 +1749,10 @@ export function createSessionService({
     stockSession: async (data: unknown): Promise<void> => {
       const payload = StockSessionPayloadSchema.parse(data);
       const enrollmentId = payload.enrollment_id;
-      type Stocked = { sessionId: string } | { why: 'no_enrollment' | 'stocked' | 'seed_next' | 'no_saved_words' };
-      let outcome: Stocked;
+      type Outcome = Stocked | { why: 'no_enrollment' | 'stocked' | 'seed_next' | 'no_saved_words' };
+      let outcome: Outcome;
       try {
-        outcome = await transaction(async (repos): Promise<Stocked> => {
+        outcome = await transaction(async (repos): Promise<Outcome> => {
           const enrolled = await repos.enrollment.findById(enrollmentId);
           if (!enrolled) return { why: 'no_enrollment' };
           // Review C1. A create running now finishes first, and its stock is seen.
@@ -1634,18 +1763,15 @@ export function createSessionService({
             payload.listening !== undefined && payload.speaking !== undefined
               ? { listening: payload.listening, speaking: payload.speaking }
               : ((await repos.session.findNewestDevices(enrollmentId)) ?? { listening: false, speaking: false });
-          return { sessionId: await stockNext(repos, enrolled, devices) };
+          return stockNext(repos, enrolled, devices);
         });
       } catch (error) {
         if (error instanceof SessionOpen) outcome = { why: 'stocked' };
         else if (error instanceof NoSavedWords) outcome = { why: 'no_saved_words' };
         else throw error;
       }
-      logger.info(
-        'sessionId' in outcome
-          ? { event: 'session_stocked', enrollment_id: enrollmentId, session_id: outcome.sessionId, reason: payload.reason }
-          : { event: 'session_stock_skipped', enrollment_id: enrollmentId, reason: payload.reason, why: outcome.why },
-      );
+      if ('sessionId' in outcome) logStocked(enrollmentId, outcome, payload.reason);
+      else logger.info({ event: 'session_stock_skipped', enrollment_id: enrollmentId, reason: payload.reason, why: outcome.why });
     },
 
     /** The dead-letter handler: retries are spent or the job expired. Marks the
