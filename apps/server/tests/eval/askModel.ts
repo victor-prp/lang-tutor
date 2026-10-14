@@ -52,6 +52,7 @@ import {
 } from '../../src/domain/translation';
 import { flattenEntries, mergeEntries, normalizeForm } from '../../src/domain/dictionary';
 import { LANGUAGES } from '../../src/domain/languages';
+import { buildSoundAlikePrompt, orderedPair, parseSoundAlike } from '../../src/domain/soundAlike';
 import type { LlmClient } from '../../src/services/llm';
 import { z } from 'zod';
 
@@ -187,6 +188,16 @@ export async function askTranslationJudge(
   return parseTranslationJudge(
     await llm({ ...buildTranslationJudgePrompt(kase.question, kase.context, kase.answer), record: { kind: 'translation_judge' } }),
   );
+}
+
+/** Phase 50 (spec D2). The real sound-alike prompt and parser, as answerBySpeech
+ *  calls them: each pair ordered as it is stored, one call for all of them. */
+export async function askSoundAlike(
+  llm: LlmClient,
+  kase: { language: LanguageCode; pairs: { a: string; b: string }[] },
+): Promise<(number | null)[] | null> {
+  const pairs = kase.pairs.map(({ a, b }) => orderedPair({ heard: a, form: b }));
+  return parseSoundAlike(await llm({ ...buildSoundAlikePrompt(kase.language, pairs), record: { kind: 'sound_alike' } }), pairs.length);
 }
 
 /** Phase 41 (spec D2). The real fit prompt and parser, as answerText calls them. */
