@@ -111,7 +111,7 @@ export function createFakeAppDeps(): AppDeps {
     photoImports,
     glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },
-    identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
+    identity: { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
     webDistDir: null,
     logger: createFakeLogger(),
     auth: { handler: async () => new Response(null, { status: 500 }), paths: [] },

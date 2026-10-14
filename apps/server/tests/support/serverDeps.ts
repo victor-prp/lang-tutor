@@ -36,7 +36,7 @@ export function createTestServerDeps(io: {
   /** Phase 29. Resend's base URL; defaults to an unroutable one, as Gemini's does. */
   mailBaseUrl?: string;
   translationTimeoutMs?: number;
-  identity?: { lane: string; database: string; port: number; version: string };
+  identity?: { lane: string; database: string; port: number; version: string; commit: string };
   /** A started boss for tests that enqueue (startTestBoss). By default an
    *  unstarted one, so an unexpected enqueue fails loudly. */
   boss?: PgBoss;
@@ -84,7 +84,7 @@ export function createTestServerDeps(io: {
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,
     stockSaveDelaySeconds: io.stockSaveDelaySeconds ?? STOCK_SAVE_DELAY_SECONDS,
-    identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test' },
+    identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
     webDistDir: null,
     botSecret: io.botSecret ?? null,
     boss: io.boss ?? unstartedBoss(io.db),

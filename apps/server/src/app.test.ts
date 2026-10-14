@@ -135,7 +135,7 @@ function depsWithPing(ok: boolean): AppDeps {
     photoImports: unreachablePhotoImports,
     glosses: createFakeAppDeps().glosses,
     health: { ping: async () => ok },
-    identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001, version: 'v-test' },
+    identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001, version: 'v-test', commit: 'a3f9c21' },
     webDistDir: null,
     logger: createFakeLogger(),
     auth: createFakeAppDeps().auth,
@@ -157,6 +157,7 @@ describe('GET /health', () => {
       database: 'lang_tutor_phase_15',
       port: 4001,
       version: 'v-test',
+      commit: 'a3f9c21',
     });
   });
 
@@ -172,6 +173,7 @@ describe('GET /health', () => {
       database: 'lang_tutor_phase_15',
       port: 4001,
       version: 'v-test',
+      commit: 'a3f9c21',
     });
   });
 });

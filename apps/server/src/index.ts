@@ -66,6 +66,7 @@ export async function main(): Promise<void> {
       database: databaseNameFrom(config.databaseUrl),
       port: config.port,
       version: config.version,
+      commit: config.commit,
     },
     webDistDir: config.webDistDir,
     botSecret,

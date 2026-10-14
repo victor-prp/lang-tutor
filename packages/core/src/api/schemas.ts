@@ -543,13 +543,16 @@ export const ErrorSchema = z.object({
 // 15 it also answers "which server is this?" — several checkouts run at once,
 // each on its own port and database, and a healthy port alone cannot tell them
 // apart. The database is named, never the URL: the URL carries credentials.
-// Since phase 30 it also names the release (the image's tag; `dev` elsewhere).
+// Since phase 30 it also names the release (the image's tag; `dev` elsewhere),
+// and since phase 49 the commit (7 characters, `-dirty` from an unclean tree,
+// `unknown` when unset), which the app's About screen shows.
 export const HealthResponseSchema = z.object({
   ok: z.boolean(),
   lane: z.string(),
   database: z.string(),
   port: z.number().int(),
   version: z.string(),
+  commit: z.string(),
 });
 
 // Identity, phase 8. A username identifies a learner; it authenticates nothing.

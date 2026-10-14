@@ -50,6 +50,8 @@ export type ServerIdentity = {
   port: number;
   // Phase 30. The release tag; `dev` outside the image.
   version: string;
+  // Phase 49. The commit, so the app's About screen can name the server's exact build.
+  commit: string;
 };
 
 export type AppDeps = {
