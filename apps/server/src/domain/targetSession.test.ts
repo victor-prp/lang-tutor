@@ -164,6 +164,14 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     expect(split).toEqual([{ targetId: 'exam', wish: 5, slots: 5, picked: 5, reason: 'steady', daysLeft: 10, readyCount: 20, wordCount: 20 }]);
   });
 
+  it('gives an exam with some of its words ready a graded share: 12 of 20 ready ask for 7, the main path takes 3', () => {
+    const exam = [...range(12, (i) => ready(`t${i}`)), ...range(8, (i) => fresh(`u${i}`))];
+    const { picks, split } = chooseWithTargets(session([...exam, ...mains(30)], [target('exam', 'exam', 10, exam)]));
+    expect(picks).toHaveLength(SESSION_LENGTH);
+    expect(of(picks, exam)).toHaveLength(7);
+    expect(split).toEqual([{ targetId: 'exam', wish: 7, slots: 7, picked: 7, reason: 'not_ready', daysLeft: 10, readyCount: 12, wordCount: 20 }]);
+  });
+
   it.each<[TargetKind, number, number]>([
     ['homework', 5, 3],
     ['exam', 10, 5],

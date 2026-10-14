@@ -108,21 +108,35 @@ describe('readinessOf', () => {
 
 describe('targetWish', () => {
   it.each([
-    { kind: 'exam', daysLeft: 1, allReady: false, expected: { wish: 10, exclusive: true, reason: 'exclusive' } },
-    { kind: 'exam', daysLeft: 1, allReady: true, expected: { wish: 10, exclusive: true, reason: 'exclusive' } },
-    { kind: 'exam', daysLeft: 2, allReady: true, expected: { wish: 10, exclusive: false, reason: 'run_up' } },
-    { kind: 'exam', daysLeft: 2, allReady: false, expected: { wish: 10, exclusive: false, reason: 'run_up' } },
-    { kind: 'exam', daysLeft: 3, allReady: false, expected: { wish: 10, exclusive: false, reason: 'not_ready' } },
-    { kind: 'exam', daysLeft: 5, allReady: false, expected: { wish: 10, exclusive: false, reason: 'not_ready' } },
-    { kind: 'exam', daysLeft: 3, allReady: true, expected: { wish: 5, exclusive: false, reason: 'steady' } },
-    { kind: 'exam', daysLeft: 5, allReady: true, expected: { wish: 5, exclusive: false, reason: 'steady' } },
-    { kind: 'homework', daysLeft: 1, allReady: false, expected: { wish: 10, exclusive: false, reason: 'not_ready' } },
-    { kind: 'homework', daysLeft: 1, allReady: true, expected: { wish: 7, exclusive: false, reason: 'run_up' } },
-    { kind: 'homework', daysLeft: 2, allReady: false, expected: { wish: 10, exclusive: false, reason: 'not_ready' } },
-    { kind: 'homework', daysLeft: 2, allReady: true, expected: { wish: 3, exclusive: false, reason: 'steady' } },
-    { kind: 'homework', daysLeft: 5, allReady: true, expected: { wish: 3, exclusive: false, reason: 'steady' } },
-  ] as const)('$kind at daysLeft $daysLeft, all ready: $allReady', ({ kind, daysLeft, allReady, expected }) => {
-    expect(targetWish(kind, daysLeft, allReady)).toEqual(expected);
+    // An exam's eve and run-up ask for the whole session, ready or not.
+    { kind: 'exam', daysLeft: 1, ready: 0, words: 20, expected: { wish: 10, exclusive: true, reason: 'exclusive' } },
+    { kind: 'exam', daysLeft: 1, ready: 20, words: 20, expected: { wish: 10, exclusive: true, reason: 'exclusive' } },
+    { kind: 'exam', daysLeft: 2, ready: 20, words: 20, expected: { wish: 10, exclusive: false, reason: 'run_up' } },
+    { kind: 'exam', daysLeft: 2, ready: 0, words: 20, expected: { wish: 10, exclusive: false, reason: 'run_up' } },
+    // Before them the wish falls from 10 toward the steady 5 as the share of ready words rises.
+    { kind: 'exam', daysLeft: 3, ready: 0, words: 20, expected: { wish: 10, exclusive: false, reason: 'not_ready' } },
+    { kind: 'exam', daysLeft: 5, ready: 4, words: 20, expected: { wish: 9, exclusive: false, reason: 'not_ready' } },
+    { kind: 'exam', daysLeft: 5, ready: 12, words: 20, expected: { wish: 7, exclusive: false, reason: 'not_ready' } },
+    { kind: 'exam', daysLeft: 5, ready: 19, words: 20, expected: { wish: 6, exclusive: false, reason: 'not_ready' } },
+    { kind: 'exam', daysLeft: 3, ready: 20, words: 20, expected: { wish: 5, exclusive: false, reason: 'steady' } },
+    { kind: 'exam', daysLeft: 5, ready: 20, words: 20, expected: { wish: 5, exclusive: false, reason: 'steady' } },
+    // A homework's from 10 toward the steady 3.
+    { kind: 'homework', daysLeft: 5, ready: 0, words: 20, expected: { wish: 10, exclusive: false, reason: 'not_ready' } },
+    { kind: 'homework', daysLeft: 5, ready: 15, words: 20, expected: { wish: 5, exclusive: false, reason: 'not_ready' } },
+    { kind: 'homework', daysLeft: 2, ready: 20, words: 20, expected: { wish: 3, exclusive: false, reason: 'steady' } },
+    { kind: 'homework', daysLeft: 5, ready: 20, words: 20, expected: { wish: 3, exclusive: false, reason: 'steady' } },
+    // In integers: 3 + ceil(7 × 1 / 7) is 4, where 3 + ceil(7 × (1 − 6/7)) would read 5.
+    { kind: 'homework', daysLeft: 5, ready: 6, words: 7, expected: { wish: 4, exclusive: false, reason: 'not_ready' } },
+    // A homework's last day asks for at least 7: run_up while the graded wish is no higher.
+    { kind: 'homework', daysLeft: 1, ready: 20, words: 20, expected: { wish: 7, exclusive: false, reason: 'run_up' } },
+    { kind: 'homework', daysLeft: 1, ready: 10, words: 20, expected: { wish: 7, exclusive: false, reason: 'run_up' } },
+    { kind: 'homework', daysLeft: 1, ready: 8, words: 20, expected: { wish: 8, exclusive: false, reason: 'not_ready' } },
+    { kind: 'homework', daysLeft: 1, ready: 0, words: 20, expected: { wish: 10, exclusive: false, reason: 'not_ready' } },
+    // A target with no words asks for its steady share; its pool picks nothing and passes it on.
+    { kind: 'exam', daysLeft: 5, ready: 0, words: 0, expected: { wish: 5, exclusive: false, reason: 'steady' } },
+    { kind: 'homework', daysLeft: 5, ready: 0, words: 0, expected: { wish: 3, exclusive: false, reason: 'steady' } },
+  ] as const)('$kind at daysLeft $daysLeft, $ready of $words ready', ({ kind, daysLeft, ready, words, expected }) => {
+    expect(targetWish(kind, daysLeft, ready, words)).toEqual(expected);
   });
 });
 

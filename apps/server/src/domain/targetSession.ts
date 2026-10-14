@@ -60,7 +60,7 @@ function plan(input: TargetSessionInput): { split: TargetSplit; pool: Pool }[] {
       readinessOf(target.kind, recallOnDue(rows.get(glossId) ?? [], live, input.speakable.get(glossId) ?? true, target.dueOn));
     const readyCount = target.glossIds.filter((glossId) => readiness(glossId) === 'ready').length;
     const wordCount = target.glossIds.length;
-    return { target, daysLeft, readyCount, wordCount, ...targetWish(target.kind, daysLeft, readyCount === wordCount) };
+    return { target, daysLeft, readyCount, wordCount, ...targetWish(target.kind, daysLeft, readyCount, wordCount) };
   });
   const slots = splitSlots(
     wishes.map(({ target, wish, exclusive }) => ({ targetId: target.id, dueOn: target.dueOn, wish, exclusive })),

@@ -61,22 +61,37 @@ export function readinessOf(kind: TargetKind, recall: number | null): Readiness 
 }
 
 /**
- * Spec D5. The slots a target asks of a session, out of SESSION_LENGTH, and why: the
- * highest row that applies. Exclusive (an exam with one day left) takes every slot from
- * everything else (D6). daysLeft is at least 1 while the target is active.
+ * Spec D5, as amended (the graded wish). The slots a target asks of a session, out of
+ * SESSION_LENGTH, and why. An exam with one day left takes every slot from everything else
+ * (exclusive, D6), and within its run-up asks for every slot, ready or not. Otherwise the wish
+ * falls from SESSION_LENGTH toward the kind's steady share as the share of ready words rises:
+ * the slots above the steady share in proportion to the words not yet ready, rounded up, so
+ * one word not ready still asks for one slot more. On a homework's last day the wish is at
+ * least HOMEWORK_LAST_DAY_SLOTS. A target with no words asks for its steady share; its pool
+ * has nothing to pick, so the slots pass on. daysLeft is at least 1 while the target is active.
  */
 export function targetWish(
   kind: TargetKind,
   daysLeft: number,
-  allReady: boolean,
+  readyCount: number,
+  wordCount: number,
 ): { wish: number; exclusive: boolean; reason: ShareReason } {
   if (kind === 'exam') {
     if (daysLeft <= 1) return { wish: SESSION_LENGTH, exclusive: true, reason: 'exclusive' as const };
     if (daysLeft <= EXAM_RUN_UP_DAYS) return { wish: SESSION_LENGTH, exclusive: false, reason: 'run_up' as const };
   }
-  if (!allReady) return { wish: SESSION_LENGTH, exclusive: false, reason: 'not_ready' as const };
-  if (kind === 'homework' && daysLeft <= 1) return { wish: HOMEWORK_LAST_DAY_SLOTS, exclusive: false, reason: 'run_up' as const };
-  return { wish: TARGET_STEADY_SLOTS[kind], exclusive: false, reason: 'steady' as const };
+  const steady = TARGET_STEADY_SLOTS[kind];
+  // An integer numerator, divided once: 1 − readyCount / wordCount in floating point can land a
+  // hair above a whole number and round up a slot too many.
+  const graded = wordCount === 0 ? steady : steady + Math.ceil(((SESSION_LENGTH - steady) * (wordCount - readyCount)) / wordCount);
+  if (kind === 'homework' && daysLeft <= 1) {
+    return {
+      wish: Math.max(HOMEWORK_LAST_DAY_SLOTS, graded),
+      exclusive: false,
+      reason: graded > HOMEWORK_LAST_DAY_SLOTS ? ('not_ready' as const) : ('run_up' as const),
+    };
+  }
+  return { wish: graded, exclusive: false, reason: readyCount < wordCount ? ('not_ready' as const) : ('steady' as const) };
 }
 
 export type SplitInput = { targetId: string; dueOn: string; wish: number; exclusive: boolean };

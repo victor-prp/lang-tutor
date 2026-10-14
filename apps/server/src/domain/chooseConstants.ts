@@ -59,12 +59,14 @@ export const TARGET_READY = { homework: 0.8, exam: 0.9 } as const;
  *  below it, "on the way". A starting value, named here to tune. */
 export const TARGET_ALMOST = { homework: 0.6, exam: 0.7 } as const;
 
-/** Phase 53 (spec D5). Slots out of SESSION_LENGTH a target asks for once all its words
- *  are ready ("steady"); the main path takes the rest. A starting value, named here to tune. */
+/** Phase 53 (spec D5, as amended: the graded wish). Slots out of SESSION_LENGTH a target asks
+ *  for once all its words are ready ("steady"); the main path takes the rest. Before then the
+ *  wish falls from SESSION_LENGTH toward this as the share of ready words rises. A starting
+ *  value, named here to tune. */
 export const TARGET_STEADY_SLOTS = { homework: 3, exam: 5 } as const;
 
-/** Phase 53 (spec D5). Slots a homework asks for on its last day when all its words are
- *  ready; not ready, it asks for the whole session. A starting value, named here to tune. */
+/** Phase 53 (spec D5, as amended). Slots a homework asks for at least on its last day, ready
+ *  or not; its graded wish when that is higher. A starting value, named here to tune. */
 export const HOMEWORK_LAST_DAY_SLOTS = 7;
 
 /** Phase 53 (spec D5). An exam's run-up: with this many days left or fewer it asks for
