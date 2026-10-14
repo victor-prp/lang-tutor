@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { ApiError } from './api/client';
-import { SIGN_OUT_TIMEOUT_MS, START_TIMEOUT_MS, signOutWithin, startStateOf, startUp } from './startState';
+import { SIGN_OUT_TIMEOUT_MS, START_TIMEOUT_MS, signOutWithin, startStateOf, startUp, unregisterWithin } from './startState';
 
 const user = { id: 'u1', username: 'dana', display_name: 'דנה', age: 30, native_language: 'he' as const };
 
@@ -143,6 +143,34 @@ describe('the budgets', () => {
   it('sign-out does not throw when the revoke fails', async () => {
     await expect(
       signOutWithin(async () => {
+        throw new TypeError('Network request failed');
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  // Phase 52 (spec D4). The phone's push token is unregistered before the revoke.
+  it('waits for the phone to be unregistered when the server answers', async () => {
+    let unregistered = false;
+    await unregisterWithin(async () => {
+      unregistered = true;
+    });
+    expect(unregistered).toBe(true);
+  });
+
+  it('gives up on an unregister that never answers, within the sign-out budget', async () => {
+    let settled = false;
+    const pending = unregisterWithin(never).finally(() => {
+      settled = true;
+    });
+    await jest.advanceTimersByTimeAsync(SIGN_OUT_TIMEOUT_MS - 1);
+    expect(settled).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(pending).resolves.toBeUndefined();
+  });
+
+  it('does not throw when the unregister fails, so sign-out goes on', async () => {
+    await expect(
+      unregisterWithin(async () => {
         throw new TypeError('Network request failed');
       }),
     ).resolves.toBeUndefined();

@@ -7,7 +7,9 @@ import { confirm } from '@/confirm';
 import { myTutors } from '@/grants';
 import { useAppRelease } from '@/hooks/useAppUpdates';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useReminders } from '@/hooks/useReminders';
 import { mobileAppLine } from '@/release';
+import { unregisterWithin } from '@/startState';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -25,6 +27,7 @@ function Row({ label, value, testID }: { label: string; value: string; testID: s
 export default function ProfileScreen() {
   const { user, enrollments, grants, endGrant, signOut } = useCurrentUser();
   const { release } = useAppRelease();
+  const reminders = useReminders();
 
   if (!user) return <Redirect href="/" />;
 
@@ -46,6 +49,8 @@ export default function ProfileScreen() {
   }
 
   async function onSignOut() {
+    // Phase 52 (spec D4). Before the session is cleared, so the call still carries it.
+    await unregisterWithin(reminders.unregister);
     await signOut();
     router.replace('/sign-in');
   }

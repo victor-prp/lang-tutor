@@ -1,5 +1,5 @@
 import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,11 +8,25 @@ import { LearningSection } from '@/components/LearningSection';
 import { StudentsSection } from '@/components/StudentsSection';
 import { needsEnrollScreen } from '@/grants';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useReminders } from '@/hooks/useReminders';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 export default function HomeScreen() {
   const { status, user, enrollments, active, grants, reloadGrants, retry } = useCurrentUser();
+  const reminders = useReminders();
+  const shown = status === 'signed_in' && user !== null && !needsEnrollScreen(enrollments, grants);
+
+  // Phase 52 (spec D1, D4). Once per learner while Home is shown: report the
+  // zone their day follows, and ask to send reminders (or register again, once
+  // granted). Neither throws, and nothing here waits on them.
+  const remindedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!shown || remindedFor.current === user.id) return;
+    remindedFor.current = user.id;
+    void reminders.reportTimeZone();
+    void reminders.promptOnce();
+  }, [shown, user, reminders]);
 
   // Fresh on every focus: an invitation may have arrived, or been answered.
   useFocusEffect(
