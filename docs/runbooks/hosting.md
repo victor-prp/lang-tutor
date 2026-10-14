@@ -172,7 +172,9 @@ then `./scripts/infra.sh prod apply`: the environment changed, so Terraform crea
 deployment of the live tag.
 
 The bots' GitHub token is not one of these: it lives in an EventBridge connection, and the bots
-runbook's *The hourly trigger* replaces it, with no apply.
+runbook's *The hourly trigger* replaces it, with no apply. `REMINDER_SECRET` is both: it is in
+Secrets Manager and in the connection that calls the reminder tick, so the reminders runbook's
+*Replacing the secret* changes both.
 
 ## Behind Lightsail's proxy
 
