@@ -191,7 +191,7 @@ whether they should land at or above the default threshold (`same`) or below it 
 - **Tier 1:** the answer parses with a score for every pair, including one batch case of three
   pairs in one call, the shape the server sends for a longer transcript.
 - **Tier 2:** each case's score is on the right side of the default threshold, pooled into its own
-  line, `sound tier 2`, against `TIER2_THRESHOLD`.
+  line, `sound alike tier 2`, against `TIER2_THRESHOLD`.
 - **The report prints every score**, so a later change of threshold is chosen from evidence: where
   `same` and `different` actually fall.
 - Each case is its own call, as the common case is one pair.
@@ -201,7 +201,7 @@ whether they should land at or above the default threshold (`same`) or below it 
 - **Core unit:** `soundPairs` (one word, an article, a word inside more words, a phrase, the cap,
   the ordering, nothing when letters matched); `evaluate` records a `sounds_like` answer as
   understood; the step refuses a bare `heard` that is unheard and accepts a `sounds_like` one.
-- **Server unit:** the prompt and the parse (matched by words, out-of-range and stray pairs
+- **Server unit:** the prompt and the parse (matched by key, out-of-range and stray pairs
   dropped); config's threshold (default, a valid value, junk falls back); `answerBySpeech` with a
   fake judge and fake repo: a stored pair calls nothing, a missing pair calls once and stores, a
   score below the threshold stays unheard and records nothing, a failed call stays unheard and
@@ -252,12 +252,19 @@ Made while executing the plan; each with what it costs if wrong.
   over-credit this phase guards against most. The anchor now gives `thin`/`tin` and Italian
   `nono`/`nonno`, and says a difference a native listener can hear is never 1. After it the group
   passed 33/33 in three runs. If wrong, a true homophone scored below 1 stays unheard, as today.
+  The final review asked whether that rule, worded for every language, now costs English
+  homophones spelled with a doubled letter, and whether the Italian cases only measure recall of
+  the prompt's example. Nine held-out cases answer it (`allowed`/`aloud`, `meddle`/`medal`,
+  `cannon`/`canon`, `bury`/`berry` the same; `tree`/`three`, `bat`/`bath`, `fato`/`fatto`,
+  `sete`/`sette`, `copia`/`coppia` apart): all on the right side, three runs out of three, so the
+  rule stays worded as it is.
 - **R6. Integration and e2e run in CI only.** All nine lanes were in use, so this worktree has
   none; unit tests, typechecks, the ADR checks and the sound-alike eval ran locally.
 
 ## Measured
 
-The eval's sound-alike group, three runs on 2026-10-14, every score identical across runs:
+The eval's sound-alike group, 40 cases (42 pairs) after the review's additions, three runs on
+2026-10-14 each before and after them, every score identical across runs:
 homophones 1; one sound apart 0.8; `work`/`walk` 0.5. The scores sit on the prompt's anchors and
 nowhere else, so today any threshold between 0.8 and 1 draws the same line, and 0.95 means "the
 model said identical". Each call took about 0.6 s (31 calls in 5 s at a concurrency of 4).

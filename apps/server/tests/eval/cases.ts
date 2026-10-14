@@ -1918,6 +1918,14 @@ export const SOUND_ALIKE_CASES: SoundAlikeCase[] = [
   apart('en', 'cat', 'cut'),
   apart('en', 'pat', 'pet'),
   apart('en', 'work', 'walk'),
+  // Review of phase 50: spelled with a doubled letter, said the same, and not
+  // the class of difference the prompt names with an example.
+  same('en', 'allowed', 'aloud'),
+  same('en', 'meddle', 'medal'),
+  same('en', 'cannon', 'canon'),
+  same('en', 'bury', 'berry'),
+  apart('en', 'tree', 'three'),
+  apart('en', 'bat', 'bath'),
   same('ru', 'лук', 'луг'),
   same('ru', 'плот', 'плод'),
   same('ru', 'кот', 'код'),
@@ -1934,6 +1942,10 @@ export const SOUND_ALIKE_CASES: SoundAlikeCase[] = [
   apart('it', 'palla', 'pala'),
   apart('it', 'carro', 'caro'),
   apart('it', 'pane', 'cane'),
+  // Review of phase 50: held out from the prompt's own example, nono/nonno.
+  apart('it', 'fato', 'fatto'),
+  apart('it', 'sete', 'sette'),
+  apart('it', 'copia', 'coppia'),
   // The shape the server sends for a transcript of several words: one call, several pairs.
   {
     label: 'sound en: three pairs in one call',
