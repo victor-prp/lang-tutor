@@ -125,7 +125,7 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 # The rule has no name filter, so it hears both, and its message names both.
 resource "aws_cloudwatch_event_rule" "bots_deauthorized" {
   name        = "wordspal-bots-dispatch-deauthorized"
-  description = "The bots' trigger lost its GitHub token"
+  description = "An EventBridge connection lost its credential"
   event_pattern = jsonencode({
     source        = ["aws.events"]
     "detail-type" = ["Connection Deauthorized"]

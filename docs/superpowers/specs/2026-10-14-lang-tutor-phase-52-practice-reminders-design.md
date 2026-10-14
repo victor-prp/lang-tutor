@@ -179,8 +179,10 @@ type declared in `services/` (R11). `scripts/image-run.sh` and `e2e/serverEnv.ts
   `android.googleServicesFile` only when `apps/mobile/google-services.json` exists, so builds
   keep working before Victor adds the Firebase file, and reminders stay dormant until he does.
   The fingerprint changes, so the next release ships a new binary (ADR 0012).
-- **Development build:** `eas.json` gains a `development` profile (`developmentClient`, internal
-  distribution), so push can be tried on a phone without Play.
+- **Preview build:** `eas.json` gains a `preview` profile (distribution internal, android
+  `buildType` `apk`, channel `preview`, environment `production`), so push can be tried on a phone
+  without Play. It is not a `development` profile because a dev client needs `expo-dev-client`, a
+  second native-layer change.
 
 ### D9. Infrastructure: a second EventBridge rule, to our own server
 
