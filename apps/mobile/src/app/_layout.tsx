@@ -10,7 +10,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import * as Notifications from 'expo-notifications';
+import type * as NotificationsModule from 'expo-notifications';
 import { Stack, router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
@@ -41,7 +41,7 @@ import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { createPhotoPicker, type PhotoAsset } from '@/photos';
 import { createRecorder, type RecordPermission } from '@/recording';
 import type { AppRelease } from '@/release';
-import { createReminders, type Permission } from '@/reminders';
+import { createReminders, type NotificationsEngine, type Permission } from '@/reminders';
 import { createSpeaker } from '@/speech';
 import { colors } from '@/theme';
 
@@ -200,54 +200,74 @@ const recorder = createRecorder({
 // Phase 52 (spec D4, D8). The only file that names expo-notifications (ADR 0002 R1).
 // The engine is called only on Android outside Expo Go, where remote push exists;
 // createReminders keeps every other platform away from it.
-const asPermission = (status: Notifications.PermissionStatus): Permission =>
-  status === Notifications.PermissionStatus.GRANTED
-    ? 'granted'
-    : status === Notifications.PermissionStatus.DENIED
-      ? 'denied'
-      : 'undetermined';
+//
+// Not imported at the top: in Expo Go on Android the package's entry loads
+// ExpoTopicSubscriptionModule, a native module Expo Go no longer ships (remote push was
+// removed in SDK 53), and that throws at import, which takes the whole layout down
+// ("missing the required default export"). So Expo Go never loads it; the type import
+// above is erased at build time.
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+const Notifications: typeof NotificationsModule | null = isExpoGo ? null : require('expo-notifications');
+
+const asPermission = (N: typeof NotificationsModule, status: NotificationsModule.PermissionStatus): Permission =>
+  status === N.PermissionStatus.GRANTED ? 'granted' : status === N.PermissionStatus.DENIED ? 'denied' : 'undetermined';
 // The server sends `data: { reminder_id }` with every reminder (spec D5).
-const reminderIdOf = (response: Notifications.NotificationResponse | null): string | null => {
+const reminderIdOf = (response: NotificationsModule.NotificationResponse | null): string | null => {
   const id = response?.notification.request.content.data?.reminder_id;
   return typeof id === 'string' ? id : null;
 };
-const reminders = createReminders({
-  engine: {
-    setChannel: async () => {
-      await Notifications.setNotificationChannelAsync('reminders', {
-        // The name Android's notification settings show, so Hebrew like the rest (the importance cannot change later).
-        name: 'תזכורות',
-        importance: Notifications.AndroidImportance.DEFAULT,
-      });
-    },
-    permission: async () => asPermission((await Notifications.getPermissionsAsync()).status),
-    requestPermission: async () => asPermission((await Notifications.requestPermissionsAsync()).status),
-    // Throws until the build carries google-services.json (app.config.js).
-    token: async () =>
-      (await Notifications.getExpoPushTokenAsync({ projectId: Constants.expoConfig?.extra?.eas?.projectId })).data,
-    onTap: (listener) => {
-      const subscription = Notifications.addNotificationResponseReceivedListener((response) =>
-        listener(reminderIdOf(response)),
-      );
-      return () => subscription.remove();
-    },
-    // Cleared once read, so an over-the-air reload does not open the session again.
-    lastTap: async () => {
-      const response = Notifications.getLastNotificationResponse();
-      if (response) Notifications.clearLastNotificationResponse();
-      return reminderIdOf(response);
-    },
-    openSettings: () => Linking.openSettings(),
+const notificationsEngine = (Notifications: typeof NotificationsModule): NotificationsEngine => ({
+  setChannel: async () => {
+    await Notifications.setNotificationChannelAsync('reminders', {
+      // The name Android's notification settings show, so Hebrew like the rest (the importance cannot change later).
+      name: 'תזכורות',
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
   },
+  permission: async () => asPermission(Notifications, (await Notifications.getPermissionsAsync()).status),
+  requestPermission: async () => asPermission(Notifications, (await Notifications.requestPermissionsAsync()).status),
+  // Throws until the build carries google-services.json (app.config.js).
+  token: async () =>
+    (await Notifications.getExpoPushTokenAsync({ projectId: Constants.expoConfig?.extra?.eas?.projectId })).data,
+  onTap: (listener) => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) =>
+      listener(reminderIdOf(response)),
+    );
+    return () => subscription.remove();
+  },
+  // Cleared once read, so an over-the-air reload does not open the session again.
+  lastTap: async () => {
+    const response = Notifications.getLastNotificationResponse();
+    if (response) Notifications.clearLastNotificationResponse();
+    return reminderIdOf(response);
+  },
+  openSettings: () => Linking.openSettings(),
+});
+// Expo Go's stand-in. createReminders never calls it there (supported is false), so a call
+// is a bug worth hearing about rather than a silent no-op.
+const unavailable = (): never => {
+  throw new Error('expo-notifications is not loaded in Expo Go');
+};
+const noNotifications: NotificationsEngine = {
+  setChannel: unavailable,
+  permission: unavailable,
+  requestPermission: unavailable,
+  token: unavailable,
+  onTap: unavailable,
+  lastTap: unavailable,
+  openSettings: unavailable,
+};
+const reminders = createReminders({
+  engine: Notifications ? notificationsEngine(Notifications) : noNotifications,
   api,
   platform: Platform.OS,
-  isExpoGo: Constants.executionEnvironment === ExecutionEnvironment.StoreClient,
+  isExpoGo,
   timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
   log: (event, detail) => console.warn(event, detail),
 });
 
 // A reminder that arrives while the app is open is shown too; by default it is not.
-if (reminders.supported) {
+if (reminders.supported && Notifications) {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
