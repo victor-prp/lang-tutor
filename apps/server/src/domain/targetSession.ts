@@ -25,8 +25,9 @@ export type TargetSessionInput = {
   introducedToday: ReadonlySet<string>;
 };
 
-/** Spec D8. What one session gave one target. `picked` counts its pool's picks: a gloss in
- *  two targets counts for the one served first. */
+/** Spec D8. What one session gave one target. `picked` counts its pool's picks over both
+ *  passes, so it passes `slots` when the main path leaves slots unpicked; a gloss in two
+ *  targets counts for the one served first. */
 export type TargetSplit = {
   targetId: string;
   wish: number;
@@ -84,8 +85,9 @@ export function targetSplit(input: TargetSessionInput): TargetSplit[] {
 
 /**
  * One session: the targets' pools, then the main path with the slots they left, in one
- * call of the picker. The picks come in pool order; the split in the same order, each
- * target's `picked` filled in. With no target, exactly chooseWords(choice).
+ * call of the picker; slots the main path cannot use go back to the targets in a second
+ * pass. The picks come in pool order; the split in the same order, each target's `picked`
+ * filled in. With no target, exactly chooseWords(choice).
  */
 export function chooseWithTargets(input: TargetSessionInput): { picks: ChosenPick[]; split: TargetSplit[] } {
   const planned = plan(input);

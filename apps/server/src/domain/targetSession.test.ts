@@ -164,6 +164,32 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     expect(split).toEqual([{ targetId: 'exam', wish: 5, slots: 5, picked: 5, reason: 'steady', daysLeft: 10, readyCount: 20, wordCount: 20 }]);
   });
 
+  it.each<[TargetKind, number, number]>([
+    ['homework', 5, 3],
+    ['exam', 10, 5],
+  ])('gives a ready %s holding every saved word a full session: its share, then the slots the main path left', (kind, daysLeft, steady) => {
+    const words = range(20, (i) => ready(`t${i}`));
+    const { picks, split } = chooseWithTargets(session(words, [target('only', kind, daysLeft, words)]));
+    expect(picks).toHaveLength(SESSION_LENGTH);
+    expect(of(picks, words)).toHaveLength(SESSION_LENGTH);
+    expect(split).toEqual([
+      { targetId: 'only', wish: steady, slots: steady, picked: SESSION_LENGTH, reason: 'steady', daysLeft, readyCount: 20, wordCount: 20 },
+    ]);
+  });
+
+  it('gives the slots the main path leaves back in pool order: the target due first takes them first', () => {
+    const homework = range(20, (i) => ready(`h${i}`));
+    const exam = range(20, (i) => ready(`e${i}`));
+    const { split } = chooseWithTargets(
+      session([...homework, ...exam], [target('exam', 'exam', 10, exam), target('hw', 'homework', 5, homework)]),
+    );
+    // First pass 3 and 5; the 2 the empty main path leaves go to the homework, due first.
+    expect(split.map(({ targetId, slots, picked }) => ({ targetId, slots, picked }))).toEqual([
+      { targetId: 'hw', slots: 3, picked: 5 },
+      { targetId: 'exam', slots: 5, picked: 5 },
+    ]);
+  });
+
   it('gives an exam the day before its date every slot, and a homework none', () => {
     const exam = unmet(20);
     const homework = range(5, (i) => fresh(`h${i}`));
@@ -305,6 +331,34 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(3);
   });
 
+  it("keeps a target's pace across both passes: past the daily cap, no more new words than it owes", () => {
+    // Every saved word is the homework's, so the main path leaves its slots unpicked.
+    expect(owedNew(20, 0, 11)).toBe(2);
+    const homework = unmet(20);
+    const { picks, split } = chooseWithTargets(session(homework, [target('hw', 'homework', 11, homework)], { newToday: DAY_NEW_CAP }));
+    expect(picks.map((pick) => pick.cls)).toEqual(['NEW', 'NEW']);
+    expect(split[0]).toMatchObject({ slots: 10, picked: 2 });
+  });
+
+  it('leaves no session empty while a word can be asked: new words past the cap come from a target too', () => {
+    // A random input the first version left empty. g1, the one word that can be asked, is
+    // new and only the exam's; the cap is spent; the exam owes no new word today, since
+    // g0 was met today; and g0 waits (phase 39).
+    const words = [{ id: 'g0', memory: { [WR]: 0.95, [SP]: 0.5, [SR]: 0.1, [SK]: 0.1 } }, fresh('g1', { key: 'run' })];
+    const families = { familyOf: new Map<string, number | string>([['g0', 'f2'], ['g1', 0]]), waiting: new Set(['g0']) };
+    const targets = [target('x0', 'homework', 13, [words[0]]), target('x1', 'homework', 9, []), target('x2', 'exam', 14, words)];
+    expect(owedNew(1, 1, 14)).toBe(0);
+    const { picks, split } = chooseWithTargets(
+      session(words, targets, { newToday: DAY_NEW_CAP + 3, listening: false, speaking: true, families }, { introducedToday: new Set(['g0']) }),
+    );
+    expect(picks).toEqual([{ glossId: 'g1', dimension: WR, rung: 1, level: 1, r: null, cls: 'NEW' }]);
+    expect(split.map(({ targetId, picked }) => ({ targetId, picked }))).toEqual([
+      { targetId: 'x1', picked: 0 },
+      { targetId: 'x0', picked: 0 },
+      { targetId: 'x2', picked: 1 },
+    ]);
+  });
+
   it('reads a word that cannot be said as ready without speaking (ruling R-D4)', () => {
     const exam = range(5, (i) => ready(`t${i}`));
     const words = [...exam, ...mains(30)];
@@ -339,21 +393,46 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
 });
 
 describe('choosePools (ruling R-D6)', () => {
-  it('asks in the main path (null) only words no other pool lists, even with slots to spare', () => {
+  it('asks in the main path (null) only words no other pool lists; the slots it leaves go back to the pools', () => {
     const words = [known('a', { [WR]: 0.3 }), known('b', { [WR]: 0.4 }), known('c'), known('d')];
     const [listed, main] = choosePools(input(words), [
       { glossIds: new Set(['a', 'b']), slots: 1, owedNew: 0 },
       { glossIds: null, slots: SESSION_LENGTH - 1, owedNew: 0 },
     ]);
-    expect(ids(listed)).toEqual(['a']);
+    // The first pass gives the listing pool its one slot, a; the second gives it b.
+    expect(ids(listed)).toEqual(['a', 'b']);
     expect(ids(main).sort()).toEqual(['c', 'd']);
   });
 
+  it('hands the slots a pool leaves forward in the first pass: the next pool runs with them', () => {
+    // a's two new words leave three of its five slots; with them, b's one-slot pool can hold
+    // the session's speaking pick, ahead of the main path.
+    const b = range(3, (i) => ({ id: `b${i}`, memory: { [WR]: 0.95 } }));
+    const words = [fresh('a1'), fresh('a2'), ...b, ...range(6, (i) => heard(`m${i}`))];
+    const [first, second, main] = choosePools(input(words, { speaking: true }), [
+      { glossIds: new Set(['a1', 'a2']), slots: 5, owedNew: 0 },
+      { glossIds: new Set(idsOf(b)), slots: 1, owedNew: 0 },
+      { glossIds: null, slots: 4, owedNew: 0 },
+    ]);
+    expect(ids(first)).toEqual(['a2', 'a1']);
+    expect(second.map((pick) => pick.cls)).toEqual(['SPEAK', 'EXPAND', 'EXPAND']);
+    expect(main.map((pick) => pick.cls)).not.toContain('SPEAK');
+  });
+
+  it('with one pool, adds nothing in the second pass: a pool gives no more picks than the groups it first held', () => {
+    // A key bridges a's family to c, so the three count as one group (phase 39): the first
+    // pass stops at a, and c, free as it is, waits for another session.
+    const words = [{ id: 'a', memory: { [WR]: 1 } }, { ...known('b', { [WP]: 0.4 }), key: 'k2' }, { ...known('c'), key: 'k2' }];
+    const families = { familyOf: new Map([['a', 1], ['b', 1]]), waiting: new Set<string>() };
+    expect(ids(chooseWords(input(words, { steps: [step('a', WR)], families })))).toEqual(['a']);
+  });
+
   it("leaves a word an earlier pool took out of a later pool's lists: it holds back none of that pool's new words", () => {
-    const words = [known('x', { [WR]: 0.3 }), ...range(3, (i) => fresh(`n${i}`)), ...range(5, (i) => ({ id: `e${i}`, memory: { [WR]: 0.95 } }))];
-    const [first, second] = choosePools(input(words), [
+    const later = [known('x', { [WR]: 0.3 }), ...range(3, (i) => fresh(`n${i}`)), ...range(5, (i) => ({ id: `e${i}`, memory: { [WR]: 0.95 } }))];
+    // The main path fills its own slots, so no second pass comes back to the second pool.
+    const [first, second] = choosePools(input([...later, ...mains(6)]), [
       { glossIds: new Set(['x']), slots: 1, owedNew: 0 },
-      { glossIds: new Set(idsOf(words)), slots: 3, owedNew: 0 },
+      { glossIds: new Set(idsOf(later)), slots: 3, owedNew: 0 },
       { glossIds: null, slots: SESSION_LENGTH - 4, owedNew: 0 },
     ]);
     expect(ids(first)).toEqual(['x']);
@@ -361,16 +440,18 @@ describe('choosePools (ruling R-D6)', () => {
     expect(second.map((pick) => pick.cls)).toEqual(['NEW', 'NEW', 'NEW']);
   });
 
-  it('goes past the daily cap only for a session that would otherwise be empty, in its last pool', () => {
+  it('goes past the daily cap only for a session still empty after the second pass, from the pools in order', () => {
     const capSpent = { newToday: DAY_NEW_CAP };
-    const pools = (first: string) => [
-      { glossIds: new Set([first]), slots: 1, owedNew: 0 },
-      { glossIds: null, slots: SESSION_LENGTH - 1, owedNew: 0 },
+    const pools = (first: string, slots = 1) => [
+      { glossIds: new Set([first]), slots, owedNew: 0 },
+      { glossIds: null, slots: SESSION_LENGTH - slots, owedNew: 0 },
     ];
     const news = range(3, (i) => fresh(`n${i}`));
     // A pool before it picked: the main path's new words wait.
     expect(choosePools(input([known('a', { [WR]: 0.3 }), ...news], capSpent), pools('a')).map(ids)).toEqual([['a'], []]);
-    // Nothing picked anywhere: the last pool goes past the cap.
-    expect(choosePools(input(news, capSpent), pools('n0')).map(ids)).toEqual([[], ['n2', 'n1']]);
+    // A pool with no slot of its own picks in the second pass: still no new word past the cap.
+    expect(choosePools(input([known('a'), ...news], capSpent), pools('a', 0)).map(ids)).toEqual([['a'], []]);
+    // Nothing picked in either pass: new words past the cap, each pool's in turn.
+    expect(choosePools(input(news, capSpent), pools('n0')).map(ids)).toEqual([['n0'], ['n2', 'n1']]);
   });
 });
