@@ -109,7 +109,14 @@ cat > "$WORK/bin/npm" << 'EOF'
 #!/usr/bin/env bash
 echo "npm $*" >> "$NPM_LOG"
 case "$*" in
-  install) [ -z "${FAKE_INSTALL_FAILS:-}" ] ;;
+  install)
+    # As npm 12 does: allow-scripts from the environment, not from .npmrc or
+    # package.json, is refused in a project install.
+    if [ -n "${npm_config_allow_scripts:-}" ]; then
+      echo "npm error code EALLOWSCRIPTS" >&2
+      exit 1
+    fi
+    [ -z "${FAKE_INSTALL_FAILS:-}" ] ;;
   "run db:migrate") [ -z "${FAKE_MIGRATE_FAILS:-}" ] ;;
   "run server")
     # Not exec: the real server is a tree (npm, tsx watch, node), so the
@@ -161,10 +168,13 @@ Server(("", port), Health).serve_forever()
 EOF
 
 # rerun_env: the environment lane-env.sh would hand rerun.sh, minus the lane
-# values, which each run passes itself.
+# values, which each run passes itself. `npm run rerun` exports the user's npm
+# config to its script as npm_config_* variables, allow-scripts among them when
+# ~/.npmrc sets it, as it does on Victor's machine.
 rerun_env() {
   env -u APP_COMMIT -u EXPO_PUBLIC_APP_COMMIT -u LANE_SLOT -u PORT -u METRO_PORT \
-    PATH="$WORK/bin:$PATH" NPM_LOG="$WORK/npm.log" FAKE_SERVER="$WORK/fake_server.py" "$@"
+    PATH="$WORK/bin:$PATH" NPM_LOG="$WORK/npm.log" FAKE_SERVER="$WORK/fake_server.py" \
+    npm_config_allow_scripts=example "$@"
 }
 
 # run [VAR=value...]: rerun.sh in the main checkout; sets OUT and CODE. In a
