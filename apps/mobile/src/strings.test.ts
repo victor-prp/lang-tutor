@@ -95,3 +95,23 @@ describe('the translation card asks for the whole sentence', () => {
     expect(strings.wordOnlyNotice).toBe('כתבו את כל המשפט, לא רק את המילה');
   });
 });
+
+describe('the Reminders screen (phase 52 D8)', () => {
+  it('words the permission notice, its two buttons and the web line exactly', () => {
+    expect(strings.remindersDeniedNotice).toBe('Reminders are off in Android settings.');
+    expect(strings.remindersEnable).toBe('Turn on notifications');
+    expect(strings.remindersWebNotice).toBe('Reminders reach the Android app.');
+  });
+
+  it('names the seven days Monday to Sunday by their ISO weekday', () => {
+    expect([1, 2, 3, 4, 5, 6, 7].map(strings.remindersDayName)).toEqual([
+      'Mon',
+      'Tue',
+      'Wed',
+      'Thu',
+      'Fri',
+      'Sat',
+      'Sun',
+    ]);
+  });
+});

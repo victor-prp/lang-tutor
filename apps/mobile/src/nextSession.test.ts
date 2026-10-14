@@ -1,7 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
 import type { CurrentSessionResponse } from '@lang-tutor/core/api';
 
-import { createLook, currentFor, homeActionOf, loadFailedFor, shouldAutoCreate, shouldPoll } from './nextSession';
+import {
+  createLook,
+  currentFor,
+  homeActionOf,
+  loadFailedFor,
+  reminderStartOf,
+  shouldAutoCreate,
+  shouldPoll,
+} from './nextSession';
 
 const none = (next_source: 'seed' | 'list', saved_count = 0): CurrentSessionResponse => ({
   current: null,
@@ -102,5 +110,40 @@ describe('createLook', () => {
 
   it('offers a retry once the create for this enrollment failed, never a second create of its own', () => {
     expect(createLook('e1', 'e1')).toBe('retry');
+  });
+});
+
+// Phase 52 (spec D8). A tapped reminder opens home with start=reminder, and home
+// starts or resumes the ready session once, as its own button would.
+describe('reminderStartOf', () => {
+  it('enters a session that is ready, untouched or with answers', () => {
+    expect(reminderStartOf({ kind: 'start', sessionId: 's1' }, false)).toEqual({
+      kind: 'enter',
+      sessionId: 's1',
+      fresh: true,
+    });
+    // The same two arguments the start button's own handler gets (fresh is `kind === 'start'`).
+    expect(reminderStartOf({ kind: 'resume', sessionId: 's1' }, false)).toEqual({
+      kind: 'enter',
+      sessionId: 's1',
+      fresh: false,
+    });
+  });
+
+  it('waits while home has not read the session, or the session is being made', () => {
+    expect(reminderStartOf(null, false)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'preparing', sessionId: 's1' }, false)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'create' }, false)).toEqual({ kind: 'wait' });
+  });
+
+  it('gives up when what it waits for failed, so a late recovery does not start a session unasked', () => {
+    expect(reminderStartOf(null, true)).toEqual({ kind: 'clear' });
+    expect(reminderStartOf({ kind: 'create' }, true)).toEqual({ kind: 'clear' });
+  });
+
+  it('clears when there is nothing ready to start', () => {
+    expect(reminderStartOf({ kind: 'start-seed' }, false)).toEqual({ kind: 'clear' });
+    expect(reminderStartOf({ kind: 'save-words-first' }, false)).toEqual({ kind: 'clear' });
+    expect(reminderStartOf({ kind: 'failed' }, false)).toEqual({ kind: 'clear' });
   });
 });

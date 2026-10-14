@@ -89,6 +89,18 @@ export default function ProfileScreen() {
         </Pressable>
       </View>
 
+      <View style={styles.card}>
+        {/* Phase 52 (spec D8): the practice reminders' schedule. */}
+        <Pressable
+          accessibilityRole="button"
+          testID="profile-reminders"
+          onPress={() => router.push('/reminders')}
+          style={styles.inlineButton}
+        >
+          <Text style={styles.secondaryLabel}>{strings.remindersEntry}</Text>
+        </Pressable>
+      </View>
+
       {tutors.length > 0 ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{strings.tutorsTitle}</Text>

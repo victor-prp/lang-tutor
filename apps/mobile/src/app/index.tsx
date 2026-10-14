@@ -1,4 +1,4 @@
-import { Redirect, router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,13 +20,28 @@ export default function HomeScreen() {
   // Phase 52 (spec D1, D4). Once per learner while Home is shown: report the
   // zone their day follows, and ask to send reminders (or register again, once
   // granted). Neither throws, and nothing here waits on them.
+  // Reset while Home is not shown, so a sign-out and a sign-in on this same Home
+  // report and register again (both calls are idempotent).
   const remindedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!shown || remindedFor.current === user.id) return;
+    if (!shown) {
+      remindedFor.current = null;
+      return;
+    }
+    if (remindedFor.current === user.id) return;
     remindedFor.current = user.id;
     void reminders.reportTimeZone();
     void reminders.promptOnce();
   }, [shown, user, reminders]);
+
+  // Phase 52 (spec D8). A tapped reminder opens Home with start=reminder, which
+  // LearningSection acts on. A learner with no enrollment has nothing to start,
+  // and the param must not wait there to start a session once they enroll.
+  const { start } = useLocalSearchParams<{ start?: string }>();
+  const navigation = useNavigation<{ setParams: (params: { start?: string }) => void }>();
+  useEffect(() => {
+    if (shown && !active && start === 'reminder') navigation.setParams({ start: undefined });
+  }, [shown, active, start, navigation]);
 
   // Fresh on every focus: an invitation may have arrived, or been answered.
   useFocusEffect(
