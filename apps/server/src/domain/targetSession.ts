@@ -85,10 +85,11 @@ export function targetSplit(input: TargetSessionInput): TargetSplit[] {
 
 /**
  * One session: the targets' pools, then the main path with the slots they left, in one
- * call of the picker; slots the main path cannot use go back to the targets, and words
- * answered today, in any pool, come only after every other word. The picks come in pool
- * order; the split in the same order, each target's `picked` filled in. With no target,
- * exactly chooseWords(choice).
+ * call of the picker. A target fills its slots with its own words, those answered today
+ * included, before passing any on; slots the main path cannot use go back to the targets;
+ * the main path's words answered today come only after every pool's other words. The picks
+ * come in pool order; the split in the same order, each target's `picked` filled in. With
+ * no target, exactly chooseWords(choice).
  */
 export function chooseWithTargets(input: TargetSessionInput): { picks: ChosenPick[]; split: TargetSplit[] } {
   const planned = plan(input);

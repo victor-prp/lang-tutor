@@ -142,8 +142,9 @@ export type Pool = {
   /** The glosses this pool may pick; null: every saved gloss no other pool lists (the main path). */
   glossIds: ReadonlySet<string> | null;
   /** Picks this pool aims for in the first pass. What it leaves unpicked passes to the next
-   *  pool; what is still unpicked after the last goes back to the pools, in order: first for
-   *  their other words, then for their words answered today. */
+   *  pool; what is still unpicked after the last goes back to the pools, in order. A pool
+   *  that lists its glosses (a target's) fills its slots with its own words answered today
+   *  before passing any on; the main path's words answered today come last of all. */
   slots: number;
   /** Ruling R-D7: new words this pool may introduce whatever the daily cap says (a target's pace); 0 for the main path. */
   owedNew: number;
@@ -155,15 +156,18 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
 }
 
 /**
- * Phase 53 (spec D6, rulings R-D6, R-D7). One call per session. Returns each pool's picks,
- * in pool order. In the first pass each pool takes steps 1–8 over its own words, aiming for
- * its slots and what the pools before it left unpicked: unused slots go forward. In the
- * second, the slots still unpicked go back to the pools in the same order, each offered as
- * many as remain, for steps 1–8 again. Only the third offers them for words answered today
- * (step 9), so a word done today waits for every pool's other words (phase 37 D3). A session
- * still empty after these goes past the daily cap (ruling 15), the pools in order. The pools
- * share what one session shares: the glosses, keys and families picked, the families the
- * returns claimed, the per-dimension and hard counts, the new words and the speaking pick.
+ * Phase 53 (spec D5, D6, rulings R-D6, R-D7). One call per session. Returns each pool's
+ * picks, in pool order. In the first pass each pool takes steps 1–8 over its own words,
+ * aiming for its slots and what the pools before it left unpicked: unused slots go forward.
+ * A target's pool (one that lists its glosses) then fills those slots with its own words
+ * answered today (step 9) before passing any on, so a target not ready keeps the whole
+ * session (D5). In the second pass the slots still unpicked go back to the pools in the same
+ * order, each offered as many as remain, by the same rule. Only the third gives what is left
+ * to the main path's words answered today, so those wait for every pool's other words
+ * (phase 37 D3). A session still empty goes past the daily cap (ruling 15), the pools in
+ * order. The pools share what one session shares: the glosses, keys and families picked,
+ * the families the returns claimed, the per-dimension and hard counts, the new words and
+ * the speaking pick.
  */
 export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenPick[][] {
   const live = liveDimensions(input.listening, input.speaking);
@@ -271,7 +275,8 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   const groupsAtFirst: number[] = [];
 
   /** One run of a pool over its words still open, for up to `slots` more picks: steps 1–8,
-   *  step 9 alone (`done`) or step 10 alone (`pastTheCap`). Returns how many it picked. */
+   *  and step 9 for a target's pool; step 9 alone (`done`, the main path's); or step 10 alone
+   *  (`pastTheCap`). Returns how many it picked. */
   const run = (index: number, slots: number, part: 'steps' | 'done' | 'pastTheCap'): number => {
     const pool = pools[index];
     // This pool's words, less those a pick so far shut out.
@@ -375,8 +380,11 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
       for (const candidate of notDue) offer(candidate, false);
       // 8. What a cap held back: before any word answered today.
       fill(deferred);
+      // 9. Words answered today: only when nothing else is left. A target's pool fills its
+      //    own slots with its own before passing any on (spec D5, target only until ready).
+      if (pool.glossIds !== null) fill(done);
     } else if (part === 'done') {
-      // 9. Words answered today: only when nothing else is left, in any pool (phase 37 D3).
+      // 9. The main path's words answered today: only when no pool has another word (phase 37 D3).
       fill(done);
     } else {
       // 10. Ruling 15, now for an empty session only: new words past the daily cap.
@@ -388,23 +396,35 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
     return picks.length;
   };
 
-  // Phase 53 (ruling R-D6). The first pass: each pool in order aims for its slots and what
-  // the pools before it left unpicked.
+  // Phase 53 (rulings R-D6, R-D7). The passes, each over the pools in order.
+  //
+  // One pool, chooseWords' main path, chooses exactly as before. Its first pass is the old
+  // steps 1–8; its second adds nothing; its third is the old step 9 and ruling 15 the old
+  // step 10, at the old capacity n − picks. The second adds nothing because:
+  //  - picks only make a run stricter: a gloss, key or family taken stays taken and claims
+  //    never change, so a word not free when steps 2–8 offered it is not free later;
+  //  - a pool the daily cap stopped has introduced its newLeft, so its next newLeft is 0;
+  //  - a pick shuts out only words of its own group (they share its key or family), so the
+  //    groups still open never fall below groupsAtFirst − picks: that bound is what binds.
+  // A pool's lists filter by `open`, not `free` (ruling 1): a word whose family another
+  // gloss's return claimed still counts in n, room and the reserve, as it always has; the
+  // claim applies only when a word is picked.
+  //
+  // The first pass: each pool aims for its slots and what the pools before it left unpicked.
   let unpicked = 0;
   pools.forEach((pool, index) => {
     unpicked += pool.slots - run(index, pool.slots + unpicked, 'steps');
   });
-  // Each later pass offers the slots still unpicked to the pools in the same order, each as
-  // many as remain.
-  const pass = (part: 'steps' | 'done' | 'pastTheCap') =>
-    pools.forEach((_, index) => {
-      if (unpicked > 0) unpicked -= run(index, unpicked, part);
+  // Each later pass offers the slots still unpicked to the pools, each as many as remain.
+  const pass = (part: 'steps' | 'done' | 'pastTheCap', only: (pool: Pool) => boolean = () => true) =>
+    pools.forEach((pool, index) => {
+      if (unpicked > 0 && only(pool)) unpicked -= run(index, unpicked, part);
     });
-  // The second: steps 1–8 again, so a learner whose saved words are all one ready target
-  // still gets a full session.
+  // The second: steps 1–8 again (and a target's words answered today), so a learner whose
+  // saved words are all one ready target still gets a full session.
   pass('steps');
-  // The third: words answered today, once no pool has another word (phase 37 D3).
-  pass('done');
+  // The third: the main path's words answered today, once no pool has another word.
+  pass('done', (pool) => pool.glossIds === null);
   // Ruling 15: a session still empty goes past the daily cap, the pools in order.
   if (taken.size === 0) pass('pastTheCap');
   return chosen;
