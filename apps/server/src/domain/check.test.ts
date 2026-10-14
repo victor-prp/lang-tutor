@@ -67,7 +67,7 @@ describe('parseCheck and readCheck', () => {
     const parsed = parseCheck('```json\n' + JSON.stringify({ items: [...full.items, { key: 'q9', options: null }] }) + '\n```');
     expect(parsed).not.toBeNull();
     const reading = readCheck(ITEMS, parsed!);
-    expect(reading.ok && [...reading.byKey]).toEqual([
+    expect([...reading.byKey]).toEqual([
       ['q1', { task: 'choice', alsoRight: [true, false, false] }],
       ['q2', { task: 'gap', alsoRight: [true, false, false] }],
       ['q1c', { task: 'meaning', meaning: 'לנסר' }],
@@ -85,18 +85,26 @@ describe('parseCheck and readCheck', () => {
   // Which option a "yes" belongs to could only be guessed.
   it('refuses a choice or gap answer that does not say, option by option, which are right', () => {
     const without = (key: string, over: object) => ({ items: full.items.map((item) => (item.key === key ? { key, ...over } : item)) });
-    for (const answer of [without('q1', {}), without('q1', { options: [true, false] }), without('q2', { gap_fits: [false, false, false, true] }), without('q2', { options: [false, false, false] })]) {
+    for (const [key, answer] of [['q1', without('q1', {})], ['q1', without('q1', { options: [true, false] })], ['q2', without('q2', { gap_fits: [false, false, false, true] })], ['q2', without('q2', { options: [false, false, false] })]] as const) {
       const reading = readCheck(ITEMS, answer);
-      expect(reading.ok).toBe(false);
+      expect(reading.unjudged.has(key)).toBe(true);
+      expect(reading.byKey.has(key)).toBe(false);
     }
-    expect(readCheck(ITEMS, without('q1', {}))).toEqual({ ok: false, reason: "the checker did not say which of q1's 3 options are right" });
+    expect(readCheck(ITEMS, without('q1', {})).unjudged.get('q1')).toBe("the checker did not say which of q1's 3 options are right");
+  });
+
+  it('phase 48 (spec D2): a miscounted item is unjudged and every other item is still read', () => {
+    const reading = readCheck(ITEMS, { items: full.items.map((item) => (item.key === 'q1' ? { key: 'q1', options: [true, false] } : item)) });
+    expect([...reading.unjudged.keys()]).toEqual(['q1']);
+    expect([...reading.byKey.keys()]).toEqual(['q2', 'q1c', 'q3c', 'q4']);
+    expect(reading.byKey.get('q2')).toEqual({ task: 'gap', alsoRight: [true, false, false] });
   });
 
   it('reads a context or sentence the checker left out as an empty answer, which the rules then refuse', () => {
     const reading = readCheck(ITEMS, { items: full.items.filter((item) => item.key === 'q1' || item.key === 'q2') });
-    expect(reading.ok && reading.byKey.get('q1c')).toEqual({ task: 'meaning', meaning: '' });
-    expect(reading.ok && reading.byKey.get('q3c')).toEqual({ task: 'words', words: [] });
-    expect(reading.ok && reading.byKey.get('q4')).toEqual({ task: 'translate', translation: '' });
+    expect(reading.byKey.get('q1c')).toEqual({ task: 'meaning', meaning: '' });
+    expect(reading.byKey.get('q3c')).toEqual({ task: 'words', words: [] });
+    expect(reading.byKey.get('q4')).toEqual({ task: 'translate', translation: '' });
     expect(meaningFits('', ['לנסר'])).toBe(false);
     expect(wordsFit([], { answer: 'download', lemma: 'download', alternatives: [] })).toBe(false);
     expect(translationUses('', ['combine'])).toBe(false);
@@ -104,7 +112,7 @@ describe('parseCheck and readCheck', () => {
 
   it('takes the first of two answers for one key', () => {
     const reading = readCheck(ITEMS, { items: [{ key: 'q1', options: [false, false, false] }, { key: 'q1', options: [true, true, true] }, ...full.items.slice(1)] });
-    expect(reading.ok && reading.byKey.get('q1')).toEqual({ task: 'choice', alsoRight: [false, false, false] });
+    expect(reading.byKey.get('q1')).toEqual({ task: 'choice', alsoRight: [false, false, false] });
   });
 });
 

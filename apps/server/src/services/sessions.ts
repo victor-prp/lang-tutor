@@ -74,6 +74,7 @@ import {
   StockSessionPayloadSchema,
   acceptRenderingKey,
 } from '../domain/jobs';
+import { keepCards, type CardUnit, type Refusal } from '../domain/keepCards';
 import { LANGUAGES, type LanguageCode } from '../domain/languages';
 import { BOARD_SIZE, planCards } from '../domain/plan';
 import { dayState, withSessionInFlight } from '../domain/today';
@@ -1062,7 +1063,7 @@ export function createSessionService({
 
       const started = now();
       let modelMs = 0;
-      let verdict: Extract<DistractorVerdict, { ok: true }>;
+      let verdict: DistractorVerdict;
       const board = plan.board;
       try {
         const raw = await llm({
@@ -1075,16 +1076,8 @@ export function createSessionService({
         const answer = raw === '' ? null : parseLlmDistractors(raw);
         if (!answer) throw new InvalidDistractors(sessionId, 'the model answer was unreadable');
         // Phase 34 (spec D3, D4): the first three usable of six, none known right.
-        const checked = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
-        if (!checked.ok) throw new InvalidDistractors(sessionId, checked.reason);
-        verdict = checked;
-        // Spec D10: a board with no usable fifth meaning fails here, before the
-        // context call and the checker are paid for; the checker can only take
-        // more away (below).
-        const first = board ? verdict.byKey.get(keyOf(board.start)) : undefined;
-        if (board && !boardMeanings(ordered.slice(board.start, board.start + BOARD_SIZE), ordered, [...first!.distractors, ...first!.spares], read.known)) {
-          throw new InvalidDistractors(sessionId, "every wrong meaning of the board is one of its words' own");
-        }
+        // Phase 48 (spec D1): a card with fewer is refused, not the batch.
+        verdict = validateDistractors(items, answer, read.enrolled.source_language, others, target, read.known);
       } catch (error) {
         // Spec D16: a failed attempt is a measurement too, not only the
         // dead-letter fifteen minutes on.
@@ -1096,6 +1089,27 @@ export function createSessionService({
           reason: error instanceof Error ? error.message : String(error),
         });
         throw error;
+      }
+
+      // Phase 48 (spec D1, D2). Why each refused card was refused, by plan index.
+      const refusals = new Map<number, Refusal>();
+      ordered.forEach((_, index) => {
+        const reason = verdict.refused.get(keyOf(index));
+        if (reason) refusals.set(index, { stage: 'validation', reason });
+      });
+      const refuseBoard = (refusal: Refusal) => {
+        for (let offset = 0; offset < BOARD_SIZE; offset += 1) refusals.set(board!.start + offset, refusal);
+      };
+      // Spec D10: a board with no usable fifth meaning is refused here, before
+      // the context call and the checker are paid for; the checker can only take
+      // more away (below). Phase 48 (ruling R2): the board is refused whole.
+      if (board) {
+        const own = refusals.get(board.start);
+        const first = verdict.byKey.get(keyOf(board.start));
+        if (own) refuseBoard(own);
+        else if (!boardMeanings(ordered.slice(board.start, board.start + BOARD_SIZE), ordered, [...first!.distractors, ...first!.spares], read.known)) {
+          refuseBoard({ stage: 'validation', reason: "every wrong meaning of the board is one of its words' own" });
+        }
       }
 
       // Spec D18, phase 34 (spec D1). A typed or spoken card accepts the
@@ -1145,6 +1159,8 @@ export function createSessionService({
       };
       const contextItems = new Map<number, ContextItem>();
       for (const card of cards) {
+        // Phase 48 (spec D1): nothing a refused card would show is known to be good.
+        if (refusals.has(card.index)) continue;
         const item = contextItemFor({
           key: keyOf(card.index),
           type: generatedAs(card.type),
@@ -1186,8 +1202,10 @@ export function createSessionService({
       const found = new Map((contextAnswer?.items ?? []).map((item) => [item.key, item]));
       const languages = { target, explanation: read.enrolled.source_language as LanguageCode };
 
-      // Logged once the session is written, not on an attempt a failed insert or a retry repeats.
-      const events: Record<string, unknown>[] = [];
+      // Logged once the session is written, not on an attempt a failed insert or a
+      // retry repeats. Phase 48 (spec D6, ruling R5): each names its card by plan
+      // index here, and is logged with the position the card was written to.
+      const events: { index: number; [field: string]: unknown }[] = [];
       const shown = cards.map((card) => {
         const item = contextItems.get(card.index);
         let context: StoredContext | null = null;
@@ -1201,7 +1219,7 @@ export function createSessionService({
             const outcome = resolveContext(item, found.get(item.key), languages);
             context = outcome.context;
             if (outcome.dropped) {
-              events.push({ event: 'context_dropped', session_id: sessionId, position: card.index, type: card.type, reason: outcome.dropped });
+              events.push({ event: 'context_dropped', session_id: sessionId, index: card.index, type: card.type, reason: outcome.dropped });
             } else {
               checkable = item;
             }
@@ -1220,15 +1238,17 @@ export function createSessionService({
       // card's Hebrew. Unlike the context call, an unreadable or failed answer
       // fails the attempt, as an unreadable batch does, and pg-boss retries it.
       // At most six (ASKED_DISTRACTORS), as validateDistractors keeps them: the
-      // checker numbers every option, and a miscount fails the attempt.
+      // checker numbers every option, and a miscount refuses its card (phase 48,
+      // ruling R3). A card validation refused is asked nothing (phase 48, spec D1).
       const candidatesOf = (index: number): string[] => {
         const made = verdict.byKey.get(keyOf(index));
         return made ? [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS) : [];
       };
-      const boardCandidates = board ? candidatesOf(board.start) : [];
+      const boardCandidates = board && !refusals.has(board.start) ? candidatesOf(board.start) : [];
       const glossMeanings = (row: GenerationContext) => [row.translation, ...(read.known.meaningsByGloss.get(row.glossId) ?? [])];
       const checkItems: CheckItem[] = [];
       for (const card of shown) {
+        if (refusals.has(card.index)) continue;
         const key = keyOf(card.index);
         const { row } = card;
         const type = generatedAs(card.type);
@@ -1267,8 +1287,14 @@ export function createSessionService({
       const checkerStarted = now();
       let checkerMs = 0;
       let findings = new Map<string, CheckFinding>();
+      // Phase 48 (spec D2, ruling R3): a choice or gap item the checker left unnumbered, with why.
+      let unjudged = new Map<string, string>();
       let meanings: string[] | null = null;
       const survivors = new Map<number, string[]>();
+      const alsoRight = (key: string): boolean[] => {
+        const finding = findings.get(key);
+        return finding && (finding.task === 'choice' || finding.task === 'gap') ? finding.alsoRight : [];
+      };
       try {
         if (checkItems.length > 0) {
           const raw = await checkerLlm({ ...buildCheckPrompt(checkItems, target, read.enrolled.source_language), record: record('checker') });
@@ -1278,46 +1304,48 @@ export function createSessionService({
             throw new InvalidDistractors(sessionId, raw === '' ? 'the checker returned no content' : 'the checker answer was unreadable');
           }
           const reading = readCheck(checkItems, answer);
-          if (!reading.ok) throw new InvalidDistractors(sessionId, reading.reason);
           findings = reading.byKey;
+          unjudged = reading.unjudged;
         }
-        const alsoRight = (key: string): boolean[] => {
-          const finding = findings.get(key);
-          return finding && (finding.task === 'choice' || finding.task === 'gap') ? finding.alsoRight : [];
-        };
-        // Spec D4: a "yes" drops the option and the next spare takes its place;
-        // fewer than three left fails the attempt, as fewer than three usable does.
+        // Spec D4: a "yes" drops the option and the next spare takes its place.
+        // Phase 48 (spec D2): fewer than three left refuses the card, as fewer
+        // than three usable does, and so does a miscount.
         for (const card of shown) {
-          if (!CHOSEN.has(generatedAs(card.type))) continue;
+          if (!CHOSEN.has(generatedAs(card.type)) || refusals.has(card.index)) continue;
           const key = keyOf(card.index);
+          const notJudged = unjudged.get(key);
+          if (notJudged) {
+            refusals.set(card.index, { stage: 'checker', reason: notJudged });
+            continue;
+          }
           const left = wrongOnly(candidatesOf(card.index), alsoRight(key));
           if (left.length < KEPT_DISTRACTORS) {
-            throw new InvalidDistractors(
-              sessionId,
-              `the checker calls ${candidatesOf(card.index).length - left.length} of ${key}'s ${candidatesOf(card.index).length} wrong options right, and ${KEPT_DISTRACTORS} must be left`,
-            );
+            refusals.set(card.index, {
+              stage: 'checker',
+              reason: `the checker calls ${candidatesOf(card.index).length - left.length} of ${key}'s ${candidatesOf(card.index).length} wrong options right, and ${KEPT_DISTRACTORS} must be left`,
+            });
+            continue;
           }
           survivors.set(card.index, left);
         }
         // Spec D10, phase 34 (D3, D5): the board's fifth meaning is the first of its
         // first word's usable wrong meanings that no board word's own meaning, nor
         // what the dictionary knows of the four, nor the checker for any of them,
-        // makes right.
-        if (board) {
-          const rightForOne = new Set(
-            Array.from({ length: BOARD_SIZE }, (_, offset) => alsoRight(keyOf(board.start + offset))).flatMap((flags) =>
-              boardCandidates.filter((_, at) => flags[at]),
-            ),
-          );
-          meanings = boardMeanings(
-            ordered.slice(board.start, board.start + BOARD_SIZE),
-            ordered,
-            boardCandidates.filter((text) => !rightForOne.has(text)),
-            read.known,
-          );
-          if (!meanings) throw new InvalidDistractors(sessionId, "every wrong meaning of the board is one of its words' own");
-          for (const text of rightForOne) {
-            events.push({ event: 'checker_dropped', session_id: sessionId, position: board.start, type: 'matching', kind: 'option', text, reason: 'the checker calls it right for a board word' });
+        // makes right. Phase 48 (spec D2, ruling R2): none, or a board word the
+        // checker miscounted, refuses the board whole.
+        if (board && !refusals.has(board.start)) {
+          const keys = Array.from({ length: BOARD_SIZE }, (_, offset) => keyOf(board.start + offset));
+          const notJudged = keys.map((key) => unjudged.get(key)).find((reason) => reason !== undefined);
+          const rightForOne = new Set(keys.map(alsoRight).flatMap((flags) => boardCandidates.filter((_, at) => flags[at])));
+          meanings = notJudged
+            ? null
+            : boardMeanings(ordered.slice(board.start, board.start + BOARD_SIZE), ordered, boardCandidates.filter((text) => !rightForOne.has(text)), read.known);
+          if (!meanings) {
+            refuseBoard({ stage: 'checker', reason: notJudged ?? "every wrong meaning of the board is one of its words' own" });
+          } else {
+            for (const text of rightForOne) {
+              events.push({ event: 'checker_dropped', session_id: sessionId, index: board.start, type: 'matching', kind: 'option', text, reason: 'the checker calls it right for a board word' });
+            }
           }
         }
       } catch (error) {
@@ -1335,6 +1363,29 @@ export function createSessionService({
         throw error;
       }
 
+      // Phase 48 (spec D3). Which cards the session keeps: every unit nobody
+      // refused, and refused ones while it would hold fewer than six. The board
+      // is one unit (ruling R2). `rng` is drawn only for a fill.
+      const units: CardUnit[] = [];
+      for (let index = 0; index < ordered.length; ) {
+        const size = board && index === board.start ? BOARD_SIZE : 1;
+        units.push({ indexes: Array.from({ length: size }, (_, offset) => index + offset), refusal: refusals.get(index) ?? null });
+        index += size;
+      }
+      const fateOf = new Map(keepCards(units, rng).map((fate) => [fate.index, fate]));
+      for (const fate of fateOf.values()) {
+        if (fate.fate !== 'keep_refused' || fate.shownAs !== 'as_generated' || !CHOSEN.has(generatedAs(plan.types[fate.index]))) continue;
+        // An ambiguous card, Victor's call: the survivors first, then the
+        // options the checker called right, each in the model's order.
+        const all = candidatesOf(fate.index);
+        const right = alsoRight(keyOf(fate.index));
+        survivors.set(fate.index, [...all.filter((_, at) => !right[at]), ...all.filter((_, at) => right[at])]);
+      }
+      if (board && fateOf.get(board.start)?.fate === 'keep_refused' && refusals.get(board.start)?.stage === 'checker') {
+        // The fifth meaning validation chose, without the checker's filter.
+        meanings = boardMeanings(ordered.slice(board.start, board.start + BOARD_SIZE), ordered, boardCandidates, read.known);
+      }
+
       // What the checker's answer does to each card: its three wrong options, its
       // context (D6's fallback when the checker reads another sense), and a
       // sentence card the practised word is not natural in (phase 27's degraded
@@ -1343,10 +1394,19 @@ export function createSessionService({
         const key = keyOf(card.index);
         const { row } = card;
         let { type, answered, context, sentence, degradedReason } = card;
+        const fate = fateOf.get(card.index)!;
+        if (fate.fate === 'keep_refused' && fate.shownAs === 'typed_translation') {
+          // Phase 48 (spec D3, ruling R1): no three showable options, so phase
+          // 27's degraded card, built as the checker's degraded sentence card is.
+          type = 'typed_translation';
+          answered = typedAnswered(row, NOTHING_GENERATED);
+          sentence = null;
+          context = fallbackContext(row, 'explanation');
+        }
         const left = survivors.get(card.index);
         if (left) {
           for (const text of candidatesOf(card.index).filter((option) => !left.includes(option))) {
-            events.push({ event: 'checker_dropped', session_id: sessionId, position: card.index, type, kind: 'option', text, reason: 'the checker calls it right' });
+            events.push({ event: 'checker_dropped', session_id: sessionId, index: card.index, type, kind: 'option', text, reason: 'the checker calls it right' });
           }
           answered = { ...answered, distractors: left.slice(0, KEPT_DISTRACTORS), spares: left.slice(KEPT_DISTRACTORS) };
         }
@@ -1364,7 +1424,7 @@ export function createSessionService({
                 });
           if (!fits) {
             const reading = contextFinding.task === 'meaning' ? contextFinding.meaning : contextFinding.task === 'words' ? contextFinding.words.join(', ') : '';
-            events.push({ event: 'checker_dropped', session_id: sessionId, position: card.index, type, kind: 'context', text: context.text, reason: `the checker reads it as ${reading || 'nothing'}` });
+            events.push({ event: 'checker_dropped', session_id: sessionId, index: card.index, type, kind: 'context', text: context.text, reason: `the checker reads it as ${reading || 'nothing'}` });
             context = fallbackContext(row, card.checkable.task);
           }
         }
@@ -1374,7 +1434,7 @@ export function createSessionService({
           const practised = [made.word, row.form, row.lemma, ...(row.answerForm ? [row.answerForm] : []), ...row.acceptedAnswers, ...answered.alternatives];
           if (!translationUses(sentenceFinding.translation, practised)) {
             const reason = `the checker says it "${sentenceFinding.translation}", using neither ${made.word} nor an answer the card accepts`;
-            events.push({ event: 'checker_dropped', session_id: sessionId, position: card.index, type, kind: 'sentence', text: made.hebrew, reason });
+            events.push({ event: 'checker_dropped', session_id: sessionId, index: card.index, type, kind: 'sentence', text: made.hebrew, reason });
             type = 'typed_translation';
             answered = typedAnswered(row, NOTHING_GENERATED);
             degradedReason = reason;
@@ -1383,14 +1443,18 @@ export function createSessionService({
           }
         }
         if (degradedReason !== null) {
-          events.push({ event: 'sentence_degraded', session_id: sessionId, position: card.index, type: card.planned, reason: degradedReason });
+          events.push({ event: 'sentence_degraded', session_id: sessionId, index: card.index, type: card.planned, reason: degradedReason });
         }
         // Spec D6: a sense saved without an example has nothing to fall back on.
         if (!context && contextLanguageOf(generatedAs(type)) !== null) {
-          events.push({ event: 'context_missing', session_id: sessionId, position: card.index, type });
+          events.push({ event: 'context_missing', session_id: sessionId, index: card.index, type });
         }
         return { row, index: card.index, type, answered, context, sentence };
       });
+      // Phase 48 (spec D4). The plan's order, a dropped card's place closed up:
+      // a card's written position is its place here, while `index` stays its
+      // plan index for everything that indexes the plan.
+      const kept = final.filter((card) => fateOf.get(card.index)!.fate !== 'drop');
 
       const written = await transaction(async ({ session, question, gloss }) => {
         // Conditional: a skip that landed during the model call wins, and this
@@ -1404,7 +1468,7 @@ export function createSessionService({
           enrollmentId: read.state.enrollmentId,
           targetLanguage: target,
           userLanguageCode: read.enrolled.source_language,
-          questions: final.map(({ row, index, type, answered, context, sentence }) => ({
+          questions: kept.map(({ row, index, type, answered, context, sentence }) => ({
             glossId: survivorGlosses.get(row.glossId)?.id ?? row.glossId,
             variantId: row.variantId,
             form: row.form,
@@ -1429,11 +1493,32 @@ export function createSessionService({
         return true;
       });
 
-      if (written) for (const event of events) logger.info(event);
+      if (written) {
+        // Phase 48 (spec D6, ruling R5). A card's events, at the position it was
+        // written to, with the plan's key that model_calls knows it by; a dropped
+        // card's, never.
+        const writtenAt = new Map(kept.map((card, position) => [card.index, position]));
+        for (const { index, ...event } of events) {
+          const position = writtenAt.get(index);
+          if (position !== undefined) logger.info({ ...event, key: keyOf(index), position });
+        }
+        for (const fate of fateOf.values()) {
+          if (fate.fate === 'keep') continue;
+          const base = { session_id: sessionId, key: keyOf(fate.index), type: plan.types[fate.index], stage: fate.refusal.stage, reason: fate.refusal.reason };
+          logger.info(
+            fate.fate === 'drop'
+              ? { event: 'card_dropped', ...base }
+              : { event: 'card_kept_refused', ...base, position: writtenAt.get(fate.index), shown_as: fate.shownAs },
+          );
+        }
+      }
       logger.info({
         event: written ? 'session_prepared' : 'session_preparation_dropped',
         session_id: sessionId,
-        question_count: written ? read.context.length : 0,
+        // Phase 48 (spec D6): the questions written, of the cards planned.
+        question_count: written ? kept.length : 0,
+        planned_count: ordered.length,
+        dropped_count: [...fateOf.values()].filter((fate) => fate.fate === 'drop').length,
         item_count: items.length,
         model_ms: modelMs,
         context_ms: contextMs,

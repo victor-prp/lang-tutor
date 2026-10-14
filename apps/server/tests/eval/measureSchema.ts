@@ -392,8 +392,8 @@ async function measureCheck(gemini: ReturnType<typeof loadGeminiConfig>, require
   console.log('accepted');
   const answer = parseCheck(raw);
   const reading = answer ? readCheck(CHECKS.map((check) => check.item), answer) : null;
-  if (!answer || !reading?.ok) {
-    console.log(`parse     FAILED: ${reading && !reading.ok ? reading.reason : raw.slice(0, 300)}`);
+  if (!answer || !reading || reading.unjudged.size > 0) {
+    console.log(`parse     FAILED: ${reading && reading.unjudged.size > 0 ? [...reading.unjudged.values()].join('; ') : raw.slice(0, 300)}`);
     return 3;
   }
   console.log(`parse     ok, ${answer.items.length} items`);

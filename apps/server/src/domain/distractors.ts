@@ -100,12 +100,14 @@ export const MAX_CARD_ALTERNATIVES = 10;
 export const DISTRACTOR_MARKER = 'six wrong answers';
 
 /** Phase 34 (spec D4). How many wrong options a choice card shows, and how many
- *  of the six asked must survive D3 and the checker for the batch to stand. */
+ *  of the six asked must survive D3 and the checker for the card to stand; with
+ *  fewer, the card is refused (phase 48, spec D1, D2), not the batch. */
 export const KEPT_DISTRACTORS = 3;
 
 /** Phase 34 (spec D4, D5). How many wrong options a choice item asks for, and the
  *  most it keeps, spares included: the checker numbers every one it is sent, and a
- *  miscount fails the attempt, so a longer list from the model is cut here. */
+ *  miscount leaves that card unjudged, which the checker refuses (phase 48, spec
+ *  D2, ruling R3), so a longer list from the model is cut here. */
 export const ASKED_DISTRACTORS = 6;
 
 /**
@@ -218,9 +220,8 @@ export type Generated = {
   degraded: string | null;
 };
 
-export type DistractorVerdict =
-  | { ok: true; byKey: Map<string, Generated> }
-  | { ok: false; reason: string };
+/** Phase 48 (spec D1). Every item's content, and why each refused item was refused. A refused item has no byKey entry. */
+export type DistractorVerdict = { byKey: Map<string, Generated>; refused: Map<string, string> };
 
 /** Spec D5, D6: the sentences an item must not repeat. A gap sentence avoids
  *  the saved example (the model is shown it) and the last sessions' sentences;
@@ -299,13 +300,14 @@ export function buildDistractorPrompt(input: {
     `- "meaning": the learner sees the ${learned.name} word and picks its ${answers.name} translation. Write ${DISTRACTOR_MARKER} in ${answers.name} as distractors.`,
     `- "word": the learner sees the ${answers.name} translation and picks the ${learned.name} word. Write ${DISTRACTOR_MARKER} in ${learned.name} as distractors.`,
     `- "typed": the learner sees the ${answers.name} translation and types the ${learned.name} word. Leave distractors empty. As alternatives, list every other ${learned.name} word or phrase that translates it equally well in this sense, at most ${MAX_ALTERNATIVES}, or none.`,
-    `- "gap": the learner sees the example sentence with the ${learned.name} word blanked, and picks the missing word. Write ${DISTRACTOR_MARKER} in ${learned.name}: words of the same part of speech and in the same form as the blanked word, each of which makes this sentence wrong or meaningless. Read each candidate into the sentence and drop it if the sentence still makes sense, however differently: never a word that also fits. Prefer a word that clashes with the other words of the sentence (an object, subject, place or time it cannot go with) over a plausible neighbour of the blanked word.`,
+    `- "gap": the learner sees the example sentence with the ${learned.name} word blanked, and picks the missing word. Write ${DISTRACTOR_MARKER} in ${learned.name}: words of the same part of speech and in the same form as the blanked word, but from a different field of meaning, each of which makes this sentence wrong or meaningless, so that a learner who reads the sentence alone can rule it out. Read each candidate into the sentence and drop it if the sentence still makes sense, however differently: never a word that also fits. In an example where many words make sense in the blank (anything one puts in a drink, any adjective for a city), none of those words may be a wrong answer of this item: its wrong answers clash with the other words of the sentence (an object, subject, place or time they cannot go with).`,
     `- "sentence": write a new, natural, everyday ${learned.name} sentence of ${SENTENCE_MIN_WORDS} to ${SENTENCE_MAX_WORDS} words that uses the word in the meaning given by correct and shown by the example, never in another sense. Use whatever form of the word the sentence needs, written as consecutive words, as many as the word has. Write it so that its other words point to the word: someone reading it without its translation and without the word should guess that word, or one of the same meaning; never a sentence that many different words would complete, such as "Please ___ the file." It must differ from every sentence in avoid. Put it in sentence; the word exactly as written in the sentence in gap; the whole sentence in natural ${answers.name}, which fixes its person, number and tense, in translation; and in alternatives every other ${learned.name} word that would fill the gap with the sentence read on its own, without its translation, leaving a correct and natural sentence whatever it then means, not only words of the same meaning, in the form the gap needs, agreeing in gender, number and case with the words around it, the likeliest first, at most ${MAX_GAP_ALTERNATIVES}, or none. Leave distractors empty.`,
     `- "translate": write a short, natural, everyday ${answers.name} sentence of ${SENTENCE_MIN_WORDS} to ${TRANSLATE_MAX_WORDS} words that uses the meaning in correct, in the sense the example shows. It must differ from every sentence in avoid. Put it in sentence; a natural ${learned.name} translation of it that uses the word, in whatever form the translation needs, in translation; and that word exactly as written in the translation in gap. Leave distractors empty.`,
-    'Each wrong answer must be plausible: the same part of speech, the same register and a',
-    'similar length as the correct answer.',
+    'A wrong answer of a "meaning" or "word" item must be plausible: the same part of speech, the same register and a',
+    'similar length as the correct answer. A "gap" item\'s wrong answers follow the gap rule above instead.',
     'A wrong answer must never be right: not the correct answer itself, not a synonym of it, and',
     'not another valid translation of the word in any of its senses.',
+    'When the word is broad (such as true, real, good or thing), its near neighbours are right in some use: take the wrong answers of its "meaning" and "word" items from another field of meaning.',
     `The six wrong answers of an item must differ from each other. Put the best first: the first ${KEPT_DISTRACTORS} that are usable are shown, and the rest stand by in case one is refused.`,
     "When several items share a word, none of an item's wrong answers may be another item's correct answer.",
     "When several items share a meaning, none of a \"word\" item's wrong answers may be another of those items' words.",
@@ -488,15 +490,16 @@ function cleanAlternatives(item: DistractorItem, found: string[] | undefined, ex
 }
 
 /**
- * All or nothing for the choice tasks: a session is either fully generated or
- * the attempt fails and pg-boss retries it. A typed item cannot fail, and nor
- * can a sentence or translate item: it comes back `degraded` with the reason,
- * and the service turns that card into a typed translation (phase 27, spec
- * D5, D6), which is why it needs the `target` language its sentences are
- * written in. A gap item is a choice task like the others. Keys the
- * model added beyond the items asked are ignored. `explanation` is the
- * language the meanings are in (the enrollment's source): a reversed card's
- * wrong words and a typed card's alternatives must not be in its script.
+ * Phase 48 (spec D1): per item, not all or nothing. A choice item with fewer
+ * than three usable wrong options, or none answered, is refused with why, and
+ * the batch goes on. A typed item cannot fail, and nor can a sentence or
+ * translate item: it comes back `degraded` with the reason, and the service
+ * turns that card into a typed translation (phase 27, spec D5, D6), which is
+ * why it needs the `target` language its sentences are written in. A gap item
+ * is a choice task like the others. Keys the model added beyond the items
+ * asked are ignored. `explanation` is the language the meanings are in (the
+ * enrollment's source): a reversed card's wrong words and a typed card's
+ * alternatives must not be in its script.
  * `others` are the session's rows that ask the model nothing: their other
  * meanings and their words are as off limits as an item's own.
  *
@@ -516,6 +519,7 @@ export function validateDistractors(
   const explanationLetters = language(explanation).letters;
   const answered = new Map(answer.items.map((item) => [item.key, item]));
   const byKey = new Map<string, Generated>();
+  const refused = new Map<string, string>();
   for (const item of items) {
     const found = answered.get(item.key);
     if (item.task === 'sentence' || item.task === 'translate') {
@@ -537,22 +541,24 @@ export function validateDistractors(
       );
       continue;
     }
-    if (!found) return { ok: false, reason: `no answer for ${item.key}` };
     if (item.task === 'typed') {
-      byKey.set(item.key, {
-        ...NOTHING_GENERATED,
-        alternatives: cleanAlternatives(item, found.alternatives, explanationLetters),
-      });
+      // A typed item cannot fail: unanswered, it keeps no alternatives (phase 48, spec D1).
+      byKey.set(item.key, { ...NOTHING_GENERATED, alternatives: cleanAlternatives(item, found?.alternatives, explanationLetters) });
+      continue;
+    }
+    if (!found) {
+      refused.set(item.key, `no answer for ${item.key}`);
       continue;
     }
     const { usable, refusal } = usableChoices(item, items, others, found.distractors, explanationLetters, known);
     if (usable.length < KEPT_DISTRACTORS) {
-      return {
-        ok: false,
-        reason: refusal
+      refused.set(
+        item.key,
+        refusal
           ? `${refusal} (${usable.length} of ${found.distractors.length} usable, ${KEPT_DISTRACTORS} needed)`
           : `${item.key} needs three non-empty wrong answers`,
-      };
+      );
+      continue;
     }
     byKey.set(item.key, {
       ...NOTHING_GENERATED,
@@ -560,7 +566,7 @@ export function validateDistractors(
       spares: usable.slice(KEPT_DISTRACTORS, ASKED_DISTRACTORS),
     });
   }
-  return { ok: true, byKey };
+  return { byKey, refused };
 }
 
 /** A generated question's options as stored: correct first. The shown order is

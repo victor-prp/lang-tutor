@@ -348,16 +348,56 @@ describe('prepareSession', () => {
     expect(none.llm.calls).toHaveLength(0);
   });
 
-  it('throws, writing nothing, when a distractor is the answer', async () => {
+  // Phase 48 (spec D1, D3, ruling R1). Two cards planned, so the floor keeps
+  // both. q1 offers its own answer as a wrong one: no three showable options, so
+  // it is phase 27's degraded card, and the context call and the checker are
+  // asked nothing for it.
+  it('keeps a card validation refuses as a typed translation when the session has fewer than six (phase 48, spec D3)', async () => {
     const bad = JSON.stringify({
       items: [
         { key: 'q1', distractors: ['קראה', 'שמעה', 'ראתה'] },
         { key: 'q2', distractors: ['чеснок', 'морковь', 'капуста'] },
       ],
     });
-    const { service, calls } = world({ reply: bad });
-    await expect(service.prepareSession(PAYLOAD)).rejects.toBeInstanceOf(InvalidDistractors);
-    expect(calls.transitions).toEqual([]);
+    const { service, calls, logger, contextLlm, checkerLlm } = world({ reply: bad });
+    await service.prepareSession(PAYLOAD);
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    const [input] = calls.generated as { questions: { type: string; prompt: string | null; options: unknown[] | null; alternatives: string[] | null }[] }[];
+    expect(input.questions.map((q) => q.type)).toEqual(['typed_translation', 'reverse_choice']);
+    expect(input.questions[0]).toMatchObject({ prompt: 'קראה', options: null, alternatives: [] });
+    expect(logger.events.filter((e) => e.event === 'card_kept_refused')).toEqual([
+      {
+        event: 'card_kept_refused',
+        session_id: SESSION,
+        key: 'q1',
+        position: 0,
+        type: 'multiple_choice',
+        stage: 'validation',
+        reason: 'q1 repeats the answer or another wrong answer (2 of 3 usable, 3 needed)',
+        shown_as: 'typed_translation',
+      },
+    ]);
+    expect(logger.events.filter((e) => e.event === 'card_dropped')).toEqual([]);
+    const asked = (client: { calls: { user: string }[] }) => client.calls.flatMap((call) => (JSON.parse(call.user).items as { key: string }[]).map((item) => item.key));
+    expect(asked(contextLlm)).toEqual(['q2']);
+    expect(asked(checkerLlm)).toEqual(['q2']);
+  });
+
+  // Phase 48 (spec D1). A typed item cannot fail: the model leaving it out
+  // leaves the card none of the model's alternatives, and the session is prepared.
+  it('prepares a typed card the model did not answer, with no alternatives of the model’s (phase 48, spec D1)', async () => {
+    const context = [
+      ...CONTEXT,
+      { glossId: 'g-s3', senseId: 's3', variantId: 'v3', lexemeId: 'l3', form: 'быстро', lemma: 'быстро', partOfSpeech: 'adverb', translation: 'מהר', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
+    ];
+    // GOOD answers q1 and q2 only.
+    const { service, calls, logger } = world({ context, reply: GOOD });
+    await service.prepareSession({ ...PAYLOAD, picks: [...PAYLOAD.picks, { gloss_id: 'g-s3', sense_id: 's3', variant_id: 'v3', ...produce(0.76) }] });
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    const [input] = calls.generated as { questions: { type: string; alternatives: string[] | null }[] }[];
+    expect(input.questions.map((q) => q.type)).toEqual(['multiple_choice', 'reverse_choice', 'typed_translation']);
+    expect(input.questions[2].alternatives).toEqual([]);
+    expect(logger.events.filter((e) => e.event === 'card_dropped' || e.event === 'card_kept_refused')).toEqual([]);
   });
 
   it('throws on an empty (blocked) or unreadable answer', async () => {
@@ -458,31 +498,57 @@ describe('prepareSession, phase 24 and 35 (spec D6, D10, D11)', () => {
     for (const i of [1, 2, 3]) expect(shown[i].options).toEqual(shown[0].options);
   });
 
-  it("refuses a board whose wrong meanings are all its words' own, so pg-boss retries", async () => {
+  // Phase 48 (spec D1, ruling R2). The board is refused whole, before the
+  // context call and the checker are paid for it, and ten cards less four is
+  // six: nothing refills it.
+  it('drops a board refused at validation as a unit, and asks the context call and the checker nothing for it', async () => {
     // Each is valid for q1 (none is ромашка's own מרגנית), and each is another
     // board word's meaning: only the board check can refuse them.
     const reply = TEN_REPLY.replace('["צב","שולחן","כיסא"]', '["צב","כרית","מטרייה"]');
-    const { service, contextLlm, checkerLlm } = world({ context: TEN, reply });
-    await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toThrow(/board/);
-    // Phase 34: before the context call and the checker are paid for.
-    expect(contextLlm.calls).toHaveLength(0);
-    expect(checkerLlm.calls).toHaveLength(0);
+    const { service, calls, contextLlm, checkerLlm, logger } = world({ context: TEN, reply });
+    await service.prepareSession(TEN_PAYLOAD);
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    const [input] = calls.generated as { questions: { type: string }[] }[];
+    expect(input.questions.map((q) => q.type)).toEqual(['typed_translation', 'multiple_choice', 'letter_tiles', 'typed_translation', 'listen_choice', 'reverse_choice']);
+    const BOARD = ['q1', 'q2', 'q3', 'q4'];
+    expect(logger.events.filter((e) => e.event === 'card_dropped')).toEqual(
+      BOARD.map((key) => ({ event: 'card_dropped', session_id: SESSION, key, type: 'matching', stage: 'validation', reason: "every wrong meaning of the board is one of its words' own" })),
+    );
+    const asked = (client: { calls: { user: string }[] }) => client.calls.flatMap((call) => (JSON.parse(call.user).items as { key: string }[]).map((item) => item.key));
+    expect(checkerLlm.calls).toHaveLength(1);
+    for (const key of [...asked(contextLlm), ...asked(checkerLlm)]) expect(BOARD).not.toContain(key.replace(/c$/, ''));
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 6, planned_count: 10, dropped_count: 4 }));
   });
 
   // Final review: a tiles card asks the model nothing, yet its meaning is as
-  // off limits as an item's own.
+  // off limits as an item's own. Phase 48 (spec D1, D3): the card is dropped,
+  // and nine are left.
   it("refuses a wrong meaning that is another meaning of a listening card's word held by a tiles card", async () => {
     const context = TEN.map((row, i) => (i === 8 ? { ...row, form: TEN[7].form, lemma: TEN[7].form, translation: 'מחבת' } : row));
     const reply = TEN_REPLY.replace('["ענן","גשם","רוח"]', '["מחבת","גשם","רוח"]');
-    const { service, calls, llm } = world({ context, reply });
-    await expect(service.prepareSession(TEN_PAYLOAD)).rejects.toBeInstanceOf(InvalidDistractors);
-    expect(calls.generated).toEqual([]);
+    const { service, calls, llm, logger } = world({ context, reply });
+    await service.prepareSession(TEN_PAYLOAD);
+    const [input] = calls.generated as { questions: { type: string }[] }[];
+    expect(input.questions).toHaveLength(9);
+    expect(input.questions.map((q) => q.type)).not.toContain('listen_choice');
+    expect(logger.events.filter((e) => e.event === 'card_dropped')).toEqual([
+      {
+        event: 'card_dropped',
+        session_id: SESSION,
+        key: 'q9',
+        type: 'listen_choice',
+        stage: 'validation',
+        reason: 'q9 offers another meaning of the same word as a wrong answer (2 of 3 usable, 3 needed)',
+      },
+    ]);
     // The model was told about the dictation's row.
     expect(JSON.parse(llm.calls[0].user).also_in_session).toEqual([{ word: TEN[7].form, correct: 'מחבת' }]);
-    // Without it offered, the same session is fine.
+    // Without it offered, the same session keeps its listening card.
     const fine = world({ context, reply: TEN_REPLY });
     await fine.service.prepareSession(TEN_PAYLOAD);
-    expect(fine.calls.generated).toHaveLength(1);
+    const [kept] = fine.calls.generated as { questions: { type: string }[] }[];
+    expect(kept.questions).toHaveLength(10);
+    expect(kept.questions.map((q) => q.type)).toContain('listen_choice');
   });
 
   it('gives a listening-off session no listening card', async () => {
@@ -628,6 +694,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
     expect(logger.events).toContainEqual({
       event: 'sentence_degraded',
       session_id: SESSION,
+      key: sentenceItem.key,
       position,
       type: 'cloze_typed',
       reason: expect.stringContaining('avoid'),
@@ -667,6 +734,7 @@ describe('prepareSession, phase 27 Part B: sentence cards', () => {
     expect(logger.events).toContainEqual({
       event: 'sentence_degraded',
       session_id: SESSION,
+      key: translate.key,
       position,
       type: 'sentence_translation',
       reason: expect.stringContaining('avoid'),
@@ -968,13 +1036,18 @@ describe('prepareSession, phase 34 (spec D1, D2, D12)', () => {
       expect(asked(await prepare([...FILLER, short], { payload: CLOZE_LAST }))).toContain('q3:sentence');
     });
 
+    // Phase 48 (spec D3, ruling R1): refused, the card is never shown with it.
+    // Three cards planned, so the floor keeps it, as a typed translation.
     it('never offers the answer form as a wrong option of the reversed card', async () => {
       const reply = (words: string[]) => ({ 'q2': { distractors: words } });
       const probe = world({ context: [FILLER[0], HOURS, FILLER[1]], reply: 'nope' });
       await expect(probe.service.prepareSession(payloadOf([FILLER[0], HOURS, FILLER[1]]))).rejects.toThrow();
       const bad = world({ context: [FILLER[0], HOURS, FILLER[1]], reply: answering([], reply(['tempo', 'ore', 'giorno']))(probe.llm) });
-      await expect(bad.service.prepareSession(payloadOf([FILLER[0], HOURS, FILLER[1]]))).rejects.toBeInstanceOf(InvalidDistractors);
-      expect(bad.calls.generated).toEqual([]);
+      await bad.service.prepareSession(payloadOf([FILLER[0], HOURS, FILLER[1]]));
+      expect(insertedOf(bad.calls)[1]).toMatchObject({ type: 'typed_translation', answerForm: 'ore', options: null });
+      expect(bad.logger.events).toContainEqual(
+        expect.objectContaining({ event: 'card_kept_refused', key: 'q2', type: 'reverse_choice', stage: 'validation', reason: 'q2 repeats the answer or another wrong answer (2 of 3 usable, 3 needed)' }),
+      );
     });
   });
 
@@ -1235,7 +1308,7 @@ describe('prepareSession, phase 34 (spec D6, D8): context sentences and marks', 
     const { service, calls, logger } = world({ enrollment: ENGLISH, context: rows, reply: CHOICES_BATCH, contextReply: reply });
     await service.prepareSession(payloadOf(rows, THREE));
     expect(insertedOf(calls)[0]).toMatchObject({ type: 'multiple_choice', context: null });
-    expect(logger.events).toContainEqual({ event: 'context_missing', session_id: SESSION, position: 0, type: 'multiple_choice' });
+    expect(logger.events).toContainEqual({ event: 'context_missing', session_id: SESSION, key: 'q1', position: 0, type: 'multiple_choice' });
   });
 
   it('reads the recent contexts in the read step, and drops a sentence one of them showed for the saved example', async () => {
@@ -1370,13 +1443,14 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     expect(checkerLlm.calls.map((call) => call.system.includes(CHECK_MARKER))).toEqual([true]);
     expect(checksOf(checkerLlm.calls[0]).find((item) => item.key === 'q1')).toEqual({ key: 'q1', task: 'choice', word: 'blow up', options: SIX_WRONG });
     expect(events(logger, 'checker_dropped')).toEqual([
-      { event: 'checker_dropped', session_id: SESSION, position: 0, type: 'multiple_choice', kind: 'option', text: 'להרוס', reason: 'the checker calls it right' },
+      { event: 'checker_dropped', session_id: SESSION, key: 'q1', position: 0, type: 'multiple_choice', kind: 'option', text: 'להרוס', reason: 'the checker calls it right' },
     ]);
   });
 
   // Review, fix round 1: the checker is never asked about more than six options,
-  // the miscount risk that fails the attempt. A seventh never gets past the parse
-  // (LlmDistractorsSchema), and validateDistractors keeps at most six.
+  // the miscount risk that leaves a card unjudged and refused (phase 48, spec D2,
+  // ruling R3). A seventh never gets past the parse (LlmDistractorsSchema), and
+  // validateDistractors keeps at most six.
   it('asks the checker about at most six options of a card, and never sees a seventh', async () => {
     const six = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG) });
     await six.service.prepareSession(payloadOf(CHOICES));
@@ -1388,21 +1462,67 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
   });
 
   // Review Focus 5.
-  it('fails the batch only when fewer than three wrong options survive the checker', async () => {
+  it('keeps a card three wrong options survive the checker for, the spares in the places of the rest', async () => {
     const three = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: checking({ q1: { options: [true, true, true, false, false, false] } }) });
     await three.service.prepareSession(payloadOf(CHOICES));
     expect(optionTexts(insertedOf(three.calls)[0])).toEqual(['לנפח', 'לצבוע', 'לבשל', 'לכתוב']);
-
-    const yes = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: checking({ q1: { options: SIX_WRONG.map(() => true) } }) });
-    await expect(yes.service.prepareSession(payloadOf(CHOICES))).rejects.toBeInstanceOf(InvalidDistractors);
-    expect(yes.calls.transitions).toEqual([]);
-    expect(yes.logger.events).toContainEqual(
-      expect.objectContaining({ event: 'session_preparation_attempt_failed', stage: 'checker', reason: expect.stringContaining("the checker calls 6 of q1's 6 wrong options right, and 3 must be left") }),
-    );
+    expect(events(three.logger, 'card_kept_refused')).toEqual([]);
   });
 
-  it('fails the batch, writing nothing, on a checker answer that is unreadable, numbers the options wrong, or never comes', async () => {
-    for (const checkReply of ['nope', '', checking({ q1: { options: [false, false] } }), new Error('provider down')]) {
+  // Phase 48 (spec D2, D3, D6). Three cards planned, so the floor keeps one the
+  // checker leaves no three wrong options, as generated: Victor's call, an
+  // ambiguous card over a failed session. It logs no checker_dropped for the
+  // options it still shows.
+  it('keeps a card the checker refuses entirely when the session has fewer than six (phase 48, spec D3)', async () => {
+    const yes = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: checking({ q1: { options: SIX_WRONG.map(() => true) } }) });
+    await yes.service.prepareSession(payloadOf(CHOICES));
+    expect(yes.calls.transitions).toEqual(['preparing→ready']);
+    expect(optionTexts(insertedOf(yes.calls)[0])).toEqual(['לנפח', 'להרוס', 'לקפל', 'לשבור']);
+    expect(events(yes.logger, 'card_kept_refused')).toEqual([
+      expect.objectContaining({ key: 'q1', position: 0, stage: 'checker', shown_as: 'as_generated', reason: "the checker calls 6 of q1's 6 wrong options right, and 3 must be left" }),
+    ]);
+    expect(events(yes.logger, 'checker_dropped')).toEqual([]);
+    expect(events(yes.logger, 'session_preparation_attempt_failed')).toEqual([]);
+  });
+
+  // Phase 48 (spec D3). Two survive the checker, which is fewer than three: the
+  // card kept as generated shows them first, then the first it called right.
+  it('shows a card kept as generated with the checker’s survivors first (phase 48, spec D3)', async () => {
+    const { service, calls, logger } = world({
+      enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: checking({ q1: { options: [true, false, true, true, false, true] } }),
+    });
+    await service.prepareSession(payloadOf(CHOICES));
+    expect(optionTexts(insertedOf(calls)[0])).toEqual(['לנפח', 'לקפל', 'לבשל', 'להרוס']);
+    expect(events(logger, 'card_kept_refused')).toEqual([
+      expect.objectContaining({ key: 'q1', reason: "the checker calls 4 of q1's 6 wrong options right, and 3 must be left", shown_as: 'as_generated' }),
+    ]);
+    expect(events(logger, 'checker_dropped')).toEqual([]);
+  });
+
+  // Phase 48 (spec D2, ruling R3). A miscount refuses its card only, and the
+  // floor keeps it, as generated.
+  it('keeps a card the checker miscounted, refused, when the session has fewer than six (phase 48, ruling R3)', async () => {
+    const { service, calls, logger } = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply: checking({ q1: { options: [false, false] } }) });
+    await service.prepareSession(payloadOf(CHOICES));
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    expect(optionTexts(insertedOf(calls)[0])).toEqual(['לנפח', 'להרוס', 'לקפל', 'לשבור']);
+    expect(events(logger, 'card_kept_refused')).toEqual([
+      {
+        event: 'card_kept_refused',
+        session_id: SESSION,
+        key: 'q1',
+        position: 0,
+        type: 'multiple_choice',
+        stage: 'checker',
+        reason: "the checker did not say which of q1's 6 options are right",
+        shown_as: 'as_generated',
+      },
+    ]);
+    expect(events(logger, 'checker_dropped')).toEqual([]);
+  });
+
+  it('fails the batch, writing nothing, on a checker answer that is unreadable, empty, or never comes', async () => {
+    for (const checkReply of ['nope', '', new Error('provider down')]) {
       const { service, calls, logger } = world({ enrollment: ENGLISH, context: CHOICES, reply: choicesBatch(SIX_WRONG), checkReply });
       await expect(service.prepareSession(payloadOf(CHOICES))).rejects.toThrow();
       expect(calls.transitions).toEqual([]);
@@ -1442,7 +1562,7 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     await service.prepareSession(payloadOf(rows));
     expect(insertedOf(calls)[0]).toMatchObject({ context: 'He will saw the branch off.', contextTranslation: 'הוא ינסר את הענף.' });
     expect(events(logger, 'checker_dropped')).toEqual([
-      { event: 'checker_dropped', session_id: SESSION, position: 0, type: 'multiple_choice', kind: 'context', text: 'Please saw the plank in half.', reason: 'the checker reads it as ראה' },
+      { event: 'checker_dropped', session_id: SESSION, key: 'q1', position: 0, type: 'multiple_choice', kind: 'context', text: 'Please saw the plank in half.', reason: 'the checker reads it as ראה' },
     ]);
   });
 
@@ -1457,7 +1577,7 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
     // table has no saved example to fall back on.
     expect(reversed.context).toBeNull();
     expect(events(logger, 'checker_dropped').map((e) => (e as unknown as { position: number }).position)).toEqual([1, 2]);
-    expect(logger.events).toContainEqual({ event: 'context_missing', session_id: SESSION, position: 1, type: 'reverse_choice' });
+    expect(logger.events).toContainEqual({ event: 'context_missing', session_id: SESSION, key: 'q2', position: 1, type: 'reverse_choice' });
   });
 
   // Review, fix round 1: the card asks for its answer form, and the saved form
@@ -1582,8 +1702,35 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
       await service.prepareSession(payloadOf(rows, cards));
       expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sing', 'dance']);
       expect(events(logger, 'checker_dropped')).toEqual([
-        { event: 'checker_dropped', session_id: SESSION, position: 1, type: 'cloze_choice', kind: 'option', text: 'sleep', reason: 'the checker calls it right' },
+        { event: 'checker_dropped', session_id: SESSION, key: 'q2', position: 1, type: 'cloze_choice', kind: 'option', text: 'sleep', reason: 'the checker calls it right' },
       ]);
+    });
+
+    // Phase 48 (spec D2, D3). Lane 0's 38b003b4 (cream) on a small session: the
+    // checker says every option fits the gap, and the floor keeps the card as
+    // generated, with its first three options.
+    it('drops nothing in a five-card session when the checker says every gap option fits', async () => {
+      const { service, calls, logger } = world({
+        enrollment: ENGLISH, context: rows, reply: batch, checkReply: checking({ ...natural, q2: { gap_fits: [true, true, true, true, true] } }),
+      });
+      await service.prepareSession(payloadOf(rows, cards));
+      expect(calls.transitions).toEqual(['preparing→ready']);
+      expect(insertedOf(calls).map((q) => q.type)).toEqual(['typed_meaning', 'cloze_choice', 'cloze_typed', 'reverse_choice', 'typed_translation']);
+      expect(optionTexts(insertedOf(calls)[1])).toEqual(['download', 'eat', 'sleep', 'sing']);
+      expect(events(logger, 'card_kept_refused')).toEqual([
+        {
+          event: 'card_kept_refused',
+          session_id: SESSION,
+          key: 'q2',
+          position: 1,
+          type: 'cloze_choice',
+          stage: 'checker',
+          reason: "the checker calls 5 of q2's 5 wrong options right, and 3 must be left",
+          shown_as: 'as_generated',
+        },
+      ]);
+      expect(events(logger, 'card_dropped')).toEqual([]);
+      expect(events(logger, 'checker_dropped')).toEqual([]);
     });
   });
 
@@ -1601,6 +1748,21 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
       expect(boardChecks).toEqual(['ромашка', 'черепаха', 'подушка', 'зонтик'].map((word, i) => ({ key: `q${i + 1}`, task: 'choice', word, options: ['שולחן', 'כיסא', 'מנורה', 'ספה'] })));
       expect(insertedOf(calls)[0].options!.map((o) => o.text)).toEqual(['מרגנית', 'צב', 'כרית', 'מטרייה', 'כיסא']);
       expect(events(logger, 'checker_dropped')).toContainEqual(expect.objectContaining({ position: 0, type: 'matching', kind: 'option', text: 'שולחן' }));
+    });
+
+    // Phase 48 (spec D2, ruling R2). Every candidate is right for a board word:
+    // the board is refused whole, and ten cards less four is six.
+    it('drops a board the checker leaves no fifth meaning', async () => {
+      const { service, calls, logger } = world({ context: TEN, reply: BOARD_REPLY, checkReply: checking({ q1: { options: [true, true, true, true] } }) });
+      await service.prepareSession(TEN_PAYLOAD);
+      expect(calls.transitions).toEqual(['preparing→ready']);
+      expect(insertedOf(calls)).toHaveLength(6);
+      expect(insertedOf(calls).map((q) => q.type)).not.toContain('matching');
+      expect(events(logger, 'card_dropped')).toEqual(
+        ['q1', 'q2', 'q3', 'q4'].map((key) => ({ event: 'card_dropped', session_id: SESSION, key, type: 'matching', stage: 'checker', reason: "every wrong meaning of the board is one of its words' own" })),
+      );
+      // A dropped card logs nothing else.
+      expect(events(logger, 'checker_dropped')).toEqual([]);
     });
 
     it('category A (1d268882): never takes a board word’s own known meaning as the fifth', async () => {
@@ -1635,6 +1797,81 @@ describe('prepareSession, phase 34 (spec D3, D4, D5): the known-right set, the s
       const overlapping = world({ context: TEN, reply, known });
       await overlapping.service.prepareSession(TEN_PAYLOAD);
       expect(boardOf(overlapping.calls)).toEqual(['ромашка', 'черепаха', 'зонтик', 'ведро']);
+    });
+
+    // Phase 48 (spec D3, ruling R1). Seven picks: the four new words are the
+    // board (q1-q4), then a typed translation (q5), a multiple choice (q6) and a
+    // reverse choice (q7). The board is refused at validation, three cards pass,
+    // and three is fewer than six, so the fill takes the board whole, and
+    // validation left it no options to show: each word is a typed translation.
+    it('keeps a board refused at validation as four typed translations when the session would hold fewer than six', async () => {
+      const seven = TEN.slice(0, 7);
+      const payload = { ...tenPayload(), picks: tenPayload().picks.slice(0, 7) };
+      // Each wrong meaning of q1 is another board word's own, as above.
+      const reply = JSON.stringify({
+        items: [
+          { key: 'q1', distractors: ['צב', 'כרית', 'מטרייה'] },
+          { key: 'q5', distractors: [], alternatives: [] },
+          { key: 'q6', distractors: ['דלת', 'קיר', 'תקרה'] },
+          { key: 'q7', distractors: ['чеснок', 'морковь', 'капуста'] },
+        ],
+      });
+      const { service, calls, contextLlm, checkerLlm, logger } = world({ context: seven, reply });
+      await service.prepareSession(payload);
+      expect(calls.transitions).toEqual(['preparing→ready']);
+      // The plan's order: the board's words first, then q5, q6 and q7 (picks 6, 4 and 5).
+      expect(calls.sessionQuestions[0]).toHaveLength(7);
+      expect(insertedOf(calls).map((q) => q.type)).toEqual([
+        'typed_translation', 'typed_translation', 'typed_translation', 'typed_translation',
+        'typed_translation', 'multiple_choice', 'reverse_choice',
+      ]);
+      const written = (calls.generated[0] as { questions: { form: string; prompt: string | null; options: unknown[] | null }[] }).questions;
+      expect(written.map((q) => q.form)).toEqual([0, 1, 2, 3, 6, 4, 5].map((i) => FORMS[i]));
+      // The board's four show their meaning and take a typed answer: no options.
+      written.slice(0, 4).forEach((q, i) => expect(q).toMatchObject({ prompt: MEANINGS[i], options: null }));
+      // The cards that passed are as generated.
+      expect(insertedOf(calls)[5].options!.map((o) => o.text)).toEqual([MEANINGS[4], 'דלת', 'קיר', 'תקרה']);
+      expect(insertedOf(calls)[6].options!.map((o) => o.text)).toEqual([FORMS[5], 'чеснок', 'морковь', 'капуста']);
+      expect(events(logger, 'card_kept_refused')).toEqual(
+        ['q1', 'q2', 'q3', 'q4'].map((key, position) => ({
+          event: 'card_kept_refused',
+          session_id: SESSION,
+          key,
+          position,
+          type: 'matching',
+          stage: 'validation',
+          reason: "every wrong meaning of the board is one of its words' own",
+          shown_as: 'typed_translation',
+        })),
+      );
+      expect(events(logger, 'card_dropped')).toEqual([]);
+      // Refused at validation, the board is asked of neither the context call nor the checker.
+      const asked = (client: { calls: { user: string }[] }) => client.calls.flatMap((call) => (JSON.parse(call.user).items as { key: string }[]).map((item) => item.key.replace(/c$/, '')));
+      for (const key of [...asked(contextLlm), ...asked(checkerLlm)]) expect(['q1', 'q2', 'q3', 'q4']).not.toContain(key);
+      expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 7, planned_count: 7, dropped_count: 0 }));
+    });
+
+    // Phase 48 (spec D2, ruling R3). One board word the checker miscounted
+    // leaves the fifth meaning unjudged for that word, so the board is refused
+    // whole; ten cards less four is six, and nothing refills it.
+    it('drops a board when the checker miscounts only one of its words', async () => {
+      const { service, calls, logger } = world({ context: TEN, reply: BOARD_REPLY, checkReply: checking({ q2: { options: [true] } }) });
+      await service.prepareSession(TEN_PAYLOAD);
+      expect(calls.transitions).toEqual(['preparing→ready']);
+      expect(insertedOf(calls)).toHaveLength(6);
+      expect(insertedOf(calls).map((q) => q.type)).not.toContain('matching');
+      expect(events(logger, 'card_dropped')).toEqual(
+        ['q1', 'q2', 'q3', 'q4'].map((key) => ({
+          event: 'card_dropped',
+          session_id: SESSION,
+          key,
+          type: 'matching',
+          stage: 'checker',
+          reason: "the checker did not say which of q2's 4 options are right",
+        })),
+      );
+      expect(events(logger, 'card_kept_refused')).toEqual([]);
+      expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 6, planned_count: 10, dropped_count: 4 }));
     });
   });
 });
@@ -1719,7 +1956,7 @@ describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
       { position: 3, text: 'לכתוב', is_correct: false },
     ]);
     expect(events(logger, 'checker_dropped')).toEqual([
-      { event: 'checker_dropped', session_id: SESSION, position: 0, type: 'new_meaning', kind: 'option', text: 'לבשל', reason: 'the checker calls it right' },
+      { event: 'checker_dropped', session_id: SESSION, key: 'q1', position: 0, type: 'new_meaning', kind: 'option', text: 'לבשל', reason: 'the checker calls it right' },
     ]);
     // As the card reaches the phone.
     expect(calls.sessionQuestions[0][0]).toMatchObject({
@@ -1763,7 +2000,7 @@ describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
     const bare = { ...PICK_UP, example: null, exampleTranslation: null };
     const { calls, logger } = await prepared({ known: ['להרים'], first: bare, sentence: 'Nothing here uses it.' });
     expect(insertedOf(calls)[0]).toMatchObject({ type: 'new_meaning', context: null });
-    expect(events(logger, 'context_missing')).toEqual([{ event: 'context_missing', session_id: SESSION, position: 0, type: 'new_meaning' }]);
+    expect(events(logger, 'context_missing')).toEqual([{ event: 'context_missing', session_id: SESSION, key: 'q1', position: 0, type: 'new_meaning' }]);
   });
 
   // findRecentContexts files a new_meaning's sentences under multiple_choice,
@@ -1786,5 +2023,92 @@ describe('prepareSession, phase 39 (spec D6): the new_meaning card', () => {
       expect(card.knownMeanings ?? null).toBeNull();
       expect(calls.sessionQuestions[0][0]).not.toHaveProperty('known_meanings');
     }
+  });
+});
+
+// Phase 48 (spec D3, D4, D6). A card validation or the checker refuses no longer
+// fails the session: it is dropped, or kept anyway while the session would hold
+// fewer than six.
+describe('prepareSession, phase 48 (spec D3, D4, D6): a refused card is dropped, or kept to reach six', () => {
+  type Inserted = { type: string; form: string; options: { text: string }[] | null };
+  const insertedOf = (calls: { generated: unknown[] }) => (calls.generated[0] as { questions: Inserted[] }).questions;
+  const events = (logger: { events: unknown[] }, name: string) => (logger.events as { event: string }[]).filter((e) => e.event === name);
+  // TEN's multiple choice (q6, plan index 5) and reverse choice (q10, index 9),
+  // each with three wrong options, all of them called right.
+  const ALL_RIGHT = { options: [true, true, true] };
+
+  it('positions close up after a drop, and events name the written position (phase 48, spec D4, D6, ruling R5)', async () => {
+    const { service, calls, logger } = world({ context: TEN, reply: TEN_REPLY, checkReply: checking({ q6: ALL_RIGHT }) });
+    await service.prepareSession(TEN_PAYLOAD);
+    // Nine, in the plan's order without index 5, at positions 0 to 8.
+    expect(calls.sessionQuestions[0]).toHaveLength(9);
+    expect(calls.sessionQuestions[0].map((q) => q.id)).toEqual(Array.from({ length: 9 }, (_, at) => `g${at}`));
+    expect(insertedOf(calls).map((q) => q.form)).toEqual([0, 1, 2, 3, 6, 8, 9, 7, 5].map((i) => FORMS[i]));
+    expect(events(logger, 'card_dropped')).toEqual([
+      { event: 'card_dropped', session_id: SESSION, key: 'q6', type: 'multiple_choice', stage: 'checker', reason: "the checker calls 3 of q6's 3 wrong options right, and 3 must be left" },
+    ]);
+    // Every per-card event names its card by the plan's key, at the position it
+    // was written to: one less than its plan index after q6. q6 logs nothing else.
+    const perCard = (logger.events as { event: string; key?: string; position?: number }[]).filter((e) => e.position !== undefined);
+    expect(perCard.map((e) => e.key)).toContain('q10');
+    for (const { key, position } of perCard) {
+      const index = Number(key!.slice(1)) - 1;
+      expect(index).not.toBe(5);
+      expect(position).toBe(index > 5 ? index - 1 : index);
+    }
+    expect(events(logger, 'sentence_degraded')).toEqual([expect.objectContaining({ key: 'q8', position: 6, type: 'cloze_typed' })]);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 9, planned_count: 10, dropped_count: 1 }));
+  });
+
+  it('fills a ten-card session up to six with refused cards (phase 48, spec D3)', async () => {
+    // The board refused at validation, as above, and q6 and q10 by the checker:
+    // four pass, so both checker-refused cards are kept as generated, and the
+    // board, refused at validation, is not needed.
+    const reply = TEN_REPLY.replace('["צב","שולחן","כיסא"]', '["צב","כרית","מטרייה"]');
+    const { service, calls, logger } = world({ context: TEN, reply, checkReply: checking({ q6: ALL_RIGHT, q10: ALL_RIGHT }) });
+    await service.prepareSession(TEN_PAYLOAD);
+    expect(calls.transitions).toEqual(['preparing→ready']);
+    expect(insertedOf(calls).map((q) => q.type)).toEqual(['typed_translation', 'multiple_choice', 'letter_tiles', 'typed_translation', 'listen_choice', 'reverse_choice']);
+    const kept = (key: string, position: number, type: string) => ({
+      event: 'card_kept_refused',
+      session_id: SESSION,
+      key,
+      position,
+      type,
+      stage: 'checker',
+      reason: `the checker calls 3 of ${key}'s 3 wrong options right, and 3 must be left`,
+      shown_as: 'as_generated',
+    });
+    expect(events(logger, 'card_kept_refused')).toEqual([kept('q6', 1, 'multiple_choice'), kept('q10', 5, 'reverse_choice')]);
+    expect(events(logger, 'card_dropped')).toEqual(['q1', 'q2', 'q3', 'q4'].map((key) => expect.objectContaining({ key, type: 'matching', stage: 'validation' })));
+    // As generated: the options the model wrote, though the checker called each right.
+    expect(insertedOf(calls)[1].options!.map((o) => o.text)).toEqual([MEANINGS[4], 'דלת', 'קיר', 'תקרה']);
+    expect(insertedOf(calls)[5].options!.map((o) => o.text)).toEqual([FORMS[5], 'чеснок', 'морковь', 'капуста']);
+    expect(events(logger, 'checker_dropped')).toEqual([]);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 6, planned_count: 10, dropped_count: 4 }));
+  });
+
+  // Ruling R2: a fill takes the board whole, past the floor, with the fifth
+  // meaning validation chose and no checker_dropped for it.
+  it('fills with a board the checker refused, whole, and its fifth meaning without the checker’s filter (phase 48, spec D3, ruling R2)', async () => {
+    // q6, q9 and q10 each offer their own answer, so validation refuses them;
+    // the checker calls every candidate right for q1. Three pass, the board is
+    // the only unit the checker refused, and it takes the session to seven.
+    const reply = TEN_REPLY.replace('["צב","שולחן","כיסא"]', '["שולחן","כיסא","מנורה","ספה"]')
+      .replace('["דלת","קיר","תקרה"]', `["${MEANINGS[4]}","קיר","תקרה"]`)
+      .replace('["ענן","גשם","רוח"]', `["${MEANINGS[7]}","גשם","רוח"]`)
+      .replace('["чеснок","морковь","капуста"]', `["${FORMS[5]}","морковь","капуста"]`);
+    const { service, calls, logger } = world({ context: TEN, reply, checkReply: checking({ q1: { options: [true, true, true, true] } }) });
+    await service.prepareSession(TEN_PAYLOAD);
+    expect(insertedOf(calls).map((q) => q.type)).toEqual(['matching', 'matching', 'matching', 'matching', 'typed_translation', 'letter_tiles', 'typed_translation']);
+    expect(insertedOf(calls)[0].options!.map((o) => o.text)).toEqual(['מרגנית', 'צב', 'כרית', 'מטרייה', 'שולחן']);
+    expect(events(logger, 'card_kept_refused')).toEqual(
+      ['q1', 'q2', 'q3', 'q4'].map((key, position) =>
+        expect.objectContaining({ key, position, type: 'matching', stage: 'checker', reason: "every wrong meaning of the board is one of its words' own", shown_as: 'as_generated' }),
+      ),
+    );
+    expect(events(logger, 'card_dropped')).toEqual(['q6', 'q9', 'q10'].map((key) => expect.objectContaining({ key, stage: 'validation' })));
+    expect(events(logger, 'checker_dropped')).toEqual([]);
+    expect(logger.events).toContainEqual(expect.objectContaining({ event: 'session_prepared', question_count: 7, planned_count: 10, dropped_count: 3 }));
   });
 });

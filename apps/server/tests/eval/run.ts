@@ -23,7 +23,9 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
-import { comparable, distractorItems, nothingKnown, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
+import { readCheck, type CheckItem } from '../../src/domain/check';
+import { findGap } from '../../src/domain/cloze';
+import { ASKED_DISTRACTORS, comparable, distractorItems, KEPT_DISTRACTORS, nothingKnown, validateDistractors, type DistractorItem, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
 import { SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
@@ -645,7 +647,7 @@ const answeredItem = (kase: DistractorCase, answer: LlmDistractors, index: numbe
 function distractorTier1(kase: DistractorCase, answer: LlmDistractors): Check[] {
   const verdict = validateDistractors(itemsOf(kase), answer, kase.to, [], kase.from as LanguageCode, nothingKnown());
   const checks: Check[] = [
-    { name: 'every item answered as its task asks', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
+    { name: 'every item answered as its task asks', ok: verdict.refused.size === 0, detail: verdict.refused.size ? [...verdict.refused.values()].join('; ') : undefined },
   ];
   // The options' language: Hebrew meanings on today's card, learned-language
   // words on the reversed card and in a typed card's alternatives.
@@ -727,7 +729,7 @@ const wordsOf = (text: string): Set<string> =>
 function sentenceTier1(kase: SentenceCase, answer: LlmDistractors): Check[] {
   const items = sentenceItemsOf(kase);
   const verdict = validateDistractors(items, answer, 'he', [], kase.from as LanguageCode, nothingKnown());
-  if (!verdict.ok) return [{ name: 'every item answered as its task asks', ok: false, detail: verdict.reason }];
+  if (verdict.refused.size > 0) return [{ name: 'every item answered as its task asks', ok: false, detail: [...verdict.refused.values()].join('; ') }];
   if (kase.task === 'gap') {
     return [
       { name: 'every item answered as its task asks', ok: true },
@@ -1041,7 +1043,7 @@ async function main(): Promise<void> {
         label: kase.label,
         text,
         tier1: distractorTier1(kase, answer),
-        tier2: distractorTier2(kase, answer),
+        tier2: [...distractorTier2(kase, answer), ...(kase.checked ? await survivesChecker(kase.from, kase.to, itemsOf(kase), answer) : [])],
         distractors: answer,
       };
     } catch (error) {
@@ -1127,7 +1129,11 @@ async function main(): Promise<void> {
         label: kase.label,
         text,
         tier1: sentenceTier1(kase, answer),
-        tier2: [...sentenceTier2(kase, answer), ...(kase.task === 'sentence' ? await pointsToWord(kase, answer) : [])],
+        tier2: [
+          ...sentenceTier2(kase, answer),
+          ...(kase.task === 'sentence' ? await pointsToWord(kase, answer) : []),
+          ...(kase.checked ? await survivesChecker(kase.from, 'he', sentenceItemsOf(kase), answer) : []),
+        ],
         written: writtenBy(kase, answer),
       };
     } catch (error) {
@@ -1166,6 +1172,42 @@ async function main(): Promise<void> {
       }
     }
     return checks;
+  };
+
+  // Phase 48 (spec D8). The checker as prepareSession asks it: each choice or gap item's usable
+  // options, at most six; at least three must survive, or production would refuse the card.
+  const survivesChecker = async (from: LanguageCode, to: LanguageCode, items: DistractorItem[], answer: LlmDistractors): Promise<Check[]> => {
+    const verdict = validateDistractors(items, answer, to, [], from, nothingKnown());
+    const checkItems: CheckItem[] = items.flatMap((item): CheckItem[] => {
+      const made = verdict.byKey.get(item.key);
+      const options = made ? [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS) : [];
+      if (options.length === 0) return [];
+      if (item.task === 'gap') {
+        const gap = findGap(item.example ?? '', [item.blank ?? item.form]);
+        if (!gap) return [];
+        return [{ key: item.key, task: 'gap', sentence: `${item.example!.slice(0, gap.start)}___${item.example!.slice(gap.end)}`, options }];
+      }
+      if (item.task === 'meaning') return [{ key: item.key, task: 'choice', word: item.form, options }];
+      if (item.task === 'word') return [{ key: item.key, task: 'choice', word: item.translation, options }];
+      return [];
+    });
+    if (checkItems.length === 0) return [{ name: 'the checker had options to judge', ok: false }];
+    try {
+      const reading = readCheck(checkItems, await askCheck(llm, { from, to, items: checkItems }));
+      return checkItems.map((item): Check => {
+        const finding = reading.byKey.get(item.key);
+        const right = finding && (finding.task === 'choice' || finding.task === 'gap') ? finding.alsoRight : [];
+        const options = item.task === 'choice' || item.task === 'gap' ? item.options : [];
+        const left = options.filter((_, at) => !right[at]);
+        return {
+          name: `${item.key}: ${KEPT_DISTRACTORS} or more wrong options survive the checker`,
+          ok: !reading.unjudged.has(item.key) && left.length >= KEPT_DISTRACTORS,
+          detail: `kept ${left.join(' | ')}; right ${options.filter((_, at) => right[at]).join(' | ') || '(none)'}`,
+        };
+      });
+    } catch (error) {
+      return [{ name: 'the checker answered', ok: false, detail: (error as Error).message }];
+    }
   };
 
   const scoreFitJudge = async (kase: FitJudgeCase): Promise<Row> => {

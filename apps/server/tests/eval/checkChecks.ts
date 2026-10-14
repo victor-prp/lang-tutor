@@ -13,13 +13,13 @@ export type Check = { name: string; ok: boolean; detail?: string };
 /** The answer reads as the server reads it: every option answered, in number. */
 export function checkTier1(kase: CheckCase, answer: LlmCheck): Check[] {
   const reading = readCheck([kase.item], answer);
-  return [{ name: 'the answer reads', ok: reading.ok, detail: reading.ok ? undefined : reading.reason }];
+  return [{ name: 'the answer reads', ok: reading.unjudged.size === 0, detail: reading.unjudged.size ? [...reading.unjudged.values()].join('; ') : undefined }];
 }
 
 /** The answer means what a careful reader means, by the server's own rules. */
 export function checkTier2(kase: CheckCase, answer: LlmCheck): Check[] {
   const reading = readCheck([kase.item], answer);
-  if (!reading.ok) return [];
+  if (reading.unjudged.size > 0) return [];
   const finding = reading.byKey.get(kase.item.key)!;
   const { item } = kase;
   switch (finding.task) {
