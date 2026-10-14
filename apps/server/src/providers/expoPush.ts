@@ -15,7 +15,14 @@ const RECEIPT_CHUNK = 1000;
 
 const HEADERS = { accept: 'application/json', 'content-type': 'application/json' };
 
-type Message = { to: string; title: string; body: string; channelId: string; data: Record<string, string> };
+type Message = {
+  to: string;
+  title: string;
+  body: string;
+  channelId: string;
+  priority: 'default' | 'normal' | 'high';
+  data: Record<string, string>;
+};
 type Ticket = { status: 'ok'; id: string } | { status: 'error'; message: string; details?: { error?: string } };
 type Receipt = { status: 'ok' } | { status: 'error'; message: string; details?: { error?: string } };
 

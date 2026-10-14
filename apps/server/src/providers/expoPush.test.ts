@@ -5,13 +5,21 @@ import { createExpoPushClient, PUSH_TIMEOUT_MS } from './expoPush';
 
 // What the provider returns is typed by services/reminders.ts, which providers/ may not import
 // (ADR 0001 R10). The test names the shapes it needs by hand.
-type Message = { to: string; title: string; body: string; channelId: string; data: Record<string, string> };
+type Message = {
+  to: string;
+  title: string;
+  body: string;
+  channelId: string;
+  priority: 'default' | 'normal' | 'high';
+  data: Record<string, string>;
+};
 
 const message = (n: number): Message => ({
   to: `ExponentPushToken[${n}]`,
   title: 'הגיע הזמן לתרגל',
   body: 'כמה דקות עכשיו, והמילים נשארות בזיכרון.',
   channelId: 'reminders',
+  priority: 'high',
   data: { reminder_id: `r-${n}` },
 });
 

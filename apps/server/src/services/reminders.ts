@@ -14,8 +14,19 @@ import { PushUnavailable, ReminderNotFound } from '../errors';
 import type { Logger } from '../logger';
 import type { Transaction } from './transaction';
 
-/** One notification for one phone. `data` reaches the app when the learner taps it. */
-export type PushMessage = { to: string; title: string; body: string; channelId: string; data: Record<string, string> };
+/**
+ * One notification for one phone. `data` reaches the app when the learner taps it. `priority`
+ * is Expo's: on Android 'high' is FCM high priority, which Doze lets through at once, where
+ * the default ('normal') may wait for a maintenance window.
+ */
+export type PushMessage = {
+  to: string;
+  title: string;
+  body: string;
+  channelId: string;
+  priority: 'default' | 'normal' | 'high';
+  data: Record<string, string>;
+};
 
 /** What the push service answers a message with: accepted for delivery under an id, or refused. */
 export type PushTicket =
@@ -239,6 +250,8 @@ export function createReminderService({
                   title: REMINDER_TITLE,
                   body: REMINDER_BODY,
                   channelId: REMINDER_CHANNEL,
+                  // A reminder is for a given hour: an idle phone must not hold it back (final review M1).
+                  priority: 'high',
                   data: { reminder_id: id },
                 })),
               );

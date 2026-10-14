@@ -350,8 +350,8 @@ describe('tick: a slot that is due', () => {
     expect(claims).toEqual([{ userId: 'u_dana', localDay: '2026-10-14', slot: '13:00', id: 'r-1' }]);
     expect(sends).toEqual([
       [
-        { to: 'ExponentPushToken[a]', title: TITLE, body: BODY, channelId: 'reminders', data: { reminder_id: 'r-1' } },
-        { to: 'ExponentPushToken[b]', title: TITLE, body: BODY, channelId: 'reminders', data: { reminder_id: 'r-1' } },
+        { to: 'ExponentPushToken[a]', title: TITLE, body: BODY, channelId: 'reminders', priority: 'high', data: { reminder_id: 'r-1' } },
+        { to: 'ExponentPushToken[b]', title: TITLE, body: BODY, channelId: 'reminders', priority: 'high', data: { reminder_id: 'r-1' } },
       ],
     ]);
     expect(records).toEqual([
