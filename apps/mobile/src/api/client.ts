@@ -19,6 +19,10 @@ import type {
   PhotoImportItem,
   PhotoImportItemUpdate,
   PhotoImportSummary,
+  PushDeviceRequest,
+  PushDeviceUnregisterRequest,
+  ReminderSettings,
+  ReminderSettingsResponse,
   SaveVocabularyRequest,
   SaveVocabularyResponse,
   SessionView,
@@ -27,6 +31,7 @@ import type {
   StartSessionResponse,
   SpeechAnswerRequest,
   SpeechAnswerResponse,
+  TimeZoneRequest,
   TranslationRequest,
   TranslationResponse,
   User,
@@ -135,8 +140,17 @@ export function createApiClient({
     return (await res.json()) as TResponse;
   }
 
-  async function postNoContent(path: string): Promise<void> {
-    await send('POST', path, { body: {} });
+  async function putJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
+    const res = await send('PUT', path, { body });
+    return (await res.json()) as TResponse;
+  }
+
+  async function postNoContent(path: string, body: unknown): Promise<void> {
+    await send('POST', path, { body });
+  }
+
+  async function putNoContent(path: string, body: unknown): Promise<void> {
+    await send('PUT', path, { body });
   }
 
   async function getJson<TResponse>(path: string): Promise<TResponse> {
@@ -262,7 +276,20 @@ export function createApiClient({
       patchJson<PhotoImportItem>(`/api/photo-imports/${encodeURIComponent(id)}/items/${position}`, update),
     savePhotoImport: (id: string) =>
       postJson<SaveVocabularyResponse>(`/api/photo-imports/${encodeURIComponent(id)}/save`, {}),
-    discardPhotoImport: (id: string) => postNoContent(`/api/photo-imports/${encodeURIComponent(id)}/discard`),
+    discardPhotoImport: (id: string) => postNoContent(`/api/photo-imports/${encodeURIComponent(id)}/discard`, {}),
+
+    // Phase 52 (spec D1, D2, D4, D6). Practice reminders: the schedule, the zone its
+    // hours are read in, this phone's push token, and a tapped reminder.
+    reminderSettings: () => getJson<ReminderSettingsResponse>('/api/me/reminders'),
+    putReminderSettings: (settings: ReminderSettings) =>
+      putJson<ReminderSettingsResponse>('/api/me/reminders', settings),
+    setTimeZone: (timeZone: string) =>
+      putNoContent('/api/me/time-zone', { time_zone: timeZone } satisfies TimeZoneRequest),
+    registerPushDevice: (token: string) =>
+      putNoContent('/api/me/push-devices', { token, platform: 'android' } satisfies PushDeviceRequest),
+    unregisterPushDevice: (token: string) =>
+      postNoContent('/api/me/push-devices/unregister', { token } satisfies PushDeviceUnregisterRequest),
+    tapReminder: (id: string) => postNoContent(`/api/me/reminders/${encodeURIComponent(id)}/tap`, {}),
   };
 }
 
