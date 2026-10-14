@@ -1,6 +1,10 @@
+import { describe, expect, it } from '@jest/globals';
+
 import {
+  copyText,
   mobileAppLine,
   nativeLine,
+  readServerRelease,
   releaseReport,
   serverLine,
   type AppRelease,
@@ -93,5 +97,45 @@ describe('releaseReport', () => {
 
   it('still reports an unreachable server', () => {
     expect(releaseReport(app(), { state: 'unreachable' })).toContain('Server:     not reachable');
+  });
+});
+
+describe('readServerRelease', () => {
+  it('keeps the version and commit /health reports', async () => {
+    await expect(readServerRelease(async () => ({ version: 'v1', commit: 'a3f9c21' }))).resolves.toEqual({
+      state: 'ok',
+      version: 'v1',
+      commit: 'a3f9c21',
+    });
+  });
+
+  it('is unreachable when /health fails, a 503 included', async () => {
+    await expect(
+      readServerRelease(async () => {
+        throw new Error('API request failed with status 503');
+      }),
+    ).resolves.toEqual({ state: 'unreachable' });
+  });
+});
+
+describe('copyText', () => {
+  it('is true once the clipboard took the text', async () => {
+    const copied: string[] = [];
+    await expect(
+      copyText(async (text) => {
+        copied.push(text);
+        return true;
+      }, 'report'),
+    ).resolves.toBe(true);
+    expect(copied).toEqual(['report']);
+  });
+
+  it('is false, never a throw, when the clipboard refuses', async () => {
+    await expect(copyText(async () => false, 'report')).resolves.toBe(false);
+    await expect(
+      copyText(async () => {
+        throw new Error('denied');
+      }, 'report'),
+    ).resolves.toBe(false);
   });
 });

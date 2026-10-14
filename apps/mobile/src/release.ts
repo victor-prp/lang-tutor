@@ -55,3 +55,24 @@ export function releaseReport(app: AppRelease, server: ServerRelease): string {
     `Native:     ${nativeLine(app.native)}`,
   ].join('\n');
 }
+
+/** The Server line's state from a /health call: any failure, a 503 included, is unreachable. */
+export async function readServerRelease(
+  health: () => Promise<{ version: string; commit?: string }>,
+): Promise<ServerRelease> {
+  try {
+    const { version, commit } = await health();
+    return { state: 'ok', version, commit };
+  } catch {
+    return { state: 'unreachable' };
+  }
+}
+
+/** Whether the clipboard took the text: the copy button confirms only then. */
+export async function copyText(copy: (text: string) => Promise<boolean>, text: string): Promise<boolean> {
+  try {
+    return await copy(text);
+  } catch {
+    return false;
+  }
+}

@@ -36,6 +36,14 @@ describe('api/client', () => {
     );
   });
 
+  // Phase 49 (spec D1). The About screen asks the server for its own release.
+  it('reads /health, outside /api', async () => {
+    const body = { ok: true, lane: 'main', database: 'lang_tutor', port: 1, version: 'v1', commit: 'a3f9c21' };
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => body }));
+    await expect(buildClient(mockFetch).health()).resolves.toEqual(body);
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/health', expect.objectContaining({ method: 'GET' }));
+  });
+
   it('reports a 401 and still throws it', async () => {
     const onUnauthorized = jest.fn();
     const mockFetch = jest.fn(async () => ({ ok: false, status: 401, json: async () => ({ error: 'not signed in' }) }));

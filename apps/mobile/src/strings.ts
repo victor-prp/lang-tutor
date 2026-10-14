@@ -201,6 +201,10 @@ export const strings = {
   updateRequiredBody: 'הגרסה הזו של האפליקציה כבר לא עובדת מול השרת. צריך לעדכן אותה כדי להמשיך.',
   updateRequiredButton: 'לעדכון ב‑Google Play',
   updateCheckAgain: 'לבדוק שוב',
+  // Phase 49 (spec D4, R4). The About screen; its three labels stay English.
+  aboutTitle: 'אודות',
+  aboutCopy: 'העתקה',
+  aboutCopied: 'הועתק',
   back: 'חזרה',
   // Phase 23. The speaker button's accessibility label.
   speak: 'השמעה',

@@ -1,24 +1,29 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
 import type { AppUpdates, UpdateRequiredEvents } from '@/appUpdates';
 import { UpdateRequired } from '@/components/UpdateRequired';
+import type { AppRelease } from '@/release';
 
 // Phase 32 (spec D8–D10). Feeds AppState to the update policy, swaps the
 // navigator for the update-required screen once the server answers 426, and
-// carries the release tag the profile screen shows. Every collaborator comes
-// from the composition root (ADR 0002).
-const AppVersionContext = createContext<string | null>(null);
+// carries the release the profile and About screens show (phase 49), with the
+// clipboard About copies it to. Every collaborator comes from the composition
+// root (ADR 0002).
+type ReleaseValue = { release: AppRelease; copy: (text: string) => Promise<boolean> };
+const ReleaseContext = createContext<ReleaseValue | null>(null);
 
 export function AppUpdatesProvider({
   updates,
   events,
-  version,
+  release,
+  copy,
   children,
 }: {
   updates: AppUpdates;
   events: UpdateRequiredEvents;
-  version: string;
+  release: AppRelease;
+  copy: (text: string) => Promise<boolean>;
   children: ReactNode;
 }) {
   const [updateRequired, setUpdateRequired] = useState(false);
@@ -32,15 +37,17 @@ export function AppUpdatesProvider({
     return () => subscription.remove();
   }, [updates]);
 
+  const value = useMemo(() => ({ release, copy }), [release, copy]);
+
   return (
-    <AppVersionContext.Provider value={version}>
+    <ReleaseContext.Provider value={value}>
       {updateRequired ? <UpdateRequired updates={updates} /> : children}
-    </AppVersionContext.Provider>
+    </ReleaseContext.Provider>
   );
 }
 
-export function useAppVersion(): string {
-  const value = useContext(AppVersionContext);
-  if (value === null) throw new Error('useAppVersion must be used inside an AppUpdatesProvider');
+export function useAppRelease(): ReleaseValue {
+  const value = useContext(ReleaseContext);
+  if (value === null) throw new Error('useAppRelease must be used inside an AppUpdatesProvider');
   return value;
 }

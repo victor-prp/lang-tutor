@@ -8,6 +8,7 @@ import type {
   Enrollment,
   Grant,
   GrantList,
+  HealthResponse,
   JudgedAnswerRequest,
   JudgedAnswerResponse,
   MeResponse,
@@ -147,6 +148,8 @@ export function createApiClient({
     `/api/enrollments/${encodeURIComponent(enrollmentId)}/vocabulary`;
 
   return {
+    /** Phase 49 (spec D1). The server's own release, for the About screen. */
+    health: () => getJson<HealthResponse>('/health'),
     me: () => getJson<MeResponse>('/api/me'),
     createProfile: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>
