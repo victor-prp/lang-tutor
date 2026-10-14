@@ -20,10 +20,12 @@ import type { Permission } from '@/reminders';
 import {
   HOURS,
   MAX_TARGET,
+  MAX_TIMES,
   MIN_TARGET,
   WEEK_DAYS,
   createSaver,
   hourId,
+  sameSettings,
   stepTarget,
   timeOf,
   toggleDay,
@@ -48,24 +50,27 @@ const toWire = ({ enabled, daily_target, days, times }: ReminderSettingsResponse
 function Chip({
   label,
   selected,
+  disabled = false,
   testID,
   onPress,
 }: {
   label: string;
   selected: boolean;
+  disabled?: boolean;
   testID: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled }}
       // react-native-web 0.21 does not render accessibilityState, so on web this
       // is what puts the choice in the DOM (and in a test).
       aria-selected={selected}
+      disabled={disabled}
       testID={testID}
       onPress={onPress}
-      style={[styles.chip, selected && styles.chipOn]}
+      style={[styles.chip, selected && styles.chipOn, disabled && styles.disabled]}
     >
       <Text style={[styles.chipLabel, selected && styles.chipLabelOn]}>{label}</Text>
     </Pressable>
@@ -138,6 +143,8 @@ export default function RemindersScreen() {
   function change(update: (current: ReminderSettingsResponse) => ReminderSettingsResponse) {
     if (!latest.current) return;
     const next = update(latest.current);
+    // A tap that changes nothing (the last hour, a ninth one, a target at its end) saves nothing.
+    if (sameSettings(next, latest.current)) return;
     latest.current = next;
     setSettings(next);
     setSaveFailed(false);
@@ -318,6 +325,8 @@ export default function RemindersScreen() {
                     key={hour}
                     label={strings.remindersTime(timeOf(hour))}
                     selected={settings.times.includes(timeOf(hour))}
+                    // Eight are the most the server takes: the rest wait until one is switched off.
+                    disabled={settings.times.length >= MAX_TIMES && !settings.times.includes(timeOf(hour))}
                     testID={`reminders-hour-${hourId(hour)}`}
                     onPress={() => change((current) => ({ ...current, times: toggleHour(current.times, hour) }))}
                   />

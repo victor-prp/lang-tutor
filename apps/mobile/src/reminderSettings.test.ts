@@ -3,11 +3,13 @@ import { describe, expect, it } from '@jest/globals';
 import {
   HOURS,
   MAX_TARGET,
+  MAX_TIMES,
   MIN_TARGET,
   WEEK_DAYS,
   clampTarget,
   createSaver,
   hourId,
+  sameSettings,
   stepTarget,
   timeOf,
   toggleDay,
@@ -80,6 +82,38 @@ describe('toggleHour', () => {
     const times = ['13:00'];
     toggleHour(times, 9);
     expect(times).toEqual(['13:00']);
+  });
+
+  it('adds no ninth hour: the wire allows eight, so the list stays as it is', () => {
+    expect(MAX_TIMES).toBe(8);
+    const eight = ['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00'];
+    expect(toggleHour(eight, 20)).toEqual(eight);
+    // Eight is still a full house to take one away from, and to add a seventh to.
+    expect(toggleHour(eight, 13)).toEqual(eight.slice(0, 7));
+    expect(toggleHour(eight.slice(0, 7), 20)).toEqual([...eight.slice(0, 7), '20:00']);
+  });
+
+  it('counts a time the screen has no chip for towards the eight', () => {
+    const eight = ['09:30', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00'];
+    expect(toggleHour(eight, 20)).toEqual(['07:00', '08:00', '09:00', '09:30', '10:00', '11:00', '12:00', '13:00']);
+  });
+});
+
+describe('sameSettings', () => {
+  const base = { enabled: true, daily_target: 2, days: [7, 1], times: ['13:00', '20:00'] };
+
+  it('is true for the same four fields, whatever else the response carries', () => {
+    expect(sameSettings(base, { ...base, days: [7, 1], times: ['13:00', '20:00'] })).toBe(true);
+    const response = { ...base, time_zone: 'UTC' };
+    expect(sameSettings(response, base)).toBe(true);
+  });
+
+  it('is false when any one of them differs', () => {
+    expect(sameSettings(base, { ...base, enabled: false })).toBe(false);
+    expect(sameSettings(base, { ...base, daily_target: 3 })).toBe(false);
+    expect(sameSettings(base, { ...base, days: [7] })).toBe(false);
+    expect(sameSettings(base, { ...base, times: ['13:00'] })).toBe(false);
+    expect(sameSettings(base, { ...base, times: ['13:00', '21:00'] })).toBe(false);
   });
 });
 

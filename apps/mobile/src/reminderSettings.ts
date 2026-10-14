@@ -11,6 +11,9 @@ export const MAX_TARGET = 5;
 /** The day chips in order, Sunday first like the Israeli week; the values are ISO weekdays (1 = Monday ... 7 = Sunday). */
 export const WEEK_DAYS: readonly number[] = [7, 1, 2, 3, 4, 5, 6];
 
+/** The most times a schedule may hold: the wire takes at most eight (spec D2). */
+export const MAX_TIMES = 8;
+
 /** The hours offered: 06:00 to 23:00, whole hours (spec: minute-level times are out). */
 export const HOURS: readonly number[] = Array.from({ length: 18 }, (_, index) => index + 6);
 
@@ -31,16 +34,30 @@ export function toggleDay(days: readonly number[], day: number): number[] {
 
 /**
  * The hour added if it is missing, taken away if it is there, except the last
- * time left: the server wants at least one. A time the screen has no chip for
- * (the wire allows minutes) is kept as it is. 'HH:MM' strings sort as clock times.
+ * time left (the server wants at least one) and a ninth (it takes at most
+ * eight): then the list is returned as it is. A time the screen has no chip for
+ * (the wire allows minutes) is kept as it is and counts towards the eight.
+ * 'HH:MM' strings sort as clock times.
  */
 export function toggleHour(times: readonly string[], hour: number): string[] {
   const time = timeOf(hour);
   const current = distinctSorted(times);
-  if (!current.includes(time)) return distinctSorted([...current, time]);
+  if (!current.includes(time)) return current.length >= MAX_TIMES ? current : distinctSorted([...current, time]);
   if (current.length <= 1) return current;
   return current.filter((t) => t !== time);
 }
+
+type Schedule = { enabled: boolean; daily_target: number; days: readonly number[]; times: readonly string[] };
+
+const sameList = <T>(a: readonly T[], b: readonly T[]): boolean =>
+  a.length === b.length && a.every((value, index) => value === b[index]);
+
+/** Whether two settings hold the same schedule: a tap that changes nothing needs no save. */
+export const sameSettings = (a: Schedule, b: Schedule): boolean =>
+  a.enabled === b.enabled &&
+  a.daily_target === b.daily_target &&
+  sameList(a.days, b.days) &&
+  sameList(a.times, b.times);
 
 export const clampTarget = (target: number): number =>
   Math.min(MAX_TARGET, Math.max(MIN_TARGET, Math.round(target)));
