@@ -190,6 +190,28 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     ]);
   });
 
+  it("asks a word done today only when no pool has another: a steady homework takes the slots the main path's done words would fill", () => {
+    const homework = range(10, (i) => ready(`t${i}`));
+    const main = mains(10);
+    const { picks, split } = chooseWithTargets(
+      session([...homework, ...main], [target('hw', 'homework', 5, homework)], { done: new Set(idsOf(main)) }),
+    );
+    expect(ids(picks).sort()).toEqual(idsOf(homework).sort());
+    expect(split[0]).toMatchObject({ slots: 3, picked: 10 });
+  });
+
+  it('leaves the main path its share while it has words not done today: the steady homework keeps its three', () => {
+    const homework = range(10, (i) => ready(`t${i}`));
+    const news = range(10, (i) => fresh(`n${i}`));
+    const answered = mains(10);
+    const { picks, split } = chooseWithTargets(
+      session([...homework, ...news, ...answered], [target('hw', 'homework', 5, homework)], { done: new Set(idsOf(answered)) }),
+    );
+    expect(of(picks, homework)).toHaveLength(3);
+    expect(of(picks, news)).toHaveLength(7);
+    expect(split[0]).toMatchObject({ slots: 3, picked: 3 });
+  });
+
   it('gives an exam the day before its date every slot, and a homework none', () => {
     const exam = unmet(20);
     const homework = range(5, (i) => fresh(`h${i}`));
@@ -417,6 +439,30 @@ describe('choosePools (ruling R-D6)', () => {
     expect(ids(first)).toEqual(['a2', 'a1']);
     expect(second.map((pick) => pick.cls)).toEqual(['SPEAK', 'EXPAND', 'EXPAND']);
     expect(main.map((pick) => pick.cls)).not.toContain('SPEAK');
+  });
+
+  it('asks every word a cap held back, in any pool, before any word done today (phase 37 D3)', () => {
+    // R 0.19 at rung 1 is a hard card: six such words in the main path, two over HARD_CAP.
+    const listed = [known('a0'), known('a1'), known('d0'), known('d1'), known('d2')];
+    const hard = range(HARD_CAP + 2, (i) => known(`h${i}`, { [WR]: 0.19 }));
+    const [first, main] = choosePools(input([...listed, ...hard], { done: new Set(['d0', 'd1', 'd2']) }), [
+      { glossIds: new Set(idsOf(listed)), slots: 5, owedNew: 0 },
+      { glossIds: null, slots: SESSION_LENGTH - 5, owedNew: 0 },
+    ]);
+    expect(ids(main)).toEqual(idsOf(hard));
+    expect(ids(first)).toEqual(['a0', 'a1', 'd0', 'd1']);
+  });
+
+  it("asks the words done today last, the pools in order: the first pool's before the main path's", () => {
+    const listed = [known('a0'), known('a1'), known('d0'), known('d1'), known('d2')];
+    const main = [...range(3, (i) => known(`m${i}`)), ...range(5, (i) => known(`e${i}`))];
+    const done = new Set(['d0', 'd1', 'd2', ...range(5, (i) => known(`e${i}`)).map((word) => word.id)]);
+    const [first, rest] = choosePools(input([...listed, ...main], { done }), [
+      { glossIds: new Set(idsOf(listed)), slots: 5, owedNew: 0 },
+      { glossIds: null, slots: SESSION_LENGTH - 5, owedNew: 0 },
+    ]);
+    expect(ids(first)).toEqual(['a0', 'a1', 'd0', 'd1', 'd2']);
+    expect(ids(rest)).toEqual(['m0', 'm1', 'm2', 'e0', 'e1']);
   });
 
   it('with one pool, adds nothing in the second pass: a pool gives no more picks than the groups it first held', () => {
