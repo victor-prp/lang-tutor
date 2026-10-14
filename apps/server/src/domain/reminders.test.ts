@@ -32,8 +32,8 @@ describe('the fixed values', () => {
     });
     expect(CATCH_UP_MINUTES).toBe(30);
     expect(REMINDER_CHANNEL).toBe('reminders');
-    expect(REMINDER_TITLE).toBe('Time to practise');
-    expect(REMINDER_BODY).toBe('A few minutes now keeps your words fresh.');
+    expect(REMINDER_TITLE).toBe('הגיע הזמן לתרגל');
+    expect(REMINDER_BODY).toBe('כמה דקות עכשיו, והמילים נשארות בזיכרון.');
   });
 });
 

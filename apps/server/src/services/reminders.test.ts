@@ -210,8 +210,8 @@ describe('tap', () => {
 
 /** Wednesday 2026-10-14, 13:05 UTC: the default 13:00 slot is due for a learner in UTC. */
 const AT = Date.parse('2026-10-14T13:05:00Z');
-const TITLE = 'Time to practise';
-const BODY = 'A few minutes now keeps your words fresh.';
+const TITLE = 'הגיע הזמן לתרגל';
+const BODY = 'כמה דקות עכשיו, והמילים נשארות בזיכרון.';
 
 type Candidate = Awaited<ReturnType<ReminderRepo['candidates']>>[number];
 type Recorded = { id: string; outcome: ReminderResult; evidence: unknown; tickets: unknown };

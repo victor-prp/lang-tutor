@@ -9,8 +9,8 @@ type Message = { to: string; title: string; body: string; channelId: string; dat
 
 const message = (n: number): Message => ({
   to: `ExponentPushToken[${n}]`,
-  title: 'Time to practise',
-  body: 'A few minutes now keeps your words fresh.',
+  title: 'הגיע הזמן לתרגל',
+  body: 'כמה דקות עכשיו, והמילים נשארות בזיכרון.',
   channelId: 'reminders',
   data: { reminder_id: `r-${n}` },
 });

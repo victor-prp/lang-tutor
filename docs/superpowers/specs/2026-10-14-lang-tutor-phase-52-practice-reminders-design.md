@@ -119,8 +119,9 @@ The job's use case, `reminders.tick(now)`:
 3. **Decide.** It counts the day's completed sessions. The pure
    `decide({ completedToday, target })` returns `skip_target_met` or `send`, with its evidence:
    `{ completed_today, daily_target, time_zone, devices }`.
-4. **Send and record.** On `send` it posts one message per device to Expo with title "Time to
-   practise", a fixed body, channel `reminders`, and data `{ reminder_id }`. The outcome is
+4. **Send and record.** On `send` it posts one message per device to Expo with title "הגיע הזמן
+   לתרגל" (ruled Hebrew in Task 9, like the app), a fixed body "כמה דקות עכשיו, והמילים נשארות
+   בזיכרון.", channel `reminders`, and data `{ reminder_id }`. The outcome is
    `sent`, or `failed` with the error, and the tickets are stored. A ticket of
    `DeviceNotRegistered` deletes that device.
 5. **Receipts.** In the same run it fetches receipts for `sent` rows decided between 15 minutes
@@ -170,7 +171,7 @@ type declared in `services/` (R11). `scripts/image-run.sh` and `e2e/serverEnv.ts
 - **Reminders screen:** `app/reminders.tsx`, linked from Profile, has an on/off switch, the target
   (1–5, minus and plus), seven day chips, and hour chips from 06:00 to 23:00, and saves on change.
   On Android with the permission refused it shows the notice from D4. On the web it shows the
-  settings with the line "Reminders reach the Android app."
+  settings with the line "התזכורות מגיעות לאפליקציה באנדרואיד." (the screen is in Hebrew, ruled in Task 9).
 - **Tap:** it reports the tap, then navigates to `/?start=reminder`. Home starts or resumes the
   ready session once, as its start button would. A tap that launched the app from closed is read
   from the last response.

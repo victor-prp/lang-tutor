@@ -31,8 +31,8 @@ const ZONE = 'Asia/Jerusalem';
 const AT = Date.parse('2026-09-02T10:05:00Z');
 const DAY = '2026-09-02';
 const minutes = (n: number) => n * 60_000;
-const TITLE = 'Time to practise';
-const BODY = 'A few minutes now keeps your words fresh.';
+const TITLE = 'הגיע הזמן לתרגל';
+const BODY = 'כמה דקות עכשיו, והמילים נשארות בזיכרון.';
 const DNR = { status: 'error', message: 'not registered', details: { error: 'DeviceNotRegistered' } } as const;
 
 let t: TestDb;

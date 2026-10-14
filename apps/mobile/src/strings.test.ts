@@ -97,21 +97,38 @@ describe('the translation card asks for the whole sentence', () => {
 });
 
 describe('the Reminders screen (phase 52 D8)', () => {
-  it('words the permission notice, its two buttons and the web line exactly', () => {
-    expect(strings.remindersDeniedNotice).toBe('Reminders are off in Android settings.');
-    expect(strings.remindersEnable).toBe('Turn on notifications');
-    expect(strings.remindersWebNotice).toBe('Reminders reach the Android app.');
+  it('words every line in Hebrew, the permission notice and its two buttons exactly', () => {
+    expect(strings.remindersEntry).toBe('תזכורות');
+    expect(strings.remindersTitle).toBe('תזכורות');
+    expect(strings.remindersEnabled).toBe('תזכורות לתרגול');
+    expect(strings.remindersTargetLabel).toBe('תרגולים ביום');
+    expect(strings.remindersDaysLabel).toBe('ימים');
+    expect(strings.remindersTimesLabel).toBe('שעות');
+    expect(strings.remindersDeniedNotice).toBe('התזכורות כבויות בהגדרות של אנדרואיד.');
+    expect(strings.remindersOpenSettings).toBe('לפתיחת ההגדרות');
+    expect(strings.remindersEnable).toBe('הפעלת התראות');
+    expect(strings.remindersWebNotice).toBe('התזכורות מגיעות לאפליקציה באנדרואיד.');
+    expect(strings.remindersLoadFailed).toBe('טעינת התזכורות נכשלה. אפשר לנסות שוב.');
+    expect(strings.remindersSaveFailed).toBe('שמירת התזכורות נכשלה. אפשר לנסות שוב.');
+    expect(strings.remindersTargetLess).toBe('פחות תרגולים');
+    expect(strings.remindersTargetMore).toBe('יותר תרגולים');
   });
 
-  it('names the seven days Monday to Sunday by their ISO weekday', () => {
+  it('names the days by their ISO weekday, Monday 1 to Sunday 7, by the Hebrew letter of the day', () => {
     expect([1, 2, 3, 4, 5, 6, 7].map(strings.remindersDayName)).toEqual([
-      'Mon',
-      'Tue',
-      'Wed',
-      'Thu',
-      'Fri',
-      'Sat',
-      'Sun',
+      'ב׳',
+      'ג׳',
+      'ד׳',
+      'ה׳',
+      'ו׳',
+      'ש׳',
+      'א׳',
     ]);
+  });
+
+  // A time like 06:00 is one run of digits and a colon, which the RTL layout can
+  // reorder beside Hebrew; the isolate pins it left to right (see isolateLtr).
+  it('isolates a time of day', () => {
+    expect(strings.remindersTime('06:00')).toBe('\u206606:00\u2069');
   });
 });

@@ -8,8 +8,8 @@
 export const MIN_TARGET = 1;
 export const MAX_TARGET = 5;
 
-/** ISO weekdays, Monday to Sunday. */
-export const WEEK_DAYS: readonly number[] = [1, 2, 3, 4, 5, 6, 7];
+/** The day chips in order, Sunday first like the Israeli week; the values are ISO weekdays (1 = Monday ... 7 = Sunday). */
+export const WEEK_DAYS: readonly number[] = [7, 1, 2, 3, 4, 5, 6];
 
 /** The hours offered: 06:00 to 23:00, whole hours (spec: minute-level times are out). */
 export const HOURS: readonly number[] = Array.from({ length: 18 }, (_, index) => index + 6);

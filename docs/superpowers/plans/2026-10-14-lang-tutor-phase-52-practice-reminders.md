@@ -24,7 +24,7 @@
 - **Fixed values.**
   - Defaults: `enabled: true`, `daily_target: 1`, `days: [1,2,3,4,5,6,7]`, `times: ['13:00','17:00','20:00','22:00']`.
   - Catch-up window: 30 minutes.
-  - Channel id `reminders`. Title `Time to practise`, body `A few minutes now keeps your words fresh.`
+  - Channel id `reminders`. Title `הגיע הזמן לתרגל`, body `כמה דקות עכשיו, והמילים נשארות בזיכרון.` (ruled Hebrew in Task 9)
   - Queue `remind` with singleton key `remind`.
   - Secret env `REMINDER_SECRET` (at least 32 characters). Base URL env `PUSH_BASE_URL`, default `https://exp.host`.
   - `API_LEVEL` stays 3.
@@ -98,8 +98,8 @@ export type ReminderSettings = { enabled: boolean; dailyTarget: number; days: nu
 export const DEFAULT_REMINDER_SETTINGS: ReminderSettings; // the fixed values in Global Constraints
 export const CATCH_UP_MINUTES = 30;
 export const REMINDER_CHANNEL = 'reminders';
-export const REMINDER_TITLE = 'Time to practise';
-export const REMINDER_BODY = 'A few minutes now keeps your words fresh.';
+export const REMINDER_TITLE = 'הגיע הזמן לתרגל';
+export const REMINDER_BODY = 'כמה דקות עכשיו, והמילים נשארות בזיכרון.';
 export type DueSlot = { localDay: string; slot: string };   // slot 'HH:MM'
 export function normalizeSettings(s: ReminderSettings): ReminderSettings; // days and times sorted and distinct
 export function dueSlots(settings: ReminderSettings, timeZone: string, now: number): DueSlot[];
@@ -399,11 +399,11 @@ The root's engine wires `expo-notifications` and `Linking`, `isExpoGo = Constant
 **Screen:**
 - An on/off switch (`testID="reminders-enabled"`).
 - The target, with minus and plus buttons around the number (`reminders-target-minus`, `reminders-target-plus`, `reminders-target`).
-- Seven day chips, Monday to Sunday (`reminders-day-1` … `reminders-day-7`).
+- Seven day chips (`reminders-day-1` … `reminders-day-7`, ISO weekdays), shown Sunday first like the Israeli week (ruled in Task 9).
 - Hour chips from 06:00 to 23:00 (`reminders-hour-06` … `reminders-hour-23`).
 - It loads with `api.reminderSettings()` and saves each change with `putReminderSettings`.
-- On Android, when `status()` is `denied`, it shows "Reminders are off in Android settings." and a button that calls `openSettings`. When `undetermined`, it shows a "Turn on notifications" button that calls `enable()`.
-- On the web it shows "Reminders reach the Android app."
+- On Android, when `status()` is `denied`, it shows "התזכורות כבויות בהגדרות של אנדרואיד." and a button that calls `openSettings`. When `undetermined`, it shows a "הפעלת התראות" button that calls `enable()`.
+- On the web it shows "התזכורות מגיעות לאפליקציה באנדרואיד." (all Reminders copy ruled Hebrew in Task 9)
 - Use the existing theme and components; read `profile.tsx` and `about.tsx` for the style.
 
 - [ ] Step 1: Write the helper tests, see them fail, implement, and see them pass.

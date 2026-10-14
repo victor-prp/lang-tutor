@@ -242,7 +242,7 @@ export default function RemindersScreen() {
               onPress={read}
               style={styles.secondaryButton}
             >
-              <Text style={styles.secondaryLabel}>{strings.remindersRetry}</Text>
+              <Text style={styles.secondaryLabel}>{strings.tryAgain}</Text>
             </Pressable>
           </>
         ) : null}
@@ -254,6 +254,7 @@ export default function RemindersScreen() {
                 <Text style={styles.rowLabel}>{strings.remindersEnabled}</Text>
                 <Switch
                   testID="reminders-enabled"
+                  accessibilityLabel={strings.remindersEnabled}
                   value={settings.enabled}
                   onValueChange={(enabled) => change((current) => ({ ...current, enabled }))}
                   trackColor={{ true: colors.primary, false: colors.border }}
@@ -265,7 +266,7 @@ export default function RemindersScreen() {
                 <View style={styles.stepper}>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="-"
+                    accessibilityLabel={strings.remindersTargetLess}
                     testID="reminders-target-minus"
                     disabled={settings.daily_target <= MIN_TARGET}
                     onPress={() =>
@@ -280,7 +281,7 @@ export default function RemindersScreen() {
                   </Text>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="+"
+                    accessibilityLabel={strings.remindersTargetMore}
                     testID="reminders-target-plus"
                     disabled={settings.daily_target >= MAX_TARGET}
                     onPress={() =>
@@ -315,7 +316,7 @@ export default function RemindersScreen() {
                 {HOURS.map((hour) => (
                   <Chip
                     key={hour}
-                    label={timeOf(hour)}
+                    label={strings.remindersTime(timeOf(hour))}
                     selected={settings.times.includes(timeOf(hour))}
                     testID={`reminders-hour-${hourId(hour)}`}
                     onPress={() => change((current) => ({ ...current, times: toggleHour(current.times, hour) }))}
@@ -333,7 +334,7 @@ export default function RemindersScreen() {
         ) : null}
 
         <Pressable accessibilityRole="button" onPress={() => router.back()} style={styles.secondary}>
-          <Text style={styles.secondaryLabel}>{strings.remindersBack}</Text>
+          <Text style={styles.secondaryLabel}>{strings.back}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -348,6 +349,7 @@ const styles = StyleSheet.create({
     lineHeight: lineHeights.xxl,
     fontWeight: '700',
     color: colors.text,
+    writingDirection: 'rtl',
   },
   card: {
     backgroundColor: colors.surface,
@@ -362,6 +364,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
     paddingVertical: spacing.sm,
+    writingDirection: 'rtl',
   },
   row: {
     flexDirection: 'row',
@@ -369,7 +372,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.sm,
   },
-  rowLabel: { fontSize: fontSizes.md, color: colors.text },
+  rowLabel: { fontSize: fontSizes.md, color: colors.text, writingDirection: 'rtl' },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   stepButton: {
     width: 44,
@@ -404,7 +407,12 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipLabel: { color: colors.text, fontSize: fontSizes.md, fontWeight: '700' },
   chipLabelOn: { color: colors.onPrimary },
-  notice: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted },
+  notice: {
+    fontSize: fontSizes.md,
+    lineHeight: lineHeights.md,
+    color: colors.muted,
+    writingDirection: 'rtl',
+  },
   button: {
     backgroundColor: colors.primary,
     borderRadius: radii.md,

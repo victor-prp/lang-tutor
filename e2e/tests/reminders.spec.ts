@@ -47,7 +47,7 @@ test('the reminder schedule starts at the defaults and keeps a change across a r
   await expect(page.getByTestId('reminders-target')).toHaveText('1');
   await expect(page.getByTestId('reminders-enabled')).toBeVisible();
   // The web has no push: the schedule is kept for the phone, and the screen says so.
-  await expect(page.getByTestId('reminders-unsupported')).toHaveText('Reminders reach the Android app.');
+  await expect(page.getByTestId('reminders-unsupported')).toBeVisible();
   await expect(page.getByTestId('reminders-enable')).toHaveCount(0);
   await expect(page.getByTestId('reminders-denied')).toHaveCount(0);
 

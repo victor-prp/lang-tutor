@@ -25,8 +25,9 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
 export const CATCH_UP_MINUTES = 30;
 
 export const REMINDER_CHANNEL = 'reminders';
-export const REMINDER_TITLE = 'Time to practise';
-export const REMINDER_BODY = 'A few minutes now keeps your words fresh.';
+// Hebrew, like every string the app shows.
+export const REMINDER_TITLE = 'הגיע הזמן לתרגל';
+export const REMINDER_BODY = 'כמה דקות עכשיו, והמילים נשארות בזיכרון.';
 
 /** One slot of one learner's day: the pair the `reminders` row is unique on. */
 export type DueSlot = { localDay: string; slot: string };

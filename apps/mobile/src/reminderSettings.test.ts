@@ -17,8 +17,8 @@ import {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('the chips', () => {
-  it('offers Monday to Sunday as ISO weekdays and 06:00 to 23:00 as whole hours', () => {
-    expect(WEEK_DAYS).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  it('offers the days Sunday first, as ISO weekdays, and 06:00 to 23:00 as whole hours', () => {
+    expect(WEEK_DAYS).toEqual([7, 1, 2, 3, 4, 5, 6]);
     expect(HOURS[0]).toBe(6);
     expect(HOURS[HOURS.length - 1]).toBe(23);
     expect(HOURS).toHaveLength(18);
