@@ -38,6 +38,18 @@ export async function seedUser(db: Db, id: string): Promise<void> {
   await seedEnrollment(db, { id: enrollmentOf(id), userId: id, targetLanguage: 'en' });
 }
 
+/**
+ * Phase 52 (final review I2). A profile with no enrollment, as a tutor who only teaches
+ * has one: seedUser without the course. `seedEnrollment` gives it one later.
+ */
+export async function seedUserWithoutEnrollment(db: Db, id: string): Promise<void> {
+  await seedIdentity(db, id);
+  await db
+    .insert(users)
+    .values({ id, username: id, displayName: `test ${id}`, age: 30, nativeLanguage: 'he' })
+    .onConflictDoNothing();
+}
+
 /** Phase 35 (spec D11). Turns a seeded learner into a bot on `botDay`. */
 export async function makeBot(db: Db, id: string, botDay: string): Promise<void> {
   await db.update(users).set({ kind: 'bot', botDay }).where(eq(users.id, id));
@@ -46,6 +58,18 @@ export async function makeBot(db: Db, id: string, botDay: string): Promise<void>
 /** Phase 35 (spec D11). A bot as `npm run db:bots:create` makes one. */
 export async function seedBot(db: Db, name: string, day: string): Promise<void> {
   await createBots(db, { names: [name], day });
+}
+
+/** Phase 52 (spec D1). Puts a seeded learner in a time zone, as the app's PUT /api/me/time-zone does. */
+export async function setTimeZone(db: Db, id: string, timeZone: string): Promise<void> {
+  await db.update(users).set({ timeZone }).where(eq(users.id, id));
+}
+
+/** Phase 52. The time zone a profile is stored with. */
+export async function timeZoneOf(db: Db, id: string): Promise<string> {
+  const [row] = await db.select({ timeZone: users.timeZone }).from(users).where(eq(users.id, id));
+  if (!row) throw new Error(`no profile ${id}`);
+  return row.timeZone;
 }
 
 /** Phase 35. The day a profile is on: null for a learner. */

@@ -49,6 +49,10 @@ const PART_OF_SPEECH_NAMES: Record<PartOfSpeech, string> = {
 };
 const PART_OF_SPEECH_LOOKUP: Record<string, string> = { ...PART_OF_SPEECH_NAMES, phrase: 'ביטוי' };
 
+// Phase 52 (spec D8). The letter of the day, by ISO weekday 1 (Monday) to 7 (Sunday):
+// Sunday is the first day (א׳) in Hebrew.
+const REMINDER_DAY_NAMES = ['ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳', 'א׳'];
+
 export const strings = {
   appTitle: 'lang tutor',
   homeSubtitle: 'תרגול אוצר מילים',
@@ -206,6 +210,25 @@ export const strings = {
   aboutCopy: 'העתקה',
   aboutCopied: 'הועתק',
   back: 'חזרה',
+  // Phase 52 (spec D8). The Reminders screen.
+  remindersEntry: 'תזכורות',
+  remindersTitle: 'תזכורות',
+  remindersEnabled: 'תזכורות לתרגול',
+  remindersTargetLabel: 'תרגולים ביום',
+  remindersTargetLess: 'פחות תרגולים',
+  remindersTargetMore: 'יותר תרגולים',
+  remindersDaysLabel: 'ימים',
+  remindersTimesLabel: 'שעות',
+  /** `day` is an ISO weekday: 1 = Monday ... 7 = Sunday. */
+  remindersDayName: (day: number): string => REMINDER_DAY_NAMES[day - 1] ?? String(day),
+  /** A time of day, `06:00`, pinned left to right beside the Hebrew around it. */
+  remindersTime: (time: string): string => isolateLtr(time),
+  remindersDeniedNotice: 'התזכורות כבויות בהגדרות של אנדרואיד.',
+  remindersOpenSettings: 'לפתיחת ההגדרות',
+  remindersEnable: 'הפעלת התראות',
+  remindersWebNotice: 'התזכורות מגיעות לאפליקציה באנדרואיד.',
+  remindersLoadFailed: 'טעינת התזכורות נכשלה. אפשר לנסות שוב.',
+  remindersSaveFailed: 'שמירת התזכורות נכשלה. אפשר לנסות שוב.',
   // Phase 23. The speaker button's accessibility label.
   speak: 'השמעה',
   translateEntry: 'תרגום מלה או ביטוי',

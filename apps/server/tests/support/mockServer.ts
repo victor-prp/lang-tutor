@@ -11,6 +11,7 @@ import { PHOTO_READING_MARKER } from '../../src/domain/photoReading';
 import { SENSE_MATCH_MARKER } from '../../src/domain/senseMatching';
 import { SOUND_ALIKE_MARKER } from '../../src/domain/soundAlike';
 import { TRANSCRIBE_MARKER } from '../../src/domain/speech';
+import type { PushMessage, PushReceipt, PushTicket } from '../../src/services/reminders';
 import { geminiBlockedResponse, geminiResponse } from './geminiResponse';
 
 // tests/support/ is the test composition root, so naming a concrete URL and
@@ -540,4 +541,67 @@ export async function codeSentTo(ns: string, email: string): Promise<string> {
   const digits = subject?.replace(/\D/g, '');
   if (!digits || digits.length !== 8) throw new Error(`no code was emailed to ${email} in ${ns}`);
   return digits;
+}
+
+/** Phase 52 (spec D7). Expo's push service, faked per test namespace exactly as Resend is. */
+export function pushBaseUrlFor(ns: string): string {
+  return `${ADMIN_URL}/${ns}`;
+}
+
+const PUSH_SEND_PATH = '/--/api/v2/push/send';
+const PUSH_RECEIPTS_PATH = '/--/api/v2/push/getReceipts';
+
+/**
+ * Phase 52 (task 6). `status` other than 200 answers that status with an error body instead of
+ * `data`, as Expo does when it is down. `times` answers only that many requests and is then
+ * spent, and it outranks an unlimited stub, whichever was registered first: a test registers
+ * "the first send fails" beside "every send succeeds", and the second learner gets the second.
+ */
+type PushStubOptions = { status?: number; times?: number };
+
+async function stubPush(ns: string, path: string, data: unknown, opts: PushStubOptions): Promise<void> {
+  const status = opts.status ?? 200;
+  await admin(
+    'expectation',
+    {
+      httpRequest: { method: 'POST', path: `/${ns}${path}` },
+      httpResponse: {
+        statusCode: status,
+        headers: { 'content-type': ['application/json'] },
+        body: JSON.stringify(status === 200 ? { data } : { errors: [{ code: 'INTERNAL_SERVER_ERROR', message: 'upstream' }] }),
+      },
+      ...(opts.times !== undefined ? { times: { remainingTimes: opts.times, unlimited: false }, priority: 10 } : {}),
+    },
+    [200, 201],
+  );
+}
+
+/** Expo's answer to every send in this namespace: these tickets, whatever was sent. A test
+ *  that sends N messages stubs N tickets; the provider refuses an answer of another length. */
+export async function stubPushSend(ns: string, tickets: PushTicket[], opts: PushStubOptions = {}): Promise<void> {
+  await stubPush(ns, PUSH_SEND_PATH, tickets, opts);
+}
+
+/** Expo's answer to every receipt request in this namespace: these receipts, by ticket id. */
+export async function stubPushReceipts(
+  ns: string,
+  receipts: Record<string, PushReceipt>,
+  opts: PushStubOptions = {},
+): Promise<void> {
+  await stubPush(ns, PUSH_RECEIPTS_PATH, receipts, opts);
+}
+
+/** Every receipt request this namespace was asked, as the ids each asked for, in arrival order. */
+export async function pushReceiptRequests(ns: string): Promise<string[][]> {
+  const res = await admin('retrieve?type=REQUESTS&format=JSON', { method: 'POST', path: `/${ns}${PUSH_RECEIPTS_PATH}` }, [200]);
+  const requests = (await res.json()) as { body: { json?: unknown } }[];
+  return requests.map((r) => ((typeof r.body.json === 'string' ? JSON.parse(r.body.json) : r.body.json) as { ids: string[] }).ids);
+}
+
+/** Every message this namespace was asked to send, in the order they arrived, across requests. */
+export async function pushSends(ns: string): Promise<PushMessage[]> {
+  const res = await admin('retrieve?type=REQUESTS&format=JSON', { method: 'POST', path: `/${ns}${PUSH_SEND_PATH}` }, [200]);
+  // MockServer returns a JSON request body as { type: 'JSON', json: ..., rawBytes }.
+  const requests = (await res.json()) as { body: { json?: unknown } }[];
+  return requests.flatMap((r) => (typeof r.body.json === 'string' ? JSON.parse(r.body.json) : r.body.json) as PushMessage[]);
 }

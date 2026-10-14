@@ -1,7 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
 import type { CurrentSessionResponse } from '@lang-tutor/core/api';
 
-import { createLook, currentFor, homeActionOf, loadFailedFor, shouldAutoCreate, shouldPoll } from './nextSession';
+import {
+  createLook,
+  currentFor,
+  homeActionOf,
+  loadFailedFor,
+  reminderStartOf,
+  shouldAutoCreate,
+  shouldPoll,
+} from './nextSession';
 
 const none = (next_source: 'seed' | 'list', saved_count = 0): CurrentSessionResponse => ({
   current: null,
@@ -102,5 +110,57 @@ describe('createLook', () => {
 
   it('offers a retry once the create for this enrollment failed, never a second create of its own', () => {
     expect(createLook('e1', 'e1')).toBe('retry');
+  });
+});
+
+// Phase 52 (spec D8). A tapped reminder opens home with start=reminder, and home
+// starts or resumes the ready session once, as its own button would, on a read
+// made after the tap: the one home held when the tap came can be about a
+// session finished since (a target of two, the first just done).
+describe('reminderStartOf', () => {
+  const fresh = { failed: false, read: true };
+  const stale = { failed: false, read: false };
+
+  it('enters a session that is ready, untouched or with answers', () => {
+    expect(reminderStartOf({ kind: 'start', sessionId: 's1' }, fresh)).toEqual({
+      kind: 'enter',
+      sessionId: 's1',
+      fresh: true,
+    });
+    // The same two arguments the start button's own handler gets (fresh is `kind === 'start'`).
+    expect(reminderStartOf({ kind: 'resume', sessionId: 's1' }, fresh)).toEqual({
+      kind: 'enter',
+      sessionId: 's1',
+      fresh: false,
+    });
+  });
+
+  it('waits for a read made after the tap, whatever the held one says', () => {
+    expect(reminderStartOf({ kind: 'start', sessionId: 's1' }, stale)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'resume', sessionId: 's1' }, stale)).toEqual({ kind: 'wait' });
+    // Nor does a held state with nothing to start clear the param before the new read says so.
+    expect(reminderStartOf({ kind: 'start-seed' }, stale)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'save-words-first' }, stale)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'failed' }, stale)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'create' }, stale)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'preparing', sessionId: 's1' }, stale)).toEqual({ kind: 'wait' });
+  });
+
+  it('waits while home has not read the session, or the session is being made', () => {
+    expect(reminderStartOf(null, fresh)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf(null, stale)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'preparing', sessionId: 's1' }, fresh)).toEqual({ kind: 'wait' });
+    expect(reminderStartOf({ kind: 'create' }, fresh)).toEqual({ kind: 'wait' });
+  });
+
+  it('gives up when what it waits for failed, so a late recovery does not start a session unasked', () => {
+    expect(reminderStartOf(null, { failed: true, read: false })).toEqual({ kind: 'clear' });
+    expect(reminderStartOf({ kind: 'create' }, { failed: true, read: true })).toEqual({ kind: 'clear' });
+  });
+
+  it('clears when the new read has nothing ready to start', () => {
+    expect(reminderStartOf({ kind: 'start-seed' }, fresh)).toEqual({ kind: 'clear' });
+    expect(reminderStartOf({ kind: 'save-words-first' }, fresh)).toEqual({ kind: 'clear' });
+    expect(reminderStartOf({ kind: 'failed' }, fresh)).toEqual({ kind: 'clear' });
   });
 });

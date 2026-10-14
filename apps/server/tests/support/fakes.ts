@@ -16,6 +16,7 @@ import type { PronunciationRepo } from '../../src/repo/pronunciationScores';
 import type { CorrectionRow, PersistEntriesInput, DictRepo, GlossCounts, MergePair } from '../../src/repo/dictionary';
 import type { EnrollmentService } from '../../src/services/enrollments';
 import type { PhotoImportService } from '../../src/services/photoImports';
+import type { ReminderService } from '../../src/services/reminders';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
 import type { SessionService } from '../../src/services/sessions';
@@ -73,6 +74,7 @@ export function createFakeAppDeps(): AppDeps {
   const users: UserService = {
     createProfile: unreachable,
     me: unreachable,
+    setTimeZone: unreachable,
     hasProfile: unreachable,
   };
   const enrollments: EnrollmentService = { enroll: unreachable, list: unreachable };
@@ -90,6 +92,15 @@ export function createFakeAppDeps(): AppDeps {
     wordDetail: unreachable,
   };
   const grants: GrantService = { invite: unreachable, list: unreachable, accept: unreachable, end: unreachable };
+  const reminders: ReminderService = {
+    settings: unreachable,
+    putSettings: unreachable,
+    registerDevice: unreachable,
+    unregisterDevice: unreachable,
+    tap: unreachable,
+    requestTick: unreachable,
+    tick: unreachable,
+  };
   const photoImports: PhotoImportService = {
     create: unreachable,
     list: unreachable,
@@ -109,6 +120,7 @@ export function createFakeAppDeps(): AppDeps {
     translations,
     vocabulary,
     grants,
+    reminders,
     photoImports,
     glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },
@@ -119,6 +131,7 @@ export function createFakeAppDeps(): AppDeps {
     signedIn: { sessionOf: async () => null },
     webOrigins: ['https://web.example.test'],
     bots: null,
+    reminderTick: null,
   };
 }
 
@@ -129,6 +142,11 @@ export function createFakeBots(): NonNullable<AppDeps['bots']> {
   };
   const service: BotService = { signIn: unreachable, setDay: unreachable };
   return { secret: 'x'.repeat(32), service };
+}
+
+/** Phase 52. The reminder tick's deps for a document-shape test: mounted, unreachable. */
+export function createFakeReminderTick(): NonNullable<AppDeps['reminderTick']> {
+  return { secret: 'y'.repeat(32), service: createFakeAppDeps().reminders };
 }
 
 /**
@@ -226,6 +244,7 @@ export function createFakeJobRepo(): FakeJobRepo {
 // of Postgres.
 export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
   const rows: User[] = [];
+  const zoneOf = (userId: string) => rows.find((row) => row.id === userId)?.time_zone;
   return {
     rows,
     insertUser: async (id, input) => {
@@ -239,12 +258,20 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
         display_name: input.display_name,
         age: input.age,
         native_language: input.native_language,
+        time_zone: 'UTC', // the column's default, until the app reports one
       };
       rows.push(user);
       return user;
     },
-    findDayContext: async (userId) =>
-      rows.some((row) => row.id === userId) ? { kind: 'learner' } : undefined,
+    findDayContext: async (userId) => {
+      const timeZone = zoneOf(userId);
+      return timeZone === undefined ? undefined : { kind: 'learner', timeZone };
+    },
+    setTimeZone: async (userId, timeZone) => {
+      const at = rows.findIndex((row) => row.id === userId);
+      if (at !== -1) rows[at] = { ...rows[at], time_zone: timeZone };
+    },
+    findTimeZone: async (userId) => zoneOf(userId),
     findByUsername: async (username) => rows.find((row) => row.username === username),
     findById: async (id) => rows.find((row) => row.id === id),
     // Phase 35. Every row here is a learner, so no name names a bot.
@@ -299,6 +326,7 @@ export function createFakeTransaction(repos: Partial<Repos>): Transaction {
     photoImport: repos.photoImport ?? unreachableRepo('photo import repo'),
     modelCall: repos.modelCall ?? unreachableRepo('model call repo'),
     pronunciation: repos.pronunciation ?? unreachableRepo('pronunciation repo'),
+    reminders: repos.reminders ?? unreachableRepo('reminders repo'),
   };
   return (run) => run(bound);
 }

@@ -94,6 +94,7 @@ import {
   sessionScore,
   step,
 } from '../domain/session';
+import { reminderForSession } from '../domain/reminders';
 import { MAX_AVOID } from '../domain/sentences';
 import type { Mark } from '../domain/marks';
 import { buildSoundAlikePrompt, orderedPair, parseSoundAlike, type OrderedPair } from '../domain/soundAlike';
@@ -683,7 +684,15 @@ export function createSessionService({
         }
 
         if (outcome.justCompleted) {
-          await repos.session.completeSession(sessionId, await learnerDay(repos, enrolled.user_id, now()));
+          const endedAt = now();
+          const day = await learnerDay(repos, enrolled.user_id, endedAt);
+          await repos.session.completeSession(sessionId, day);
+          // Phase 52 (spec D6). The latest reminder the learner was sent today, if no
+          // session has claimed it yet, is the one this session answers: "practised
+          // after a reminder" becomes a row. The learner is the enrollment's owner, as
+          // for the day, so a tutor finishing a session marks the learner's reminder.
+          const reminderId = reminderForSession(await repos.reminders.sentOnDay(enrolled.user_id, day), endedAt);
+          if (reminderId) await repos.reminders.markSession(reminderId, sessionId);
           await recordProgress(repos, sessionId);
           // Phase 43 (spec D3). A stock that failed, or was never built, is
           // built now; one already there makes this a no-op.

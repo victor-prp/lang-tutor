@@ -1,5 +1,5 @@
-import type { Enrollment } from '@lang-tutor/core/api';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import type { CurrentSessionResponse, Enrollment } from '@lang-tutor/core/api';
+import { router, useFocusEffect, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -9,7 +9,15 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
-import { POLL_INTERVAL_MS, createLook, homeActionOf, shouldAutoCreate, shouldPoll, type HomeAction } from '@/nextSession';
+import {
+  POLL_INTERVAL_MS,
+  createLook,
+  homeActionOf,
+  reminderStartOf,
+  shouldAutoCreate,
+  shouldPoll,
+  type HomeAction,
+} from '@/nextSession';
 import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
@@ -34,7 +42,12 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const { enrollments, switchTo } = useCurrentUser();
   const { imports, reload: reloadPhotos } = usePhotoImports();
   // Set by the review after a save (spec D13): "28 words saved".
-  const { photoSaved } = useLocalSearchParams<{ photoSaved?: string }>();
+  const { photoSaved, start } = useLocalSearchParams<{ photoSaved?: string; start?: string }>();
+  // Phase 52 (spec D8). Home's own route, so the param is cleared here even if
+  // another screen has been opened over home since: router.setParams would clear
+  // the focused screen's.
+  const navigation = useNavigation<{ setParams: (params: { start?: string }) => void }>();
+  const focused = useIsFocused();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   // A ref guards re-entry (state is stale between two taps in one frame); the
   // state only drives the disabled look.
@@ -45,6 +58,13 @@ export function LearningSection({ active }: { active: Enrollment }) {
   // focus, then offered as a retry.
   const attemptedFor = useRef<string | null>(null);
   const [makeFailedFor, setMakeFailedFor] = useState<string | null>(null);
+  // Phase 52 (spec D8). `start=reminder` is acted on once: the param is cleared
+  // as it is, and this holds the render or two before the clear reaches `start`.
+  const reminderHandled = useRef(false);
+  // The read home held when it first saw the param. It may be about a session
+  // finished since, so home reads again and acts on the first read that differs
+  // (every successful read stores a new object).
+  const reminderHeld = useRef<{ read: CurrentSessionResponse | null } | null>(null);
 
   // Fresh on every focus: back from a session, from translate, after a switch.
   // Both reloads change with the active enrollment, so a switch runs this
@@ -146,6 +166,32 @@ export function LearningSection({ active }: { active: Enrollment }) {
     if (inFlight.current || !shouldAutoCreate(action, attemptedFor.current, active.id)) return;
     attemptedFor.current = active.id;
     void makeNext(active.id);
+  });
+
+  // Phase 52 (spec D8). A tapped reminder opens home with start=reminder. Home
+  // reads the session again, then does what its start button does with that
+  // read, and clears the param, so a re-render or a return to home does not
+  // start again. With nothing to start the param is just cleared; until then it
+  // waits. After every render, like the guard above, and only while home is focused.
+  useEffect(() => {
+    if (start !== 'reminder') {
+      reminderHandled.current = false;
+      reminderHeld.current = null;
+      return;
+    }
+    if (!focused || reminderHandled.current || inFlight.current) return;
+    if (reminderHeld.current === null) {
+      reminderHeld.current = { read: next.current };
+      reload();
+    }
+    const step = reminderStartOf(action, {
+      failed: next.loadFailed || createLook(makeFailedFor, active.id) === 'retry',
+      read: next.current !== reminderHeld.current.read,
+    });
+    if (step.kind === 'wait') return;
+    reminderHandled.current = true;
+    navigation.setParams({ start: undefined });
+    if (step.kind === 'enter') enterSession(step.sessionId, step.fresh);
   });
 
   return (

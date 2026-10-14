@@ -1,7 +1,7 @@
 # ADR 0003: OpenAPI generated from the wire contract
 
 - **Status:** Accepted
-- **Date:** 2026-09-06; R1's exception widened 2026-10-08 (phase 29) and 2026-10-11 (phase 35)
+- **Date:** 2026-09-06; R1's exception widened 2026-10-08 (phase 29), 2026-10-11 (phase 35) and 2026-10-14 (phase 52)
 - **Source:** [phase 7 design](../superpowers/specs/2026-09-05-lang-tutor-phase-7-openapi-design.md)
 
 ## Decision
@@ -30,7 +30,7 @@ apps/server/src/
 
 | # | Subject | May do | Must not do |
 |---|---|---|---|
-| R1 | `apps/server/src/routes/`, `app.ts` | Declare an endpoint via `createRoute` + `router.openapi(...)` / `app.openapi(...)` | Register an API endpoint with a raw Hono verb (`.get(`, `.post(`, `.put(`, `.patch(`, `.delete(`) — the exceptions are the `/docs` UI mount and the four `/api/auth/*` Better Auth mounts plus the `/api/auth/*` 404 in `app.ts` ([ADR 0009](adr-0009-sign-in.md)), whose paths are published through `routes/authDocs.ts`, and the `/api/bots/*` 404 in `app.ts` (phase 35), which answers a plain 404 for an unmounted bot route before the session middleware; test files (`*.test.ts`) are not scanned |
+| R1 | `apps/server/src/routes/`, `app.ts` | Declare an endpoint via `createRoute` + `router.openapi(...)` / `app.openapi(...)` | Register an API endpoint with a raw Hono verb (`.get(`, `.post(`, `.put(`, `.patch(`, `.delete(`) — the exceptions are the `/docs` UI mount and the four `/api/auth/*` Better Auth mounts plus the `/api/auth/*` 404 in `app.ts` ([ADR 0009](adr-0009-sign-in.md)), whose paths are published through `routes/authDocs.ts`, the `/api/bots/*` 404 in `app.ts` (phase 35), which answers a plain 404 for an unmounted bot route before the session middleware, and the `/api/internal/*` 404 in `app.ts` (phase 52), which does the same for the unmounted reminder tick; test files (`*.test.ts`) are not scanned |
 | R2 | `apps/server/src/routes/` | Import request/response schemas from `@lang-tutor/core/api/schemas` | Define its own schema file (`schemas.ts` or similar) — the wire contract has exactly one home |
 | R3 | `packages/core/src/api/types.ts` | Export `z.infer<typeof XSchema>` | Export a hand-written type |
 | R4 | `packages/core/src/api/index.ts` | `export type { ... }` | Export a value (a schema, a runtime helper) |
@@ -98,6 +98,13 @@ grep -n "'/doc'" apps/server/src/app.ts
   and for any `/api/bots` path it does not declare, this mount answers a plain 404 before the
   session middleware runs, so the bot door looks absent rather than answering a 401 that
   says something is there. It publishes nothing, as a 404 should not.
+- So does phase 52's `app.all('/api/internal/*', ...)` in `app.ts`, the same raw 404 for the
+  same reason. The reminder tick (`routes/internalReminders.ts`, `POST
+  /api/internal/reminders/tick`, declared with `createRoute`) is mounted only where
+  `REMINDER_SECRET` is set, before the session middleware, because its bearer secret is its
+  credential and EventBridge has no session. Everywhere else, and for any `/api/internal` path
+  it does not declare, this mount answers 404 before the session middleware, so an unmounted
+  tick is absent rather than a 401. It publishes nothing either.
 - `apps/mobile` is deliberately unscanned: phase 7 states no mobile change as a success
   criterion, and it imports only types from `@lang-tutor/core/api`, never `./api/schemas`.
 - No composition-root exclusions apply — `createRoute` definitions and their handlers are

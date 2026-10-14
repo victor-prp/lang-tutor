@@ -6,14 +6,17 @@ import {
   setAudioModeAsync,
 } from 'expo-audio';
 import * as Clipboard from 'expo-clipboard';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import { Stack } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { Stack, router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import * as Updates from 'expo-updates';
-import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
+import { useEffect } from 'react';
+import { I18nManager, Linking, Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { API_LEVEL, API_LEVEL_HEADER } from '@lang-tutor/core/apiLevel';
@@ -30,6 +33,7 @@ import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
 import { PhotoImportsProvider } from '@/hooks/usePhotoImports';
 import { RecordingProvider } from '@/hooks/useRecording';
+import { RemindersProvider } from '@/hooks/useReminders';
 import { SessionProvider } from '@/hooks/useSession';
 import { SpeechProvider } from '@/hooks/useSpeech';
 import { TranslationProvider } from '@/hooks/useTranslation';
@@ -37,6 +41,7 @@ import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { createPhotoPicker, type PhotoAsset } from '@/photos';
 import { createRecorder, type RecordPermission } from '@/recording';
 import type { AppRelease } from '@/release';
+import { createReminders, type Permission } from '@/reminders';
 import { createSpeaker } from '@/speech';
 import { colors } from '@/theme';
 
@@ -192,6 +197,67 @@ const recorder = createRecorder({
   },
 });
 
+// Phase 52 (spec D4, D8). The only file that names expo-notifications (ADR 0002 R1).
+// The engine is called only on Android outside Expo Go, where remote push exists;
+// createReminders keeps every other platform away from it.
+const asPermission = (status: Notifications.PermissionStatus): Permission =>
+  status === Notifications.PermissionStatus.GRANTED
+    ? 'granted'
+    : status === Notifications.PermissionStatus.DENIED
+      ? 'denied'
+      : 'undetermined';
+// The server sends `data: { reminder_id }` with every reminder (spec D5).
+const reminderIdOf = (response: Notifications.NotificationResponse | null): string | null => {
+  const id = response?.notification.request.content.data?.reminder_id;
+  return typeof id === 'string' ? id : null;
+};
+const reminders = createReminders({
+  engine: {
+    setChannel: async () => {
+      await Notifications.setNotificationChannelAsync('reminders', {
+        // The name Android's notification settings show, so Hebrew like the rest (the importance cannot change later).
+        name: 'תזכורות',
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+    },
+    permission: async () => asPermission((await Notifications.getPermissionsAsync()).status),
+    requestPermission: async () => asPermission((await Notifications.requestPermissionsAsync()).status),
+    // Throws until the build carries google-services.json (app.config.js).
+    token: async () =>
+      (await Notifications.getExpoPushTokenAsync({ projectId: Constants.expoConfig?.extra?.eas?.projectId })).data,
+    onTap: (listener) => {
+      const subscription = Notifications.addNotificationResponseReceivedListener((response) =>
+        listener(reminderIdOf(response)),
+      );
+      return () => subscription.remove();
+    },
+    // Cleared once read, so an over-the-air reload does not open the session again.
+    lastTap: async () => {
+      const response = Notifications.getLastNotificationResponse();
+      if (response) Notifications.clearLastNotificationResponse();
+      return reminderIdOf(response);
+    },
+    openSettings: () => Linking.openSettings(),
+  },
+  api,
+  platform: Platform.OS,
+  isExpoGo: Constants.executionEnvironment === ExecutionEnvironment.StoreClient,
+  timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+  log: (event, detail) => console.warn(event, detail),
+});
+
+// A reminder that arrives while the app is open is shown too; by default it is not.
+if (reminders.supported) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    }),
+  });
+}
+
 // RTL is set two different ways because the platforms disagree about how.
 //
 // Native: I18nManager is the real mechanism, but it only applies a flip on
@@ -209,34 +275,43 @@ I18nManager.forceRTL(true);
 const rtlProps = { dir: 'rtl' } as unknown as ViewProps;
 
 export default function RootLayout() {
+  // Phase 52 (spec D8). A tapped reminder opens /?start=reminder, and Home starts
+  // the ready session; the tap that launched the app is read once from the last
+  // response. dismissTo, as a saved photo import returns Home: back to the Home
+  // already at the bottom of the stack, or Home in place of the screen when it is
+  // not there, rather than a second Home pushed over a session in progress.
+  useEffect(() => reminders.onTap(() => router.dismissTo({ pathname: '/', params: { start: 'reminder' } })), []);
+
   return (
     // Every screen uses SafeAreaView. The navigator happens to provide a
     // fallback provider, but relying on that is relying on an internal detail —
     // and on web the insets are zero without an explicit provider.
     <SafeAreaProvider>
       <ApiProvider api={api}>
-        <SpeechProvider speaker={speaker}>
-          <RecordingProvider recorder={recorder}>
-            <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore}
-            >
-              <NextSessionProvider api={api}>
-                <SessionProvider api={api}>
-                  <TranslationProvider api={api}>
-                    <VocabularyProvider api={api}>
-                      <PhotoImportsProvider api={api} picker={photoPicker}>
-                        <View style={styles.root} {...rtlProps}>
-                          <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} release={appRelease} copy={copyToClipboard}>
-                            <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-                          </AppUpdatesProvider>
-                        </View>
-                      </PhotoImportsProvider>
-                    </VocabularyProvider>
-                  </TranslationProvider>
-                </SessionProvider>
-              </NextSessionProvider>
-            </CurrentUserProvider>
-          </RecordingProvider>
-        </SpeechProvider>
+        <RemindersProvider reminders={reminders}>
+          <SpeechProvider speaker={speaker}>
+            <RecordingProvider recorder={recorder}>
+              <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore}
+              >
+                <NextSessionProvider api={api}>
+                  <SessionProvider api={api}>
+                    <TranslationProvider api={api}>
+                      <VocabularyProvider api={api}>
+                        <PhotoImportsProvider api={api} picker={photoPicker}>
+                          <View style={styles.root} {...rtlProps}>
+                            <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} release={appRelease} copy={copyToClipboard}>
+                              <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                            </AppUpdatesProvider>
+                          </View>
+                        </PhotoImportsProvider>
+                      </VocabularyProvider>
+                    </TranslationProvider>
+                  </SessionProvider>
+                </NextSessionProvider>
+              </CurrentUserProvider>
+            </RecordingProvider>
+          </SpeechProvider>
+        </RemindersProvider>
       </ApiProvider>
     </SafeAreaProvider>
   );

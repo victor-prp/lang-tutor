@@ -1,10 +1,12 @@
 import type { CreateUserRequest, User } from '@lang-tutor/core/api';
 
+import { isTimeZone } from '../domain/learnerClock';
+import { InvalidTimeZone } from '../errors';
 import type { Logger } from '../logger';
 import type { Transaction } from './transaction';
 
 /**
- * The application layer for profiles. Three use cases, one transaction each.
+ * The application layer for profiles. Four use cases, one transaction each.
  *
  * Phase 29 (ADR 0009): who the user is comes from the session, never from
  * here. Every use case takes the signed-in user's id, which routes/actor.ts
@@ -31,6 +33,12 @@ export function createUserService({
     /** GET /api/me: the profile, or null until onboarding. */
     me: (actorUserId: string): Promise<User | null> =>
       transaction(async ({ user }) => (await user.findById(actorUserId)) ?? null),
+
+    /** PUT /api/me/time-zone: the IANA zone the app reports on every launch (phase 52, spec D1). */
+    setTimeZone: async (actorUserId: string, timeZone: string): Promise<void> => {
+      if (!isTimeZone(timeZone)) throw new InvalidTimeZone(timeZone);
+      await transaction(({ user }) => user.setTimeZone(actorUserId, timeZone));
+    },
 
     /** The session middleware's profile check. */
     hasProfile: (userId: string): Promise<boolean> =>

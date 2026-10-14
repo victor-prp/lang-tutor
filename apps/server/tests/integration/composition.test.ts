@@ -57,6 +57,8 @@ describe('createServerDeps', () => {
       identity: { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
       webDistDir: null,
       botSecret: null,
+      pushBaseUrl: 'http://127.0.0.1:9/never-registered',
+      reminderSecret: null,
       boss: unstartedBoss(t.db),
     });
     expect(deps.logger).toBe(logger);

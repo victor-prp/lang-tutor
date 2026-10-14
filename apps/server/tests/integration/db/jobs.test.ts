@@ -11,6 +11,7 @@ import {
   PREPARE_SESSION_FAILED,
   READ_PHOTO,
   READ_PHOTO_FAILED,
+  REMIND,
 } from '../../../src/domain/jobs';
 import { createTestDb, type TestDb } from '../../support/testDb';
 
@@ -120,6 +121,23 @@ describe('installJobs', () => {
     });
     await installJobs(t.db);
     expect(await read()).toEqual(rows);
+  });
+
+  // Phase 52 (spec D5). `exclusive` is what makes two overlapping ticks one run. No retry and
+  // no dead letter: the next tick, five minutes on, covers a run that failed or expired.
+  it('creates the remind queue exclusive, never retried, and expiring inside the five minutes between ticks', async () => {
+    const rows = (
+      await t.db.execute<QueueRow & { policy: string }>(
+        sql.raw(
+          `select name, policy, retry_limit, expire_seconds, deletion_seconds, dead_letter
+             from ${JOB_SCHEMA}.queue
+            where name = '${REMIND}'`,
+        ),
+      )
+    ).rows;
+    expect(rows).toEqual([
+      { name: REMIND, policy: 'exclusive', retry_limit: 0, expire_seconds: 240, deletion_seconds: 86_400, dead_letter: null },
+    ]);
   });
 
   it('is idempotent: a second install changes nothing', async () => {

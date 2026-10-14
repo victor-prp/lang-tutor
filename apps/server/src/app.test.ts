@@ -61,6 +61,9 @@ const unreachableUsers: UserService = {
   me: () => {
     throw new Error('the health route must not reach the user service');
   },
+  setTimeZone: () => {
+    throw new Error('the health route must not reach the user service');
+  },
   hasProfile: () => {
     throw new Error('the health route must not reach the user service');
   },
@@ -127,6 +130,7 @@ const unreachablePhotoImports = createFakeAppDeps().photoImports;
 function depsWithPing(ok: boolean): AppDeps {
   return {
     grants: unreachableGrants,
+    reminders: createFakeAppDeps().reminders,
     sessions: unreachableSessions,
     users: unreachableUsers,
     enrollments: unreachableEnrollments,
@@ -142,6 +146,7 @@ function depsWithPing(ok: boolean): AppDeps {
     signedIn: createFakeAppDeps().signedIn,
     webOrigins: createFakeAppDeps().webOrigins,
     bots: null,
+    reminderTick: null,
   };
 }
 

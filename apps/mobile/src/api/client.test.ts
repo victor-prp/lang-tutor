@@ -634,3 +634,54 @@ describe('photo imports', () => {
     }
   });
 });
+
+// Phase 52 (spec D1, D2, D4, D6). The reminder endpoints the app calls.
+describe('reminders', () => {
+  const settings = { enabled: true, daily_target: 2, days: [1, 3, 5], times: ['13:00', '20:00'] };
+
+  function recording(status: (url: string, method: string) => number) {
+    const calls: { method: string; path: string; body?: unknown; contentType?: string }[] = [];
+    const mockFetch = jest.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      calls.push({
+        method,
+        path: url.replace('http://test.local', ''),
+        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+        ...(init?.headers ? { contentType: (init.headers as Record<string, string>)['Content-Type'] } : {}),
+      });
+      return new Response(status(url, method) === 204 ? null : JSON.stringify({ ...settings, time_zone: 'Asia/Jerusalem' }), {
+        status: status(url, method),
+      });
+    });
+    return { calls, client: buildClient(mockFetch as unknown as jest.Mock) };
+  }
+
+  it('reads and replaces the schedule, answered with the time zone', async () => {
+    const { calls, client } = recording(() => 200);
+    await expect(client.reminderSettings()).resolves.toEqual({ ...settings, time_zone: 'Asia/Jerusalem' });
+    await expect(client.putReminderSettings(settings)).resolves.toEqual({ ...settings, time_zone: 'Asia/Jerusalem' });
+    expect(calls).toEqual([
+      { method: 'GET', path: '/api/me/reminders', contentType: undefined },
+      { method: 'PUT', path: '/api/me/reminders', body: settings, contentType: 'application/json' },
+    ]);
+  });
+
+  it('reports the time zone, registers and unregisters the phone, and reports a tap, each answered 204', async () => {
+    const { calls, client } = recording(() => 204);
+    await expect(client.setTimeZone('Asia/Jerusalem')).resolves.toBeUndefined();
+    await expect(client.registerPushDevice('ExponentPushToken[abc]')).resolves.toBeUndefined();
+    await expect(client.unregisterPushDevice('ExponentPushToken[abc]')).resolves.toBeUndefined();
+    await expect(client.tapReminder('r 1')).resolves.toBeUndefined();
+    expect(calls.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+      { method: 'PUT', path: '/api/me/time-zone', body: { time_zone: 'Asia/Jerusalem' } },
+      { method: 'PUT', path: '/api/me/push-devices', body: { token: 'ExponentPushToken[abc]', platform: 'android' } },
+      { method: 'POST', path: '/api/me/push-devices/unregister', body: { token: 'ExponentPushToken[abc]' } },
+      { method: 'POST', path: '/api/me/reminders/r%201/tap', body: {} },
+    ]);
+  });
+
+  it("throws the 404 of a tap on someone else's reminder", async () => {
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({ error: 'not found' }) }));
+    await expect(buildClient(mockFetch).tapReminder('not-a-uuid')).rejects.toEqual(new ApiError(404, 'not found'));
+  });
+});

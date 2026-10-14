@@ -83,6 +83,7 @@ describe('createUserRepo', () => {
       display_name: 'דנה',
       age: 34,
       native_language: 'he',
+      time_zone: 'UTC',
     });
   });
 
@@ -129,5 +130,26 @@ describe('createUserRepo', () => {
 
   it('returns undefined for an id nobody has', async () => {
     expect(await withTx(t.db, (tx) => createUserRepo(tx).findById('no-such-id'))).toBeUndefined();
+  });
+
+  // Phase 52 (spec D1, D2).
+  it('stores UTC until a zone is reported, and then the latest report', async () => {
+    await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findTimeZone('u_dana'))).toBe('UTC');
+
+    await withTx(t.db, (tx) => createUserRepo(tx).setTimeZone('u_dana', 'Asia/Jerusalem'));
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findTimeZone('u_dana'))).toBe('Asia/Jerusalem');
+  });
+
+  it('carries the stored zone on the profile it finds', async () => {
+    await withTx(t.db, (tx) => createUserRepo(tx).insertUser('u_dana', REQUEST));
+    await withTx(t.db, (tx) => createUserRepo(tx).setTimeZone('u_dana', 'Asia/Jerusalem'));
+
+    expect((await withTx(t.db, (tx) => createUserRepo(tx).findById('u_dana')))?.time_zone).toBe('Asia/Jerusalem');
+    expect((await withTx(t.db, (tx) => createUserRepo(tx).findByUsername('dana')))?.time_zone).toBe('Asia/Jerusalem');
+  });
+
+  it('has no time zone for an id nobody has', async () => {
+    expect(await withTx(t.db, (tx) => createUserRepo(tx).findTimeZone('no-such-id'))).toBeUndefined();
   });
 });

@@ -54,7 +54,7 @@ describe('POST /api/users', () => {
   it("creates the signed-in user's profile under their own id", async () => {
     const res = await postJson(buildTestApp(), '/api/users', 'u_dana', REQUEST);
     expect(res.status).toBe(201);
-    expect(await res.json()).toEqual({ id: 'u_dana', ...REQUEST });
+    expect(await res.json()).toEqual({ id: 'u_dana', ...REQUEST, time_zone: 'UTC' });
   });
 
   it('answers 409 profile exists for a second profile', async () => {

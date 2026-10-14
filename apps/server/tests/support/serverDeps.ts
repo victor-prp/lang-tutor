@@ -59,6 +59,10 @@ export function createTestServerDeps(io: {
   soundAlikeThreshold?: number;
   /** Phase 35 (spec D12). Mounts the bot route; unset, as on every lane. */
   botSecret?: string | null;
+  /** Phase 52. Expo's base URL; defaults to an unroutable one, as Gemini's does. */
+  pushBaseUrl?: string;
+  /** Phase 52 (spec D5). Mounts the reminder tick route; unset, as on every lane. */
+  reminderSecret?: string | null;
 }): AppDeps {
   return createServerDeps({
     db: io.db,
@@ -91,6 +95,8 @@ export function createTestServerDeps(io: {
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
     webDistDir: null,
     botSecret: io.botSecret ?? null,
+    pushBaseUrl: io.pushBaseUrl ?? 'http://127.0.0.1:9/never-registered',
+    reminderSecret: io.reminderSecret ?? null,
     boss: io.boss ?? unstartedBoss(io.db),
   });
 }

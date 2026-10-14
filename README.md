@@ -341,6 +341,8 @@ Since phase 9 the server calls a third-party model, so it needs credentials to s
 | `GEMINI_MODEL` | none — the server refuses to start | `gemini-2.5-flash` is the id phase 9 was scored against. |
 | `APP_VERSION` | `dev` | Phase 30. The release tag, published on `/health`. The image sets it from its build argument. |
 | `WEB_DIST_DIR` | unset — the server answers the API only | Phase 30. The web export the server serves. Set only inside the image, to `/app/web`. |
+| `PUSH_BASE_URL` | `https://exp.host` | Phase 52. Expo's push service, which the reminder tick sends through. Tests and e2e point it at a MockServer namespace. |
+| `REMINDER_SECRET` | unset — the tick route is not mounted | Phase 52. At least 32 characters. The bearer secret of `POST /api/internal/reminders/tick`, which EventBridge calls every five minutes; unset, `/api/internal/*` answers 404. Production sets it from Secrets Manager. |
 
 `npm run db:migrate` needs none of these: migrations read `loadConfig` only.
 
@@ -765,6 +767,14 @@ is `on`; otherwise the release run shows it as skipped.
 A change that breaks older clients raises `API_LEVEL` in `packages/core/src/apiLevel.ts` by one,
 in the same PR: an installed app can be a day or two behind the server, and the server answers it
 426 so it shows "update required".
+
+### Practice reminders
+
+Since phase 52 the Android app reminds a learner to practise with a push notification. An
+EventBridge rule calls the server's internal tick route every five minutes, and the `remind` job
+sends what is due through Expo's push service. The Firebase setup, the secret, the rule's key, the
+check on a phone and the queries that show whether reminders work are in the
+[reminders runbook](docs/runbooks/reminders.md).
 
 ## End-to-end test
 

@@ -42,7 +42,7 @@ esac
 for key in GEMINI_API_KEY GEMINI_MODEL BETTER_AUTH_SECRET AUTH_BASE_URL WEB_ORIGINS RESEND_API_KEY MAIL_FROM; do
   if [ -n "${!key:-}" ]; then args+=(-e "$key=${!key}"); fi
 done
-for key in GEMINI_BASE_URL RESEND_BASE_URL; do
+for key in GEMINI_BASE_URL RESEND_BASE_URL PUSH_BASE_URL; do
   if [ -n "${!key:-}" ]; then args+=(-e "$key=$(to_container "${!key}")"); fi
 done
 
