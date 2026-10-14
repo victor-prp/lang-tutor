@@ -58,6 +58,26 @@ if ! jq -e '.expo.extra.eas.projectId // empty' "$MOBILE_DIR/app.json" > /dev/nu
   exit 0
 fi
 
+# The app's EXPO_PUBLIC_* values, from apps/mobile/.env.production. `eas update
+# --environment production` reads no .env file, only this process's environment
+# and EAS's own, so they are exported here. Without EXPO_PUBLIC_API_URL the
+# update throws at launch ("EXPO_PUBLIC_API_URL is not set"), expo-updates falls
+# back to the build's own bundle, and no update ever reaches a phone: every
+# update through v2026.10.14.4 shipped that way. The build itself is made on EAS
+# from a checkout, where the file is read.
+# Checked first: a failed redirect stops bash 5 under set -e, though not macOS's bash 3.
+if [ -f "$MOBILE_DIR/.env.production" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      EXPO_PUBLIC_*=*) export "${line?}" ;;
+    esac
+  done < "$MOBILE_DIR/.env.production"
+fi
+if [ -z "${EXPO_PUBLIC_API_URL:-}" ]; then
+  echo "::error::$MOBILE_DIR/.env.production sets no EXPO_PUBLIC_API_URL: an update without it cannot start."
+  exit 1
+fi
+
 cd "$MOBILE_DIR"
 
 # npm prints its notices on the same stream in some setups; the JSON is the one
