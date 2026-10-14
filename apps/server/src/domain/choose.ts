@@ -146,7 +146,8 @@ export type Pool = {
    *  that lists its glosses (a target's) fills its slots with its own words answered today
    *  before passing any on; the main path's words answered today come last of all. */
   slots: number;
-  /** Ruling R-D7: new words this pool may introduce whatever the daily cap says (a target's pace); 0 for the main path. */
+  /** Ruling R-D7: new words this pool may introduce whatever the daily cap says (a target's pace),
+   *  reserved ahead of its returns and due words (owed words first); 0 for the main path. */
   owedNew: number;
 };
 
@@ -299,11 +300,15 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
     const groups = groupCount(candidates.filter(mine));
     groupsAtFirst[index] ??= groups;
     const n = Math.min(slots, groups, groupsAtFirst[index] - chosen[index].length);
-    const newLeft = Math.max(0, pool.owedNew - introducedBy[index], DAY_NEW_CAP - (input.newToday + newCount));
+    const owedLeft = Math.max(0, pool.owedNew - introducedBy[index]);
+    const newLeft = Math.max(owedLeft, DAY_NEW_CAP - (input.newToday + newCount));
     // Ruling R-D6: the session's speaking pick, while no run before has made it.
     const speak = input.speaking && n >= 2 ? Math.max(0, SPEAKING_PER_SESSION - spoken) : 0;
     const room = n - speak - returns.length - due.length;
-    const reserve = Math.min(fresh.length, newLeft, Math.min(NEW_PER_SESSION, Math.max(NEW_FLOOR, room)));
+    // Phase 53 (owed words first): the new words a pool's pace still owes are reserved ahead of
+    // its returns and due words, up to the whole run, so a target meets its words before its last
+    // day however much it has to review. The main path owes none: its reserve is today's.
+    const reserve = Math.min(fresh.length, newLeft, Math.max(Math.min(NEW_PER_SESSION, Math.max(NEW_FLOOR, room)), Math.min(owedLeft, n)));
 
     const picks: ChosenPick[] = [];
     // New words this run introduced.

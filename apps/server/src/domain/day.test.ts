@@ -429,7 +429,7 @@ const listIds = (from: number, to: number) => Array.from({ length: to - from + 1
 const listWord = (n: number, day: number): Omit<FamilyGloss, 'knownAt'> => ({
   glossId: listId(n),
   key: `list-${n}`,
-  savedAt: `${dayAfter(LANE0_DAY.today, day)}T18:00:${String(n).padStart(2, '0')}.000000Z`,
+  savedAt: `${dayAfter(LANE0_DAY.today, day)}T18:${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}.000000Z`,
   lexemeId: `x-list-${n}`,
   lemma: `x-list-${n}`,
   forms: [`f-list-${n}`],
@@ -774,30 +774,33 @@ describe("two targets, phase 37's learner: a 4-word exam due in 6 days beside a 
   itKeepsTheSessionRules(run, homework.dueOn);
 });
 
-describe("a target that changes, phase 37's learner: 40 words due in 8 days, moved to day 5 on day 2, 10 words added on day 3 (phase 53, spec §2 row 5)", () => {
+describe("a target that changes, phase 37's learner: 70 words due in 8 days, moved to day 5 on day 2, 10 words added on day 3 (phase 53, spec §2 row 5)", () => {
   const examOn = (day: number): ActiveTarget[] => [
-    { id: 'exam', kind: 'exam', dueOn: day < 2 ? dueIn(8) : dueIn(5), glossIds: day < 3 ? listIds(1, 40) : listIds(1, 50) },
+    { id: 'exam', kind: 'exam', dueOn: day < 2 ? dueIn(8) : dueIn(5), glossIds: day < 3 ? listIds(1, 70) : listIds(1, 80) },
   ];
-  const run = runTargets(withList(40, { words: 10, on: 3 }), 8, examOn);
+  const run = runTargets(withList(70, { words: 10, on: 3 }), 8, examOn);
 
   it('splits every session by the rules: daysLeft follows the new date, the word count the added words', () => {
     expectSplitsByTheRules(run);
-    expect(sessionsOn(run, 1)[0].session.split[0]).toMatchObject({ daysLeft: 7, wordCount: 40 });
-    expect(sessionsOn(run, 2)[0].session.split[0]).toMatchObject({ daysLeft: 3, wordCount: 40 });
-    expect(sessionsOn(run, 3)[0].session.split[0]).toMatchObject({ daysLeft: 2, wordCount: 50, reason: 'run_up' });
-    expect(sessionsOn(run, 4)[0].session.split[0]).toMatchObject({ daysLeft: 1, wordCount: 50, reason: 'exclusive' });
+    expect(sessionsOn(run, 1)[0].session.split[0]).toMatchObject({ daysLeft: 7, wordCount: 70 });
+    expect(sessionsOn(run, 2)[0].session.split[0]).toMatchObject({ daysLeft: 3, wordCount: 70 });
+    expect(sessionsOn(run, 3)[0].session.split[0]).toMatchObject({ daysLeft: 2, wordCount: 80, reason: 'run_up' });
+    expect(sessionsOn(run, 4)[0].session.split[0]).toMatchObject({ daysLeft: 1, wordCount: 80, reason: 'exclusive' });
     expect(sessionsOn(run, 5)[0].session.split).toEqual([]);
   });
 
-  it('meets each day at least the pace for the words and the days left at its start', () => {
-    for (let day = 0; day < dayIndex(dueIn(5)); day++) {
+  it('meets each day at least the pace for the words and the days left at its start, past the daily cap when the date comes closer', () => {
+    const days = Array.from({ length: dayIndex(dueIn(5)) }, (_, day) => {
       const [first] = sessionsOn(run, day);
       const target = activeIn(run, first.at)[0];
       const unmet = target.glossIds.filter((glossId) => !first.session.input.memory.some((row) => row.glossId === glossId)).length;
       const pace = owedNew(unmet, 0, first.session.split[0].daysLeft);
       const met = sessionsOn(run, day).reduce((sum, { session }) => sum + picksOf(session, target.glossIds).filter((pick) => pick.cls === 'NEW').length, 0);
-      expect({ day, pace, metAtLeastThePace: met >= pace }).toEqual({ day, pace, metAtLeastThePace: true });
-    }
+      return { day, pace, met };
+    });
+    // The pace binds: the moved date and the added words owe more in a day than DAY_NEW_CAP allows.
+    expect(days.filter(({ pace }) => pace > DAY_NEW_CAP).length).toBeGreaterThan(0);
+    for (const { day, pace, met } of days) expect({ day, pace, metAtLeastThePace: met >= pace }).toEqual({ day, pace, metAtLeastThePace: true });
   });
 
   it('meets every word, those added included, before the new last day', () => {

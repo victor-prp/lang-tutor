@@ -387,6 +387,34 @@ describe('chooseWithTargets (spec D5–D7, rulings R-D6, R-D7)', () => {
     expect(count(picks, (pick) => pick.cls === 'NEW')).toBe(3);
   });
 
+  it("introduces the new words a target owes before its returns: an exam in 3 days, the daily cap already spent", () => {
+    /** A session after the list's first `k` words were met earlier today, each owing its return. */
+    const classesAfter = (list: Word[], k: number) => {
+      const met = list.slice(0, k).map((word) => ({ ...word, memory: { [WR]: 1 } }));
+      const { picks } = chooseWithTargets(
+        session(
+          [...met, ...list.slice(k), ...mains(10)],
+          [target('exam', 'exam', 3, list)],
+          { newToday: DAY_NEW_CAP + k, steps: met.map((word, i) => step(word.id, WR, i)) },
+          { introducedToday: new Set(idsOf(met)) },
+        ),
+      );
+      return picks.map((pick) => pick.cls);
+    };
+    const all = (cls: ChosenPick['cls'], n = SESSION_LENGTH) => Array<ChosenPick['cls']>(n).fill(cls);
+
+    // Two days to meet 40 words in: 20 today. The first session meets ten, the second the other
+    // ten ahead of the ten returns the first opened; then the returns, and no new word past the cap.
+    expect(owedNew(40, 0, 3)).toBe(20);
+    const forty = unmet(40);
+    expect(classesAfter(forty, 0)).toEqual(all('NEW'));
+    expect(classesAfter(forty, 10)).toEqual(all('NEW'));
+    expect(classesAfter(forty, 20)).toEqual(all('STEP'));
+    // 30 words owe 15: the second session meets the five still owed, and the returns fill the rest.
+    expect(owedNew(30, 0, 3)).toBe(15);
+    expect(classesAfter(unmet(30), 10)).toEqual([...all('NEW', 5), ...all('STEP', 5)]);
+  });
+
   it("keeps a target's pace across both passes: past the daily cap, no more new words than it owes", () => {
     // Every saved word is the homework's, so the main path leaves its slots unpicked.
     expect(owedNew(20, 0, 11)).toBe(2);
