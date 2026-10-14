@@ -54,7 +54,7 @@ function world(session: Partial<SessionRepo>, extra: Partial<Repos> = {}) {
   const service = createSessionService({
     transaction: createFakeTransaction({
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
-      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const }) }),
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }) }),
       session: stub<SessionRepo>({
         findAnswersOn: async () => [],
         findIntroducedOn: async () => [],

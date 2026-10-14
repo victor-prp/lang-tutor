@@ -335,6 +335,35 @@ export class EmailNotSent extends Error {
   }
 }
 
+/** Phase 52 (spec D7). Expo's push service could not be reached, refused the request, ran out
+ *  of time, or answered with something other than tickets or receipts. One error for every
+ *  cause; the tick records it against the learner's reminder and goes on to the next. */
+export class PushUnavailable extends Error {
+  constructor(readonly detail: number | 'timeout' | 'network' | 'unreadable') {
+    super(`push service unavailable (${detail})`);
+    this.name = 'PushUnavailable';
+  }
+}
+
+/** Phase 52 (spec D1). The app reported a time zone `Intl` does not know. The
+ *  route answers 400; a wrong zone would give the learner the wrong day. */
+export class InvalidTimeZone extends Error {
+  constructor(readonly timeZone: string) {
+    super(`${timeZone} is not a time zone`);
+    this.name = 'InvalidTimeZone';
+  }
+}
+
+/** Phase 52 (spec D6). The reminder a tap reports is not the caller's, or does not exist, or
+ *  the id is not even a uuid. One error for all three, so the route's 404 cannot tell a
+ *  stranger's reminder from a missing one (ADR 0009 R7). */
+export class ReminderNotFound extends Error {
+  constructor(readonly reminderId: string) {
+    super(`no reminder ${reminderId}`);
+    this.name = 'ReminderNotFound';
+  }
+}
+
 /** Phase 29 (spec D12). The signed-in user already has a profile. */
 export class ProfileExists extends Error {
   constructor(readonly userId: string) {

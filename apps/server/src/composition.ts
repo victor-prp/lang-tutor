@@ -5,6 +5,7 @@ import type { AuthConfig, GeminiConfig } from './config';
 import type { Db, Tx } from './db/client';
 import { createTransaction } from './db/transaction';
 import type { Logger } from './logger';
+import { createExpoPushClient, PUSH_TIMEOUT_MS } from './providers/expoPush';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from './providers/gemini';
 import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
 import { createAuthRepo } from './repo/auth';
@@ -24,12 +25,14 @@ import { createDictRepo } from './repo/dictionary';
 import { createVocabularyRepo } from './repo/vocabulary';
 import { createModelCallRepo } from './repo/modelCalls';
 import { createPronunciationRepo } from './repo/pronunciationScores';
+import { createReminderRepo } from './repo/reminders';
 import { createBotService, type BotService, type MintSession } from './services/bots';
 import { createEnrollmentService, type EnrollmentService } from './services/enrollments';
 import { createGlossService, type GlossService } from './services/glosses';
 import type { LlmClient, ModelCallRecorder, VisionClient } from './services/llm';
 import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
+import { createReminderService, type PushSender, type ReminderService } from './services/reminders';
 import { createSessionService, type SessionService } from './services/sessions';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
@@ -62,6 +65,8 @@ export type AppDeps = {
   translations: TranslationService;
   vocabulary: VocabularyService;
   grants: GrantService;
+  // Phase 52 (spec D2, D4, D6). A learner's reminder schedule, their phones, and the tap.
+  reminders: ReminderService;
   photoImports: PhotoImportService;
   // Phase 31 (spec D7). The merge job's use case; no route reaches it. The
   // tool's plan and apply come with the type, unused here and composed with a
@@ -84,6 +89,9 @@ export type AppDeps = {
   // Phase 35 (spec D12). The bot route's secret and use cases, or null, which
   // leaves the route unmounted: every lane, CI and every test that sets none.
   bots: { secret: string; service: BotService } | null;
+  // Phase 52 (spec D5). The reminder tick's secret and the service it asks for a run, or null,
+  // which leaves the route unmounted: every lane, CI and every test that sets none.
+  reminderTick: { secret: string; service: ReminderService } | null;
 };
 
 // A tool that enqueues nothing gets a jobs repository that says so.
@@ -114,6 +122,7 @@ function bindRepos(tx: Tx, boss: PgBoss | null): Repos {
     gloss: createGlossRepo(tx),
     modelCall: createModelCallRepo(tx),
     pronunciation: createPronunciationRepo(tx),
+    reminders: createReminderRepo(tx),
   };
 }
 
@@ -161,6 +170,11 @@ export function createServerDeps(io: {
   webDistDir: string | null;
   // Phase 35 (spec D12). BOT_SECRET, or null where it is unset.
   botSecret: string | null;
+  // Phase 52 (spec D7). Expo's push service; tests and e2e point it at MockServer.
+  pushBaseUrl: string;
+  // Phase 52 (spec D5, D9). REMINDER_SECRET, or null where it is unset: the tick route's
+  // secret, which leaves the route unmounted, as botSecret does.
+  reminderSecret: string | null;
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
   boss: PgBoss;
@@ -289,6 +303,13 @@ export function createServerDeps(io: {
     timeoutMs: RESEND_TIMEOUT_MS,
   });
   const sendCode: SendCode = mailer.sendSignInCode;
+  // Phase 52 (spec D7). The one place that names both the Expo provider and the PushSender
+  // contract it satisfies (ADR 0001 R11); the annotation is what checks it.
+  const push: PushSender = createExpoPushClient({
+    fetch: io.fetch,
+    baseUrl: io.pushBaseUrl,
+    timeoutMs: PUSH_TIMEOUT_MS,
+  });
   const authModule = createAuth({
     db: io.db,
     authRepo: createAuthRepo(io.db),
@@ -301,6 +322,7 @@ export function createServerDeps(io: {
   });
 
   const translations = createTranslationService({ llm, transaction, logger: io.logger, now: io.now });
+  const reminders = createReminderService({ transaction, push, logger: io.logger, now: io.now });
   // Phase 35 (spec D12). The one place that hands Better Auth's session minting
   // to the use case that needs it (ADR 0001 R13).
   const mintSession: MintSession = authModule.mintSession;
@@ -324,6 +346,7 @@ export function createServerDeps(io: {
     translations,
     vocabulary: createVocabularyService({ transaction, logger: io.logger, stockSaveDelaySeconds: io.stockSaveDelaySeconds }),
     grants: createGrantService({ transaction, logger: io.logger }),
+    reminders,
     // Phase 26. Handed the lookup use case itself, so a row is looked up exactly
     // as a typed word is (spec D7). The match call shares the lookup's client
     // and budget.
@@ -346,6 +369,7 @@ export function createServerDeps(io: {
     signedIn: { sessionOf: authModule.sessionOf },
     webOrigins: io.auth.webOrigins,
     bots: io.botSecret ? { secret: io.botSecret, service: createBotService({ transaction, mintSession }) } : null,
+    reminderTick: io.reminderSecret ? { secret: io.reminderSecret, service: reminders } : null,
   };
 }
 

@@ -95,6 +95,8 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: APP_URL,
+    // Phase 52 makes the learner's day follow the browser's reported time zone, and e2e helpers (tests/support/memory.ts) assume a UTC day.
+    timezoneId: 'UTC',
     trace: 'retain-on-failure',
     // Left near default deliberately: the app is a pre-built static bundle, so
     // nothing compiles mid-test and page loads are fast. Under the Metro dev

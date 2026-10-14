@@ -7,6 +7,7 @@ import { AnswerKindMismatch, NoSavedWords, SessionNotFound } from '../errors';
 import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { ModelCallRepo } from '../repo/modelCalls';
 import type { PronunciationRepo } from '../repo/pronunciationScores';
+import type { ReminderRepo } from '../repo/reminders';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
@@ -85,7 +86,7 @@ describe('repos', () => {
       throw new Error('the session service must not register a user');
     },
     // Read by learnerDay, wherever a session ends.
-    findDayContext: async () => ({ kind: 'learner' }),
+    findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }),
     findByUsername: () => {
       throw new Error('the session service must not look a username up');
     },
@@ -97,6 +98,12 @@ describe('repos', () => {
     },
     findBotByName: () => {
       throw new Error('the session service must not look a bot up');
+    },
+    setTimeZone: () => {
+      throw new Error('the session service must not set a time zone');
+    },
+    findTimeZone: () => {
+      throw new Error('the session service must not read a time zone');
     },
     setBotDay: () => {
       throw new Error("the session service must not move a bot's day");
@@ -303,6 +310,7 @@ describe('repos', () => {
         photoImport: photoImportRepo,
         modelCall: stub<ModelCallRepo>({}),
         pronunciation: stub<PronunciationRepo>({}),
+        reminders: stub<ReminderRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,
       });
@@ -428,7 +436,7 @@ const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn' | 'fi
 };
 const noHistory = {
   ...noFamilies,
-  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const }) }),
+  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }) }),
   memory: stub<MemoryRepo>({ findRows: async () => [] }),
   progress: stub<ProgressRepo>({ findRows: async () => [] }),
 };
@@ -456,7 +464,7 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
         user: stub<UserRepo>({
           findDayContext: async (userId) => {
             reads.dayOf = userId;
-            return { kind: 'learner' as const };
+            return { kind: 'learner' as const, timeZone: 'UTC' };
           },
         }),
         session: stub<SessionRepo>({

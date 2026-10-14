@@ -35,6 +35,9 @@ export type Config = {
   // server answers the API only, which is every lane and every test: there,
   // Metro or `expo serve` serves the app.
   webDistDir: string | null;
+  // Phase 52 (spec D7). Expo's push service. Tests and e2e point it at a MockServer
+  // namespace, as RESEND_BASE_URL is.
+  pushBaseUrl: string;
 };
 
 // The one place this default lives. Both composition roots read it from here.
@@ -52,6 +55,8 @@ const DEFAULT_SPEECH_TIMEOUT_MS = 8_000;
 
 // Phase 27 (spec D4). One judged answer: the learner waits on it, as on a transcription.
 const DEFAULT_JUDGE_TIMEOUT_MS = 8_000;
+
+const DEFAULT_PUSH_BASE_URL = 'https://exp.host';
 
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   return {
@@ -100,6 +105,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     // when nothing set it (spec D2).
     commit: env.APP_COMMIT?.trim() || 'unknown',
     webDistDir: env.WEB_DIST_DIR?.trim() || null,
+    pushBaseUrl: env.PUSH_BASE_URL?.trim() || DEFAULT_PUSH_BASE_URL,
   };
 }
 
@@ -197,6 +203,19 @@ export function loadBotSecret(env: NodeJS.ProcessEnv): string | null {
   const secret = env.BOT_SECRET?.trim();
   if (!secret) return null;
   if (secret.length < 32) throw new Error('BOT_SECRET must be at least 32 characters. Generate one with: openssl rand -base64 32');
+  return secret;
+}
+
+/**
+ * Phase 52 (spec D5, D9). REMINDER_SECRET, which mounts the reminder tick route, or null where
+ * it is unset: every lane, CI and tests. Read separately from Config for the reason
+ * loadBotSecret is: db/cli.ts calls loadConfig and has no use for it. A secret too short to
+ * resist guessing fails at start-up; the value is never printed.
+ */
+export function loadReminderSecret(env: NodeJS.ProcessEnv): string | null {
+  const secret = env.REMINDER_SECRET?.trim();
+  if (!secret) return null;
+  if (secret.length < 32) throw new Error('REMINDER_SECRET must be at least 32 characters. Generate one with: openssl rand -base64 32');
   return secret;
 }
 

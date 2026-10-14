@@ -11,6 +11,7 @@ import {
   pgTable,
   primaryKey,
   real,
+  smallint,
   text,
   timestamp,
   unique,
@@ -127,6 +128,10 @@ export const users = pgTable(
     // alone (ADR 0013 R2).
     kind: text('kind').notNull().default('learner'),
     botDay: date('bot_day', { mode: 'string' }),
+    // Phase 52 (spec D1). The learner's IANA time zone, reported by the app on
+    // every launch (PUT /api/me/time-zone). The default is UTC, which is what
+    // the day was before and what a learner who never reports one keeps.
+    timeZone: text('time_zone').notNull().default('UTC'),
   },
   (t) => [
     check('users_kind_known', sql`${t.kind} in ('learner', 'bot')`),
@@ -1328,5 +1333,72 @@ export const pronunciationScores = pgTable(
     check('pronunciation_scores_form_a_length', sql`length(${t.formA}) between 1 and 100`),
     check('pronunciation_scores_form_b_length', sql`length(${t.formB}) between 1 and 100`),
     check('pronunciation_scores_score_range', sql`${t.score} between 0 and 1`),
+  ],
+);
+
+// Phase 52 (spec D2). A learner's reminder schedule: one row, written whole by
+// PUT /api/me/reminders. A learner with no row has the defaults, which live in
+// one constant, DEFAULT_REMINDER_SETTINGS in domain/reminders.ts, so there is
+// no column default to keep in step with it. `days` are ISO weekdays (1 =
+// Monday), `times` are 'HH:MM' on the learner's clock; the service keeps both
+// sorted and distinct.
+export const reminderSettings = pgTable('reminder_settings', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull(),
+  dailyTarget: smallint('daily_target').notNull(),
+  days: smallint('days').array().notNull(),
+  times: text('times').array().notNull(),
+  updatedAt: timestamp('updated_at', tz).notNull().defaultNow(),
+});
+
+// Phase 52 (spec D4). One row per Expo push token. A token is a phone, not a
+// person: when a second account signs in on the same phone it registers the
+// same token, and the row moves to them (repo/reminders.ts upsertDevice).
+export const pushDevices = pgTable(
+  'push_devices',
+  {
+    token: text('token').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    platform: text('platform').notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', tz).notNull().defaultNow(),
+  },
+  (t) => [index('push_devices_user_idx').on(t.userId)],
+);
+
+// Phase 52 (spec D6). One row per decision about one slot of one learner's day:
+// the log that says what a tick decided and why, and what came of it (tickets,
+// receipts, the tap, the session). `outcome` starts as 'claimed' in the write
+// that wins the slot and is replaced by the result; a row left 'claimed' is a
+// slot whose send never landed. `session_id` carries no foreign key, so the log
+// outlives the session, as gloss_family_events does. `local_day` is a date on
+// the learner's clock (domain/learnerClock.ts); `slot` is 'HH:MM'. Unique on
+// (user_id, local_day, slot) is what makes a claim decide a slot once.
+export const reminders = pgTable(
+  'reminders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    localDay: date('local_day', { mode: 'string' }).notNull(),
+    slot: text('slot').notNull(),
+    decidedAt: timestamp('decided_at', tz).notNull().defaultNow(),
+    outcome: text('outcome').notNull(),
+    evidence: jsonb('evidence').notNull().default(sql`'{}'::jsonb`),
+    tickets: jsonb('tickets'),
+    receipts: jsonb('receipts'),
+    receiptsCheckedAt: timestamp('receipts_checked_at', tz),
+    tappedAt: timestamp('tapped_at', tz),
+    sessionId: text('session_id'),
+  },
+  (t) => [
+    unique('reminders_user_day_slot_key').on(t.userId, t.localDay, t.slot),
+    check('reminders_outcome_known', sql`${t.outcome} in ('claimed', 'sent', 'skip_target_met', 'failed')`),
+    index('reminders_user_day_idx').on(t.userId, t.localDay),
   ],
 );

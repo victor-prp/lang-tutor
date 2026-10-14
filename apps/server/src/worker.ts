@@ -10,12 +10,14 @@ import {
   PREPARE_SESSION_FAILED,
   READ_PHOTO,
   READ_PHOTO_FAILED,
+  REMIND,
   RENDER_LEMMA,
   RENDER_LEMMA_FAILED,
   STOCK_SESSION,
 } from './domain/jobs';
 import type { GlossService } from './services/glosses';
 import type { PhotoImportService } from './services/photoImports';
+import type { ReminderService } from './services/reminders';
 import type { SessionService } from './services/sessions';
 import type { TranslationService } from './services/translations';
 
@@ -34,10 +36,11 @@ export async function registerWorkers(
     photoImports: PhotoImportService;
     glosses: GlossService;
     translations: TranslationService;
+    reminders: ReminderService;
   },
   options: { pollingIntervalSeconds: number },
 ): Promise<void> {
-  const { sessions, photoImports, glosses, translations } = services;
+  const { sessions, photoImports, glosses, translations, reminders } = services;
   await boss.work(
     PREPARE_SESSION,
     // Four at once per process: one model call each, kept under the quota.
@@ -115,5 +118,11 @@ export async function registerWorkers(
   );
   await boss.work(ACCEPT_RENDERING_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
     for (const job of jobs) await translations.failAcceptRendering(job.data);
+  });
+
+  // Phase 52 (spec D5). One run at a time, everywhere: the queue is exclusive,
+  // so at most one job exists to fetch. The run takes no payload.
+  await boss.work(REMIND, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async () => {
+    await reminders.tick();
   });
 }

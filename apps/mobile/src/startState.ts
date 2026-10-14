@@ -68,3 +68,12 @@ export async function signOutWithin(revoke: (signal: AbortSignal) => Promise<voi
     controller.abort();
   }
 }
+
+/**
+ * Phase 52 (spec D4). Sign-out unregisters this phone's push token first, while
+ * the session is still there to send. It gets the revoke's budget, and sign-out
+ * goes on whatever it answers. A late answer changes nothing on the device.
+ */
+export async function unregisterWithin(unregister: () => Promise<void>): Promise<void> {
+  await within(unregister, SIGN_OUT_TIMEOUT_MS).catch(() => {});
+}

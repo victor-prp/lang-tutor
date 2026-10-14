@@ -120,11 +120,12 @@ resource "aws_sns_topic_subscription" "alerts_email" {
 }
 
 # A 401 or 407 from GitHub (a token expired, revoked or never set) deauthorizes
-# the connection, and every later hour fails until it is updated. This is the
-# one account connection, so the rule needs no name filter.
+# the connection, and every later hour fails until it is updated. The reminders'
+# connection (reminders.tf) deauthorizes the same way when its secret is wrong.
+# The rule has no name filter, so it hears both, and its message names both.
 resource "aws_cloudwatch_event_rule" "bots_deauthorized" {
   name        = "wordspal-bots-dispatch-deauthorized"
-  description = "The bots' trigger lost its GitHub token"
+  description = "An EventBridge connection lost its credential"
   event_pattern = jsonencode({
     source        = ["aws.events"]
     "detail-type" = ["Connection Deauthorized"]
@@ -140,7 +141,7 @@ resource "aws_cloudwatch_event_target" "bots_deauthorized" {
     input_paths = {
       at = "$.time"
     }
-    input_template = "\"GitHub refused the bots' trigger token at <at>, so no bot run starts until it is replaced. docs/runbooks/bots.md, The hourly trigger.\""
+    input_template = "\"An EventBridge connection lost its credential at <at>: GitHub refused the bots' trigger token (no bot run starts until it is replaced; docs/runbooks/bots.md, The hourly trigger), or the server refused the reminders' secret (no practice reminder is sent until it is set; docs/runbooks/reminders.md, Is it working).\""
   }
 }
 
@@ -163,7 +164,8 @@ resource "aws_cloudwatch_metric_alarm" "bots_dispatch_failed" {
   ok_actions          = [aws_sns_topic.alerts.arn]
 }
 
-# Replaces SNS's default policy, so it names both publishers.
+# Replaces SNS's default policy, so it names every publisher: the deauthorization
+# rule, and the two alarms (the bots' trigger here, the reminders' in reminders.tf).
 data "aws_iam_policy_document" "alerts" {
   statement {
     sid       = "DeauthorizedRule"
@@ -195,7 +197,10 @@ data "aws_iam_policy_document" "alerts" {
     condition {
       test     = "ArnEquals"
       variable = "aws:SourceArn"
-      values   = [aws_cloudwatch_metric_alarm.bots_dispatch_failed.arn]
+      values = [
+        aws_cloudwatch_metric_alarm.bots_dispatch_failed.arn,
+        aws_cloudwatch_metric_alarm.reminders_tick_failed.arn,
+      ]
     }
   }
 }

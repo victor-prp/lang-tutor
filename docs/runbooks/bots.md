@@ -153,9 +153,13 @@ confirm the subscription: click "Confirm subscription" in the email "AWS Notific
 Subscription Confirmation"; opening it is not enough. Until then the last check above shows
 `PendingConfirmation` and SNS delivers nothing. The rehearsal's two alerts were lost that way.
 
-- **Body "GitHub refused the bots' trigger token …"** (subject "AWS Notification Message"): the
-  token expired, was revoked, or was never set. Every hour fails until it is replaced; replace it
-  as above. No day is lost: the next run plays the day the bots are on.
+- **Body "An EventBridge connection lost its credential …"** (subject "AWS Notification
+  Message"): the rule hears every EventBridge connection, so the text names both and the reminders
+  connection is covered too. When it names GitHub refusing the bots' trigger token, the token
+  expired, was revoked, or was never set. Every hour fails until it is replaced; replace it as
+  above. No day is lost: the next run plays the day the bots are on. When it names the server
+  refusing the reminders' secret, no practice reminder is sent until it is set:
+  `docs/runbooks/reminders.md`, *Is it working*.
 - **"ALARM: "wordspal-bots-dispatch-failed" …"**: a call failed: GitHub was down for the whole
   50-minute retry window, `bots.yml` was renamed, or a refused token (this alarm backs up the
   email above, and did in the rehearsal). An "OK" email follows the next good hour. `aws events describe-api-destination

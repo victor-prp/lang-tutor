@@ -8,6 +8,7 @@ import type { ModelCallRepo } from '../repo/modelCalls';
 import type { PhotoImportRepo } from '../repo/photoImports';
 import type { PronunciationRepo } from '../repo/pronunciationScores';
 import type { ProgressRepo } from '../repo/progress';
+import type { ReminderRepo } from '../repo/reminders';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
 import type { UserRepo } from '../repo/users';
@@ -35,6 +36,8 @@ export type Repos = {
   modelCall: ModelCallRepo;
   // Phase 50 (spec D3). Read before and written after a sound-alike call.
   pronunciation: PronunciationRepo;
+  // Phase 52 (spec D2, D4, D6). Settings, devices and the log of each tick's decisions.
+  reminders: ReminderRepo;
 };
 
 /**

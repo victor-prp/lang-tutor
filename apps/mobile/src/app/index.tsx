@@ -1,5 +1,5 @@
-import { Redirect, router, useFocusEffect } from 'expo-router';
-import { useCallback } from 'react';
+import { Redirect, router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useCallback, useEffect, useRef } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -8,11 +8,49 @@ import { LearningSection } from '@/components/LearningSection';
 import { StudentsSection } from '@/components/StudentsSection';
 import { needsEnrollScreen } from '@/grants';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useReminders } from '@/hooks/useReminders';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
 export default function HomeScreen() {
   const { status, user, enrollments, active, grants, reloadGrants, retry } = useCurrentUser();
+  const reminders = useReminders();
+  const shown = status === 'signed_in' && user !== null && !needsEnrollScreen(enrollments, grants);
+
+  // Phase 52 (spec D1, D4). Once per learner while Home is shown: report the
+  // zone their day follows, when it differs from the one the server holds (the
+  // profile carries it), and, if they have a course of their own, ask to send
+  // reminders (or register again, once granted). A tutor with no enrollment has
+  // nothing to practise, and the server leaves them out of the tick as well; they
+  // are asked when an enrollment arrives. Neither call throws, and nothing here
+  // waits on them. Both are reset while Home is not shown, so a sign-out and a
+  // sign-in on this same Home report and register again (both are idempotent).
+  const reportedFor = useRef<string | null>(null);
+  const promptedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!shown) {
+      reportedFor.current = null;
+      promptedFor.current = null;
+      return;
+    }
+    if (reportedFor.current !== user.id) {
+      reportedFor.current = user.id;
+      void reminders.reportTimeZone(user.time_zone);
+    }
+    if (active && promptedFor.current !== user.id) {
+      promptedFor.current = user.id;
+      void reminders.promptOnce();
+    }
+  }, [shown, user, active, reminders]);
+
+  // Phase 52 (spec D8). A tapped reminder opens Home with start=reminder, which
+  // LearningSection acts on. A learner with no enrollment has nothing to start,
+  // and the param must not wait there to start a session once they enroll.
+  const { start } = useLocalSearchParams<{ start?: string }>();
+  const navigation = useNavigation<{ setParams: (params: { start?: string }) => void }>();
+  useEffect(() => {
+    if (shown && !active && start === 'reminder') navigation.setParams({ start: undefined });
+  }, [shown, active, start, navigation]);
 
   // Fresh on every focus: an invitation may have arrived, or been answered.
   useFocusEffect(

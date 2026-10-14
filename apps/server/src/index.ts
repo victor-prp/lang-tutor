@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { PgBoss } from 'pg-boss';
 
 import { createApp } from './app';
-import { databaseNameFrom, loadAuthConfig, loadBotSecret, loadConfig, loadGeminiConfig } from './config';
+import { databaseNameFrom, loadAuthConfig, loadBotSecret, loadConfig, loadGeminiConfig, loadReminderSecret } from './config';
 import { createServerDeps } from './composition';
 import { createDb } from './db/client';
 import { JOB_SCHEMA } from './db/jobs';
@@ -20,6 +20,7 @@ export async function main(): Promise<void> {
   const gemini = loadGeminiConfig(process.env);
   const authConfig = loadAuthConfig(process.env);
   const botSecret = loadBotSecret(process.env);
+  const reminderSecret = loadReminderSecret(process.env);
   // Constructed before the pool, because the pool's error policy closes over it.
   const logger = createConsoleLogger();
 
@@ -71,6 +72,8 @@ export async function main(): Promise<void> {
     },
     webDistDir: config.webDistDir,
     botSecret,
+    pushBaseUrl: config.pushBaseUrl,
+    reminderSecret,
     boss,
   });
 
