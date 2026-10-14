@@ -8,6 +8,7 @@ import type {
   Enrollment,
   Grant,
   GrantList,
+  HealthResponse,
   JudgedAnswerRequest,
   JudgedAnswerResponse,
   MeResponse,
@@ -65,6 +66,10 @@ export const JUDGE_REQUEST_TIMEOUT_MS = 15_000;
  *  this the upload screen shows its upload-failed message and keeps the photo
  *  for a retry, instead of waiting with both buttons disabled. */
 export const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
+
+/** Phase 49 (review I1). React Native sets no timeout of its own; past this the
+ *  About screen's Server line reads "not reachable" instead of waiting forever. */
+export const HEALTH_TIMEOUT_MS = 5_000;
 
 export type ApiClientDeps = {
   baseUrl: string;
@@ -147,6 +152,17 @@ export function createApiClient({
     `/api/enrollments/${encodeURIComponent(enrollmentId)}/vocabulary`;
 
   return {
+    /** Phase 49 (spec D1). The server's own release, for the About screen. */
+    health: async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+      try {
+        const res = await send('GET', '/health', { signal: controller.signal });
+        return (await res.json()) as HealthResponse;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     me: () => getJson<MeResponse>('/api/me'),
     createProfile: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>

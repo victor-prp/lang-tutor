@@ -370,7 +370,7 @@ describe('GET /health in the published document', () => {
   it('publishes the identity fields a caller needs to tell two lanes apart', async () => {
     const doc = await openApiDocument();
     const schema = doc.paths['/health'].get.responses['200'].content['application/json'].schema;
-    expect(schema.required.sort()).toEqual(['database', 'lane', 'ok', 'port', 'version']);
+    expect(schema.required.sort()).toEqual(['commit', 'database', 'lane', 'ok', 'port', 'version']);
   });
 });
 

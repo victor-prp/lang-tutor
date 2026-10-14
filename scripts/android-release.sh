@@ -38,6 +38,8 @@ rollback=0
 
 cd "$(dirname "$0")/.."
 MOBILE_DIR=${MOBILE_DIR:-apps/mobile}
+# Phase 49 (spec D2). The tag's commit, inlined beside the tag for the About screen.
+commit=$(git rev-parse --short=7 HEAD)
 
 if [ ! -f "$MOBILE_DIR/eas.json" ]; then
   echo "::notice::$TAG predates the Android release (no eas.json): nothing to ship."
@@ -80,7 +82,7 @@ submit() {
   eas submit --platform android --profile production --id "$1" --wait --non-interactive
 }
 publish() { # publish <the build it targets>
-  EXPO_PUBLIC_APP_VERSION="$TAG" eas update --branch production --platform android \
+  EXPO_PUBLIC_APP_VERSION="$TAG" EXPO_PUBLIC_APP_COMMIT="$commit" eas update --branch production --platform android \
     --environment production --message "$TAG for build $1" --non-interactive
 }
 

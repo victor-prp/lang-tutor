@@ -65,6 +65,8 @@ jobs:
       - run: ./scripts/test-release.sh
       # Phase 32. The Android release's build-or-update decision, against stub eas and npx.
       - run: ./scripts/test-android-release.sh
+      # Phase 49. The commit the server and the app name, against a throwaway repository.
+      - run: ./scripts/test-with-commit.sh
 
   check-types:
     runs-on: ubuntu-latest
