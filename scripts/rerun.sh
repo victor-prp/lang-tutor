@@ -51,11 +51,16 @@ else
   echo "$(git rev-parse --short=7 "$before") -> $(git rev-parse --short=7 "$after")"
 fi
 
+# Against the lockfile node_modules was last installed from, recorded after
+# each install that succeeds, not against what this pull changed: that would
+# skip the retry after a failed install, and a pull done by hand beforehand.
 step install
-if [ ! -d node_modules ] || ! git diff --quiet "$before" "$after" -- package-lock.json; then
+STAMP=node_modules/.rerun-lockfile
+if [ "$(cat "$STAMP" 2> /dev/null)" != "$(git hash-object package-lock.json)" ]; then
   npm install || fail "npm install failed; nothing was stopped"
+  git hash-object package-lock.json > "$STAMP"
 else
-  echo "package-lock.json unchanged; skipped"
+  echo "package-lock.json unchanged since the last install; skipped"
 fi
 
 step migrate
@@ -105,9 +110,10 @@ stop_port server "$PORT"
 stop_port metro "$METRO_PORT"
 
 # --- the server, then Metro (D4, D5) -----------------------------------------
-# The server runs in the background of a shell without job control, so it
-# ignores the terminal's Ctrl-C; this trap is what stops it, whichever way the
-# command ends.
+# This trap is what stops the server, whichever way the command ends. Expo puts
+# the terminal in raw mode, so Ctrl-C reaches Metro alone, as a key press: Metro
+# exits, and nothing but this trap would then stop the server, a tree of npm,
+# tsx watch and node.
 descendants() {
   local child
   for child in $(pgrep -P "$1"); do

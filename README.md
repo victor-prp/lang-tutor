@@ -221,8 +221,8 @@ npm run mobile       # terminal 2
 ```
 
 **After a merge**, `npm run rerun` in the main checkout does the rest in one terminal. It pulls
-`master` (fast-forward only), runs `npm install` when `package-lock.json` changed, then
-`npm run db:migrate`, then stops the server and Metro this checkout is running, and starts
+`master` (fast-forward only), runs `npm install` when `package-lock.json` changed since the
+last install, then `npm run db:migrate`, then stops the server and Metro this checkout is running, and starts
 both again: the server in the background with its lines prefixed `[server]`, Metro in the
 foreground with its QR code and keys. Metro starts only once `/health` names the commit just
 pulled, and Ctrl-C stops both. The first step that fails stops it and names itself, and

@@ -34,8 +34,9 @@ and the branch is `master`.
 command and names itself; nothing is stopped until the first three have succeeded.
 
 1. **pull** — `git pull --ff-only origin master`.
-2. **install** — `npm install`, only when `package-lock.json` differs between the commit before
-   and after the pull, or `node_modules` is missing.
+2. **install** — `npm install`, only when `package-lock.json` differs from the one `node_modules`
+   was last installed from, which a stamp in `node_modules` records after each install that
+   succeeds.
 3. **migrate** — `npm run db:migrate`.
 4. **stop** — whatever listens on lane 0's `PORT` and `METRO_PORT` (D3).
 5. **server** — `npm run server` in the background, every line prefixed `[server] ` in this
@@ -78,8 +79,11 @@ seen to fire on a planted violation first.
    reloads pulled files by itself, so "left running" means whatever it picked up, not the old
    commit.
 2. **The name is `rerun`**, Victor's own verb; the README says it pulls first.
-3. **Install only when the lockfile changed.** `npm install` on every pull spends a minute for
-   nothing; it is the command `setup-worktree.sh` already uses.
+3. **Install only when the lockfile changed since the last install.** `npm install` on every
+   pull spends a minute for nothing; it is the command `setup-worktree.sh` already uses. The
+   comparison is against a stamp of the last installed lockfile, not against what this pull
+   changed (amended after the final review): that would skip the retry after a failed install,
+   and a pull done by hand beforehand. The first run after this ships installs once.
 4. **No native-change notice.** The one-pager's Out allowed one "at most"; not built.
 5. **`rerun` joins ADR 0006 R3.** It starts the server and Metro, so it runs through
    `lane-env.sh` like `server` and `mobile`.
@@ -88,5 +92,6 @@ seen to fire on a planted violation first.
 
 - **Expo Go after Metro restarts** may show itself disconnected until reloaded. If it does, `r`
   in the same terminal reloads it. Only a run on Victor's Android phone can tell.
-- **Stopping a whole group** takes the other terminal's whole job: a hand-typed
-  `npm run server; something` loses `something` too.
+- **Stopping a whole group** takes the other terminal's whole job. An interactive shell makes
+  each command of a hand-typed `npm run server; something` a job of its own, so only a pipeline
+  or a wrapper script shares the server's fate.

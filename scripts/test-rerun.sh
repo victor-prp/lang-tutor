@@ -52,13 +52,17 @@ held_after() {
   held "$1"
 }
 
-# listen <dir> <port> [shell]: a listener started from <dir>, in a process
-# group of its own; its pid lands in LPID. With `shell`, a bash that does not
-# exec leads the group, as a hand-typed `cmd; other` would.
+# listen <dir> <port> [shell|tree]: a listener started from <dir>, in a
+# process group of its own; the group leader's pid lands in LPID. With `shell`,
+# a bash that does not exec leads the group. With `tree`, a watcher that does
+# not listen leads it and outlives its listener, as `tsx watch` does, so only
+# stopping the whole group stops the leader.
 listen() {
   set -m
   if [ "${3:-}" = shell ]; then
     (cd "$1" && python3 "$WORK/listener.py" "$2"; true) &
+  elif [ "${3:-}" = tree ]; then
+    (cd "$1" && exec python3 "$WORK/watcher.py" "$WORK/listener.py" "$2") &
   else
     (cd "$1" && exec python3 "$WORK/listener.py" "$2") &
   fi
@@ -105,11 +109,13 @@ cat > "$WORK/bin/npm" << 'EOF'
 #!/usr/bin/env bash
 echo "npm $*" >> "$NPM_LOG"
 case "$*" in
-  install) exit 0 ;;
+  install) [ -z "${FAKE_INSTALL_FAILS:-}" ] ;;
   "run db:migrate") [ -z "${FAKE_MIGRATE_FAILS:-}" ] ;;
   "run server")
+    # Not exec: the real server is a tree (npm, tsx watch, node), so the
+    # stand-in nests a level and only stopping the whole tree frees the port.
     commit=${FAKE_HEALTH_COMMIT:-$(bash scripts/with-commit.sh printenv APP_COMMIT)}
-    cd apps/server && exec python3 "$FAKE_SERVER" "$PORT" "$commit" ;;
+    cd apps/server && python3 "$FAKE_SERVER" "$PORT" "$commit" ;;
   "run mobile") exec sleep "${FAKE_MOBILE_SLEEPS:-0}" ;;
   *) echo "stub npm: unexpected 'npm $*'" >&2; exit 2 ;;
 esac
@@ -119,12 +125,20 @@ chmod +x "$WORK/bin/npm"
 # Python's HTTPServer looks up its own host name before it listens, which can
 # stall for seconds; both stand-ins bind and listen without that lookup.
 cat > "$WORK/listener.py" << 'EOF'
-import signal, socket, sys
+import socket, sys, time
 s = socket.socket()
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 s.bind(("", int(sys.argv[1])))
 s.listen()
-signal.pause()
+while True:
+    time.sleep(3600)
+EOF
+
+cat > "$WORK/watcher.py" << 'EOF'
+import subprocess, sys, time
+subprocess.Popen([sys.executable, sys.argv[1], sys.argv[2]])
+while True:  # stays when its listener exits, as tsx watch does
+    time.sleep(3600)
 EOF
 
 cat > "$WORK/fake_server.py" << 'EOF'
@@ -207,6 +221,20 @@ run $LANE0
 expect "nothing new on origin: the run still succeeds" 0 "$CODE"
 says   "  and says it is already on the commit" "already on $(short)"
 
+publish package-lock.json '{"v":3}'
+git -C "$WORK/main" pull -q --ff-only origin master
+run $LANE0
+expect "a lockfile change pulled by hand first: install still runs" \
+  "npm install,npm run db:migrate,npm run server,npm run mobile," "$(npm_log)"
+
+publish package-lock.json '{"v":4}'
+run $LANE0 FAKE_INSTALL_FAILS=1
+expect "a failed install: the run fails" 1 "$CODE"
+says   "  naming the step" "rerun: install:"
+run $LANE0
+expect "  and the retry installs, though the pull has nothing new" \
+  "npm install,npm run db:migrate,npm run server,npm run mobile," "$(npm_log)"
+
 echo edited >> "$WORK/main/README.md"
 publish notes.txt notes
 run $LANE0
@@ -214,7 +242,7 @@ expect "a tracked file left edited: the run succeeds" 0 "$CODE"
 says   "  and expects the commit with-commit.sh names, -dirty" "with $(short)-dirty"
 git -C "$WORK/main" checkout -q -- README.md
 
-listen "$WORK/main/apps/server" "$PORT"
+listen "$WORK/main/apps/server" "$PORT" tree
 SERVER_LISTENER=$LPID
 publish notes.txt 'more notes'
 run $LANE0 FAKE_MIGRATE_FAILS=1
@@ -224,7 +252,7 @@ expect "  the running server is left alone" held "$(held "$PORT")"
 expect "  and nothing was started" "npm run db:migrate," "$(npm_log)"
 
 # --- D3: stopping only what is ours -------------------------------------------
-listen "$WORK/main/apps/mobile" "$METRO_PORT"
+listen "$WORK/main/apps/mobile" "$METRO_PORT" tree
 METRO_LISTENER=$LPID
 run $LANE0
 expect "this checkout's server and Metro: the run succeeds" 0 "$CODE"
@@ -261,9 +289,11 @@ says   "  naming both commits" "the server answered with 0000000, expected $(sho
 expect "  and stops the server it started" free "$(held_after "$PORT")"
 
 # --- D4: Ctrl-C while Metro runs ---------------------------------------------
-# SIGINT to the command's whole process group, as the terminal sends it. The
-# server was started in the background by a shell without job control, so it
-# ignores SIGINT: only the command's own exit can stop it.
+# SIGINT to the command's whole process group, as a terminal sends it. The
+# stand-in server, started in the background by a shell without job control,
+# inherits SIGINT ignored, so only the command's own exit can stop it. (The
+# real server is node, which resets that, but under Expo's raw-mode terminal
+# Ctrl-C never reaches it: Metro exits and, again, only the exit trap is left.)
 : > "$WORK/npm.log"
 set -m
 (cd "$WORK/main" && rerun_env $LANE0 FAKE_MOBILE_SLEEPS=30 bash scripts/rerun.sh > "$WORK/ctrl-c.out" 2>&1) &
