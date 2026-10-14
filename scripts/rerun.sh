@@ -57,7 +57,10 @@ fi
 step install
 STAMP=node_modules/.rerun-lockfile
 if [ "$(cat "$STAMP" 2> /dev/null)" != "$(git hash-object package-lock.json)" ]; then
-  npm install || fail "npm install failed; nothing was stopped"
+  # `npm run rerun` exported the user's npm config to this script as npm_config_*
+  # variables. npm 12 refuses allow-scripts from the environment in a project
+  # install (EALLOWSCRIPTS); without it, npm reads it from ~/.npmrc itself.
+  env -u npm_config_allow_scripts npm install || fail "npm install failed; nothing was stopped"
   git hash-object package-lock.json > "$STAMP"
 else
   echo "package-lock.json unchanged since the last install; skipped"
