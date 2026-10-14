@@ -591,6 +591,10 @@ export const CreateUserRequestSchema = z.object({
   native_language: NativeLanguageSchema,
 });
 
+// Phase 52 (spec D1). The IANA zone the app reports on every launch. Whether the
+// name is one is the server's to decide (it asks Intl), so the wire only bounds it.
+export const TimeZoneRequestSchema = z.object({ time_zone: z.string().min(1).max(64) });
+
 // A course of study: one target language, explained in one source language.
 // Language fields are plain strings for the reason UserSchema's are.
 export const EnrollmentSchema = z.object({

@@ -40,6 +40,7 @@ import {
   TranslationCorrectionSchema,
   TranslationRequestSchema,
   TranslationResponseSchema,
+  TimeZoneRequestSchema,
   TranslationSenseSchema,
   UserSchema,
   UsernameSchema,
@@ -465,6 +466,21 @@ describe('CreateUserRequestSchema', () => {
     ['a malformed username', { username: 'Dana' }],
   ])('rejects %s', (_label, override) => {
     expect(CreateUserRequestSchema.safeParse({ ...valid, ...override }).success).toBe(false);
+  });
+});
+
+describe('TimeZoneRequestSchema', () => {
+  it('accepts an IANA name', () => {
+    expect(TimeZoneRequestSchema.safeParse({ time_zone: 'Asia/Jerusalem' }).success).toBe(true);
+  });
+
+  it.each([
+    ['an empty name', { time_zone: '' }],
+    ['a name over 64 characters', { time_zone: 'a'.repeat(65) }],
+    ['no name', {}],
+    ['a number', { time_zone: 3 }],
+  ])('rejects %s', (_label, body) => {
+    expect(TimeZoneRequestSchema.safeParse(body).success).toBe(false);
   });
 });
 

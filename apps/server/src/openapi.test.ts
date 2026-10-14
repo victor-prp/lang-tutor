@@ -113,7 +113,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all twenty-eight paths and nothing else', async () => {
+  it('contains all twenty-nine paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -130,6 +130,7 @@ describe('the document as a whole', () => {
       '/api/grants/{id}',
       '/api/grants/{id}/accept',
       '/api/me',
+      '/api/me/time-zone',
       '/api/photo-imports/{id}',
       '/api/photo-imports/{id}/discard',
       '/api/photo-imports/{id}/items/{position}',
@@ -230,6 +231,14 @@ describe('sign-in in the published document (phase 29)', () => {
     expect(Object.keys(op.responses).sort()).toEqual(['200', '401']);
     const schema = op.responses['200'].content['application/json'].schema;
     expect(schema.required.sort()).toEqual(['email', 'user']);
+  });
+
+  it('publishes PUT /api/me/time-zone: a profile is needed, and it answers no body', async () => {
+    const doc = await openApiDocument();
+    const op = doc.paths['/api/me/time-zone'].put;
+    expect(Object.keys(op.responses).sort()).toEqual(['204', '400', '401', '403']);
+    expect(op.responses['204'].content).toBeUndefined();
+    expect(op.requestBody.required).toBe(true);
   });
 });
 

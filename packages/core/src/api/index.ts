@@ -91,6 +91,7 @@ export type {
   SpeechMimeType,
   SpeechVerdict,
   SpokenVerdict,
+  TimeZoneRequest,
   TranslationCorrection,
   TranslationGuardReason,
   TranslationKind,

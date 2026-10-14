@@ -85,7 +85,7 @@ describe('repos', () => {
       throw new Error('the session service must not register a user');
     },
     // Read by learnerDay, wherever a session ends.
-    findDayContext: async () => ({ kind: 'learner' }),
+    findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }),
     findByUsername: () => {
       throw new Error('the session service must not look a username up');
     },
@@ -97,6 +97,9 @@ describe('repos', () => {
     },
     findBotByName: () => {
       throw new Error('the session service must not look a bot up');
+    },
+    setTimeZone: () => {
+      throw new Error('the session service must not set a time zone');
     },
     setBotDay: () => {
       throw new Error("the session service must not move a bot's day");
@@ -428,7 +431,7 @@ const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn' | 'fi
 };
 const noHistory = {
   ...noFamilies,
-  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const }) }),
+  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }) }),
   memory: stub<MemoryRepo>({ findRows: async () => [] }),
   progress: stub<ProgressRepo>({ findRows: async () => [] }),
 };
@@ -456,7 +459,7 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
         user: stub<UserRepo>({
           findDayContext: async (userId) => {
             reads.dayOf = userId;
-            return { kind: 'learner' as const };
+            return { kind: 'learner' as const, timeZone: 'UTC' };
           },
         }),
         session: stub<SessionRepo>({

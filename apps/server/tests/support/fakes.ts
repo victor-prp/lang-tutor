@@ -73,6 +73,7 @@ export function createFakeAppDeps(): AppDeps {
   const users: UserService = {
     createProfile: unreachable,
     me: unreachable,
+    setTimeZone: unreachable,
     hasProfile: unreachable,
   };
   const enrollments: EnrollmentService = { enroll: unreachable, list: unreachable };
@@ -226,6 +227,7 @@ export function createFakeJobRepo(): FakeJobRepo {
 // of Postgres.
 export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
   const rows: User[] = [];
+  const timeZones = new Map<string, string>();
   return {
     rows,
     insertUser: async (id, input) => {
@@ -244,7 +246,12 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
       return user;
     },
     findDayContext: async (userId) =>
-      rows.some((row) => row.id === userId) ? { kind: 'learner' } : undefined,
+      rows.some((row) => row.id === userId)
+        ? { kind: 'learner', timeZone: timeZones.get(userId) ?? 'UTC' }
+        : undefined,
+    setTimeZone: async (userId, timeZone) => {
+      timeZones.set(userId, timeZone);
+    },
     findByUsername: async (username) => rows.find((row) => row.username === username),
     findById: async (id) => rows.find((row) => row.id === id),
     // Phase 35. Every row here is a learner, so no name names a bot.

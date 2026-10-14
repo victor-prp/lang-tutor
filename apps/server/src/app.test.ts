@@ -61,6 +61,9 @@ const unreachableUsers: UserService = {
   me: () => {
     throw new Error('the health route must not reach the user service');
   },
+  setTimeZone: () => {
+    throw new Error('the health route must not reach the user service');
+  },
   hasProfile: () => {
     throw new Error('the health route must not reach the user service');
   },

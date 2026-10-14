@@ -127,6 +127,10 @@ export const users = pgTable(
     // alone (ADR 0013 R2).
     kind: text('kind').notNull().default('learner'),
     botDay: date('bot_day', { mode: 'string' }),
+    // Phase 52 (spec D1). The learner's IANA time zone, reported by the app on
+    // every launch (PUT /api/me/time-zone). The default is UTC, which is what
+    // the day was before and what a learner who never reports one keeps.
+    timeZone: text('time_zone').notNull().default('UTC'),
   },
   (t) => [
     check('users_kind_known', sql`${t.kind} in ('learner', 'bot')`),

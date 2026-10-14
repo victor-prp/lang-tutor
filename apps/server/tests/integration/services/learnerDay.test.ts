@@ -8,13 +8,13 @@ import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import { readProgress, saveSessionGlosses, sessionDay, setLastStep } from '../../support/progressRows';
 import { asChoice } from '../../support/questions';
 import { createTestServerDeps } from '../../support/serverDeps';
-import { enrollmentOf, makeBot as makeBotUser, seedUser } from '../../support/seedUser';
+import { enrollmentOf, makeBot as makeBotUser, seedUser, setTimeZone } from '../../support/seedUser';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 
-// Phase 35 (spec D10, D11). The day a session counts for comes from
-// learnerDay: the UTC date of the clock for a learner, the profile's bot_day
-// for a bot.
+// Phase 35 (spec D10, D11), phase 52 (spec D1). The day a session counts for
+// comes from learnerDay: the date of the clock in the learner's time zone (UTC
+// until one is reported), the profile's bot_day for a bot.
 
 const E = enrollmentOf('u_1');
 
@@ -71,7 +71,25 @@ describe('the day a session counts for', () => {
     expect(await sessionDay(t.db, sessionId)).toBe('2026-03-05');
   });
 
-  it("is a bot's bot_day, whatever the clock says", async () => {
+  it("is the date in the learner's time zone, east of UTC", async () => {
+    // 23:59Z on 4 March is 12:59 on 5 March in Auckland (UTC+13).
+    await setTimeZone(t.db, 'u_1', 'Pacific/Auckland');
+    const { sessionId, record } = await start();
+    await answerAll(sessionId, record);
+    expect(await sessionDay(t.db, sessionId)).toBe('2026-03-05');
+  });
+
+  it("is the date in the learner's time zone, west of UTC", async () => {
+    // 00:30Z on 5 March is 16:30 on 4 March in Los Angeles (UTC-8).
+    await setTimeZone(t.db, 'u_1', 'America/Los_Angeles');
+    clock = Date.parse('2026-03-05T00:30:00Z');
+    const { sessionId, record } = await start();
+    await answerAll(sessionId, record);
+    expect(await sessionDay(t.db, sessionId)).toBe('2026-03-04');
+  });
+
+  it("is a bot's bot_day, whatever the clock or its time zone says", async () => {
+    await setTimeZone(t.db, 'u_1', 'Pacific/Auckland');
     await makeBot('2030-01-09');
     const { sessionId, record } = await start();
     await answerAll(sessionId, record);

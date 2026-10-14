@@ -48,6 +48,18 @@ export async function seedBot(db: Db, name: string, day: string): Promise<void> 
   await createBots(db, { names: [name], day });
 }
 
+/** Phase 52 (spec D1). Puts a seeded learner in a time zone, as the app's PUT /api/me/time-zone does. */
+export async function setTimeZone(db: Db, id: string, timeZone: string): Promise<void> {
+  await db.update(users).set({ timeZone }).where(eq(users.id, id));
+}
+
+/** Phase 52. The time zone a profile is stored with. */
+export async function timeZoneOf(db: Db, id: string): Promise<string> {
+  const [row] = await db.select({ timeZone: users.timeZone }).from(users).where(eq(users.id, id));
+  if (!row) throw new Error(`no profile ${id}`);
+  return row.timeZone;
+}
+
 /** Phase 35. The day a profile is on: null for a learner. */
 export async function botDayOf(db: Db, username: string): Promise<string | null> {
   const [row] = await db.select({ day: users.botDay }).from(users).where(eq(users.username, username));

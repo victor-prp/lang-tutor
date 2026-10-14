@@ -335,6 +335,15 @@ export class EmailNotSent extends Error {
   }
 }
 
+/** Phase 52 (spec D1). The app reported a time zone `Intl` does not know. The
+ *  route answers 400; a wrong zone would give the learner the wrong day. */
+export class InvalidTimeZone extends Error {
+  constructor(readonly timeZone: string) {
+    super(`${timeZone} is not a time zone`);
+    this.name = 'InvalidTimeZone';
+  }
+}
+
 /** Phase 29 (spec D12). The signed-in user already has a profile. */
 export class ProfileExists extends Error {
   constructor(readonly userId: string) {

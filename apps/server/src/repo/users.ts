@@ -66,15 +66,25 @@ export function createUserRepo(tx: Tx) {
     },
 
     /** Phase 35 (spec D10, D11, ADR 0013 R2). What the learner's day depends
-     *  on: a learner has none of its own, and a bot has the day it is on. */
-    findDayContext: async (userId: string): Promise<{ kind: 'learner' } | { kind: 'bot'; day: string } | undefined> => {
+     *  on: a learner's is the date in their time zone (phase 52, spec D1), and a
+     *  bot has the day it is on. */
+    findDayContext: async (
+      userId: string,
+    ): Promise<{ kind: 'learner'; timeZone: string } | { kind: 'bot'; day: string } | undefined> => {
       const [row] = await tx
-        .select({ kind: users.kind, botDay: users.botDay })
+        .select({ kind: users.kind, botDay: users.botDay, timeZone: users.timeZone })
         .from(users)
         .where(eq(users.id, userId));
       if (!row) return undefined;
       if (row.kind === 'bot') return { kind: 'bot', day: row.botDay! };
-      return { kind: 'learner' };
+      return { kind: 'learner', timeZone: row.timeZone };
+    },
+
+    /** Phase 52 (spec D1). Records the IANA zone the app reported. The caller has
+     *  already checked it is one (services/users.ts), and the profile exists
+     *  (the session gate), so a row that matches nothing changes nothing. */
+    setTimeZone: async (userId: string, timeZone: string): Promise<void> => {
+      await tx.update(users).set({ timeZone }).where(eq(users.id, userId));
     },
 
     /**

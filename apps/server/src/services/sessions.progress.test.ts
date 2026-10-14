@@ -140,7 +140,7 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
       session,
       progress,
       memory,
-      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' }) }),
+      user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }) }),
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
       jobs,
     }),
