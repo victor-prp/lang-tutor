@@ -46,10 +46,12 @@ streak or daily-target widget on home.
 
 ### D1. The learner's day is the date in their time zone
 
-`users.time_zone` (IANA name, `text not null default 'UTC'`) is new. The app reports it on every
-launch once signed in, from `Intl.DateTimeFormat().resolvedOptions().timeZone`, through
-`PUT /api/me/time-zone`. The server accepts a name only if `Intl.DateTimeFormat` accepts it
-(otherwise 400).
+`users.time_zone` (IANA name, `text not null default 'UTC'`) is new. The app reports it once signed
+in, from `Intl.DateTimeFormat().resolvedOptions().timeZone`, through `PUT /api/me/time-zone`, and
+only when it differs from the zone the server already holds: the profile (`GET /api/me`,
+`POST /api/users`) carries it as `time_zone`, an additive field, so `API_LEVEL` stays. A launch
+that changed nothing sends nothing, which also leaves no request for a page load to abort. The
+server accepts a name only if `Intl.DateTimeFormat` accepts it (otherwise 400).
 
 The formula moves into a pure function, `dayInTimeZone(now, timeZone): 'YYYY-MM-DD'`, in
 `apps/server/src/domain/learnerClock.ts`, with `localMinutes(now, timeZone)` (minutes since local

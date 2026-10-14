@@ -127,8 +127,9 @@ needs the Android phone.
       production, like the Play app. **If the Play copy is installed, uninstall it first**: Play
       signs its copy with Google's key and the APK carries the upload key, and Android refuses an
       install over a different signature. Sign in again after.
-   2. Signed in, the home screen asks Android to allow notifications: allow. The app reports its
-      time zone and registers its token at every launch once the permission is granted. If it was
+   2. Signed in, the home screen asks Android to allow notifications: allow. The app registers its
+      token at every launch once the permission is granted, and reports its time zone when it
+      differs from the one the server holds. If it was
       refused, Profile → *תזכורות* has the way back (*הפעלת התראות*). Check the phone is
       registered (`PROD_DB` is the hosting runbook's go-live step 9):
 

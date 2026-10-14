@@ -123,10 +123,17 @@ export function createReminders({ engine, api, platform, isExpoGo, timeZone, log
       }
     },
 
-    /** Every platform, on every launch once signed in. Never throws. */
-    async reportTimeZone(): Promise<void> {
+    /**
+     * Every platform, on every launch once signed in. Reports the device zone only
+     * when the server does not already hold it: `known` is the zone it holds, or
+     * null when that is not known. A launch that changed nothing sends nothing, so
+     * there is no request for a page load to abort (spec D1). Never throws.
+     */
+    async reportTimeZone(known: string | null): Promise<void> {
       try {
-        await api.setTimeZone(timeZone());
+        const zone = timeZone();
+        if (zone === known) return;
+        await api.setTimeZone(zone);
       } catch (error) {
         log('reminder_time_zone_failed', error);
       }

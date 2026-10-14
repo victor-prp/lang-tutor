@@ -18,7 +18,8 @@ export default function HomeScreen() {
   const shown = status === 'signed_in' && user !== null && !needsEnrollScreen(enrollments, grants);
 
   // Phase 52 (spec D1, D4). Once per learner while Home is shown: report the
-  // zone their day follows, and, if they have a course of their own, ask to send
+  // zone their day follows, when it differs from the one the server holds (the
+  // profile carries it), and, if they have a course of their own, ask to send
   // reminders (or register again, once granted). A tutor with no enrollment has
   // nothing to practise, and the server leaves them out of the tick as well; they
   // are asked when an enrollment arrives. Neither call throws, and nothing here
@@ -34,7 +35,7 @@ export default function HomeScreen() {
     }
     if (reportedFor.current !== user.id) {
       reportedFor.current = user.id;
-      void reminders.reportTimeZone();
+      void reminders.reportTimeZone(user.time_zone);
     }
     if (active && promptedFor.current !== user.id) {
       promptedFor.current = user.id;

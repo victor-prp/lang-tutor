@@ -582,6 +582,9 @@ export const UserSchema = z.object({
   display_name: z.string(),
   age: z.number().int(),
   native_language: z.string(),
+  // Phase 52 (spec D1). The IANA zone the server holds for the learner, UTC until the app
+  // reports one. It lets the app skip the report when nothing changed.
+  time_zone: z.string(),
 });
 
 export const CreateUserRequestSchema = z.object({

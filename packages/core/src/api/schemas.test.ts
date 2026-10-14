@@ -555,15 +555,17 @@ describe('the push device requests', () => {
 });
 
 describe('UserSchema', () => {
+  const dana = { id: 'u1', username: 'dana', display_name: 'דנה', age: 34, native_language: 'he', time_zone: 'UTC' };
+
   it('accepts a language code it does not narrow', () => {
-    const parsed = UserSchema.safeParse({
-      id: 'u1',
-      username: 'dana',
-      display_name: 'דנה',
-      age: 34,
-      native_language: 'fr',
-    });
-    expect(parsed.success).toBe(true);
+    expect(UserSchema.safeParse({ ...dana, native_language: 'fr' }).success).toBe(true);
+  });
+
+  // Phase 52 (spec D1). The zone the server holds, so the app can skip a report that changes nothing.
+  it('carries the time zone the server holds', () => {
+    expect(UserSchema.parse(dana).time_zone).toBe('UTC');
+    const { time_zone: _omitted, ...without } = dana;
+    expect(UserSchema.safeParse(without).success).toBe(false);
   });
 });
 

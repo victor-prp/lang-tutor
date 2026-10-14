@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import { ApiError } from './api/client';
 import { SIGN_OUT_TIMEOUT_MS, START_TIMEOUT_MS, signOutWithin, startStateOf, startUp, unregisterWithin } from './startState';
 
-const user = { id: 'u1', username: 'dana', display_name: 'דנה', age: 30, native_language: 'he' as const };
+const user = { id: 'u1', username: 'dana', display_name: 'דנה', age: 30, native_language: 'he' as const, time_zone: 'UTC' };
 
 describe('startStateOf', () => {
   it('a profile means signed in; none means onboarding', () => {

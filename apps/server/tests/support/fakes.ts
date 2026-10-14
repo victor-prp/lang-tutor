@@ -244,7 +244,7 @@ export function createFakeJobRepo(): FakeJobRepo {
 // of Postgres.
 export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
   const rows: User[] = [];
-  const timeZones = new Map<string, string>();
+  const zoneOf = (userId: string) => rows.find((row) => row.id === userId)?.time_zone;
   return {
     rows,
     insertUser: async (id, input) => {
@@ -258,19 +258,20 @@ export function createInMemoryUserRepo(): UserRepo & { rows: User[] } {
         display_name: input.display_name,
         age: input.age,
         native_language: input.native_language,
+        time_zone: 'UTC', // the column's default, until the app reports one
       };
       rows.push(user);
       return user;
     },
-    findDayContext: async (userId) =>
-      rows.some((row) => row.id === userId)
-        ? { kind: 'learner', timeZone: timeZones.get(userId) ?? 'UTC' }
-        : undefined,
-    setTimeZone: async (userId, timeZone) => {
-      timeZones.set(userId, timeZone);
+    findDayContext: async (userId) => {
+      const timeZone = zoneOf(userId);
+      return timeZone === undefined ? undefined : { kind: 'learner', timeZone };
     },
-    findTimeZone: async (userId) =>
-      rows.some((row) => row.id === userId) ? (timeZones.get(userId) ?? 'UTC') : undefined,
+    setTimeZone: async (userId, timeZone) => {
+      const at = rows.findIndex((row) => row.id === userId);
+      if (at !== -1) rows[at] = { ...rows[at], time_zone: timeZone };
+    },
+    findTimeZone: async (userId) => zoneOf(userId),
     findByUsername: async (username) => rows.find((row) => row.username === username),
     findById: async (id) => rows.find((row) => row.id === id),
     // Phase 35. Every row here is a learner, so no name names a bot.

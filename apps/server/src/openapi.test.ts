@@ -268,6 +268,16 @@ describe('sign-in in the published document (phase 29)', () => {
     expect(schema.required.sort()).toEqual(['email', 'user']);
   });
 
+  // Phase 52 (spec D1). The profile carries the zone the server holds, so the app reports its own
+  // only when it differs.
+  it('publishes the stored time zone on the profile, in GET /api/me and POST /api/users alike', async () => {
+    const doc = await openApiDocument();
+    const created = doc.paths['/api/users'].post.responses['201'].content['application/json'].schema;
+    expect(created.required).toContain('time_zone');
+    const me = doc.paths['/api/me'].get.responses['200'].content['application/json'].schema;
+    expect(me.properties.user.required).toContain('time_zone');
+  });
+
   it('publishes PUT /api/me/time-zone: a profile is needed, and it answers no body', async () => {
     const doc = await openApiDocument();
     const op = doc.paths['/api/me/time-zone'].put;

@@ -204,7 +204,7 @@ describe('where reminders are not supported', () => {
       const stop = reminders.onTap(() => calls.push('go'));
       stop();
       await flush();
-      await reminders.reportTimeZone();
+      await reminders.reportTimeZone('UTC');
       expect(calls).toEqual(['setTimeZone Asia/Jerusalem']);
     });
   }
@@ -215,15 +215,27 @@ describe('where reminders are not supported', () => {
 });
 
 describe('the time zone (spec D1)', () => {
-  it('reports the device zone', async () => {
+  it('reports the device zone when the server holds another', async () => {
     const { reminders, calls } = setup();
-    await reminders.reportTimeZone();
+    await reminders.reportTimeZone('UTC');
+    expect(calls).toEqual(['setTimeZone Asia/Jerusalem']);
+  });
+
+  it('reports nothing when the server already holds the device zone', async () => {
+    const { reminders, calls } = setup();
+    await reminders.reportTimeZone('Asia/Jerusalem');
+    expect(calls).toEqual([]);
+  });
+
+  it('reports the device zone when the server’s is not known', async () => {
+    const { reminders, calls } = setup();
+    await reminders.reportTimeZone(null);
     expect(calls).toEqual(['setTimeZone Asia/Jerusalem']);
   });
 
   it('logs a report that failed, and does not throw', async () => {
     const { reminders, logged } = setup({ apiFails: true });
-    await expect(reminders.reportTimeZone()).resolves.toBeUndefined();
+    await expect(reminders.reportTimeZone('UTC')).resolves.toBeUndefined();
     expect(logged.map(({ event }) => event)).toEqual(['reminder_time_zone_failed']);
   });
 });

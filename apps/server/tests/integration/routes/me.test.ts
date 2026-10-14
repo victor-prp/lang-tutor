@@ -41,6 +41,22 @@ function putTimeZone(body: unknown, headers: Record<string, string> = { cookie }
   });
 }
 
+describe('GET /api/me', () => {
+  // Phase 52 (spec D1). The profile carries the zone the server holds, so the app reports its
+  // own only when it differs.
+  it('carries the stored time zone: UTC until the app reports one, then the report', async () => {
+    const zoneInMe = async () => {
+      const res = await app.request('/api/me', { headers: { cookie } });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { user: { time_zone: string } }).user.time_zone;
+    };
+    expect(await zoneInMe()).toBe('UTC');
+
+    await putTimeZone({ time_zone: 'Asia/Jerusalem' });
+    expect(await zoneInMe()).toBe('Asia/Jerusalem');
+  });
+});
+
 describe('PUT /api/me/time-zone', () => {
   it('records the zone and answers 204', async () => {
     expect(await timeZoneOf(t.db, userId)).toBe('UTC');
