@@ -5,6 +5,7 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
+import * as Clipboard from 'expo-clipboard';
 import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -35,6 +36,7 @@ import { TranslationProvider } from '@/hooks/useTranslation';
 import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { createPhotoPicker, type PhotoAsset } from '@/photos';
 import { createRecorder, type RecordPermission } from '@/recording';
+import type { AppRelease } from '@/release';
 import { createSpeaker } from '@/speech';
 import { colors } from '@/theme';
 
@@ -78,10 +80,23 @@ const appUpdates = createAppUpdates({
   minBackgroundMs: 30 * 60 * 1000,
 });
 
-// Phase 32 (spec D10). The release tag, inlined by Metro like the API URL: the
-// android release job sets it for every update, the Dockerfile for the web
-// export. Unset in Expo Go and every lane.
-const appVersion = process.env.EXPO_PUBLIC_APP_VERSION ?? 'dev';
+// Phase 32 (spec D10), phase 49 (spec D1). The release tag and its commit,
+// inlined by Metro like the API URL: the android release job sets them for every
+// update, the Dockerfile for the web export, scripts/with-commit.sh the commit
+// for Metro in a lane. The native layer is read from expo-updates, whose runtime
+// version is the fingerprint (ADR 0012 R1); updates are off in Expo Go.
+const appRelease: AppRelease = {
+  version: process.env.EXPO_PUBLIC_APP_VERSION || null,
+  commit: process.env.EXPO_PUBLIC_APP_COMMIT || null,
+  native:
+    Platform.OS === 'web'
+      ? { kind: 'web' }
+      : Updates.isEnabled && Updates.runtimeVersion
+        ? { kind: 'build', fingerprint: Updates.runtimeVersion, embedded: Updates.isEmbeddedLaunch }
+        : { kind: 'expo-go' },
+};
+// Phase 49. The only file that names expo-clipboard (ADR 0002 R1).
+const copyToClipboard = (text: string) => Clipboard.setStringAsync(text);
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
 
 const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
@@ -210,7 +225,7 @@ export default function RootLayout() {
                     <VocabularyProvider api={api}>
                       <PhotoImportsProvider api={api} picker={photoPicker}>
                         <View style={styles.root} {...rtlProps}>
-                          <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} version={appVersion}>
+                          <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} release={appRelease} copy={copyToClipboard}>
                             <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
                           </AppUpdatesProvider>
                         </View>

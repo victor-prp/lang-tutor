@@ -29,6 +29,8 @@ export type Config = {
   // Phase 30 (spec D2). The release tag the image was built from, published on
   // /health so a release can prove which image answers. `dev` everywhere else.
   version: string;
+  // Phase 49 (spec D3). The commit the image was built from, beside the tag on /health.
+  commit: string;
   // Phase 30 (spec D1). Where the web export sits inside the image. Unset, the
   // server answers the API only, which is every lane and every test: there,
   // Metro or `expo serve` serves the app.
@@ -94,6 +96,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     stockSaveDelaySeconds: Number(env.STOCK_SAVE_DELAY_SECONDS) || STOCK_SAVE_DELAY_SECONDS,
     soundAlikeThreshold: soundAlikeThreshold(env.SOUND_ALIKE_THRESHOLD),
     version: env.APP_VERSION?.trim() || 'dev',
+    // 7 characters, `-dirty` from a tree with uncommitted changes; `unknown`
+    // when nothing set it (spec D2).
+    commit: env.APP_COMMIT?.trim() || 'unknown',
     webDistDir: env.WEB_DIST_DIR?.trim() || null,
   };
 }

@@ -5,8 +5,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { confirm } from '@/confirm';
 import { myTutors } from '@/grants';
-import { useAppVersion } from '@/hooks/useAppUpdates';
+import { useAppRelease } from '@/hooks/useAppUpdates';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { mobileAppLine } from '@/release';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, radii, spacing } from '@/theme';
 
@@ -23,7 +24,7 @@ function Row({ label, value, testID }: { label: string; value: string; testID: s
 
 export default function ProfileScreen() {
   const { user, enrollments, grants, endGrant, signOut } = useCurrentUser();
-  const appVersion = useAppVersion();
+  const { release } = useAppRelease();
 
   if (!user) return <Redirect href="/" />;
 
@@ -70,8 +71,17 @@ export default function ProfileScreen() {
           }
           testID="profile-target"
         />
-        {/* Phase 32 (spec D10): the release tag this phone runs, or dev. */}
-        <Row label={strings.appVersionLabel} value={appVersion} testID="app-version" />
+        {/* Phase 32 (spec D10): the release this phone runs. Phase 49 (spec D4):
+            a tap opens About, which names the server and the native layer too. */}
+        <Pressable
+          accessibilityRole="button"
+          testID="app-version"
+          onPress={() => router.push('/about')}
+          style={styles.row}
+        >
+          <Text style={styles.rowLabel}>{strings.appVersionLabel}</Text>
+          <Text style={[styles.rowValue, styles.link]}>{mobileAppLine(release)}</Text>
+        </Pressable>
       </View>
 
       {tutors.length > 0 ? (
@@ -158,6 +168,8 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: fontSizes.md, color: colors.muted, writingDirection: 'rtl' },
   rowValue: { fontSize: fontSizes.md, color: colors.text, fontWeight: '700' },
+  // Review M6: `dev (e91c0aa, uncommitted changes)` is wider than a small phone's row.
+  link: { flexShrink: 1, color: colors.primary, writingDirection: 'ltr' },
   button: {
     backgroundColor: colors.primary,
     borderRadius: radii.md,

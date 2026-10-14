@@ -54,7 +54,7 @@ describe('createServerDeps', () => {
       photoReadTimeoutMs: 120_000,
       stockSaveDelaySeconds: 30,
       soundAlikeThreshold: 0.95,
-      identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
+      identity: { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
       webDistDir: null,
       botSecret: null,
       boss: unstartedBoss(t.db),

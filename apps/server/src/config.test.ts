@@ -37,6 +37,7 @@ describe('loadConfig', () => {
       stockSaveDelaySeconds: 30,
       soundAlikeThreshold: 0.95,
       version: 'dev',
+      commit: 'unknown',
       webDistDir: null,
     });
   });
@@ -50,6 +51,13 @@ describe('loadConfig', () => {
       version: 'dev',
       webDistDir: null,
     });
+  });
+
+  it('reads the release commit, or unknown (phase 49)', () => {
+    expect(loadConfig({ APP_COMMIT: ' a3f9c21 ' }).commit).toBe('a3f9c21');
+    expect(loadConfig({ APP_COMMIT: 'e91c0aa-dirty' }).commit).toBe('e91c0aa-dirty');
+    expect(loadConfig({ APP_COMMIT: '  ' }).commit).toBe('unknown');
+    expect(loadConfig({}).commit).toBe('unknown');
   });
 
   it('reads the speech budget, defaulting to 8 s (phase 25)', () => {
@@ -92,6 +100,7 @@ describe('loadConfig', () => {
       stockSaveDelaySeconds: 30,
       soundAlikeThreshold: 0.95,
       version: 'dev',
+      commit: 'unknown',
       webDistDir: null,
     });
   });
