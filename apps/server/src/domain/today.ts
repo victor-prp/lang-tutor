@@ -69,7 +69,9 @@ export function dayState(answers: readonly DayAnswer[], introduced: ReadonlySet<
  * it: that session's glosses count as answered today, so the two sessions ask
  * different words while the list has others. A return it asks leaves the
  * returns, and each of its glosses is done, after today's own, so a short list
- * still fills the stock with them, last. `extraNew` counts the ones it meets
+ * still fills the stock with them, last. One already done today moves there
+ * too: left in its place, a stock picked once the whole list is done for the
+ * day asked the started session's words again. `extraNew` counts the ones it meets
  * for the first time (not in `met`), which are today's new words too. The
  * caller passes the saved glosses of the session in flight.
  */
@@ -81,7 +83,7 @@ export function withSessionInFlight(
   const asked = new Set(inFlight);
   return {
     steps: day.steps.filter((step) => !asked.has(step.glossId)),
-    done: new Set([...day.done, ...asked]),
+    done: new Set([...[...day.done].filter((glossId) => !asked.has(glossId)), ...asked]),
     extraNew: [...asked].filter((glossId) => !met.has(glossId)).length,
   };
 }

@@ -103,9 +103,12 @@ describe('withSessionInFlight (phase 43 D4)', () => {
     });
   });
 
-  it("lists the session's glosses done after today's, and leaves one already done in its place", () => {
+  // A Set keeps a value where it was first added, so an in-flight gloss already
+  // done today stayed at the front, and a stock picked once the whole list was
+  // done asked the started session's words again.
+  it("lists the session's glosses done after today's, one already done today among them", () => {
     const { done } = withSessionInFlight({ steps: [], done: new Set(['c', 'd']) }, ['e', 'd', 'f'], new Set(['c', 'd', 'e', 'f']));
-    expect([...done]).toEqual(['c', 'd', 'e', 'f']);
+    expect([...done]).toEqual(['c', 'e', 'd', 'f']);
   });
 
   it('counts each gloss the session meets for the first time once, as a new word today', () => {
