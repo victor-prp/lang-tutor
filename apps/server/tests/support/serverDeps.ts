@@ -9,6 +9,7 @@ import {
   SESSION_GENERATION_BUDGET_MS,
   STOCK_SAVE_DELAY_SECONDS,
 } from '../../src/domain/jobs';
+import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
 import type { Logger } from '../../src/logger';
 import { unstartedBoss } from './jobs';
 
@@ -54,6 +55,8 @@ export function createTestServerDeps(io: {
   photoReadTimeoutMs?: number;
   /** Phase 43. How long a save's stock waits; defaults to production's. */
   stockSaveDelaySeconds?: number;
+  /** Phase 50. The sound-alike threshold; defaults to production's. */
+  soundAlikeThreshold?: number;
   /** Phase 35 (spec D12). Mounts the bot route; unset, as on every lane. */
   botSecret?: string | null;
 }): AppDeps {
@@ -84,6 +87,7 @@ export function createTestServerDeps(io: {
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,
     stockSaveDelaySeconds: io.stockSaveDelaySeconds ?? STOCK_SAVE_DELAY_SECONDS,
+    soundAlikeThreshold: io.soundAlikeThreshold ?? DEFAULT_SOUND_ALIKE_THRESHOLD,
     identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
     webDistDir: null,
     botSecret: io.botSecret ?? null,

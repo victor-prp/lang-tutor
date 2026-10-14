@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { MAX_SPOKEN_WORDS, judgeSpoken, speakable, spokenWords } from './spoken';
+import { MAX_SOUND_PAIRS, MAX_SPOKEN_WORDS, judgeSpoken, soundPairs, speakable, spokenWords } from './spoken';
 
 const read = (form: string) => ({ forms: [form], alternatives: [] });
 
@@ -77,5 +77,55 @@ describe('speakable (spec D3)', () => {
     expect(speakable('caffè con il cornetto')).toBe(true);
     expect(speakable('vorrei un caffè con cornetto')).toBe(false);
     expect(speakable('…')).toBe(false);
+  });
+});
+
+describe('soundPairs (phase 50 D1)', () => {
+  it('pairs a one-word transcript with the form', () => {
+    expect(soundPairs(read('cell'), 'Sell.')).toEqual([{ heard: 'sell', form: 'cell' }]);
+  });
+
+  it('pairs every stretch of the heard words as long as the form, so a word said among others is found', () => {
+    expect(soundPairs(read('cell'), 'I sell')).toEqual([
+      { heard: 'i', form: 'cell' },
+      { heard: 'sell', form: 'cell' },
+    ]);
+  });
+
+  it('takes a form with and without its leading article, as the letter check does', () => {
+    expect(soundPairs(read('il gatto'), 'un gato')).toEqual([
+      { heard: 'un gato', form: 'il gatto' },
+      { heard: 'un', form: 'gatto' },
+      { heard: 'gato', form: 'gatto' },
+    ]);
+  });
+
+  it('takes stretches of a phrase form its own length', () => {
+    expect(soundPairs(read('thank you'), 'thank ewe')).toEqual([{ heard: 'thank ewe', form: 'thank you' }]);
+  });
+
+  it('asks each pair once, across forms that are the same word', () => {
+    expect(soundPairs({ forms: ['cell', 'cell'], alternatives: [] }, 'sell')).toEqual([{ heard: 'sell', form: 'cell' }]);
+  });
+
+  it('never pairs the alternatives', () => {
+    expect(soundPairs({ forms: ['big'], alternatives: ['large'] }, 'barge')).toEqual([{ heard: 'barge', form: 'big' }]);
+  });
+
+  it('keeps at most MAX_SOUND_PAIRS, the first form first', () => {
+    const heard = 'one two three four five six seven eight nine ten';
+    const pairs = soundPairs({ forms: ['cell', 'sale'], alternatives: [] }, heard);
+    expect(MAX_SOUND_PAIRS).toBe(8);
+    expect(pairs).toHaveLength(8);
+    expect(pairs.every((pair) => pair.form === 'cell')).toBe(true);
+  });
+
+  it('has nothing to pair in an empty or letterless transcript', () => {
+    expect(soundPairs(read('cell'), '')).toEqual([]);
+    expect(soundPairs(read('cell'), '… ?')).toEqual([]);
+  });
+
+  it('skips a stretch that is the form itself', () => {
+    expect(soundPairs(read('cell'), 'cell sell')).toEqual([{ heard: 'sell', form: 'cell' }]);
   });
 });

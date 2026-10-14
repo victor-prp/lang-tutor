@@ -239,6 +239,13 @@
       "when": 1791902682220,
       "tag": "0033_model_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791966525578,
+      "tag": "0034_pronunciation_scores",
+      "breakpoints": true
     }
   ]
 }

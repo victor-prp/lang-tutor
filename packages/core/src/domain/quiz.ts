@@ -33,6 +33,10 @@ export type AnswerInput =
   | { option_index: number }
   | { text: string }
   | { heard: string }
+  // Phase 50 (spec D5). A transcript the server scored as sounding like the
+  // card's form, which it names. Only the server builds it: the next-step
+  // schema has no `sounds_like` field.
+  | { heard: string; sounds_like: string }
   | { pass: 'skip' | 'show_answer' }
   // Phase 27 (spec D3). A text the server judged, by rule or by a model call.
   // Only the server builds it: the next-step schema has no `judged` field.
@@ -216,7 +220,7 @@ export function evaluate(question: Question, answer: AnswerInput): AnswerRecord 
     });
   }
   if (isSpeaking(question) && 'heard' in answer) {
-    const verdict = spokenVerdict(question, answer.heard);
+    const verdict = 'sounds_like' in answer ? 'understood' : spokenVerdict(question, answer.heard);
     if (verdict === 'unheard') throw new Error('an unheard transcript is never recorded (spec D5)');
     return recorded(question, { question_id: question.id, is_correct: true, answer_string: answer.heard.slice(0, MAX_ANSWER_TEXT), verdict });
   }

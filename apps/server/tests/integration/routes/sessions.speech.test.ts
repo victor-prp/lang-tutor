@@ -5,11 +5,12 @@ import { createFakeLogger } from '../../support/fakes';
 import {
   clearNamespace,
   expectGeminiStatus,
+  expectSoundAlike,
   expectTranscription,
   geminiBaseUrlFor,
   mockNamespace,
 } from '../../support/mockServer';
-import { insertListSession, readStoredAnswers, type AskedGloss } from '../../support/questions';
+import { insertListSession, readPronunciationScores, readStoredAnswers, type AskedGloss } from '../../support/questions';
 import { enrollmentOf, seedUser } from '../../support/seedUser';
 import { createTestServerDeps } from '../../support/serverDeps';
 import { createTestDb, type TestDb } from '../../support/testDb';
@@ -81,6 +82,8 @@ describe('POST /api/sessions/:id/speech', () => {
   it('records an understood attempt and carries the next step; an unheard one records nothing', async () => {
     const ns = namespaceFor('speech-understood');
     await expectTranscription(ns, 'tomb', { once: true });
+    // Phase 50: tomb is not said as tome is.
+    await expectSoundAlike(ns, 0.6);
     await expectTranscription(ns, 'the tome', { once: true });
     const app = buildTestApp(ns);
     const { sessionId, questions } = await startSpeaking();
@@ -94,6 +97,20 @@ describe('POST /api/sessions/:id/speech', () => {
     const heard = await speak();
     const body = await heard.json();
     expect(body).toMatchObject({ heard: 'the tome', verdict: 'understood', next: { complete: false, question: { type: 'say_translation' } } });
+  });
+
+  // Phase 50 (spec D1–D5). The read-aloud card's word, heard as its homophone.
+  it('understands a transcript that sounds like the form, and stores its score once', async () => {
+    const ns = namespaceFor('speech-sounds-alike');
+    await expectTranscription(ns, 'tohm');
+    await expectSoundAlike(ns, 1);
+    const app = buildTestApp(ns);
+    const { sessionId, questions } = await startSpeaking();
+    const res = await postJson(app, `/api/sessions/${sessionId}/speech`, { question_id: questions[0].id, mime_type: 'audio/aac', audio: AUDIO });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ heard: 'tohm', verdict: 'understood', next: { complete: false } });
+    expect(await readStoredAnswers(t.db, sessionId)).toEqual([expect.objectContaining({ answer_string: 'tohm', verdict: 'understood' })]);
+    expect(await readPronunciationScores(t.db)).toEqual([{ language: 'en', a: 'tohm', b: 'tome', score: 1 }]);
   });
 
   it('answers say the translation with an alternative, then completes with a skip left out of the score', async () => {

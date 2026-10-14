@@ -92,6 +92,7 @@ function setup(
     transcriber: createFakeTranscriber(''),
     judge,
     translationJudge,
+    soundAlikeThreshold: 0.95,
   });
   return { service, inserted, resolved, logger };
 }
@@ -196,6 +197,7 @@ describe('answerJudged (spec D3)', () => {
       transcriber: createFakeTranscriber(''),
       judge,
       translationJudge: judge,
+      soundAlikeThreshold: 0.95,
     });
     const result = await service.answerJudged('u1', SESSION, answer('לשריין'));
     expect(judge.calls).toHaveLength(1);

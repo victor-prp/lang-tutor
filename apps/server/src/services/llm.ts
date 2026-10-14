@@ -49,7 +49,9 @@ export type ModelCallKind =
   | 'session_generation'
   | 'context'
   | 'checker'
-  | 'gloss_merge';
+  | 'gloss_merge'
+  // Phase 50 (spec D2). On the judge's client.
+  | 'sound_alike';
 
 /** Phase 47 (spec D3). A handle the call site does not have is left out. */
 export type ModelCallRecord = {

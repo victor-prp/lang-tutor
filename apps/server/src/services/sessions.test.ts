@@ -6,6 +6,7 @@ import type { GlossRendering, SessionRecord } from '../domain/session';
 import { AnswerKindMismatch, NoSavedWords, SessionNotFound } from '../errors';
 import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { ModelCallRepo } from '../repo/modelCalls';
+import type { PronunciationRepo } from '../repo/pronunciationScores';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
@@ -301,6 +302,7 @@ describe('repos', () => {
         glossFamilies: stub<GlossFamiliesRepo>({}),
         photoImport: photoImportRepo,
         modelCall: stub<ModelCallRepo>({}),
+        pronunciation: stub<PronunciationRepo>({}),
         // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
         jobs,
       });
@@ -321,6 +323,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await expect(
@@ -375,6 +378,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     const result = await service.submitAnswer('u1', 's1', 't1', { text: 'finestar' });
@@ -398,6 +402,7 @@ describe('repos', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await expect(service.submitAnswer('u1', 's1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
@@ -501,6 +506,7 @@ describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () 
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await service.createNextSession('u1', E, { listening: false, speaking: false });
@@ -559,6 +565,7 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await service.createNextSession('u1', E, { listening: true, speaking });
@@ -611,6 +618,7 @@ describe('createNextSession, phase 31 (spec D12)', () => {
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
     return { service, jobs, reads };
   }

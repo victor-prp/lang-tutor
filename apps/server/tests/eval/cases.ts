@@ -1880,3 +1880,80 @@ export const FIT_JUDGE_CASES: FitJudgeCase[] = [
   fit('ru', ruBought, 'купила', 'купил', 'wrong', 'the masculine past'),
   fit('ru', ruBought, 'купила', 'купить', 'wrong', 'the infinitive'),
 ];
+
+/**
+ * Phase 50 (spec D8). The sound-alike score, as answerBySpeech asks it: pairs
+ * of one language, each expected at or above the server's default threshold
+ * (`same`) or below it (`different`). None of them is an example in the
+ * prompt, so this measures the rule rather than recall of it. The `different`
+ * half is the guard that matters most: a near miss scored as the same word
+ * would be credited for every learner of the language.
+ */
+export type SoundAlikePair = { a: string; b: string; expect: 'same' | 'different' };
+export type SoundAlikeCase = { label: string; language: 'en' | 'ru' | 'it'; pairs: SoundAlikePair[] };
+
+const same = (language: SoundAlikeCase['language'], a: string, b: string): SoundAlikeCase => ({
+  label: `sound ${language}: ${a} is said as ${b}`,
+  language,
+  pairs: [{ a, b, expect: 'same' }],
+});
+const apart = (language: SoundAlikeCase['language'], a: string, b: string): SoundAlikeCase => ({
+  label: `sound ${language}: ${a} is not said as ${b}`,
+  language,
+  pairs: [{ a, b, expect: 'different' }],
+});
+
+export const SOUND_ALIKE_CASES: SoundAlikeCase[] = [
+  same('en', 'sell', 'cell'),
+  same('en', 'too', 'two'),
+  same('en', 'night', 'knight'),
+  same('en', 'flower', 'flour'),
+  same('en', 'sea', 'see'),
+  same('en', 'hole', 'whole'),
+  same('en', 'male', 'mail'),
+  apart('en', 'sheep', 'ship'),
+  apart('en', 'bat', 'bad'),
+  apart('en', 'taught', 'thought'),
+  apart('en', 'leave', 'live'),
+  apart('en', 'cat', 'cut'),
+  apart('en', 'pat', 'pet'),
+  apart('en', 'work', 'walk'),
+  // Review of phase 50: spelled with a doubled letter, said the same, and not
+  // the class of difference the prompt names with an example.
+  same('en', 'allowed', 'aloud'),
+  same('en', 'meddle', 'medal'),
+  same('en', 'cannon', 'canon'),
+  same('en', 'bury', 'berry'),
+  apart('en', 'tree', 'three'),
+  apart('en', 'bat', 'bath'),
+  same('ru', 'лук', 'луг'),
+  same('ru', 'плот', 'плод'),
+  same('ru', 'кот', 'код'),
+  same('ru', 'прут', 'пруд'),
+  same('ru', 'грипп', 'гриб'),
+  apart('ru', 'люк', 'лук'),
+  apart('ru', 'лис', 'лес'),
+  apart('ru', 'мель', 'мел'),
+  apart('ru', 'брать', 'брат'),
+  same('it', 'anno', 'hanno'),
+  same('it', 'o', 'ho'),
+  same('it', 'ai', 'hai'),
+  apart('it', 'gato', 'gatto'),
+  apart('it', 'palla', 'pala'),
+  apart('it', 'carro', 'caro'),
+  apart('it', 'pane', 'cane'),
+  // Review of phase 50: held out from the prompt's own example, nono/nonno.
+  apart('it', 'fato', 'fatto'),
+  apart('it', 'sete', 'sette'),
+  apart('it', 'copia', 'coppia'),
+  // The shape the server sends for a transcript of several words: one call, several pairs.
+  {
+    label: 'sound en: three pairs in one call',
+    language: 'en',
+    pairs: [
+      { a: 'sell', b: 'cell', expect: 'same' },
+      { a: 'sheep', b: 'ship', expect: 'different' },
+      { a: 'hole', b: 'whole', expect: 'same' },
+    ],
+  },
+];

@@ -209,8 +209,9 @@ function refusal(question: Question, answer: AnswerInput, languages: StepLanguag
     if (gate !== null && wrongScript(answer.text, gate)) return { status: 'wrong_script' };
   }
   // Phase 25 (spec D5). A transcript that is not the word records nothing:
-  // a recogniser's reject is no evidence and never wrong (phase 20).
-  if ('heard' in answer && isSpeaking(question) && spokenVerdict(question, answer.heard) === 'unheard') {
+  // a recogniser's reject is no evidence and never wrong (phase 20). Phase 50
+  // (spec D5): unless the server scored it as sounding like the form.
+  if ('heard' in answer && !('sounds_like' in answer) && isSpeaking(question) && spokenVerdict(question, answer.heard) === 'unheard') {
     return { status: 'unheard' };
   }
   if ('option_index' in answer && isChoice(question)) {

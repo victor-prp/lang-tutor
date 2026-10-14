@@ -3,7 +3,7 @@ import { isChoice, type ChoiceQuestion, type QuestionType } from '@lang-tutor/co
 import { asc, eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
-import { answers } from '../../src/db/schema';
+import { answers, pronunciationScores } from '../../src/db/schema';
 import { findGap } from '../../src/domain/cloze';
 import { NOTHING_GENERATED, generatedContent, type Generated, type QuestionContent } from '../../src/domain/distractors';
 import { LANGUAGES } from '../../src/domain/languages';
@@ -131,6 +131,14 @@ export async function insertListSession(
 export async function readStoredAnswers(db: Db, sessionId: string) {
   const record = await withTx(db, (tx) => createSessionRepo(tx).loadSession(sessionId));
   return record?.answers ?? [];
+}
+
+/** Phase 50 (spec D3). Every stored pronunciation score, as route tests read
+ *  them: they may not reach past composition for a repository. */
+export async function readPronunciationScores(db: Db): Promise<{ language: string; a: string; b: string; score: number }[]> {
+  return db
+    .select({ language: pronunciationScores.languageCode, a: pronunciationScores.formA, b: pronunciationScores.formB, score: pronunciationScores.score })
+    .from(pronunciationScores);
 }
 
 /** Phase 41. Each answer's stored verdict and retry state, in position order. */

@@ -28,13 +28,14 @@ import { findGap } from '../../src/domain/cloze';
 import { ASKED_DISTRACTORS, comparable, distractorItems, KEPT_DISTRACTORS, nothingKnown, validateDistractors, type DistractorItem, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
 import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
+import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
 import { SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
 import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
 import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askAccept, askCheck, askContext, askDistractors, askFitJudge, askGapGuesses, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
+import { askAccept, askCheck, askContext, askDistractors, askFitJudge, askGapGuesses, askJudge, askModel, askRendering, askSoundAlike, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
   ACCEPT_CASES,
   CASES,
@@ -44,6 +45,7 @@ import {
   FIT_JUDGE_CASES,
   GAP_CASES,
   JUDGE_CASES,
+  SOUND_ALIKE_CASES,
   RENDERING_CASES,
   SENTENCE_CASES,
   TRANSCRIPTION_CASES,
@@ -58,6 +60,7 @@ import {
   type JudgeCase,
   type RenderingCase,
   type SentenceCase,
+  type SoundAlikeCase,
   type TranscriptionCase,
   type TranslationJudgeCase,
 } from './cases';
@@ -877,12 +880,14 @@ async function main(): Promise<void> {
   const fitCases = FIT_JUDGE_CASES.filter((kase) => matches(kase.label));
   const contextCases = CONTEXT_CASES.filter((kase) => matches(kase.label));
   const checkCases = CHECK_CASES.filter((kase) => matches(kase.label));
+  // Phase 50. Every label starts "sound", so the filter "sound" selects the group.
+  const soundCases = SOUND_ALIKE_CASES.filter((kase) => matches(kase.label));
   if (filter) console.log(`filter "${filter}"`);
   if (
     cases.length + renderingCases.length + acceptCases.length + distractorCases.length + transcriptionCases.length +
       photoCases.length + matchCases.length + judgeCases.length +
       gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + fitCases.length + contextCases.length +
-      checkCases.length === 0
+      checkCases.length + soundCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
@@ -1231,6 +1236,42 @@ async function main(): Promise<void> {
     }
   };
 
+  // Phase 50 (spec D8). Each pair on the side of the server's default line it
+  // belongs on. Every score is printed, pass or fail, so the line can be moved
+  // with evidence of where same and different actually fall.
+  const scoreSoundAlike = async (kase: SoundAlikeCase): Promise<Row> => {
+    const text = kase.pairs.map((pair) => `${pair.a}/${pair.b}`).join(', ');
+    try {
+      const scores = await askSoundAlike(judgeLlm, kase);
+      return {
+        label: kase.label,
+        text,
+        tier1: [
+          { name: 'the answer parses', ok: scores !== null, detail: scores === null ? 'unreadable' : undefined },
+          { name: 'every pair is scored', ok: scores !== null && scores.every((score) => score !== null), detail: scores?.join(', ') },
+        ],
+        tier2: kase.pairs.map((pair, index) => {
+          const score = scores?.[index] ?? null;
+          const atLine = score !== null && score >= DEFAULT_SOUND_ALIKE_THRESHOLD;
+          return {
+            name: `${pair.a}/${pair.b} ${pair.expect}`,
+            ok: score !== null && atLine === (pair.expect === 'same'),
+            detail: `score ${score ?? 'none'}, line ${DEFAULT_SOUND_ALIKE_THRESHOLD}`,
+          };
+        }),
+        verdict: scores?.map((score) => score ?? 'none').join(', ') ?? undefined,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   const scoreTranslationJudge = async (kase: TranslationJudgeCase): Promise<Row> => {
     try {
       const verdict = await askTranslationJudge(translationJudgeLlm, kase);
@@ -1292,7 +1333,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   const [
     translationRows, renderingRows, acceptRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
-    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows, soundRows,
   ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
@@ -1310,10 +1351,11 @@ async function main(): Promise<void> {
     mapWithConcurrency(contextCases, CONCURRENCY, scoreContext),
     mapWithConcurrency(checkCases, CONCURRENCY, scoreCheck),
     mapWithConcurrency(fitCases, CONCURRENCY, scoreFitJudge),
+    mapWithConcurrency(soundCases, CONCURRENCY, scoreSoundAlike),
   ]);
   const rows = [
     ...translationRows, ...renderingRows, ...acceptRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
-    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows,
+    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows, ...soundRows,
   ];
   const elapsedMs = Date.now() - started;
 
@@ -1348,6 +1390,9 @@ async function main(): Promise<void> {
     // Phase 41 (spec D2). The fit check, a line of its own: a judge that says
     // fits to everything must fail here.
     { name: 'fit judge', rows: fitRows, passed: 0, total: 0 },
+    // Phase 50 (spec D8). The sound-alike score, a line of its own: a scorer
+    // that calls every near miss the same word must fail here.
+    { name: 'sound alike', rows: soundRows, passed: 0, total: 0 },
   ];
 
   for (const row of rows) {
@@ -1452,7 +1497,7 @@ async function main(): Promise<void> {
       `${cases.length} translation + ${renderingCases.length} rendering + ${acceptCases.length} accept + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ` +
       `${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge + ` +
       `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge + ` +
-      `${contextCases.length} context + ${checkCases.length} checker + ${fitCases.length} fit judge cases in ` +
+      `${contextCases.length} context + ${checkCases.length} checker + ${fitCases.length} fit judge + ${soundCases.length} sound alike cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -1477,6 +1522,7 @@ async function main(): Promise<void> {
         contextScore: groupScore(groups[3]),
         checkerScore: groupScore(groups[4]),
         fitJudgeScore: groupScore(groups[5]),
+        soundAlikeScore: groupScore(groups[6]),
         rows,
       },
       null,

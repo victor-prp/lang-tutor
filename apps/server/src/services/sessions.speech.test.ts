@@ -5,11 +5,13 @@ import {
   createFakeClock,
   createFakeLlmClient,
   createFakeLogger,
+  createFakePronunciationRepo,
   createFakeTransaction,
   createFakeTranscriber,
   stub,
 } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
+import { SOUND_ALIKE_MARKER } from '../domain/soundAlike';
 import { TRANSCRIBE_MARKER } from '../domain/speech';
 import type { SessionRecord } from '../domain/session';
 import { AccessDenied, AnswerKindMismatch, LlmUnavailable, QuestionDesynced } from '../errors';
@@ -37,7 +39,17 @@ const record = (answers: SessionRecord['answers'] = []): SessionRecord => ({
   source: 'list',
 });
 
-function setup(transcriber: ReturnType<typeof createFakeTranscriber>, loaded: SessionRecord = record()) {
+// Phase 50 (spec D2). A score far from the line, for a test about something else.
+const FAR = '{"scores":[{"key":"p1","score":0}]}';
+const scored = (...scores: number[]) => JSON.stringify({ scores: scores.map((score, index) => ({ key: `p${index + 1}`, score })) });
+
+function setup(
+  transcriber: ReturnType<typeof createFakeTranscriber>,
+  loaded: SessionRecord = record(),
+  sound: { judge?: ReturnType<typeof createFakeLlmClient>; stored?: Parameters<typeof createFakePronunciationRepo>[0] } = {},
+) {
+  const judge = sound.judge ?? createFakeLlmClient(FAR);
+  const pronunciation = createFakePronunciationRepo(sound.stored ?? []);
   const inserted: unknown[] = [];
   const resolved: unknown[] = [];
   const logger = createFakeLogger();
@@ -57,7 +69,7 @@ function setup(transcriber: ReturnType<typeof createFakeTranscriber>, loaded: Se
   // Phase 29: another learner holds no grant on the list.
   const grant = stub<GrantRepo>({ findGrantFor: async () => null });
   const service = createSessionService({
-    transaction: createFakeTransaction({ session, enrollment, grant }),
+    transaction: createFakeTransaction({ session, enrollment, grant, pronunciation }),
     rng: testRng(7),
     now: createFakeClock(1_000, 2_500),
     logger,
@@ -65,10 +77,11 @@ function setup(transcriber: ReturnType<typeof createFakeTranscriber>, loaded: Se
     contextLlm: createFakeLlmClient(''),
     checkerLlm: createFakeLlmClient(''),
     transcriber,
-    judge: createFakeLlmClient(''),
+    judge,
     translationJudge: createFakeLlmClient(''),
+    soundAlikeThreshold: 0.95,
   });
-  return { service, inserted, resolved, logger };
+  return { service, inserted, resolved, logger, judge, pronunciation };
 }
 
 const attempt = { questionId: 'r1', audio: AUDIO, mimeType: 'audio/aac' };
@@ -203,9 +216,103 @@ describe('answerBySpeech (spec D5)', () => {
       transcriber: createFakeTranscriber('{"heard":"gatto"}'),
       judge: createFakeLlmClient(''),
       translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
     await expect(service.answerBySpeech('u1', SESSION, attempt)).rejects.toBeInstanceOf(QuestionDesynced);
     expect(logger.events.filter((e) => (e as { event?: string }).event === 'speech_judged')).toHaveLength(1);
+  });
+});
+
+// Phase 50. A transcript whose letters are not the form gets a second look:
+// how alike each pair sounds, stored once per pair and shared.
+describe('answerBySpeech, the second look by sound (phase 50)', () => {
+  const event = (logger: ReturnType<typeof createFakeLogger>, name: string) =>
+    logger.events.find((entry) => (entry as { event?: string }).event === name);
+
+  it('records a transcript that sounds like the form as understood, storing what was heard and the score (D1, D3, D5)', async () => {
+    const judge = createFakeLlmClient(scored(0.95));
+    const { service, inserted, pronunciation } = setup(createFakeTranscriber('{"heard":"gato"}'), record(), { judge });
+    const result = await service.answerBySpeech('u1', SESSION, attempt);
+    expect(result).toMatchObject({ heard: 'gato', verdict: 'understood' });
+    expect(result.session?.answers[0]).toMatchObject({ answer_string: 'gato', verdict: 'understood', is_correct: true });
+    expect(inserted).toEqual([[SESSION, 0, 'r1', { text: 'gato', verdict: 'understood' }]]);
+    expect(pronunciation.rows).toEqual([{ language: 'it', a: 'gato', b: 'gatto', score: 0.95 }]);
+  });
+
+  it('asks the judge in text, under the sound-alike kind, with the pair under its key (D2)', async () => {
+    const judge = createFakeLlmClient(scored(1));
+    await setup(createFakeTranscriber('{"heard":"gato"}'), record(), { judge }).service.answerBySpeech('u1', SESSION, attempt);
+    expect(judge.calls).toHaveLength(1);
+    expect(judge.calls[0].system).toContain(SOUND_ALIKE_MARKER);
+    expect(judge.calls[0].system).toContain('Italian');
+    expect(JSON.parse(judge.calls[0].user)).toEqual({ pairs: [{ key: 'p1', a: 'gato', b: 'gatto' }] });
+    expect(judge.calls[0].record).toEqual({ kind: 'sound_alike', sessionId: SESSION, enrollmentId: 'e1', userId: 'u1' });
+  });
+
+  it('costs no call for a pair already scored', async () => {
+    const judge = createFakeLlmClient(scored(0));
+    const stored = [{ language: 'it', a: 'gato', b: 'gatto', score: 1 }];
+    const { service } = setup(createFakeTranscriber('{"heard":"gato"}'), record(), { judge, stored });
+    expect(await service.answerBySpeech('u1', SESSION, attempt)).toMatchObject({ verdict: 'understood' });
+    expect(judge.calls).toHaveLength(0);
+  });
+
+  it('keeps a score below the threshold, and records nothing', async () => {
+    const { service, inserted, pronunciation } = setup(createFakeTranscriber('{"heard":"gato"}'), record(), { judge: createFakeLlmClient(scored(0.9)) });
+    expect(await service.answerBySpeech('u1', SESSION, attempt)).toEqual({ heard: 'gato', verdict: 'unheard', session: null });
+    expect(inserted).toEqual([]);
+    expect(pronunciation.rows).toEqual([{ language: 'it', a: 'gato', b: 'gatto', score: 0.9 }]);
+  });
+
+  it('takes the best of several pairs, and names its form', async () => {
+    // `il` and `gato` are each a stretch of one word, as long as `gatto`.
+    const judge = createFakeLlmClient(scored(0.1, 1));
+    const { service, logger } = setup(createFakeTranscriber('{"heard":"il gato"}'), record(), { judge });
+    expect(await service.answerBySpeech('u1', SESSION, attempt)).toMatchObject({ heard: 'il gato', verdict: 'understood' });
+    expect(JSON.parse(judge.calls[0].user).pairs).toEqual([
+      { key: 'p1', a: 'gatto', b: 'il' },
+      { key: 'p2', a: 'gato', b: 'gatto' },
+    ]);
+    expect(event(logger, 'speech_judged')).toMatchObject({ verdict: 'understood', sound_score: 1, sounds_like: 'gatto' });
+  });
+
+  it('stays unheard when the score call fails or is unreadable, stores nothing, and logs it (D6)', async () => {
+    for (const reply of [new LlmUnavailable('responded 503'), 'nonsense']) {
+      const { service, inserted, pronunciation, logger } = setup(createFakeTranscriber('{"heard":"gato"}'), record(), {
+        judge: createFakeLlmClient(reply),
+      });
+      expect(await service.answerBySpeech('u1', SESSION, attempt)).toEqual({ heard: 'gato', verdict: 'unheard', session: null });
+      expect(inserted).toEqual([]);
+      expect(pronunciation.rows).toEqual([]);
+      expect(event(logger, 'sound_alike_failed')).toMatchObject({ session_id: SESSION, question_type: 'read_aloud', reason: expect.any(String) });
+    }
+  });
+
+  it('never looks again when the letters matched, or when nothing was heard', async () => {
+    const judge = createFakeLlmClient(scored(1));
+    await setup(createFakeTranscriber('{"heard":"il gatto"}'), record(), { judge }).service.answerBySpeech('u1', SESSION, attempt);
+    await setup(createFakeTranscriber('{"heard":""}'), record(), { judge }).service.answerBySpeech('u1', SESSION, attempt);
+    await setup(createFakeTranscriber('{"heard":"gatto"}'), record(), { judge }).service.answerBySpeech('u1', SESSION, { ...attempt, audio: 'AAAA' });
+    expect(judge.calls).toHaveLength(0);
+  });
+
+  it('logs the second look on speech_judged (D7)', async () => {
+    const { service, logger } = setup(createFakeTranscriber('{"heard":"gato"}'), record(), { judge: createFakeLlmClient(scored(0.95)) });
+    await service.answerBySpeech('u1', SESSION, attempt);
+    expect(event(logger, 'speech_judged')).toMatchObject({
+      verdict: 'understood',
+      heard: 'gato',
+      sound_score: 0.95,
+      sounds_like: 'gatto',
+      sound_called: true,
+      sound_ms: expect.any(Number),
+    });
+    const stored = setup(createFakeTranscriber('{"heard":"gato"}'), record(), { stored: [{ language: 'it', a: 'gato', b: 'gatto', score: 0.5 }] });
+    await stored.service.answerBySpeech('u1', SESSION, attempt);
+    expect(event(stored.logger, 'speech_judged')).toMatchObject({ verdict: 'unheard', sound_score: 0.5, sound_called: false });
+    const matched = setup(createFakeTranscriber('{"heard":"gatto"}'));
+    await matched.service.answerBySpeech('u1', SESSION, attempt);
+    expect(event(matched.logger, 'speech_judged')).not.toHaveProperty('sound_score');
   });
 });
 
@@ -271,6 +378,13 @@ describe('answerBySpeech, the second try', () => {
     const { service, resolved } = setup(createFakeTranscriber('{"heard":"cane"}'), pending());
     expect(await service.answerBySpeech('u1', SESSION, { ...clip, retry: true })).toEqual({ heard: 'cane', verdict: 'unheard', session: null });
     expect(resolved).toEqual([]);
+  });
+
+  // Phase 50. A retry clip gets the second look a first one does.
+  it('resolves a retry that sounds like the word as understood', async () => {
+    const { service, resolved } = setup(createFakeTranscriber('{"heard":"lanterne"}'), pending(), { judge: createFakeLlmClient(scored(1)) });
+    expect(await service.answerBySpeech('u1', SESSION, { ...clip, retry: true })).toMatchObject({ heard: 'lanterne', verdict: 'understood' });
+    expect(resolved).toEqual([[SESSION, 0, { text: 'lanterne', verdict: 'understood' }]]);
   });
 
   it('replays a retry sent again without a call, and treats one after a give-up as stale', async () => {

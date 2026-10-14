@@ -6,7 +6,7 @@ import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
 import { seedMemory, seededR, type MemorySeed } from './support/memory';
-import { clearGemini, expectGeminiMatching, expectTranscription, userText } from './support/mockServer';
+import { clearGemini, expectGeminiMatching, expectSoundAlike, expectTranscription, userText } from './support/mockServer';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
 
@@ -113,9 +113,14 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
     const card = await readCard(page, position, 4);
     kinds.push(card.kind);
     if (card.kind === 'read') {
-      // Read aloud: first not understood, then understood.
+      // Read aloud: first not understood, then understood. Phase 50: the second
+      // is heard as рамашка, which is how ромашка is said (its unstressed о is
+      // an а), so it is understood by sound and the banner shows what was heard.
+      expect(card.prompt).toBe('ромашка');
       await expectTranscription(request, 'кошка');
-      await expectTranscription(request, card.prompt);
+      await expectSoundAlike(request, 'кошка', 0.1);
+      await expectTranscription(request, 'рамашка');
+      await expectSoundAlike(request, 'рамашка', 1);
       await speak(page);
       await expect(page.getByTestId('speak-notice')).toContainText('לא הבנו');
       await expect(page.getByTestId('speak-notice-heard')).toHaveText(/кошка/);
@@ -123,7 +128,7 @@ test('speaking: read aloud and say the translation', async ({ page, request }) =
       await page.getByTestId('speak-try-again').click();
       await speak(page);
       await expect(page.getByTestId('feedback-title')).toHaveText(/נכון! שמענו:/);
-      await expect(page.getByTestId('feedback-line')).toContainText(card.prompt);
+      await expect(page.getByTestId('feedback-line')).toContainText('рамашка');
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'say') {
       // Say the translation, understood at once.
