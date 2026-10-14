@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
 import { pushDevices, reminders, sessions } from '../../src/db/schema';
@@ -82,4 +82,19 @@ export async function seedCompletedSession(db: Db, input: { userId: string; day:
     listening: false,
     speaking: false,
   });
+}
+
+/**
+ * Makes every update of a reminder fail, to prove what a finished session writes to one is
+ * part of its completion. The database is the test's own clone, so the trigger goes with it.
+ */
+export async function failReminderUpdates(db: Db): Promise<void> {
+  await db.execute(
+    sql.raw(`
+      create function fail_reminder_update() returns trigger language plpgsql as $$
+        begin raise exception 'planted failure'; end
+      $$;
+      create trigger fail_reminder_update before update on reminders
+        for each row execute function fail_reminder_update();`),
+  );
 }

@@ -5,11 +5,13 @@ import { DIMENSIONS } from '@lang-tutor/core/domain';
 import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogger, createFakeTransaction, createFakeTranscriber, stub } from '../../tests/support/fakes';
 import { testRng } from '../../tests/support/testRng';
 import type { ProgressRow, SnapshotRead } from '../domain/progress';
+import type { MarkCandidate } from '../domain/reminders';
 import type { SessionRecord, SessionState } from '../domain/session';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { MemoryRow } from '../domain/memoryUpdate';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo, SessionEvidence } from '../repo/progress';
+import type { ReminderRepo } from '../repo/reminders';
 import type { SessionRepo } from '../repo/sessions';
 import type { UserRepo } from '../repo/users';
 import { createSessionService } from './sessions';
@@ -70,7 +72,16 @@ const CHANGE = [
   { glossId: 's1', form: 'word0', translation: 'right0', levelBefore: 1, levelAfter: 1, raised: ['written_receptive'] },
 ];
 
-function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null; rows?: ProgressRow[]; state?: SessionState }) {
+function world(opts: {
+  record: SessionRecord;
+  evidence?: SessionEvidence | null;
+  rows?: ProgressRow[];
+  state?: SessionState;
+  /** Phase 52. The service's clock, in epoch ms; the epoch when not given. */
+  at?: number;
+  /** Phase 52. The learner's sent reminders of the day, as sentOnDay answers; none when not given. */
+  sent?: MarkCandidate[];
+}) {
   const calls = {
     completed: 0,
     // Phase 35. The practice_day each ending wrote.
@@ -83,6 +94,9 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
     memory: [] as MemoryRow[][],
     // Phase 31. The order of the share lock and the evidence read.
     steps: [] as string[],
+    // Phase 52. The (learner, day) pairs asked for sent reminders, and the (reminder, session) pairs marked.
+    sentAsked: [] as string[][],
+    marked: [] as string[][],
   };
   const session = stub<SessionRepo>({
     loadSession: async () => opts.record,
@@ -142,11 +156,20 @@ function world(opts: { record: SessionRecord; evidence?: SessionEvidence | null;
       memory,
       user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }) }),
       enrollment: stub<EnrollmentRepo>({ findById: async () => ENROLLMENT }),
+      reminders: stub<ReminderRepo>({
+        sentOnDay: async (userId, day) => {
+          calls.sentAsked.push([userId, day]);
+          return opts.sent ?? [];
+        },
+        markSession: async (id, sessionId) => {
+          calls.marked.push([id, sessionId]);
+        },
+      }),
       jobs,
     }),
     rng: testRng(7),
     logger: createFakeLogger(),
-    now: createFakeClock(0),
+    now: createFakeClock(opts.at ?? 0),
     llm: createFakeLlmClient(''),
     contextLlm: createFakeLlmClient(''),
     checkerLlm: createFakeLlmClient(''),
@@ -251,6 +274,79 @@ describe('progress when a session ends', () => {
     expect(calls.asked).toHaveLength(1);
     expect(calls.updated).toEqual([]);
     expect(calls.snapshots).toEqual([]);
+  });
+
+  // Phase 52 (spec D6). The session that ends marks the latest reminder of the
+  // learner's day that no session has claimed, in the transaction that ends it.
+  describe('the reminder a finished session marks', () => {
+    const AT = Date.parse('2026-10-14T13:40:00Z');
+    const at = (time: string) => Date.parse(`2026-10-14T${time}:00Z`);
+
+    it("marks the latest reminder decided by then, asking for the owner's reminders of the learner's day", async () => {
+      const { service, calls } = world({
+        record: record(9),
+        at: AT,
+        sent: [
+          { id: 'r_13', decidedAt: at('13:00'), sessionId: null },
+          { id: 'r_17', decidedAt: at('17:00'), sessionId: null },
+        ],
+      });
+      await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
+      expect(calls.sentAsked).toEqual([['u1', '2026-10-14']]);
+      expect(calls.marked).toEqual([['r_13', SESSION]]);
+    });
+
+    it('marks nothing when no reminder was sent', async () => {
+      const { service, calls } = world({ record: record(9), at: AT, sent: [] });
+      await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
+      expect(calls.sentAsked).toEqual([['u1', '2026-10-14']]);
+      expect(calls.marked).toEqual([]);
+      expect(calls.completed).toBe(1);
+    });
+
+    it('marks nothing when the latest reminder is already marked, and never an earlier one', async () => {
+      const { service, calls } = world({
+        record: record(9),
+        at: at('17:10'),
+        sent: [
+          { id: 'r_13', decidedAt: at('13:00'), sessionId: null },
+          { id: 'r_17', decidedAt: at('17:00'), sessionId: 's_earlier' },
+        ],
+      });
+      await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
+      expect(calls.marked).toEqual([]);
+    });
+
+    it('does not mark a reminder decided after the session ended', async () => {
+      const { service, calls } = world({ record: record(9), at: AT, sent: [{ id: 'r_17', decidedAt: at('17:00'), sessionId: null }] });
+      await service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
+      expect(calls.marked).toEqual([]);
+    });
+
+    it('an answer that ends nothing, a replay and a skip ask for no reminder', async () => {
+      const sent = [{ id: 'r_13', decidedAt: at('13:00'), sessionId: null }];
+      for (const run of [
+        async () => {
+          const w = world({ record: record(5), at: AT, sent });
+          await w.service.submitAnswer('u1', SESSION, 'q5', { option_index: 0 });
+          return w.calls;
+        },
+        async () => {
+          const w = world({ record: record(10), at: AT, sent });
+          await w.service.submitAnswer('u1', SESSION, 'q9', { option_index: 0 });
+          return w.calls;
+        },
+        async () => {
+          const w = world({ record: record(3), at: AT, sent });
+          await w.service.skipSession('u1', SESSION);
+          return w.calls;
+        },
+      ]) {
+        const calls = await run();
+        expect(calls.sentAsked).toEqual([]);
+        expect(calls.marked).toEqual([]);
+      }
+    });
   });
 
   it('getSession answers a completed session with its change, and any other with none', async () => {
