@@ -293,6 +293,16 @@ const createRequest = (over: Partial<CreateTargetRequest> = {}): CreateTargetReq
 });
 const word = (glossId: string, readiness: string) => ({ gloss_id: glossId, form: WORDS[glossId].form, meaning: WORDS[glossId].key, readiness });
 const logged = (logger: { events: Record<string, unknown>[] }, event: string) => logger.events.filter((line) => line.event === event);
+/** Final review I3. A photo import saved through a target, logged as its own save logs it (phase
+ *  26 D14), with the target named. */
+const importSaved = (importId: string, saved: number, unticked = 0, changed = 0, targetId = 't_new') => ({
+  event: 'photo_import_saved',
+  import_id: importId,
+  saved_count: saved,
+  unticked_count: unticked,
+  changed_gloss_count: changed,
+  target_id: targetId,
+});
 
 describe('create (spec D10, rulings R-D9, R-D10)', () => {
   it('saves the photos’ rows and the typed words, and makes one target of them: the photos’ first, each word once', async () => {
@@ -333,7 +343,31 @@ describe('create (spec D10, rulings R-D9, R-D10)', () => {
       },
     ]);
     expect(jobs.enqueued.at(-1)).toEqual(TARGET_STOCK);
-    expect(logger.events).toEqual([{ event: 'target_created', enrollment_id: 'e1', target_id: 't_new', kind: 'exam', word_count: 4 }]);
+    // Each photo's save as its own logs it, counting the words it gave: gatto is i_a's.
+    expect(logger.events).toEqual([
+      importSaved('i_a', 2),
+      importSaved('i_b', 1),
+      { event: 'target_created', enrollment_id: 'e1', target_id: 't_new', kind: 'exam', word_count: 4, unread_photo_count: 0 },
+    ]);
+  });
+
+  it('logs each photo saved with what its review left, and the photos not read on target_created (final review I3)', async () => {
+    const reviewed = photo('i_a', ['g_casa', 'g_gatto']);
+    // gatto unticked; cane's row read as sole, its other meaning chosen instead.
+    reviewed.items[1] = { ...reviewed.items[1], ticked: false };
+    reviewed.items.push({
+      ...itemRow('i_a', 2, 'g_cane'),
+      options: [...itemRow('i_a', 2, 'g_sole').options, ...itemRow('i_a', 2, 'g_cane').options],
+      suggestedGlossId: 'g_sole',
+    });
+    const { service, logger } = world({ imports: [photo('i_failed', [], { status: 'failed' }), reviewed] });
+
+    await service.create(OWNER, 'e1', createRequest({ photo_import_ids: ['i_failed', 'i_a'], entries: [] }));
+
+    expect(logger.events).toEqual([
+      importSaved('i_a', 2, 1, 1),
+      { event: 'target_created', enrollment_id: 'e1', target_id: 't_new', kind: 'exam', word_count: 2, unread_photo_count: 1 },
+    ]);
   });
 
   it('takes a gloss from the first photo that has it: unticked there, it is not saved from a later photo (ruling R-D9)', async () => {
@@ -485,9 +519,33 @@ describe('addWords', () => {
     expect(retired).toEqual(['s_stock']);
     expect(jobs.enqueued.at(-1)).toEqual(TARGET_STOCK);
     expect(logger.events).toEqual([
-      { event: 'target_changed', target_id: 't1', change: 'words_added', count: 2 },
+      importSaved('i_a', 2, 0, 0, 't1'),
+      { event: 'target_changed', target_id: 't1', change: 'words_added', count: 2, unread_photo_count: 0 },
       { event: 'session_retired', enrollment_id: 'e1', session_id: 's_stock', reason: 'target_changed' },
     ]);
+  });
+
+  it('logs the photos saved and those not read; a photo whose words the target holds is saved and logged all the same (final review I3)', async () => {
+    const { service, logger } = world({
+      saved: ['g_casa'],
+      targets: [target({ words: ['g_casa'] })],
+      imports: [photo('i_failed', [], { status: 'failed' }), photo('i_a', ['g_gatto']), photo('i_b', ['g_casa'])],
+    });
+
+    await service.addWords(OWNER, 't1', { photo_import_ids: ['i_failed', 'i_a', 'i_b'], entries: [] });
+
+    expect(logger.events).toEqual([
+      importSaved('i_a', 1, 0, 0, 't1'),
+      importSaved('i_b', 1, 0, 0, 't1'),
+      { event: 'target_changed', target_id: 't1', change: 'words_added', count: 1, unread_photo_count: 1 },
+    ]);
+  });
+
+  it('logs a photo saved though it added the target no word: no target_changed (final review I3)', async () => {
+    const { service, logger, events } = world({ saved: ['g_casa'], targets: [target()], imports: [photo('i_a', ['g_casa'])], open: { stock: listStock() } });
+    await service.addWords(OWNER, 't1', { photo_import_ids: ['i_a'], entries: [] });
+    expect(events).toEqual([]);
+    expect(logger.events).toEqual([importSaved('i_a', 1, 0, 0, 't1')]);
   });
 
   it('changes nothing when the target holds every word already: no event, the stock kept', async () => {

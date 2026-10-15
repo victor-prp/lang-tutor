@@ -16,7 +16,7 @@ import type { Logger } from '../logger';
 import type { TargetRow } from '../repo/targets';
 import { authorizeEnrollment } from './access';
 import { learnerDay } from './learnerDay';
-import { saveImportsInTx } from './photoImports';
+import { logImportSaved, saveImportsInTx, type ImportSaved } from './photoImports';
 import { requestStock } from './stock';
 import type { Repos, Transaction } from './transaction';
 import { saveEntriesInTx } from './vocabulary';
@@ -26,6 +26,10 @@ type TargetWithWords = TargetRow & { glossIds: readonly string[] };
 
 /** What a create or an add brings: photo imports, one per photo, and typed words. */
 type WordsInput = Pick<CreateTargetRequest, 'photo_import_ids' | 'entries'>;
+
+/** What saving them did: the words' gloss ids, each photo import saved, to be logged once the
+ *  transaction commits, and the photos not read (ruling R-D9). */
+type SavedWords = { glossIds: string[]; imports: ImportSaved[]; unreadPhotos: number };
 
 /** Spec D1. Active while its date is still to come and it was not ended early. */
 const isActive = (target: TargetRow, today: string): boolean => target.endedAt === null && today < target.dueOn;
@@ -108,9 +112,10 @@ export function createTargetService({
   /**
    * Spec D10, D11, ruling R-D9. The words a create or an add brings, saved in its
    * transaction as their own saves would save them: the photo imports' rows, then the typed
-   * words. Their gloss ids, resolved through merges, the photos' first, each once.
+   * words. Their gloss ids, resolved through merges, the photos' first, each once; and what
+   * the photos' saves log (final review I3).
    */
-  async function saveWords(repos: Repos, enrolled: Enrollment, actorUserId: string, input: WordsInput): Promise<string[]> {
+  async function saveWords(repos: Repos, enrolled: Enrollment, actorUserId: string, input: WordsInput): Promise<SavedWords> {
     const photos = await saveImportsInTx(repos, logger, {
       enrolled,
       actorUserId,
@@ -119,7 +124,13 @@ export function createTargetService({
       stockSaveDelaySeconds,
     });
     const typed = await saveEntriesInTx(repos, logger, { enrolled, actorUserId, entries: input.entries, stockSaveDelaySeconds });
-    return [...new Set([...photos.glossIds, ...typed])];
+    return { glossIds: [...new Set([...photos.glossIds, ...typed])], imports: photos.imports, unreadPhotos: photos.failedPhotos };
+  }
+
+  /** Final review I3. Once the change committed: each photo import it saved, as the import's
+   *  own save logs it (phase 26 D14), naming the target. */
+  function logImportsSaved(saved: SavedWords, targetId: string): void {
+    for (const imported of saved.imports) logImportSaved(logger, imported, { target_id: targetId });
   }
 
   /**
@@ -206,7 +217,8 @@ export function createTargetService({
         const today = await learnerDay(repos, enrolled.user_id, now());
         if (request.due_on <= today) throw new InvalidTarget('due_date');
         await repos.session.lockNextSession(enrolled.id);
-        const glossIds = await saveWords(repos, enrolled, actorUserId, request);
+        const saved = await saveWords(repos, enrolled, actorUserId, request);
+        const { glossIds } = saved;
         if (glossIds.length === 0) throw new InvalidTarget('no_words');
         const row = await repos.target.insertTarget({ enrollmentId: enrolled.id, kind: request.kind, dueOn: request.due_on });
         await repos.target.addWords(row.id, glossIds);
@@ -219,14 +231,16 @@ export function createTargetService({
           sessionId: null,
         });
         const retired = await restock(repos, enrolled.id);
-        return { target: await viewOne(repos, enrolled, today, row), wordCount: glossIds.length, retired };
+        return { target: await viewOne(repos, enrolled, today, row), wordCount: glossIds.length, retired, saved };
       });
+      logImportsSaved(created.saved, created.target.id);
       logger.info({
         event: 'target_created',
         enrollment_id: enrollmentId,
         target_id: created.target.id,
         kind: created.target.kind,
         word_count: created.wordCount,
+        unread_photo_count: created.saved.unreadPhotos,
       });
       logRetired(enrollmentId, created.retired);
       return created.target;
@@ -240,7 +254,8 @@ export function createTargetService({
       const changed = await transaction(async (repos) => {
         const { enrolled, target, today, active } = await lockTarget(repos, actorUserId, targetId);
         if (!active) throw new TargetClosed(targetId);
-        const added = await repos.target.addWords(target.id, await saveWords(repos, enrolled, actorUserId, request));
+        const saved = await saveWords(repos, enrolled, actorUserId, request);
+        const added = await repos.target.addWords(target.id, saved.glossIds);
         let retired: string | null = null;
         if (added.length > 0) {
           await repos.target.insertEvent({
@@ -253,10 +268,17 @@ export function createTargetService({
           });
           retired = await restock(repos, enrolled.id);
         }
-        return { target: await viewOne(repos, enrolled, today, target), enrollmentId: enrolled.id, added, retired };
+        return { target: await viewOne(repos, enrolled, today, target), enrollmentId: enrolled.id, added, retired, saved };
       });
+      logImportsSaved(changed.saved, targetId);
       if (changed.added.length > 0) {
-        logger.info({ event: 'target_changed', target_id: targetId, change: 'words_added', count: changed.added.length });
+        logger.info({
+          event: 'target_changed',
+          target_id: targetId,
+          change: 'words_added',
+          count: changed.added.length,
+          unread_photo_count: changed.saved.unreadPhotos,
+        });
       }
       logRetired(changed.enrollmentId, changed.retired);
       return changed.target;

@@ -100,7 +100,17 @@ describe('create (spec D10, ruling R-D9)', () => {
     ]);
     expect(await deps.targets.getTarget('u_1', made.id)).toEqual(made);
     expect((await deps.targets.list('u_1', E)).targets.map((listed) => listed.id)).toEqual([made.id]);
-    expect(logger.events).toContainEqual({ event: 'target_created', enrollment_id: E, target_id: made.id, kind: 'exam', word_count: 4 });
+    expect(logger.events).toContainEqual({ event: 'target_created', enrollment_id: E, target_id: made.id, kind: 'exam', word_count: 4, unread_photo_count: 0 });
+    // Final review I3: each photo's save is logged as its own save logs it; bread is the first photo's.
+    const saved = (importId: string, savedCount: number) => ({
+      event: 'photo_import_saved',
+      import_id: importId,
+      saved_count: savedCount,
+      unticked_count: 0,
+      changed_gloss_count: 0,
+      target_id: made.id,
+    });
+    expect(logger.events.filter((line) => line.event === 'photo_import_saved')).toEqual([saved(first, 2), saved(second, 1)]);
   });
 
   it('decides the date by the bot’s day, not the clock: its today is refused, and the day after is one day left (ADR 0013)', async () => {

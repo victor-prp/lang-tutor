@@ -85,6 +85,28 @@ function readyToSave(row: PhotoImportRow, items: readonly PhotoImportItemRow[], 
  *  entry's log names it. */
 type ImportEntry = VocabularyEntryInput & { importId: string };
 
+/** Phase 26 (spec D14). A photo import saved: the words it gave, and what its review left, the
+ *  rows unticked and the rows given another meaning than the one suggested. */
+export type ImportSaved = { importId: string; savedCount: number; untickedCount: number; changedGlossCount: number };
+
+function importSaved(importId: string, items: readonly PhotoImportItemRow[], savedCount: number): ImportSaved {
+  const counts = reviewCounts(items);
+  return { importId, savedCount, untickedCount: counts.unticked, changedGlossCount: counts.changedGloss };
+}
+
+/** Phase 26 (spec D14). A save of an import, logged once its transaction committed. Phase 53
+ *  (final review I3): a target's save of several logs each the same way, naming the target. */
+export function logImportSaved(logger: Logger, saved: ImportSaved, by: { target_id?: string } = {}): void {
+  logger.info({
+    event: 'photo_import_saved',
+    import_id: saved.importId,
+    saved_count: saved.savedCount,
+    unticked_count: saved.untickedCount,
+    changed_gloss_count: saved.changedGlossCount,
+    ...by,
+  });
+}
+
 /**
  * Spec D11. The writes of a save from photo imports, in a transaction the caller opened,
  * authorized, and locked each import in after checking it with readyToSave: the entries
@@ -179,7 +201,9 @@ async function writeImportSave(
  * then by position, are one review, as the app shows it: the first row of each chosen gloss
  * (firstRowPerGloss), and of those the ticked ones are saved as a save of one import saves
  * them, every import then marked saved. Answers the saved gloss ids, resolved through merges,
- * in order, and the photos not read. No import, or only failed ones: nothing is written.
+ * in order, the photos not read, and each import saved, for the caller to log once its
+ * transaction commits (logImportSaved): its words are the entries taken from its rows. No
+ * import, or only failed ones: nothing is written.
  */
 export async function saveImportsInTx(
   repos: Repos,
@@ -191,7 +215,7 @@ export async function saveImportsInTx(
     now: number;
     stockSaveDelaySeconds: number;
   },
-): Promise<{ glossIds: string[]; failedPhotos: number }> {
+): Promise<{ glossIds: string[]; failedPhotos: number; imports: ImportSaved[] }> {
   const { photoImport } = repos;
   const joined: { importId: string; items: PhotoImportItemRow[] }[] = [];
   let failedPhotos = 0;
@@ -207,7 +231,7 @@ export async function saveImportsInTx(
     if (!readyToSave(row, items, input.now)) throw new PhotoImportConflict(importId, 'not ready to save');
     joined.push({ importId, items });
   }
-  if (joined.length === 0) return { glossIds: [], failedPhotos };
+  if (joined.length === 0) return { glossIds: [], failedPhotos, imports: [] };
   const shown = firstRowPerGloss(
     joined.flatMap(({ importId, items }) => items.map((item) => ({ importId, item }))),
     ({ item }) => item.chosenGlossId,
@@ -220,7 +244,10 @@ export async function saveImportsInTx(
     entries,
     stockSaveDelaySeconds: input.stockSaveDelaySeconds,
   });
-  return { glossIds, failedPhotos };
+  const imports = joined.map(({ importId, items }) =>
+    importSaved(importId, items, entries.filter((entry) => entry.importId === importId).length),
+  );
+  return { glossIds, failedPhotos, imports };
 }
 
 /**
@@ -367,16 +394,7 @@ export function createPhotoImportService({
         });
         return { entries, items, repeated: false };
       });
-      if (!outcome.repeated) {
-        const counts = reviewCounts(outcome.items);
-        logger.info({
-          event: 'photo_import_saved',
-          import_id: importId,
-          saved_count: outcome.entries.length,
-          unticked_count: counts.unticked,
-          changed_gloss_count: counts.changedGloss,
-        });
-      }
+      if (!outcome.repeated) logImportSaved(logger, importSaved(importId, outcome.items, outcome.entries.length));
       return { saved_gloss_ids: outcome.entries.map((entry) => entry.gloss_id) };
     },
 
