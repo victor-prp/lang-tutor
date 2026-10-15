@@ -162,6 +162,10 @@ api_host() {
 HOST=$(api_host)
 
 LANE_ROOT="$ROOT"
+# Request logs (spec D3). Where with-log.sh writes this lane's server and Metro
+# output: inside the checkout, so it is the lane's by construction (R5) and goes
+# with the worktree when lane:clean removes it.
+LANE_LOGS="${LANE_LOGS:-$ROOT/.logs}"
 PORT="${PORT:-$d_port}"
 METRO_PORT="${METRO_PORT:-$d_metro_port}"
 E2E_APP_PORT="${E2E_APP_PORT:-$d_e2e_app_port}"
@@ -182,7 +186,7 @@ WEB_ORIGINS="${WEB_ORIGINS:-http://localhost:$METRO_PORT,http://$HOST:$METRO_POR
 # written down, not because it varies.
 MOCKSERVER_URL="${MOCKSERVER_URL:-http://localhost:1080}"
 
-KEYS="LANE LANE_SLOT LANE_ROOT LANE_BRANCH PORT METRO_PORT DATABASE_URL \
+KEYS="LANE LANE_SLOT LANE_ROOT LANE_BRANCH LANE_LOGS PORT METRO_PORT DATABASE_URL \
 E2E_API_URL E2E_APP_URL E2E_APP_PORT E2E_DATABASE_URL E2E_MOCK_NAMESPACE \
 MOCKSERVER_URL TEST_DB_PREFIX EXPO_PUBLIC_API_URL AUTH_BASE_URL WEB_ORIGINS"
 

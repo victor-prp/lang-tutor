@@ -75,6 +75,8 @@ expect_eq "main checkout e2e database" \
   "postgres://postgres:postgres@localhost:5432/lang_tutor_e2e" "$(value_of "$MAIN" E2E_DATABASE_URL)"
 expect_eq "main checkout test prefix is bare"     "t_"         "$(value_of "$MAIN" TEST_DB_PREFIX)"
 expect_eq "main checkout mock namespace"          "e2e"        "$(value_of "$MAIN" E2E_MOCK_NAMESPACE)"
+expect_eq "main checkout logs into its own .logs" \
+  "$(cd "$MAIN" && pwd -P)/.logs"                               "$(value_of "$MAIN" LANE_LOGS)"
 expect_eq "MockServer is shared, not per lane" \
   "http://localhost:1080"                                      "$(value_of "$MAIN" MOCKSERVER_URL)"
 
@@ -102,6 +104,8 @@ expect_eq "auth base url is this lane's server" \
   "http://localhost:4001"                                      "$(value_of "$FIXTURE/wt1" AUTH_BASE_URL)"
 expect_eq "web origins are this lane's Metro, by name and by address" \
   "http://localhost:9081,http://localhost:9081"                "$(value_of "$FIXTURE/wt1" WEB_ORIGINS)"
+expect_eq "a worktree logs into its own .logs" \
+  "$(cd "$FIXTURE/wt1" && pwd -P)/.logs"                       "$(value_of "$FIXTURE/wt1" LANE_LOGS)"
 
 # --- allocation --------------------------------------------------------------
 worktree wt2 second

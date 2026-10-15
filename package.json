@@ -12,11 +12,11 @@
     "zod": "^4.4.3"
   },
   "scripts": {
-    "mobile": "bash scripts/lane-env.sh bash scripts/with-commit.sh npm run start --workspace apps/mobile",
+    "mobile": "bash scripts/lane-env.sh bash scripts/with-commit.sh bash scripts/with-log.sh --tty metro npm run start --workspace apps/mobile",
     "mobile:prod": "bash scripts/lane-env.sh bash scripts/mobile-prod.sh",
     "image:build": "bash scripts/lane-env.sh bash scripts/image-build.sh",
     "image:run": "bash scripts/lane-env.sh bash scripts/image-run.sh",
-    "server": "bash scripts/lane-env.sh bash scripts/with-commit.sh npm run dev --workspace apps/server",
+    "server": "bash scripts/lane-env.sh bash scripts/with-commit.sh bash scripts/with-log.sh server npm run dev --workspace apps/server",
     "rerun": "bash scripts/lane-env.sh bash scripts/rerun.sh",
     "e2e": "bash scripts/lane-env.sh bash scripts/with-commit.sh npm run e2e --workspace e2e",
     "e2e:image": "E2E_TARGET=image bash scripts/lane-env.sh bash scripts/with-commit.sh npm run e2e --workspace e2e",

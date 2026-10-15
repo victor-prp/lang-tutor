@@ -1,3 +1,4 @@
+import type { MiddlewareHandler } from 'hono';
 import type { PgBoss } from 'pg-boss';
 
 import { createAuth, type AuthModule, type SendCode, type SessionReader } from './auth/betterAuth';
@@ -9,6 +10,7 @@ import { createExpoPushClient, PUSH_TIMEOUT_MS } from './providers/expoPush';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from './providers/gemini';
 import { createResendMailer, RESEND_TIMEOUT_MS } from './providers/resend';
 import { createAuthRepo } from './repo/auth';
+import { createRequestLog, passRequestsThrough } from './routes/requestLog';
 import { createGlossFamiliesRepo } from './repo/glossFamilies';
 import { createGlossRepo } from './repo/glosses';
 import { createHealthRepo, type HealthRepo } from './repo/health';
@@ -81,6 +83,8 @@ export type AppDeps = {
   // Phase 30 (spec D1). Set only inside the image; app.ts serves the export from it.
   webDistDir: string | null;
   logger: Logger;
+  // The request log on /api/*: a started and a finished line per request.
+  requestLog: MiddlewareHandler;
   // Phase 29. The four mounted Better Auth paths and their handler (spec D3).
   auth: {
     handler: AuthModule['handler'];
@@ -183,6 +187,9 @@ export function createServerDeps(io: {
   // Phase 19. Constructed and started in main() — starting it is I/O, and
   // composition performs none (ADR 0001 R6). Only the jobs repository uses it.
   boss: PgBoss;
+  // A line per request when it arrives and when it finishes, with bodies or
+  // without; null writes none, which keeps a test's logger to its own events.
+  requestLog: { bodies: boolean } | null;
 }): AppDeps {
   // Binding the repositories to a transaction is assembly, which is what this
   // file is for. Doing it here is what lets services/ take a transaction rather
@@ -378,6 +385,9 @@ export function createServerDeps(io: {
     identity: io.identity,
     webDistDir: io.webDistDir,
     logger: io.logger,
+    requestLog: io.requestLog
+      ? createRequestLog({ logger: io.logger, now: io.now, bodies: io.requestLog.bodies })
+      : passRequestsThrough,
     auth: { handler: authModule.handler, paths: authModule.paths },
     signedIn: { sessionOf: authModule.sessionOf },
     webOrigins: io.auth.webOrigins,

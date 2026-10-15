@@ -50,6 +50,8 @@ const healthRoute = createRoute({
 // route definitions below *are* the published description of this API.
 export function createApp(deps: AppDeps) {
   const app = new OpenAPIHono<ActorEnv>();
+  // First, so a request is on record before anything else can answer or hang it.
+  app.use('/api/*', deps.requestLog);
   // Phase 29 (spec D15). The lane's own web origins, with credentials: the
   // browser sends the session cookie only to an origin CORS names. The phone
   // sends no Origin and is unaffected.
