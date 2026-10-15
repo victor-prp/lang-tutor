@@ -3,6 +3,7 @@ import type { QuestionType } from '@lang-tutor/core/domain';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 
 import type { Tx } from '../db/client';
+import type { RecentContexts } from '../domain/context';
 import type { GenerationContext, RecentSentences } from '../domain/distractors';
 import { dictLexemes, dictVariants, questions, type QuestionOption } from '../db/schema';
 
@@ -25,6 +26,20 @@ export type QuestionRow = {
   sentenceTranslation: string | null;
   gapStart: number | null;
   gapEnd: number | null;
+  /** Phase 34 (spec D2, D12). The form the card asks for when it is not the
+   *  variant's `form`; null on a card with none. */
+  answerForm: string | null;
+  /** Phase 34 (spec D6, D8, D12). The sentence shown beside a bare word and its
+   *  marked word, and the practised word marked in a sentence card's Hebrew.
+   *  The context's other half is the judge's and is not read here. */
+  context: string | null;
+  contextMarkStart: number | null;
+  contextMarkEnd: number | null;
+  sentenceMarkStart: number | null;
+  sentenceMarkEnd: number | null;
+  /** Phase 39 (spec D6). The meanings a new_meaning card lists as known; null
+   *  on every other type (questions_known_meanings_valid). */
+  knownMeanings: string[] | null;
   form: string;
   lemma: string;
   partOfSpeech: string;
@@ -44,6 +59,13 @@ export const questionColumns = {
   sentenceTranslation: questions.sentenceTranslation,
   gapStart: questions.gapStart,
   gapEnd: questions.gapEnd,
+  answerForm: questions.answerForm,
+  context: questions.context,
+  contextMarkStart: questions.contextMarkStart,
+  contextMarkEnd: questions.contextMarkEnd,
+  sentenceMarkStart: questions.sentenceMarkStart,
+  sentenceMarkEnd: questions.sentenceMarkEnd,
+  knownMeanings: questions.knownMeanings,
   form: dictVariants.form,
   lemma: dictLexemes.lemma,
   partOfSpeech: dictLexemes.partOfSpeech,
@@ -65,6 +87,15 @@ export const questionColumns = {
  */
 export function questionFrom(row: QuestionRow, order: number[] | null): Question {
   const base = { id: row.id, vocab_term_id: row.lexemeId };
+  // Phase 34 (spec D2, D12). The word a card asks for, or shows beside its
+  // rendering: the form that agrees with the rendering when the question stored
+  // one, else the variant's own. One source for the six types that ask for it.
+  const asked = row.answerForm ?? row.form;
+  // Phase 34 (spec D6, D8). The sentence beside a bare word, and a sentence
+  // card's marked word: a pair of offsets is a mark, half of one is none.
+  const markOf = (start: number | null, end: number | null) => (start !== null && end !== null ? { start, end } : null);
+  const context = row.context === null ? null : { text: row.context, mark: markOf(row.contextMarkStart, row.contextMarkEnd) };
+  const mark = markOf(row.sentenceMarkStart, row.sentenceMarkEnd);
   switch (row.type) {
     case 'typed_translation':
       return {
@@ -72,9 +103,10 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         type: 'typed_translation',
         question: row.prompt!,
         part_of_speech: row.partOfSpeech,
-        answer: row.form,
+        answer: asked,
         lemma: row.lemma,
         alternatives: row.alternatives ?? [],
+        context,
       };
     case 'dictation':
       return { ...base, type: 'dictation', question: row.form, meaning: row.prompt! };
@@ -86,9 +118,10 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         type: 'say_translation',
         question: row.prompt!,
         part_of_speech: row.partOfSpeech,
-        answer: row.form,
+        answer: asked,
         lemma: row.lemma,
         alternatives: row.alternatives ?? [],
+        context,
       };
     case 'typed_meaning':
       // Phase 27 (spec D15): the form is asked, the stored Hebrew is the meaning
@@ -99,6 +132,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         question: row.form,
         part_of_speech: row.partOfSpeech,
         meaning: row.prompt!,
+        context,
       };
     case 'cloze_typed':
       // Phase 27 (spec D5). The gap's text is the answer; the client judges it.
@@ -111,6 +145,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         meaning: row.prompt!,
         answer: row.sentence!.slice(row.gapStart!, row.gapEnd!),
         alternatives: row.alternatives ?? [],
+        mark,
       };
     case 'sentence_translation':
       // Phase 27 (spec D6). The Hebrew sentence is asked; `sentence` is the reference.
@@ -122,6 +157,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         sentence: row.sentence!,
         gap: { start: row.gapStart!, end: row.gapEnd! },
         answer: row.sentence!.slice(row.gapStart!, row.gapEnd!),
+        mark,
       };
     case 'letter_tiles':
       return {
@@ -129,7 +165,7 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         type: 'letter_tiles',
         question: row.prompt!,
         part_of_speech: row.partOfSpeech,
-        answer: row.form,
+        answer: asked,
         tiles: row.tiles!,
       };
   }
@@ -151,19 +187,29 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
         ...choice,
       };
     case 'reverse_choice':
-      return { ...base, type: 'reverse_choice', question: row.prompt!, part_of_speech: row.partOfSpeech, ...choice };
+      return { ...base, type: 'reverse_choice', question: row.prompt!, part_of_speech: row.partOfSpeech, ...choice, context };
     case 'listen_choice':
-      return { ...base, type: 'listen_choice', question: row.form, ...choice };
+      // Phase 34 (spec D10): the part of speech, as the reverse card shows it.
+      return { ...base, type: 'listen_choice', question: asked, part_of_speech: row.partOfSpeech, ...choice };
+    case 'new_meaning':
+      // Phase 39 (spec D6): a multiple choice's card, with the meanings already known.
+      return { ...base, type: 'new_meaning', question: asked, known_meanings: row.knownMeanings!, ...choice, context };
     case 'matching':
       return {
         ...base,
         type: 'matching',
         question: row.form,
+        part_of_speech: row.partOfSpeech,
         ...choice,
-        board: { question_ids: [row.id], words: [row.form], correct_options: [choice.correct_option] },
+        board: {
+          question_ids: [row.id],
+          words: [row.form],
+          parts_of_speech: [row.partOfSpeech],
+          correct_options: [choice.correct_option],
+        },
       };
     default:
-      return { ...base, type: 'multiple_choice', question: row.form, ...choice };
+      return { ...base, type: 'multiple_choice', question: asked, ...choice, context };
   }
 }
 
@@ -185,6 +231,7 @@ export function withBoards(questions: readonly Question[]): Question[] {
     const board = {
       question_ids: run.map((question) => question.id),
       words: run.map((question) => question.question),
+      parts_of_speech: run.map((question) => question.part_of_speech),
       correct_options: run.map((question) => question.correct_option),
     };
     for (let i = start; i < end; i++) result[i] = { ...(result[i] as MatchingQuestion), board };
@@ -229,7 +276,8 @@ export function createQuestionRepo(tx: Tx) {
      * form's rendering of the picked sense in the source language, under the
      * gloss the pick practises (phase 31). In pick order. A pick whose rows are
      * gone (a db:reseed between request and job) is dropped rather than failing
-     * the whole session.
+     * the whole session. Phase 34 (spec D1, D2): with what the accept job stored
+     * for the rendering, and when it ran.
      */
     findGenerationContext: async (input: {
       picks: { glossId: string; senseId: string; variantId: string }[];
@@ -247,9 +295,15 @@ export function createQuestionRepo(tx: Tx) {
         translation: string;
         example_source: string | null;
         example_target: string | null;
+        accepted_answers: string[];
+        answer_form: string | null;
+        accepted_ms: number | null;
       }>(sql`
         SELECT asked.gloss_id, tr.sense_id, tr.variant_id, l.id AS lexeme_id, v.form, l.lemma, l.part_of_speech,
-               tr.translation, tr.example_source, tr.example_target
+               tr.translation, tr.example_source, tr.example_target,
+               tr.accepted_answers, tr.answer_form,
+               -- A raw read hands a timestamptz back as text; milliseconds parse exactly.
+               (extract(epoch from tr.accepted_at) * 1000)::float8 AS accepted_ms
         FROM (VALUES ${sql.join(
           input.picks.map((pick) => sql`(${pick.glossId}::text, ${pick.senseId}::text, ${pick.variantId}::text)`),
           sql`, `,
@@ -275,6 +329,9 @@ export function createQuestionRepo(tx: Tx) {
                 translation: row.translation,
                 example: row.example_source,
                 exampleTranslation: row.example_target,
+                acceptedAnswers: row.accepted_answers,
+                answerForm: row.answer_form,
+                acceptedAt: row.accepted_ms === null ? null : new Date(row.accepted_ms),
               },
             ]
           : [];
@@ -318,6 +375,45 @@ export function createQuestionRepo(tx: Tx) {
     },
 
     /**
+     * Phase 34 (spec D6). Per gloss and card type, the context sentences this
+     * enrollment's last sessions showed, newest first by creation, so a new one
+     * is never one of them (phase 27 D8's rule, as findRecentSentences). At most
+     * `limit` per gloss and type; a gloss with none has no entry.
+     *
+     * Phase 39 (spec D6). A new_meaning is generated as a multiple choice and
+     * shows its sentence, so its sentences are a multiple choice's: one list,
+     * newest first across both, capped once.
+     */
+    findRecentContexts: async (input: {
+      enrollmentId: string;
+      glossIds: string[];
+      limit: number;
+    }): Promise<RecentContexts> => {
+      const recent: RecentContexts = new Map();
+      if (input.glossIds.length === 0) return recent;
+      const rows = await tx.execute<{ gloss_id: string; type: QuestionType; context: string }>(sql`
+        SELECT gloss_id, type, context FROM (
+          SELECT q.gloss_id, shown.type, q.context,
+                 row_number() OVER (PARTITION BY q.gloss_id, shown.type ORDER BY q.created_at DESC, q.id DESC) AS recency
+          FROM questions q
+          CROSS JOIN LATERAL (
+            SELECT CASE WHEN q.type = 'new_meaning' THEN 'multiple_choice' ELSE q.type END AS type
+          ) shown
+          WHERE q.enrollment_id = ${input.enrollmentId}
+            AND q.context IS NOT NULL
+            AND q.gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
+        ) ranked
+        WHERE recency <= ${input.limit}
+        ORDER BY gloss_id, type, recency`);
+      for (const row of rows.rows) {
+        const entry = recent.get(row.gloss_id) ?? {};
+        (entry[row.type] ??= []).push(row.context);
+        recent.set(row.gloss_id, entry);
+      }
+      return recent;
+    },
+
+    /**
      * Phase 27 (spec D15). What the meaning judge is shown: the asked form, its
      * lexeme, the stored meaning, and the learner's saved example for that
      * form and, since phase 31, the lowest-ranked member of the card's gloss
@@ -327,6 +423,11 @@ export function createQuestionRepo(tx: Tx) {
      * word page head the saved word with (D11), unless it is the stored meaning
      * itself, then the gloss's other words, in citation form. questions.id is
      * text, so an id that matches nothing is simply no row.
+     *
+     * Phase 34 (spec D7). The example is the sentence the card showed and its
+     * hidden other half, when the card showed a target-language one (a typed
+     * meaning's, or a multiple choice's); else the saved example, as before. A
+     * card that fell back stored the saved example as its own, so the two agree.
      */
     findJudgeContext: async (
       questionId: string,
@@ -353,7 +454,11 @@ export function createQuestionRepo(tx: Tx) {
         key: string;
         gloss_alternatives: string[];
       }>(sql`
-        SELECT v.form, l.lemma, l.part_of_speech, q.prompt, tr.example_source, tr.example_target,
+        SELECT v.form, l.lemma, l.part_of_speech, q.prompt,
+               CASE WHEN q.context IS NOT NULL AND q.type IN ('typed_meaning', 'multiple_choice')
+                    THEN q.context ELSE tr.example_source END AS example_source,
+               CASE WHEN q.context IS NOT NULL AND q.type IN ('typed_meaning', 'multiple_choice')
+                    THEN q.context_translation ELSE tr.example_target END AS example_target,
                coalesce(tr.alternatives, '{}'::text[]) AS rendering_alternatives,
                g.key, g.alternatives AS gloss_alternatives
         FROM questions q
@@ -411,6 +516,18 @@ export function createQuestionRepo(tx: Tx) {
         sentenceTranslation?: string | null;
         gapStart?: number | null;
         gapEnd?: number | null;
+        // Phase 34 (spec D2, D12): the form the card asks for; null = the variant's.
+        answerForm?: string | null;
+        // Phase 34 (spec D6, D8, D12): the context and its marks, a sentence
+        // card's mark; null on every card questions_shape_valid gives none.
+        context?: string | null;
+        contextTranslation?: string | null;
+        contextMarkStart?: number | null;
+        contextMarkEnd?: number | null;
+        sentenceMarkStart?: number | null;
+        sentenceMarkEnd?: number | null;
+        // Phase 39 (spec D6): a new_meaning's known meanings; null on every other type.
+        knownMeanings?: string[] | null;
       }[];
     }): Promise<Question[]> => {
       if (input.questions.length === 0) return [];
@@ -434,6 +551,14 @@ export function createQuestionRepo(tx: Tx) {
             sentenceTranslation: question.sentenceTranslation ?? null,
             gapStart: question.gapStart ?? null,
             gapEnd: question.gapEnd ?? null,
+            answerForm: question.answerForm ?? null,
+            context: question.context ?? null,
+            contextTranslation: question.contextTranslation ?? null,
+            contextMarkStart: question.contextMarkStart ?? null,
+            contextMarkEnd: question.contextMarkEnd ?? null,
+            sentenceMarkStart: question.sentenceMarkStart ?? null,
+            sentenceMarkEnd: question.sentenceMarkEnd ?? null,
+            knownMeanings: question.knownMeanings ?? null,
           })),
         )
         .returning({ id: questions.id });
@@ -451,6 +576,13 @@ export function createQuestionRepo(tx: Tx) {
             sentenceTranslation: question.sentenceTranslation ?? null,
             gapStart: question.gapStart ?? null,
             gapEnd: question.gapEnd ?? null,
+            answerForm: question.answerForm ?? null,
+            context: question.context ?? null,
+            contextMarkStart: question.contextMarkStart ?? null,
+            contextMarkEnd: question.contextMarkEnd ?? null,
+            sentenceMarkStart: question.sentenceMarkStart ?? null,
+            sentenceMarkEnd: question.sentenceMarkEnd ?? null,
+            knownMeanings: question.knownMeanings ?? null,
             form: question.form,
             lemma: question.lemma,
             partOfSpeech: question.partOfSpeech,

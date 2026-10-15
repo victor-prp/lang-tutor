@@ -66,6 +66,36 @@ export function judgeSpoken(target: SpokenTarget, heard: string): SpeechVerdict 
   return 'unheard';
 }
 
+/** Phase 50 (spec D1). The most pairs one unheard transcript is scored on. */
+export const MAX_SOUND_PAIRS = 8;
+
+/** Phase 50 (spec D1). A stretch of the heard words and a run of a form, both
+ *  in the judge's words, joined by spaces. */
+export type SoundPair = { heard: string; form: string };
+
+/**
+ * Phase 50 (spec D1). What an unheard transcript is scored on by sound: each
+ * run of each form, with and without its article as `judgeSpoken` looks for
+ * it, against every stretch of the heard words as long as the run. Never the
+ * alternatives. Each pair once, the forms' first, at most MAX_SOUND_PAIRS.
+ */
+export function soundPairs(target: SpokenTarget, heard: string): SoundPair[] {
+  const words = spokenWords(heard);
+  const pairs: SoundPair[] = [];
+  const seen = new Set<string>();
+  for (const run of target.forms.flatMap(runsOf)) {
+    const form = run.join(' ');
+    for (let start = 0; start + run.length <= words.length; start++) {
+      const stretch = words.slice(start, start + run.length).join(' ');
+      const key = `${stretch}\n${form}`;
+      if (stretch === form || seen.has(key)) continue;
+      seen.add(key);
+      pairs.push({ heard: stretch, form });
+    }
+  }
+  return pairs.slice(0, MAX_SOUND_PAIRS);
+}
+
 /** Spec D3. Whether a saved form can be a speaking card: one to four words. */
 export function speakable(form: string): boolean {
   const count = spokenWords(form).length;

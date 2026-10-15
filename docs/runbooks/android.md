@@ -22,29 +22,28 @@ The job also skips, green, while steps 2–4 are not done.
 
 ## Where go-live stands
 
-Last updated 2026-10-11.
+Last updated 2026-10-13.
 
-- [ ] **1. Play Console.** The account is created and the ID documents are uploaded. **Waiting
-      for Google's identity email**, which can take a few days. Steps 1.2–1.4 come after it.
+- [x] **1. Play Console.** Done 2026-10-13: identity verified, app created, tester list and
+      app content filled in.
 - [x] **2. Expo account and project.** Done. The project is `@wordspal/lang-tutor`, owned by the
       `wordspal` Expo account, id `66fb04ba-7006-4095-92be-9c26592db6c7`. The `production`
       channel exists, and `app.json` has the project id, updates URL and owner (PR #130).
-- [ ] **3. Play service account.** Not started. 3.1 (Google Cloud) can be done now; 3.2 waits
-      for Play.
+- [x] **3. Play service account.** Done 2026-10-13. `play-publisher@gen-lang-client-0339599374`
+      in the `words-ai-teacher` Cloud project, its key held by EAS.
 - [x] **4. The GitHub secret.** Done. `EXPO_TOKEN` is a **Developer** robot token of the
       `wordspal` account.
-- [ ] **5. The first release.** Waits for steps 1 and 3. `ANDROID_RELEASE` is not set yet,
-      so releases until then skip Android.
-- [ ] **6. Back up the upload key.** After step 5.
-- [ ] **7. Check it on your phone.** After step 5.
-- [ ] **8. Invite friends.** After step 7.
+- [x] **5. The first release.** Done 2026-10-13: `v2026.10.13`, build
+      `ec913d7c-281e-4caa-aa89-69bcbf5889c6`, versionCode 2, submitted to the internal track and
+      its update published, with no draft-app detour. `ANDROID_RELEASE` is `on`.
+- [ ] **6. Back up the upload key.** Next.
+- [ ] **7. Check it on your phone.** Next.
+- [ ] **8. Invite friends.** After step 7. The tester list already holds four addresses.
 
-Releasing other phases meanwhile is safe. `ANDROID_RELEASE` is unset, so every release shows
-`android` as skipped. Do not set it to `on` before steps 1 and 3 are done: the job would build, then
-fail to submit to a Play app that does not exist.
+Every release now ships the app. The tag `v2026.10.13` was cut before PR #160 merged, so the
+live privacy page still names the old contact until the next release.
 
-**Picking up from here:** when Google's email arrives, do steps 1.2–1.4, then step 3, then
-step 5.
+**Picking up from here:** step 6, then step 7, then step 8.
 
 ## Go-live, once
 
@@ -56,23 +55,30 @@ proves before the next one starts.
       account for **Yourself**, not an organisation. An organisation account needs a D-U-N-S
       number and a registered business. It costs a one-time $25, and Google verifies your
       identity, which can take a few days. *(Account created and documents uploaded
-      2026-10-11; waiting for verification.)*
-   2. *Create app*: name **WordsPal**, default language Hebrew, App, Free.
+      2026-10-11; verified 2026-10-13.)*
+   2. *Create app*: name **WordsPal**, default language Hebrew, App, Free. If it asks for a
+      package name, enter `ai.wordspal.app`, the `android.package` in `apps/mobile/app.json`.
    3. *Testing → Internal testing → Testers*: create an email list with your friends'
       Google-account addresses, and your own. Keep the opt-in link it shows: friends open it
       once before installing.
    4. *App content*. Fill in every item it lists:
       - **Privacy policy:** `https://app.wordspal.ai/privacy.html`. Read the page first. Its
-        deletion contact is `code@wordspal.ai`; if that address does not receive mail, change it
+        deletion contact is `contact@wordspal.ai`; if that address does not receive mail, change it
         in `apps/mobile/public/privacy.html` and release before citing the page.
       - **Data safety:** the answers in [Data safety](#data-safety) below.
       - **Content rating:** the questionnaire. It is an education app with no violence, no user
         chat and no purchases.
       - **Target audience:** 13 and over.
       - **Ads:** no ads.
+      - **App access:** sign-in is by one-time email code, so a reviewer cannot use a real
+        account. The form names a placeholder reviewer account, `android_tester_0001@wordspal.ai`, that
+        the server does not accept yet. *(Entered 2026-10-13.)* Internal testing is rarely
+        reviewed, but **before the first production release** the server must accept a fixed
+        8-digit sign-in code for that account (the form's "password"; codes are 8 digits in
+        `SignInWithCodeRequestSchema`), or the entry must change to a mailbox you can share.
 
-   *Proves:* the app exists. Its package name is not set yet: Play takes it from the first
-   upload, and after that it can never change.
+   *Proves:* the app exists. Its package name, whether entered here or taken from the first
+   upload, can never change afterwards.
 
 2. **Expo account and project.** *(Done 2026-10-11.)* Create an account at
    [expo.dev](https://expo.dev), then:
@@ -149,10 +155,16 @@ proves before the next one starts.
       ```bash
       git checkout <tag>
       cd apps/mobile
-      EXPO_PUBLIC_APP_VERSION=<tag> npx eas-cli@24.8.0 update --branch production --platform android \
+      EXPO_PUBLIC_APP_VERSION=<tag> EXPO_PUBLIC_APP_COMMIT=$(git rev-parse --short=7 HEAD) \
+        EXPO_PUBLIC_API_URL=https://app.wordspal.ai \
+        npx eas-cli@24.8.0 update --branch production --platform android \
         --environment production --message "<tag> for build <build id>"
       git checkout master
       ```
+
+      `eas update --environment` reads no `.env` file, so every `EXPO_PUBLIC_` value the app
+      needs is passed on the command line. An update without `EXPO_PUBLIC_API_URL` crashes at
+      launch, and phones quietly keep the build's own bundle.
 
       That message is the marker later releases look for: an update naming the newest build means
       the build reached Play. From then on, releases publish over the air on their own.
@@ -211,13 +223,20 @@ over-the-air update first and offers Play and "check again".
 
 What the app sends, for Play Console's *Data safety* form:
 
-| Data type | Collected | Shared | Why | Optional |
-|---|---|---|---|---|
-| Email address | yes | no | account management | no |
-| Name (display name), other info (age) | yes | no | app functionality | no |
-| App activity: in-app actions (saved words, answers) | yes | no | app functionality | no |
-| Audio: voice recordings | yes, processed and not stored | no | app functionality | yes |
-| Photos | yes, deleted once read | no | app functionality | yes |
+| Play data type | Collected | Shared | Ephemeral | Required | Purposes |
+|---|---|---|---|---|---|
+| Personal info → Email address | yes | no | no | yes | app functionality, account management |
+| Personal info → Name, Other info (age) | yes | no | no | yes | app functionality |
+| Personal info → User IDs (account id) | yes | no | no | yes | account management |
+| App activity → App interactions, Other user-generated content | yes | no | no | yes | app functionality |
+| Audio files → Voice or sound recordings | yes | no | **yes**: transcribed, never stored | no | app functionality |
+| Photos and videos → Photos | yes | no | no: held in a row until read, then cleared | no | app functionality |
+| Device or other IDs | yes | no | no | yes | app functionality: expo-updates sends a per-install id to Expo |
+
+Account creation: *Username and other authentication* (email plus a one-time code). Deletion:
+by request at the privacy page, which also covers deleting some data without closing the account
+(saved words can be removed in the app). *(Filled in 2026-10-13.)* When gender is added to
+onboarding, it joins age under *Other info*, and the privacy page's list must name it.
 
 - All of it is encrypted in transit.
 - Users can ask for deletion by email.

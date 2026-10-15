@@ -6,6 +6,7 @@ import type {
   MatchingQuestion,
   MissedQuestion,
   MultipleChoiceQuestion,
+  NewMeaningQuestion,
   Question,
   ReadAloudQuestion,
   ReverseChoiceQuestion,
@@ -32,12 +33,16 @@ export type AnswerInput =
   | { option_index: number }
   | { text: string }
   | { heard: string }
+  // Phase 50 (spec D5). A transcript the server scored as sounding like the
+  // card's form, which it names. Only the server builds it: the next-step
+  // schema has no `sounds_like` field.
+  | { heard: string; sounds_like: string }
   | { pass: 'skip' | 'show_answer' }
   // Phase 27 (spec D3). A text the server judged, by rule or by a model call.
   // Only the server builds it: the next-step schema has no `judged` field.
   | { text: string; judged: TypedVerdict };
 
-export type ChoiceQuestion = MultipleChoiceQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion | ClozeChoiceQuestion;
+export type ChoiceQuestion = MultipleChoiceQuestion | NewMeaningQuestion | ReverseChoiceQuestion | ListenChoiceQuestion | MatchingQuestion | ClozeChoiceQuestion;
 /** Phase 25. The cards answered by voice. */
 export type SpeakingQuestion = ReadAloudQuestion | SayTranslationQuestion;
 /** Phase 24. A question answered by text: typed, heard, or built from tiles. */
@@ -48,6 +53,7 @@ type TextQuestion = Exclude<Question, ChoiceQuestion | SpeakingQuestion | Judged
 export function isChoice(question: Question): question is ChoiceQuestion {
   switch (question.type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'reverse_choice':
     case 'listen_choice':
     case 'matching':
@@ -179,42 +185,91 @@ const MAX_ANSWER_TEXT = 100;
 // answers_typed_text_length (phase 27 D11)
 export const MAX_JUDGED_TEXT = 300;
 
+/**
+ * Phase 34 (spec D9). The cards on which a right answer that is not the saved
+ * word earns a second try: another accepted word (typed translation, say the
+ * translation, typed cloze), another sense (typed meaning), or another word in a
+ * sentence (sentence translation). A dictation accepts no alternative, and a
+ * choice has no verdict.
+ */
+const RETRIED: ReadonlySet<QuestionType> = new Set([
+  'typed_translation',
+  'say_translation',
+  'typed_meaning',
+  'cloze_typed',
+  'sentence_translation',
+]);
+
+type FirstAnswer = Omit<AnswerRecord, 'retry_state' | 'retry_answer_string' | 'retry_verdict'>;
+
+/** Phase 34 (spec D9). A first answer, pending its retry when it opens one. */
+function recorded(question: Question, first: FirstAnswer): AnswerRecord {
+  const opens = first.verdict === 'alternative' && RETRIED.has(question.type);
+  return { ...first, retry_state: opens ? 'pending' : null, retry_answer_string: null, retry_verdict: null };
+}
+
 // Callers check answerFits, and an option's range, first: the session's step
 // owns those outcomes, so here a mismatch is a programming error. So is an
 // unheard transcript, which step refuses before it gets here (spec D5).
 export function evaluate(question: Question, answer: AnswerInput): AnswerRecord {
   if (isChoice(question) && 'option_index' in answer) {
-    return {
+    return recorded(question, {
       question_id: question.id,
       is_correct: answer.option_index === question.correct_option,
       answer_string: question.options[answer.option_index],
-    };
+    });
   }
   if (isSpeaking(question) && 'heard' in answer) {
-    const verdict = spokenVerdict(question, answer.heard);
+    const verdict = 'sounds_like' in answer ? 'understood' : spokenVerdict(question, answer.heard);
     if (verdict === 'unheard') throw new Error('an unheard transcript is never recorded (spec D5)');
-    return { question_id: question.id, is_correct: true, answer_string: answer.heard.slice(0, MAX_ANSWER_TEXT), verdict };
+    return recorded(question, { question_id: question.id, is_correct: true, answer_string: answer.heard.slice(0, MAX_ANSWER_TEXT), verdict });
   }
   if (isSpeaking(question) && 'pass' in answer) {
     const verdict = answer.pass === 'skip' ? 'skipped' : 'gave_up';
-    return { question_id: question.id, is_correct: false, answer_string: '', verdict };
+    return recorded(question, { question_id: question.id, is_correct: false, answer_string: '', verdict });
   }
   if (isJudged(question) && 'judged' in answer) {
-    return {
+    return recorded(question, {
       question_id: question.id,
       is_correct: verdictCorrect(answer.judged),
       answer_string: answer.text.slice(0, MAX_JUDGED_TEXT),
       verdict: answer.judged,
-    };
+    });
   }
   if (!isChoice(question) && !isJudged(question) && question.type !== 'read_aloud' && 'text' in answer && !('judged' in answer)) {
     const verdict = verdictFor(question, answer.text);
-    return { question_id: question.id, is_correct: verdictCorrect(verdict), answer_string: answer.text, verdict };
+    return recorded(question, { question_id: question.id, is_correct: verdictCorrect(verdict), answer_string: answer.text, verdict });
   }
   throw new Error(`the answer does not fit a ${question.type} question`);
 }
 
-/** Phase 25 (spec D9). A skipped card is not in the total: a skip is not a failure. */
+/**
+ * Phase 34 (spec D9). A second try, judged by the rule or the model call the
+ * first answer was: the text and verdict it is stored with. An empty text, or
+ * a pass, gives up; on a first answer an empty text is wrong. D9 ends a second
+ * try with an answer or a give-up, so a skip there is a give-up too, never
+ * `skipped` (the app sends show_answer, but the wire takes either). The caller
+ * checks the answer's kind first, as for evaluate.
+ */
+export function evaluateRetry(question: Question, answer: AnswerInput): { answer_string: string; verdict: AnswerVerdict } {
+  const { answer_string, verdict } = evaluate(question, answer);
+  if (verdict === undefined) throw new Error(`a ${question.type} question has no second try`);
+  const givenUp = ('text' in answer && answer.text.trim() === '') || 'pass' in answer;
+  return { answer_string, verdict: givenUp ? 'gave_up' : verdict };
+}
+
+/**
+ * Phase 34 (spec D9). The verdict progress reads: the retry's when it resolved
+ * right (`exact`, `near_miss` or `understood`), which moves the word as that
+ * verdict would; the first answer's otherwise. A retry given up, wrong or
+ * another alternative leaves the answer where it was: right, and no progress.
+ */
+export function evidenceVerdict(verdict: AnswerVerdict, retryVerdict: AnswerVerdict | null): AnswerVerdict {
+  return retryVerdict === 'exact' || retryVerdict === 'near_miss' || retryVerdict === 'understood' ? retryVerdict : verdict;
+}
+
+/** Phase 25 (spec D9). A skipped card is not in the total: a skip is not a failure.
+ *  Phase 34 (spec D9): the first answer counts, never its retry. */
 export function score(questions: readonly Question[], answers: readonly AnswerRecord[]): Score {
   return {
     correct: answers.filter((record) => record.is_correct).length,

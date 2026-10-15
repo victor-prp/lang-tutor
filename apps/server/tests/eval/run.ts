@@ -23,36 +23,55 @@ import { PartOfSpeechSchema } from '@lang-tutor/core/api/schemas';
 
 import { loadGeminiConfig } from '../../src/config';
 import { normalizeForm } from '../../src/domain/dictionary';
-import { comparable, distractorItems, validateDistractors, type RecentSentences, type Task } from '../../src/domain/distractors';
+import { readCheck, type CheckItem } from '../../src/domain/check';
+import { findGap } from '../../src/domain/cloze';
+import { ASKED_DISTRACTORS, comparable, distractorItems, KEPT_DISTRACTORS, nothingKnown, validateDistractors, type DistractorItem, type RecentSentences, type Task } from '../../src/domain/distractors';
 import { isInScript, stripStress, type LanguageCode } from '../../src/domain/languages';
+import { TRANSLATION_JUDGE_THINKING } from '../../src/domain/judge';
+import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
+import { SESSION_GENERATION_THINKING } from '../../src/domain/jobs';
 import type { ReadItem } from '../../src/domain/photoReading';
 import { createGeminiClient, createGeminiTranscriber, createGeminiVisionClient } from '../../src/providers/gemini';
-import { judgeSpoken, normaliseGloss } from '@lang-tutor/core/domain';
-import type { LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
+import { judgeSpoken, judgeTyped, normaliseGloss } from '@lang-tutor/core/domain';
+import type { LlmAccept, LlmDistractors, LlmReconciliation } from '@lang-tutor/core/api';
 
-import { askDistractors, askJudge, askModel, askRendering, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
+import { askAccept, askCheck, askContext, askDistractors, askFitJudge, askGapGuesses, askJudge, askModel, askRendering, askSoundAlike, askTranscription, askTranslationJudge, type ModelAnswer } from './askModel';
 import {
+  ACCEPT_CASES,
   CASES,
+  CHECK_CASES,
+  CONTEXT_CASES,
   DISTRACTOR_CASES,
+  FIT_JUDGE_CASES,
   GAP_CASES,
   JUDGE_CASES,
+  SOUND_ALIKE_CASES,
   RENDERING_CASES,
   SENTENCE_CASES,
   TRANSCRIPTION_CASES,
   TRANSLATE_CASES,
   TRANSLATION_JUDGE_CASES,
+  type AcceptCase,
+  type CheckCase,
+  type ContextCase,
   type DistractorCase,
   type EvalCase,
+  type FitJudgeCase,
   type JudgeCase,
   type RenderingCase,
   type SentenceCase,
+  type SoundAlikeCase,
   type TranscriptionCase,
   type TranslationJudgeCase,
 } from './cases';
 import { askPhoto, askSenseMatch } from './askPhoto';
+import { checkTier1, checkTier2, checkWritten } from './checkChecks';
+import { contextItemOf, contextTier1, contextTier2, contextWritten } from './contextChecks';
 import { MATCH_CASES, PHOTO_CASES, type MatchCase, type PhotoCase } from './photoCases';
 
 const TIER2_THRESHOLD = 0.85;
+/** Phase 47 (ruling R6). The eval has no database: its calls are not recorded. */
+const RECORDS_NOTHING = async (): Promise<void> => {};
 const TIMEOUT_MS = 30_000;
 /** A photo read's production budget. */
 const PHOTO_TIMEOUT_MS = 120_000;
@@ -84,6 +103,8 @@ type Row = {
   rendering?: LlmReconciliation;
   /** Set on a distractor row, the third call's answer. */
   distractors?: LlmDistractors;
+  /** Phase 34. Set on an accept row: the answer as written, and what the server keeps. */
+  accept?: { raw: LlmAccept; answers: string[]; answerForm: string | null };
   /** Set on a transcription row: what the model heard. */
   heard?: string;
   /** Set on a photo row: what the reading found. */
@@ -547,6 +568,56 @@ function renderingTier2(kase: RenderingCase, answer: LlmReconciliation): Check[]
   return checks;
 }
 
+/** Phase 34 (spec D1). Invariants of an accept answer, whatever it lists: it
+ *  parses (or the row records the failed call), and every answer as written is
+ *  in the target language's script, so never in the explanation's. */
+function acceptTier1(kase: AcceptCase, answer: { raw: LlmAccept }): Check[] {
+  const outside = answer.raw.answers.filter((text) => !isInScript(text, kase.target));
+  return [
+    {
+      name: `every answer is in ${kase.target} script`,
+      ok: outside.length === 0,
+      detail: outside.length ? outside.join(' | ') : undefined,
+    },
+  ];
+}
+
+/** Phase 34 (spec D1, D2). The scored axes: the right answers a card refused
+ *  before the list existed are kept, placeholders are written out, and the
+ *  answer form agrees with the rendering. */
+function acceptTier2(kase: AcceptCase, answer: { raw: LlmAccept; answers: string[]; answerForm: string | null }): Check[] {
+  const checks: Check[] = [];
+  // Scored as the card will judge it: the typed judge over the kept list, so a
+  // kept `to lose my temper` accepts a typed `lose my temper`, as it would.
+  const target = { answer: kase.form, lemma: kase.lemma, alternatives: answer.answers };
+  for (const word of kase.expectAnswers ?? []) {
+    checks.push({
+      name: `accepts ${word}`,
+      ok: ['exact', 'alternative'].includes(judgeTyped(target, word)),
+      detail: answer.answers.join(' | ') || 'none',
+    });
+  }
+  if (kase.rejectSubstrings) {
+    const offenders = answer.raw.answers.filter((text) =>
+      kase.rejectSubstrings!.some((placeholder) => text.toLowerCase().includes(placeholder)),
+    );
+    checks.push({
+      name: 'writes every placeholder out',
+      ok: offenders.length === 0,
+      detail: offenders.length ? offenders.join(' | ') : undefined,
+    });
+  }
+  if (kase.expectAnswerForm !== undefined) {
+    const expected = kase.expectAnswerForm;
+    checks.push({
+      name: expected === null ? 'keeps the form, no answer form' : `answer form ${expected}`,
+      ok: expected === null ? answer.answerForm === null : answer.answerForm !== null && comparable(answer.answerForm) === comparable(expected),
+      detail: `answer_form=${answer.raw.answer_form ?? 'null'}`,
+    });
+  }
+  return checks;
+}
+
 const taskOf = (item: DistractorCase['items'][number]): Task => item.task ?? 'meaning';
 
 /** Phase 19. The items as prepareSession builds them, keyed q1, q2, …. Phase
@@ -564,6 +635,9 @@ function itemsOf(kase: DistractorCase) {
       translation: item.translation,
       example: null,
       exampleTranslation: null,
+      acceptedAnswers: [],
+      answerForm: null,
+      acceptedAt: null,
     })),
     kase.items.map(taskOf),
     new Map(),
@@ -574,9 +648,9 @@ const answeredItem = (kase: DistractorCase, answer: LlmDistractors, index: numbe
   answer.items.find((answered) => answered.key === itemsOf(kase)[index].key);
 
 function distractorTier1(kase: DistractorCase, answer: LlmDistractors): Check[] {
-  const verdict = validateDistractors(itemsOf(kase), answer, kase.to, [], kase.from as LanguageCode);
+  const verdict = validateDistractors(itemsOf(kase), answer, kase.to, [], kase.from as LanguageCode, nothingKnown());
   const checks: Check[] = [
-    { name: 'every item answered as its task asks', ok: verdict.ok, detail: verdict.ok ? undefined : verdict.reason },
+    { name: 'every item answered as its task asks', ok: verdict.refused.size === 0, detail: verdict.refused.size ? [...verdict.refused.values()].join('; ') : undefined },
   ];
   // The options' language: Hebrew meanings on today's card, learned-language
   // words on the reversed card and in a typed card's alternatives.
@@ -642,6 +716,9 @@ function sentenceItemsOf(kase: SentenceCase) {
       translation: item.translation,
       example: item.example,
       exampleTranslation: item.exampleTranslation,
+      acceptedAnswers: [],
+      answerForm: null,
+      acceptedAt: null,
     })),
     kase.items.map(() => kase.task),
     recent,
@@ -654,8 +731,8 @@ const wordsOf = (text: string): Set<string> =>
 
 function sentenceTier1(kase: SentenceCase, answer: LlmDistractors): Check[] {
   const items = sentenceItemsOf(kase);
-  const verdict = validateDistractors(items, answer, 'he', [], kase.from as LanguageCode);
-  if (!verdict.ok) return [{ name: 'every item answered as its task asks', ok: false, detail: verdict.reason }];
+  const verdict = validateDistractors(items, answer, 'he', [], kase.from as LanguageCode, nothingKnown());
+  if (verdict.refused.size > 0) return [{ name: 'every item answered as its task asks', ok: false, detail: [...verdict.refused.values()].join('; ') }];
   if (kase.task === 'gap') {
     return [
       { name: 'every item answered as its task asks', ok: true },
@@ -693,10 +770,23 @@ function sentenceTier2(kase: SentenceCase, answer: LlmDistractors): Check[] {
         },
       ];
     }
-    if (!item.offSense?.length) return [];
+    // Phase 38 (spec D2). The typed gap hides its Hebrew, so its alternatives are the
+    // words that fit the sentence read alone; an everyday sentence admits one.
+    const fits: Check[] =
+      kase.task === 'sentence'
+        ? [
+            {
+              name: `${item.form}: lists another word that fits the gap read alone`,
+              ok: (got?.alternatives ?? []).length > 0,
+              detail: `${got?.sentence ?? '(none)'} +${(got?.alternatives ?? []).join('/')}`,
+            },
+          ]
+        : [];
+    if (!item.offSense?.length) return fits;
     const seen = new Set([...wordsOf(got?.sentence ?? ''), ...wordsOf(got?.translation ?? '')]);
     const offenders = item.offSense.filter((text) => seen.has(text.toLowerCase()));
     return [
+      ...fits,
       {
         name: `${item.form}: no word of another sense`,
         ok: offenders.length === 0,
@@ -771,6 +861,7 @@ async function main(): Promise<void> {
   const renderingCases = RENDERING_CASES.filter((kase) =>
     matches(kase.label, kase.form, kase.lemma),
   );
+  const acceptCases = ACCEPT_CASES.filter((kase) => matches(kase.label, kase.form, kase.rendering));
   const distractorCases = DISTRACTOR_CASES.filter((kase) =>
     matches(kase.label, ...kase.items.map((item) => item.form)),
   );
@@ -786,11 +877,17 @@ async function main(): Promise<void> {
   const sentenceCases = SENTENCE_CASES.filter((kase) => matches(kase.label));
   const translateCases = TRANSLATE_CASES.filter((kase) => matches(kase.label));
   const tjudgeCases = TRANSLATION_JUDGE_CASES.filter((kase) => matches(kase.label));
+  const fitCases = FIT_JUDGE_CASES.filter((kase) => matches(kase.label));
+  const contextCases = CONTEXT_CASES.filter((kase) => matches(kase.label));
+  const checkCases = CHECK_CASES.filter((kase) => matches(kase.label));
+  // Phase 50. Every label starts "sound", so the filter "sound" selects the group.
+  const soundCases = SOUND_ALIKE_CASES.filter((kase) => matches(kase.label));
   if (filter) console.log(`filter "${filter}"`);
   if (
-    cases.length + renderingCases.length + distractorCases.length + transcriptionCases.length +
+    cases.length + renderingCases.length + acceptCases.length + distractorCases.length + transcriptionCases.length +
       photoCases.length + matchCases.length + judgeCases.length +
-      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length === 0
+      gapCases.length + sentenceCases.length + translateCases.length + tjudgeCases.length + fitCases.length + contextCases.length +
+      checkCases.length + soundCases.length === 0
   ) {
     throw new Error(`filter "${filter}" matched no case`);
   }
@@ -800,7 +897,21 @@ async function main(): Promise<void> {
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
+  });
+  // Phase 47 (spec D1). The session-generation prompt on the client composition.ts
+  // gives it: thinking capped. The rest of the prompts keep the plain client.
+  const sessionLlm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
+    timeoutMs: TIMEOUT_MS,
+    thinkingBudget: SESSION_GENERATION_THINKING,
   });
   // Matches the options composition.ts gives the judge client, except the
   // timeout: the eval uses its own TIMEOUT_MS (30 s), not production's budget.
@@ -809,14 +920,29 @@ async function main(): Promise<void> {
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
     thinkingBudget: 0,
+  });
+  // Phase 45 (spec D3). The translation judge's own client, as composition.ts builds it.
+  const translationJudgeLlm = createGeminiClient({
+    fetch: globalThis.fetch,
+    baseUrl: gemini.baseUrl,
+    apiKey: gemini.apiKey,
+    model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
+    timeoutMs: TIMEOUT_MS,
+    thinkingBudget: TRANSLATION_JUDGE_THINKING,
   });
   const transcriber = createGeminiTranscriber({
     fetch: globalThis.fetch,
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: TIMEOUT_MS,
   });
   const vision = createGeminiVisionClient({
@@ -824,6 +950,8 @@ async function main(): Promise<void> {
     baseUrl: gemini.baseUrl,
     apiKey: gemini.apiKey,
     model: gemini.model,
+    onCall: RECORDS_NOTHING,
+    now: Date.now,
     timeoutMs: PHOTO_TIMEOUT_MS,
   });
 
@@ -886,15 +1014,41 @@ async function main(): Promise<void> {
     }
   };
 
+  /** Phase 34. The same contract, for the accept call. */
+  const scoreAccept = async (kase: AcceptCase): Promise<Row> => {
+    const text = `${kase.rendering} \u2192 ${kase.form}`;
+    try {
+      const answer = await askAccept(llm, {
+        form: kase.form,
+        lemma: kase.lemma,
+        partOfSpeech: kase.partOfSpeech,
+        rendering: kase.rendering,
+        example: kase.example,
+        exampleTranslation: kase.exampleTranslation,
+        target: kase.target,
+        explanation: kase.explanation ?? 'he',
+      });
+      return { label: kase.label, text, tier1: acceptTier1(kase, answer), tier2: acceptTier2(kase, answer), accept: answer };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   const scoreDistractors = async (kase: DistractorCase): Promise<Row> => {
     const text = kase.items.map((item) => item.form).join(', ');
     try {
-      const answer = await askDistractors(llm, { from: kase.from, to: kase.to, items: itemsOf(kase) });
+      const answer = await askDistractors(sessionLlm, { from: kase.from, to: kase.to, items: itemsOf(kase) });
       return {
         label: kase.label,
         text,
         tier1: distractorTier1(kase, answer),
-        tier2: distractorTier2(kase, answer),
+        tier2: [...distractorTier2(kase, answer), ...(kase.checked ? await survivesChecker(kase.from, kase.to, itemsOf(kase), answer) : [])],
         distractors: answer,
       };
     } catch (error) {
@@ -975,12 +1129,16 @@ async function main(): Promise<void> {
   const scoreSentences = async (kase: SentenceCase): Promise<Row> => {
     const text = kase.items.map((item) => item.form).join(', ');
     try {
-      const answer = await askDistractors(llm, { from: kase.from, to: 'he', items: sentenceItemsOf(kase) });
+      const answer = await askDistractors(sessionLlm, { from: kase.from, to: 'he', items: sentenceItemsOf(kase) });
       return {
         label: kase.label,
         text,
         tier1: sentenceTier1(kase, answer),
-        tier2: sentenceTier2(kase, answer),
+        tier2: [
+          ...sentenceTier2(kase, answer),
+          ...(kase.task === 'sentence' ? await pointsToWord(kase, answer) : []),
+          ...(kase.checked ? await survivesChecker(kase.from, 'he', sentenceItemsOf(kase), answer) : []),
+        ],
         written: writtenBy(kase, answer),
       };
     } catch (error) {
@@ -994,9 +1152,72 @@ async function main(): Promise<void> {
     }
   };
 
-  const scoreTranslationJudge = async (kase: TranslationJudgeCase): Promise<Row> => {
+  // Phase 41 (spec D1). Read alone, the gapped sentence's likeliest fills include its
+  // word: the gap as written, or the item's own form or lemma.
+  const pointsToWord = async (kase: SentenceCase, answer: LlmDistractors): Promise<Check[]> => {
+    // One item at a time, inside the row's own concurrency slot; a probe that fails
+    // is a failed tier 2 check of its own, never the row's tier 1 (review M4).
+    const items = sentenceItemsOf(kase);
+    const checks: Check[] = [];
+    for (const [index, item] of kase.items.entries()) {
+      const name = `${item.form}: the sentence points to its word`;
+      const got = answer.items.find((answered) => answered.key === items[index].key);
+      const at = got?.sentence && got.gap ? got.sentence.indexOf(got.gap) : -1;
+      if (!got?.sentence || !got.gap || at < 0) {
+        checks.push({ name, ok: false, detail: 'no sentence' });
+        continue;
+      }
+      const gapped = `${got.sentence.slice(0, at)}___${got.sentence.slice(at + got.gap.length)}`;
+      try {
+        const guesses = await askGapGuesses(judgeLlm, { language: kase.from as LanguageCode, sentence: gapped });
+        const target = { answer: got.gap, lemma: item.lemma, alternatives: [item.form] };
+        checks.push({ name, ok: guesses.some((guess) => judgeTyped(target, guess) !== 'wrong'), detail: `${gapped} → ${guesses.join(' / ')}` });
+      } catch (error) {
+        checks.push({ name, ok: false, detail: `the probe failed: ${(error as Error).message}` });
+      }
+    }
+    return checks;
+  };
+
+  // Phase 48 (spec D8). The checker as prepareSession asks it: each choice or gap item's usable
+  // options, at most six; at least three must survive, or production would refuse the card.
+  const survivesChecker = async (from: LanguageCode, to: LanguageCode, items: DistractorItem[], answer: LlmDistractors): Promise<Check[]> => {
+    const verdict = validateDistractors(items, answer, to, [], from, nothingKnown());
+    const checkItems: CheckItem[] = items.flatMap((item): CheckItem[] => {
+      const made = verdict.byKey.get(item.key);
+      const options = made ? [...made.distractors, ...made.spares].slice(0, ASKED_DISTRACTORS) : [];
+      if (options.length === 0) return [];
+      if (item.task === 'gap') {
+        const gap = findGap(item.example ?? '', [item.blank ?? item.form]);
+        if (!gap) return [];
+        return [{ key: item.key, task: 'gap', sentence: `${item.example!.slice(0, gap.start)}___${item.example!.slice(gap.end)}`, options }];
+      }
+      if (item.task === 'meaning') return [{ key: item.key, task: 'choice', word: item.form, options }];
+      if (item.task === 'word') return [{ key: item.key, task: 'choice', word: item.translation, options }];
+      return [];
+    });
+    if (checkItems.length === 0) return [{ name: 'the checker had options to judge', ok: false }];
     try {
-      const verdict = await askTranslationJudge(judgeLlm, kase);
+      const reading = readCheck(checkItems, await askCheck(llm, { from, to, items: checkItems }));
+      return checkItems.map((item): Check => {
+        const finding = reading.byKey.get(item.key);
+        const right = finding && (finding.task === 'choice' || finding.task === 'gap') ? finding.alsoRight : [];
+        const options = item.task === 'choice' || item.task === 'gap' ? item.options : [];
+        const left = options.filter((_, at) => !right[at]);
+        return {
+          name: `${item.key}: ${KEPT_DISTRACTORS} or more wrong options survive the checker`,
+          ok: !reading.unjudged.has(item.key) && left.length >= KEPT_DISTRACTORS,
+          detail: `kept ${left.join(' | ')}; right ${options.filter((_, at) => right[at]).join(' | ') || '(none)'}`,
+        };
+      });
+    } catch (error) {
+      return [{ name: 'the checker answered', ok: false, detail: (error as Error).message }];
+    }
+  };
+
+  const scoreFitJudge = async (kase: FitJudgeCase): Promise<Row> => {
+    try {
+      const verdict = await askFitJudge(judgeLlm, kase);
       return {
         label: kase.label,
         text: kase.answer,
@@ -1015,16 +1236,109 @@ async function main(): Promise<void> {
     }
   };
 
+  // Phase 50 (spec D8). Each pair on the side of the server's default line it
+  // belongs on. Every score is printed, pass or fail, so the line can be moved
+  // with evidence of where same and different actually fall.
+  const scoreSoundAlike = async (kase: SoundAlikeCase): Promise<Row> => {
+    const text = kase.pairs.map((pair) => `${pair.a}/${pair.b}`).join(', ');
+    try {
+      const scores = await askSoundAlike(judgeLlm, kase);
+      return {
+        label: kase.label,
+        text,
+        tier1: [
+          { name: 'the answer parses', ok: scores !== null, detail: scores === null ? 'unreadable' : undefined },
+          { name: 'every pair is scored', ok: scores !== null && scores.every((score) => score !== null), detail: scores?.join(', ') },
+        ],
+        tier2: kase.pairs.map((pair, index) => {
+          const score = scores?.[index] ?? null;
+          const atLine = score !== null && score >= DEFAULT_SOUND_ALIKE_THRESHOLD;
+          return {
+            name: `${pair.a}/${pair.b} ${pair.expect}`,
+            ok: score !== null && atLine === (pair.expect === 'same'),
+            detail: `score ${score ?? 'none'}, line ${DEFAULT_SOUND_ALIKE_THRESHOLD}`,
+          };
+        }),
+        verdict: scores?.map((score) => score ?? 'none').join(', ') ?? undefined,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  const scoreTranslationJudge = async (kase: TranslationJudgeCase): Promise<Row> => {
+    try {
+      const verdict = await askTranslationJudge(translationJudgeLlm, kase);
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the answer parses', ok: verdict !== null, detail: verdict === null ? 'unreadable' : undefined }],
+        tier2: [{ name: `judged ${kase.expect}`, ok: verdict === kase.expect, detail: `verdict ${verdict ?? 'none'}` }],
+        verdict: verdict ?? undefined,
+      };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text: kase.answer,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  /** Phase 34. The same contract, for the context call. */
+  const scoreContext = async (kase: ContextCase): Promise<Row> => {
+    const text = `${kase.form} (${kase.type})`;
+    try {
+      const answer = await askContext(llm, { from: kase.target, to: 'he', items: [contextItemOf(kase)] });
+      return { label: kase.label, text, tier1: contextTier1(kase, answer), tier2: contextTier2(kase, answer), written: contextWritten(kase, answer) };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
+  /** Phase 34 (spec D5). The same contract, for the checker. */
+  const scoreCheck = async (kase: CheckCase): Promise<Row> => {
+    const text = `${kase.item.task} ${'word' in kase.item ? kase.item.word : kase.item.sentence}`;
+    try {
+      const answer = await askCheck(llm, { from: kase.target, to: 'he', items: [kase.item] });
+      return { label: kase.label, text, tier1: checkTier1(kase, answer), tier2: checkTier2(kase, answer), written: checkWritten(kase, answer) };
+    } catch (error) {
+      return {
+        label: kase.label,
+        text,
+        tier1: [{ name: 'the call succeeded', ok: false, detail: (error as Error).message }],
+        tier2: [],
+        error: (error as Error).message,
+      };
+    }
+  };
+
   // Every call site of the provider, scored in one run and one scorecard. They
   // share the concurrency budget rather than each taking their own: the quota
   // they compete for is the same one.
   const started = Date.now();
   const [
-    translationRows, renderingRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
-    gapRows, sentenceRows, translateRows, tjudgeRows,
+    translationRows, renderingRows, acceptRows, distractorRows, transcriptionRows, photoRows, matchRows, judgeRows,
+    gapRows, sentenceRows, translateRows, tjudgeRows, contextRows, checkRows, fitRows, soundRows,
   ] = await Promise.all([
     mapWithConcurrency(cases, CONCURRENCY, scoreCase),
     mapWithConcurrency(renderingCases, CONCURRENCY, scoreRendering),
+    // Phase 34. Pooled into tier 2 with the translation and rendering rows.
+    mapWithConcurrency(acceptCases, CONCURRENCY, scoreAccept),
     mapWithConcurrency(distractorCases, CONCURRENCY, scoreDistractors),
     mapWithConcurrency(transcriptionCases, CONCURRENCY, scoreTranscription),
     mapWithConcurrency(photoCases, CONCURRENCY, scorePhoto),
@@ -1034,10 +1348,14 @@ async function main(): Promise<void> {
     mapWithConcurrency(sentenceCases, CONCURRENCY, scoreSentences),
     mapWithConcurrency(translateCases, CONCURRENCY, scoreSentences),
     mapWithConcurrency(tjudgeCases, CONCURRENCY, scoreTranslationJudge),
+    mapWithConcurrency(contextCases, CONCURRENCY, scoreContext),
+    mapWithConcurrency(checkCases, CONCURRENCY, scoreCheck),
+    mapWithConcurrency(fitCases, CONCURRENCY, scoreFitJudge),
+    mapWithConcurrency(soundCases, CONCURRENCY, scoreSoundAlike),
   ]);
   const rows = [
-    ...translationRows, ...renderingRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
-    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows,
+    ...translationRows, ...renderingRows, ...acceptRows, ...distractorRows, ...transcriptionRows, ...photoRows, ...matchRows,
+    ...judgeRows, ...gapRows, ...sentenceRows, ...translateRows, ...tjudgeRows, ...contextRows, ...checkRows, ...fitRows, ...soundRows,
   ];
   const elapsedMs = Date.now() - started;
 
@@ -1064,6 +1382,17 @@ async function main(): Promise<void> {
     { name: 'gap', rows: gapRows, passed: 0, total: 0 },
     { name: 'sentence', rows: [...sentenceRows, ...translateRows], passed: 0, total: 0 },
     { name: 'translation judge', rows: tjudgeRows, passed: 0, total: 0 },
+    // Phase 34. The context call, a line of its own like the others.
+    { name: 'context', rows: contextRows, passed: 0, total: 0 },
+    // Phase 34 (spec D5). The checker, a line of its own: a checker that says
+    // yes to everything must fail here, not hide in the pooled score.
+    { name: 'checker', rows: checkRows, passed: 0, total: 0 },
+    // Phase 41 (spec D2). The fit check, a line of its own: a judge that says
+    // fits to everything must fail here.
+    { name: 'fit judge', rows: fitRows, passed: 0, total: 0 },
+    // Phase 50 (spec D8). The sound-alike score, a line of its own: a scorer
+    // that calls every near miss the same word must fail here.
+    { name: 'sound alike', rows: soundRows, passed: 0, total: 0 },
   ];
 
   for (const row of rows) {
@@ -1123,6 +1452,12 @@ async function main(): Promise<void> {
         }`,
       );
     }
+    if (row.accept) {
+      console.log(
+        `       answers=${row.accept.raw.answers.join(' | ') || '(none)'} answer_form=${row.accept.raw.answer_form ?? 'null'}` +
+          ` kept=${row.accept.answers.join(' | ') || '(none)'}`,
+      );
+    }
     if (row.distractors) {
       console.log(
         `       ${row.distractors.items
@@ -1159,9 +1494,10 @@ async function main(): Promise<void> {
             `(threshold ${(TIER2_THRESHOLD * 100).toFixed(0)}%)\n`,
         )
         .join('') +
-      `${cases.length} translation + ${renderingCases.length} rendering + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ` +
+      `${cases.length} translation + ${renderingCases.length} rendering + ${acceptCases.length} accept + ${distractorCases.length} distractor + ${transcriptionCases.length} transcription + ` +
       `${photoCases.length} photo + ${matchCases.length} match + ${judgeCases.length} judge + ` +
-      `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge cases in ` +
+      `${gapCases.length} gap + ${sentenceCases.length} sentence + ${translateCases.length} translate + ${tjudgeCases.length} translation judge + ` +
+      `${contextCases.length} context + ${checkCases.length} checker + ${fitCases.length} fit judge + ${soundCases.length} sound alike cases in ` +
       `${(elapsedMs / 1000).toFixed(1)}s ` +
       `at concurrency ${CONCURRENCY}`,
   );
@@ -1183,6 +1519,10 @@ async function main(): Promise<void> {
         gapScore: groupScore(groups[0]),
         sentenceScore: groupScore(groups[1]),
         translationJudgeScore: groupScore(groups[2]),
+        contextScore: groupScore(groups[3]),
+        checkerScore: groupScore(groups[4]),
+        fitJudgeScore: groupScore(groups[5]),
+        soundAlikeScore: groupScore(groups[6]),
         rows,
       },
       null,

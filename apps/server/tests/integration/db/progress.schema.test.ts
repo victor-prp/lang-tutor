@@ -106,8 +106,8 @@ describe('gloss_progress', () => {
 describe('session_progress', () => {
   async function session(): Promise<string> {
     const rows = await t.db.execute<{ id: string }>(sql`
-      insert into sessions (user_id, enrollment_id, status, source)
-      values ('u_1', ${E}, 'skipped', 'seed') returning id`);
+      insert into sessions (user_id, enrollment_id, status, source, listening, speaking)
+      values ('u_1', ${E}, 'skipped', 'seed', false, false) returning id`);
     return rows.rows[0].id;
   }
   const snapshot = (sessionId: string, over: { dimension?: string; before?: number; after?: number } = {}) =>

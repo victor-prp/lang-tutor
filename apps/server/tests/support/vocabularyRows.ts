@@ -1,6 +1,7 @@
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
+import { vocabularyEntries } from '../../src/db/schema';
 import { createVocabularyRepo } from '../../src/repo/vocabulary';
 import { insertLexeme } from './dictRows';
 import { withTx } from './withTx';
@@ -19,6 +20,8 @@ export async function seedSavedSenses(
     translations: string[];
     form?: string;
     languageCode?: string;
+    /** Phase 34. The lexeme's part of speech; a noun when omitted. */
+    partOfSpeech?: string;
     /** Who saved them; the enrollment's owner when omitted. */
     addedByUserId?: string;
     /** Phase 27: the saved example of the first sense's rendering. */
@@ -28,7 +31,7 @@ export async function seedSavedSenses(
   const word = await insertLexeme(db, {
     lemma: input.lemma,
     languageCode: input.languageCode ?? 'en',
-    partOfSpeech: 'noun',
+    partOfSpeech: input.partOfSpeech ?? 'noun',
     userLanguageCode: 'he',
     senses: input.translations.map((_, i) => ({ senseCode: `s${i}` })),
     variants: [
@@ -75,4 +78,13 @@ export async function readSavedGlossIds(db: Db, enrollmentId: string): Promise<s
     sql`select gloss_id from vocabulary_entries where enrollment_id = ${enrollmentId} order by gloss_id`,
   );
   return rows.rows.map((row) => row.gloss_id);
+}
+
+/** Phase 46. Every saved gloss's known_at, by gloss, as ISO text or null. */
+export async function readKnownAt(db: Db, enrollmentId: string): Promise<Map<string, string | null>> {
+  const rows = await db
+    .select({ glossId: vocabularyEntries.glossId, knownAt: vocabularyEntries.knownAt })
+    .from(vocabularyEntries)
+    .where(eq(vocabularyEntries.enrollmentId, enrollmentId));
+  return new Map(rows.map((row) => [row.glossId, row.knownAt ? row.knownAt.toISOString() : null]));
 }

@@ -11,12 +11,15 @@ type Props = {
   state: OptionVisualState;
   disabled: boolean;
   minHeight?: number;
+  /** Phase 34 (spec D10). A small Hebrew line under the label: a board word's
+   *  part of speech. */
+  note?: string;
   testID?: string;
   onPress: () => void;
   onMeasure: (height: number) => void;
 };
 
-export function OptionButton({ label, direction, state, disabled, minHeight, testID, onPress, onMeasure }: Props) {
+export function OptionButton({ label, direction, state, disabled, minHeight, note, testID, onPress, onMeasure }: Props) {
   function handleLayout(event: LayoutChangeEvent) {
     onMeasure(event.nativeEvent.layout.height);
   }
@@ -38,6 +41,11 @@ export function OptionButton({ label, direction, state, disabled, minHeight, tes
       <Text style={[styles.label, { writingDirection: direction }, state === 'dimmed' ? styles.labelDimmed : null]}>
         {label}
       </Text>
+      {note === undefined ? null : (
+        <Text style={styles.note} testID={testID === undefined ? undefined : `${testID}-note`}>
+          {note}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -59,6 +67,7 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   labelDimmed: { color: colors.muted },
+  note: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },
 });
 
 const stateStyles = StyleSheet.create({

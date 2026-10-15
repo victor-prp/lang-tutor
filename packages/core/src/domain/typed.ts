@@ -34,8 +34,10 @@ export function normaliseTyped(text: string): string {
     .replace(/[\s.,;:!?…]+$/u, '');
 }
 
-/** The text without one leading article or "to", when anything is left. */
-function bare(text: string): string {
+/** The text without one leading article or "to", when anything is left. Read
+ *  on a normalised answer (lowercase, single spaces); exported for phase 34's
+ *  answer-form check, which must strip exactly what this judge does. */
+export function bare(text: string): string {
   const space = text.indexOf(' ');
   if (space > 0 && LEADING_WORDS.has(text.slice(0, space))) return text.slice(space + 1);
   for (const prefix of ELIDED) {
@@ -115,4 +117,16 @@ export function judgeTyped(target: TypedTarget, text: string): TypedVerdict {
 export function judgeTiles(answer: string, built: string): TypedVerdict {
   const typed = normaliseTyped(built);
   return typed !== '' && typed === normaliseTyped(answer) ? 'exact' : 'wrong';
+}
+
+const wordCount = (text: string) => normaliseTyped(text).split(' ').filter((word) => /\p{L}/u.test(word)).length;
+
+/**
+ * A translation card answered with one word when its sentence has more: the
+ * practised word on its own, most likely. Shared on purpose: the app asks for
+ * the whole sentence instead of sending it, and the server judges it wrong
+ * without a model call, the verdict an older app has always had for it.
+ */
+export function wordOnly(text: string, reference: string): boolean {
+  return wordCount(text) === 1 && wordCount(reference) > 1;
 }

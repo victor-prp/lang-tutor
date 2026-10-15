@@ -37,6 +37,8 @@ function typedGrades(verdict: AnswerVerdict | undefined): GradedPiece[] {
 export function gradesFor(answer: GradableAnswer): GradedPiece[] {
   switch (answer.type) {
     case 'multiple_choice':
+    case 'new_meaning':
+      // Phase 39 (spec D6): a new meaning is graded as a multiple choice.
       return [piece('written_receptive', answer.correct ? GOOD : AGAIN)];
     case 'matching':
       // First try only: elimination makes the last pair free, so a success is Hard.
@@ -97,6 +99,7 @@ export function gradesFor(answer: GradableAnswer): GradedPiece[] {
 export function dimensionsTested(type: QuestionType): Dimension[] {
   switch (type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'matching':
     case 'typed_meaning':
       return ['written_receptive'];

@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createGlossTools } from '../composition';
 import { loadConfig, loadGeminiConfig, maintenanceUrlFor, redactDatabaseUrl } from '../config';
 import { createConsoleLogger } from '../logger';
+import { requestAcceptRenderings } from './acceptRenderings';
 import { createDb } from './client';
 import { ensureDatabase, laneStampFrom, parseLaneComment } from './ensureDatabase';
 import { dropLaneDatabases, findOrphans, listLaneDatabases, liveWorktreesOf } from './lanes';
@@ -308,6 +309,13 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Phase 34 (spec D13). On demand, after migrating: `npm run dict:accept`.
+    if (process.argv.includes('--accept-renderings')) {
+      const { requested } = await requestAcceptRenderings(db);
+      console.log(`asked for the accepted answers of ${requested} renderings in ${shownUrl}`);
+      return;
+    }
+
     // Phase 31 (spec D7). `npm run dict:glosses:merge -- --model --definitions
     // --yes`, every flag optional: prints the plan, and changes nothing without
     // --yes, as lane:clean does; --yes plans again before applying, model calls
@@ -330,6 +338,7 @@ async function main(): Promise<void> {
         // Tier 1 needs no model, so the Gemini settings are read only for --model.
         gemini: model ? loadGeminiConfig(process.env) : null,
         timeoutMs: 60_000,
+        now: Date.now,
       });
       const plan = await tools.planMerges({
         model,

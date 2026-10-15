@@ -40,7 +40,7 @@ r1_construct() {
 }
 
 r2() {
-  grep -rnE "boss\??\.(send|insert|sendAfter|sendThrottled|sendDebounced|flow)\(" apps/server/src --include='*.ts' \
+  grep -rnE "boss\??\.(send|insert|sendAfter|sendThrottled|sendDebounced|upsert|flow)\(" apps/server/src --include='*.ts' \
     | grep -v '^apps/server/src/repo/jobs\.ts:'
 }
 

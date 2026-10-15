@@ -29,7 +29,7 @@ function build() {
 describe('createProfile', () => {
   it("creates the profile under the signed-in user's own id", async () => {
     const { service } = build();
-    expect(await service.createProfile('u_dana', REQUEST)).toEqual({ id: 'u_dana', ...REQUEST });
+    expect(await service.createProfile('u_dana', REQUEST)).toEqual({ id: 'u_dana', ...REQUEST, time_zone: 'UTC' });
   });
 
   it('logs the new profile once the write has resolved', async () => {
@@ -71,5 +71,15 @@ describe('me and hasProfile', () => {
     const created = await service.createProfile('u_dana', REQUEST);
     expect(await service.me('u_dana')).toEqual(created);
     expect(await service.hasProfile('u_dana')).toBe(true);
+  });
+
+  // Phase 52 (spec D1). The profile carries the zone the app reported, UTC until it has.
+  it('answers the time zone the app reported, UTC before it', async () => {
+    const { service } = build();
+    await service.createProfile('u_dana', REQUEST);
+    expect((await service.me('u_dana'))?.time_zone).toBe('UTC');
+
+    await service.setTimeZone('u_dana', 'Asia/Jerusalem');
+    expect((await service.me('u_dana'))?.time_zone).toBe('Asia/Jerusalem');
   });
 });

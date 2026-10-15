@@ -7,10 +7,17 @@ import {
   loadBotSecret,
   loadConfig,
   loadGeminiConfig,
+  loadReminderSecret,
   maintenanceUrlFor,
   redactDatabaseUrl,
 } from './config';
-import { PREPARE_SESSION_EXPIRY_SECONDS } from './domain/jobs';
+import {
+  CHECKER_CALL_BUDGET_MS,
+  CONTEXT_CALL_BUDGET_MS,
+  PREPARE_SESSION_CALL_BUDGETS_MS,
+  PREPARE_SESSION_EXPIRY_SECONDS,
+  SESSION_GENERATION_BUDGET_MS,
+} from './domain/jobs';
 
 // Literal env objects in, Config out. No process.env is read or written here —
 // which is the whole point of taking `env` as a parameter.
@@ -22,12 +29,18 @@ describe('loadConfig', () => {
       port: 3001,
       poolMax: 5,
       translationTimeoutMs: 25_000,
-      sessionGenerationTimeoutMs: 300_000,
+      sessionGenerationTimeoutMs: 120_000,
+      contextCallTimeoutMs: 60_000,
+      checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
+      stockSaveDelaySeconds: 30,
+      soundAlikeThreshold: 0.95,
       version: 'dev',
+      commit: 'unknown',
       webDistDir: null,
+      pushBaseUrl: 'https://exp.host',
     });
   });
 
@@ -42,10 +55,28 @@ describe('loadConfig', () => {
     });
   });
 
+  it('reads the release commit, or unknown (phase 49)', () => {
+    expect(loadConfig({ APP_COMMIT: ' a3f9c21 ' }).commit).toBe('a3f9c21');
+    expect(loadConfig({ APP_COMMIT: 'e91c0aa-dirty' }).commit).toBe('e91c0aa-dirty');
+    expect(loadConfig({ APP_COMMIT: '  ' }).commit).toBe('unknown');
+    expect(loadConfig({}).commit).toBe('unknown');
+  });
+
+  it('reads the push base URL, defaulting to Expo (phase 52)', () => {
+    expect(loadConfig({}).pushBaseUrl).toBe('https://exp.host');
+    expect(loadConfig({ PUSH_BASE_URL: ' http://localhost:1080/ns ' }).pushBaseUrl).toBe('http://localhost:1080/ns');
+    expect(loadConfig({ PUSH_BASE_URL: '  ' }).pushBaseUrl).toBe('https://exp.host');
+  });
+
   it('reads the speech budget, defaulting to 8 s (phase 25)', () => {
     expect(loadConfig({}).speechTimeoutMs).toBe(8_000);
     expect(loadConfig({ SPEECH_TIMEOUT_MS: '3000' }).speechTimeoutMs).toBe(3_000);
     expect(loadConfig({ SPEECH_TIMEOUT_MS: 'nonsense' }).speechTimeoutMs).toBe(8_000);
+  });
+
+  it('reads the sound-alike threshold, defaulting to 0.95 (phase 50 D4)', () => {
+    expect(loadConfig({ SOUND_ALIKE_THRESHOLD: '0.9' }).soundAlikeThreshold).toBe(0.9);
+    expect(loadConfig({ SOUND_ALIKE_THRESHOLD: '2' }).soundAlikeThreshold).toBe(0.95);
   });
 
   it('reads the judge budget, defaulting to 8 s (phase 27)', () => {
@@ -68,12 +99,18 @@ describe('loadConfig', () => {
       port: 8080,
       poolMax: 20,
       translationTimeoutMs: 12_000,
-      sessionGenerationTimeoutMs: 300_000,
+      sessionGenerationTimeoutMs: 120_000,
+      contextCallTimeoutMs: 60_000,
+      checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
+      stockSaveDelaySeconds: 30,
+      soundAlikeThreshold: 0.95,
       version: 'dev',
+      commit: 'unknown',
       webDistDir: null,
+      pushBaseUrl: 'https://exp.host',
     });
   });
 
@@ -83,26 +120,57 @@ describe('loadConfig', () => {
     expect(loadConfig({ TRANSLATION_TIMEOUT_MS: 'nonsense' }).translationTimeoutMs).toBe(25_000);
   });
 
-  it('defaults the session generation budget to five minutes and reads SESSION_GENERATION_TIMEOUT_MS', () => {
-    expect(loadConfig({}).sessionGenerationTimeoutMs).toBe(300_000);
+  it('defaults the session generation budget to two minutes (phase 47 D1) and reads SESSION_GENERATION_TIMEOUT_MS', () => {
+    expect(loadConfig({}).sessionGenerationTimeoutMs).toBe(120_000);
     expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '5000' }).sessionGenerationTimeoutMs).toBe(5_000);
   });
 
-  // Victor's cap: the job's expiry is twice the budget and depends on it.
-  it('never lets SESSION_GENERATION_TIMEOUT_MS raise the budget above five minutes', () => {
-    expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '600000' }).sessionGenerationTimeoutMs).toBe(300_000);
+  // Victor's cap: the job's expiry is twice the sum of the budgets and depends on it.
+  it('never lets SESSION_GENERATION_TIMEOUT_MS raise the budget above two minutes', () => {
+    expect(loadConfig({ SESSION_GENERATION_TIMEOUT_MS: '600000' }).sessionGenerationTimeoutMs).toBe(120_000);
   });
 
   // Phase 24 (spec D16): expiry detects a crashed worker and must never cut a
   // healthy call off. The two numbers used to agree only through a comment.
-  it('expires a prepare-session job no sooner than twice the default budget', () => {
-    expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(2 * loadConfig({}).sessionGenerationTimeoutMs);
+  // Phase 34 (ruling R12): an attempt makes its calls one after another, so the
+  // expiry covers their sum.
+  it('expires a prepare-session job no sooner than twice the sum of its calls’ default budgets', () => {
+    const config = loadConfig({});
+    expect(PREPARE_SESSION_EXPIRY_SECONDS * 1000).toBeGreaterThanOrEqual(
+      2 * (config.sessionGenerationTimeoutMs + config.contextCallTimeoutMs + config.checkerCallTimeoutMs),
+    );
+  });
+
+  it('expires a prepare-session job at exactly twice the batch’s, the context call’s and the checker’s budgets (ruling R12)', () => {
+    expect(PREPARE_SESSION_CALL_BUDGETS_MS).toEqual([SESSION_GENERATION_BUDGET_MS, CONTEXT_CALL_BUDGET_MS, CHECKER_CALL_BUDGET_MS]);
+    expect(PREPARE_SESSION_EXPIRY_SECONDS).toBe((2 * (120_000 + 60_000 + 60_000)) / 1000);
+  });
+
+  it('defaults the checker’s budget to a minute, reads CHECKER_CALL_TIMEOUT_MS, and never above a minute', () => {
+    expect(loadConfig({}).checkerCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: '2000' }).checkerCallTimeoutMs).toBe(2_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: '300000' }).checkerCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CHECKER_CALL_TIMEOUT_MS: 'nonsense' }).checkerCallTimeoutMs).toBe(60_000);
+  });
+
+  it('defaults the context call’s budget to a minute, reads CONTEXT_CALL_TIMEOUT_MS, and never above a minute', () => {
+    expect(loadConfig({}).contextCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CONTEXT_CALL_TIMEOUT_MS: '2000' }).contextCallTimeoutMs).toBe(2_000);
+    expect(loadConfig({ CONTEXT_CALL_TIMEOUT_MS: '300000' }).contextCallTimeoutMs).toBe(60_000);
+    expect(loadConfig({ CONTEXT_CALL_TIMEOUT_MS: 'nonsense' }).contextCallTimeoutMs).toBe(60_000);
   });
 
   it('caps the photo read budget at two minutes, and defaults to it', () => {
     expect(loadConfig({}).photoReadTimeoutMs).toBe(120_000);
     expect(loadConfig({ PHOTO_READ_TIMEOUT_MS: '5000' }).photoReadTimeoutMs).toBe(5_000);
     expect(loadConfig({ PHOTO_READ_TIMEOUT_MS: '999999' }).photoReadTimeoutMs).toBe(120_000);
+  });
+
+  // Phase 43 (ruling R3). e2e holds a save's stock back for the length of a run.
+  it("reads how long a save's stock waits, half a minute by default", () => {
+    expect(loadConfig({}).stockSaveDelaySeconds).toBe(30);
+    expect(loadConfig({ STOCK_SAVE_DELAY_SECONDS: '3600' }).stockSaveDelaySeconds).toBe(3_600);
+    expect(loadConfig({ STOCK_SAVE_DELAY_SECONDS: 'nonsense' }).stockSaveDelaySeconds).toBe(30);
   });
 
   it('still works with no Gemini settings at all, so db:migrate is unaffected', () => {
@@ -236,6 +304,24 @@ describe('assertDatabaseIdentifier', () => {
     for (const bad of ['', 'Lang', '1lane', 'a-b', 'a b', 'a";drop', 'a'.repeat(64)]) {
       expect(() => assertDatabaseIdentifier(bad)).toThrow('database identifier');
     }
+  });
+});
+
+// Phase 52 (spec D5, D9). The tick route is mounted only when this is set.
+describe('loadReminderSecret', () => {
+  it('is null when REMINDER_SECRET is unset or blank, as on every lane', () => {
+    expect(loadReminderSecret({})).toBeNull();
+    expect(loadReminderSecret({ REMINDER_SECRET: '   ' })).toBeNull();
+  });
+
+  it('reads it, trimmed', () => {
+    const secret = 'x'.repeat(32);
+    expect(loadReminderSecret({ REMINDER_SECRET: ` ${secret} ` })).toBe(secret);
+  });
+
+  it('refuses a secret shorter than 32 characters, naming the variable but not the value', () => {
+    expect(() => loadReminderSecret({ REMINDER_SECRET: 'short-secret' })).toThrow(/REMINDER_SECRET/);
+    expect(() => loadReminderSecret({ REMINDER_SECRET: 'short-secret' })).not.toThrow(/short-secret/);
   });
 });
 

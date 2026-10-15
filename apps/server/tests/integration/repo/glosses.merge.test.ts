@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 
 import { createDictRepo, type RepairedRendering } from '../../../src/repo/dictionary';
 import { createGlossRepo } from '../../../src/repo/glosses';
+import { createTargetRepo } from '../../../src/repo/targets';
 import { insertDriftedFinger, insertLexeme, insertRendering } from '../../support/dictRows';
 import { holdMergeOpen, waitForBlockedQuery } from '../../support/locks';
 import { insertAnsweredSession, insertProgressRows, setLevel } from '../../support/progressRows';
@@ -114,6 +115,68 @@ describe('mergeGlosses (spec D7)', () => {
         { enrollment_id: e2, gloss_id: w.survivor, dimension: 'written_receptive', stability: 7, reps: 2 },
       ].sort(byRow),
     );
+  });
+
+  // Phase 46 (spec D1, D3). A skill reached under either gloss was reached, and a
+  // gloss known under either is known: the fold keeps the earliest of each.
+  it('keeps the earliest reached_on per dimension and the earliest known_at when an enrollment saved both', async () => {
+    const w = await twoGlosses();
+    const e1 = enrollmentOf('u_1');
+    await save(e1, w.other, w.fingers, w.lexemeId, '2026-01-01');
+    await save(e1, w.survivor, w.finger, w.lexemeId, '2026-02-01');
+    const remember = (glossId: string, dimension: string, stability: number, reachedOn: string | null) =>
+      t.db.execute(sql`
+        insert into gloss_memory (enrollment_id, gloss_id, dimension, stability, difficulty, last_day, reps, lapses, params, reached_on)
+        values (${e1}, ${glossId}, ${dimension}, ${stability}, 5, '2026-09-01', 2, 0, 'fsrs6-default', ${reachedOn}::date)`);
+    // WP: the survivor is stronger now, the other reached the bar first and has since slipped.
+    await remember(w.other, 'written_productive', 2, '2026-05-01');
+    await remember(w.survivor, 'written_productive', 9, '2026-08-01');
+    // WR: the other is stronger and never reached; the survivor reached it.
+    await remember(w.other, 'written_receptive', 6, null);
+    await remember(w.survivor, 'written_receptive', 3, '2026-07-01');
+    await t.db.execute(sql`update vocabulary_entries set known_at = '2026-06-01T10:00:00Z' where enrollment_id = ${e1} and gloss_id = ${w.other}`);
+
+    await merge(w.lexemeId, w.survivor, w.other);
+
+    const memory = await t.db.execute<{ dimension: string; stability: number; reached_on: string | null }>(sql`
+      select dimension, stability, reached_on::text from gloss_memory where enrollment_id = ${e1} order by dimension`);
+    expect(memory.rows).toEqual([
+      { dimension: 'written_productive', stability: 9, reached_on: '2026-05-01' },
+      { dimension: 'written_receptive', stability: 6, reached_on: '2026-07-01' },
+    ]);
+    const entry = await t.db.execute<{ known: string | null }>(sql`
+      select known_at::text as known from vocabulary_entries where enrollment_id = ${e1} and gloss_id = ${w.survivor}`);
+    expect(entry.rows[0].known).not.toBeNull();
+  });
+
+  // Phase 53 (spec D1). A target's word is a gloss: the merge moves it to the survivor,
+  // and where a target held both it keeps the one row the key allows.
+  it('moves a target word to the survivor, and leaves one row where a target held both', async () => {
+    const w = await twoGlosses();
+    const e1 = enrollmentOf('u_1');
+    const e2 = enrollmentOf('u_2');
+    const target = (enrollmentId: string, dueOn: string) =>
+      withTx(t.db, (tx) => createTargetRepo(tx).insertTarget({ enrollmentId, kind: 'exam', dueOn }));
+    const hold = (targetId: string, glossIds: string[]) => withTx(t.db, (tx) => createTargetRepo(tx).addWords(targetId, glossIds));
+    const wordsOf = (targetId: string) => withTx(t.db, (tx) => createTargetRepo(tx).listWordIds(targetId));
+    const onlyOther = await target(e1, '2026-11-01');
+    const both = await target(e1, '2026-11-02');
+    const onlySurvivor = await target(e2, '2026-11-03');
+    const neither = await target(e2, '2026-11-04');
+    await hold(onlyOther.id, [w.other]);
+    await hold(both.id, [w.other, w.survivor]);
+    await hold(onlySurvivor.id, [w.survivor]);
+
+    const counts = await merge(w.lexemeId, w.survivor, w.other);
+
+    // One row moved (onlyOther) and one folded into the survivor's own (both).
+    expect(counts).toMatchObject({ targetWords: 2 });
+    expect(await wordsOf(onlyOther.id)).toEqual([w.survivor]);
+    expect(await wordsOf(both.id)).toEqual([w.survivor]);
+    expect(await wordsOf(onlySurvivor.id)).toEqual([w.survivor]);
+    expect(await wordsOf(neither.id)).toEqual([]);
+    const left = await t.db.execute<{ n: number }>(sql`select count(*)::int as n from target_words where gloss_id = ${w.other}`);
+    expect(left.rows[0].n).toBe(0);
   });
 
   it('is idempotent: a second run changes nothing', async () => {

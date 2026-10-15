@@ -1,13 +1,17 @@
 import type {
+  AddTargetWordsRequest,
+  ChangeTargetDateRequest,
   CreateEnrollmentRequest,
   CreateGrantRequest,
   CreateSessionRequest,
   CreateSessionResponse,
+  CreateTargetRequest,
   CreateUserRequest,
   CurrentSessionResponse,
   Enrollment,
   Grant,
   GrantList,
+  HealthResponse,
   JudgedAnswerRequest,
   JudgedAnswerResponse,
   MeResponse,
@@ -18,12 +22,21 @@ import type {
   PhotoImportItem,
   PhotoImportItemUpdate,
   PhotoImportSummary,
+  PushDeviceRequest,
+  PushDeviceUnregisterRequest,
+  ReminderSettings,
+  ReminderSettingsResponse,
   SaveVocabularyRequest,
   SaveVocabularyResponse,
   SessionView,
   SkipSessionResponse,
+  StartSessionRequest,
+  StartSessionResponse,
   SpeechAnswerRequest,
   SpeechAnswerResponse,
+  Target,
+  TargetList,
+  TimeZoneRequest,
   TranslationRequest,
   TranslationResponse,
   User,
@@ -34,19 +47,25 @@ import type {
 export class ApiError extends Error {
   // `code` is the body's `error` string when there is one: the server answers
   // several 409s (session_open, no_saved_words, …) that the status alone
-  // cannot tell apart.
+  // cannot tell apart. Phase 53: `reason` is the body's `reason` beside it, which
+  // says why an `invalid target` was refused (no_words, due_date, unknown_import).
   constructor(
     public readonly status: number,
     public readonly code?: string,
+    public readonly reason?: string,
   ) {
-    super(`API request failed with status ${status}${code ? ` (${code})` : ''}`);
+    super(`API request failed with status ${status}${code ? ` (${code}${reason ? `: ${reason}` : ''})` : ''}`);
   }
 }
 
 async function failureOf(res: Response): Promise<ApiError> {
   try {
-    const body = (await res.json()) as { error?: unknown };
-    return new ApiError(res.status, typeof body.error === 'string' ? body.error : undefined);
+    const body = (await res.json()) as { error?: unknown; reason?: unknown };
+    return new ApiError(
+      res.status,
+      typeof body.error === 'string' ? body.error : undefined,
+      typeof body.reason === 'string' ? body.reason : undefined,
+    );
   } catch {
     return new ApiError(res.status);
   }
@@ -63,6 +82,10 @@ export const JUDGE_REQUEST_TIMEOUT_MS = 15_000;
  *  this the upload screen shows its upload-failed message and keeps the photo
  *  for a retry, instead of waiting with both buttons disabled. */
 export const PHOTO_UPLOAD_TIMEOUT_MS = 60_000;
+
+/** Phase 49 (review I1). React Native sets no timeout of its own; past this the
+ *  About screen's Server line reads "not reachable" instead of waiting forever. */
+export const HEALTH_TIMEOUT_MS = 5_000;
 
 export type ApiClientDeps = {
   baseUrl: string;
@@ -128,8 +151,17 @@ export function createApiClient({
     return (await res.json()) as TResponse;
   }
 
-  async function postNoContent(path: string): Promise<void> {
-    await send('POST', path, { body: {} });
+  async function putJson<TResponse>(path: string, body: unknown): Promise<TResponse> {
+    const res = await send('PUT', path, { body });
+    return (await res.json()) as TResponse;
+  }
+
+  async function postNoContent(path: string, body: unknown): Promise<void> {
+    await send('POST', path, { body });
+  }
+
+  async function putNoContent(path: string, body: unknown): Promise<void> {
+    await send('PUT', path, { body });
   }
 
   async function getJson<TResponse>(path: string): Promise<TResponse> {
@@ -143,14 +175,39 @@ export function createApiClient({
 
   const vocabularyPath = (enrollmentId: string) =>
     `/api/enrollments/${encodeURIComponent(enrollmentId)}/vocabulary`;
+  const targetsPath = (enrollmentId: string) => `/api/enrollments/${encodeURIComponent(enrollmentId)}/targets`;
+  const targetPath = (targetId: string) => `/api/targets/${encodeURIComponent(targetId)}`;
 
   return {
+    /** Phase 49 (spec D1). The server's own release, for the About screen. */
+    health: async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+      try {
+        const res = await send('GET', '/health', { signal: controller.signal });
+        return (await res.json()) as HealthResponse;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     me: () => getJson<MeResponse>('/api/me'),
     createProfile: (request: CreateUserRequest) => postJson<User>('/api/users', request),
     createSession: (request: CreateSessionRequest) =>
       postJson<CreateSessionResponse>('/api/sessions', request),
-    nextStep: (sessionId: string, request: NextStepRequest) =>
-      postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request),
+    nextStep: async (sessionId: string, request: NextStepRequest) => {
+      // Phase 41 (review I1). A fit check waits on the server's model call, so it
+      // is given up as a judged answer is, and the card offers "try again".
+      if (!('check_fit' in request && request.check_fit)) {
+        return postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request);
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), JUDGE_REQUEST_TIMEOUT_MS);
+      try {
+        return await postJson<NextStepResponse>(`/api/sessions/${sessionId}/next-step`, request, { signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     answerBySpeech: async (sessionId: string, request: SpeechAnswerRequest) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), SPEECH_UPLOAD_TIMEOUT_MS);
@@ -181,6 +238,9 @@ export function createApiClient({
       getJson<SessionView>(`/api/sessions/${encodeURIComponent(sessionId)}`),
     skipSession: (sessionId: string) =>
       postJson<SkipSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/skip`, {}),
+    // Phase 43 (spec D2). Starting a session has the next one built for this device.
+    startSession: (sessionId: string, request: StartSessionRequest) =>
+      postJson<StartSessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/start`, request),
     currentSession: (enrollmentId: string) =>
       getJson<CurrentSessionResponse>(`/api/enrollments/${encodeURIComponent(enrollmentId)}/sessions/current`),
     translate: (request: TranslationRequest) =>
@@ -229,7 +289,34 @@ export function createApiClient({
       patchJson<PhotoImportItem>(`/api/photo-imports/${encodeURIComponent(id)}/items/${position}`, update),
     savePhotoImport: (id: string) =>
       postJson<SaveVocabularyResponse>(`/api/photo-imports/${encodeURIComponent(id)}/save`, {}),
-    discardPhotoImport: (id: string) => postNoContent(`/api/photo-imports/${encodeURIComponent(id)}/discard`),
+    discardPhotoImport: (id: string) => postNoContent(`/api/photo-imports/${encodeURIComponent(id)}/discard`, {}),
+
+    // Phase 52 (spec D1, D2, D4, D6). Practice reminders: the schedule, the zone its
+    // hours are read in, this phone's push token, and a tapped reminder.
+    reminderSettings: () => getJson<ReminderSettingsResponse>('/api/me/reminders'),
+    putReminderSettings: (settings: ReminderSettings) =>
+      putJson<ReminderSettingsResponse>('/api/me/reminders', settings),
+    setTimeZone: (timeZone: string) =>
+      putNoContent('/api/me/time-zone', { time_zone: timeZone } satisfies TimeZoneRequest),
+    registerPushDevice: (token: string) =>
+      putNoContent('/api/me/push-devices', { token, platform: 'android' } satisfies PushDeviceRequest),
+    unregisterPushDevice: (token: string) =>
+      postNoContent('/api/me/push-devices/unregister', { token } satisfies PushDeviceUnregisterRequest),
+    tapReminder: (id: string) => postNoContent(`/api/me/reminders/${encodeURIComponent(id)}/tap`, {}),
+
+    // Phase 53 (spec D13). Preparing for homework or a test: the enrollment's active
+    // targets and a new one, then one target, its words, its date, and its end.
+    listTargets: (enrollmentId: string) => getJson<TargetList>(targetsPath(enrollmentId)),
+    getTarget: (targetId: string) => getJson<Target>(targetPath(targetId)),
+    createTarget: (enrollmentId: string, request: CreateTargetRequest) =>
+      postJson<Target>(targetsPath(enrollmentId), request),
+    addTargetWords: (targetId: string, request: AddTargetWordsRequest) =>
+      postJson<Target>(`${targetPath(targetId)}/words`, request),
+    removeTargetWord: (targetId: string, glossId: string) =>
+      deleteResource(`${targetPath(targetId)}/words/${encodeURIComponent(glossId)}`),
+    changeTargetDate: (targetId: string, request: ChangeTargetDateRequest) =>
+      patchJson<Target>(targetPath(targetId), request),
+    endTarget: (targetId: string) => postNoContent(`${targetPath(targetId)}/end`, {}),
   };
 }
 

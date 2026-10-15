@@ -5,7 +5,21 @@ import { z } from 'zod';
 // inferred from it in ./types. Plain Zod 4 on purpose: core must not depend on
 // a Hono adapter, and Zod 4's native JSON Schema output is what lets the
 // adapter document these without one.
+// Phase 34 (spec D6, D8). A marked word: JavaScript string indices, [start,
+// end), into the sentence it marks, as GapSchema's are.
+export const MarkSchema = z.object({ start: z.number().int(), end: z.number().int() });
+
+// Phase 34 (spec D6). The sentence a card that shows a bare word shows with it,
+// so the word has one sense: Hebrew on a typed translation, say the translation
+// and reverse choice; in the target language on a typed meaning and multiple
+// choice. `mark` is the word in it, or null when the server could not find it
+// (a Hebrew verb inflects), and the sentence is then shown unmarked. Its other
+// half is never sent: it goes to the judge (D7).
+export const ContextSchema = z.object({ text: z.string(), mark: MarkSchema.nullable() });
+
 // Today's card: the target word, four meanings in the learner's language.
+// Phase 34: with its context sentence (spec D6), or null for a saved sense
+// without an example.
 export const MultipleChoiceQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('multiple_choice'),
@@ -13,6 +27,21 @@ export const MultipleChoiceQuestionSchema = z.object({
   question: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
+  context: ContextSchema.nullable(),
+});
+
+// Phase 39 (spec D6). A new meaning for a word the learner already knows:
+// the word, every meaning already learned (in family order), and four
+// meanings to pick the new one from. Answered and graded as a multiple choice.
+export const NewMeaningQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('new_meaning'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  known_meanings: z.array(z.string()),
+  options: z.array(z.string()),
+  correct_option: z.number().int(),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 23. The same card turned round: the meaning, four target words.
@@ -25,6 +54,7 @@ export const ReverseChoiceQuestionSchema = z.object({
   part_of_speech: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 23. The meaning; the learner types the target word. The client holds
@@ -39,16 +69,20 @@ export const TypedTranslationQuestionSchema = z.object({
   answer: z.string(),
   lemma: z.string(),
   alternatives: z.array(z.string()),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 24. Hear the word, pick its meaning: today's card with its prompt
 // spoken rather than shown. `question` is the form the app speaks, and shows
-// once the card is answered (spec D6).
+// once the card is answered (spec D6). Phase 34 (spec D10): with the part of
+// speech the reverse card shows, since a written sentence would spell out the
+// word being heard.
 export const ListenChoiceQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('listen_choice'),
   vocab_term_id: z.string(),
   question: z.string(),
+  part_of_speech: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
 });
@@ -65,9 +99,11 @@ export const DictationQuestionSchema = z.object({
 
 // Phase 24 (spec D10). A matching board, as each of its words carries it: every
 // word's question id, the word, and its right option among the shared options.
+// Phase 34 (spec D10): and each word's part of speech, shown under it.
 export const MatchingBoardSchema = z.object({
   question_ids: z.array(z.string()),
   words: z.array(z.string()),
+  parts_of_speech: z.array(z.string()),
   correct_options: z.array(z.number().int()),
 });
 
@@ -79,6 +115,7 @@ export const MatchingQuestionSchema = z.object({
   type: z.literal('matching'),
   vocab_term_id: z.string(),
   question: z.string(),
+  part_of_speech: z.string(),
   options: z.array(z.string()),
   correct_option: z.number().int(),
   board: MatchingBoardSchema,
@@ -119,6 +156,7 @@ export const SayTranslationQuestionSchema = z.object({
   answer: z.string(),
   lemma: z.string(),
   alternatives: z.array(z.string()),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 27 (spec D2, D11). The form, written; the learner types its Hebrew
@@ -131,6 +169,7 @@ export const TypedMeaningQuestionSchema = z.object({
   question: z.string(),
   part_of_speech: z.string(),
   meaning: z.string(),
+  context: ContextSchema.nullable(),
 });
 
 // Phase 27 (spec D7, D11). Where a word sits in a sentence: JavaScript string
@@ -157,6 +196,8 @@ export const ClozeChoiceQuestionSchema = z.object({
 // Phase 27 (spec D5). A sentence written for this session, the word blanked in
 // whatever form it needs, and the whole sentence in Hebrew. `answer` is the
 // gap's text: the client judges locally against it and `alternatives`.
+// Phase 34 (spec D8): `mark` is the practised word in `translation`, the Hebrew,
+// or null when the server could not find it there.
 export const ClozeTypedQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('cloze_typed'),
@@ -167,11 +208,14 @@ export const ClozeTypedQuestionSchema = z.object({
   meaning: z.string(),
   answer: z.string(),
   alternatives: z.array(z.string()),
+  mark: MarkSchema.nullable(),
 });
 
 // Phase 27 (spec D6). A Hebrew sentence to translate, judged by the server.
 // `sentence` is a reference translation, `gap` and `answer` the practised word
-// in it: shown after the answer.
+// in it: shown after the answer. Phase 34 (spec D8): `mark` is the practised
+// word in `question`, the Hebrew sentence (נשלב in בואו נשלב כוחות), or null
+// when the server could not find it there.
 export const SentenceTranslationQuestionSchema = z.object({
   id: z.string(),
   type: z.literal('sentence_translation'),
@@ -181,12 +225,14 @@ export const SentenceTranslationQuestionSchema = z.object({
   sentence: z.string(),
   gap: GapSchema,
   answer: z.string(),
+  mark: MarkSchema.nullable(),
 });
 
 // A tagged union. Consumers switch on `type`, so adding a type is additive and
 // the compiler finds every switch that has not learnt it.
 export const QuestionSchema = z.discriminatedUnion('type', [
   MultipleChoiceQuestionSchema,
+  NewMeaningQuestionSchema,
   ReverseChoiceQuestionSchema,
   TypedTranslationQuestionSchema,
   ListenChoiceQuestionSchema,
@@ -231,6 +277,13 @@ export const AnswerRecordSchema = z.object({
   answer_string: z.string(),
   // Phase 23. Present for a typed answer; phase 25, for a spoken one too.
   verdict: AnswerVerdictSchema.optional(),
+  // Phase 34 (spec D9). A right answer that is not the saved word holds its card
+  // for one more try: `pending` until the retry comes, then `resolved` with the
+  // retry's text and verdict. Null on every other answer. The score reads the
+  // first answer; progress reads the retry when it was right.
+  retry_state: z.enum(['pending', 'resolved']).nullable(),
+  retry_answer_string: z.string().nullable(),
+  retry_verdict: AnswerVerdictSchema.nullable(),
 });
 
 export const ScoreSchema = z.object({
@@ -313,6 +366,15 @@ export const CreateSessionResponseSchema = z.object({
   source: SessionSourceSchema,
 });
 
+// Phase 34 (spec D9). The current card is held for its second try: `answer` is
+// the first answer, which was right but is not the saved word, and `wording`
+// which line the card shows, another saved word or (typed meaning) another
+// meaning. The retry is sent with `retry: true`.
+export const PendingRetrySchema = z.object({
+  answer: z.string(),
+  wording: z.enum(['word', 'meaning']),
+});
+
 // Phase 19. One session as resume and the poll read it. `question` is the
 // current one while the session is ready and unfinished, and null otherwise.
 export const SessionViewSchema = z.object({
@@ -321,26 +383,46 @@ export const SessionViewSchema = z.object({
   source: SessionSourceSchema,
   position: PositionSchema,
   question: QuestionSchema.nullable(),
+  // Phase 34 (spec D9). Set while `question` is held for its second try, so a
+  // resumed session opens on it; null otherwise.
+  pending_retry: PendingRetrySchema.nullable(),
   // Phase 20. What a completed session did to the saved words; empty otherwise.
   progress: z.array(SessionProgressItemSchema),
 });
 
 // Phase 23. A choice is answered by index, a typed card by its text. Empty
 // text is "show me the answer", which is wrong.
+//
+// Phase 34 (spec D9). `retry: true` is the second try at a card held for one:
+// judged as the first answer was, except that an empty text, `show_answer` or
+// a skip gives up (D9 ends a second try with an answer or a give-up, so a skip
+// there is never stored as skipped). Absent, a request for the held card
+// replays its first answer.
 export const NextStepRequestSchema = z.union([
   z.object({
     question_id: z.string().min(1),
     option_index: z.number().int().nonnegative(),
+    retry: z.boolean().optional(),
   }),
   z.object({
     question_id: z.string().min(1),
     text: z.string().max(100),
+    retry: z.boolean().optional(),
+    // Phase 38 (spec D4). On a first answer to a typed cloze: whether the learner
+    // opened its Hebrew sentence. Optional, so an older app is unchanged; stored for
+    // `cloze_typed` only, and never changed by a retry.
+    hint_opened: z.boolean().optional(),
+    // Phase 41 (spec D2). On a first answer to a typed cloze that the rule calls
+    // wrong: the app waits while the server asks the model whether the word fits
+    // the gap. Optional, so an older app is graded as before.
+    check_fit: z.boolean().optional(),
   }),
   // Phase 25 (spec D5). A speaking card answered without audio: passed, or
   // "show me the answer".
   z.object({
     question_id: z.string().min(1),
     pass: z.enum(['skip', 'show_answer']),
+    retry: z.boolean().optional(),
   }),
 ]);
 
@@ -353,6 +435,9 @@ export const NextStepResponseSchema = z.discriminatedUnion('complete', [
     question: QuestionSchema,
     position: PositionSchema,
     complete: z.literal(false),
+    // Phase 34 (spec D9). Set when `question` is the card just answered, held
+    // for its second try; null when it is the next card.
+    pending_retry: PendingRetrySchema.nullable(),
   }),
   z.object({
     session_id: z.string(),
@@ -376,6 +461,9 @@ export const SpeechAnswerRequestSchema = z.object({
   question_id: z.string().min(1),
   mime_type: SpeechMimeTypeSchema,
   audio: z.string().min(1).max(270_000),
+  // Phase 34 (spec D9). The second try at a card held for one. Absent, a clip
+  // for the held card replays its first answer.
+  retry: z.boolean().optional(),
 });
 
 // How an attempt was judged. `unheard` records nothing (spec D5).
@@ -396,6 +484,10 @@ export const SpeechAnswerResponseSchema = z.object({
 export const JudgedAnswerRequestSchema = z.object({
   question_id: z.string().min(1),
   text: z.string().max(300),
+  // Phase 34 (spec D9). The second try at a card held for one. An empty text is
+  // this route's give-up, as an empty text, `show_answer` or a skip is
+  // next-step's. Absent, a text for the held card replays its first answer.
+  retry: z.boolean().optional(),
 });
 
 export const JudgedAnswerResponseSchema = z.object({
@@ -426,6 +518,19 @@ export const SkipSessionResponseSchema = z.object({
   status: z.literal('skipped'),
 });
 
+// Phase 43 (spec D2). Starting a session asks for the next one in stock, built
+// for the device that started it: whether it has a voice for the target and
+// whether it can record, each as on create. Absent means no.
+export const StartSessionRequestSchema = z.object({
+  listening: z.boolean().optional(),
+  speaking: z.boolean().optional(),
+});
+
+export const StartSessionResponseSchema = z.object({
+  session_id: z.string(),
+  status: SessionStatusSchema,
+});
+
 // The failure body every endpoint can return. Until this phase this shape lived
 // only inside handler code; declaring it here is what lets each route publish
 // its failures instead of documenting a happy path.
@@ -438,13 +543,16 @@ export const ErrorSchema = z.object({
 // 15 it also answers "which server is this?" — several checkouts run at once,
 // each on its own port and database, and a healthy port alone cannot tell them
 // apart. The database is named, never the URL: the URL carries credentials.
-// Since phase 30 it also names the release (the image's tag; `dev` elsewhere).
+// Since phase 30 it also names the release (the image's tag; `dev` elsewhere),
+// and since phase 49 the commit (7 characters, `-dirty` from an unclean tree,
+// `unknown` when unset), which the app's About screen shows.
 export const HealthResponseSchema = z.object({
   ok: z.boolean(),
   lane: z.string(),
   database: z.string(),
   port: z.number().int(),
   version: z.string(),
+  commit: z.string(),
 });
 
 // Identity, phase 8. A username identifies a learner; it authenticates nothing.
@@ -474,6 +582,9 @@ export const UserSchema = z.object({
   display_name: z.string(),
   age: z.number().int(),
   native_language: z.string(),
+  // Phase 52 (spec D1). The IANA zone the server holds for the learner, UTC until the app
+  // reports one. It lets the app skip the report when nothing changed.
+  time_zone: z.string(),
 });
 
 export const CreateUserRequestSchema = z.object({
@@ -482,6 +593,31 @@ export const CreateUserRequestSchema = z.object({
   age: z.number().int().min(3).max(120),
   native_language: NativeLanguageSchema,
 });
+
+// Phase 52 (spec D1). The IANA zone the app reports on every launch. Whether the
+// name is one is the server's to decide (it asks Intl), so the wire only bounds it.
+export const TimeZoneRequestSchema = z.object({ time_zone: z.string().min(1).max(64) });
+
+// Phase 52 (spec D2, D4). A learner's reminder schedule on the wire. `days` are ISO
+// weekdays (1 = Monday ... 7 = Sunday) and may be empty (no day); `times` are
+// 'HH:MM' on the learner's own clock, at most eight before the server sorts them
+// and drops repeats. The response adds the zone those times are read in.
+export const ReminderSettingsSchema = z.object({
+  enabled: z.boolean(),
+  daily_target: z.number().int().min(1).max(10),
+  days: z.array(z.number().int().min(1).max(7)).max(7),
+  times: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)).min(1).max(8),
+});
+export const ReminderSettingsResponseSchema = ReminderSettingsSchema.extend({ time_zone: z.string() });
+
+// Phase 52 (spec D4). An Expo push token, registered after the permission is granted.
+// Android only; a later platform widens the literal.
+export const PushDeviceRequestSchema = z.object({ token: z.string().min(1).max(256), platform: z.literal('android') });
+export const PushDeviceUnregisterRequestSchema = z.object({ token: z.string().min(1).max(256) });
+
+// Phase 52 (spec D5). The reminder tick's answer, to EventBridge: a run is queued,
+// or one already was. Mounted only where REMINDER_SECRET is set.
+export const ReminderTickResponseSchema = z.object({ queued: z.literal(true) });
 
 // A course of study: one target language, explained in one source language.
 // Language fields are plain strings for the reason UserSchema's are.
@@ -723,6 +859,70 @@ export const VocabularyWordQuerySchema = z.object({
   lemma: z.string().min(1).regex(/^[^\u0000]*$/),
 });
 
+// Phase 53 (spec D1, D4, D13). A target: a kind, a due date and words saved in the
+// enrollment, which sessions serve until the date. A learner day is ADR 0013's,
+// 'YYYY-MM-DD'. `days_left` counts from the learner's today, and a target is active
+// while it is at least 1. A word's readiness is its chance of being remembered on
+// the due date, in its weakest live skill, read against the kind's bars.
+export const TargetKindSchema = z.enum(['homework', 'exam']);
+export const TargetReadinessSchema = z.enum(['not_started', 'on_the_way', 'almost', 'ready']);
+// A calendar day, not only the shape of one: 2026-02-30 and 2026-13-01 match the pattern, reached
+// Postgres, which raises 22008, and answered 500. The parts must survive a round trip through UTC,
+// so no locale and no time zone is read; setUTCFullYear rather than Date.UTC, which would remap
+// the years 0-99 to 1900-1999. This checks a day it is given and computes none (ADR 0013 R1).
+const isCalendarDay = (day: string): boolean => {
+  const [year, month, date] = day.split('-').map(Number);
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, date);
+  return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === date;
+};
+export const LearnerDaySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine(isCalendarDay, { message: 'not a calendar day' });
+export const TargetSummarySchema = z.object({
+  id: z.string(),
+  kind: TargetKindSchema,
+  due_on: LearnerDaySchema,
+  days_left: z.number().int(),
+  word_count: z.number().int(),
+  ready_count: z.number().int(),
+});
+// The active targets, nearest due date first, and the day they were read on: the
+// app's date step offers the days after it.
+export const TargetListSchema = z.object({ today: LearnerDaySchema, targets: z.array(TargetSummarySchema) });
+// Ruling R-D11. `form` is the form the word was saved from, `meaning` the gloss's key.
+export const TargetWordSchema = z.object({
+  gloss_id: z.string(),
+  form: z.string(),
+  meaning: z.string(),
+  readiness: TargetReadinessSchema,
+});
+// Its words in the order they were added.
+export const TargetSchema = TargetSummarySchema.extend({ words: z.array(TargetWordSchema) });
+// Ruling R-D9. The words a create or an add brings, saved in the same transaction:
+// photo imports (one per photo; a failed one is skipped) and typed words.
+export const TargetWordsInputSchema = z.object({
+  photo_import_ids: z.array(z.string().min(1)).max(10),
+  entries: z.array(VocabularyEntryInputSchema).max(50),
+});
+// Ruling R-D10. Creating needs at least one word, which only the save can tell: a
+// photo may hold none, or fail.
+export const CreateTargetRequestSchema = TargetWordsInputSchema.extend({ kind: TargetKindSchema, due_on: LearnerDaySchema });
+export const AddTargetWordsRequestSchema = TargetWordsInputSchema.refine(
+  (body) => body.photo_import_ids.length + body.entries.length > 0,
+  { message: 'nothing to add' },
+);
+// Any day after the learner's today; the kind never changes.
+export const ChangeTargetDateRequestSchema = z.object({ due_on: LearnerDaySchema });
+// The 400 of a target request. `invalid request` (the body did not validate) and `invalid
+// vocabulary entry` carry the error alone; `invalid target` says why: the due date is not after
+// the learner's today, no word came out of the photos and typed words, or a photo import is
+// unknown or another list's.
+export const TargetRefusalSchema = ErrorSchema.extend({
+  reason: z.enum(['due_date', 'no_words', 'unknown_import']).optional(),
+});
+
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from
 // phase 12 on: free text would make (book,"verb phrase") and (book,"verb_phrase")
 // two lexemes, and the pre-phase-12 data already held 80 spellings of ten ideas.
@@ -927,14 +1127,42 @@ export const LlmGlossMergeSchema = z.object({
   definitions: z.array(z.object({ sense_code: z.string().min(1), definition: z.string().min(1) })),
 });
 
+// Phase 34 (spec D1, D2). The accept job's answer for one rendering: every right
+// translation of it in its sense, and the form of the headword that agrees with
+// it, or null. No array caps: a cap travels as `responseSchema`, and the server
+// keeps ten of what comes back (domain/accept.ts). `answer_form` has `.min(1)`
+// for the provider, not the parse: a bare `z.string().nullable()` becomes
+// `"type": ["string", "null"]`, which Gemini refuses with a 400 ("Proto field is
+// not repeating"), measured 2026-10-11 on gemini-2.5-flash; with a constraint
+// Zod writes `anyOf`, which it accepts, as LlmRenderingSchema's `translation`.
+// parseAccept reads an empty answer form as null before this schema sees it.
+export const LlmAcceptSchema = z.object({
+  answers: z.array(z.string()),
+  answer_form: z.string().min(1).nullable(),
+});
+
 // Phase 25 (spec D13). The transcriber's answer: the words it heard, or an
 // empty string for nothing intelligible.
 export const LlmTranscriptSchema = z.object({ heard: z.string() });
+
+// Phase 50 (spec D2). How alike each pair sounds, 0 to 1, under the short key
+// it was sent with: a key the model cannot mistype, where an echoed word could
+// come back respelled. The range is the domain's check: a plain number is all
+// the schema says, as the other answers' counts are.
+export const LlmSoundAlikeSchema = z.object({
+  scores: z.array(z.object({ key: z.string(), score: z.number() })),
+});
 
 // Phase 27 (spec D4). The model's verdict on a meaning-recall answer. Mapped
 // to a typed verdict in the server (domain/judge.ts).
 export const LlmMeaningJudgeSchema = z.object({
   verdict: z.enum(['right', 'other_sense', 'wrong']),
+});
+
+// Phase 41 (spec D2). The model's verdict on whether a typed word fills a
+// fill-in sentence's gap. `fits` is recorded as `alternative` (domain/judge.ts).
+export const LlmFitJudgeSchema = z.object({
+  verdict: z.enum(['fits', 'wrong']),
 });
 
 // Phase 27 (spec D4). The model's verdict on a sentence translation.
@@ -951,13 +1179,45 @@ export const LlmTranslationJudgeSchema = z.object({
 // the schema's. `alternatives` (other right answers for a typed item) is
 // optional and capped at twice the five kept, for the reason
 // LlmTranslationSchema.alternatives gives: a missing or surplus list must never
-// fail a session the model otherwise answered.
+// fail a session the model otherwise answered. Phase 38 (spec D2): a typed gap
+// asks for ten, the cap itself, so the server trims a longer list before this
+// schema reads it (domain/distractors.ts withEmptyLists).
+//
+// Phase 34 (spec D4, D4a). `distractors` goes from three to six, of which the
+// domain keeps three. That is the same trade as `entries` above, so it was
+// measured against the live API before anything was built on it: this schema
+// travels as `responseSchema`, where array caps multiply, and MockServer, which
+// never validates a schema, cannot show a 400. `npx tsx tests/eval/measureSchema.ts`
+// (in apps/server) sends the batch at full size, ten items of every task kind
+// through the real prompt and client, and prints `accepted` or the provider's
+// reason; its flags measure the variants below. gemini-2.5-flash, 2026-10-11,
+// with the four context strings below still in the item:
+//
+//   accepted  3 distractors and no context strings (the phase 27 shape),
+//             6 distractors and the four context strings, and also 7 or 8,
+//             6 distractors, the four context strings and one more
+//   refused   9 distractors, 10, 12, 20; 6 distractors, the four context
+//             strings and two more optional strings, or three; 8 distractors
+//             and one more optional string; all of it twice over (20
+//             distractors, every field doubled)
+//
+// Accepted is not answered, though (ruling R8). The batch first carried four
+// optional strings for spec D6 and D8 (`context`, `context_translation`,
+// `context_word`, `sentence_word`), and with them the non-streaming call hung:
+// a probe of 75 live calls, 30 s budget, timed out 8 of 8 `translate it` and 2
+// of 5 `sentence en` batches, while 6 distractors alone never did (0 of 14), and
+// a call asking only for the context answered in 1.8 to 7.4 s. The hang is on
+// the non-streaming path and only with those strings; measureSchema.ts cannot
+// see it, because it waits production's 300 s. So the four strings left this
+// schema for LlmContextSchema's call (spec D4a's first fallback), and six stays
+// six. A new field here, or a larger cap, means measuring first, for a 400 and
+// for the wait: a 400 fails every list session, with nothing in the diff to say so.
 export const LlmDistractorsSchema = z.object({
   items: z
     .array(
       z.object({
         key: z.string(),
-        distractors: z.array(z.string()).max(3),
+        distractors: z.array(z.string()).max(6),
         alternatives: z.array(z.string()).max(10).optional(),
         // Phase 27: the sentence tasks' answers (spec D5, D6).
         sentence: z.string().optional(),
@@ -966,6 +1226,79 @@ export const LlmDistractorsSchema = z.object({
       }),
     )
     .max(10),
+});
+
+// Phase 34 (spec D6, D7, D8, ruling R8). The context call's answer, one item per
+// card that needs one, keyed as the batch is (q1, q2, …). A bare-word card's
+// item has `context` (the sentence the card shows), `context_translation` (its
+// other half, never shown, which goes to the judge) and `context_word` (the
+// marked word as written in `context`); a sentence card's has `sentence_word`
+// (the practised word as written in its Hebrew sentence). Every string optional,
+// for the reason Phase 23 gives above: a missing one costs that card its
+// sentence or its mark, never the session (ruling R11). Optional rather than
+// nullable: Gemini refuses a bare nullable string (LlmAcceptSchema). Measured
+// with `npx tsx tests/eval/measureSchema.ts --context` (in apps/server): ten
+// items, every kind (four target sentences, three Hebrew ones, three marks),
+// through the real prompt and client, gemini-2.5-flash, 2026-10-11, a 300 s
+// budget (production now gives the call 60 s of its own, ruling R12), thinking on. Accepted on all four runs, no 400, answered in
+// 7.3, 7.1, 7.4 and 7.0 s, every item answered and kept by D6's rules. The batch beside it,
+// without the four strings, answered in 13.6 s the same day. A field more here
+// means measuring again, for a 400 and for the wait.
+export const LlmContextSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        key: z.string(),
+        context: z.string().optional(),
+        context_translation: z.string().optional(),
+        context_word: z.string().optional(),
+        sentence_word: z.string().optional(),
+      }),
+    )
+    .max(10),
+});
+
+// Phase 34 (spec D5). The checker's answer: a second model call, after the batch
+// and the context call, that reads the session's cards as a learner would. One
+// item per check, keyed as the service asks (q1 for a card's options, gap or
+// sentence; q1c for its context sentence). `options` and `gap_fits` hold one
+// boolean per option in the order asked, true when that option is also right;
+// `context_meaning` is what a target-language context's marked word means there,
+// `context_words` which target words fit a Hebrew context's marked word, and
+// `natural_translation` a sentence card's Hebrew as a native speaker would say it.
+// Every field optional, never a bare nullable (LlmAcceptSchema), and no array
+// caps: a cap travels as `responseSchema`, and the domain checks each list's
+// length against the options it asked (domain/check.ts), so a miscount fails the
+// batch rather than shifting a "yes" onto the wrong option.
+//
+// Measured before anything was built on it (ruling R8: optional strings once made
+// the batch's non-streaming call hang), with `npx tsx tests/eval/measureSchema.ts
+// --check` (in apps/server), through the real prompt and client with
+// production's 60 s budget (CHECKER_CALL_BUDGET_MS), gemini-2.5-flash,
+// 2026-10-11, thinking on. None hung, none was refused:
+//
+//   16 checks, a full session with a board (three choice cards, the board's
+//   four, a gap, three target-language contexts, three Hebrew ones, two sentence
+//   cards), the current wording: seven runs, 15.9, 12.7, 13.3, 12.2, 15.7, 14.9
+//   and 15.2 s
+//   10 checks, the first wording of the "translate" task: nine runs, 10.4 to
+//   16.3 s; the current wording: four runs, 6.9 to 7.5 s
+//
+// Every item came back with the right number of booleans. (Asked alone, the
+// first wording rendered בואו נשלב כוחות word for word, "combine forces"; the
+// current one asks for what a native speaker reaches for first.) A field more
+// here means measuring again, for a 400 and for the wait.
+export const LlmCheckSchema = z.object({
+  items: z.array(
+    z.object({
+      key: z.string(),
+      options: z.array(z.boolean()).optional(),
+      gap_fits: z.array(z.boolean()).optional(),
+      context_meaning: z.string().optional(),
+      context_words: z.array(z.string()).optional(),
+      natural_translation: z.string().optional(),
+    }),
+  ),
 });
 
 // Phase 26. Words from a photo: an import is one photo of a word list, read in

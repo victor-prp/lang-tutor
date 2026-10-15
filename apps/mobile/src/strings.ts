@@ -1,4 +1,4 @@
-import type { PartOfSpeech } from '@lang-tutor/core/api';
+import type { PartOfSpeech, TargetKind, TargetReadiness } from '@lang-tutor/core/api';
 import type { Dimension } from '@lang-tutor/core/domain';
 
 // U+2066 LEFT-TO-RIGHT ISOLATE ... U+2069 POP DIRECTIONAL ISOLATE.
@@ -13,6 +13,10 @@ const isolateLtr = (text: string) => `\u2066${text}\u2069`;
 
 const LANGUAGE_NAMES: Record<string, string> = { he: 'עברית', en: 'אנגלית', ru: 'רוסית', it: 'איטלקית' };
 const languageName = (code: string): string => LANGUAGE_NAMES[code] ?? code;
+
+/** Phase 39 (spec D9). An instruction in three parts, so the card can set the language it asks for in bold. */
+export type Instruction = { before: string; language: string; after: string };
+const instruct = (before: string, language: string): Instruction => ({ before, language: languageName(language), after: '' });
 
 // Phase 23. The direction of a string written in `code`, for a line whose
 // language is known: Hebrew alone is right-to-left. Forcing rtl on a he → it
@@ -45,13 +49,43 @@ const PART_OF_SPEECH_NAMES: Record<PartOfSpeech, string> = {
 };
 const PART_OF_SPEECH_LOOKUP: Record<string, string> = { ...PART_OF_SPEECH_NAMES, phrase: 'ביטוי' };
 
+// Phase 52 (spec D8). The letter of the day, by ISO weekday 1 (Monday) to 7 (Sunday):
+// Sunday is the first day (א׳) in Hebrew.
+const REMINDER_DAY_NAMES = ['ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳', 'א׳'];
+
+// Phase 53 (spec D4, D11). Records over the closed wire sets, so the compiler refuses
+// a third kind or a fifth level that has no Hebrew name.
+const TARGET_KIND_NAMES: Record<TargetKind, string> = { homework: 'שיעורי בית', exam: 'בוחן' };
+const TARGET_READINESS_NAMES: Record<TargetReadiness, string> = {
+  not_started: 'עוד לא התחלנו',
+  on_the_way: 'בדרך',
+  almost: 'כמעט מוכנה',
+  ready: 'מוכנה',
+};
+// The weekday as JavaScript numbers it, 0 (Sunday) to 6 (Saturday), and each month
+// with its ב, which is how a date reads: "16 באוקטובר".
+const TARGET_WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+const TARGET_MONTH_NAMES = [
+  'בינואר',
+  'בפברואר',
+  'במרץ',
+  'באפריל',
+  'במאי',
+  'ביוני',
+  'ביולי',
+  'באוגוסט',
+  'בספטמבר',
+  'באוקטובר',
+  'בנובמבר',
+  'בדצמבר',
+];
+
 export const strings = {
   appTitle: 'lang tutor',
   homeSubtitle: 'תרגול אוצר מילים',
   homeSetLabel: (count: number, language: string) => `${count} מילים ב${language}`,
   start: 'התחל',
   resume: 'המשך',
-  createQuestions: 'צור שאלות',
   preparingQuestions: 'מכין שאלות…',
   skip: 'דלג',
   cancel: 'ביטול',
@@ -62,28 +96,40 @@ export const strings = {
   preparationFailed: 'יצירת השאלות נכשלה. אפשר לנסות שוב.',
   homeSavedLabel: (count: number, language: string) => `${count} משמעויות שמורות ב${language}`,
   questionInstruction: 'מה הפירוש?',
+  // Phase 39 (spec D6). A word the learner knows, asked for another meaning.
+  questionInstructionNewMeaning: 'פירוש חדש למילה שאתם מכירים',
+  knownMeanings: (meanings: readonly string[]) => `כבר למדתם: ${meanings.join(', ')}`,
+  newMeaningQuestion: 'מה עוד זה אומר?',
   // Phase 23. The reversed and typed cards name the language they ask for.
   questionInstructionReverse: (language: string) => `איך אומרים ב${languageName(language)}?`,
-  questionInstructionTyped: (language: string) => `כתבו את המילה ב${languageName(language)}`,
+  questionInstructionTyped: (language: string): Instruction => instruct('כתבו את המילה ב', language),
   typedPlaceholder: 'התשובה שלך…',
   typedCheck: 'בדיקה',
   typedShowAnswer: 'הצגת התשובה',
   // Phase 24 (spec D14).
   questionInstructionListen: 'הקשיבו ובחרו את הפירוש',
-  questionInstructionDictation: (language: string) => `הקשיבו וכתבו ב${languageName(language)}`,
+  questionInstructionDictation: (language: string): Instruction => instruct('הקשיבו וכתבו ב', language),
   questionInstructionMatching: 'התאימו כל מילה לפירוש שלה',
   questionInstructionTiles: (language: string) => `הרכיבו את המילה ב${languageName(language)}`,
   listenAgain: 'השמעה חוזרת',
   listenNoVoice: 'אין במכשיר קול לשפה הזו, אז הנה המילה בכתב',
   boardResult: (right: number, total: number) => `בניסיון הראשון: ${right} מתוך ${total}`,
   // Phase 27 (spec D12).
-  questionInstructionMeaning: 'כתבו את הפירוש בעברית',
+  // Phase 39 (spec D9): names the learner's language, not always Hebrew.
+  questionInstructionMeaning: (learner: string): Instruction => instruct('כתבו את הפירוש ב', learner),
+  // Phase 39 (spec D8). A typed answer in the wrong alphabet is asked again, not sent.
+  wrongScriptNotice: (language: string): Instruction => instruct('התשובה צריכה להיות ב', language),
   feedbackSavedMeaning: 'נכון! הפירוש השמור:',
   feedbackOtherSense: 'נכון, אבל כאן תרגלנו:',
   // Phase 27 (spec D5, D6): the gap and translation cards.
   questionInstructionCloze: 'איזו מילה חסרה?',
-  questionInstructionClozeTyped: (language: string) => `השלימו את המילה החסרה ב${languageName(language)}`,
-  questionInstructionTranslate: (language: string) => `תרגמו ל${languageName(language)}`,
+  questionInstructionClozeTyped: (language: string): Instruction => instruct('השלימו את המילה החסרה ב', language),
+  // Phase 38 (spec D1). The typed gap's Hebrew sentence is a hint, named by what it shows.
+  sentenceHint: 'רמז: הצגת המשפט בעברית',
+  // The whole sentence, by name: the marked word invited typing it alone.
+  questionInstructionTranslate: (language: string): Instruction => instruct('תרגמו את המשפט ל', language),
+  // One word on a translation card is asked again, not sent.
+  wordOnlyNotice: 'כתבו את כל המשפט, לא רק את המילה',
   translationReference: 'תרגום לדוגמה:',
   // Phase 25 (spec D7).
   questionInstructionReadAloud: 'קראו בקול',
@@ -108,6 +154,18 @@ export const strings = {
   // Phase 23. Both count as correct (spec D9).
   feedbackNearMiss: 'כמעט! כך כותבים:',
   feedbackAlternative: 'נכון! המילה שתרגלנו:',
+  // Phase 45 (spec D1). Another accepted word again, on the second try: not "right".
+  feedbackStillOther: 'עדיין לא המילה שתרגלנו:',
+  feedbackStillOtherSense: 'עדיין לא הפירוש שתרגלנו:',
+  // Phase 34 (spec D9). A card held for its second try: the first answer, then
+  // what is left to find. FSI/PDI around the answer, as in heardLine: a target
+  // word, or a whole sentence, inside a Hebrew line.
+  retryRight: (answer: string) => `✓ נכון, ⁨${answer}⁩ מתאים כאן.`,
+  retryAnotherWord: 'יש מילה נוספת ששמרת — נסו שוב',
+  retryAnotherMeaning: 'יש פירוש נוסף — נסו שוב',
+  // Phase 38 (spec D3). A typed gap's second try: the word fits, another was
+  // meant, and the Hebrew sentence, now open, says which.
+  retryMeantAnother: 'אבל התכוונו למילה אחרת — היעזרו במשפט בעברית ונסו שוב',
   resultsHeadlineGreat: 'מצוין!',
   resultsHeadlineGood: 'עבודה טובה!',
   resultsHeadlineKeepPractising: 'ממשיכים לתרגל',
@@ -175,7 +233,30 @@ export const strings = {
   updateRequiredButton: 'לעדכון ב‑Google Play',
   updateRequiredButtonIos: 'לעדכון ב‑TestFlight',
   updateCheckAgain: 'לבדוק שוב',
+  // Phase 49 (spec D4, R4). The About screen; its three labels stay English.
+  aboutTitle: 'אודות',
+  aboutCopy: 'העתקה',
+  aboutCopied: 'הועתק',
   back: 'חזרה',
+  // Phase 52 (spec D8). The Reminders screen.
+  remindersEntry: 'תזכורות',
+  remindersTitle: 'תזכורות',
+  remindersEnabled: 'תזכורות לתרגול',
+  remindersTargetLabel: 'תרגולים ביום',
+  remindersTargetLess: 'פחות תרגולים',
+  remindersTargetMore: 'יותר תרגולים',
+  remindersDaysLabel: 'ימים',
+  remindersTimesLabel: 'שעות',
+  /** `day` is an ISO weekday: 1 = Monday ... 7 = Sunday. */
+  remindersDayName: (day: number): string => REMINDER_DAY_NAMES[day - 1] ?? String(day),
+  /** A time of day, `06:00`, pinned left to right beside the Hebrew around it. */
+  remindersTime: (time: string): string => isolateLtr(time),
+  remindersDeniedNotice: 'התזכורות כבויות בהגדרות של אנדרואיד.',
+  remindersOpenSettings: 'לפתיחת ההגדרות',
+  remindersEnable: 'הפעלת התראות',
+  remindersWebNotice: 'התזכורות מגיעות לאפליקציה באנדרואיד.',
+  remindersLoadFailed: 'טעינת התזכורות נכשלה. אפשר לנסות שוב.',
+  remindersSaveFailed: 'שמירת התזכורות נכשלה. אפשר לנסות שוב.',
   // Phase 23. The speaker button's accessibility label.
   speak: 'השמעה',
   translateEntry: 'תרגום מלה או ביטוי',
@@ -316,4 +397,75 @@ export const strings = {
   homePhotoReady: (count: number) => `רשימה מתמונה: ${isolateLtr(String(count))} מילים לסקירה`,
   homePhotoFailed: 'לא הצלחנו לקרוא את התמונה ששלחת',
   homePhotoSeveral: (count: number) => `${isolateLtr(String(count))} רשימות מתמונות מחכות לסקירה`,
+  // Phase 53 (spec D10, D11). Preparing for homework or a test.
+  targetKindName: (kind: TargetKind): string => TARGET_KIND_NAMES[kind],
+  targetReadinessName: (readiness: TargetReadiness): string => TARGET_READINESS_NAMES[readiness],
+  targetTomorrow: 'מחר',
+  targetInDays: (days: number) => `בעוד ${isolateLtr(String(days))} ימים`,
+  // A target read after its date has come is no longer counted down to.
+  targetDateCame: 'התאריך הגיע',
+  targetReadyCount: (ready: number, total: number) =>
+    `${isolateLtr(String(ready))} מתוך ${isolateLtr(String(total))} מוכנות`,
+  /** `weekday` is JavaScript's (0 = Sunday), `month` is 1 = January. */
+  targetDueDay: (weekday: number, day: number, month: number) =>
+    `יום ${TARGET_WEEKDAY_NAMES[weekday]}, ${isolateLtr(String(day))} ${TARGET_MONTH_NAMES[month - 1]}`,
+  // Home's button, which says what a target is for.
+  targetNew: 'הכנה לשיעורי בית או לבוחן',
+  // The wizard: its title for each action, and each step's (spec D10).
+  targetWizardCreate: 'הכנה חדשה',
+  targetWizardAddPhotos: 'מילים מתמונות',
+  targetWizardAddWords: 'הוספת מילים',
+  targetWizardChangeDate: 'שינוי התאריך',
+  targetStepKind: 'למה מתכוננים?',
+  targetStepPhotos: 'תמונות של רשימת המילים',
+  targetStepReview: 'המילים מהתמונות',
+  targetStepWords: 'עוד מילים',
+  targetStepDate: 'באיזה תאריך?',
+  targetPhotosHint: 'אפשר לצלם או לבחור כמה תמונות, או לדלג על השלב.',
+  // A target screen's add photos, whose Next needs a photo: no skipping there.
+  targetPhotosHintAdd: 'אפשר לצלם או לבחור כמה תמונות.',
+  targetReviewHint: 'אפשר להוריד סימון ממילה או לבחור לה משמעות אחרת.',
+  targetWordsHint: 'חפשו מילה והוסיפו אותה לרשימה.',
+  targetWizardNext: 'הבא',
+  targetWizardDone: 'סיום',
+  // Leaving the wizard with photos or words picked: nothing was saved yet.
+  targetLeaveTitle: 'לצאת בלי לשמור?',
+  targetLeaveMessage: 'התמונות והמילים שנבחרו לא יישמרו.',
+  targetLeaveConfirm: 'יציאה',
+  targetPhotoRemove: 'הסרת התמונה',
+  targetPhotosFull: (max: number) => `אפשר עד ${isolateLtr(String(max))} תמונות`,
+  // While the chosen photos are shrunk, one at a time, before they are shown.
+  targetPhotosPreparing: 'מכינים את התמונות…',
+  // `current` is the photo on its way, counted from 1.
+  targetUploading: (current: number, total: number) =>
+    `שולחים תמונה ${isolateLtr(String(current))} מתוך ${isolateLtr(String(total))}…`,
+  targetPhotoAddFailed: 'לא הצלחנו להוסיף את התמונה. נסו שוב.',
+  targetPhotoRemoveFailed: 'הסרת התמונה נכשלה. נסו שוב.',
+  targetReviewReading: 'קוראים את התמונות…',
+  targetReviewLoadFailed: 'טעינת המילים נכשלה. מנסים שוב…',
+  targetReviewEmpty: 'לא נמצאו מילים בתמונות.',
+  // Ruling R-D9: each photo is its own import, and a failed one is a photo not read.
+  targetPhotosUnread: (unread: number, total: number) =>
+    `לא הצלחנו לקרוא ${isolateLtr(String(unread))} מתוך ${isolateLtr(String(total))} תמונות`,
+  targetPickedCount: (count: number) => `מילים שנבחרו: ${isolateLtr(String(count))}`,
+  targetEntriesFull: (max: number) => `אפשר עד ${isolateLtr(String(max))} מילים`,
+  targetEntryRemove: 'הסרה',
+  targetDatesLoadFailed: 'טעינת התאריכים נכשלה.',
+  // Done refused: what to fix (the 400's reason), or that it did not go through.
+  targetNoWords: 'צריך לפחות מילה אחת. אפשר לחזור ולהוסיף מילים.',
+  targetDueDatePast: 'צריך לבחור תאריך אחרי היום.',
+  targetSaveFailed: 'השמירה נכשלה. נסו שוב.',
+  targetClosed: 'ההכנה הזו כבר הסתיימה.',
+  // The target screen (spec D11).
+  targetAddPhotos: 'הוספת מילים מתמונות',
+  targetAddWord: 'הוספת מילה',
+  targetChangeDate: 'שינוי התאריך',
+  targetEnd: 'סיום ההכנה',
+  targetEndTitle: 'לסיים את ההכנה?',
+  targetEndMessage: 'המילים יישארו שמורות ברשימה שלך.',
+  targetEndConfirm: 'סיום ההכנה',
+  targetWordRemove: 'הסרה',
+  targetEmpty: 'אין מילים בהכנה הזו.',
+  targetLoadFailed: 'טעינת ההכנה נכשלה. אפשר לנסות שוב.',
+  targetActionFailed: 'הפעולה נכשלה. נסו שוב.',
 } as const;

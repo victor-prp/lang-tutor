@@ -3,11 +3,13 @@ import type { ClozeChoiceQuestion, ClozeTypedQuestion, LetterTilesQuestion, Matc
 import type { PgBoss } from 'pg-boss';
 
 import type { AppDeps } from '../../../src/composition';
+import { DISTRACTOR_MARKER } from '../../../src/domain/distractors';
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createJobRepo } from '../../../src/repo/jobs';
 import { createSessionRepo } from '../../../src/repo/sessions';
 import { registerWorkers } from '../../../src/worker';
 import { createFakeLogger, type FakeLogger } from '../../support/fakes';
+import { CHOSEN_ON, NO_DEVICES } from '../../support/questions';
 import { startTestBoss, stopTestBoss, waitFor } from '../../support/jobs';
 import {
   assertMockServerReachable,
@@ -19,6 +21,8 @@ import {
   STUB_SENTENCE_HEBREW,
   STUB_WRONG_ENGLISH,
   STUB_WRONG_HEBREW,
+  expectAccept,
+  expectCheck,
   expectDistractors,
   expectGeminiStatus,
   geminiBaseUrlFor,
@@ -46,6 +50,10 @@ beforeEach(async () => {
   logger = createFakeLogger();
   boss = await startTestBoss(t.db);
   deps = createTestServerDeps({ db: t.db, logger, rng: testRng(7), boss, geminiBaseUrl: geminiBaseUrlFor(ns) });
+  // Phase 34 (spec D1). Preparing a session asks for the accept job of every
+  // picked rendering, which the workers below then run: answered here, and above
+  // any stub a test registers, so it is never the subject of one.
+  await expectAccept(ns, { answers: [], answer_form: null });
   await registerWorkers(boss, deps, { pollingIntervalSeconds: 0.5 });
 });
 
@@ -78,7 +86,7 @@ const statusOf = async (sessionId: string) => (await deps.sessions.getSession('u
 // enqueue the job with picks that name their cards; a pick with none of them
 // is a new word, multiple choice. sessionsChoose.test.ts covers how a created
 // session's picks get theirs.
-type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r'>>;
+type Card = Partial<Pick<PrepareSessionPayload['picks'][number], 'dimension' | 'rung' | 'level' | 'r' | 'step'>>;
 const RECOGNISE: Card = { dimension: 'written_receptive', rung: 1, level: 1, r: 0.81 }; // multiple choice, p 0.925
 const PICK_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.5 }; // reverse or cloze choice, p 0.78
 const BUILD_FORM: Card = { dimension: 'written_productive', rung: 1, level: 1, r: 0.81 }; // letter tiles, p 0.9
@@ -100,11 +108,12 @@ async function enqueueSession(words: Record<string, string>, cards: Card[], opts
       rung: 1,
       level: 1,
       r: null,
+      step: false,
       ...cards[i],
     });
   }
   return withTx(t.db, async (tx) => {
-    const sessionId = await createSessionRepo(tx).insertPreparingSession('u_1', E);
+    const sessionId = await createSessionRepo(tx).insertPreparingSession('u_1', E, NO_DEVICES, CHOSEN_ON);
     await createJobRepo(tx, boss).enqueue(PREPARE_SESSION, { session_id: sessionId, picks, listening: opts.listening, speaking: false });
     return sessionId;
   });
@@ -122,6 +131,7 @@ it('prepares a ten-word session with listening on: the board, then each card by 
   await expectDistractors(ns, {
     tasks: ['meaning', 'meaning', 'meaning', 'meaning', 'typed', 'meaning', 'meaning', 'sentence', 'meaning', 'word'],
   });
+  await expectCheck(ns);
   const sessionId = await enqueueSession(
     TEN_WORDS,
     [{}, {}, {}, {}, RECOGNISE, PICK_FORM, produce(0.95), HEAR, BUILD_FORM, produce(0.88)],
@@ -161,6 +171,7 @@ describe('sentence cards through the queue', () => {
     await expectDistractors(ns, {
       tasks: ['meaning', 'meaning', 'meaning', 'meaning', 'typed', 'meaning', 'sentence', 'meaning', 'word', 'gap'],
     });
+    await expectCheck(ns);
     const sessionId = await enqueueSession(
       TEN_WORDS,
       [{}, {}, {}, {}, PICK_FORM, PICK_FORM, produce(0.95), HEAR, BUILD_FORM, produce(0.88)],
@@ -197,6 +208,7 @@ describe('sentence cards through the queue', () => {
     await expectDistractors(ns, {
       tasks: ['meaning', 'meaning', 'meaning', 'meaning', 'sentence', 'typed', 'meaning', 'translate', 'meaning', 'word'],
     });
+    await expectCheck(ns);
     const sessionId = await enqueueSession(
       TEN_WORDS,
       [{}, {}, {}, {}, produce(0.91), PICK_FORM, produce(0.95), HEAR, BUILD_FORM, produce(0.88)],
@@ -216,6 +228,7 @@ describe('sentence cards through the queue', () => {
 
 describe('prepare-session through the queue', () => {
   it('turns a list session ready, with its saved words as the prompts', async () => {
+    await expectCheck(ns);
     await expectDistractors(ns, { tasks: ['meaning', 'meaning', 'meaning'] });
     const sessionId = await requestListSession();
 
@@ -233,6 +246,7 @@ describe('prepare-session through the queue', () => {
 
   it('writes each card the content its type needs', async () => {
     await expectDistractors(ns);
+    await expectCheck(ns);
     // p: sprint new 1, lantern's form picked 0.78, tome's form typed 0.76.
     const sessionId = await enqueueSession(WORDS, [produce(0.76), {}, PICK_FORM], { listening: false });
 
@@ -265,17 +279,18 @@ describe('prepare-session through the queue', () => {
     const sessionId = await requestListSession();
 
     await waitFor(async () => (await statusOf(sessionId)) === 'failed', 25_000);
-    // One attempt and two retries.
-    expect(await countGeminiRequests(ns)).toBe(3);
+    // One attempt and two retries. Phase 34: the accept calls are not counted.
+    expect(await countGeminiRequests(ns, DISTRACTOR_MARKER)).toBe(3);
     expect((await deps.sessions.currentSession('u_1', E)).current).toMatchObject({ id: sessionId, status: 'failed' });
   });
 
   // Review Focus 2: a skip lands while the model is still answering.
   it('a skip during generation wins: the job writes nothing', async () => {
     await expectDistractors(ns, { delayMs: 3_000 });
+    await expectCheck(ns);
     const sessionId = await requestListSession();
 
-    await waitFor(async () => (await countGeminiRequests(ns)) === 1);
+    await waitFor(async () => (await countGeminiRequests(ns, DISTRACTOR_MARKER)) === 1);
     await deps.sessions.skipSession('u_1', sessionId);
     await waitFor(async () => logger.events.some((e) => e.event === 'session_preparation_dropped'), 15_000);
 

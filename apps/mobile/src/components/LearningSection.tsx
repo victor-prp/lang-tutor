@@ -1,15 +1,25 @@
-import type { Enrollment } from '@lang-tutor/core/api';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import type { CurrentSessionResponse, Enrollment } from '@lang-tutor/core/api';
+import { router, useFocusEffect, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ApiError } from '@/api/client';
+import { TargetsSection } from '@/components/TargetsSection';
 import { availableTargets } from '@/enrollments';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { usePhotoImports } from '@/hooks/usePhotoImports';
 import { useSession } from '@/hooks/useSession';
-import { POLL_INTERVAL_MS, homeActionOf, shouldPoll, type HomeAction } from '@/nextSession';
+import { useTargets } from '@/hooks/useTargets';
+import {
+  POLL_INTERVAL_MS,
+  createLook,
+  homeActionOf,
+  reminderStartOf,
+  shouldAutoCreate,
+  shouldPoll,
+  type HomeAction,
+} from '@/nextSession';
 import { homePhotoCard, isWorking, type HomePhotoCard } from '@/photoImports';
 import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 import { strings } from '@/strings';
@@ -33,24 +43,46 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const next = useNextSession();
   const { enrollments, switchTo } = useCurrentUser();
   const { imports, reload: reloadPhotos } = usePhotoImports();
+  const { reload: reloadTargets } = useTargets();
   // Set by the review after a save (spec D13): "28 words saved".
-  const { photoSaved } = useLocalSearchParams<{ photoSaved?: string }>();
+  const { photoSaved, start } = useLocalSearchParams<{ photoSaved?: string; start?: string }>();
+  // Phase 52 (spec D8). Home's own route, so the param is cleared here even if
+  // another screen has been opened over home since: router.setParams would clear
+  // the focused screen's.
+  const navigation = useNavigation<{ setParams: (params: { start?: string }) => void }>();
+  const focused = useIsFocused();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   // A ref guards re-entry (state is stale between two taps in one frame); the
   // state only drives the disabled look.
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
+  // Phase 43 (spec D7). The enrollment home sent its own create for in this
+  // focus, and the one whose create failed: a missing session is made once per
+  // focus, then offered as a retry.
+  const attemptedFor = useRef<string | null>(null);
+  const [makeFailedFor, setMakeFailedFor] = useState<string | null>(null);
+  // Phase 52 (spec D8). `start=reminder` is acted on once: the param is cleared
+  // as it is, and this holds the render or two before the clear reaches `start`.
+  const reminderHandled = useRef(false);
+  // The read home held when it first saw the param. It may be about a session
+  // finished since, so home reads again and acts on the first read that differs
+  // (every successful read stores a new object).
+  const reminderHeld = useRef<{ read: CurrentSessionResponse | null } | null>(null);
 
   // Fresh on every focus: back from a session, from translate, after a switch.
-  // Both reloads change with the active enrollment, so a switch runs this
+  // The reloads change with the active enrollment, so a switch runs this
   // again, and the providers keep each read under the enrollment it was for,
-  // so that read is the one shown.
+  // so that read is the one shown. Phase 53: the targets too, back from a target
+  // or the wizard. Their reload never rejects, and the effect returns nothing.
   const { reload } = next;
   useFocusEffect(
     useCallback(() => {
+      attemptedFor.current = null;
+      setMakeFailedFor(null);
       reload();
       reloadPhotos();
-    }, [reload, reloadPhotos]),
+      void reloadTargets();
+    }, [reload, reloadPhotos, reloadTargets]),
   );
 
   // While preparing, and only while this screen is focused.
@@ -77,7 +109,10 @@ export function LearningSection({ active }: { active: Enrollment }) {
   const action: HomeAction | null = next.current ? homeActionOf(next.current) : null;
   const photoCard = homePhotoCard(imports);
 
-  function enterSession(sessionId: string) {
+  // Phase 43 (spec D2). A session not yet answered is started, which has the
+  // next one built for this device. Not waited on: its first answer starts it too.
+  function enterSession(sessionId: string, fresh: boolean) {
+    if (fresh) void next.start(sessionId);
     enter(sessionId);
     router.push('/session');
   }
@@ -102,12 +137,67 @@ export function LearningSection({ active }: { active: Enrollment }) {
     }
   }
 
-  const create = () =>
+  // The seed's cards are fixed, so its create does not wait on the voices: the
+  // start it is entered with waits instead, without holding the tap.
+  const startSeed = () =>
     run(async () => {
-      const created = await next.create();
-      if (created.status === 'ready') enterSession(created.session_id);
+      const created = await next.create({ waitForVoices: false });
+      if (created.status === 'ready') enterSession(created.session_id, true);
     });
-  const skip = (sessionId: string) => run(() => next.skip(sessionId));
+  // Phase 43 (spec D7). Makes the next session without entering it: home shows
+  // it preparing, then offers it.
+  const makeNext = (enrollmentId: string) =>
+    run(async () => {
+      try {
+        await next.create();
+        setMakeFailedFor(null);
+      } catch (error) {
+        setMakeFailedFor(enrollmentId);
+        throw error;
+      }
+    });
+  // A skip from home can leave no session at all (the one in stock skipped):
+  // home may make the next one again in this focus.
+  const skip = (sessionId: string) =>
+    run(async () => {
+      await next.skip(sessionId);
+      attemptedFor.current = null;
+    });
+
+  // Phase 43 (spec D7). A missing session is made, not offered as a button.
+  // After every render: the guard sends it once per focus and enrollment, and
+  // waits out another action in flight rather than being swallowed by it.
+  useEffect(() => {
+    if (inFlight.current || !shouldAutoCreate(action, attemptedFor.current, active.id)) return;
+    attemptedFor.current = active.id;
+    void makeNext(active.id);
+  });
+
+  // Phase 52 (spec D8). A tapped reminder opens home with start=reminder. Home
+  // reads the session again, then does what its start button does with that
+  // read, and clears the param, so a re-render or a return to home does not
+  // start again. With nothing to start the param is just cleared; until then it
+  // waits. After every render, like the guard above, and only while home is focused.
+  useEffect(() => {
+    if (start !== 'reminder') {
+      reminderHandled.current = false;
+      reminderHeld.current = null;
+      return;
+    }
+    if (!focused || reminderHandled.current || inFlight.current) return;
+    if (reminderHeld.current === null) {
+      reminderHeld.current = { read: next.current };
+      reload();
+    }
+    const step = reminderStartOf(action, {
+      failed: next.loadFailed || createLook(makeFailedFor, active.id) === 'retry',
+      read: next.current !== reminderHeld.current.read,
+    });
+    if (step.kind === 'wait') return;
+    reminderHandled.current = true;
+    navigation.setParams({ start: undefined });
+    if (step.kind === 'enter') enterSession(step.sessionId, step.fresh);
+  });
 
   return (
     <>
@@ -176,7 +266,9 @@ export function LearningSection({ active }: { active: Enrollment }) {
         loadFailed={next.loadFailed}
         busy={busy}
         onRetry={reload}
-        onCreate={create}
+        makeFailed={createLook(makeFailedFor, active.id) === 'retry'}
+        onStartSeed={startSeed}
+        onMake={() => void makeNext(active.id)}
         onEnter={enterSession}
         onSkip={skip}
       />
@@ -199,6 +291,8 @@ export function LearningSection({ active }: { active: Enrollment }) {
           <Text style={styles.cardLabel}>{photoCardLabel(photoCard)}</Text>
         </Pressable>
       ) : null}
+
+      <TargetsSection />
 
       <Pressable
         accessibilityRole="button"
@@ -235,7 +329,9 @@ function SessionAction({
   loadFailed,
   busy,
   onRetry,
-  onCreate,
+  makeFailed,
+  onStartSeed,
+  onMake,
   onEnter,
   onSkip,
 }: {
@@ -243,8 +339,11 @@ function SessionAction({
   loadFailed: boolean;
   busy: boolean;
   onRetry: () => void;
-  onCreate: () => void;
-  onEnter: (sessionId: string) => void;
+  /** Phase 43 (spec D7). Home's own create for the `create` state failed. */
+  makeFailed: boolean;
+  onStartSeed: () => void;
+  onMake: () => void;
+  onEnter: (sessionId: string, fresh: boolean) => void;
   onSkip: (sessionId: string) => void;
 }) {
   const primary = (testID: string, label: string, onPress: () => void) => (
@@ -269,6 +368,22 @@ function SessionAction({
       <Text style={styles.secondaryButtonLabel}>{strings.skip}</Text>
     </Pressable>
   );
+  const preparingLabel = (
+    <View testID="preparing-label" style={[styles.button, styles.buttonDisabled, styles.preparing]}>
+      <ActivityIndicator color={colors.onPrimary} />
+      <Text style={styles.buttonLabel}>{strings.preparingQuestions}</Text>
+    </View>
+  );
+  // Phase 43 (spec D7). Making the next session failed: say so and offer
+  // "try again", which makes it again; no button names creating questions.
+  const retry = (
+    <>
+      <Text testID="preparation-failed" style={styles.notice}>
+        {strings.preparationFailed}
+      </Text>
+      {primary('home-make-retry', strings.translateRetry, onMake)}
+    </>
+  );
 
   if (!action) {
     if (!loadFailed) return <ActivityIndicator testID="home-loading" />;
@@ -290,9 +405,10 @@ function SessionAction({
   }
   switch (action.kind) {
     case 'start-seed':
-      return primary('start-button', strings.start, onCreate);
+      return primary('start-button', strings.start, onStartSeed);
     case 'create':
-      return primary('create-button', strings.createQuestions, onCreate);
+      // Phase 43 (spec D7). Home sends create itself: this is how it looks.
+      return makeFailed ? retry : preparingLabel;
     case 'save-words-first':
       return (
         <Text testID="save-words-first" style={styles.notice}>
@@ -302,10 +418,7 @@ function SessionAction({
     case 'preparing':
       return (
         <>
-          <View testID="preparing-label" style={[styles.button, styles.buttonDisabled, styles.preparing]}>
-            <ActivityIndicator color={colors.onPrimary} />
-            <Text style={styles.buttonLabel}>{strings.preparingQuestions}</Text>
-          </View>
+          {preparingLabel}
           {skip(action.sessionId)}
         </>
       );
@@ -314,20 +427,13 @@ function SessionAction({
       return (
         <>
           {primary('start-button', action.kind === 'start' ? strings.start : strings.resume, () =>
-            onEnter(action.sessionId),
+            onEnter(action.sessionId, action.kind === 'start'),
           )}
           {skip(action.sessionId)}
         </>
       );
     case 'failed':
-      return (
-        <>
-          <Text testID="preparation-failed" style={styles.notice}>
-            {strings.preparationFailed}
-          </Text>
-          {primary('create-button', strings.createQuestions, onCreate)}
-        </>
-      );
+      return retry;
   }
 }
 

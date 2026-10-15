@@ -36,7 +36,7 @@ const REQUEST = {
 describe('createProfile', () => {
   it("persists the profile under the signed-in user's id, which me then finds", async () => {
     const created = await service.createProfile('u_dana', REQUEST);
-    expect(created).toEqual({ id: 'u_dana', ...REQUEST });
+    expect(created).toEqual({ id: 'u_dana', ...REQUEST, time_zone: 'UTC' });
     expect(await service.me('u_dana')).toEqual(created);
     expect(await service.hasProfile('u_dana')).toBe(true);
   });

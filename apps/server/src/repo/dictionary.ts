@@ -25,6 +25,7 @@ import {
   type SenseRow,
   type StaleLexeme,
 } from '../domain/dictionary';
+import type { KnownRight } from '../domain/distractors';
 import { assignGlosses, type AnswerSense } from '../domain/glosses';
 import type { LanguageCode } from '../domain/languages';
 import type { GlossRendering } from '../domain/session';
@@ -76,6 +77,24 @@ export type CorrectionRow = {
 
 /** One rendering a repair produces: what the lookup writes, by sense id. */
 export type RepairedRendering = Rendering & { senseId: string };
+
+/** Phase 34 (spec D1). One rendering: a form, a sense, a learner language. What
+ *  the accept job is about. */
+export type RenderingKey = { variantId: string; senseId: string; userLanguageCode: string };
+
+/** Phase 34 (spec D1, D2). One rendering as the accept job reads it, with its
+ *  form and lexeme. `rendering` is the text shown; `acceptedAt` null = never asked. */
+export type RenderingForAccept = RenderingKey & {
+  lexemeId: string;
+  languageCode: string;
+  form: string;
+  lemma: string;
+  partOfSpeech: string;
+  rendering: string;
+  example: string | null;
+  exampleTranslation: string | null;
+  acceptedAt: Date | null;
+};
 
 export function createDictRepo(tx: Tx) {
   /**
@@ -695,6 +714,11 @@ export function createDictRepo(tx: Tx) {
             alternatives: sense.alternatives,
             exampleSource: sense.exampleSource,
             exampleTarget: sense.exampleTarget,
+            // Phase 34 (spec D1, D2). Only a restore brings these; a lookup's
+            // renderings start with none.
+            acceptedAnswers: sense.acceptedAnswers ?? [],
+            answerForm: sense.answerForm ?? null,
+            acceptedAt: sense.acceptedAt ?? null,
           })),
         )
         .onConflictDoNothing({
@@ -809,7 +833,13 @@ export function createDictRepo(tx: Tx) {
     senses: RepairedRendering[];
   }): Promise<{ needsMerge: boolean }> => {
     const current = await tx
-      .select({ senseId: dictVarTranslations.senseId })
+      .select({
+        senseId: dictVarTranslations.senseId,
+        translation: dictVarTranslations.translation,
+        acceptedAnswers: dictVarTranslations.acceptedAnswers,
+        answerForm: dictVarTranslations.answerForm,
+        acceptedAt: dictVarTranslations.acceptedAt,
+      })
       .from(dictVarTranslations)
       .where(
         and(
@@ -856,18 +886,30 @@ export function createDictRepo(tx: Tx) {
         ),
       );
 
+    // Phase 34 (spec D1). What the accept job stored goes back for every (variant,
+    // sense) whose translation text is unchanged, read above before the delete. A
+    // new or reworded rendering starts with none: what was accepted for the old
+    // words does not describe the new ones, and the next session re-enqueues the job.
+    const before = new Map(current.map((row) => [row.senseId, row]));
     await tx.insert(dictVarTranslations).values(
-      input.senses.map((sense) => ({
-        variantId: input.variantId,
-        senseId: sense.senseId,
-        userLanguageCode: input.userLanguageCode,
-        rank: sense.rank,
-        translation: sense.translation,
-        gloss: sense.gloss,
-        alternatives: sense.alternatives,
-        exampleSource: sense.exampleSource,
-        exampleTarget: sense.exampleTarget,
-      })),
+      input.senses.map((sense) => {
+        const was = before.get(sense.senseId);
+        const unchanged = was !== undefined && was.translation === sense.translation;
+        return {
+          variantId: input.variantId,
+          senseId: sense.senseId,
+          userLanguageCode: input.userLanguageCode,
+          rank: sense.rank,
+          translation: sense.translation,
+          gloss: sense.gloss,
+          alternatives: sense.alternatives,
+          exampleSource: sense.exampleSource,
+          exampleTarget: sense.exampleTarget,
+          acceptedAnswers: unchanged ? was.acceptedAnswers : [],
+          answerForm: unchanged ? was.answerForm : null,
+          acceptedAt: unchanged ? was.acceptedAt : null,
+        };
+      }),
     );
 
     await tx
@@ -1013,12 +1055,219 @@ export function createDictRepo(tx: Tx) {
     return rows.rows.map((row) => ({ glossId: row.gloss_id, lemma: row.lemma }));
   };
 
+  /**
+   * Phase 34 (spec D3). What the dictionary already knows to be right for a
+   * session's picks, in one read (domain/distractors.ts, KnownRight):
+   * - per lexeme, every meaning in the learner language of it and of each
+   *   homograph: another lexeme of the target language with a variant spelled
+   *   like one of `variantIds` (lowercased, through the variants' form index);
+   * - per gloss, its own meanings: its key and alternatives, its member senses'
+   *   renderings, their citation forms and alternatives;
+   * - per rendering text, the target words right for it: the accepted answers,
+   *   form and lemma of every rendering of that text in this language pair.
+   *   Matched loosely here, on the text without spaces, points, stress or
+   *   punctuation, which every pair equal under the domain's `comparable` also
+   *   is; the domain applies the exact rule (knownWords).
+   */
+  const findKnownRight = async (input: {
+    glossIds: string[];
+    lexemeIds: string[];
+    variantIds: string[];
+    prompts: string[];
+    userLanguageCode: string;
+    targetLanguage: string;
+  }): Promise<KnownRight> => {
+    const known: KnownRight = { meaningsByLexeme: new Map(), meaningsByGloss: new Map(), wordsByPrompt: new Map() };
+    const add = (map: Map<string, string[]>, key: string, value: string) => {
+      if (value.trim() === '') return;
+      const list = map.get(key) ?? [];
+      list.push(value);
+      map.set(key, list);
+    };
+    const list = (ids: string[]) => sql.join(ids.map((id) => sql`${id}`), sql`, `);
+
+    if (input.lexemeIds.length > 0) {
+      const homographs =
+        input.variantIds.length > 0
+          ? sql`
+            UNION
+            SELECT av.lexeme_id, ov.lexeme_id
+            FROM dict_variants av
+            JOIN dict_variants ov ON ov.language_code = av.language_code
+                                 AND lower(ov.form) = lower(av.form)
+                                 AND ov.lexeme_id <> av.lexeme_id
+            WHERE av.id IN (${list(input.variantIds)}) AND av.language_code = ${input.targetLanguage}`
+          : sql``;
+      const rows = await tx.execute<{ asked_id: string; meaning: string }>(sql`
+        WITH reach(asked_id, lexeme_id) AS (
+          SELECT l.id, l.id FROM dict_lexemes l WHERE l.id IN (${list(input.lexemeIds)})
+          ${homographs}
+        ),
+        renderings AS (
+          SELECT r.asked_id, tr.translation, tr.gloss, tr.alternatives
+          FROM reach r
+          JOIN dict_senses s            ON s.lexeme_id = r.lexeme_id
+          JOIN dict_var_translations tr ON tr.sense_id = s.id AND tr.user_language_code = ${input.userLanguageCode}
+        ),
+        glosses AS (
+          SELECT r.asked_id, g.key, g.alternatives
+          FROM reach r
+          JOIN dict_glosses g ON g.lexeme_id = r.lexeme_id AND g.user_language_code = ${input.userLanguageCode} AND g.merged_into IS NULL
+        )
+        SELECT DISTINCT asked_id, meaning FROM (
+          SELECT asked_id, translation AS meaning FROM renderings
+          UNION ALL SELECT asked_id, gloss FROM renderings
+          UNION ALL SELECT asked_id, unnest(alternatives) FROM renderings
+          UNION ALL SELECT asked_id, key FROM glosses
+          UNION ALL SELECT asked_id, unnest(alternatives) FROM glosses
+        ) m
+        ORDER BY asked_id, meaning`);
+      for (const row of rows.rows) add(known.meaningsByLexeme, row.asked_id, row.meaning);
+    }
+
+    if (input.glossIds.length > 0) {
+      const rows = await tx.execute<{ gloss_id: string; meaning: string }>(sql`
+        WITH members AS (
+          SELECT m.gloss_id, tr.translation, tr.gloss, tr.alternatives
+          FROM dict_sense_glosses m
+          JOIN dict_var_translations tr ON tr.sense_id = m.sense_id AND tr.user_language_code = m.user_language_code
+          WHERE m.gloss_id IN (${list(input.glossIds)})
+        )
+        SELECT DISTINCT gloss_id, meaning FROM (
+          SELECT g.id AS gloss_id, g.key AS meaning FROM dict_glosses g WHERE g.id IN (${list(input.glossIds)})
+          UNION ALL SELECT g.id, unnest(g.alternatives) FROM dict_glosses g WHERE g.id IN (${list(input.glossIds)})
+          UNION ALL SELECT gloss_id, translation FROM members
+          UNION ALL SELECT gloss_id, gloss FROM members
+          UNION ALL SELECT gloss_id, unnest(alternatives) FROM members
+        ) x
+        ORDER BY gloss_id, meaning`);
+      for (const row of rows.rows) add(known.meaningsByGloss, row.gloss_id, row.meaning);
+    }
+
+    if (input.prompts.length > 0) {
+      // Everything `comparable` removes, and more: a superset of its matches.
+      const loose = '[\\s\u0591-\u05C7\u0301.,;:!?\u2026\u060C\u061B\u061F]';
+      const rows = await tx.execute<{ prompt: string; word: string }>(sql`
+        WITH asked(text) AS (VALUES ${sql.join(input.prompts.map((prompt) => sql`(${prompt}::text)`), sql`, `)}),
+        matched AS (
+          SELECT tr.translation, tr.accepted_answers, v.form, l.lemma
+          FROM dict_var_translations tr
+          JOIN dict_variants v ON v.id = tr.variant_id AND v.language_code = ${input.targetLanguage}
+          JOIN dict_lexemes l  ON l.id = v.lexeme_id
+          WHERE tr.user_language_code = ${input.userLanguageCode}
+            AND lower(regexp_replace(tr.translation, ${loose}, '', 'g'))
+                IN (SELECT lower(regexp_replace(text, ${loose}, '', 'g')) FROM asked)
+        )
+        SELECT DISTINCT prompt, word FROM (
+          SELECT translation AS prompt, unnest(accepted_answers) AS word FROM matched
+          UNION ALL SELECT translation, form FROM matched
+          UNION ALL SELECT translation, lemma FROM matched
+        ) x
+        ORDER BY prompt, word`);
+      for (const row of rows.rows) add(known.wordsByPrompt, row.prompt, row.word);
+    }
+    return known;
+  };
+
+  /** Phase 34 (spec D1, D2). One rendering with its form and lexeme, for the
+   *  accept job; undefined when it is gone. */
+  const findRenderingForAccept = async (key: RenderingKey): Promise<RenderingForAccept | undefined> => {
+    const [row] = await tx
+      .select({
+        variantId: dictVarTranslations.variantId,
+        senseId: dictVarTranslations.senseId,
+        userLanguageCode: dictVarTranslations.userLanguageCode,
+        lexemeId: dictLexemes.id,
+        languageCode: dictLexemes.languageCode,
+        form: dictVariants.form,
+        lemma: dictLexemes.lemma,
+        partOfSpeech: dictLexemes.partOfSpeech,
+        rendering: dictVarTranslations.translation,
+        example: dictVarTranslations.exampleSource,
+        exampleTranslation: dictVarTranslations.exampleTarget,
+        acceptedAt: dictVarTranslations.acceptedAt,
+      })
+      .from(dictVarTranslations)
+      .innerJoin(dictVariants, eq(dictVariants.id, dictVarTranslations.variantId))
+      .innerJoin(dictLexemes, eq(dictLexemes.id, dictVariants.lexemeId))
+      .where(
+        and(
+          eq(dictVarTranslations.variantId, key.variantId),
+          eq(dictVarTranslations.senseId, key.senseId),
+          eq(dictVarTranslations.userLanguageCode, key.userLanguageCode),
+        ),
+      );
+    return row;
+  };
+
+  /**
+   * Phase 34 (spec D1, D2). The accept job's write: the list, the answer form and
+   * the stamp, on the rendering whose text is still `translation`. A repair that
+   * reworded the rendering during the call leaves it unstamped instead, so what
+   * was accepted for the old words never lands on the new ones and the next
+   * session asks again. The caller holds lockLexemes, the lock the repair's
+   * caller takes, so this reads the repair's committed rows rather than racing
+   * its delete. Whether a row was written.
+   */
+  const storeAccepted = async (
+    input: RenderingKey & { translation: string; answers: string[]; answerForm: string | null; at: Date },
+  ): Promise<boolean> => {
+    const written = await tx
+      .update(dictVarTranslations)
+      .set({ acceptedAnswers: input.answers, answerForm: input.answerForm, acceptedAt: input.at })
+      .where(
+        and(
+          eq(dictVarTranslations.variantId, input.variantId),
+          eq(dictVarTranslations.senseId, input.senseId),
+          eq(dictVarTranslations.userLanguageCode, input.userLanguageCode),
+          eq(dictVarTranslations.translation, input.translation),
+        ),
+      )
+      .returning({ variantId: dictVarTranslations.variantId });
+    return written.length > 0;
+  };
+
+  /** Phase 34 (spec D13). Every rendering, in its enrollment's learner language,
+   *  of a saved gloss's member senses that the accept job has never run for: the
+   *  backfill's work. In key order, so a rerun asks in the same order. */
+  const findUnacceptedSavedRenderings = async (): Promise<RenderingKey[]> => {
+    const rows = await tx.execute<{ variant_id: string; sense_id: string; user_language_code: string }>(sql`
+      SELECT DISTINCT tr.variant_id, tr.sense_id, tr.user_language_code
+      FROM vocabulary_entries ve
+      JOIN enrollments e            ON e.id = ve.enrollment_id
+      JOIN dict_sense_glosses m     ON m.gloss_id = ve.gloss_id AND m.user_language_code = e.source_language
+      JOIN dict_var_translations tr ON tr.sense_id = m.sense_id AND tr.user_language_code = m.user_language_code
+      WHERE tr.accepted_at IS NULL
+      ORDER BY tr.variant_id, tr.sense_id, tr.user_language_code`);
+    return rows.rows.map((row) => ({ variantId: row.variant_id, senseId: row.sense_id, userLanguageCode: row.user_language_code }));
+  };
+
+  /** Phase 39 (spec D1, D4). Every spelling of each lexeme, lowercased: its variants' forms
+   *  and its lemma, distinct. A family is joined by lexeme, and its forms are the words a
+   *  sentence may not show. */
+  const findLexemeForms = async (input: { lexemeIds: string[] }): Promise<{ lexemeId: string; form: string }[]> => {
+    if (input.lexemeIds.length === 0) return [];
+    const ids = sql.join(input.lexemeIds.map((id) => sql`${id}`), sql`, `);
+    const rows = await tx.execute<{ lexeme_id: string; form: string }>(sql`
+      SELECT DISTINCT lexeme_id, form FROM (
+        SELECT lexeme_id, lower(form) AS form FROM dict_variants WHERE lexeme_id IN (${ids})
+        UNION ALL
+        SELECT id AS lexeme_id, lower(lemma) AS form FROM dict_lexemes WHERE id IN (${ids})
+      ) f
+      ORDER BY lexeme_id, form`);
+    return rows.rows.map((row) => ({ lexemeId: row.lexeme_id, form: row.form }));
+  };
+
   return {
     claimLemmaRenders,
     claimSavedLemmaRenders,
     findCorrectionByForm,
     findGlossRenderings,
+    findKnownRight,
     findLexeme,
+    findLexemeForms,
+    findRenderingForAccept,
+    findUnacceptedSavedRenderings,
     findSenseVersion,
     findSensesByForm,
     findSensesByLexeme,
@@ -1031,6 +1280,7 @@ export function createDictRepo(tx: Tx) {
     persistEntries,
     releaseLemmaRender,
     repairVariantRenderings,
+    storeAccepted,
   };
 }
 

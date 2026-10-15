@@ -10,7 +10,8 @@ const question = (current = 'm1'): MatchingQuestion => ({
   question: 'casa',
   options: ['בית', 'חתול', 'כלב', 'עץ', 'דלת'],
   correct_option: 0,
-  board: { question_ids: ['m1', 'm2', 'm3', 'm4'], words: ['casa', 'gatto', 'cane', 'albero'], correct_options: [0, 1, 2, 3] },
+  board: { question_ids: ['m1', 'm2', 'm3', 'm4'], words: ['casa', 'gatto', 'cane', 'albero'], parts_of_speech: ['noun', 'noun', 'noun', 'noun'], correct_options: [0, 1, 2, 3] },
+  part_of_speech: 'noun',
 });
 
 const play = (q: MatchingQuestion, taps: (['w' | 'm', number])[]) =>

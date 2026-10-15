@@ -1,7 +1,9 @@
 import type { Question } from '@lang-tutor/core/api';
 import { isChoice, type ChoiceQuestion, type QuestionType } from '@lang-tutor/core/domain';
+import { asc, eq } from 'drizzle-orm';
 
 import type { Db } from '../../src/db/client';
+import { answers, pronunciationScores } from '../../src/db/schema';
 import { findGap } from '../../src/domain/cloze';
 import { NOTHING_GENERATED, generatedContent, type Generated, type QuestionContent } from '../../src/domain/distractors';
 import { LANGUAGES } from '../../src/domain/languages';
@@ -10,6 +12,13 @@ import { createQuestionRepo } from '../../src/repo/questions';
 import { createSessionRepo } from '../../src/repo/sessions';
 import { testRng } from './testRng';
 import { withTx } from './withTx';
+
+/** Phase 43. A session built for a device that can neither listen nor speak. */
+export const NO_DEVICES = { listening: false, speaking: false };
+
+/** Phase 53. The learner day a test's stock says its words were chosen on, where the day is
+ *  no part of what the test is about. */
+export const CHOSEN_ON = '2026-10-14';
 
 /**
  * Phase 23. A question a test knows is a choice, narrowed so it can read the
@@ -102,7 +111,7 @@ export async function insertListSession(
         ...sentenceCard(sense, types[index], input.alternatives ?? [], (example, generated, gap) =>
           generatedContent(
             // generatedContent reads neither id; a list session's card names its gloss alone.
-            { ...sense, senseId: '', partOfSpeech: 'noun', example, exampleTranslation: example ? HEBREW_SENTENCE : null },
+            { ...sense, senseId: '', partOfSpeech: 'noun', example, exampleTranslation: example ? HEBREW_SENTENCE : null, acceptedAnswers: [], answerForm: null, acceptedAt: null },
             types[index],
             generated,
             {
@@ -114,7 +123,7 @@ export async function insertListSession(
         ),
       })),
     });
-    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId);
+    const sessionId = await sessionRepo.insertPreparingSession(input.userId, input.enrollmentId, NO_DEVICES, CHOSEN_ON);
     await sessionRepo.insertSessionQuestions(sessionId, generated);
     await sessionRepo.transition(sessionId, ['preparing'], 'ready');
     return { sessionId, questions: generated };
@@ -126,4 +135,32 @@ export async function insertListSession(
 export async function readStoredAnswers(db: Db, sessionId: string) {
   const record = await withTx(db, (tx) => createSessionRepo(tx).loadSession(sessionId));
   return record?.answers ?? [];
+}
+
+/** Phase 50 (spec D3). Every stored pronunciation score, as route tests read
+ *  them: they may not reach past composition for a repository. */
+export async function readPronunciationScores(db: Db): Promise<{ language: string; a: string; b: string; score: number }[]> {
+  return db
+    .select({ language: pronunciationScores.languageCode, a: pronunciationScores.formA, b: pronunciationScores.formB, score: pronunciationScores.score })
+    .from(pronunciationScores);
+}
+
+/** Phase 41. Each answer's stored verdict and retry state, in position order. */
+export async function readVerdicts(db: Db, sessionId: string): Promise<{ verdict: string | null; retryState: string | null }[]> {
+  return db
+    .select({ verdict: answers.verdict, retryState: answers.retryState })
+    .from(answers)
+    .where(eq(answers.sessionId, sessionId))
+    .orderBy(asc(answers.position));
+}
+
+/** Phase 38 (spec D4). Each stored answer's hint_opened, by position. The domain's
+ *  answer record does not carry it: only a count over the table reads it. */
+export async function readHintOpened(db: Db, sessionId: string): Promise<(boolean | null)[]> {
+  const rows = await db
+    .select({ hintOpened: answers.hintOpened })
+    .from(answers)
+    .where(eq(answers.sessionId, sessionId))
+    .orderBy(asc(answers.position));
+  return rows.map((row) => row.hintOpened);
 }

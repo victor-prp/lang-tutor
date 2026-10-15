@@ -116,6 +116,23 @@ export async function insertGlossMemory(db: Db, rows: (typeof glossMemory.$infer
   await db.insert(glossMemory).values(rows);
 }
 
+/** Phase 39. One memory row's stability set directly: a lapse no session made. */
+export async function setMemoryStability(
+  db: Db,
+  input: { enrollmentId: string; glossId: string; dimension: Dimension; stability: number },
+): Promise<void> {
+  await db
+    .update(glossMemory)
+    .set({ stability: input.stability })
+    .where(
+      and(
+        eq(glossMemory.enrollmentId, input.enrollmentId),
+        eq(glossMemory.glossId, input.glossId),
+        eq(glossMemory.dimension, input.dimension),
+      ),
+    );
+}
+
 /** Puts one progress row at a level that last stepped on `lastStepOn`. */
 export async function setLastStep(
   db: Db,
@@ -225,6 +242,8 @@ export async function insertAnsweredSession(
       status: input.status,
       source: 'list',
       completedAt: input.status === 'completed' ? sql`now()` : null,
+      listening: false,
+      speaking: false,
     })
     .returning({ id: sessions.id });
   await db.insert(sessionQuestions).values(
@@ -266,4 +285,12 @@ export async function failInsertsInto(db: Db, table: 'session_progress' | 'gloss
       create trigger fail_insert before insert on ${table}
         for each row execute function fail_insert();`),
   );
+}
+
+/** Phase 46. The day a memory row reached the bar, set directly for every one of a gloss's rows. */
+export async function setReachedOn(db: Db, input: { enrollmentId: string; glossId: string; reachedOn: string }): Promise<void> {
+  await db
+    .update(glossMemory)
+    .set({ reachedOn: input.reachedOn })
+    .where(and(eq(glossMemory.enrollmentId, input.enrollmentId), eq(glossMemory.glossId, input.glossId)));
 }

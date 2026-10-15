@@ -2,10 +2,12 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   JUDGE_MARKER,
+  buildFitJudgePrompt,
   buildMeaningJudgePrompt,
   buildTranslationJudgePrompt,
   judgePrompt,
   meaningRuleVerdict,
+  parseFitJudge,
   parseJudge,
   parseMeaningJudge,
   parseTranslationJudge,
@@ -13,6 +15,7 @@ import {
   translationRuleVerdict,
   type JudgeContext,
 } from './judge';
+import type { ClozeTypedQuestion } from '@lang-tutor/core/api';
 
 const CONTEXT: JudgeContext = {
   language: 'it',
@@ -65,6 +68,11 @@ describe('buildMeaningJudgePrompt (spec D4)', () => {
   it('names all three verdicts', () => {
     for (const verdict of ['"right"', '"other_sense"', '"wrong"']) expect(prompt.system).toContain(verdict);
   });
+  // Phase 42 (spec D2). הזייה for imagination was taken as another sense.
+  it('takes another sense only as one a dictionary lists, and a related word as wrong', () => {
+    expect(prompt.system).toContain('a dictionary would list as a sense of its own');
+    expect(prompt.system).toContain('only related, associated or near in meaning');
+  });
 });
 
 describe('parseMeaningJudge (spec D4)', () => {
@@ -92,8 +100,9 @@ const QUESTION = {
   sentence: 'I want to book a table.',
   gap: { start: 10, end: 14 },
   answer: 'book',
+  mark: null,
 };
-const MEANING_Q = { id: 'm1', type: 'typed_meaning' as const, vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין' };
+const MEANING_Q = { id: 'm1', type: 'typed_meaning' as const, vocab_term_id: 'l1', question: 'prenotare', part_of_speech: 'verb', meaning: 'להזמין', context: null };
 
 describe('translationRuleVerdict', () => {
   it('is wrong for an empty answer', () => {
@@ -102,8 +111,12 @@ describe('translationRuleVerdict', () => {
   it('is exact for the reference in another case without the full stop', () => {
     expect(translationRuleVerdict('I want to book a table.', 'i want to BOOK a table')).toBe('exact');
   });
+  it('is wrong for one word on its own, with no model call', () => {
+    expect(translationRuleVerdict('This mushroom grew fast.', 'mushroom ')).toBe('wrong');
+  });
   it('leaves anything else to the model', () => {
     expect(translationRuleVerdict('I want to book a table.', 'I want a table')).toBeNull();
+    expect(translationRuleVerdict('Run!', 'go')).toBeNull();
   });
 });
 
@@ -136,6 +149,9 @@ describe('buildTranslationJudgePrompt', () => {
     expect(prompt.system).toContain('one-letter or accent slip');
     expect(prompt.system).toContain('another word instead of it');
     expect(prompt.system).toContain('including the wrong form');
+    // Phase 45 (spec D2). "clearly" left out of a sentence about communicating clearly.
+    expect(prompt.system).toContain('changed or left out');
+    expect(prompt.system).toContain('how something is done, such as clearly, quickly or very');
   });
 });
 
@@ -170,7 +186,7 @@ describe('the dispatchers', () => {
     expect(ruleVerdict(MEANING_Q, 'רכב', ['רכב'])).toBe('exact');
     expect(ruleVerdict(MEANING_Q, 'רכב')).toBeNull();
     // A translation's reference is a sentence in the language being learned; the lists are words in the learner's.
-    expect(ruleVerdict(QUESTION, 'book', ['book'])).toBeNull();
+    expect(ruleVerdict(QUESTION, 'a book', ['a book'])).toBeNull();
   });
 });
 
@@ -180,5 +196,48 @@ describe('meaningRuleVerdict over the stored alternatives (spec D13)', () => {
     expect(meaningRuleVerdict('מכונית', 'רֶכֶב', ['רכב'])).toBe('exact');
     expect(meaningRuleVerdict('מכונית', 'משאית', ['רכב'])).toBeNull();
     expect(meaningRuleVerdict('מכונית', 'מכונית', [])).toBe('exact');
+  });
+});
+
+// Phase 41 (spec D2). Whether an unlisted word fills a typed cloze's gap.
+describe('buildFitJudgePrompt', () => {
+  const CLOZE: ClozeTypedQuestion = {
+    id: 'c1',
+    type: 'cloze_typed',
+    vocab_term_id: 'v',
+    sentence: 'Please download the file.',
+    gap: { start: 7, end: 15 },
+    translation: 'בבקשה תוריד את הקובץ.',
+    meaning: 'להוריד',
+    answer: 'download',
+    alternatives: ['upload'],
+    mark: null,
+  };
+  const prompt = buildFitJudgePrompt(CLOZE, 'en', 'edit');
+  it('carries the marker MockServer matches on, and the language', () => {
+    expect(prompt.system).toContain(JUDGE_MARKER);
+    expect(prompt.system).toContain('English');
+  });
+  it('sends the sentence with its gap, the word meant and the answer, never the translation', () => {
+    expect(JSON.parse(prompt.user)).toEqual({ sentence: 'Please ___ the file.', word_meant: 'download', answer: 'edit' });
+    expect(prompt.user).not.toContain('הקובץ');
+  });
+  it('asks whether the sentence read alone is correct with the answer, in the form the gap needs', () => {
+    expect(prompt.system).toContain('whatever it then means');
+    expect(prompt.system).toContain('the form the gap needs');
+    for (const verdict of ['"fits"', '"wrong"']) expect(prompt.system).toContain(verdict);
+  });
+});
+
+describe('parseFitJudge', () => {
+  it('reads both verdicts, fenced or not', () => {
+    expect(parseFitJudge('{"verdict":"fits"}')).toBe('fits');
+    expect(parseFitJudge('{"verdict":"wrong"}')).toBe('wrong');
+    expect(parseFitJudge('```json\n{"verdict":"fits"}\n```')).toBe('fits');
+  });
+  it('is null for another verdict, empty or junk', () => {
+    expect(parseFitJudge('{"verdict":"right"}')).toBeNull();
+    expect(parseFitJudge('')).toBeNull();
+    expect(parseFitJudge('junk')).toBeNull();
   });
 });

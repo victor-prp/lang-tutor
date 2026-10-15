@@ -90,7 +90,8 @@ jobs:
           fi
           # No EXPO_PUBLIC_API_URL argument: the web export reads
           # apps/mobile/.env.production, which is the point of a release build.
-          docker build --build-arg "APP_VERSION=$TAG" -t "$IMAGE" .
+          # Phase 49: the tag's commit too, for /health and the app's About screen.
+          docker build --build-arg "APP_VERSION=$TAG" --build-arg "APP_COMMIT=${GITHUB_SHA::7}" -t "$IMAGE" .
           docker push "$IMAGE"
 
   apply:

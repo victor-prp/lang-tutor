@@ -1,4 +1,11 @@
-import { PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from './domain/jobs';
+import {
+  CHECKER_CALL_BUDGET_MS,
+  CONTEXT_CALL_BUDGET_MS,
+  PHOTO_READ_BUDGET_MS,
+  SESSION_GENERATION_BUDGET_MS,
+  STOCK_SAVE_DELAY_SECONDS,
+} from './domain/jobs';
+import { soundAlikeThreshold } from './domain/soundAlike';
 
 // A pure function of its argument: it reads no global, so a test hands it a
 // literal object rather than mutating the process environment.
@@ -9,16 +16,28 @@ export type Config = {
   poolMax: number;
   translationTimeoutMs: number;
   sessionGenerationTimeoutMs: number;
+  contextCallTimeoutMs: number;
+  checkerCallTimeoutMs: number;
   speechTimeoutMs: number;
   judgeTimeoutMs: number;
   photoReadTimeoutMs: number;
+  // Phase 43 (ruling R3). How long a save's request for a session in stock waits.
+  stockSaveDelaySeconds: number;
+  // Phase 50 (spec D4). The pronunciation score at which an unheard transcript
+  // is the card's word.
+  soundAlikeThreshold: number;
   // Phase 30 (spec D2). The release tag the image was built from, published on
   // /health so a release can prove which image answers. `dev` everywhere else.
   version: string;
+  // Phase 49 (spec D3). The commit the image was built from, beside the tag on /health.
+  commit: string;
   // Phase 30 (spec D1). Where the web export sits inside the image. Unset, the
   // server answers the API only, which is every lane and every test: there,
   // Metro or `expo serve` serves the app.
   webDistDir: string | null;
+  // Phase 52 (spec D7). Expo's push service. Tests and e2e point it at a MockServer
+  // namespace, as RESEND_BASE_URL is.
+  pushBaseUrl: string;
 };
 
 // The one place this default lives. Both composition roots read it from here.
@@ -37,6 +56,8 @@ const DEFAULT_SPEECH_TIMEOUT_MS = 8_000;
 // Phase 27 (spec D4). One judged answer: the learner waits on it, as on a transcription.
 const DEFAULT_JUDGE_TIMEOUT_MS = 8_000;
 
+const DEFAULT_PUSH_BASE_URL = 'https://exp.host';
+
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   return {
     databaseUrl: env.DATABASE_URL ?? DEFAULT_DATABASE_URL,
@@ -48,12 +69,24 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     port: Number(env.PORT) || 3001,
     poolMax: Number(env.PG_POOL_MAX) || 5,
     translationTimeoutMs: Number(env.TRANSLATION_TIMEOUT_MS) || DEFAULT_TRANSLATION_TIMEOUT_MS,
-    // Victor's cap: five minutes at most. The prepare-session job expires at
-    // twice SESSION_GENERATION_BUDGET_MS, so a longer call would be cut off by
-    // the expiry rather than by its own timeout.
+    // Victor's cap: two minutes at most (phase 47 D1; five before it). The
+    // prepare-session job expires at twice the sum of its calls' budgets
+    // (PREPARE_SESSION_CALL_BUDGETS_MS), so a call longer than its budget would
+    // be cut off by the expiry rather than by its own timeout: each is capped
+    // at its budget, never above.
     sessionGenerationTimeoutMs: Math.min(
       Number(env.SESSION_GENERATION_TIMEOUT_MS) || SESSION_GENERATION_BUDGET_MS,
       SESSION_GENERATION_BUDGET_MS,
+    ),
+    // Phase 34 (ruling R12). The context call after the batch, capped the same way.
+    contextCallTimeoutMs: Math.min(
+      Number(env.CONTEXT_CALL_TIMEOUT_MS) || CONTEXT_CALL_BUDGET_MS,
+      CONTEXT_CALL_BUDGET_MS,
+    ),
+    // Phase 34 (spec D5, ruling R12). The checker after the context call, capped the same way.
+    checkerCallTimeoutMs: Math.min(
+      Number(env.CHECKER_CALL_TIMEOUT_MS) || CHECKER_CALL_BUDGET_MS,
+      CHECKER_CALL_BUDGET_MS,
     ),
     speechTimeoutMs: Number(env.SPEECH_TIMEOUT_MS) || DEFAULT_SPEECH_TIMEOUT_MS,
     judgeTimeoutMs: Number(env.JUDGE_TIMEOUT_MS) || DEFAULT_JUDGE_TIMEOUT_MS,
@@ -63,8 +96,16 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       Number(env.PHOTO_READ_TIMEOUT_MS) || PHOTO_READ_BUDGET_MS,
       PHOTO_READ_BUDGET_MS,
     ),
+    // Phase 43 (ruling R3). e2e sets it past the length of a run, so only the
+    // home screen's create builds a spec's first list session.
+    stockSaveDelaySeconds: Number(env.STOCK_SAVE_DELAY_SECONDS) || STOCK_SAVE_DELAY_SECONDS,
+    soundAlikeThreshold: soundAlikeThreshold(env.SOUND_ALIKE_THRESHOLD),
     version: env.APP_VERSION?.trim() || 'dev',
+    // 7 characters, `-dirty` from a tree with uncommitted changes; `unknown`
+    // when nothing set it (spec D2).
+    commit: env.APP_COMMIT?.trim() || 'unknown',
     webDistDir: env.WEB_DIST_DIR?.trim() || null,
+    pushBaseUrl: env.PUSH_BASE_URL?.trim() || DEFAULT_PUSH_BASE_URL,
   };
 }
 
@@ -162,6 +203,19 @@ export function loadBotSecret(env: NodeJS.ProcessEnv): string | null {
   const secret = env.BOT_SECRET?.trim();
   if (!secret) return null;
   if (secret.length < 32) throw new Error('BOT_SECRET must be at least 32 characters. Generate one with: openssl rand -base64 32');
+  return secret;
+}
+
+/**
+ * Phase 52 (spec D5, D9). REMINDER_SECRET, which mounts the reminder tick route, or null where
+ * it is unset: every lane, CI and tests. Read separately from Config for the reason
+ * loadBotSecret is: db/cli.ts calls loadConfig and has no use for it. A secret too short to
+ * resist guessing fails at start-up; the value is never printed.
+ */
+export function loadReminderSecret(env: NodeJS.ProcessEnv): string | null {
+  const secret = env.REMINDER_SECRET?.trim();
+  if (!secret) return null;
+  if (secret.length < 32) throw new Error('REMINDER_SECRET must be at least 32 characters. Generate one with: openssl rand -base64 32');
   return secret;
 }
 

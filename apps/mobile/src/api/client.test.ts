@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 import {
   ApiError,
+  HEALTH_TIMEOUT_MS,
   JUDGE_REQUEST_TIMEOUT_MS,
   PHOTO_UPLOAD_TIMEOUT_MS,
   SPEECH_UPLOAD_TIMEOUT_MS,
@@ -34,6 +35,34 @@ describe('api/client', () => {
         headers: expect.objectContaining({ cookie: 'better-auth.session_token=abc' }),
       }),
     );
+  });
+
+  // Phase 49 (spec D1). The About screen asks the server for its own release.
+  it('reads /health, outside /api', async () => {
+    const body = { ok: true, lane: 'main', database: 'lang_tutor', port: 1, version: 'v1', commit: 'a3f9c21' };
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => body }));
+    await expect(buildClient(mockFetch).health()).resolves.toEqual(body);
+    expect(mockFetch).toHaveBeenCalledWith('http://test.local/health', expect.objectContaining({ method: 'GET' }));
+  });
+
+  // Phase 49 (review I1). React Native's Android client has no timeout of its
+  // own, so a server that accepts and never answers would leave About at "…".
+  it('gives up on a /health that never answers', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetch = jest.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          }),
+      );
+      const pending = buildClient(fetch as unknown as jest.Mock).health();
+      const outcome = expect(pending).rejects.toThrow('aborted');
+      await jest.advanceTimersByTimeAsync(HEALTH_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('reports a 401 and still throws it', async () => {
@@ -158,6 +187,17 @@ describe('api/client', () => {
     expect(mockFetch).toHaveBeenNthCalledWith(3, 'http://test.local/api/enrollments/e1/sessions/current', expect.objectContaining({ method: 'GET' }));
   });
 
+  // Phase 43 (spec D2, D7).
+  it('startSession posts the device to the session’s start', async () => {
+    const mockFetch = jest.fn(async () => ({ ok: true, status: 200, json: async () => ({ session_id: 's1', status: 'ready' }) }));
+    const result = await buildClient(mockFetch).startSession('s1', { listening: true, speaking: false });
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://test.local/api/sessions/s1/start',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ listening: true, speaking: false }) }),
+    );
+    expect(result).toEqual({ session_id: 's1', status: 'ready' });
+  });
+
   it("carries a failure's error code, so the app can tell two 409s apart", async () => {
     const mockFetch = jest.fn(async () => ({ ok: false, status: 409, json: async () => ({ error: 'no_saved_words' }) }));
     await expect(buildClient(mockFetch).createSession({ enrollment_id: 'e1' })).rejects.toMatchObject({
@@ -171,6 +211,7 @@ describe('api/client', () => {
     const failure = await buildClient(mockFetch).currentSession('e1').catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ApiError);
     expect((failure as ApiError).code).toBeUndefined();
+    expect((failure as ApiError).reason).toBeUndefined();
   });
 
   it('createProfile posts the profile to /api/users', async () => {
@@ -496,6 +537,53 @@ describe('api/client', () => {
   });
 });
 
+// Phase 41 (review I1). A next-step with check_fit waits on the server's model call,
+// so it is given up as a judged answer is, and the card offers "try again".
+describe('a fit-checked next-step', () => {
+  const stalled = () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const fetch = ((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        signals.push(init.signal ?? undefined);
+        init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      })) as unknown as typeof globalThis.fetch;
+    const api = createApiClient({
+      baseUrl: 'http://api',
+      fetch,
+      sessionHeaders: async () => ({}),
+      credentials: 'omit',
+      onUnauthorized: () => {},
+      appHeaders: {},
+      onUpdateRequired: () => {},
+    });
+    return { api, signals };
+  };
+
+  it('is abandoned when it stalls', async () => {
+    jest.useFakeTimers();
+    try {
+      const { api } = stalled();
+      const outcome = expect(api.nextStep('s1', { question_id: 'q', text: 'edit', check_fit: true })).rejects.toThrow('aborted');
+      await jest.advanceTimersByTimeAsync(JUDGE_REQUEST_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('leaves every other next-step without a timeout', async () => {
+    jest.useFakeTimers();
+    try {
+      const { api, signals } = stalled();
+      void api.nextStep('s1', { question_id: 'q', text: 'edit' });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(signals).toEqual([undefined]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
 describe('photo imports', () => {
   it('uploads to the enrollment, patches a row, saves and discards', async () => {
     const calls: { url: string; method?: string; body?: unknown }[] = [];
@@ -545,5 +633,169 @@ describe('photo imports', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+// Phase 52 (spec D1, D2, D4, D6). The reminder endpoints the app calls.
+describe('reminders', () => {
+  const settings = { enabled: true, daily_target: 2, days: [1, 3, 5], times: ['13:00', '20:00'] };
+
+  function recording(status: (url: string, method: string) => number) {
+    const calls: { method: string; path: string; body?: unknown; contentType?: string }[] = [];
+    const mockFetch = jest.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      calls.push({
+        method,
+        path: url.replace('http://test.local', ''),
+        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+        ...(init?.headers ? { contentType: (init.headers as Record<string, string>)['Content-Type'] } : {}),
+      });
+      return new Response(status(url, method) === 204 ? null : JSON.stringify({ ...settings, time_zone: 'Asia/Jerusalem' }), {
+        status: status(url, method),
+      });
+    });
+    return { calls, client: buildClient(mockFetch as unknown as jest.Mock) };
+  }
+
+  it('reads and replaces the schedule, answered with the time zone', async () => {
+    const { calls, client } = recording(() => 200);
+    await expect(client.reminderSettings()).resolves.toEqual({ ...settings, time_zone: 'Asia/Jerusalem' });
+    await expect(client.putReminderSettings(settings)).resolves.toEqual({ ...settings, time_zone: 'Asia/Jerusalem' });
+    expect(calls).toEqual([
+      { method: 'GET', path: '/api/me/reminders', contentType: undefined },
+      { method: 'PUT', path: '/api/me/reminders', body: settings, contentType: 'application/json' },
+    ]);
+  });
+
+  it('reports the time zone, registers and unregisters the phone, and reports a tap, each answered 204', async () => {
+    const { calls, client } = recording(() => 204);
+    await expect(client.setTimeZone('Asia/Jerusalem')).resolves.toBeUndefined();
+    await expect(client.registerPushDevice('ExponentPushToken[abc]')).resolves.toBeUndefined();
+    await expect(client.unregisterPushDevice('ExponentPushToken[abc]')).resolves.toBeUndefined();
+    await expect(client.tapReminder('r 1')).resolves.toBeUndefined();
+    expect(calls.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+      { method: 'PUT', path: '/api/me/time-zone', body: { time_zone: 'Asia/Jerusalem' } },
+      { method: 'PUT', path: '/api/me/push-devices', body: { token: 'ExponentPushToken[abc]', platform: 'android' } },
+      { method: 'POST', path: '/api/me/push-devices/unregister', body: { token: 'ExponentPushToken[abc]' } },
+      { method: 'POST', path: '/api/me/reminders/r%201/tap', body: {} },
+    ]);
+  });
+
+  it("throws the 404 of a tap on someone else's reminder", async () => {
+    const mockFetch = jest.fn(async () => ({ ok: false, status: 404, json: async () => ({ error: 'not found' }) }));
+    await expect(buildClient(mockFetch).tapReminder('not-a-uuid')).rejects.toEqual(new ApiError(404, 'not found'));
+  });
+});
+
+// Phase 53 (spec D13). The target endpoints the app calls.
+describe('targets', () => {
+  const word = { gloss_id: 'g1', form: 'dita', meaning: 'אצבע', readiness: 'not_started' };
+  const target = {
+    id: 't 1',
+    kind: 'exam',
+    due_on: '2026-10-20',
+    days_left: 5,
+    word_count: 1,
+    ready_count: 0,
+    words: [word],
+  };
+  const list = { today: '2026-10-15', targets: [] };
+  const create = {
+    kind: 'exam' as const,
+    due_on: '2026-10-20',
+    photo_import_ids: ['i1'],
+    entries: [{ gloss_id: 'g1', variant_id: 'v1' }],
+  };
+  const add = { photo_import_ids: [], entries: [{ gloss_id: 'g2', variant_id: 'v2' }] };
+
+  // Answers as the server does: 201 for a create, 204 for a removal and an end,
+  // 200 for the rest.
+  function recording() {
+    const calls: { method: string; path: string; body?: unknown; contentType?: string }[] = [];
+    const mockFetch = jest.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      const path = url.replace('http://test.local', '');
+      calls.push({
+        method,
+        path,
+        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
+        ...(init?.headers ? { contentType: (init.headers as Record<string, string>)['Content-Type'] } : {}),
+      });
+      if (method === 'DELETE' || path.endsWith('/end')) return new Response(null, { status: 204 });
+      if (method === 'GET' && path.endsWith('/targets')) return new Response(JSON.stringify(list), { status: 200 });
+      const created = method === 'POST' && path.endsWith('/targets');
+      return new Response(JSON.stringify(target), { status: created ? 201 : 200 });
+    });
+    return { calls, client: buildClient(mockFetch as unknown as jest.Mock) };
+  }
+
+  it('lists and creates under the enrollment, and does the rest under the target', async () => {
+    const { calls, client } = recording();
+    await client.listTargets('e 1');
+    await client.getTarget('t 1');
+    await client.createTarget('e 1', create);
+    await client.addTargetWords('t 1', add);
+    await client.changeTargetDate('t 1', { due_on: '2026-10-22' });
+    await client.removeTargetWord('t 1', 'g/1');
+    await client.endTarget('t 1');
+    expect(calls).toEqual([
+      { method: 'GET', path: '/api/enrollments/e%201/targets', contentType: undefined },
+      { method: 'GET', path: '/api/targets/t%201', contentType: undefined },
+      { method: 'POST', path: '/api/enrollments/e%201/targets', body: create, contentType: 'application/json' },
+      { method: 'POST', path: '/api/targets/t%201/words', body: add, contentType: 'application/json' },
+      { method: 'PATCH', path: '/api/targets/t%201', body: { due_on: '2026-10-22' }, contentType: 'application/json' },
+      { method: 'DELETE', path: '/api/targets/t%201/words/g%2F1', contentType: undefined },
+      { method: 'POST', path: '/api/targets/t%201/end', body: {}, contentType: 'application/json' },
+    ]);
+  });
+
+  it('answers the list or the target the server sent, and nothing for a removal or an end', async () => {
+    const { client } = recording();
+    await expect(client.listTargets('e1')).resolves.toEqual(list);
+    await expect(client.getTarget('t1')).resolves.toEqual(target);
+    await expect(client.createTarget('e1', create)).resolves.toEqual(target);
+    await expect(client.addTargetWords('t1', add)).resolves.toEqual(target);
+    await expect(client.changeTargetDate('t1', { due_on: '2026-10-22' })).resolves.toEqual(target);
+    await expect(client.removeTargetWord('t1', 'g1')).resolves.toBeUndefined();
+    await expect(client.endTarget('t1')).resolves.toBeUndefined();
+  });
+
+  it("throws a refusal with the body's error, so the screen can tell the refusals apart", async () => {
+    const refuse = (status: number, error: string) =>
+      buildClient(jest.fn(async () => ({ ok: false, status, json: async () => ({ error }) })));
+    await expect(refuse(400, 'invalid target').createTarget('e1', create)).rejects.toEqual(
+      new ApiError(400, 'invalid target'),
+    );
+    await expect(refuse(409, 'target closed').changeTargetDate('t1', { due_on: '2026-10-22' })).rejects.toEqual(
+      new ApiError(409, 'target closed'),
+    );
+    await expect(refuse(409, 'photo import not ready').addTargetWords('t1', add)).rejects.toEqual(
+      new ApiError(409, 'photo import not ready'),
+    );
+    await expect(refuse(404, 'target not found').getTarget('nope')).rejects.toEqual(
+      new ApiError(404, 'target not found'),
+    );
+    await expect(refuse(409, 'target closed').endTarget('t1')).rejects.toEqual(new ApiError(409, 'target closed'));
+  });
+
+  // Phase 53 (spec D10). An invalid target says why (`no_words`, `due_date`, `unknown_import`),
+  // and the wizard's Done tells the learner what to fix from it.
+  it("keeps a refusal's reason beside its error, and only a reason that is a string", async () => {
+    const refuse = (body: unknown) =>
+      buildClient(jest.fn(async () => ({ ok: false, status: 400, json: async () => body })));
+    const failureOf = (body: unknown) => refuse(body).createTarget('e1', create).catch((error: unknown) => error);
+
+    const noWords = await failureOf({ error: 'invalid target', reason: 'no_words' });
+    expect(noWords).toBeInstanceOf(ApiError);
+    expect(noWords).toMatchObject({ status: 400, code: 'invalid target', reason: 'no_words' });
+    expect((noWords as ApiError).message).toBe('API request failed with status 400 (invalid target: no_words)');
+
+    const plain = await failureOf({ error: 'invalid request' });
+    expect((plain as ApiError).reason).toBeUndefined();
+    expect((plain as ApiError).message).toBe('API request failed with status 400 (invalid request)');
+    expect((await failureOf({ error: 'invalid target', reason: 7 })) as ApiError).toMatchObject({
+      code: 'invalid target',
+      reason: undefined,
+    });
   });
 });

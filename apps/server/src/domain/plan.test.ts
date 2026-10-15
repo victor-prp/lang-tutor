@@ -22,6 +22,7 @@ const pick = (n: number, over: Partial<PlanPick> = {}): PlanPick => ({
   rung: 1,
   level: 1,
   r: null,
+  step: false,
   ...over,
 });
 
@@ -118,6 +119,36 @@ describe('planCards: aiming at CARD_TARGET (spec D6)', () => {
     const sr = typesByPick(Array.from({ length: 5 }, (_, i) => at(i, SR, 1)));
     expect(count(sr, 'listen_choice')).toBe(4);
     expect(count(sr, 'dictation')).toBe(1);
+  });
+});
+
+// Phase 39 (spec D6).
+describe('planCards: new_meaning', () => {
+  const meaning = (n: number, over: Partial<PlanPick> = {}) => at(n, WR, 1, { knownMeanings: ['להרים'], ...over });
+
+  it('turns a pick with known meanings into new_meaning, whatever its dimension or rung', () => {
+    expect(typeOf(meaning(0))).toBe('new_meaning');
+    expect(typeOf(pick(0, { knownMeanings: ['להרים'] }))).toBe('new_meaning');
+    expect(typeOf(at(0, WP, 2, { knownMeanings: ['להרים'] }))).toBe('new_meaning');
+    expect(typeOf(pick(0, { knownMeanings: [] }))).toBe('multiple_choice');
+  });
+
+  it('does not count toward MAX_PER_TYPE', () => {
+    const list = [...Array.from({ length: 5 }, (_, i) => meaning(i)), ...Array.from({ length: 4 }, (_, i) => at(10 + i, WR, 1, { form: 'same' }))];
+    const types = typesByPick(list);
+    expect(types.slice(0, 5)).toEqual(Array(5).fill('new_meaning'));
+    expect(types.slice(5)).toEqual(Array(4).fill('multiple_choice'));
+  });
+
+  it('is never on a board, in a ten-pick session', () => {
+    const list = [meaning(0), meaning(1), pick(2), pick(3), pick(4), pick(5), pick(6), meaning(7), meaning(8), pick(9)];
+    const plan = planCards(list, ALL);
+    expect(plan.board).not.toBeNull();
+    const start = plan.board!.start;
+    const onBoard = plan.order.slice(start, start + 4);
+    expect(onBoard.every((index) => list[index].knownMeanings === undefined)).toBe(true);
+    expect(count(plan.types, 'new_meaning')).toBe(4);
+    expect(count(plan.types, 'matching')).toBe(4);
   });
 });
 
@@ -245,6 +276,26 @@ describe('planCards: the board (spec D6, D10)', () => {
     expect(plan.order.slice(start, start + 4)).toEqual([0, 2, 4, 5]);
   });
 
+  // Phase 34 (spec D3). 282213b7: main sat on board f8ccaf3d as מרכזי beside
+  // mainstream, which the dictionary also knows as מרכזי. Either pairing was right.
+  it('category A (282213b7): never puts main and mainstream on one board when mainstream is also מרכזי', () => {
+    const main = pick(0, { form: 'main', translation: 'מרכזי', meanings: ['מרכזי', 'ראשי', 'ים פתוח'] });
+    const mainstream = pick(1, { form: 'mainstream', translation: 'מיינסטרימי', meanings: ['מיינסטרימי', 'מרכזי'] });
+    const rest = [2, 3, 4, 5, 6].map((n) => pick(n));
+    const boardOf = (list: PlanPick[]) => {
+      const plan = planCards(list, ALL);
+      const start = plan.board!.start;
+      return plan.order.slice(start, start + 4);
+    };
+    // Seven new words, each a multiple choice: the board is main and the next
+    // three; mainstream stays a multiple choice of its own.
+    expect(boardOf([main, mainstream, ...rest])).toEqual([0, 2, 3, 4]);
+    // Either way round: the clash is found from the later word's meanings too.
+    expect(boardOf([mainstream, main, ...rest])).toEqual([0, 2, 3, 4]);
+    // Without what the dictionary knows, the two share the board, as on lane 0.
+    expect(boardOf([main, mainstream, ...rest].map(({ meanings: _, ...other }) => other))).toEqual([0, 1, 2, 3]);
+  });
+
   it('has no board when four distinct words cannot be found', () => {
     const list = Array.from({ length: 8 }, (_, i) => pick(i, { form: i < 3 ? `w${i}` : 'w0' }));
     const plan = planCards(list, ALL);
@@ -293,5 +344,48 @@ describe('planCards: the order (spec D6)', () => {
         }
       }
     }
+  });
+});
+
+describe('planCards: same-day returns (phase 37 D6)', () => {
+  /** A return owed today: recall, R 1 on the day it opened. */
+  const back = (n: number, dimension: Dimension, over: Partial<PlanPick> = {}): PlanPick =>
+    pick(n, { dimension, rung: 2, level: 1, r: 1, step: true, ...over });
+
+  it('asks a return after every other card, however high its p', () => {
+    // The listening card's p is 0.625, the return's typed meaning 1.
+    const plan = planCards([at(0, SR, 1, { r: 0.25 }), back(1, WR)], ALL);
+    expect(plan.order).toEqual([0, 1]);
+    expect(plan.types).toEqual(['listen_choice', 'typed_meaning']);
+  });
+
+  it('keeps the highest p first among the returns', () => {
+    const plan = planCards([pick(0), back(1, WP, { r: 0.8 }), back(2, WR)], ALL);
+    expect(plan.order).toEqual([0, 2, 1]);
+    expect(plan.types).toEqual(['multiple_choice', 'typed_meaning', 'typed_translation']);
+  });
+
+  it('starts the returns with a type other than the card before them, where one can', () => {
+    const plan = planCards([at(0, WR, 2, { r: 0.9 }), back(1, WR), back(2, WP, { r: 0.95 })], ALL);
+    expect(plan.types).toEqual(['typed_meaning', 'typed_translation', 'typed_meaning']);
+    expect(plan.order).toEqual([0, 2, 1]);
+  });
+
+  it('asks every return as recall past the per-type limit, and counts them toward it for the other cards', () => {
+    // Nine words met in one session come back in the next: written receptive's one
+    // recall type takes them all. A due word's typed meaning then falls back.
+    const list = [pick(0), ...Array.from({ length: 9 }, (_, i) => back(i + 1, WR)), at(10, WR, 2)];
+    const types = typesByPick(list);
+    expect(types.slice(1, 10)).toEqual(Array(9).fill('typed_meaning'));
+    expect(types[10]).toBe('multiple_choice');
+  });
+
+  it('keeps a return off the board, which still forms from the new words', () => {
+    // A return with no memory falls back to a multiple choice, which the board must not take.
+    const list = [back(0, WR, { r: null }), pick(1), pick(2), pick(3), pick(4), at(5, WP, 2), back(6, WP)];
+    const plan = planCards(list, ALL);
+    expect(plan.board).toEqual({ start: 0 });
+    expect(plan.order.slice(0, 4)).toEqual([1, 2, 3, 4]);
+    expect(plan.order.slice(5)).toEqual([0, 6]);
   });
 });

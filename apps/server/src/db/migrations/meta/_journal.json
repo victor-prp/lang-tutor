@@ -197,6 +197,76 @@
       "when": 1791718069206,
       "tag": "0027_learner_day_and_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791736753184,
+      "tag": "0028_ambiguous_questions",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791755196837,
+      "tag": "0029_hint_opened",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791798484150,
+      "tag": "0030_gloss_families",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791824296442,
+      "tag": "0031_always_ready_session",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791879654166,
+      "tag": "0032_known_per_skill",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791902682220,
+      "tag": "0033_model_calls",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791966525578,
+      "tag": "0034_pronunciation_scores",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791996916014,
+      "tag": "0035_user_time_zone",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791997769900,
+      "tag": "0036_reminders",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792018194479,
+      "tag": "0037_targets",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import { clearNamespace, expectEmails, mailBaseUrlFor, mockNamespace } from '../
 import { seedPhotoImport } from '../../support/photoImportRows';
 import { countRows } from '../../support/rowCounts';
 import { createTestServerDeps } from '../../support/serverDeps';
+import { seedTarget } from '../../support/targetRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { testRng } from '../../support/testRng';
 
@@ -34,6 +35,7 @@ let ids: {
   enrollment: string;
   session: string;
   photoImport: string;
+  target: string;
   grant: string;
   saved: { gloss_id: string; variant_id: string };
   unsaved: { gloss_id: string; variant_id: string };
@@ -52,6 +54,16 @@ const OPEN = new Set([
 /** Operations that never address another user's things: each acts on the caller's own. */
 const OWN_ONLY = new Set([
   'get /api/me',
+  'put /api/me/time-zone', // acts on c.var.actor only (phase 52)
+  // Phase 52 (spec D2, D4, D6). Each acts on c.var.actor and no one else. The tap names a reminder
+  // in its path, but it finds it only under the caller's id: a stranger's reminder answers 404, the
+  // same as a missing one, so it has no 403 for the stranger fixtures to expect. Asserted in
+  // routes/reminders.test.ts.
+  'get /api/me/reminders',
+  'put /api/me/reminders',
+  'put /api/me/push-devices',
+  'post /api/me/push-devices/unregister',
+  'post /api/me/reminders/{id}/tap',
   'post /api/users',
   'get /api/enrollments',
   'post /api/enrollments',
@@ -70,6 +82,8 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
   'post /api/sessions': () => ({ url: '/api/sessions', body: { enrollment_id: ids.enrollment } }),
   'get /api/sessions/{id}': () => ({ url: `/api/sessions/${ids.session}` }),
   'post /api/sessions/{id}/skip': () => ({ url: `/api/sessions/${ids.session}/skip` }),
+  // Phase 43 (spec D2).
+  'post /api/sessions/{id}/start': () => ({ url: `/api/sessions/${ids.session}/start`, body: {} }),
   'post /api/sessions/{id}/next-step': () => ({
     url: `/api/sessions/${ids.session}/next-step`,
     body: { question_id: 'q', option_index: 0 },
@@ -106,6 +120,25 @@ const STRANGER: Record<string, () => { url: string; body?: unknown }> = {
   }),
   'post /api/photo-imports/{id}/save': () => ({ url: `/api/photo-imports/${ids.photoImport}/save` }),
   'post /api/photo-imports/{id}/discard': () => ({ url: `/api/photo-imports/${ids.photoImport}/discard` }),
+  // Phase 53 (spec D2). A target is its list owner's alone, a tutor of the list included: the
+  // tutor loop below is refused on all seven too. A call that got through would show in the
+  // counts of targets, target_words, target_events or vocabulary_entries (the add aims at a gloss
+  // the owner has not saved, the removal at one their target holds), or in the target's state.
+  'get /api/enrollments/{id}/targets': () => ({ url: `/api/enrollments/${ids.enrollment}/targets` }),
+  'post /api/enrollments/{id}/targets': () => ({
+    url: `/api/enrollments/${ids.enrollment}/targets`,
+    body: { kind: 'exam', due_on: '2099-01-01', photo_import_ids: [], entries: [ids.saved] },
+  }),
+  'get /api/targets/{id}': () => ({ url: `/api/targets/${ids.target}` }),
+  'patch /api/targets/{id}': () => ({ url: `/api/targets/${ids.target}`, body: { due_on: '2099-02-01' } }),
+  'post /api/targets/{id}/end': () => ({ url: `/api/targets/${ids.target}/end` }),
+  'post /api/targets/{id}/words': () => ({
+    url: `/api/targets/${ids.target}/words`,
+    body: { photo_import_ids: [], entries: [ids.unsaved] },
+  }),
+  'delete /api/targets/{id}/words/{gloss_id}': () => ({
+    url: `/api/targets/${ids.target}/words/${ids.saved.gloss_id}`,
+  }),
   // The enrollment is named only in the body (Review Focus 5). Its pair is the
   // request's, so a missing check would reach the model rather than a 400.
   'post /api/translations': () => ({
@@ -155,12 +188,17 @@ async function written() {
     'photo_imports',
     'photo_import_items',
     'enrollment_grants',
+    'targets',
+    'target_words',
+    'target_events',
   ]);
   const states = await t.db.execute(sql`select
     (select status from sessions where id = ${ids.session}) as session,
     (select status from photo_imports where id = ${ids.photoImport}) as photo_import,
     (select ticked from photo_import_items where import_id = ${ids.photoImport} and position = 0) as item_ticked,
-    (select accepted_at::text from enrollment_grants where id = ${ids.grant}) as grant_accepted_at`);
+    (select accepted_at::text from enrollment_grants where id = ${ids.grant}) as grant_accepted_at,
+    (select ended_at::text from targets where id = ${ids.target}) as target_ended_at,
+    (select due_on::text from targets where id = ${ids.target}) as target_due_on`);
   return { rows, ...states.rows[0] };
 }
 
@@ -214,6 +252,14 @@ beforeAll(async () => {
   // Every photo-import use case authorizes right after loading the import, so
   // one pending row is enough to aim at.
   const photoImport = await seedPhotoImport(t.db, { enrollmentId: enrollment, status: 'read', items: [{ text: LEMMA }] });
+  // Through the repository, with none of the targets service's rules: it holds the gloss the owner
+  // saved, and its date is far enough away that it is active for as long as this file runs.
+  const target = await seedTarget(t.db, {
+    enrollmentId: enrollment,
+    kind: 'exam',
+    dueOn: '2099-01-01',
+    glossIds: [saved.gloss_id],
+  });
   const grant = await seedGrant(t.db, {
     enrollmentId: enrollment,
     ownerUserId: owner.userId,
@@ -221,7 +267,7 @@ beforeAll(async () => {
     accepted: true,
   });
 
-  ids = { enrollment, session, photoImport, grant, saved, unsaved };
+  ids = { enrollment, session, photoImport, target, grant, saved, unsaved };
 }, 120_000);
 
 afterAll(async () => {

@@ -12,6 +12,8 @@ import {
   SkipSessionResponseSchema,
   SpeechAnswerRequestSchema,
   SpeechAnswerResponseSchema,
+  StartSessionRequestSchema,
+  StartSessionResponseSchema,
 } from '@lang-tutor/core/api/schemas';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -20,6 +22,7 @@ import type { ProgressChange } from '../domain/progress';
 import {
   currentQuestion,
   missedQuestions,
+  pendingRetryOf,
   positionOf,
   sessionScore,
 } from '../domain/session';
@@ -36,6 +39,7 @@ import {
   SessionNotReady,
   SessionNotSkippable,
   SessionOpen,
+  WrongScript,
 } from '../errors';
 import type { SessionResult, SessionService } from '../services/sessions';
 import { forbidden, learnerResponses, type ActorEnv } from './actor';
@@ -72,11 +76,14 @@ function buildNextStepResponse(
       progress: result.progress.map(progressItem),
     };
   }
+  // Phase 34 (spec D9): while a card is held for its second try, it is the
+  // current one, and the response says so.
   return {
     session_id: sessionId,
     question: currentQuestion(result)!,
     position: positionOf(result),
     complete: false,
+    pending_retry: pendingRetryOf(result),
   };
 }
 
@@ -87,6 +94,7 @@ function sessionView(sessionId: string, result: SessionResult): z.infer<typeof S
     source: result.source,
     position: positionOf(result),
     question: result.status === 'ready' ? (currentQuestion(result) ?? null) : null,
+    pending_retry: result.status === 'ready' ? pendingRetryOf(result) : null,
     progress: result.progress.map(progressItem),
   };
 }
@@ -99,13 +107,17 @@ const createSessionRoute = createRoute({
   method: 'post',
   path: '/sessions',
   tags: ['sessions'],
-  summary: 'Create the next session',
+  summary: 'The next session to play',
   description:
-    "An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, listening cards only when the request says `listening: true`, and speaking cards only when it says `speaking: true`. Read it with GET /sessions/{id}.",
+    "The session in stock, the one not yet started, when there is one: answered as it is, built for the device that asked first, so this request's `listening` and `speaking` do not change it. Otherwise one is created. An enrollment's first session is drawn from the seed and is ready at once. Every later one is built from the enrollment's saved words: it starts `preparing`, and its questions are generated in the background. Its question types come from a plan: runs of three cards that climb from recognition to recall, a matching board in sessions of seven words or more, listening cards only when the request says `listening: true`, and speaking cards only when it says `speaking: true`. Read it with GET /sessions/{id}.",
   request: {
     body: { required: true, content: { 'application/json': { schema: CreateSessionRequestSchema } } },
   },
   responses: {
+    200: {
+      content: { 'application/json': { schema: CreateSessionResponseSchema } },
+      description: 'The session in stock, not yet started: the next one to play.',
+    },
     201: {
       content: { 'application/json': { schema: CreateSessionResponseSchema } },
       description: 'The session was created.',
@@ -113,7 +125,7 @@ const createSessionRoute = createRoute({
     400: failure('The request body did not validate.'),
     404: failure('No enrollment has this `enrollment_id`.'),
     409: failure(
-      'An open session exists (`session_open`), the saved list is empty (`no_saved_words`), or the seed has too few questions for this pair (`not enough questions`).',
+      'A session is started (`session_open`), which is continued rather than replaced, the saved list is empty (`no_saved_words`), or the seed has too few questions for this pair (`not enough questions`).',
     ),
     ...learnerResponses,
     403: NOT_YOURS,
@@ -126,7 +138,7 @@ const getSessionRoute = createRoute({
   tags: ['sessions'],
   summary: 'Read a session',
   description:
-    'Its status, position, and the current question while it is ready. A completed session also carries `progress`: each practised saved word with its level before and after. Serves resume and the poll.',
+    'Its status, position, and the current question while it is ready. `pending_retry` is set while that question is held for its second try, so a resumed session opens on it. A completed session also carries `progress`: each practised saved word with its level before and after. Serves resume and the poll.',
   request: { params: sessionIdParam },
   responses: {
     200: { content: { 'application/json': { schema: SessionViewSchema } }, description: 'The session.' },
@@ -142,12 +154,35 @@ const skipSessionRoute = createRoute({
   tags: ['sessions'],
   summary: 'Skip a session',
   description:
-    'Ends a preparing or ready session. The answers given before the skip count toward progress. Skipping a skipped session is a no-op.',
+    'Ends a preparing or ready session. The answers given before the skip count toward progress; a card held for its second try is given up first. Skipping a skipped session is a no-op.',
   request: { params: sessionIdParam },
   responses: {
     200: { content: { 'application/json': { schema: SkipSessionResponseSchema } }, description: 'The session is skipped.' },
     404: failure('No session has this id.'),
     409: failure('The session is completed or failed (`session_not_skippable`).'),
+    ...learnerResponses,
+    403: NOT_YOURS,
+  },
+});
+
+const startSessionRoute = createRoute({
+  method: 'post',
+  path: '/sessions/{id}/start',
+  tags: ['sessions'],
+  summary: 'Start a session',
+  description:
+    "Marks a ready session started, and has the next session prepared in the background, built for this device: listening cards only when the request says `listening: true`, speaking cards only when it says `speaking: true`. Starting a started session is a no-op. A session's first answer starts it too, for a client that never sends this.",
+  request: {
+    params: sessionIdParam,
+    body: { required: true, content: { 'application/json': { schema: StartSessionRequestSchema } } },
+  },
+  responses: {
+    200: { content: { 'application/json': { schema: StartSessionResponseSchema } }, description: 'The session is started.' },
+    400: failure('The request body did not validate.'),
+    404: failure('No session has this id.'),
+    409: failure(
+      'The session is not ready: preparing, completed, skipped or failed (`session_not_ready`), or another session of the enrollment is started (`session_open`).',
+    ),
     ...learnerResponses,
     403: NOT_YOURS,
   },
@@ -159,7 +194,7 @@ const nextStepRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current question',
   description:
-    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`.',
+    'Records an answer and returns the next question, or the final score once all are answered. A `multiple_choice`, `new_meaning` or `reverse_choice` question is answered with `option_index`; a `typed_translation` question with `text`, where an empty text means the learner asked for the answer and is wrong. A speaking card is answered by voice through `/speech`, or here with `pass`: `skip` passes it (a read-aloud card takes only this), and `show_answer` gives up on a `say_translation` card, which is wrong. A `say_translation` card also takes `text`, answered as a typed card. Re-sending the same answer replays the same response. A `typed_meaning` card is answered only through `/judged-answer`. An answer that is right but is not the saved word (`alternative`) on a `typed_translation`, `say_translation` or `cloze_typed` card holds the card for one second try: the response carries the same card as `question`, with `pending_retry`, and the session does not move on or complete until the same card is answered again with `retry: true`, judged as the first answer was. An empty text, or a `pass` (`show_answer` or `skip`), with `retry: true` gives up. Without `retry`, an answer to the held card replays the first one. A first `text` answer to a `cloze_typed` card may carry `hint_opened`, whether the learner opened its Hebrew sentence; it is stored with the answer and ignored on every other card and on a retry. Such an answer may also carry `check_fit: true`: when its text is not one of the card\'s accepted words, the server asks a language model, which costs money on every call, whether it fills the gap, and records one that does as `alternative`, holding the card for its second try; a failed call records it `wrong`. `check_fit` is ignored on every other card, on a retry and on a replay.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: NextStepRequestSchema } } },
@@ -168,15 +203,16 @@ const nextStepRoute = createRoute({
     200: {
       content: { 'application/json': { schema: NextStepResponseSchema } },
       description:
-        'The answer was recorded. `complete: false` carries the next question; `complete: true` carries the score and the missed questions. The completing response also carries `progress`: each practised saved word with its level before and after, and the dimensions that rose.',
+        'The answer was recorded. `complete: false` carries the next question, or the card held for its second try with `pending_retry` set; `complete: true` carries the score and the missed questions. The completing response also carries `progress`: each practised saved word with its level before and after, and the dimensions that rose.',
     },
     400: failure(
       'The request body did not validate, `option_index` is out of range, or the answer is not the kind its question takes (`text` for a choice, `option_index` for a typed question).',
     ),
     404: failure('No session has this id.'),
     409: failure(
-      "`question_id` is not the session's current question, or the session is not ready (`session_not_ready`).",
+      "`question_id` is not the session's current question, `retry` was sent where no second try is pending, the session is not ready (`session_not_ready`), or another session of the enrollment is started, so this one cannot start (`session_open`).",
     ),
+    422: failure("The text has letters but none in its answer language's alphabet. Nothing was recorded and the card stays current."),
     ...learnerResponses,
     403: NOT_YOURS,
   },
@@ -188,7 +224,7 @@ const speechRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current speaking card by voice',
   description:
-    'Takes one recorded attempt at the current `read_aloud` or `say_translation` card, as base64 audio (`audio/aac`, `audio/mp4` or `audio/webm`, at most 200 KB). The server transcribes it with a language model, which costs money on every call, and judges the transcript. `understood` and `alternative` record the answer and carry `next`, the next-step response. `unheard` records nothing: the card stays current and may be tried again. Re-sending an attempt that was recorded replays it without a model call.',
+    'Takes one recorded attempt at the current `read_aloud` or `say_translation` card, as base64 audio (`audio/aac`, `audio/mp4` or `audio/webm`, at most 200 KB). The server transcribes it with a language model, which costs money on every call, and judges the transcript. `understood` and `alternative` record the answer and carry `next`, the next-step response. `unheard` records nothing: the card stays current and may be tried again. Re-sending an attempt that was recorded replays it without a model call. An `alternative` on a `say_translation` card holds the card for one second try (`next.pending_retry`): a clip sent with `retry: true` is that try, transcribed and judged as the first, and one sent without it replays the first.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: SpeechAnswerRequestSchema } } },
@@ -200,7 +236,7 @@ const speechRoute = createRoute({
     },
     400: failure('The request body did not validate, or the current card is not a speaking card.'),
     404: failure('No session has this id.'),
-    409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
+    409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, the session is not ready (`session_not_ready`), or another session of the enrollment is started, so this one cannot start (`session_open`)."),
     413: failure('The body is over 300 KB.'),
     502: failure('The transcription failed or timed out; the card may be tried again.'),
     ...learnerResponses,
@@ -214,7 +250,7 @@ const judgedAnswerRoute = createRoute({
   tags: ['sessions'],
   summary: 'Answer the current card that the server judges',
   description:
-    'Takes the text answer to the current `typed_meaning` card. An empty text is judged by rule, and so is the stored meaning, the gloss key (the citation form the word list shows), or one of the stored alternatives of the card\'s rendering or of its gloss; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`.',
+    'Takes the text answer to the current `typed_meaning` card. An empty text is judged by rule, and so is the stored meaning, the gloss key (the citation form the word list shows), or one of the stored alternatives of the card\'s rendering or of its gloss; any other text is judged by a language model, which costs money on every call. The answer is recorded with its verdict, and `next` is the next-step response. Re-sending an answer that was recorded replays it without a model call. A judged card takes no answer through `next-step`. An `alternative` (another sense of a `typed_meaning` card, another word in a `sentence_translation`) holds the card for one second try (`next.pending_retry`): a text sent with `retry: true` is that try, judged as the first, and an empty one gives up, answered `wrong`; one sent without it replays the first.',
   request: {
     params: sessionIdParam,
     body: { required: true, content: { 'application/json': { schema: JudgedAnswerRequestSchema } } },
@@ -226,7 +262,8 @@ const judgedAnswerRoute = createRoute({
     },
     400: failure('The request body did not validate, or the current card is not one the server judges.'),
     404: failure('No session has this id.'),
-    409: failure("`question_id` is not the session's current question, or the session is not ready (`session_not_ready`)."),
+    409: failure("`question_id` is not the session's current question, `retry` was sent where no second try is pending, the session is not ready (`session_not_ready`), or another session of the enrollment is started, so this one cannot start (`session_open`)."),
+    422: failure("The text has letters but none in its answer language's alphabet. Nothing was recorded, no model was called, and the card stays current."),
     502: failure('The judge failed or timed out; nothing was recorded, and the answer may be sent again.'),
     ...learnerResponses,
     403: NOT_YOURS,
@@ -239,7 +276,7 @@ const currentSessionRoute = createRoute({
   tags: ['sessions'],
   summary: "An enrollment's current session",
   description:
-    'The newest session while it is preparing, ready or failed; where the next one will come from; and how many glosses are saved.',
+    'The started session, else the one in stock (not yet started: preparing or ready), else the newest session if it failed; where the next one will come from; and how many glosses are saved.',
   request: { params: z.object({ id: z.string() }) },
   responses: {
     200: {
@@ -265,14 +302,13 @@ export function createSessionsRouter(sessions: SessionService) {
   router.openapi(createSessionRoute, async (c) => {
     const { enrollment_id, listening, speaking } = c.req.valid('json');
     try {
-      const created = await sessions.createNextSession(c.var.actor, enrollment_id, {
+      const next = await sessions.createNextSession(c.var.actor, enrollment_id, {
         listening: listening ?? false,
         speaking: speaking ?? false,
       });
-      return c.json(
-        { session_id: created.sessionId, status: created.status, source: created.source },
-        201,
-      );
+      const body = { session_id: next.sessionId, status: next.status, source: next.source };
+      // Phase 43 (spec D5): the stock is answered, not created.
+      return next.created ? c.json(body, 201) : c.json(body, 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof EnrollmentNotFound) return c.json({ error: 'enrollment not found' }, 404);
@@ -307,18 +343,49 @@ export function createSessionsRouter(sessions: SessionService) {
     }
   });
 
+  router.openapi(startSessionRoute, async (c) => {
+    const { id } = c.req.valid('param');
+    const { listening, speaking } = c.req.valid('json');
+    try {
+      const started = await sessions.startSession(c.var.actor, id, { listening: listening ?? false, speaking: speaking ?? false });
+      return c.json({ session_id: started.sessionId, status: started.status }, 200);
+    } catch (error) {
+      if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
+      if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
+      if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
+      throw error;
+    }
+  });
+
   router.openapi(nextStepRoute, async (c) => {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
-    const answer =
-      'text' in body ? { text: body.text } : 'pass' in body ? { pass: body.pass } : { option_index: body.option_index };
     try {
-      const record = await sessions.submitAnswer(c.var.actor, id, body.question_id, answer);
+      // Phase 41 (spec D2): a text answer may ask for a fit check, which answerText makes.
+      const record =
+        'text' in body
+          ? await sessions.answerText(c.var.actor, id, {
+              questionId: body.question_id,
+              text: body.text,
+              hintOpened: body.hint_opened,
+              checkFit: body.check_fit,
+              retry: body.retry ?? false,
+            })
+          : await sessions.submitAnswer(
+              c.var.actor,
+              id,
+              body.question_id,
+              'pass' in body ? { pass: body.pass } : { option_index: body.option_index },
+              { retry: body.retry ?? false },
+            );
       return c.json(buildNextStepResponse(id, record), 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      // Phase 43 (spec D2): this answer would start a second session.
+      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
       if (error instanceof QuestionDesynced) {
         return c.json({ error: "question_id does not match the session's current question" }, 409);
       }
@@ -328,6 +395,7 @@ export function createSessionsRouter(sessions: SessionService) {
       if (error instanceof AnswerKindMismatch) {
         return c.json({ error: 'the answer is not the kind this question takes' }, 400);
       }
+      if (error instanceof WrongScript) return c.json({ error: `the answer is not written in ${error.language}'s alphabet` }, 422);
       throw error; // anything else is a real failure: app.ts's onError makes it a 500
     }
   });
@@ -346,6 +414,7 @@ export function createSessionsRouter(sessions: SessionService) {
         questionId: body.question_id,
         audio: body.audio,
         mimeType: body.mime_type,
+        retry: body.retry ?? false,
       });
       return c.json(
         {
@@ -359,6 +428,8 @@ export function createSessionsRouter(sessions: SessionService) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      // Phase 43 (spec D2): this answer would start a second session.
+      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
       if (error instanceof QuestionDesynced) {
         return c.json({ error: "question_id does not match the session's current question" }, 409);
       }
@@ -372,16 +443,19 @@ export function createSessionsRouter(sessions: SessionService) {
     const { id } = c.req.valid('param');
     const body = c.req.valid('json');
     try {
-      const result = await sessions.answerJudged(c.var.actor, id, { questionId: body.question_id, text: body.text });
+      const result = await sessions.answerJudged(c.var.actor, id, { questionId: body.question_id, text: body.text, retry: body.retry ?? false });
       return c.json({ verdict: result.verdict, next: buildNextStepResponse(id, result.session) }, 200);
     } catch (error) {
       if (error instanceof AccessDenied) return c.json({ error: 'forbidden' }, 403);
       if (error instanceof SessionNotFound) return c.json({ error: 'session not found' }, 404);
       if (error instanceof SessionNotReady) return c.json({ error: 'session_not_ready' }, 409);
+      // Phase 43 (spec D2): this answer would start a second session.
+      if (error instanceof SessionOpen) return c.json({ error: 'session_open' }, 409);
       if (error instanceof QuestionDesynced) {
         return c.json({ error: "question_id does not match the session's current question" }, 409);
       }
       if (error instanceof AnswerKindMismatch) return c.json({ error: 'the current card is not judged by the server' }, 400);
+      if (error instanceof WrongScript) return c.json({ error: `the answer is not written in ${error.language}'s alphabet` }, 422);
       if (error instanceof LlmUnavailable) return c.json({ error: 'judge unavailable' }, 502);
       throw error;
     }

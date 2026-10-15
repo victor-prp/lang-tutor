@@ -20,4 +20,5 @@ IMAGE_API_URL="${IMAGE_API_URL:-http://localhost:$PORT}"
 exec docker build \
   --build-arg "EXPO_PUBLIC_API_URL=$IMAGE_API_URL" \
   --build-arg "APP_VERSION=${APP_VERSION:-dev}" \
+  --build-arg "APP_COMMIT=${APP_COMMIT:-unknown}" \
   -t "$IMAGE" .

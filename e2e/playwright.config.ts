@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
 
-import { serverEnv } from './serverEnv';
+import { APP_COMMIT, serverEnv } from './serverEnv';
 import { API_URL, APP_URL } from './urls';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -43,7 +43,8 @@ const sourceServers: WebServer[] = [
     command: 'npm run build:web -w apps/mobile && npm run serve:web -w apps/mobile',
     cwd: REPO_ROOT,
     url: APP_URL,
-    env: { EXPO_PUBLIC_API_URL: API_URL, E2E_APP_PORT: new URL(APP_URL).port },
+    // Phase 49: the commit About's Mobile App line shows, the same one the server has.
+    env: { EXPO_PUBLIC_API_URL: API_URL, EXPO_PUBLIC_APP_COMMIT: APP_COMMIT, E2E_APP_PORT: new URL(APP_URL).port },
     // Deliberately not tied to CI: a stray process already on this port must
     // fail the run loudly (port already in use) rather than have Playwright
     // silently reuse it and run the test against the wrong server.
@@ -94,6 +95,8 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: APP_URL,
+    // Phase 52 makes the learner's day follow the browser's reported time zone, and e2e helpers (tests/support/memory.ts) assume a UTC day.
+    timezoneId: 'UTC',
     trace: 'retain-on-failure',
     // Left near default deliberately: the app is a pre-built static bundle, so
     // nothing compiles mid-test and page loads are fast. Under the Metro dev

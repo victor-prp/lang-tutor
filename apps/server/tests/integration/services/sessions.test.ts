@@ -40,6 +40,9 @@ import {
 // The other half of this file's tests is src/services/sessions.test.ts, which
 // covers the cases the repository-factory seam makes reachable without Postgres.
 
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
+
 let t: TestDb;
 let logger: FakeLogger;
 let service: SessionService;
@@ -86,17 +89,42 @@ describe('createNextSession', () => {
     await expect(service.createNextSession('u_1', 'e_nobody', { listening: false, speaking: false })).rejects.toBeInstanceOf(EnrollmentNotFound);
   });
 
-  it('refuses a second session while one is open', async () => {
-    await service.createNextSession('u_1', E, { listening: false, speaking: false });
+  // Phase 43 (spec D5).
+  it('answers the session not yet started to a second create, and refuses one while a session is started', async () => {
+    const first = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    expect(await service.createNextSession('u_1', E, { listening: false, speaking: false })).toEqual({ ...first, created: false });
+    await service.startSession('u_1', first.sessionId, { listening: false, speaking: false });
     await expect(service.createNextSession('u_1', E, { listening: false, speaking: false })).rejects.toBeInstanceOf(SessionOpen);
   });
 
-  // Review Focus 1: a double tap.
-  it('lets exactly one of two concurrent creates through', async () => {
-    const results = await Promise.allSettled([service.createNextSession('u_1', E, { listening: false, speaking: false }), service.createNextSession('u_1', E, { listening: false, speaking: false })]);
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-    const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
-    expect(rejected.reason).toBeInstanceOf(SessionOpen);
+  // Review Focus 1: a double tap. Phase 43 (review C1): one create makes the
+  // session, and the other waits for it and answers it.
+  it('answers two concurrent creates with one session, made once', async () => {
+    const devices = { listening: false, speaking: false };
+    for (let round = 0; round < 3; round++) {
+      const results = await Promise.all([service.createNextSession('u_1', E, devices), service.createNextSession('u_1', E, devices)]);
+      expect(results[0].sessionId).toBe(results[1].sessionId);
+      expect(results.filter((result) => result.created)).toHaveLength(1);
+      await service.skipSession('u_1', results[0].sessionId);
+      if (round === 0) await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    }
+  });
+
+  // Phase 43 (review C1). A create and the stock job at once build one stock,
+  // and the create answers it, whichever ran first.
+  it('builds one stock when a create and the stock job race', async () => {
+    const { sessionId: seed } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
+    await service.skipSession('u_1', seed);
+    await seedSavedSenses(t.db, { enrollmentId: E, lemma: 'kite', translations: ['עפיפון'] });
+    for (let round = 0; round < 3; round++) {
+      const [, created] = await Promise.all([
+        service.stockSession({ enrollment_id: E, reason: 'complete' }),
+        service.createNextSession('u_1', E, { listening: false, speaking: false }),
+      ]);
+      const home = await service.currentSession('u_1', E);
+      expect(home.current?.id).toBe(created.sessionId);
+      await service.skipSession('u_1', created.sessionId);
+    }
   });
 
   it('after the seed, asks for saved words when the list is empty', async () => {
@@ -108,11 +136,16 @@ describe('createNextSession', () => {
   it('after the seed, prepares a list session from at most ten saved senses', async () => {
     const { sessionId: seed } = await service.createNextSession('u_1', E, { listening: false, speaking: false });
     await service.skipSession('u_1', seed);
-    const saved = await seedSavedSenses(t.db, {
-      enrollmentId: E,
-      lemma: 'tome',
-      translations: ['ספר', 'כרך', 'חיבור', 'מחברת', 'דף', 'עמוד', 'פרק', 'שער', 'כותר', 'ספרון', 'קובץ', 'גליון'],
-    });
+    // Phase 39 (spec D1): twelve words, not twelve meanings of one, which would be
+    // one family asking one meaning at a time.
+    const saved = { glossIds: [] as string[], senseIds: [] as string[] };
+    const words = ['tome', 'volume', 'treatise', 'notebook', 'leaf', 'column', 'chapter', 'gate', 'title', 'booklet', 'file', 'sheet'];
+    const translations = ['ספר', 'כרך', 'חיבור', 'מחברת', 'דף', 'עמוד', 'פרק', 'שער', 'כותר', 'ספרון', 'קובץ', 'גליון'];
+    for (const [i, lemma] of words.entries()) {
+      const word = await seedSavedSenses(t.db, { enrollmentId: E, lemma, translations: [translations[i]] });
+      saved.glossIds.push(...word.glossIds);
+      saved.senseIds.push(...word.senseIds);
+    }
 
     const created = await service.createNextSession('u_1', E, { listening: true, speaking: false });
     expect(created).toMatchObject({ status: 'preparing', source: 'list' });
@@ -230,6 +263,7 @@ describe('submitAnswer', () => {
       question_id: question.id,
       is_correct: true,
       answer_string: question.options[question.correct_option],
+      ...NO_RETRY,
     });
     expect(after.complete).toBe(false);
   });

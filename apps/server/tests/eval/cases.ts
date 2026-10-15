@@ -1,5 +1,7 @@
-import type { LanguageCode, PartOfSpeech, SentenceTranslationQuestion, TranslationKind } from '@lang-tutor/core/api';
+import type { ClozeTypedQuestion, LanguageCode, PartOfSpeech, SentenceTranslationQuestion, TranslationKind } from '@lang-tutor/core/api';
+import type { QuestionType, TypedTarget } from '@lang-tutor/core/domain';
 
+import type { CheckItem } from '../../src/domain/check';
 import type { Task } from '../../src/domain/distractors';
 import type { JudgeContext, MeaningJudgeContext } from '../../src/domain/judge';
 import type { StoredSense } from '../../src/domain/translation';
@@ -869,6 +871,8 @@ export type DistractorCase = {
     synonyms: string[];
     alternatives?: string[];
   }[];
+  /** Phase 48 (spec D8). Also asks the real checker, and at least three wrong options must survive it. */
+  checked?: boolean;
 };
 
 export const DISTRACTOR_CASES: DistractorCase[] = [
@@ -961,6 +965,21 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
     ],
   },
   {
+    // Phase 47 (spec D7). The word items of lane 0's failed stock c0c71c16
+    // (2026-10-13), with its two typed items. Uncapped, gemini-2.5-flash once
+    // thought 62,910 tokens over this batch and offered Hebrew wrong options
+    // for both words to pick. At 4096 it answered in English (spec D1).
+    label: 'English words to pick where the model once answered in Hebrew (century, dish)',
+    from: 'en',
+    to: 'he',
+    items: [
+      { task: 'word', form: 'century', lemma: 'century', partOfSpeech: 'noun', translation: 'מאה', synonyms: [] },
+      { task: 'typed', form: 'drum', lemma: 'drum', partOfSpeech: 'noun', translation: 'תוף', synonyms: [], alternatives: [] },
+      { task: 'word', form: 'dish', lemma: 'dish', partOfSpeech: 'noun', translation: 'צלחת', synonyms: ['plate'] },
+      { task: 'typed', form: 'train', lemma: 'train', partOfSpeech: 'verb', translation: 'לאמן', synonyms: [], alternatives: [] },
+    ],
+  },
+  {
     label: 'A mixed session, as prepare-session sends it',
     from: 'it',
     to: 'he',
@@ -969,6 +988,18 @@ export const DISTRACTOR_CASES: DistractorCase[] = [
       { task: 'word', form: 'finestra', lemma: 'finestra', partOfSpeech: 'noun', translation: 'חלון', synonyms: ['finestrella'] },
       { task: 'typed', form: 'macchina', lemma: 'macchina', partOfSpeech: 'noun', translation: 'מכונית', synonyms: [], alternatives: ['auto', 'automobile'] },
       { task: 'meaning', form: 'acqua', lemma: 'acqua', partOfSpeech: 'noun', translation: 'מים', synonyms: [] },
+    ],
+  },
+  {
+    // Phase 48 (spec D8). The bots' 9cb1b1a8: vero's reversed card got Hebrew options, and broad
+    // words leave few wrong meanings the checker accepts.
+    label: 'vero, a broad Italian word, both ways',
+    from: 'it',
+    to: 'he',
+    checked: true,
+    items: [
+      { task: 'meaning', form: 'vero', lemma: 'vero', partOfSpeech: 'adjective', translation: 'אמיתי', synonyms: ['נכון', 'אמת', 'ממשי', 'מציאותי', 'אותנטי', 'כן', 'באמת', 'צודק', 'מדויק'] },
+      { task: 'word', form: 'vero', lemma: 'vero', partOfSpeech: 'adjective', translation: 'אמיתי', synonyms: ['giusto', 'esatto', 'corretto', 'certo', 'reale', 'autentico', 'verace', 'davvero', 'vera', 'sì'] },
     ],
   },
 ];
@@ -1137,6 +1168,18 @@ const enBank = {
   example: 'I went to the bank to take out money.', translation: 'הלכתי לבנק למשוך כסף.',
 };
 
+// Phase 42 (spec D2). One sense saved; a nearby idea is not another sense.
+const enImagination = {
+  form: 'imagination', pos: 'noun' as const, meaning: 'דמיון',
+  example: 'Her imagination helps her write stories.', translation: 'הדמיון שלה עוזר לה לכתוב סיפורים.',
+};
+
+// Phase 34 (spec D7). A generated pair, as findJudgeContext now gives it.
+const enSawCard = {
+  form: 'saw', pos: 'verb' as const, meaning: 'לנסר',
+  example: 'Can you saw this wood for me?', translation: 'האם תוכל לנסר את העץ הזה בשבילי?',
+};
+
 export const JUDGE_CASES: JudgeCase[] = [
   judge('it', itPrenotare, 'לשריין', 'exact', 'synonym'),
   judge('it', itComprare, 'לרכוש', 'exact', 'synonym'),
@@ -1169,6 +1212,12 @@ export const JUDGE_CASES: JudgeCase[] = [
   judge('en', enBook, 'להזמן', 'exact', 'small typo'),
   judge('en', enBook, 'ספר', 'alternative', 'other sense'),
   judge('en', enBank, 'גדה', 'alternative', 'other sense'),
+  judge('en', enImagination, 'הזייה', 'wrong', 'a nearby idea, not a sense'),
+  judge('en', enImagination, 'יצירתיות', 'wrong', 'related but different'),
+  // Review M1, M2. Held out of the prompt's own examples: a near idea of another
+  // word is still wrong, and a close synonym is still right.
+  judge('en', { form: 'memory', pos: 'noun', meaning: 'זיכרון', example: 'I have a clear memory of that day.', translation: 'יש לי זיכרון ברור מהיום ההוא.' }, 'נוסטלגיה', 'wrong', 'a nearby idea, not a sense'),
+  judge('en', { form: 'happy', pos: 'adjective', meaning: 'שמח', example: 'She is happy with her new job.', translation: 'היא שמחה בעבודה החדשה שלה.' }, 'מרוצה', 'exact', 'close synonym'),
   judge('en', enBook, 'לבטל', 'wrong', 'related but different'),
   judge('en', { form: 'tulip', pos: 'noun', meaning: 'צבעוני', example: 'She planted a red tulip.', translation: 'היא שתלה צבעוני אדום.' }, 'פרח', 'wrong', 'too general'),
   judge('en', { form: 'window', pos: 'noun', meaning: 'חלון', example: 'Please close the window.', translation: 'בבקשה סגור את החלון.' }, 'כלב', 'wrong', 'unrelated'),
@@ -1194,6 +1243,12 @@ export const JUDGE_CASES: JudgeCase[] = [
   judge('it', itParla, 'parla', 'wrong', 'the word typed back'),
   judge('ru', ruKniga, 'книга', 'wrong', 'the word typed back'),
   judge('en', enBook, 'book', 'wrong', 'the word typed back'),
+
+  // Phase 34 (spec D7). The judge is given the sentence the card showed and its
+  // hidden Hebrew, not the saved example: this pair is the one the context call
+  // wrote for 71b0b407's `saw` on 2026-10-11 (CONTEXT_CASES' first case).
+  judge('en', enSawCard, 'מנסר', 'exact', 'other form, on the card’s generated sentence'),
+  judge('en', enSawCard, 'לשבור', 'wrong', 'unrelated, on the card’s generated sentence'),
 ];
 
 /**
@@ -1208,7 +1263,8 @@ export const JUDGE_CASES: JudgeCase[] = [
  *    (not degraded: a degrading prompt means a learner sees a typed translation
  *    instead of the card); tier 2 is that no `offSense` word, one that only the
  *    wrong sense of a polysemous word would bring, appears as a whole word in the
- *    sentence or its translation.
+ *    sentence or its translation. Phase 38 (spec D2): a sentence item also lists at
+ *    least one other word that fits its gap with the sentence read alone.
  */
 export type SentenceCaseItem = {
   form: string;
@@ -1233,6 +1289,8 @@ export type SentenceCase = {
   task: 'gap' | 'sentence' | 'translate';
   from: LanguageCode;
   items: SentenceCaseItem[];
+  /** Phase 48 (spec D8). Also asks the real checker, and at least three wrong options must survive it. */
+  checked?: boolean;
 };
 
 const word = (
@@ -1292,6 +1350,19 @@ export const GAP_CASES: SentenceCase[] = [
       }),
       word('tulip', 'tulip', 'noun', 'צבעוני', 'She planted a red tulip.', 'היא שתלה צבעוני אדום.', {
         fits: ['rose', 'flower', 'poppy', 'daisy', 'lily', 'geranium'],
+      }),
+    ],
+  },
+  {
+    // Phase 48 (spec D8). Lane 0's 38b003b4: the model offered sugar, salt, oil, water, bread, fruit;
+    // the checker said four fit, every attempt.
+    label: 'gap en (38b003b4): anything goes in coffee — cream',
+    task: 'gap',
+    from: 'en',
+    checked: true,
+    items: [
+      word('cream', 'cream', 'noun', 'שמנת', 'I like to put cream in my coffee.', 'אני אוהב לשים שמנת בקפה שלי.', {
+        fits: ['sugar', 'milk', 'honey', 'salt', 'water', 'oil', 'cinnamon', 'butter', 'syrup', 'ice', 'whiskey', 'chocolate', 'cocoa', 'vanilla', 'caramel', 'lemon', 'spice', 'foam', 'sweetener'],
       }),
     ],
   },
@@ -1389,6 +1460,7 @@ const tjudge = (
       sentence: sentence.reference,
       gap: { start, end: start + sentence.gap.length },
       answer: sentence.gap,
+      mark: null,
     },
     context: {
       language,
@@ -1415,6 +1487,13 @@ const ruBeautiful = { form: 'красивый', pos: 'adjective' as const, meani
 const enTable: Sentence = { hebrew: 'אני רוצה להזמין שולחן לשניים.', reference: 'I want to book a table for two.', gap: 'book' };
 const enYesterday: Sentence = { hebrew: 'הזמנתי אתמול שולחן לשניים.', reference: 'I booked a table for two yesterday.', gap: 'booked' };
 const enBookWord = { form: 'book', pos: 'verb' as const, meaning: 'להזמין' };
+
+// Phase 45 (spec D2). A manner word left out is a changed detail. Lane 0's card,
+// and a held-out one on a word the prompt does not name.
+const enClearly: Sentence = { hebrew: 'חשוב לתקשר בבירור עם כולם.', reference: 'It is important to communicate clearly with everyone.', gap: 'communicate' };
+const enCommunicate = { form: 'communicate', pos: 'verb' as const, meaning: 'לתקשר' };
+const ruFast: Sentence = { hebrew: 'הוא רץ מהר.', reference: 'Он быстро бегает.', gap: 'бегает' };
+const ruRun = { form: 'бегать', pos: 'verb' as const, meaning: 'לרוץ' };
 
 export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('it', itBook, itTable, 'Vorrei prenotare un tavolo per due persone.', 'exact', 'paraphrase'),
@@ -1446,4 +1525,435 @@ export const TRANSLATION_JUDGE_CASES: TranslationJudgeCase[] = [
   tjudge('en', enBookWord, enTable, 'I want to book a table for four.', 'wrong', 'missed meaning'),
   tjudge('en', enBookWord, enTable, 'table', 'wrong', 'not a sentence'),
   tjudge('en', enBookWord, enTable, 'I want to book a tabel for two.', 'exact', 'slip in another word'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to talk with everyone.', 'wrong', 'manner word left out'),
+  tjudge('en', enCommunicate, enClearly, "It's important to communicate clearly with everyone.", 'exact', 'contraction'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to talk clearly with everyone.', 'alternative', 'other word, every detail kept'),
+  // Review M1. The detail rule must spare a slip in the manner word, a synonym of it,
+  // and its other place.
+  tjudge('en', enCommunicate, enClearly, 'It is important to communicate clerly with everyone.', 'exact', 'slip in the manner word'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to communicate plainly with everyone.', 'exact', 'synonym of the manner word'),
+  tjudge('en', enCommunicate, enClearly, 'It is important to clearly communicate with everyone.', 'exact', 'other adverb order'),
+  tjudge('ru', ruRun, ruFast, 'Он бегает.', 'wrong', 'manner word left out'),
+  tjudge('ru', ruRun, ruFast, 'Он бегает быстро.', 'exact', 'other word order'),
+];
+
+/**
+ * Phase 34 (spec D1, D2). The accept call: every right answer to a typed or
+ * spoken card whose prompt is one rendering, and the form of the headword that
+ * agrees with it. Each case is a card from the audit
+ * (drafts/2026-10-11-ambiguous-questions-findings.md, B, D and G), with its
+ * rendering and saved example as lane 0 holds them. The prompt's own examples
+ * are deliberately not these, so the cases measure the rules rather than recall.
+ */
+export type AcceptCase = {
+  label: string;
+  form: string;
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  /** The explanation-language text the card shows. */
+  rendering: string;
+  example: string | null;
+  exampleTranslation: string | null;
+  target: LanguageCode;
+  /** Defaults to he. */
+  explanation?: LanguageCode;
+  /** Each must be accepted, by the typed judge, from the answers the server keeps. */
+  expectAnswers?: string[];
+  /** No answer as the model wrote it may contain one: a placeholder written out. */
+  rejectSubstrings?: string[];
+  /** The answer form the server keeps; null for a form that already agrees. */
+  expectAnswerForm?: string | null;
+};
+
+export const ACCEPT_CASES: AcceptCase[] = [
+  // B, 324633b1: four other cards for this prompt accept `frate`, this one did not.
+  {
+    label: 'B: a religious brother is also frate',
+    form: 'fratello', lemma: 'fratello', partOfSpeech: 'noun', target: 'it',
+    rendering: 'אח (במסדר דתי)',
+    example: 'Il fratello francescano ha dedicato la sua vita alla preghiera.',
+    exampleTranslation: 'האח הפרנציסקני הקדיש את חייו לתפילה.',
+    expectAnswers: ['frate'],
+  },
+  // B, 703a58ca: 89b4bb33 accepted `allora` for the same prompt, this one refused it.
+  {
+    label: 'B: אז as "in that case" is also allora',
+    form: 'poi', lemma: 'poi', partOfSpeech: 'adverb', target: 'it',
+    rendering: 'אז',
+    example: 'Se non vuoi venire, poi non lamentarti.',
+    exampleTranslation: 'אם אינך רוצה לבוא, אז אל תתלונן.',
+    expectAnswers: ['allora'],
+  },
+  // D, 5d9e4f97: `io ho`, the form with the pronoun יש לי implies, was marked wrong.
+  {
+    label: 'D: the subject pronoun יש לי implies',
+    form: 'ho', lemma: 'avere', partOfSpeech: 'verb', target: 'it',
+    rendering: 'יש לי',
+    example: 'Ho un libro interessante da leggere.',
+    exampleTranslation: 'יש לי ספר מעניין לקרוא.',
+    expectAnswers: ['io ho'],
+  },
+  // B, 7d96a0c2: "lose one's temper" was listed; `lose my temper` was marked wrong.
+  {
+    label: "B: a placeholder written out, never one's",
+    form: 'blow up', lemma: 'blow up', partOfSpeech: 'verb', target: 'en',
+    rendering: 'להתפרץ בכעס',
+    example: "My boss will blow up if I'm late again.",
+    exampleTranslation: 'הבוס שלי יתפרץ בכעס אם אאחר שוב.',
+    expectAnswers: ['lose my temper'],
+    rejectSubstrings: ["one's", 'one’s', 'someone'],
+  },
+  // G, 2260df83: שעות from "per ore" asked for the singular `ora`.
+  {
+    label: 'G: a plural rendering asks for the plural form',
+    form: 'ora', lemma: 'ora', partOfSpeech: 'noun', target: 'it',
+    rendering: 'שעות',
+    example: 'Abbiamo aspettato per ore.',
+    exampleTranslation: 'חיכינו שעות.',
+    expectAnswerForm: 'ore',
+  },
+  // The counterweight, and it must stay green: a card built from שעה still asks
+  // for `ora` (spec D2). A prompt that pluralises everything shows up here.
+  {
+    label: 'G: a singular rendering keeps the form',
+    form: 'ora', lemma: 'ora', partOfSpeech: 'noun', target: 'it',
+    rendering: 'שעה',
+    example: "La lezione dura un'ora.",
+    exampleTranslation: 'השיעור נמשך שעה.',
+    expectAnswerForm: null,
+  },
+];
+
+/**
+ * Phase 34 (spec D6, D8; ruling R3). The context call, one card each, as
+ * prepareSession asks it. Scored on structure (contextChecks.ts): tier 1 that
+ * the sentence and its other half are in the right scripts; tier 2 that the
+ * server's own rules keep the sentence (contextItemFor and resolveContext, so a
+ * target sentence shows the card's form and a Hebrew one holds no answer), that
+ * the marked word is a form of the card's word, that the hidden Hebrew holds a
+ * form of the rendering's root and none of another word's forms, and that a
+ * sentence card's word is found in its Hebrew. The checker's own reading of the
+ * sense is Task 6's case.
+ */
+export type ContextCase = {
+  label: string;
+  target: LanguageCode;
+  /** The card the sentence is for. */
+  type: QuestionType;
+  form: string;
+  lemma: string;
+  partOfSpeech: PartOfSpeech;
+  /** The rendering, in Hebrew. */
+  translation: string;
+  example: string | null;
+  exampleTranslation: string | null;
+  acceptedAnswers?: string[];
+  /** A bare-word card: context_word must begin like one of these. */
+  formsOf?: string[];
+  /** A bare-word card: some word of the hidden Hebrew, with or without a
+   *  one-letter prefix, matches this (a form of the rendering's root). */
+  translationRoot?: RegExp;
+  /** ...and none of them is one of these (another word's forms: ראה's for saw). */
+  translationNotWords?: string[];
+  /** A sentence card: its Hebrew, its target sentence and the practised word,
+   *  and the Hebrew word that stands for it. */
+  sentence?: { hebrew: string; target: string; word: string; marked: string };
+};
+
+/** לנסר's root in any form: לנסר, ינסר, מנסר, נוסר, ניסר, נסרתי. */
+const SAW_ROOT = /נ[יו]?סר/u;
+/** ראה's forms, the past of see read as Hebrew. */
+const SEE_FORMS = ['ראה', 'ראיתי', 'ראית', 'ראתה', 'ראינו', 'ראיתם', 'ראו', 'רואה', 'רואים', 'רואות', 'יראה', 'תראה', 'אראה', 'לראות'];
+
+export const CONTEXT_CASES: ContextCase[] = [
+  // E, 71b0b407: `saw` is the tool's verb here, never the past of see.
+  {
+    label: 'context E: saw/לנסר in a sentence that shows saw, never see',
+    target: 'en', type: 'typed_meaning', form: 'saw', lemma: 'saw', partOfSpeech: 'verb', translation: 'לנסר',
+    example: 'He will saw the branch off the tree.', exampleTranslation: 'הוא ינסר את הענף מהעץ.',
+    formsOf: ['saw'], translationRoot: SAW_ROOT, translationNotWords: SEE_FORMS,
+  },
+  // H, a7d6bdb4: the same word on a multiple choice, with no saved example to lean on.
+  {
+    label: 'context H: saw/לנסר on a multiple choice, no saved example',
+    target: 'en', type: 'multiple_choice', form: 'saw', lemma: 'saw', partOfSpeech: 'verb', translation: 'לנסר',
+    example: null, exampleTranslation: null,
+    formsOf: ['saw'], translationRoot: SAW_ROOT, translationNotWords: SEE_FORMS,
+  },
+  // C, d388f738: a Hebrew sentence for להוריד that holds no English word.
+  {
+    label: 'context C: להוריד/download in a Hebrew sentence with no English word',
+    target: 'en', type: 'typed_translation', form: 'download', lemma: 'download', partOfSpeech: 'verb', translation: 'להוריד',
+    example: 'I need to download the file before the meeting.', exampleTranslation: 'אני צריך להוריד את הקובץ לפני הפגישה.',
+    acceptedAnswers: ['get'],
+  },
+  // F, eb95d246: the practised word, named in the sentence the card shows.
+  {
+    label: 'context F: combine named in בואו נשלב כוחות',
+    target: 'en', type: 'sentence_translation', form: 'combine', lemma: 'combine', partOfSpeech: 'verb', translation: 'לשלב',
+    example: null, exampleTranslation: null,
+    sentence: { hebrew: 'בואו נשלב כוחות.', target: "Let's combine forces.", word: 'combine', marked: 'נשלב' },
+  },
+];
+
+/**
+ * Phase 34 (spec D5; ruling R3). The checker, a second model reading the cards
+ * as a learner would. One call per case, one item each, through the real
+ * prompt and parser (askCheck). Tier 1 is that the answer reads (readCheck);
+ * tier 2 that it means what a careful reader means, scored by the server's own
+ * rules (wrongOnly, meaningFits, wordsFit, translationUses). Each kind has a
+ * "no" beside its "yes": a checker that calls every option right fails the
+ * blow up and pick up cases' wrong options and the gap's misfit, and one that
+ * confirms every sentence fails "I saw him" and the volume's להוריד.
+ */
+export type CheckCase = {
+  label: string;
+  /** The language learned; the learner's own is Hebrew. */
+  target: LanguageCode;
+  item: CheckItem;
+  /** A choice or gap item: per option, whether it is also right (or fits the gap). */
+  alsoRight?: Record<string, boolean>;
+  /** A target-language context: the gloss's meanings, which the reading must be one of to keep it. */
+  glossMeanings?: string[];
+  /** ...and the meanings it must not be read as (another word's). */
+  notMeanings?: string[];
+  /** A Hebrew context: the card it is for, by whose judge a word the checker reads fits. */
+  card?: TypedTarget;
+  /** A sentence card: the practised word and its accepted answers. */
+  practised?: string[];
+  /** A context or sentence card: whether the server keeps it on this answer. */
+  keep?: boolean;
+};
+
+const SAW_READINGS = ['לנסר', 'מסור', 'ראה', 'לראות'];
+
+export const CHECK_CASES: CheckCase[] = [
+  // 3c482348: blow up stored as לנפח; a learner picked להרוס ("blew up the bridge") and was marked wrong.
+  {
+    label: 'checker A (3c482348): blow up — להרוס is also right, לקפל and לשבור are not',
+    target: 'en',
+    item: { key: 'q1', task: 'choice', word: 'blow up', options: ['להרוס', 'לקפל', 'לשבור'] },
+    alsoRight: { להרוס: true, לקפל: false, לשבור: false },
+  },
+  // c49ddbec: pick up stored as לענות (the phone); להרים is its other sense.
+  {
+    label: 'checker A (c49ddbec): pick up — להרים is also right, לכתוב and לשיר are not',
+    target: 'en',
+    item: { key: 'q1', task: 'choice', word: 'pick up', options: ['להרים', 'לכתוב', 'לשיר'] },
+    alsoRight: { להרים: true, לכתוב: false, לשיר: false },
+  },
+  // A cloze choice: the sentence, not the word's meaning, makes an option right.
+  {
+    label: 'checker gap: unlocked still fits "She ___ the door", ate does not',
+    target: 'en',
+    item: { key: 'q1', task: 'gap', sentence: 'She ___ the door and walked in.', options: ['unlocked', 'ate', 'slept'] },
+    alsoRight: { unlocked: true, ate: false, slept: false },
+  },
+  {
+    label: 'checker gap (38b003b4): sugar still fits "put ___ in my coffee", chair and music do not',
+    target: 'en',
+    item: { key: 'q1', task: 'gap', sentence: 'I like to put ___ in my coffee.', options: ['sugar', 'chair', 'music'] },
+    alsoRight: { sugar: true, chair: false, music: false },
+  },
+  // Ruling R3, 71b0b407: the sentence the context call wrote for saw on 2026-10-11 (CONTEXT_CASES' first).
+  {
+    label: 'checker E (71b0b407, ruling R3): saw/לנסר — the marked saw means לנסר, not ראה',
+    target: 'en',
+    item: { key: 'q1c', task: 'meaning', sentence: 'Can you saw this wood for me?', word: 'saw', candidates: SAW_READINGS },
+    glossMeanings: ['לנסר'],
+    notMeanings: ['ראה', 'לראות'],
+    keep: true,
+  },
+  {
+    label: 'checker E: "I saw him at the station" is the past of see, and is dropped from a card for saw/לנסר',
+    target: 'en',
+    item: { key: 'q1c', task: 'meaning', sentence: 'I saw him at the station yesterday.', word: 'saw', candidates: SAW_READINGS },
+    glossMeanings: ['לנסר'],
+    keep: false,
+  },
+  // d388f738: להוריד is download in one sentence and turn down in another.
+  {
+    label: 'checker C (d388f738): להוריד the new game is download',
+    target: 'en',
+    item: { key: 'q1c', task: 'words', sentence: 'אני רוצה להוריד את המשחק החדש הלילה.', word: 'להוריד' },
+    card: { answer: 'download', lemma: 'download', alternatives: ['get'] },
+    keep: true,
+  },
+  {
+    label: 'checker C: תוריד את הווליום is not download, and is dropped from a card for download',
+    target: 'en',
+    item: { key: 'q1c', task: 'words', sentence: 'תוריד את הווליום, בבקשה.', word: 'תוריד' },
+    card: { answer: 'download', lemma: 'download', alternatives: ['get'] },
+    keep: false,
+  },
+  // eb95d246: a learner wrote "lets work together" and got only "alternative".
+  {
+    label: 'checker F (eb95d246): בואו נשלב כוחות is said without combine, so the card is not a combine card',
+    target: 'en',
+    item: { key: 'q1', task: 'translate', sentence: 'בואו נשלב כוחות.' },
+    practised: ['combine'],
+    keep: false,
+  },
+  {
+    label: 'checker F: a sentence whose practised word is the natural one is kept',
+    target: 'en',
+    item: { key: 'q1', task: 'translate', sentence: 'אני שותה קפה כל בוקר.' },
+    practised: ['coffee'],
+    keep: true,
+  },
+  // The server's candidates are the gap's text as the reference writes it, the form and the lemma.
+  {
+    label: 'checker F: an everyday verb is kept, in the past its sentence needs',
+    target: 'en',
+    item: { key: 'q1', task: 'translate', sentence: 'הוא קנה מכונית חדשה אתמול.' },
+    practised: ['bought', 'buy'],
+    keep: true,
+  },
+  // Review, fix round 1: Italian elides a preposition onto a vowel-initial word
+  // (all'università), and the word is still found.
+  {
+    label: "checker F: an Italian word behind an elided preposition is kept (all'università)",
+    target: 'it',
+    item: { key: 'q1', task: 'translate', sentence: 'הלכתי לאוניברסיטה אתמול בבוקר.' },
+    practised: ['università'],
+    keep: true,
+  },
+];
+
+/**
+ * Phase 41 (spec D2). Whether a word the card's list missed fills a typed gap,
+ * the sentence read alone. Each case is tier 2: a verdict either way is a call
+ * the card then records.
+ */
+export type FitJudgeCase = {
+  label: string;
+  question: ClozeTypedQuestion;
+  language: LanguageCode;
+  answer: string;
+  expect: 'fits' | 'wrong';
+};
+
+const fit = (language: LanguageCode, sentence: string, gap: string, answer: string, expect: FitJudgeCase['expect'], what: string): FitJudgeCase => {
+  const start = sentence.indexOf(gap);
+  return {
+    label: `fit ${language} ${what}: ${answer}`,
+    question: {
+      id: 'q',
+      type: 'cloze_typed',
+      vocab_term_id: 'v',
+      sentence,
+      gap: { start, end: start + gap.length },
+      translation: '',
+      meaning: '',
+      answer: gap,
+      alternatives: [],
+      mark: null,
+    },
+    language,
+    answer,
+    expect,
+  };
+};
+
+const enFile = 'Please download the file.';
+const enReading = 'She is reading a book in the garden.';
+const itHouse = 'Abbiamo comprato una nuova casa al mare.';
+const ruBought = 'Она купила новую машину вчера.';
+
+export const FIT_JUDGE_CASES: FitJudgeCase[] = [
+  // The bug that opened the phase: an open sentence, a common verb the list missed.
+  fit('en', enFile, 'download', 'edit', 'fits', 'another verb'),
+  fit('en', enFile, 'download', 'upload', 'fits', 'the opposite verb'),
+  fit('en', enFile, 'download', 'print', 'fits', 'another verb'),
+  fit('en', enFile, 'download', 'downloads', 'wrong', 'a form the gap cannot take'),
+  fit('en', enFile, 'download', 'banana', 'wrong', 'a noun'),
+  fit('en', enReading, 'reading', 'writing', 'fits', 'another verb'),
+  fit('en', enReading, 'reading', 'read', 'wrong', 'a form the gap cannot take'),
+  fit('en', enReading, 'reading', 'holding', 'fits', 'another meaning, still correct'),
+  fit('en', enReading, 'reading', 'eating', 'wrong', 'a sentence that makes no sense'),
+  // Gender and number decide in Italian and Russian.
+  fit('it', itHouse, 'casa', 'macchina', 'fits', 'another feminine noun'),
+  fit('it', itHouse, 'casa', 'barca', 'fits', 'another feminine noun'),
+  fit('it', itHouse, 'casa', 'fiore', 'wrong', 'a masculine noun'),
+  fit('it', itHouse, 'casa', 'case', 'wrong', 'the plural'),
+  fit('ru', ruBought, 'купила', 'продала', 'fits', 'another verb, same agreement'),
+  fit('ru', ruBought, 'купила', 'купил', 'wrong', 'the masculine past'),
+  fit('ru', ruBought, 'купила', 'купить', 'wrong', 'the infinitive'),
+];
+
+/**
+ * Phase 50 (spec D8). The sound-alike score, as answerBySpeech asks it: pairs
+ * of one language, each expected at or above the server's default threshold
+ * (`same`) or below it (`different`). None of them is an example in the
+ * prompt, so this measures the rule rather than recall of it. The `different`
+ * half is the guard that matters most: a near miss scored as the same word
+ * would be credited for every learner of the language.
+ */
+export type SoundAlikePair = { a: string; b: string; expect: 'same' | 'different' };
+export type SoundAlikeCase = { label: string; language: 'en' | 'ru' | 'it'; pairs: SoundAlikePair[] };
+
+const same = (language: SoundAlikeCase['language'], a: string, b: string): SoundAlikeCase => ({
+  label: `sound ${language}: ${a} is said as ${b}`,
+  language,
+  pairs: [{ a, b, expect: 'same' }],
+});
+const apart = (language: SoundAlikeCase['language'], a: string, b: string): SoundAlikeCase => ({
+  label: `sound ${language}: ${a} is not said as ${b}`,
+  language,
+  pairs: [{ a, b, expect: 'different' }],
+});
+
+export const SOUND_ALIKE_CASES: SoundAlikeCase[] = [
+  same('en', 'sell', 'cell'),
+  same('en', 'too', 'two'),
+  same('en', 'night', 'knight'),
+  same('en', 'flower', 'flour'),
+  same('en', 'sea', 'see'),
+  same('en', 'hole', 'whole'),
+  same('en', 'male', 'mail'),
+  apart('en', 'sheep', 'ship'),
+  apart('en', 'bat', 'bad'),
+  apart('en', 'taught', 'thought'),
+  apart('en', 'leave', 'live'),
+  apart('en', 'cat', 'cut'),
+  apart('en', 'pat', 'pet'),
+  apart('en', 'work', 'walk'),
+  // Review of phase 50: spelled with a doubled letter, said the same, and not
+  // the class of difference the prompt names with an example.
+  same('en', 'allowed', 'aloud'),
+  same('en', 'meddle', 'medal'),
+  same('en', 'cannon', 'canon'),
+  same('en', 'bury', 'berry'),
+  apart('en', 'tree', 'three'),
+  apart('en', 'bat', 'bath'),
+  same('ru', 'лук', 'луг'),
+  same('ru', 'плот', 'плод'),
+  same('ru', 'кот', 'код'),
+  same('ru', 'прут', 'пруд'),
+  same('ru', 'грипп', 'гриб'),
+  apart('ru', 'люк', 'лук'),
+  apart('ru', 'лис', 'лес'),
+  apart('ru', 'мель', 'мел'),
+  apart('ru', 'брать', 'брат'),
+  same('it', 'anno', 'hanno'),
+  same('it', 'o', 'ho'),
+  same('it', 'ai', 'hai'),
+  apart('it', 'gato', 'gatto'),
+  apart('it', 'palla', 'pala'),
+  apart('it', 'carro', 'caro'),
+  apart('it', 'pane', 'cane'),
+  // Review of phase 50: held out from the prompt's own example, nono/nonno.
+  apart('it', 'fato', 'fatto'),
+  apart('it', 'sete', 'sette'),
+  apart('it', 'copia', 'coppia'),
+  // The shape the server sends for a transcript of several words: one call, several pairs.
+  {
+    label: 'sound en: three pairs in one call',
+    language: 'en',
+    pairs: [
+      { a: 'sell', b: 'cell', expect: 'same' },
+      { a: 'sheep', b: 'ship', expect: 'different' },
+      { a: 'hole', b: 'whole', expect: 'same' },
+    ],
+  },
 ];

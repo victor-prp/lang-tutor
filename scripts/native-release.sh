@@ -58,6 +58,8 @@ rollback=0
 
 cd "$(dirname "$0")/.."
 MOBILE_DIR=${MOBILE_DIR:-apps/mobile}
+# Phase 49 (spec D2). The tag's commit, inlined beside the tag for the About screen.
+commit=$(git rev-parse --short=7 HEAD)
 
 if [ ! -f "$MOBILE_DIR/eas.json" ]; then
   echo "::notice::$TAG predates the native release (no eas.json): nothing to ship."
@@ -78,6 +80,26 @@ fi
 if [ "$platform" = ios ] && ! jq -e '.submit.production.ios.ascAppId // empty' "$MOBILE_DIR/eas.json" > /dev/null; then
   echo "::notice::eas.json has no submit.production.ios.ascAppId, the App Store Connect app id: the iOS release is not set up yet (docs/runbooks/ios.md). Skipped."
   exit 0
+fi
+
+# The app's EXPO_PUBLIC_* values, from apps/mobile/.env.production. `eas update
+# --environment production` reads no .env file, only this process's environment
+# and EAS's own, so they are exported here. Without EXPO_PUBLIC_API_URL the
+# update throws at launch ("EXPO_PUBLIC_API_URL is not set"), expo-updates falls
+# back to the build's own bundle, and no update ever reaches a phone: every
+# update through v2026.10.14.4 shipped that way. The build itself is made on EAS
+# from a checkout, where the file is read.
+# Checked first: a failed redirect stops bash 5 under set -e, though not macOS's bash 3.
+if [ -f "$MOBILE_DIR/.env.production" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      EXPO_PUBLIC_*=*) export "${line?}" ;;
+    esac
+  done < "$MOBILE_DIR/.env.production"
+fi
+if [ -z "${EXPO_PUBLIC_API_URL:-}" ]; then
+  echo "::error::$MOBILE_DIR/.env.production sets no EXPO_PUBLIC_API_URL: an update without it cannot start."
+  exit 1
 fi
 
 cd "$MOBILE_DIR"
@@ -113,7 +135,7 @@ submit() {
   eas submit --platform "$platform" --profile production --id "$1" --wait --non-interactive
 }
 publish() { # publish <the build it targets>
-  EXPO_PUBLIC_APP_VERSION="$TAG" eas update --branch production --platform "$platform" \
+  EXPO_PUBLIC_APP_VERSION="$TAG" EXPO_PUBLIC_APP_COMMIT="$commit" eas update --branch production --platform "$platform" \
     --environment production --message "$TAG for build $1" --non-interactive
 }
 build_submit_publish() {

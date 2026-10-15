@@ -13,6 +13,10 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useRecorder } from '@/hooks/useRecording';
 import { useSpeaker } from '@/hooks/useSpeech';
 import { currentFor, loadFailedFor, type StoredCurrent } from '@/nextSession';
+import { voicesRead } from '@/speech';
+
+/** Phase 43. The longest a session waits for the device's voices to be read. */
+const VOICES_WAIT_MS = 3_000;
 
 // Phase 19. The active enrollment's session state for the home screen: what
 // is current, where the next session comes from, and the two actions on it.
@@ -24,7 +28,12 @@ export type NextSessionValue = {
   /** The first read for the active enrollment failed and nothing is shown. */
   loadFailed: boolean;
   reload: () => void;
-  create: () => Promise<CreateSessionResponse>;
+  /** `waitForVoices: false` for the seed, whose cards are fixed: tapping start
+   *  must not wait on the voices (phase 43). */
+  create: (options?: { waitForVoices?: boolean }) => Promise<CreateSessionResponse>;
+  /** Phase 43 (spec D2). Has the next session built for this device; never
+   *  throws, since a session's first answer starts it too. */
+  start: (sessionId: string) => Promise<void>;
   skip: (sessionId: string) => Promise<void>;
 };
 
@@ -62,22 +71,40 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
       .catch(() => setFailedFor(enrollmentId));
   }, [api, active]);
 
-  const create = useCallback(async () => {
+  // Phase 24 (spec D5): only the device knows whether it can speak the target,
+  // so only it can ask for listening cards. Phase 25 (spec D4): likewise, only
+  // it knows whether it can record. Read where a session is built for it, once
+  // the voices are read (phase 43): home builds one as soon as it shows.
+  const devices = useCallback(
+    async (targetLanguage: string, waitForVoices = true) => {
+      if (waitForVoices) await voicesRead(speaker, VOICES_WAIT_MS);
+      return {
+        listening: speaker.snapshot().tags.has(targetLanguage),
+        speaking: await recorder.canRecord().catch(() => false),
+      };
+    },
+    [speaker, recorder],
+  );
+
+  const create = useCallback(async (options?: { waitForVoices?: boolean }) => {
     if (!active) throw new Error('cannot create a session with no active enrollment');
     try {
-      // Phase 24 (spec D5): only the device knows whether it can speak the
-      // target, so only it can ask for listening cards.
-      // Phase 25 (spec D4): likewise, only it knows whether it can record.
-      const speaking = await recorder.canRecord().catch(() => false);
       return await api.createSession({
         enrollment_id: active.id,
-        listening: speaker.snapshot().tags.has(active.target_language),
-        speaking,
+        ...(await devices(active.target_language, options?.waitForVoices ?? true)),
       });
     } finally {
       reload();
     }
-  }, [api, active, speaker, recorder, reload]);
+  }, [api, active, devices, reload]);
+
+  const start = useCallback(
+    async (sessionId: string) => {
+      if (!active) return;
+      await api.startSession(sessionId, await devices(active.target_language)).catch(() => undefined);
+    },
+    [api, active, devices],
+  );
 
   const skip = useCallback(
     async (sessionId: string) => {
@@ -91,8 +118,8 @@ export function NextSessionProvider({ api, children }: { api: ApiClient; childre
   );
 
   const value = useMemo(
-    () => ({ current, loadFailed, reload, create, skip }),
-    [current, loadFailed, reload, create, skip],
+    () => ({ current, loadFailed, reload, create, start, skip }),
+    [current, loadFailed, reload, create, start, skip],
   );
   return <NextSessionContext.Provider value={value}>{children}</NextSessionContext.Provider>;
 }

@@ -9,7 +9,7 @@ export const WRONG_HEBREW = ['דלת', 'קיר', 'תקרה'];
 /** Wrong Russian words for a reversed card. None is a saved form or lemma. */
 export const WRONG_RUSSIAN = ['писать', 'дверь', 'стена'];
 
-export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning' | 'cloze-choice' | 'cloze-typed' | 'translate';
+export type CardKind = 'choice' | 'reverse' | 'typed' | 'listen' | 'dictation' | 'tiles' | 'board' | 'read' | 'say' | 'meaning' | 'cloze-choice' | 'cloze-typed' | 'translate' | 'new-meaning';
 
 export type Card = { kind: CardKind; prompt: string; options: string[] };
 
@@ -28,6 +28,7 @@ async function kindOnScreen(page: Page): Promise<CardKind> {
   if (await has('meaning-card')) return 'meaning';
   if (await has('cloze-card')) return (await has('typed-input')) ? 'cloze-typed' : 'cloze-choice';
   if (await has('translate-card')) return 'translate';
+  if (await has('new-meaning-card')) return 'new-meaning';
   if (await has('typed-input')) return 'typed';
   const prompt = stripIsolates(await page.getByTestId('question-prompt').textContent());
   return HEBREW.test(prompt) ? 'reverse' : 'choice';
@@ -48,10 +49,23 @@ export async function readCard(page: Page, position: number, total: number, expe
       ? stripIsolates(await page.getByTestId('question-prompt').textContent())
       : '';
   const options =
-    kind === 'choice' || kind === 'reverse' || kind === 'listen' || kind === 'cloze-choice'
+    kind === 'choice' || kind === 'new-meaning' || kind === 'reverse' || kind === 'listen' || kind === 'cloze-choice'
       ? await Promise.all([0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`option-${i}`).textContent())))
       : [];
   return { kind, prompt, options };
+}
+
+/** The words on a board, in order. Phase 34 (spec D10): each button also shows
+ *  the word's part of speech under it, `board-word-<i>-note`, which is not the word. */
+export async function boardWords(page: Page): Promise<string[]> {
+  return Promise.all(
+    [0, 1, 2, 3].map(async (i) => {
+      const text = stripIsolates(await page.getByTestId(`board-word-${i}`).textContent());
+      const note = page.getByTestId(`board-word-${i}-note`);
+      const part = (await note.count()) > 0 ? stripIsolates(await note.textContent()) : '';
+      return text.endsWith(part) ? text.slice(0, text.length - part.length).trim() : text;
+    }),
+  );
 }
 
 /** Phase 27 Part B. The one sentence every stubbed `sentence` and `translate`
@@ -68,22 +82,23 @@ export const STUB_GAP_LEMMA = 'прочитать';
  *  (domain/distractors.ts taskFor), whichever position asks it: Hebrew wrong
  *  options for a choice of meanings (and a board's), Russian ones for a choice
  *  of words or of a gap, `alternatives` for a typed card, and the one stub
- *  sentence for a gap to type and a sentence to translate. */
-export function generationStub(alternatives: string[] = []): Record<string, Record<string, unknown>> {
+ *  sentence for a gap to type and a sentence to translate. Phase 38:
+ *  `gapAlternatives`, the words that also fit the typed gap. */
+export function generationStub(alternatives: string[] = [], gapAlternatives: string[] = []): Record<string, Record<string, unknown>> {
   return {
     meaning: { distractors: WRONG_HEBREW },
     word: { distractors: WRONG_RUSSIAN },
     gap: { distractors: WRONG_RUSSIAN },
     typed: { distractors: [], alternatives },
-    sentence: { distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: [] },
+    sentence: { distractors: [], sentence: STUB_SENTENCE, gap: STUB_GAP, translation: STUB_SENTENCE_HEBREW, alternatives: gapAlternatives },
     translate: { distractors: [], sentence: STUB_SENTENCE_HEBREW, gap: STUB_GAP, translation: STUB_SENTENCE },
   };
 }
 
 /** Registers the generation stub: every position's item answered by its task,
  *  for as many positions as a list session holds. */
-export async function expectGeneration(request: APIRequestContext, alternatives: string[] = []): Promise<void> {
-  await expectGeminiByTask(request, generationStub(alternatives), SESSION_LENGTH);
+export async function expectGeneration(request: APIRequestContext, alternatives: string[] = [], gapAlternatives: string[] = []): Promise<void> {
+  await expectGeminiByTask(request, generationStub(alternatives, gapAlternatives), SESSION_LENGTH);
 }
 
 /** Whether an option is one of the stub's wrong words. Case-blind: a gap's wrong

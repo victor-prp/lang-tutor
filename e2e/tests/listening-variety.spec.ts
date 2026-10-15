@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 import { API_URL } from '../urls';
-import { answerTyped, expectGeneration, readCard, type Card, type CardKind } from './support/cards';
+import { answerTyped, boardWords, expectGeneration, readCard, type Card, type CardKind } from './support/cards';
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { BOARD_WORDS } from './support/lexemes';
@@ -94,9 +94,8 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
 
   await clearGemini(request);
   await expectGeneration(request);
-  // Past a skipped seed the home screen offers create, not start, so openApp's default landing does not fit.
-  await openApp(page, 'create-button');
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
+  await openApp(page, 'enrollment-switcher');
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   let before = (await spoken(page)).length;
   await tapUntil(page, 'start-button', 'progress-label');
@@ -105,6 +104,10 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
   for (let position = 1; position <= 10; position++) {
     const card = await readCard(page, position, 10);
     kinds.push(card.kind);
+    // Phase 44 (spec D1, D2): everything said since this card appeared. Each
+    // branch below waits for the card's last cue, so `before` is settled when
+    // it is read again for the next card.
+    const said = async () => (await spoken(page)).slice(before);
     if (card.kind === 'listen') {
       // The word is spoken on arrival and not shown; pick its meaning.
       const heard = await spokenAfter(page, before);
@@ -112,36 +115,63 @@ test('ten words: a listening card, a board, tiles and a dictation', async ({ pag
       await page.getByTestId(`option-${card.options.indexOf(MEANING_OF[heard.text])}`).click();
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await expect(page.getByTestId('question-prompt')).toHaveText(heard.text);
+      // Once per card (R7): nothing more after the answer.
+      expect(await said()).toEqual([heard]);
     } else if (card.kind === 'tiles') {
+      // Silent until checked: hearing the word would give it away.
+      expect(await said()).toEqual([]);
       // Build the word from its tiles.
       await buildFromTiles(page, card);
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      // Then it says the word just built.
+      await expect.poll(said).toEqual([{ text: FORM_OF[card.prompt], lang: 'ru-RU' }]);
     } else if (card.kind === 'typed') {
+      // Silent until checked, then it says the right answer.
+      expect(await said()).toEqual([]);
       await answerTyped(page, FORM_OF[card.prompt]);
+      await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      await expect.poll(said).toEqual([{ text: FORM_OF[card.prompt], lang: 'ru-RU' }]);
     } else if (card.kind === 'board') {
       // The board: one wrong pairing for the first word, then every word right.
-      const words = await Promise.all([0, 1, 2, 3].map(async (i) => stripIsolates(await page.getByTestId(`board-word-${i}`).textContent())));
+      const words = await boardWords(page);
+      // Phase 34 (spec D10): each word says its part of speech, all nouns here.
+      for (const i of [0, 1, 2, 3]) await expect(page.getByTestId(`board-word-${i}-note`)).toHaveText('שם עצם');
       const meanings = await Promise.all(
         [0, 1, 2, 3, 4].map(async (i) => stripIsolates(await page.getByTestId(`board-meaning-${i}`).textContent())),
       );
-      await page.getByTestId('board-word-0').click();
+      // Phase 44 (spec D5): a tap on a word says it.
+      const tapBoardWord = async (i: number) => {
+        const n = (await spoken(page)).length;
+        await page.getByTestId(`board-word-${i}`).click();
+        expect(await spokenAfter(page, n)).toEqual({ text: words[i], lang: 'ru-RU' });
+      };
+      await tapBoardWord(0);
       await page.getByTestId(`board-meaning-${meanings.findIndex((m) => m !== MEANING_OF[words[0]])}`).click();
       for (const [i, word] of words.entries()) {
-        await page.getByTestId(`board-word-${i}`).click();
+        await tapBoardWord(i);
         await page.getByTestId(`board-meaning-${meanings.indexOf(MEANING_OF[word])}`).click();
       }
       await expect(page.getByTestId('feedback-title')).toHaveText(/3\s*מתוך\s*4/);
+      // The tapped words and nothing else: a meaning says nothing, and neither
+      // does the board by itself.
+      expect(await said()).toEqual([words[0], ...words].map((text) => ({ text, lang: 'ru-RU' })));
       // The board takes four positions.
       position += 3;
     } else if (card.kind === 'meaning') {
-      // Meaning recall, passed by showing the answer.
+      // Meaning recall reads its word on arrival, with no tap.
+      await expect.poll(said).toEqual([{ text: card.prompt, lang: 'ru-RU' }]);
+      // Passed by showing the answer, after which it says nothing more (R7).
       await page.getByTestId('typed-show-answer').click();
+      await expect(page.getByTestId('continue-button')).toBeVisible();
+      expect(await said()).toEqual([{ text: card.prompt, lang: 'ru-RU' }]);
     } else {
       // Hear it, type it.
       expect(card.kind).toBe('dictation');
       const dictated = await spokenAfter(page, before);
       await answerTyped(page, dictated.text);
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
+      // Once per card (R7): nothing more after the answer.
+      expect(await said()).toEqual([dictated]);
     }
     before = (await spoken(page)).length;
     await page.getByTestId('continue-button').click();

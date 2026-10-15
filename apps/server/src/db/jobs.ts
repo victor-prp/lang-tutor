@@ -1,7 +1,10 @@
 import { sql } from 'drizzle-orm';
-import { PgBoss, fromDrizzle } from 'pg-boss';
+import { PgBoss, fromDrizzle, type QueuePolicy } from 'pg-boss';
 
 import {
+  ACCEPT_RENDERING,
+  ACCEPT_RENDERING_EXPIRY_SECONDS,
+  ACCEPT_RENDERING_FAILED,
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_EXPIRY_SECONDS,
   LOOK_UP_IMPORT_ITEM_FAILED,
@@ -13,9 +16,13 @@ import {
   READ_PHOTO,
   READ_PHOTO_EXPIRY_SECONDS,
   READ_PHOTO_FAILED,
+  REMIND,
+  REMIND_EXPIRY_SECONDS,
   RENDER_LEMMA,
   RENDER_LEMMA_EXPIRY_SECONDS,
   RENDER_LEMMA_FAILED,
+  STOCK_SESSION,
+  STOCK_SESSION_EXPIRY_SECONDS,
   type JobName,
 } from '../domain/jobs';
 import type { Db } from './client';
@@ -29,6 +36,9 @@ export const JOB_SCHEMA = 'pgboss';
 
 type QueueDefinition = {
   name: JobName;
+  // Phase 34. Set at creation only: pg-boss refuses to change a queue's policy,
+  // so a changed one means a new queue. Absent is pg-boss's `standard`.
+  policy?: QueuePolicy;
   // The subset that both createQueue and updateQueue accept, so one definition
   // serves a fresh install and a changed one.
   options: {
@@ -52,8 +62,9 @@ export const JOB_QUEUES: QueueDefinition[] = [
     options: {
       retryLimit: 2,
       retryBackoff: true,
-      // Twice the generation budget (domain/jobs.ts, spec D16): a worker that
-      // crashed mid-call expires, and the expiry counts as a failed attempt.
+      // Twice the sum of the attempt's call budgets (domain/jobs.ts,
+      // PREPARE_SESSION_CALL_BUDGETS_MS; spec D16, phase 34 ruling R12): a worker
+      // that crashed mid-call expires, and the expiry counts as a failed attempt.
       expireInSeconds: PREPARE_SESSION_EXPIRY_SECONDS,
       deleteAfterSeconds: 86_400,
       deadLetter: PREPARE_SESSION_FAILED,
@@ -101,6 +112,47 @@ export const JOB_QUEUES: QueueDefinition[] = [
       deadLetter: RENDER_LEMMA_FAILED,
     },
   },
+  // Phase 34 (spec D1). `exclusive`: one job per rendering queued, retrying or
+  // active, so every session that picks the rendering meanwhile, and the
+  // backfill, asks for the call it is already waiting on. The dead letter
+  // writes nothing: the rendering stays unstamped, and the next session that
+  // picks it asks again.
+  { name: ACCEPT_RENDERING_FAILED, options: { retryLimit: 2, deleteAfterSeconds: 86_400 } },
+  {
+    name: ACCEPT_RENDERING,
+    policy: 'exclusive',
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: ACCEPT_RENDERING_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
+      deadLetter: ACCEPT_RENDERING_FAILED,
+    },
+  },
+  // Phase 43 (spec D3). `stately`: one job queued and one active per enrollment
+  // (the singleton key), so a burst of triggers is one job and a trigger that
+  // arrives mid-run is queued rather than lost. No dead letter: a stock never
+  // built is built by the next trigger, or by the home screen's create.
+  {
+    name: STOCK_SESSION,
+    policy: 'stately',
+    options: {
+      retryLimit: 2,
+      retryBackoff: true,
+      expireInSeconds: STOCK_SESSION_EXPIRY_SECONDS,
+      deleteAfterSeconds: 86_400,
+    },
+  },
+  // Phase 52 (spec D5). `exclusive`: one run queued or active, under the
+  // singleton key the tick route sends, so two overlapping ticks (a rollout
+  // runs two containers, ADR 0010) make one run. No retry and no dead letter:
+  // the next tick, five minutes on, does what a retry would, and the claims
+  // keep a slot from being sent twice either way.
+  {
+    name: REMIND,
+    policy: 'exclusive',
+    options: { retryLimit: 0, expireInSeconds: REMIND_EXPIRY_SECONDS, deleteAfterSeconds: 86_400 },
+  },
 ];
 
 /**
@@ -131,7 +183,7 @@ export async function installJobs(db: Db): Promise<void> {
   try {
     for (const queue of JOB_QUEUES) {
       if (await boss.getQueue(queue.name)) await boss.updateQueue(queue.name, queue.options);
-      else await boss.createQueue(queue.name, queue.options);
+      else await boss.createQueue(queue.name, { ...queue.options, ...(queue.policy ? { policy: queue.policy } : {}) });
     }
   } finally {
     await boss.stop({ graceful: false });

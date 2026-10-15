@@ -2,7 +2,14 @@ import type { PgBoss } from 'pg-boss';
 
 import { createServerDeps, type AppDeps } from '../../src/composition';
 import type { Db } from '../../src/db/client';
-import { PHOTO_READ_BUDGET_MS, SESSION_GENERATION_BUDGET_MS } from '../../src/domain/jobs';
+import {
+  CHECKER_CALL_BUDGET_MS,
+  CONTEXT_CALL_BUDGET_MS,
+  PHOTO_READ_BUDGET_MS,
+  SESSION_GENERATION_BUDGET_MS,
+  STOCK_SAVE_DELAY_SECONDS,
+} from '../../src/domain/jobs';
+import { DEFAULT_SOUND_ALIKE_THRESHOLD } from '../../src/domain/soundAlike';
 import type { Logger } from '../../src/logger';
 import { unstartedBoss } from './jobs';
 
@@ -30,22 +37,36 @@ export function createTestServerDeps(io: {
   /** Phase 29. Resend's base URL; defaults to an unroutable one, as Gemini's does. */
   mailBaseUrl?: string;
   translationTimeoutMs?: number;
-  identity?: { lane: string; database: string; port: number; version: string };
+  identity?: { lane: string; database: string; port: number; version: string; commit: string };
   /** A started boss for tests that enqueue (startTestBoss). By default an
    *  unstarted one, so an unexpected enqueue fails loudly. */
   boss?: PgBoss;
   /** Phase 19. The budget of one distractor call; defaults to production's. */
   sessionGenerationTimeoutMs?: number;
+  /** Phase 34. The budget of the context call; defaults to production's. */
+  contextCallTimeoutMs?: number;
+  /** Phase 34. The budget of the checker; defaults to production's. */
+  checkerCallTimeoutMs?: number;
   /** Phase 25. The budget of one transcription; defaults to production's. */
   speechTimeoutMs?: number;
   /** Phase 27. The budget of one judged answer; defaults to production's. */
   judgeTimeoutMs?: number;
   /** Phase 26. A read's budget; defaults to production's. */
   photoReadTimeoutMs?: number;
+  /** Phase 43. How long a save's stock waits; defaults to production's. */
+  stockSaveDelaySeconds?: number;
+  /** Phase 50. The sound-alike threshold; defaults to production's. */
+  soundAlikeThreshold?: number;
   /** Phase 35 (spec D12). Mounts the bot route; unset, as on every lane. */
   botSecret?: string | null;
+  /** Phase 52. Expo's base URL; defaults to an unroutable one, as Gemini's does. */
+  pushBaseUrl?: string;
+  /** Phase 52 (spec D5). Mounts the reminder tick route; unset, as on every lane. */
+  reminderSecret?: string | null;
 }): AppDeps {
   return createServerDeps({
+    // No request lines: a test's logger keeps to the events it asserts on.
+    requestLog: null,
     db: io.db,
     logger: io.logger,
     rng: io.rng,
@@ -66,12 +87,18 @@ export function createTestServerDeps(io: {
     },
     translationTimeoutMs: io.translationTimeoutMs ?? 25_000,
     sessionGenerationTimeoutMs: io.sessionGenerationTimeoutMs ?? SESSION_GENERATION_BUDGET_MS,
+    contextCallTimeoutMs: io.contextCallTimeoutMs ?? CONTEXT_CALL_BUDGET_MS,
+    checkerCallTimeoutMs: io.checkerCallTimeoutMs ?? CHECKER_CALL_BUDGET_MS,
     speechTimeoutMs: io.speechTimeoutMs ?? 8_000,
     judgeTimeoutMs: io.judgeTimeoutMs ?? 8_000,
     photoReadTimeoutMs: io.photoReadTimeoutMs ?? PHOTO_READ_BUDGET_MS,
-    identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test' },
+    stockSaveDelaySeconds: io.stockSaveDelaySeconds ?? STOCK_SAVE_DELAY_SECONDS,
+    soundAlikeThreshold: io.soundAlikeThreshold ?? DEFAULT_SOUND_ALIKE_THRESHOLD,
+    identity: io.identity ?? { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
     webDistDir: null,
     botSecret: io.botSecret ?? null,
+    pushBaseUrl: io.pushBaseUrl ?? 'http://127.0.0.1:9/never-registered',
+    reminderSecret: io.reminderSecret ?? null,
     boss: io.boss ?? unstartedBoss(io.db),
   });
 }

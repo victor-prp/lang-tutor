@@ -1,6 +1,8 @@
 import type { PgBoss } from 'pg-boss';
 
 import {
+  ACCEPT_RENDERING,
+  ACCEPT_RENDERING_FAILED,
   LOOK_UP_IMPORT_ITEM,
   LOOK_UP_IMPORT_ITEM_FAILED,
   MERGE_GLOSSES,
@@ -8,11 +10,14 @@ import {
   PREPARE_SESSION_FAILED,
   READ_PHOTO,
   READ_PHOTO_FAILED,
+  REMIND,
   RENDER_LEMMA,
   RENDER_LEMMA_FAILED,
+  STOCK_SESSION,
 } from './domain/jobs';
 import type { GlossService } from './services/glosses';
 import type { PhotoImportService } from './services/photoImports';
+import type { ReminderService } from './services/reminders';
 import type { SessionService } from './services/sessions';
 import type { TranslationService } from './services/translations';
 
@@ -31,16 +36,27 @@ export async function registerWorkers(
     photoImports: PhotoImportService;
     glosses: GlossService;
     translations: TranslationService;
+    reminders: ReminderService;
   },
   options: { pollingIntervalSeconds: number },
 ): Promise<void> {
-  const { sessions, photoImports, glosses, translations } = services;
+  const { sessions, photoImports, glosses, translations, reminders } = services;
   await boss.work(
     PREPARE_SESSION,
     // Four at once per process: one model call each, kept under the quota.
     { localConcurrency: 4, pollingIntervalSeconds: options.pollingIntervalSeconds },
     async (jobs) => {
-      for (const job of jobs) await sessions.prepareSession(job.data);
+      // Phase 47 (spec D6). The attempt, 1 to 3, names this run's model calls.
+      for (const job of jobs) await sessions.prepareSession(job.data, { attempt: job.retryCount + 1 });
+    },
+  );
+  // Phase 43 (spec D3). Two at once per process: each is one transaction, and
+  // the queue keeps one job active per enrollment.
+  await boss.work(
+    STOCK_SESSION,
+    { localConcurrency: 2, pollingIntervalSeconds: options.pollingIntervalSeconds },
+    async (jobs) => {
+      for (const job of jobs) await sessions.stockSession(job.data);
     },
   );
   await boss.work(
@@ -89,5 +105,24 @@ export async function registerWorkers(
   );
   await boss.work(RENDER_LEMMA_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
     for (const job of jobs) await translations.failLemmaRender(job.data);
+  });
+
+  // Phase 34 (spec D1). Two at once per process: one short call each, beside the
+  // sessions that enqueue them.
+  await boss.work(
+    ACCEPT_RENDERING,
+    { localConcurrency: 2, pollingIntervalSeconds: options.pollingIntervalSeconds },
+    async (jobs) => {
+      for (const job of jobs) await translations.acceptRendering(job.data);
+    },
+  );
+  await boss.work(ACCEPT_RENDERING_FAILED, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async (jobs) => {
+    for (const job of jobs) await translations.failAcceptRendering(job.data);
+  });
+
+  // Phase 52 (spec D5). One run at a time, everywhere: the queue is exclusive,
+  // so at most one job exists to fetch. The run takes no payload.
+  await boss.work(REMIND, { pollingIntervalSeconds: options.pollingIntervalSeconds }, async () => {
+    await reminders.tick();
   });
 }

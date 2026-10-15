@@ -55,7 +55,7 @@ export async function readyListSession(
  * show the form as `question` (phase 35, domain/plan.ts).
  */
 export function askedForm(question: Question): string {
-  if (question.type === 'multiple_choice' || question.type === 'typed_meaning') return question.question;
+  if (question.type === 'multiple_choice' || question.type === 'typed_meaning' || question.type === 'new_meaning') return question.question;
   throw new Error(`a one-word session asked a ${question.type} card`);
 }
 

@@ -65,6 +65,12 @@ jobs:
       - run: ./scripts/test-release.sh
       # Phases 32 and 36. The native releases' build-or-update decision, against stub eas and npx.
       - run: ./scripts/test-native-release.sh
+      # Phase 49. The commit the server and the app name, against a throwaway repository.
+      - run: ./scripts/test-with-commit.sh
+      # Request logs. A lane's output saved to its files, against a throwaway LANE_LOGS.
+      - run: ./scripts/test-with-log.sh
+      # Phase 51. npm run rerun's steps and refusals, against a stub npm and real listeners.
+      - run: ./scripts/test-rerun.sh
 
   check-types:
     runs-on: ubuntu-latest

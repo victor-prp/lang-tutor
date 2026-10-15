@@ -307,14 +307,74 @@ export function createVocabularyRepo(tx: Tx) {
      *  picks reproducibly. Phase 35 (spec D5): with when it was saved, in UTC to
      *  the microsecond and fixed width, so the text sorts by time. */
     listSavedGlosses: async (enrollmentId: string): Promise<SavedGloss[]> => {
-      const rows = await tx.execute<{ gloss_id: string; key: string; variant_id: string; saved_at: string }>(sql`
+      const rows = await tx.execute<{
+        gloss_id: string;
+        key: string;
+        variant_id: string;
+        saved_at: string;
+        lexeme_id: string;
+        lemma: string;
+        form: string;
+        entry_rank: number;
+        rendering_rank: number;
+        known_at: string | null;
+      }>(sql`
         SELECT ve.gloss_id, g.key, ve.variant_id,
-               to_char(ve.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS saved_at
+               to_char(ve.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS saved_at,
+               ve.lexeme_id, ve.lemma, lower(v.form) AS form, v.entry_rank,
+               COALESCE((
+                 SELECT min(tr.rank)
+                 FROM dict_sense_glosses m
+                 JOIN dict_var_translations tr
+                   ON tr.sense_id = m.sense_id AND tr.user_language_code = m.user_language_code
+                 WHERE m.gloss_id = ve.gloss_id AND tr.variant_id = ve.variant_id
+                   AND tr.user_language_code = e.source_language
+               ), 0) AS rendering_rank,
+               to_char(ve.known_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS known_at
         FROM vocabulary_entries ve
         JOIN dict_glosses g ON g.id = ve.gloss_id
+        JOIN dict_variants v ON v.id = ve.variant_id
+        JOIN enrollments e ON e.id = ve.enrollment_id
         WHERE ve.enrollment_id = ${enrollmentId}
         ORDER BY ve.gloss_id`);
-      return rows.rows.map((row) => ({ glossId: row.gloss_id, key: row.key, variantId: row.variant_id, savedAt: row.saved_at }));
+      return rows.rows.map((row) => ({
+        glossId: row.gloss_id,
+        key: row.key,
+        variantId: row.variant_id,
+        savedAt: row.saved_at,
+        lexemeId: row.lexeme_id,
+        lemma: row.lemma,
+        form: row.form,
+        order: [row.entry_rank, row.rendering_rank],
+        knownAt: row.known_at,
+      }));
+    },
+
+    /** Phase 53 (ruling R-D11, final review M3). The saved glosses among `glossIds`, each with
+     *  its key and the form it was saved from as the dictionary writes it ("Monday", "I"): what
+     *  a target's screen shows. listSavedGlosses lowercases its form, which the picker needs. */
+    findSavedWords: async (input: { enrollmentId: string; glossIds: string[] }): Promise<{ glossId: string; key: string; form: string }[]> => {
+      if (input.glossIds.length === 0) return [];
+      const rows = await tx.execute<{ gloss_id: string; key: string; form: string }>(sql`
+        SELECT ve.gloss_id, g.key, v.form
+        FROM vocabulary_entries ve
+        JOIN dict_glosses g ON g.id = ve.gloss_id
+        JOIN dict_variants v ON v.id = ve.variant_id
+        WHERE ve.enrollment_id = ${input.enrollmentId}
+          AND ve.gloss_id IN (${inList(input.glossIds)})
+        ORDER BY ve.gloss_id`);
+      return rows.rows.map((row) => ({ glossId: row.gloss_id, key: row.key, form: row.form }));
+    },
+
+    /** Phase 46 (spec D3). Stamps `at` as these glosses' known_at where none is set:
+     *  known once, known for good. */
+    markKnown: async (input: { enrollmentId: string; glossIds: string[]; at: string }): Promise<void> => {
+      if (input.glossIds.length === 0) return;
+      await tx.execute(sql`
+        UPDATE vocabulary_entries SET known_at = ${input.at}::timestamptz
+        WHERE enrollment_id = ${input.enrollmentId}
+          AND gloss_id IN (${sql.join(input.glossIds.map((id) => sql`${id}`), sql`, `)})
+          AND known_at IS NULL`);
     },
 
     countEntries: async (enrollmentId: string): Promise<number> => {

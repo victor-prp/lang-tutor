@@ -14,6 +14,8 @@ export type MergeCounts = {
   snapshots: number;
   questions: number;
   memberships: number;
+  /** Phase 53. Target words moved to the survivor, and those folded into a row the target already held. */
+  targetWords: number;
 };
 
 /** One lexeme and learner language the tool looks at: two or more live glosses,
@@ -114,8 +116,8 @@ export function createGlossRepo(tx: Tx) {
   /**
    * Spec D7. Folds `other` into `survivor`, both live glosses of one lexeme and
    * language: entries (an enrollment holding both keeps one, the earlier save,
-   * at each dimension's best), session snapshots, questions and memberships move
-   * to the survivor; the survivor takes the other's key and alternatives as its
+   * at each dimension's best), session snapshots, questions, memberships and target
+   * words move to the survivor; the survivor takes the other's key and alternatives as its
    * own alternatives; the other forwards to it, and so does anything that
    * forwarded to the other. Photo rows are left alone: their options are a
    * snapshot, and a stale id resolves when the import is saved.
@@ -143,6 +145,16 @@ export function createGlossRepo(tx: Tx) {
     if (survivor.lexeme_id !== other.lexeme_id || survivor.user_language_code !== other.user_language_code) {
       throw new Error(`glosses ${input.otherId} and ${input.survivorId} are not of one lexeme and language`);
     }
+
+    // 0. Targets (phase 53, spec D1): a target holding the other keeps the word under
+    //    the survivor, and one holding both keeps the survivor's row alone, since
+    //    target_words_pkey allows a gloss once per target. The count is moved and
+    //    folded rows together, as the snapshots' below.
+    const foldedTargetWords = await tx.execute(sql`
+      DELETE FROM target_words o
+      WHERE o.gloss_id = ${input.otherId}
+        AND EXISTS (SELECT 1 FROM target_words s WHERE s.target_id = o.target_id AND s.gloss_id = ${input.survivorId})`);
+    const movedTargetWords = await tx.execute(sql`UPDATE target_words SET gloss_id = ${input.survivorId} WHERE gloss_id = ${input.otherId}`);
 
     // 1. Enrollments holding both: fold the progress and the memory onto the
     //    survivor's rows, keep the earlier save, drop the other entry (what is
@@ -190,16 +202,31 @@ export function createGlossRepo(tx: Tx) {
           WHERE enrollment_id = ${row.enrollment_id} AND gloss_id = ${input.survivorId} AND dimension = ${level.dimension}`);
       }
       // Memory (phase 35): per dimension, the row with the larger stability, the
-      // better-learnt trace; a dimension only the other has moves over.
+      // better-learnt trace; a dimension only the other has moves over. Phase 46
+      // (spec D1): a skill reached under either gloss was reached, so the earlier
+      // reached_on survives whichever row's stability does.
       await tx.execute(sql`
-        INSERT INTO gloss_memory (enrollment_id, gloss_id, dimension, stability, difficulty, last_day, reps, lapses, params)
-        SELECT enrollment_id, ${input.survivorId}, dimension, stability, difficulty, last_day, reps, lapses, params
+        UPDATE gloss_memory s SET reached_on = o.reached_on
+        FROM gloss_memory o
+        WHERE s.enrollment_id = ${row.enrollment_id} AND s.gloss_id = ${input.survivorId}
+          AND o.enrollment_id = s.enrollment_id AND o.gloss_id = ${input.otherId} AND o.dimension = s.dimension
+          AND o.reached_on IS NOT NULL AND (s.reached_on IS NULL OR o.reached_on < s.reached_on)`);
+      await tx.execute(sql`
+        INSERT INTO gloss_memory (enrollment_id, gloss_id, dimension, stability, difficulty, last_day, reps, lapses, params, reached_on)
+        SELECT enrollment_id, ${input.survivorId}, dimension, stability, difficulty, last_day, reps, lapses, params, reached_on
         FROM gloss_memory
         WHERE enrollment_id = ${row.enrollment_id} AND gloss_id = ${input.otherId}
         ON CONFLICT (enrollment_id, gloss_id, dimension) DO UPDATE
         SET stability = EXCLUDED.stability, difficulty = EXCLUDED.difficulty, last_day = EXCLUDED.last_day,
-            reps = EXCLUDED.reps, lapses = EXCLUDED.lapses, params = EXCLUDED.params
+            reps = EXCLUDED.reps, lapses = EXCLUDED.lapses, params = EXCLUDED.params,
+            reached_on = LEAST(gloss_memory.reached_on, EXCLUDED.reached_on)
         WHERE EXCLUDED.stability > gloss_memory.stability`);
+      // Phase 46 (spec D3): a gloss known under either is known, from the earlier date.
+      await tx.execute(sql`
+        UPDATE vocabulary_entries s SET known_at = LEAST(s.known_at, o.known_at)
+        FROM vocabulary_entries o
+        WHERE s.enrollment_id = ${row.enrollment_id} AND s.gloss_id = ${input.survivorId}
+          AND o.enrollment_id = s.enrollment_id AND o.gloss_id = ${input.otherId} AND o.known_at IS NOT NULL`);
       const kept = keptEntry(
         { variantId: row.s_variant, addedByUserId: row.s_adder, savedAt: row.s_saved },
         { variantId: row.o_variant, addedByUserId: row.o_adder, savedAt: row.o_saved },
@@ -257,6 +284,7 @@ export function createGlossRepo(tx: Tx) {
       snapshots: (snapshots.rowCount ?? 0) + sessions.rows.length,
       questions: questions.rowCount ?? 0,
       memberships: memberships.rowCount ?? 0,
+      targetWords: (movedTargetWords.rowCount ?? 0) + (foldedTargetWords.rowCount ?? 0),
     };
   };
 

@@ -1,13 +1,15 @@
-import type { ClozeChoiceQuestion, ClozeTypedQuestion, Question, SentenceTranslationQuestion } from '@lang-tutor/core/api';
+import type { ClozeChoiceQuestion, ClozeTypedQuestion, LanguageCode, Question, SentenceTranslationQuestion } from '@lang-tutor/core/api';
 import { Redirect, router } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MarkedText } from '@/components/ContextLine';
 import { FeedbackBanner } from '@/components/FeedbackBanner';
 import { LetterTilesView } from '@/components/LetterTilesView';
 import { MatchingBoardView } from '@/components/MatchingBoardView';
 import { MultipleChoiceView } from '@/components/MultipleChoiceView';
+import { NewMeaningPrompt } from '@/components/NewMeaningPrompt';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SentenceGap } from '@/components/SentenceGap';
 import { SpeakButton } from '@/components/SpeakButton';
@@ -15,6 +17,7 @@ import { SpeakingCardView } from '@/components/SpeakingCardView';
 import { TypedAnswerView } from '@/components/TypedAnswerView';
 import { confirm } from '@/confirm';
 import { feedbackFor } from '@/feedback';
+import { useCardVoice } from '@/hooks/useCardVoice';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNextSession } from '@/hooks/useNextSession';
 import { useSession, type SessionValue } from '@/hooks/useSession';
@@ -22,17 +25,30 @@ import { showsSentenceTranslation, splitAtGap } from '@/sentence';
 import { isSkip } from '@/speaking';
 import { strings } from '@/strings';
 import { colors, fontSizes, lineHeights, spacing } from '@/theme';
+import { scriptGate } from '@/typedSubmit';
 
 // Phase 27 (spec D5). The gap card's prompt: the sentence with its blank, the
-// Hebrew line under it, and once answered the sentence spoken.
-function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID?: string) {
+// Hebrew line under it, and once answered the sentence spoken. Phase 34 (spec
+// D8): a typed gap's Hebrew line marks the practised word. Phase 38 (spec D1):
+// a typed gap's Hebrew line is a hint, a button until it is opened.
+type GapHint = { open: boolean; retrying: boolean; onOpen: () => void };
+
+function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered: boolean, language: string, testID?: string, hint?: GapHint) {
+  const shown = showsSentenceTranslation(question.type, { answered, hintOpen: hint?.open ?? false, retrying: hint?.retrying ?? false });
   return (
     <View style={styles.gapCard} testID={testID}>
       <SentenceGap sentence={question.sentence} gap={question.gap} filled={answered} />
-      {showsSentenceTranslation(question.type, answered) ? (
-        <Text style={styles.hebrewLine} testID="sentence-translation">
-          {question.translation}
-        </Text>
+      {shown ? (
+        <MarkedText
+          text={question.translation}
+          mark={question.type === 'cloze_typed' ? question.mark : null}
+          style={styles.hebrewLine}
+          testID="sentence-translation"
+        />
+      ) : hint ? (
+        <Pressable accessibilityRole="button" testID="sentence-hint" hitSlop={8} onPress={hint.onOpen}>
+          <Text style={styles.hint}>{strings.sentenceHint}</Text>
+        </Pressable>
       ) : null}
       {answered ? <SpeakButton text={question.sentence} language={language} testID="speak-sentence" /> : null}
     </View>
@@ -40,14 +56,13 @@ function gapPrompt(question: ClozeChoiceQuestion | ClozeTypedQuestion, answered:
 }
 
 // Phase 27 (spec D6). The translation card's prompt: the Hebrew sentence and,
-// once judged, the reference with its practised word in bold.
+// once judged, the reference with its practised word in bold. Phase 34 (spec
+// D8): the Hebrew sentence marks the practised word too.
 function translatePrompt(question: SentenceTranslationQuestion, answered: boolean, language: string) {
   const { before, word, after } = splitAtGap(question.sentence, question.gap);
   return (
     <View style={styles.gapCard}>
-      <Text style={styles.hebrewPrompt} testID="sentence-translation">
-        {question.question}
-      </Text>
+      <MarkedText text={question.question} mark={question.mark} style={styles.hebrewPrompt} testID="sentence-translation" />
       {answered ? (
         <View style={styles.reference}>
           <Text style={styles.referenceLabel}>{strings.translationReference}</Text>
@@ -65,17 +80,57 @@ function translatePrompt(question: SentenceTranslationQuestion, answered: boolea
   );
 }
 
+// Phase 38 (spec D1, D4). The typed gap card holds whether its hint is open, and
+// sends it with the first answer. Keyed by question id, so a new card starts closed.
+function ClozeTypedCard({ question, session, language, answerLanguage }: { question: ClozeTypedQuestion; session: SessionValue; language: string; answerLanguage: LanguageCode | null }) {
+  const [hintOpen, setHintOpen] = useState(false);
+  return (
+    <TypedAnswerView
+      question={question}
+      instruction={strings.questionInstructionClozeTyped(language)}
+      answerLanguage={answerLanguage}
+      language={language}
+      answered={session.answered}
+      verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
+      onSubmit={(text) => session.submitText(text, hintOpen)}
+      direction="ltr"
+      checking={session.judging === 'checking'}
+      failed={session.judging === 'failed'}
+      retry={session.retry}
+      prompt={gapPrompt(question, session.answered, language, undefined, {
+        open: hintOpen,
+        retrying: session.retry !== null,
+        onOpen: () => setHintOpen(true),
+      })}
+    />
+  );
+}
+
 // The one place the session screen dispatches on question type. Adding a type
 // means a new case here plus a view component; the header, progress bar,
 // feedback banner and scoring are untouched, and the `never` below fails the
 // build for a type with no case.
-function renderQuestion(question: Question, session: SessionValue, language: string) {
+function renderQuestion(question: Question, session: SessionValue, language: string, learner: string) {
+  // Phase 39 (spec D7, D8): the language a typed card's answer is checked in, by the server's rule.
+  const answerLanguage = scriptGate(question, language, learner);
   switch (question.type) {
     case 'multiple_choice':
       return (
         <MultipleChoiceView
           question={question}
           instruction={strings.questionInstruction}
+          language={language}
+          selectedOption={session.selectedOption}
+          onSelect={session.select}
+        />
+      );
+    case 'new_meaning':
+      // Phase 39 (spec D6): a choice of meanings, under a prompt that names the ones already known.
+      return (
+        <MultipleChoiceView
+          question={question}
+          instruction={strings.questionInstructionNewMeaning}
+          prompt={<NewMeaningPrompt question={question} language={language} />}
           language={language}
           selectedOption={session.selectedOption}
           onSelect={session.select}
@@ -92,17 +147,21 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         />
       );
     case 'typed_translation':
+      // Phase 34 (spec D9): another accepted word waits for the server to hold
+      // the card, so it checks and fails as a judged card does.
       return (
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionTyped(language)}
+          answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           onSubmit={session.submitText}
           direction="ltr"
-          checking={false}
-          failed={false}
+          checking={session.judging === 'checking'}
+          failed={session.judging === 'failed'}
+          retry={session.retry}
         />
       );
     case 'cloze_choice':
@@ -118,32 +177,21 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       );
     case 'cloze_typed':
       // Judged on the phone against the gap's word, as a typed translation is.
-      return (
-        <TypedAnswerView
-          question={question}
-          instruction={strings.questionInstructionClozeTyped(language)}
-          language={language}
-          answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
-          onSubmit={session.submitText}
-          direction="ltr"
-          checking={false}
-          failed={false}
-          prompt={gapPrompt(question, session.answered, language)}
-        />
-      );
+      return <ClozeTypedCard key={question.id} question={question} session={session} language={language} answerLanguage={answerLanguage} />;
     case 'sentence_translation':
       return (
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionTranslate(language)}
+          answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           direction="ltr"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
           onSubmit={session.submitJudged}
+          retry={session.retry}
           prompt={translatePrompt(question, session.answered, language)}
         />
       );
@@ -151,14 +199,16 @@ function renderQuestion(question: Question, session: SessionValue, language: str
       return (
         <TypedAnswerView
           question={question}
-          instruction={strings.questionInstructionMeaning}
+          instruction={strings.questionInstructionMeaning(learner)}
+          answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           direction="rtl"
           checking={session.judging === 'checking'}
           failed={session.judging === 'failed'}
           onSubmit={session.submitJudged}
+          retry={session.retry}
         />
       );
     case 'listen_choice':
@@ -176,13 +226,15 @@ function renderQuestion(question: Question, session: SessionValue, language: str
         <TypedAnswerView
           question={question}
           instruction={strings.questionInstructionDictation(language)}
+          answerLanguage={answerLanguage}
           language={language}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           onSubmit={session.submitText}
           direction="ltr"
           checking={false}
           failed={false}
+          retry={null}
         />
       );
     case 'letter_tiles':
@@ -191,7 +243,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           question={question}
           instruction={strings.questionInstructionTiles(language)}
           answered={session.answered}
-          verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+          verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
           onSubmit={session.submitText}
         />
       );
@@ -201,6 +253,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           key={question.id}
           question={question}
           instruction={strings.questionInstructionMatching}
+          language={language}
           answered={session.answered}
           onComplete={session.submitBoard}
         />
@@ -221,6 +274,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onPass={session.pass}
           onCantSpeak={session.stopSpeaking}
           onRecordFailed={session.markSpeechFailed}
+          retry={null}
         />
       );
     case 'say_translation':
@@ -231,13 +285,15 @@ function renderQuestion(question: Question, session: SessionValue, language: str
             <TypedAnswerView
               question={question}
               instruction={strings.questionInstructionTyped(language)}
+              answerLanguage={answerLanguage}
               language={language}
               answered={session.answered}
-              verdict={session.answer ? feedbackFor(question, session.answer).verdict : null}
+              verdict={session.answer ? feedbackFor(question, session.answer, session.retry).verdict : null}
               onSubmit={session.submitText}
               direction="ltr"
-              checking={false}
-              failed={false}
+              checking={session.judging === 'checking'}
+              failed={session.judging === 'failed'}
+              retry={session.retry}
             />
           </View>
         );
@@ -255,6 +311,7 @@ function renderQuestion(question: Question, session: SessionValue, language: str
           onPass={session.pass}
           onCantSpeak={session.stopSpeaking}
           onRecordFailed={session.markSpeechFailed}
+          retry={session.retry}
         />
       );
     default: {
@@ -270,6 +327,15 @@ export default function SessionScreen() {
   const { active } = useCurrentUser();
   // Re-entry guard: a fast double tap on skip must not stack two confirms.
   const skipping = useRef(false);
+  // A session is always entered from home, which needs an active enrollment;
+  // an empty language only drops the name from the instruction.
+  const language = active?.target_language ?? '';
+  // Phase 44 (spec D2): the card reads itself aloud.
+  useCardVoice(session.question ?? null, {
+    language,
+    banner: session.answer !== null && !isSkip(session.answer),
+    speaking: session.speakingOff === null,
+  });
   // Phase 27: what a meaning card last sent, so "try again" sends the same text.
 
   // Results replaces Session in the stack, so backing out of Results reaches
@@ -309,9 +375,8 @@ export default function SessionScreen() {
     return null;
   }
 
-  // A session is always entered from home, which needs an active enrollment;
-  // an empty language only drops the name from the instruction.
-  const language = active?.target_language ?? '';
+  // Phase 39 (spec D9): a typed meaning is answered in the learner's language.
+  const learner = active?.source_language ?? 'he';
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -347,12 +412,12 @@ export default function SessionScreen() {
               {strings.noMicrophone}
             </Text>
           ) : null}
-          {renderQuestion(question, session, language)}
+          {renderQuestion(question, session, language, learner)}
         </ScrollView>
       </KeyboardAvoidingView>
 
       {session.answer && !isSkip(session.answer) ? (
-        <FeedbackBanner feedback={feedbackFor(question, session.answer)} onContinue={session.next} />
+        <FeedbackBanner feedback={feedbackFor(question, session.answer, session.retry)} onContinue={session.next} />
       ) : null}
     </SafeAreaView>
   );
@@ -361,6 +426,7 @@ export default function SessionScreen() {
 const styles = StyleSheet.create({
   gapCard: { gap: spacing.md, alignItems: 'center' },
   hebrewLine: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.muted, textAlign: 'center', writingDirection: 'rtl' },
+  hint: { fontSize: fontSizes.md, lineHeight: lineHeights.md, color: colors.primary, fontWeight: '700', writingDirection: 'rtl' },
   hebrewPrompt: { fontSize: fontSizes.xl, lineHeight: lineHeights.xl, color: colors.text, textAlign: 'center', writingDirection: 'rtl' },
   reference: { gap: spacing.xs, alignItems: 'center' },
   referenceLabel: { fontSize: fontSizes.sm, lineHeight: lineHeights.sm, color: colors.muted, writingDirection: 'rtl' },

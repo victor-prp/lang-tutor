@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createApp } from './app';
+import { createRequestLog } from './routes/requestLog';
 import type { AppDeps } from './composition';
 import type { EnrollmentService } from './services/enrollments';
 import type { SessionService } from './services/sessions';
@@ -19,10 +20,19 @@ const unreachableSessions: SessionService = {
   answerJudged: () => {
     throw new Error('the health route must not reach the session service');
   },
+  answerText: () => {
+    throw new Error('the health route must not reach the session service');
+  },
   answerBySpeech: () => {
     throw new Error('the health route must not reach the session service');
   },
   createNextSession: () => {
+    throw new Error('the health route must not reach the session service');
+  },
+  startSession: () => {
+    throw new Error('the health route must not reach the session service');
+  },
+  stockSession: () => {
     throw new Error('the health route must not reach the session service');
   },
   getSession: () => {
@@ -52,6 +62,9 @@ const unreachableUsers: UserService = {
   me: () => {
     throw new Error('the health route must not reach the user service');
   },
+  setTimeZone: () => {
+    throw new Error('the health route must not reach the user service');
+  },
   hasProfile: () => {
     throw new Error('the health route must not reach the user service');
   },
@@ -74,6 +87,12 @@ const unreachableTranslations: TranslationService = {
     throw new Error('the health route must not reach the translation service');
   },
   failLemmaRender: () => {
+    throw new Error('the health route must not reach the translation service');
+  },
+  acceptRendering: () => {
+    throw new Error('the health route must not reach the translation service');
+  },
+  failAcceptRendering: () => {
     throw new Error('the health route must not reach the translation service');
   },
 };
@@ -109,29 +128,48 @@ const unreachableGrants: GrantService = {
 };
 const unreachablePhotoImports = createFakeAppDeps().photoImports;
 
-function depsWithPing(ok: boolean): AppDeps {
+function depsWithPing(ok: boolean, logger = createFakeLogger()): AppDeps {
   return {
     grants: unreachableGrants,
+    reminders: createFakeAppDeps().reminders,
     sessions: unreachableSessions,
     users: unreachableUsers,
     enrollments: unreachableEnrollments,
     translations: unreachableTranslations,
     vocabulary: unreachableVocabulary,
     photoImports: unreachablePhotoImports,
+    targets: createFakeAppDeps().targets,
     glosses: createFakeAppDeps().glosses,
     health: { ping: async () => ok },
-    identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001, version: 'v-test' },
+    identity: { lane: 'phase_15', database: 'lang_tutor_phase_15', port: 4001, version: 'v-test', commit: 'a3f9c21' },
     webDistDir: null,
-    logger: createFakeLogger(),
+    logger,
+    requestLog: createRequestLog({ logger, now: () => 0, bodies: true }),
     auth: createFakeAppDeps().auth,
     signedIn: createFakeAppDeps().signedIn,
     webOrigins: createFakeAppDeps().webOrigins,
     bots: null,
+    reminderTick: null,
   };
 }
 
 // No database: the health route's two branches are both reachable with a fake.
 // The app's one database-backed case lives in tests/integration/app.test.ts.
+// The request log is registered on /api/* only: /health is Lightsail's check,
+// every few seconds, and would drown every other line.
+describe('the request log', () => {
+  it('logs an /api request and leaves /health out', async () => {
+    const logger = createFakeLogger();
+    const app = createApp(depsWithPing(true, logger));
+    await app.request('/health');
+    await app.request('/api/auth/nowhere');
+    expect(logger.events).toEqual([
+      expect.objectContaining({ event: 'request_started', path: '/api/auth/nowhere' }),
+      expect.objectContaining({ event: 'request_finished', path: '/api/auth/nowhere', status: 404 }),
+    ]);
+  });
+});
+
 describe('GET /health', () => {
   it('returns 200 and names the lane that answered when the check passes', async () => {
     const res = await createApp(depsWithPing(true)).request('/health');
@@ -142,6 +180,7 @@ describe('GET /health', () => {
       database: 'lang_tutor_phase_15',
       port: 4001,
       version: 'v-test',
+      commit: 'a3f9c21',
     });
   });
 
@@ -157,6 +196,7 @@ describe('GET /health', () => {
       database: 'lang_tutor_phase_15',
       port: 4001,
       version: 'v-test',
+      commit: 'a3f9c21',
     });
   });
 });

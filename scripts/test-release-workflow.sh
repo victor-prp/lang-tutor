@@ -14,7 +14,8 @@
 #     which is a rollback, passes --rollback so it can never build;
 #   - the job reads the ANDROID_RELEASE repository variable; without it the
 #     script would skip every release, green, and nobody would notice. The job
-#     itself is skipped unless the variable is on, so the run shows it greyed out.
+#     itself is skipped unless the variable is on, so the run shows it greyed out;
+#   - (phase 49) the image carries the tag's commit, for /health and the About screen;
 #   - (phase 36) the ios job holds the same facts with IOS_RELEASE, and each
 #     job passes its own platform to scripts/native-release.sh.
 
@@ -51,6 +52,7 @@ echo
 expect "the apply job checks out master" 0 apply '^[[:space:]]+ref: master$'
 expect "the apply job runs scripts/infra.sh" 0 apply 'scripts/infra.sh prod apply'
 expect "build-push builds the tag, not master" 1 build-push 'ref:'
+expect "build-push stamps the commit into the image (phase 49)" 0 build-push 'APP_COMMIT=\$\{GITHUB_SHA::7\}'
 expect "android runs after apply" 0 android '^[[:space:]]+needs: apply$'
 expect "android ships the tag, not master" 1 android 'ref:'
 expect "android passes --rollback on a dispatch" 0 android "workflow_dispatch' && '--rollback'"

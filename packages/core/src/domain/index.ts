@@ -4,6 +4,8 @@ export {
   SESSION_LENGTH,
   answerFits,
   evaluate,
+  evaluateRetry,
+  evidenceVerdict,
   isChoice,
   isJudged,
   isSpeaking,
@@ -18,13 +20,16 @@ export {
   verdictCorrect,
 } from './quiz';
 export type { AnswerInput, ChoiceQuestion, JudgedQuestion, QuestionType, SpeakingQuestion } from './quiz';
-export { MAX_SPOKEN_WORDS, judgeSpoken, speakable, spokenWords } from './spoken';
-export type { SpokenTarget } from './spoken';
-export { judgeTiles, judgeTyped, normaliseTyped } from './typed';
+export { MAX_SOUND_PAIRS, MAX_SPOKEN_WORDS, judgeSpoken, soundPairs, speakable, spokenWords } from './spoken';
+export type { SoundPair, SpokenTarget } from './spoken';
+export { bare as withoutLeadingWord, judgeTiles, judgeTyped, normaliseTyped, wordOnly } from './typed';
 export type { TypedTarget } from './typed';
 export { DIMENSIONS, LIVE_DIMENSIONS, MAX_LEVEL, MIN_LEVEL, badge } from './progress';
 export type { Dimension } from './progress';
+export { SCRIPTS, answerLanguage, gatesScript, isTypedAnswerType, wrongScript } from './script';
+export type { TypedAnswerType } from './script';
 export { normaliseGloss } from './gloss';
+export { firstRowPerGloss } from './importRows';
 export { FSRS6_DEFAULT, retrievability, review } from './memory';
 export type { Grade, MemoryState } from './memory';
 export { dimensionsTested, gradesFor } from './memoryGrades';

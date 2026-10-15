@@ -1,6 +1,7 @@
 import type { APIRequestContext } from '@playwright/test';
 
 import { MOCKSERVER_URL, requireEnv } from '../../urls';
+import { STUB_SENTENCE } from './cards';
 
 /**
  * One namespace for the whole run rather than one per test: the server is a
@@ -26,11 +27,104 @@ function envelope(payload: unknown) {
   });
 }
 
+/**
+ * Clears the namespace, then registers again the answers every list session's
+ * preparation needs besides the batch (phase 34, below): a spec registers its
+ * own stubs after this, as before, and never loses those.
+ */
 export async function clearGemini(request: APIRequestContext): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/clear`, {
     data: { path: `/${E2E_MOCK_NAMESPACE}/.*` },
   });
   if (!res.ok()) throw new Error(`MockServer clear failed: ${res.status()}`);
+  await expectPreparationDefaults(request);
+}
+
+/**
+ * Phase 34. Each in the server's prompt verbatim, so a stub answers its own
+ * call and no other: ACCEPT_MARKER (apps/server/src/domain/accept.ts),
+ * CONTEXT_MARKER (domain/context.ts) and CHECK_MARKER (domain/check.ts).
+ */
+const ACCEPT_MARKER = 'every right translation';
+const CONTEXT_MARKER = 'pins the sense';
+const CHECK_MARKER = 'a second opinion';
+
+/** Above the broad generation stub (no priority), below a spec's own answer to
+ *  the same call (expectContext's and expectCheck's default). */
+const DEFAULT_PRIORITY = 5;
+const OVERRIDE_PRIORITY = 10;
+
+async function expectMarked(
+  request: APIRequestContext,
+  marker: string,
+  payload: unknown,
+  priority: number,
+): Promise<void> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      priority,
+      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: `[\\s\\S]*${marker}[\\s\\S]*` } },
+      httpResponse: { statusCode: 200, headers: { 'content-type': ['application/json'] }, body: envelope(payload) },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
+
+/**
+ * Phase 34. A list session's preparation makes three calls besides the batch,
+ * and these answer each one so that a session prepares as it did before them:
+ *
+ * - **accept** (spec D1): every rendering a session picks is asked once, in a
+ *   background job. Answered with no other right word and no answer form, which
+ *   stamps the rendering, so the job never retries. A failed one would retry in
+ *   the background and could take a later spec's one-shot or body-matched stub.
+ * - **context** (spec D6, D8): no sentence for any card, so every card falls
+ *   back on its saved example, or shows none, and a sentence card is unmarked.
+ * - **checker** (spec D5): it must name every option, or the attempt fails.
+ *   expectCheck's answer keeps every card as the batch stubs made it.
+ *
+ * Registered by clearGemini, so every spec has them however it clears.
+ */
+async function expectPreparationDefaults(request: APIRequestContext): Promise<void> {
+  await expectMarked(request, ACCEPT_MARKER, { answers: [], answer_form: null }, DEFAULT_PRIORITY);
+  await expectContext(request, [], DEFAULT_PRIORITY);
+  await expectCheck(request, {}, DEFAULT_PRIORITY);
+}
+
+/** Phase 34 (spec D6, D8). The context call's answer: per key, the sentence a
+ *  bare-word card shows (`context`, `context_translation`, and `context_word`,
+ *  the word to mark), or the practised word in a sentence card's Hebrew
+ *  (`sentence_word`). A key left out falls back. Ranks above the default. */
+export async function expectContext(
+  request: APIRequestContext,
+  items: { key: string; context?: string; context_translation?: string; context_word?: string; sentence_word?: string }[],
+  priority = OVERRIDE_PRIORITY,
+): Promise<void> {
+  await expectMarked(request, CONTEXT_MARKER, { items }, priority);
+}
+
+/**
+ * Phase 34 (spec D5). The checker's answer for q1 to q10: each of the three
+ * wrong options the batch stubs write (cards.ts) is wrong, as an option and in
+ * a gap, and a sentence card's Hebrew translates naturally as STUB_SENTENCE,
+ * which uses STUB_GAP, so the card is kept. It reads no context sentence, so
+ * one the context call wrote is dropped: `overrides` says how the checker
+ * reads one (`q3c`: `{ context_words }` for a Hebrew sentence,
+ * `{ context_meaning }` for a target-language one). Ranks above the default.
+ */
+export async function expectCheck(
+  request: APIRequestContext,
+  overrides: Record<string, Record<string, unknown>> = {},
+  priority = OVERRIDE_PRIORITY,
+): Promise<void> {
+  const wrong = [false, false, false];
+  const items = [
+    ...Array.from({ length: 10 }, (_, i) => ({ key: `q${i + 1}`, options: wrong, gap_fits: wrong, natural_translation: STUB_SENTENCE })),
+    ...Object.keys(overrides)
+      .filter((key) => !/^q([1-9]|10)$/.test(key))
+      .map((key) => ({ key })),
+  ].map((item) => ({ ...item, ...overrides[item.key] }));
+  await expectMarked(request, CHECK_MARKER, { items }, priority);
 }
 
 export async function expectGemini(
@@ -78,8 +172,8 @@ export async function expectGeminiFailure(
 }
 
 /** Phase 19. Any model answer, not only a translation: the distractor call's
- *  `{ items: [...] }`. The spec clears the namespace first, so this is the only
- *  expectation and needs no body match. */
+ *  `{ items: [...] }`. The spec clears the namespace first, so this needs no
+ *  body match: the only stubs beside it are phase 34's, each on its marker. */
 export async function expectGeminiPayload(request: APIRequestContext, payload: unknown): Promise<void> {
   const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
     data: {
@@ -160,6 +254,25 @@ export async function expectTranscription(request: APIRequestContext, heard: str
   if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
 }
 
+/** Phase 50 (spec D2). The sound-alike call's answer for one pair, matched on
+ *  the server's SOUND_ALIKE_MARKER (apps/server/src/domain/soundAlike.ts) and
+ *  on the heard word, so two queued answers cannot swap. Consumed once. */
+export async function expectSoundAlike(request: APIRequestContext, heard: string, score: number): Promise<void> {
+  const res = await request.put(`${MOCKSERVER_URL}/mockserver/expectation`, {
+    data: {
+      priority: 10,
+      httpRequest: { method: 'POST', path, body: { type: 'REGEX', regex: `(?=[\\s\\S]*how alike they sound)[\\s\\S]*${heard}[\\s\\S]*` } },
+      httpResponse: {
+        statusCode: 200,
+        headers: { 'content-type': ['application/json'] },
+        body: envelope({ scores: [{ key: 'p1', score }] }),
+      },
+      times: { remainingTimes: 1, unlimited: false },
+    },
+  });
+  if (!res.ok()) throw new Error(`MockServer expectation failed: ${res.status()}`);
+}
+
 /**
  * Phase 26. A model answer for the one call whose request body matches
  * `bodyRegex`. A photo import makes several calls at once (the read, a lookup
@@ -225,13 +338,13 @@ export async function codeFor(request: APIRequestContext, email: string): Promis
   return digits;
 }
 
-/** Phase 27. The meaning judge's answer (or, with `misspelled` or `other_word`, the translation judge's), matched on the server's JUDGE_MARKER
+/** Phase 27. The meaning judge's answer (or, with `misspelled` or `other_word`, the translation judge's; with `fits`, phase 41's fit check), matched on the server's JUDGE_MARKER
  *  (apps/server/src/domain/judge.ts) and ranked above the generation stub.
  *  Consumed once, in registration order. `status` makes it a failed call
  *  instead; `delayMs` holds the answer back so the "checking" state can be seen. */
 export async function expectJudge(
   request: APIRequestContext,
-  verdict: 'right' | 'other_sense' | 'wrong' | 'misspelled' | 'other_word',
+  verdict: 'right' | 'other_sense' | 'wrong' | 'misspelled' | 'other_word' | 'fits',
   opts: { status?: number; delayMs?: number } = {},
 ): Promise<void> {
   const failed = opts.status !== undefined && opts.status !== 200;

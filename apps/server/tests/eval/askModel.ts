@@ -3,7 +3,11 @@ import { join } from 'node:path';
 
 import { LlmTranscriptSchema } from '@lang-tutor/core/api/schemas';
 import type {
+  ClozeTypedQuestion,
   LanguageCode,
+  LlmAccept,
+  LlmCheck,
+  LlmContext,
   TypedVerdict,
   LlmDistractors,
   LlmEntry,
@@ -15,14 +19,19 @@ import type {
   TranslationSense,
 } from '@lang-tutor/core/api';
 
+import { buildAcceptPrompt, parseAccept, validateAccept, type AcceptInput } from '../../src/domain/accept';
+import { buildCheckPrompt, parseCheck, type CheckItem } from '../../src/domain/check';
+import { buildContextPrompt, parseLlmContext, type ContextItem } from '../../src/domain/context';
 import {
   buildDistractorPrompt,
   parseLlmDistractors,
   type DistractorItem,
 } from '../../src/domain/distractors';
 import {
+  buildFitJudgePrompt,
   buildMeaningJudgePrompt,
   buildTranslationJudgePrompt,
+  parseFitJudge,
   parseMeaningJudge,
   parseTranslationJudge,
   type JudgeContext,
@@ -38,10 +47,14 @@ import {
   parseLlmTranslation,
   resolveCorrection,
   resolveKind,
+  unfence,
   type StoredSense,
 } from '../../src/domain/translation';
 import { flattenEntries, mergeEntries, normalizeForm } from '../../src/domain/dictionary';
+import { LANGUAGES } from '../../src/domain/languages';
+import { buildSoundAlikePrompt, orderedPair, parseSoundAlike } from '../../src/domain/soundAlike';
 import type { LlmClient } from '../../src/services/llm';
+import { z } from 'zod';
 
 /**
  * The real prompt, the real client, the real parser — everything
@@ -75,7 +88,7 @@ export async function askModel(
   const text = input.text.trim();
   const { from, to } = input;
 
-  const raw = await llm(buildPrompt({ text, from, to }));
+  const raw = await llm({ ...buildPrompt({ text, from, to }), record: { kind: 'lookup' } });
   // An empty string is the contract's "no content" — a safety block, or a
   // candidate with no text. The input was refused; nothing is broken.
   if (raw === '') return { from, to, kind: resolveKind(text, 'word'), entries: [], senses: [] };
@@ -126,7 +139,7 @@ export async function askRendering(
     storedSenses: StoredSense[];
   },
 ): Promise<LlmReconciliation> {
-  const raw = await llm(buildRenderingPrompt(input));
+  const raw = await llm({ ...buildRenderingPrompt(input), record: { kind: 'rendering' } });
   // Unlike call 1, an empty answer here is not "the input was refused" — the
   // input is a form the model already returned an entry for. It is a failure.
   if (raw === '') throw new Error('the model returned no content for the rendering call');
@@ -143,7 +156,7 @@ export async function askDistractors(
   llm: LlmClient,
   input: { from: LanguageCode; to: LanguageCode; items: DistractorItem[] },
 ): Promise<LlmDistractors> {
-  const raw = await llm(buildDistractorPrompt({ ...input, others: [] }));
+  const raw = await llm({ ...buildDistractorPrompt({ ...input, others: [] }), record: { kind: 'session_generation' } });
   const answer = raw === '' ? null : parseLlmDistractors(raw);
   if (!answer) throw new Error(`unreadable distractor answer: ${raw.slice(0, 200)}`);
   return answer;
@@ -161,6 +174,7 @@ export async function askTranscription(
     audio,
     mimeType: 'audio/aac',
     schema: LlmTranscriptSchema,
+    record: { kind: 'transcription' },
   });
   return parseTranscript(raw);
 }
@@ -171,12 +185,96 @@ export async function askTranslationJudge(
   llm: LlmClient,
   kase: { question: SentenceTranslationQuestion; context: JudgeContext; answer: string },
 ): Promise<TypedVerdict | null> {
-  return parseTranslationJudge(await llm(buildTranslationJudgePrompt(kase.question, kase.context, kase.answer)));
+  return parseTranslationJudge(
+    await llm({ ...buildTranslationJudgePrompt(kase.question, kase.context, kase.answer), record: { kind: 'translation_judge' } }),
+  );
+}
+
+/** Phase 50 (spec D2). The real sound-alike prompt and parser, as answerBySpeech
+ *  calls them: each pair ordered as it is stored, one call for all of them. */
+export async function askSoundAlike(
+  llm: LlmClient,
+  kase: { language: LanguageCode; pairs: { a: string; b: string }[] },
+): Promise<(number | null)[] | null> {
+  const pairs = kase.pairs.map(({ a, b }) => orderedPair({ heard: a, form: b }));
+  return parseSoundAlike(await llm({ ...buildSoundAlikePrompt(kase.language, pairs), record: { kind: 'sound_alike' } }), pairs.length);
+}
+
+/** Phase 41 (spec D2). The real fit prompt and parser, as answerText calls them. */
+export async function askFitJudge(
+  llm: LlmClient,
+  kase: { question: ClozeTypedQuestion; language: LanguageCode; answer: string },
+): Promise<'fits' | 'wrong' | null> {
+  return parseFitJudge(await llm({ ...buildFitJudgePrompt(kase.question, kase.language, kase.answer), record: { kind: 'fit_judge' } }));
+}
+
+const GapGuessesSchema = z.object({ guesses: z.array(z.string()) });
+
+/**
+ * Phase 41 (spec D1). The eval's own probe, no call the app makes: the three
+ * words a reader would most likely put in a gapped sentence read alone. A
+ * sentence that points to its word has that word, or one of its meaning, here.
+ */
+export async function askGapGuesses(llm: LlmClient, kase: { language: LanguageCode; sentence: string }): Promise<string[]> {
+  const raw = await llm({
+    system: [
+      `A ${LANGUAGES[kase.language].name} sentence has one word left out, marked ___.`,
+      'Return JSON only, matching the supplied schema: in guesses, the three words a native reader would most likely put in the gap, likeliest first, each in the form the gap needs.',
+    ].join('\n'),
+    user: JSON.stringify({ sentence: kase.sentence }),
+    schema: GapGuessesSchema,
+    // An eval-only probe with no production twin; the eval records nothing (phase 47 R6).
+    record: { kind: 'fit_judge' },
+  });
+  const parsed = GapGuessesSchema.safeParse(JSON.parse(unfence(raw)));
+  return parsed.success ? parsed.data.guesses.slice(0, 3) : [];
 }
 
 export async function askJudge(
   llm: LlmClient,
   kase: { context: MeaningJudgeContext; answer: string },
 ): Promise<TypedVerdict | null> {
-  return parseMeaningJudge(await llm(buildMeaningJudgePrompt(kase.context, kase.answer)));
+  return parseMeaningJudge(await llm({ ...buildMeaningJudgePrompt(kase.context, kase.answer), record: { kind: 'judge' } }));
+}
+
+/** Phase 34 (spec D1, D2). The real accept prompt, parser and validation, as the
+ *  accept job uses them, minus the database. `raw` is the answer as the model
+ *  wrote it, which the placeholder check reads; `answers` and `answerForm` are
+ *  what the server would store. An empty answer is the provider's "no content",
+ *  stored as an empty list; an unreadable one throws, and tier 1 records it. */
+export async function askAccept(
+  llm: LlmClient,
+  input: AcceptInput,
+): Promise<{ raw: LlmAccept; answers: string[]; answerForm: string | null }> {
+  const text = await llm({ ...buildAcceptPrompt(input), record: { kind: 'accept' } });
+  const raw = text === '' ? { answers: [], answer_form: null } : parseAccept(text);
+  if (!raw) throw new Error(`unreadable accept answer: ${text.slice(0, 200)}`);
+  return { raw, ...validateAccept(input, raw) };
+}
+
+/** Phase 34 (spec D6, D8; ruling R8). The real context prompt and parser, as
+ *  prepareSession sends them after the batch, minus the database. Throws on an
+ *  empty or unreadable answer: tier 1 then records it as a failed call (the
+ *  session would go on without it, ruling R11, but the prompt has failed). */
+export async function askContext(
+  llm: LlmClient,
+  input: { from: LanguageCode; to: LanguageCode; items: ContextItem[] },
+): Promise<LlmContext> {
+  const raw = await llm({ ...buildContextPrompt(input), record: { kind: 'context' } });
+  const answer = raw === '' ? null : parseLlmContext(raw);
+  if (!answer) throw new Error(`unreadable context answer: ${raw.slice(0, 200)}`);
+  return answer;
+}
+
+/** Phase 34 (spec D5). The real checker prompt and parser, as prepareSession
+ *  sends them after the context call, minus the database. Throws on an empty or
+ *  unreadable answer: the session would fail the attempt on it too. */
+export async function askCheck(
+  llm: LlmClient,
+  input: { from: LanguageCode; to: LanguageCode; items: CheckItem[] },
+): Promise<LlmCheck> {
+  const raw = await llm({ ...buildCheckPrompt(input.items, input.from, input.to), record: { kind: 'checker' } });
+  const answer = raw === '' ? null : parseCheck(raw);
+  if (!answer) throw new Error(`unreadable checker answer: ${raw.slice(0, 200)}`);
+  return answer;
 }

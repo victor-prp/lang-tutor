@@ -98,7 +98,7 @@ variable "secret_prefix" {
 variable "secret_env_names" {
   description = "Secrets Manager entries under secret_prefix, each passed to the container under its own name. Each must exist before a plan: write it first (runbook)."
   type        = list(string)
-  default     = ["GEMINI_API_KEY", "BETTER_AUTH_SECRET", "RESEND_API_KEY", "BOT_SECRET"]
+  default     = ["GEMINI_API_KEY", "BETTER_AUTH_SECRET", "RESEND_API_KEY", "BOT_SECRET", "REMINDER_SECRET"]
 }
 
 variable "mail_from" {

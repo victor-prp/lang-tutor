@@ -220,6 +220,16 @@ npm run server       # terminal 1
 npm run mobile       # terminal 2
 ```
 
+**After a merge**, `npm run rerun` in the main checkout does the rest in one terminal. It pulls
+`master` (fast-forward only), runs `npm install` when `package-lock.json` changed since the
+last install, then `npm run db:migrate`, then stops the server and Metro this checkout is running, and starts
+both again: the server in the background with its lines prefixed `[server]`, Metro in the
+foreground with its QR code and keys. Metro starts only once `/health` names the commit just
+pulled, and Ctrl-C stops both. The first step that fails stops it and names itself, and
+nothing is stopped before pull, install and migrate succeed. It never stops a process
+started outside this checkout, or one whose process group a shell leads; it names those for
+you to stop yourself. It runs only in lane 0 on `master`.
+
 > **Migrations `0003` and `0005` each clear the dictionary and the quiz.** Both run
 > `TRUNCATE dict_lexemes, sessions CASCADE` before restructuring, so applying either drops
 > every seeded and looked-up word, every question, and all session history — `answers`,
@@ -331,6 +341,8 @@ Since phase 9 the server calls a third-party model, so it needs credentials to s
 | `GEMINI_MODEL` | none — the server refuses to start | `gemini-2.5-flash` is the id phase 9 was scored against. |
 | `APP_VERSION` | `dev` | Phase 30. The release tag, published on `/health`. The image sets it from its build argument. |
 | `WEB_DIST_DIR` | unset — the server answers the API only | Phase 30. The web export the server serves. Set only inside the image, to `/app/web`. |
+| `PUSH_BASE_URL` | `https://exp.host` | Phase 52. Expo's push service, which the reminder tick sends through. Tests and e2e point it at a MockServer namespace. |
+| `REMINDER_SECRET` | unset — the tick route is not mounted | Phase 52. At least 32 characters. The bearer secret of `POST /api/internal/reminders/tick`, which EventBridge calls every five minutes; unset, `/api/internal/*` answers 404. Production sets it from Secrets Manager. |
 
 `npm run db:migrate` needs none of these: migrations read `loadConfig` only.
 
@@ -765,9 +777,17 @@ TestFlight build. On an iPad, and in a wide browser window, every screen sits in
 column at most 640 points wide
 ([phase 36 design](docs/superpowers/specs/2026-10-11-lang-tutor-phase-36-ios-app-design.md)).
 The repository variable `IOS_RELEASE` switches the `ios` job, as `ANDROID_RELEASE` does
-`android`: off, the release run shows it as skipped. A TestFlight build expires after 90 days, so the job rebuilds at 80, and a release
-is due at least that often. Running it in the iOS simulator, the one-time Apple setup and what
+`android`: off, the release run shows it as skipped. A TestFlight build expires after 90 days,
+so the job rebuilds at 80, and a release is due at least that often. Running it in the iOS simulator, the one-time Apple setup and what
 each release prints are in the [iOS runbook](docs/runbooks/ios.md).
+
+### Practice reminders
+
+Since phase 52 the Android app reminds a learner to practise with a push notification. An
+EventBridge rule calls the server's internal tick route every five minutes, and the `remind` job
+sends what is due through Expo's push service. The Firebase setup, the secret, the rule's key, the
+check on a phone and the queries that show whether reminders work are in the
+[reminders runbook](docs/runbooks/reminders.md).
 
 ## End-to-end test
 

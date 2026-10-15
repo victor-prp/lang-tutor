@@ -18,6 +18,9 @@ import { migrationsUpTo } from '../../support/migrations';
  * inserts rows the old schema allowed, then runs the rest. The name comes from
  * testDbName, so globalSetup's sweep reclaims it.
  */
+// Phase 34 (spec D9). What every answer that opens no second try carries.
+const NO_RETRY = { retry_state: null, retry_answer_string: null, retry_verdict: null };
+
 const opened: { close: () => Promise<void> }[] = [];
 
 afterEach(async () => {
@@ -284,13 +287,14 @@ describe('0015_question_types', () => {
       const before = await repo.loadSession(session.id);
       expect(before!.questions.map((q) => q.type)).toEqual(['multiple_choice', 'multiple_choice']);
       expect(before!.questions[0]).toMatchObject({ question: 'kite', options: ['ב', 'עפיפון', 'ג', 'א'], correct_option: 1 });
-      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון' }]);
+      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון', ...NO_RETRY }]);
 
       await repo.insertAnswer(session.id, 1, 'q2', { displayIndex: 2 });
       expect((await repo.loadSession(session.id))!.answers[1]).toEqual({
         question_id: 'q2',
         is_correct: false,
         answer_string: 'ב',
+        ...NO_RETRY,
       });
     });
   });
@@ -347,7 +351,7 @@ describe('0016_listening_variety', () => {
       const repo = createSessionRepo(tx);
       const before = await repo.loadSession(session.id);
       expect(before!.questions.map((q) => q.type)).toEqual(['multiple_choice', 'typed_translation']);
-      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון' }]);
+      expect(before!.answers).toEqual([{ question_id: 'q1', is_correct: true, answer_string: 'עפיפון', ...NO_RETRY }]);
 
       await repo.insertAnswer(session.id, 1, 'q2', { text: 'kite', verdict: 'exact' });
       expect((await repo.loadSession(session.id))!.answers[1]).toMatchObject({ question_id: 'q2', is_correct: true });
@@ -466,19 +470,20 @@ describe('0017_speaking_cards', () => {
       const repo = createSessionRepo(tx);
       const before = await repo.loadSession(session.id);
       expect(before!.answers.slice(0, 5)).toEqual([
-        { question_id: 'q1', is_correct: true, answer_string: 'עפיפון' },
-        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact' },
-        { question_id: 'q3', is_correct: true, answer_string: 'kyte', verdict: 'near_miss' },
-        { question_id: 'q3', is_correct: true, answer_string: 'toy', verdict: 'alternative' },
-        { question_id: 'q3', is_correct: false, answer_string: 'bird', verdict: 'wrong' },
+        { question_id: 'q1', is_correct: true, answer_string: 'עפיפון', ...NO_RETRY },
+        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact', ...NO_RETRY },
+        { question_id: 'q3', is_correct: true, answer_string: 'kyte', verdict: 'near_miss', ...NO_RETRY },
+        // Phase 34 (spec D9): an alternative stored before the second try holds nothing.
+        { question_id: 'q3', is_correct: true, answer_string: 'toy', verdict: 'alternative', ...NO_RETRY },
+        { question_id: 'q3', is_correct: false, answer_string: 'bird', verdict: 'wrong', ...NO_RETRY },
       ]);
 
       await repo.insertAnswer(session.id, 5, 'q1', { displayIndex: 1 });
       await repo.insertAnswer(session.id, 6, 'q3', { text: 'kite', verdict: 'exact' });
       const after = await repo.loadSession(session.id);
       expect(after!.answers.slice(5, 7)).toEqual([
-        { question_id: 'q1', is_correct: false, answer_string: 'א' },
-        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact' },
+        { question_id: 'q1', is_correct: false, answer_string: 'א', ...NO_RETRY },
+        { question_id: 'q3', is_correct: true, answer_string: 'kite', verdict: 'exact', ...NO_RETRY },
       ]);
     });
   });
@@ -665,7 +670,8 @@ describe('0020_sentence_cards', () => {
     await expect(insertQuestion('s1', 'cloze_choice', { ...sentence, prompt: 'עפיפון' })).rejects.toMatchObject(shape);
     await expect(insertQuestion('s2', 'cloze_choice', { ...sentence, options, prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject(shape);
     await expect(insertQuestion('s3', 'cloze_typed', { ...sentence, prompt: 'עפיפון', options, alternatives: '{}' })).rejects.toMatchObject(shape);
-    await expect(insertQuestion('s4', 'cloze_typed', { ...sentence, prompt: 'עפיפון', alternatives: '{a,b,c,d,e,f}' })).rejects.toMatchObject(shape);
+    // Eleven, since 0028 raised the cap from five to ten.
+    await expect(insertQuestion('s4', 'cloze_typed', { ...sentence, prompt: 'עפיפון', alternatives: '{a,b,c,d,e,f,g,h,i,j,k}' })).rejects.toMatchObject(shape);
     await expect(insertQuestion('s5', 'sentence_translation', { ...sentence, prompt: 'עפיפון', alternatives: '{}' })).rejects.toMatchObject(shape);
     await expect(insertQuestion('s6', 'sentence_translation', { ...sentence, prompt: 'עפיפון', tiles: '{a,b,c,d,e}' })).rejects.toMatchObject(shape);
 
@@ -1057,5 +1063,269 @@ describe('0027_learner_day_and_memory', () => {
       const ended = sessions.find((s) => S(s.n) === r.id)!;
       if (ended.status !== 'ready') expect(r.day).toBe(r.old);
     }
+  });
+});
+
+// Phase 34 (spec §2, Data). The migration adds columns that are null or empty on
+// every existing row, and checks that read only those columns plus the cap, which
+// rises: a database of phase 33 renderings, cards and answers must come through whole.
+describe('0028_ambiguous_questions', () => {
+  it('keeps every rendering, card and answer, and gives each the new columns empty', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0027_learner_day_and_memory'));
+
+    const options = JSON.stringify([
+      { position: 0, text: 'kite', is_correct: true },
+      { position: 1, text: 'a', is_correct: false },
+      { position: 2, text: 'b', is_correct: false },
+      { position: 3, text: 'c', is_correct: false },
+    ]);
+    // A bound parameter and several statements do not mix, so the card with options is its own call.
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, gloss, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 'עפיפון', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'עפיפון');
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, prompt, alternatives)
+        values ('q1', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{a,b,c,d,e}');
+    `);
+    await db.execute(sql`
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, options)
+        values ('q2', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'multiple_choice', ${options}::jsonb)`);
+    await db.execute(sql`
+      insert into sessions (id, user_id, enrollment_id, status, source)
+        values ('00000000-0000-4000-8000-000000000028', 'u_1', 'e_1', 'ready', 'list');
+      insert into session_questions (session_id, position, question_id, option_order)
+        values ('00000000-0000-4000-8000-000000000028', 0, 'q1', '{}'),
+               ('00000000-0000-4000-8000-000000000028', 1, 'q2', '{0,1,2,3}');
+      insert into answers (session_id, position, question_id, selected_option_position, typed_text, verdict)
+        values ('00000000-0000-4000-8000-000000000028', 0, 'q1', null, 'kit', 'alternative'),
+               ('00000000-0000-4000-8000-000000000028', 1, 'q2', 0, null, null);
+    `);
+
+    await runMigrations(db);
+
+    const renderings = await db.execute(
+      sql`select translation, accepted_answers, answer_form, accepted_at from dict_var_translations`,
+    );
+    expect(renderings.rows).toEqual([
+      { translation: 'עפיפון', accepted_answers: [], answer_form: null, accepted_at: null },
+    ]);
+
+    const cards = await db.execute(sql`
+      select id, type, alternatives, context, context_translation, context_mark_start, context_mark_end,
+             sentence_mark_start, sentence_mark_end, answer_form
+      from questions order by id`);
+    const empty = {
+      context: null, context_translation: null, context_mark_start: null, context_mark_end: null,
+      sentence_mark_start: null, sentence_mark_end: null, answer_form: null,
+    };
+    expect(cards.rows).toEqual([
+      { id: 'q1', type: 'typed_translation', alternatives: ['a', 'b', 'c', 'd', 'e'], ...empty },
+      { id: 'q2', type: 'multiple_choice', alternatives: null, ...empty },
+    ]);
+
+    const answers = await db.execute(
+      sql`select position, verdict, retry_state, retry_text, retry_verdict from answers order by position`,
+    );
+    expect(answers.rows).toEqual([
+      { position: 0, verdict: 'alternative', retry_state: null, retry_text: null, retry_verdict: null },
+      { position: 1, verdict: null, retry_state: null, retry_text: null, retry_verdict: null },
+    ]);
+  });
+});
+
+describe('0029_hint_opened', () => {
+  it('keeps every answer, with no hint recorded, and takes a hint only on a text answer', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0028_ambiguous_questions'));
+
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_var_translations (variant_id, sense_id, user_language_code, translation, gloss, rank)
+        values ('v1', 's1', 'he', 'עפיפון', 'עפיפון', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'עפיפון');
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, prompt, alternatives)
+        values ('q1', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}');
+      insert into sessions (id, user_id, enrollment_id, status, source)
+        values ('00000000-0000-4000-8000-000000000029', 'u_1', 'e_1', 'ready', 'list');
+      insert into session_questions (session_id, position, question_id, option_order)
+        values ('00000000-0000-4000-8000-000000000029', 0, 'q1', '{}');
+      insert into answers (session_id, position, question_id, selected_option_position, typed_text, verdict)
+        values ('00000000-0000-4000-8000-000000000029', 0, 'q1', null, 'kite', 'exact');
+    `);
+
+    await runMigrations(db);
+
+    expect((await db.execute(sql`select hint_opened from answers`)).rows).toEqual([{ hint_opened: null }]);
+    await db.execute(sql`update answers set hint_opened = true`);
+    expect((await db.execute(sql`select hint_opened from answers`)).rows).toEqual([{ hint_opened: true }]);
+    // A hint belongs to a typed answer: a choice answer cannot carry one.
+    await expect(
+      db.execute(sql`update answers set typed_text = null, verdict = null, selected_option_position = 0`),
+    ).rejects.toMatchObject({ cause: { constraint: 'answers_hint_opened_typed' } });
+  });
+});
+
+describe('0030_gloss_families', () => {
+  it('keeps every card, adds the three tables, and ties known_meanings to the new_meaning type', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0029_hint_opened'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'עפיפון');
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, prompt, alternatives)
+        values ('q1', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}');
+    `);
+
+    await runMigrations(db);
+
+    expect((await db.execute(sql`select known_meanings from questions`)).rows).toEqual([{ known_meanings: null }]);
+    for (const table of ['gloss_families', 'gloss_family_members', 'gloss_family_events']) {
+      expect((await db.execute(sql`select count(*)::int as n from ${sql.identifier(table)}`)).rows).toEqual([{ n: 0 }]);
+    }
+    const card = (type: string, knownMeanings: string) => sql`
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, options, known_meanings)
+      values (${`q_${type}_${knownMeanings.length}`}, 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', ${type}, '[{"position":0,"text":"a","is_correct":true},{"position":1,"text":"b","is_correct":false}]'::jsonb, ${sql.raw(knownMeanings)})`;
+    await expect(db.execute(card('new_meaning', 'null'))).rejects.toMatchObject({ cause: { constraint: 'questions_known_meanings_valid' } });
+    await expect(db.execute(card('new_meaning', `'{}'::text[]`))).rejects.toMatchObject({ cause: { constraint: 'questions_known_meanings_valid' } });
+    await expect(db.execute(card('multiple_choice', `ARRAY['x']::text[]`))).rejects.toMatchObject({
+      cause: { constraint: 'questions_known_meanings_valid' },
+    });
+    await db.execute(card('new_meaning', `ARRAY['x']::text[]`));
+    await db.execute(card('multiple_choice', 'null'));
+  });
+});
+
+describe('0031_always_ready_session', () => {
+  it('starts every session that has an answer at its first, builds each for no device, and lets a stock sit beside a started one', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0030_gloss_families'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'kite', 'noun');
+      insert into dict_senses (id, lexeme_id, sense_code) values ('s1', 'l1', 'toy');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'kite', 'word', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'עפיפון');
+      insert into questions (id, user_id, enrollment_id, gloss_id, prompt_variant_id, target_language, user_language_code, type, prompt, alternatives)
+        values ('q1', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}'),
+               ('q2', 'u_1', 'e_1', 'g1', 'v1', 'en', 'he', 'typed_translation', 'עפיפון', '{}');
+      insert into sessions (id, user_id, enrollment_id, status, source, completed_at, practice_day)
+        values ('00000000-0000-4000-8000-00000000003a', 'u_1', 'e_1', 'completed', 'seed', '2026-10-10T09:00:00Z', '2026-10-10'),
+               ('00000000-0000-4000-8000-00000000003b', 'u_1', 'e_1', 'ready', 'list', null, null);
+      insert into session_questions (session_id, position, question_id, option_order)
+        values ('00000000-0000-4000-8000-00000000003a', 0, 'q1', '{}'),
+               ('00000000-0000-4000-8000-00000000003b', 0, 'q1', '{}'),
+               ('00000000-0000-4000-8000-00000000003b', 1, 'q2', '{}');
+      insert into answers (session_id, position, question_id, typed_text, verdict, answered_at)
+        values ('00000000-0000-4000-8000-00000000003a', 0, 'q1', 'kite', 'exact', '2026-10-10T08:55:00Z'),
+               ('00000000-0000-4000-8000-00000000003b', 1, 'q2', 'kite', 'exact', '2026-10-11T08:01:00Z'),
+               ('00000000-0000-4000-8000-00000000003b', 0, 'q1', 'kite', 'exact', '2026-10-11T08:00:00Z');
+    `);
+
+    await runMigrations(db);
+
+    const rows = await db.execute(
+      sql`select id, extract(epoch from started_at)::int as started, listening, speaking from sessions order by id`,
+    );
+    const epoch = (iso: string) => Date.parse(iso) / 1000;
+    expect(rows.rows).toEqual([
+      { id: '00000000-0000-4000-8000-00000000003a', started: epoch('2026-10-10T08:55:00Z'), listening: false, speaking: false },
+      { id: '00000000-0000-4000-8000-00000000003b', started: epoch('2026-10-11T08:00:00Z'), listening: false, speaking: false },
+    ]);
+    // The started one leaves room for one stock, and only one.
+    const stock = (id: string) => sql`
+      insert into sessions (id, user_id, enrollment_id, status, source, listening, speaking)
+      values (${id}, 'u_1', 'e_1', 'preparing', 'list', false, false)`;
+    await db.execute(stock('00000000-0000-4000-8000-00000000003c'));
+    await expect(db.execute(stock('00000000-0000-4000-8000-00000000003d'))).rejects.toMatchObject({
+      cause: { constraint: 'sessions_one_stock_per_enrollment' },
+    });
+    // And one started session: a second cannot start beside it.
+    await db.execute(sql`update sessions set status = 'ready' where id = '00000000-0000-4000-8000-00000000003c'`);
+    await expect(
+      db.execute(sql`update sessions set started_at = now() where id = '00000000-0000-4000-8000-00000000003c'`),
+    ).rejects.toMatchObject({ cause: { constraint: 'sessions_one_started_per_enrollment' } });
+  });
+
+  // Final review M1. ADR 0010: the old container serves for about a minute after
+  // the new one has migrated, and its inserts name neither column.
+  it('still takes a session inserted the way the code before it does', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0030_gloss_families'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+    `);
+    await runMigrations(db);
+
+    await db.execute(sql`insert into sessions (user_id, enrollment_id, status, source) values ('u_1', 'e_1', 'preparing', 'list')`);
+    expect((await db.execute(sql`select listening, speaking from sessions`)).rows).toEqual([{ listening: false, speaking: false }]);
+  });
+});
+
+describe('0032_known_per_skill', () => {
+  it('dates every skill at the bar, moves a member known_at to its gloss, and keeps the old column', async () => {
+    const db = await emptyDatabase();
+    await runMigrationsFrom(db, migrationsUpTo('0031_always_ready_session'));
+    await db.execute(sql`
+      insert into auth_users (id, name, email) values ('u_1', 'one', 'u_1@test.invalid');
+      insert into users (id, username, display_name, age, native_language) values ('u_1', 'u_1', 'one', 30, 'he');
+      insert into enrollments (id, user_id, source_language, target_language) values ('e_1', 'u_1', 'he', 'en');
+      insert into dict_lexemes (id, language_code, lemma, part_of_speech) values ('l1', 'en', 'pick up', 'verb');
+      insert into dict_variants (id, lexeme_id, language_code, form, kind, entry_rank)
+        values ('v1', 'l1', 'en', 'pick up', 'word', 0);
+      insert into dict_glosses (id, lexeme_id, user_language_code, key) values ('g1', 'l1', 'he', 'להרים'), ('g2', 'l1', 'he', 'לאסוף');
+      insert into vocabulary_entries (enrollment_id, gloss_id, lexeme_id, variant_id, lemma, added_by_user_id)
+        values ('e_1', 'g1', 'l1', 'v1', 'pick up', 'u_1'), ('e_1', 'g2', 'l1', 'v1', 'pick up', 'u_1');
+      insert into gloss_memory (enrollment_id, gloss_id, dimension, stability, difficulty, last_day, reps, lapses, params)
+        values ('e_1', 'g1', 'written_receptive', 8, 5, '2026-10-01', 3, 0, 'fsrs6-default'),
+               ('e_1', 'g1', 'spelling', 5, 5, '2026-10-02', 2, 1, 'fsrs6-default');
+      insert into gloss_families (id, enrollment_id, label) values ('f1', 'e_1', 'pick up');
+      insert into gloss_family_members (enrollment_id, gloss_id, family_id, state, position, known_at, since)
+        values ('e_1', 'g1', 'f1', 'known', 0, '2026-10-03T10:00:00Z', now()),
+               ('e_1', 'g2', 'f1', 'current', 1, null, now());
+    `);
+
+    await runMigrations(db);
+
+    expect(
+      (await db.execute(sql`select dimension, reached_on::text from gloss_memory order by dimension`)).rows,
+    ).toEqual([
+      { dimension: 'spelling', reached_on: null },
+      { dimension: 'written_receptive', reached_on: '2026-10-01' },
+    ]);
+    expect(
+      (await db.execute(sql`select gloss_id, known_at is not null as known from vocabulary_entries order by gloss_id`)).rows,
+    ).toEqual([
+      { gloss_id: 'g1', known: true },
+      { gloss_id: 'g2', known: false },
+    ]);
+    // ADR 0010: the old container still names this column for its rollout minute.
+    expect(
+      (await db.execute(sql`select count(*)::int as n from gloss_family_members where known_at is not null`)).rows,
+    ).toEqual([{ n: 1 }]);
   });
 });

@@ -5,13 +5,17 @@ import type {
   JudgedAnswerResponse,
   NextStepRequest,
   NextStepResponse,
+  PendingRetry,
   Question,
   SaveVocabularyResponse,
   SessionView,
   SpeechAnswerResponse,
+  SpeechVerdict,
   TranslationResponse,
+  TypedVerdict,
   VocabularyPage,
 } from '@lang-tutor/core/api';
+import { evaluate } from '@lang-tutor/core/domain';
 
 import { ApiError, type BotApi, type BotRoute } from './api.ts';
 
@@ -27,7 +31,10 @@ export type FakeOptions = {
   failOn?: (call: string) => boolean;
   /** A call that throws a plain Error, as a bug in the driver would: never an ApiError. */
   crashOn?: (call: string) => boolean;
-  speechVerdict?: 'understood' | 'unheard';
+  /** How a clip is heard; a function tells a first clip from a second try's. */
+  speechVerdict?: SpeechVerdict | ((retry: boolean) => SpeechVerdict);
+  /** How a judged text is judged; `exact` by default. */
+  judgedVerdict?: (text: string, retry: boolean) => TypedVerdict;
 };
 
 export const meaningOf = (form: string) => `משמעות-${form}`;
@@ -40,6 +47,7 @@ export function choiceCard(id: string, form: string): Question {
     question: form,
     options: [meaningOf(form), 'דלת', 'קיר', 'תקרה'],
     correct_option: 0,
+    context: null,
   };
 }
 
@@ -53,6 +61,7 @@ export function sayCard(id: string, form: string): Question {
     answer: form,
     lemma: form,
     alternatives: [],
+    context: null,
   };
 }
 
@@ -60,7 +69,36 @@ export function readCard(id: string, form: string): Question {
   return { id, type: 'read_aloud', vocab_term_id: `g-${form}`, question: form, meaning: meaningOf(form) };
 }
 
-type Session = { id: string; source: 'seed' | 'list'; status: SessionView['status']; polls: number; cards: Question[]; at: number };
+/** A typed translation of `form` that also accepts `alternatives`. */
+export function typedCard(id: string, form: string, alternatives: string[]): Question {
+  return {
+    id,
+    type: 'typed_translation',
+    vocab_term_id: `g-${form}`,
+    question: meaningOf(form),
+    part_of_speech: 'noun',
+    answer: form,
+    lemma: form,
+    alternatives,
+    context: null,
+  };
+}
+
+/** A typed meaning of `form`: the server judges it (judgedVerdict). */
+export function meaningCard(id: string, form: string): Question {
+  return { id, type: 'typed_meaning', vocab_term_id: `g-${form}`, question: form, part_of_speech: 'noun', meaning: meaningOf(form), context: null };
+}
+
+/** `held`: the first answer of the current card, when it is held for its second try. */
+type Session = {
+  id: string;
+  source: 'seed' | 'list';
+  status: SessionView['status'];
+  polls: number;
+  cards: Question[];
+  at: number;
+  held: string | null;
+};
 
 export class FakeServer {
   readonly calls: string[] = [];
@@ -108,6 +146,7 @@ export class FakeServer {
       source: s.source,
       position: { position: s.at + 1, total: s.cards.length },
       question: s.status === 'ready' ? (s.cards[s.at] ?? null) : null,
+      pending_retry: pendingOf(s),
       progress: [],
     });
     const advance = (s: Session): NextStepResponse => {
@@ -124,7 +163,30 @@ export class FakeServer {
           progress: [],
         };
       }
-      return { session_id: s.id, question: s.cards[s.at], position: { position: s.at + 1, total: s.cards.length }, complete: false };
+      return { session_id: s.id, question: s.cards[s.at], position: { position: s.at + 1, total: s.cards.length }, complete: false, pending_retry: null };
+    };
+    // Phase 34 (spec D9), as the server does it: an `alternative` holds the card
+    // for one second try, sent with `retry`. The first answer sent again (no
+    // `retry`) replays the hold; the second try, whatever it is, moves on.
+    const held = (s: Session): NextStepResponse => ({
+      session_id: s.id,
+      question: s.cards[s.at],
+      position: { position: s.at + 1, total: s.cards.length },
+      complete: false,
+      pending_retry: pendingOf(s),
+    });
+    const settle = (s: Session, answer: string, verdict: string | undefined, retry: boolean): NextStepResponse => {
+      if (s.held !== null) {
+        if (!retry) return held(s);
+        s.held = null;
+        return advance(s);
+      }
+      if (retry) throw new ApiError('POST', `/sessions/${s.id}`, 409, '{"error":"question_id does not match the session\'s current question"}');
+      if (verdict === 'alternative') {
+        s.held = answer;
+        return held(s);
+      }
+      return advance(s);
     };
     return {
       enrollments: async () => {
@@ -176,7 +238,7 @@ export class FakeServer {
         const seed = ![...this.sessions.values()].some((s) => s.id.startsWith(`${bot}-`));
         const id = `${bot}-s${++this.count}`;
         const cards = seed ? [choiceCard(`${id}-q1`, 'seedword')] : (this.options.cardsFor ?? defaultCards)(savedOf());
-        this.sessions.set(id, { id, source: seed ? 'seed' : 'list', status: seed ? 'ready' : 'preparing', polls: 0, cards, at: 0 });
+        this.sessions.set(id, { id, source: seed ? 'seed' : 'list', status: seed ? 'ready' : 'preparing', polls: 0, cards, at: 0, held: null });
         return { session_id: id, status: seed ? 'ready' : 'preparing', source: seed ? 'seed' : 'list' };
       },
       currentSession: async (): Promise<CurrentSessionResponse> => {
@@ -196,23 +258,43 @@ export class FakeServer {
       },
       nextStep: async (id, body: NextStepRequest) => {
         this.record(bot, 'next-step', body);
-        return advance(session(id));
+        const s = session(id);
+        const retry = body.retry ?? false;
+        // A typed card is judged by the function the server runs (packages/core).
+        const verdict = 'text' in body ? evaluate(s.cards[s.at], { text: body.text }).verdict : undefined;
+        return settle(s, 'text' in body ? body.text : '', verdict, retry);
       },
       speech: async (id, body): Promise<SpeechAnswerResponse> => {
-        this.record(bot, 'speech', { question_id: body.question_id, mime_type: body.mime_type });
+        this.record(bot, 'speech', { question_id: body.question_id, mime_type: body.mime_type, ...(body.retry ? { retry: true } : {}) });
         const s = session(id);
-        if ((this.options.speechVerdict ?? 'understood') === 'unheard') return { heard: '', verdict: 'unheard' };
-        return { heard: 'x', verdict: 'understood', next: advance(s) };
+        const retry = body.retry ?? false;
+        const option = this.options.speechVerdict ?? 'understood';
+        const verdict = typeof option === 'function' ? option(retry) : option;
+        if (verdict === 'unheard') return { heard: '', verdict: 'unheard' };
+        // The first clip sent again replays the hold, its verdict with it.
+        if (s.held !== null && !retry) return { heard: s.held, verdict: 'alternative', next: held(s) };
+        return { heard: 'x', verdict, next: settle(s, 'x', verdict, retry) };
       },
       judged: async (id, body): Promise<JudgedAnswerResponse> => {
         this.record(bot, 'judged', body);
-        return { verdict: 'exact', next: advance(session(id)) };
+        const s = session(id);
+        const retry = body.retry ?? false;
+        if (s.held !== null && !retry) return { verdict: 'alternative', next: held(s) };
+        // An empty second try gives up, which the judged route reports as wrong (ruling R15).
+        const verdict = retry && body.text.trim() === '' ? 'wrong' : (this.options.judgedVerdict?.(body.text, retry) ?? 'exact');
+        return { verdict, next: settle(s, body.text, verdict, retry) };
       },
       signOut: async () => {
         this.record(bot, 'sign-out');
       },
     };
   }
+}
+
+/** The pending retry of a held card, as the server's responses carry it. */
+function pendingOf(s: Session): PendingRetry | null {
+  if (s.held === null) return null;
+  return { answer: s.held, wording: s.cards[s.at].type === 'typed_meaning' ? 'meaning' : 'word' };
 }
 
 /** One choice of meanings per saved word. */

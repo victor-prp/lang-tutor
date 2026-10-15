@@ -1,6 +1,6 @@
-import type { SentenceTranslationQuestion, TypedVerdict } from '@lang-tutor/core/api';
-import { LlmMeaningJudgeSchema, LlmTranslationJudgeSchema } from '@lang-tutor/core/api/schemas';
-import { normaliseHebrew, normaliseTyped, type JudgedQuestion } from '@lang-tutor/core/domain';
+import type { ClozeTypedQuestion, SentenceTranslationQuestion, TypedVerdict } from '@lang-tutor/core/api';
+import { LlmFitJudgeSchema, LlmMeaningJudgeSchema, LlmTranslationJudgeSchema } from '@lang-tutor/core/api/schemas';
+import { normaliseHebrew, normaliseTyped, wordOnly, type JudgedQuestion } from '@lang-tutor/core/domain';
 
 import { LANGUAGES, type LanguageCode } from './languages';
 import { unfence } from './translation';
@@ -16,7 +16,10 @@ import { unfence } from './translation';
 export const JUDGE_MARKER = "judge the learner's answer";
 
 /** What the meaning judge is told about the card: the word, and the sense its
- *  saved example pins. The example is absent for a saved sense without one. */
+ *  example pins. The example is absent for a saved sense without one. Phase 34
+ *  (spec D7): `example` and `exampleTranslation` are the sentence the card
+ *  showed and its hidden other half (findJudgeContext), so the judge sees what the
+ *  learner saw; the saved example only when the card fell back on it. */
 export type MeaningJudgeContext = {
   language: LanguageCode;
   /** The enrollment's source language: the one the learner reads and types in. */
@@ -51,8 +54,8 @@ export function buildMeaningJudgePrompt(context: MeaningJudgeContext, answer: st
     'The meaning practised is saved_meaning, in the sense the example shows.',
     'Return JSON only, matching the supplied schema, with one field, verdict:',
     '- "right": the answer means the same as saved_meaning in this sense. Accept a synonym, another form, tense or person of it (for example לדבר, מדבר, דיבר), with or without a prefix such as ה, ל, ו or ש, with or without niqqud, and with small Hebrew spelling slips.',
-    '- "other_sense": the answer is a correct meaning of the word, but of a different sense than the one practised.',
-    '- "wrong": anything else, including an answer that is only related, too general, or the meaning of another word.',
+    '- "other_sense": the answer is a meaning the word really has in another context, one a dictionary would list as a sense of its own, but not the sense practised (for example, for "bank" practised as בנק: גדת נהר, a river bank).',
+    '- "wrong": anything else, including the meaning of another word, an answer too general, and one only related, associated or near in meaning, however close (for example, for "imagination" practised as דמיון: הזייה, a hallucination, or יצירתיות, creativity).',
   ].join('\n');
   const user = JSON.stringify({
     word: context.form,
@@ -87,12 +90,19 @@ export function parseMeaningJudge(raw: string): TypedVerdict | null {
 export type JudgeContext = MeaningJudgeContext;
 
 /** The translation card's rule: empty is "show me the answer"; the reference
- *  is right as typed, whatever its case or full stop. Null: only the model can tell. */
+ *  is right as typed, whatever its case or full stop; one word for a longer
+ *  sentence is wrong, as the model judged it (the app asks for the whole
+ *  sentence instead of sending it). Null: only the model can tell. */
 export function translationRuleVerdict(reference: string, text: string): TypedVerdict | null {
   const typed = normaliseTyped(text);
-  if (typed === '') return 'wrong';
+  if (typed === '' || wordOnly(typed, reference)) return 'wrong';
   return typed === normaliseTyped(reference) ? 'exact' : null;
 }
+
+/** Phase 45 (spec D3). The translation judge's thinking budget, in tokens. With
+ *  none it took "talk with everyone" for "communicate clearly with everyone";
+ *  512 judged it wrong every time, at about 2.4 s a call. */
+export const TRANSLATION_JUDGE_THINKING = 512;
 
 export function buildTranslationJudgePrompt(question: SentenceTranslationQuestion, context: JudgeContext, answer: string) {
   const name = LANGUAGES[context.language].name;
@@ -100,7 +110,7 @@ export function buildTranslationJudgePrompt(question: SentenceTranslationQuestio
   const system = [
     `Your task: ${JUDGE_MARKER}. A ${source}-speaking learner of ${name} was shown a ${source} sentence and typed its translation into ${name}.`,
     'The word practised is word, in the sense of meaning. reference_translation is one good translation, not the only one.',
-    `Judge on conveying the ${source} sentence and on the practised word, in any form the sentence needs; ignore slips in other words, and small grammar slips that do not touch the practised word. Any other detail of the sentence changed (a number, a person, a tense, an object, a quality) means it is not conveyed.`,
+    `Judge on conveying the ${source} sentence and on the practised word, in any form the sentence needs; ignore slips in other words, and small grammar slips that do not touch the practised word. Any other detail of the sentence changed or left out (a number, a person, a tense, an object, a quality, or how something is done, such as clearly, quickly or very) means it is not conveyed.`,
     'Return JSON only, matching the supplied schema, with one field, verdict:',
     '- "right": the answer conveys the sentence and uses the practised word in a form the sentence needs.',
     '- "misspelled": as "right", but the practised word itself has a one-letter or accent slip. A slip in any other word is still "right".',
@@ -160,5 +170,39 @@ export function parseJudge(type: JudgedQuestion['type'], raw: string): TypedVerd
       return parseMeaningJudge(raw);
     case 'sentence_translation':
       return parseTranslationJudge(raw);
+  }
+}
+
+/**
+ * Phase 41 (spec D2). Whether a word the card's list missed fills a typed
+ * cloze's gap. The learner saw the sentence with its gap and no translation, so
+ * the model sees the same: whether the answer makes it a correct, natural
+ * sentence, whatever it then means. A word in a form the gap cannot take does
+ * not fit. Only `fits` and `wrong`: a slip of the word meant is the rule's
+ * `near_miss`, decided before any call.
+ */
+export function buildFitJudgePrompt(question: ClozeTypedQuestion, language: LanguageCode, answer: string) {
+  const name = LANGUAGES[language].name;
+  const system = [
+    `Your task: ${JUDGE_MARKER}. A learner of ${name} was shown a ${name} sentence with one word left out, marked ___, and no translation, and typed a word for the gap.`,
+    'word_meant is the word the sentence was written with; the answer is another word.',
+    'Put the answer in the gap and read the sentence on its own.',
+    'Return JSON only, matching the supplied schema, with one field, verdict:',
+    '- "fits": the sentence is correct and natural with the answer, whatever it then means, and the answer is in the form the gap needs, agreeing with the words around it.',
+    '- "wrong": anything else, including a sentence that is ungrammatical, unnatural or meaningless with the answer, or an answer in a form the gap cannot take.',
+  ].join('\n');
+  const sentence = `${question.sentence.slice(0, question.gap.start)}___${question.sentence.slice(question.gap.end)}`;
+  const user = JSON.stringify({ sentence, word_meant: question.answer, answer });
+  return { system, user, schema: LlmFitJudgeSchema };
+}
+
+/** The model's fit verdict, or null when it cannot be read. */
+export function parseFitJudge(raw: string): 'fits' | 'wrong' | null {
+  if (raw.trim() === '') return null;
+  try {
+    const parsed = LlmFitJudgeSchema.safeParse(JSON.parse(unfence(raw)));
+    return parsed.success ? parsed.data.verdict : null;
+  } catch {
+    return null;
   }
 }

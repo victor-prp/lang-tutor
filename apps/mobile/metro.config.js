@@ -26,6 +26,12 @@ const path = require('node:path');
 const { getDefaultConfig } = require('expo/metro-config');
 const { FileStore } = require('@expo/metro/metro-cache');
 
+const { withEasBuildCommit } = require('./easBuildCommit');
+
+// Before the cache key below and before Metro's workers start, so the commit is
+// both inlined and keyed on.
+withEasBuildCommit(process.env);
+
 const config = getDefaultConfig(__dirname);
 
 // Everything Metro inlines but does not key on. Sorted, so the digest depends on

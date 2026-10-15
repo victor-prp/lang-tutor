@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import type { TypedTranslationQuestion } from '../api/types';
-import { judgeTiles, judgeTyped, normaliseTyped } from './typed';
+import { judgeTiles, judgeTyped, normaliseTyped, wordOnly } from './typed';
 
 const q = (answer: string, lemma = answer, alternatives: string[] = []): TypedTranslationQuestion => ({
   id: 'q1',
@@ -12,6 +12,7 @@ const q = (answer: string, lemma = answer, alternatives: string[] = []): TypedTr
   answer,
   lemma,
   alternatives,
+  context: null,
 });
 
 describe('normaliseTyped', () => {
@@ -116,5 +117,24 @@ describe('judgeTiles (phase 24, spec D11)', () => {
   it('is wrong for any other order, and for nothing', () => {
     expect(judgeTiles('casa', 'caas')).toBe('wrong');
     expect(judgeTiles('casa', '')).toBe('wrong');
+  });
+});
+
+describe('wordOnly (one word for a sentence)', () => {
+  const reference = 'This mushroom grew fast.';
+  it('is true for one word, however it is spelled or punctuated', () => {
+    expect(wordOnly('mushroom ', reference)).toBe(true);
+    expect(wordOnly('Mushrooms.', reference)).toBe(true);
+    expect(wordOnly('mushrom', reference)).toBe(true);
+  });
+  it('is false for an answer of two words or more', () => {
+    expect(wordOnly('the mushroom', reference)).toBe(false);
+    expect(wordOnly('This mushroom grew fast', reference)).toBe(false);
+  });
+  it('is false for empty text, which gives up instead', () => {
+    expect(wordOnly('   ', reference)).toBe(false);
+  });
+  it('is false when the reference is itself one word', () => {
+    expect(wordOnly('run', 'Run!')).toBe(false);
   });
 });

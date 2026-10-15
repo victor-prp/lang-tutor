@@ -31,6 +31,7 @@ describe('createServerDeps', () => {
   it('passes the logger it is given straight through', () => {
     const logger = createFakeLogger();
     const deps = createServerDeps({
+      requestLog: null,
       db: t.db,
       logger,
       rng: testRng(7),
@@ -47,12 +48,18 @@ describe('createServerDeps', () => {
       },
       translationTimeoutMs: 25_000,
       sessionGenerationTimeoutMs: 120_000,
+      contextCallTimeoutMs: 60_000,
+      checkerCallTimeoutMs: 60_000,
       speechTimeoutMs: 8_000,
       judgeTimeoutMs: 8_000,
       photoReadTimeoutMs: 120_000,
-      identity: { lane: 'test', database: 'test_db', port: 0, version: 'test' },
+      stockSaveDelaySeconds: 30,
+      soundAlikeThreshold: 0.95,
+      identity: { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },
       webDistDir: null,
       botSecret: null,
+      pushBaseUrl: 'http://127.0.0.1:9/never-registered',
+      reminderSecret: null,
       boss: unstartedBoss(t.db),
     });
     expect(deps.logger).toBe(logger);

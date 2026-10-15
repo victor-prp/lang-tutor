@@ -62,7 +62,7 @@ describe('missedPair', () => {
   it('reads a missed choice as its prompt and right option', () => {
     expect(
       missedPair({
-        question: { id: 'c', type: 'multiple_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+        question: { id: 'c', type: 'multiple_choice', vocab_term_id: 'l', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null },
         correct_answer: 'בית',
       }),
     ).toEqual({ word: 'casa', meaning: 'בית' });
@@ -71,13 +71,13 @@ describe('missedPair', () => {
   it('turns a reversed or typed card round', () => {
     expect(
       missedPair({
-        question: { id: 't', type: 'typed_translation', vocab_term_id: 'l', question: 'חלון', part_of_speech: 'noun', answer: 'finestra', lemma: 'finestra', alternatives: [] },
+        question: { id: 't', type: 'typed_translation', vocab_term_id: 'l', question: 'חלון', part_of_speech: 'noun', answer: 'finestra', lemma: 'finestra', alternatives: [], context: null },
         correct_answer: 'finestra',
       }),
     ).toEqual({ word: 'finestra', meaning: 'חלון' });
     expect(
       missedPair({
-        question: { id: 'r', type: 'reverse_choice', vocab_term_id: 'l', question: 'בית', part_of_speech: 'noun', options: ['porta', 'casa'], correct_option: 1 },
+        question: { id: 'r', type: 'reverse_choice', vocab_term_id: 'l', question: 'בית', part_of_speech: 'noun', options: ['porta', 'casa'], correct_option: 1, context: null },
         correct_answer: 'casa',
       }),
     ).toEqual({ word: 'casa', meaning: 'בית' });
@@ -124,7 +124,7 @@ describe('level names', () => {
 
 describe('missedPair, phase 24', () => {
   it('reads word → meaning for every new type', () => {
-    expect(missedPair({ question: { id: 'l', type: 'listen_choice', vocab_term_id: 'v', question: 'casa', options: ['בית'], correct_option: 0 }, correct_answer: 'בית' }))
+    expect(missedPair({ question: { id: 'l', type: 'listen_choice', vocab_term_id: 'v', question: 'casa', options: ['בית'], correct_option: 0, part_of_speech: 'noun' }, correct_answer: 'בית' }))
       .toEqual({ word: 'casa', meaning: 'בית' });
     expect(missedPair({ question: { id: 'd', type: 'dictation', vocab_term_id: 'v', question: 'parlo', meaning: 'מדבר' }, correct_answer: 'parlo' }))
       .toEqual({ word: 'parlo', meaning: 'מדבר' });
@@ -145,13 +145,13 @@ describe('missedPair, phase 27 sentence cards', () => {
     ).toEqual({ word: 'parlavamo', meaning: 'לדבר' });
     expect(
       missedPair({
-        question: { id: 'b', type: 'cloze_typed', ...base, sentence, translation: 'x', answer: 'parlavamo', alternatives: [] },
+        question: { id: 'b', type: 'cloze_typed', ...base, sentence, translation: 'x', answer: 'parlavamo', alternatives: [], mark: null },
         correct_answer: 'parlavamo',
       }),
     ).toEqual({ word: 'parlavamo', meaning: 'לדבר' });
     expect(
       missedPair({
-        question: { id: 'c', type: 'sentence_translation', ...base, question: 'אתמול', sentence, answer: 'parlavamo' },
+        question: { id: 'c', type: 'sentence_translation', ...base, question: 'אתמול', sentence, answer: 'parlavamo', mark: null },
         correct_answer: sentence,
       }),
     ).toEqual({ word: 'parlavamo', meaning: 'לדבר' });

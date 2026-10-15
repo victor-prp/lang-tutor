@@ -1,5 +1,7 @@
 import type { ZodType } from 'zod';
 
+import type { ModelCallRecord } from './llm';
+
 /**
  * Phase 25 (spec D13). The audio counterpart of LlmClient: one JSON-shaped
  * completion over one clip. Types only, as llm.ts is, so a provider's name
@@ -15,6 +17,8 @@ export type LlmAudioRequest = {
   mimeType: string;
   /** The canonical Zod schema of the answer; each provider converts it. */
   schema: ZodType;
+  /** Phase 47 (spec D3). What the call is for and whom it serves, for its record. */
+  record: ModelCallRecord;
 };
 
 /**

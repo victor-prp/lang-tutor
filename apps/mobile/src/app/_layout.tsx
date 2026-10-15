@@ -5,14 +5,18 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
 } from 'expo-audio';
+import * as Clipboard from 'expo-clipboard';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { File } from 'expo-file-system';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import { Stack } from 'expo-router';
+import type * as NotificationsModule from 'expo-notifications';
+import { Stack, router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Speech from 'expo-speech';
 import * as Updates from 'expo-updates';
-import { I18nManager, Platform, StyleSheet, View, type ViewProps } from 'react-native';
+import { useEffect } from 'react';
+import { I18nManager, Linking, Platform, StyleSheet, View, type ViewProps } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { API_LEVEL, API_LEVEL_HEADER } from '@lang-tutor/core/apiLevel';
@@ -29,13 +33,18 @@ import { CurrentUserProvider } from '@/hooks/useCurrentUser';
 import { NextSessionProvider } from '@/hooks/useNextSession';
 import { PhotoImportsProvider } from '@/hooks/usePhotoImports';
 import { RecordingProvider } from '@/hooks/useRecording';
+import { RemindersProvider } from '@/hooks/useReminders';
 import { SessionProvider } from '@/hooks/useSession';
 import { SpeechProvider } from '@/hooks/useSpeech';
+import { TargetsProvider } from '@/hooks/useTargets';
 import { TranslationProvider } from '@/hooks/useTranslation';
 import { VocabularyProvider } from '@/hooks/useVocabulary';
 import { createPhotoPicker, type PhotoAsset } from '@/photos';
 import { createRecorder, type RecordPermission } from '@/recording';
+import type { AppRelease } from '@/release';
+import { createReminders, type NotificationsEngine, type Permission } from '@/reminders';
 import { createSpeaker } from '@/speech';
+import { MAX_PHOTOS } from '@/targetWizard';
 import { colors, layout } from '@/theme';
 
 // Read directly off process.env.EXPO_PUBLIC_API_URL (not via an indirection)
@@ -78,16 +87,36 @@ const appUpdates = createAppUpdates({
   minBackgroundMs: 30 * 60 * 1000,
 });
 
-// Phase 32 (spec D10). The release tag, inlined by Metro like the API URL: the
-// android release job sets it for every update, the Dockerfile for the web
-// export. Unset in Expo Go and every lane.
-const appVersion = process.env.EXPO_PUBLIC_APP_VERSION ?? 'dev';
+// Phase 32 (spec D10), phase 49 (spec D1). The release tag and its commit,
+// inlined by Metro like the API URL: the android release job sets them for every
+// update, the Dockerfile for the web export, scripts/with-commit.sh the commit
+// for Metro in a lane. The native layer is read from expo-updates, whose runtime
+// version is the fingerprint (ADR 0012 R1); updates are off in Expo Go.
+const appRelease: AppRelease = {
+  version: process.env.EXPO_PUBLIC_APP_VERSION || null,
+  commit: process.env.EXPO_PUBLIC_APP_COMMIT || null,
+  native:
+    Platform.OS === 'web'
+      ? { kind: 'web' }
+      : Updates.isEnabled && Updates.runtimeVersion
+        ? { kind: 'build', fingerprint: Updates.runtimeVersion, embedded: Updates.isEmbeddedLaunch }
+        : { kind: 'expo-go' },
+};
+// Phase 49. The only file that names expo-clipboard (ADR 0002 R1).
+const copyToClipboard = (text: string) => Clipboard.setStringAsync(text);
 const enrollmentStore = createRememberedEnrollmentStore({ storage: AsyncStorage });
 
 const firstAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset | null =>
   result.canceled || result.assets.length === 0
     ? null
     : { uri: result.assets[0].uri, width: result.assets[0].width, height: result.assets[0].height };
+
+// Phase 53. Every asset of a multiple pick, not the first. The web's file chooser ignores
+// `selectionLimit`, so the most a request carries is kept here, before any is shrunk.
+const everyAsset = (result: ImagePicker.ImagePickerResult): PhotoAsset[] =>
+  result.canceled
+    ? []
+    : result.assets.slice(0, MAX_PHOTOS).map(({ uri, width, height }) => ({ uri, width, height }));
 
 // Phase 26. The only file that names the image packages (ADR 0002 R1).
 const photoPicker = createPhotoPicker({
@@ -98,6 +127,15 @@ const photoPicker = createPhotoPicker({
     launchCamera: async () => firstAsset(await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 })),
     launchLibrary: async () =>
       firstAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 })),
+    chooseMany: async () =>
+      everyAsset(
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 1,
+          allowsMultipleSelection: true,
+          selectionLimit: MAX_PHOTOS,
+        }),
+      ),
     // The context and the rendered image hold native memory (a decoded camera
     // photo is tens of megabytes) until released, so both are released as soon
     // as the JPEG is saved, or the shrink fails. A no-op on web.
@@ -177,6 +215,87 @@ const recorder = createRecorder({
   },
 });
 
+// Phase 52 (spec D4, D8). The only file that names expo-notifications (ADR 0002 R1).
+// The engine is called only on Android outside Expo Go, where remote push exists;
+// createReminders keeps every other platform away from it.
+//
+// Not imported at the top: in Expo Go on Android the package's entry loads
+// ExpoTopicSubscriptionModule, a native module Expo Go no longer ships (remote push was
+// removed in SDK 53), and that throws at import, which takes the whole layout down
+// ("missing the required default export"). So Expo Go never loads it; the type import
+// above is erased at build time.
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+const Notifications: typeof NotificationsModule | null = isExpoGo ? null : require('expo-notifications');
+
+const asPermission = (N: typeof NotificationsModule, status: NotificationsModule.PermissionStatus): Permission =>
+  status === N.PermissionStatus.GRANTED ? 'granted' : status === N.PermissionStatus.DENIED ? 'denied' : 'undetermined';
+// The server sends `data: { reminder_id }` with every reminder (spec D5).
+const reminderIdOf = (response: NotificationsModule.NotificationResponse | null): string | null => {
+  const id = response?.notification.request.content.data?.reminder_id;
+  return typeof id === 'string' ? id : null;
+};
+const notificationsEngine = (Notifications: typeof NotificationsModule): NotificationsEngine => ({
+  setChannel: async () => {
+    await Notifications.setNotificationChannelAsync('reminders', {
+      // The name Android's notification settings show, so Hebrew like the rest (the importance cannot change later).
+      name: 'תזכורות',
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
+  },
+  permission: async () => asPermission(Notifications, (await Notifications.getPermissionsAsync()).status),
+  requestPermission: async () => asPermission(Notifications, (await Notifications.requestPermissionsAsync()).status),
+  // Throws until the build carries google-services.json (app.config.js).
+  token: async () =>
+    (await Notifications.getExpoPushTokenAsync({ projectId: Constants.expoConfig?.extra?.eas?.projectId })).data,
+  onTap: (listener) => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) =>
+      listener(reminderIdOf(response)),
+    );
+    return () => subscription.remove();
+  },
+  // Cleared once read, so an over-the-air reload does not open the session again.
+  lastTap: async () => {
+    const response = Notifications.getLastNotificationResponse();
+    if (response) Notifications.clearLastNotificationResponse();
+    return reminderIdOf(response);
+  },
+  openSettings: () => Linking.openSettings(),
+});
+// Expo Go's stand-in. createReminders never calls it there (supported is false), so a call
+// is a bug worth hearing about rather than a silent no-op.
+const unavailable = (): never => {
+  throw new Error('expo-notifications is not loaded in Expo Go');
+};
+const noNotifications: NotificationsEngine = {
+  setChannel: unavailable,
+  permission: unavailable,
+  requestPermission: unavailable,
+  token: unavailable,
+  onTap: unavailable,
+  lastTap: unavailable,
+  openSettings: unavailable,
+};
+const reminders = createReminders({
+  engine: Notifications ? notificationsEngine(Notifications) : noNotifications,
+  api,
+  platform: Platform.OS,
+  isExpoGo,
+  timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+  log: (event, detail) => console.warn(event, detail),
+});
+
+// A reminder that arrives while the app is open is shown too; by default it is not.
+if (reminders.supported && Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    }),
+  });
+}
+
 // RTL is set two different ways because the platforms disagree about how.
 //
 // Native: I18nManager is the real mechanism, but it only applies a flip on
@@ -194,36 +313,47 @@ I18nManager.forceRTL(true);
 const rtlProps = { dir: 'rtl' } as unknown as ViewProps;
 
 export default function RootLayout() {
+  // Phase 52 (spec D8). A tapped reminder opens /?start=reminder, and Home starts
+  // the ready session; the tap that launched the app is read once from the last
+  // response. dismissTo, as a saved photo import returns Home: back to the Home
+  // already at the bottom of the stack, or Home in place of the screen when it is
+  // not there, rather than a second Home pushed over a session in progress.
+  useEffect(() => reminders.onTap(() => router.dismissTo({ pathname: '/', params: { start: 'reminder' } })), []);
+
   return (
     // Every screen uses SafeAreaView. The navigator happens to provide a
     // fallback provider, but relying on that is relying on an internal detail —
     // and on web the insets are zero without an explicit provider.
     <SafeAreaProvider>
       <ApiProvider api={api}>
-        <SpeechProvider speaker={speaker}>
-          <RecordingProvider recorder={recorder}>
-            <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore}
-            >
-              <NextSessionProvider api={api}>
-                <SessionProvider api={api}>
-                  <TranslationProvider api={api}>
-                    <VocabularyProvider api={api}>
-                      <PhotoImportsProvider api={api} picker={photoPicker}>
-                        <View style={styles.root} {...rtlProps}>
-                          <View style={styles.column} testID="content-column">
-                            <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} version={appVersion}>
-                              <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
-                            </AppUpdatesProvider>
-                          </View>
-                        </View>
-                      </PhotoImportsProvider>
-                    </VocabularyProvider>
-                  </TranslationProvider>
-                </SessionProvider>
-              </NextSessionProvider>
-            </CurrentUserProvider>
-          </RecordingProvider>
-        </SpeechProvider>
+        <RemindersProvider reminders={reminders}>
+          <SpeechProvider speaker={speaker}>
+            <RecordingProvider recorder={recorder}>
+              <CurrentUserProvider api={api} auth={auth} authEvents={authEvents} enrollmentStore={enrollmentStore}
+              >
+                <NextSessionProvider api={api}>
+                  <SessionProvider api={api}>
+                    <TranslationProvider api={api}>
+                      <VocabularyProvider api={api}>
+                        <PhotoImportsProvider api={api} picker={photoPicker}>
+                          <TargetsProvider api={api}>
+                            <View style={styles.root} {...rtlProps}>
+                              <View style={styles.column} testID="content-column">
+                                <AppUpdatesProvider updates={appUpdates} events={updateRequiredEvents} release={appRelease} copy={copyToClipboard}>
+                                  <Stack screenOptions={{ headerShown: false, contentStyle: styles.content }} />
+                                </AppUpdatesProvider>
+                              </View>
+                            </View>
+                          </TargetsProvider>
+                        </PhotoImportsProvider>
+                      </VocabularyProvider>
+                    </TranslationProvider>
+                  </SessionProvider>
+                </NextSessionProvider>
+              </CurrentUserProvider>
+            </RecordingProvider>
+          </SpeechProvider>
+        </RemindersProvider>
       </ApiProvider>
     </SafeAreaProvider>
   );

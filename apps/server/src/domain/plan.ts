@@ -17,7 +17,11 @@ import { READ_ALOUD_MAX_LEVEL } from './progress';
  *  `speakable`: it is one to four words, so it can be said (phase 25 D3).
  *  `clozeGap`: its saved example holds the form exactly once, so it can be
  *  blanked (phase 27 D7). `dimension`, `rung`, `level` and `r` come from the
- *  word choice (D5): `r` is null for a dimension with no memory yet. */
+ *  word choice (D5): `r` is null for a dimension with no memory yet. `step`: a
+ *  same-day return (phase 37 D1), asked after every other card (D6).
+ *  `meanings`: phase 34 (spec D3), every meaning the dictionary knows for its
+ *  word and the word's homographs; none when absent. `knownMeanings`: phase 39
+ *  (spec D6), the meanings already learned of a word whose new gloss this is. */
 export type PlanPick = {
   form: string;
   translation: string;
@@ -28,6 +32,9 @@ export type PlanPick = {
   rung: 1 | 2;
   level: number;
   r: number | null;
+  step: boolean;
+  meanings?: readonly string[];
+  knownMeanings?: readonly string[];
 };
 
 /** `listening`: the app said its device has a voice for the target (phase 24 D5).
@@ -64,7 +71,7 @@ export const BOARD_SIZE = 4;
 export const BOARD_MIN_PICKS = 7;
 
 /** The cards with four options to pick from: a guess is right one time in four. */
-const FOUR_OPTION: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'reverse_choice', 'cloze_choice', 'listen_choice']);
+const FOUR_OPTION: ReadonlySet<QuestionType> = new Set(['multiple_choice', 'new_meaning', 'reverse_choice', 'cloze_choice', 'listen_choice']);
 
 const SPEAKING: ReadonlySet<QuestionType> = new Set(['read_aloud', 'say_translation']);
 
@@ -73,6 +80,7 @@ function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaki
   if (SPEAKING.has(type) && !speaking) return false;
   switch (type) {
     case 'multiple_choice':
+    case 'new_meaning':
     case 'reverse_choice':
     case 'typed_translation':
     case 'typed_meaning':
@@ -104,6 +112,14 @@ function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaki
 // do not make two words different.
 const key = comparable;
 
+/** Phase 34 (spec D3). Two board words overlap when either's meaning on the
+ *  board is one the dictionary knows for the other: then both pairings of that
+ *  meaning are right (`main` on מרכזי, which `mainstream` reaches too). */
+const overlaps = (a: PlanPick, b: PlanPick): boolean =>
+  key(a.translation) === key(b.translation) ||
+  (b.meanings ?? []).some((meaning) => key(meaning) === key(a.translation)) ||
+  (a.meanings ?? []).some((meaning) => key(meaning) === key(b.translation));
+
 /** The first four of `candidates` (indices into `picks`) whose forms and
  *  meanings all differ: two senses of one word, or two words with one meaning,
  *  would each make two pairings right. Null when four cannot be found. */
@@ -111,9 +127,7 @@ function boardPicks(picks: readonly PlanPick[], candidates: readonly number[]): 
   const taken: number[] = [];
   for (const i of candidates) {
     if (taken.length === BOARD_SIZE) break;
-    const clash = taken.some(
-      (j) => key(picks[j].form) === key(picks[i].form) || key(picks[j].translation) === key(picks[i].translation),
-    );
+    const clash = taken.some((j) => key(picks[j].form) === key(picks[i].form) || overlaps(picks[j], picks[i]));
     if (!clash) taken.push(i);
   }
   return taken.length === BOARD_SIZE ? taken : null;
@@ -125,7 +139,9 @@ type Choice = Card & { chosen: boolean };
 
 /** Spec D6. The eligible type of the rung whose chance is nearest CARD_TARGET;
  *  a tie goes to the type used least, then to the table's order. Null when the
- *  rung has no eligible type left. */
+ *  rung has no eligible type left. A return (phase 37 D6) is not held to
+ *  MAX_PER_TYPE: written receptive has one recall type, and a word met today
+ *  would otherwise be settled by a multiple choice, never recalled. */
 function bestIn(
   rung: 1 | 2,
   pick: PlanPick,
@@ -136,7 +152,7 @@ function bestIn(
   let best: (Card & { distance: number; uses: number }) | null = null;
   for (const type of RUNGS[pick.dimension][rung - 1]) {
     const uses = used.get(type) ?? 0;
-    if (uses >= MAX_PER_TYPE || !eligible(type, pick, listening, speaking)) continue;
+    if ((uses >= MAX_PER_TYPE && !pick.step) || !eligible(type, pick, listening, speaking)) continue;
     // The exponent is the rung the type sits in, also when it is the fallback rung.
     const p = expectedSuccess(pick.r, FOUR_OPTION.has(type), rung);
     const distance = Math.abs(p - CARD_TARGET);
@@ -150,6 +166,9 @@ function bestIn(
 /** The pick's rung, then the other rung, then multiple choice, always
  *  eligible. A new word has no R and takes multiple choice (spec D6). */
 function cardFor(pick: PlanPick, used: ReadonlyMap<QuestionType, number>, listening: boolean, speaking: boolean): Choice {
+  // Phase 39 (spec D6): a new gloss of a known word is a new_meaning, not chosen
+  // from a rung: it does not count toward MAX_PER_TYPE, nor go on a board.
+  if (pick.knownMeanings?.length) return { type: 'new_meaning', p: expectedSuccess(pick.r, true, 1), chosen: false };
   const multipleChoice = { type: 'multiple_choice' as const, p: expectedSuccess(pick.r, true, 1), chosen: false };
   if (pick.dimension === 'written_receptive' && pick.r === null) return multipleChoice;
   const other = pick.rung === 1 ? 2 : 1;
@@ -158,7 +177,7 @@ function cardFor(pick: PlanPick, used: ReadonlyMap<QuestionType, number>, listen
 }
 
 /** What the order places: one pick, or the board's four together. */
-type Unit = { indices: number[]; type: QuestionType; p: number };
+type Unit = { indices: number[]; type: QuestionType; p: number; step: boolean };
 
 /** Whether `counts`, the types still to place, can follow `last` with no type
  *  twice in a row: no type more than half of what is left, rounded up, or
@@ -174,13 +193,14 @@ function separable(counts: ReadonlyMap<QuestionType, number>, last: QuestionType
 
 /** Spec D6. Highest p first, and no type twice in a row where an order without
  *  it exists: the highest-p unit whose type differs from the last and leaves
- *  the rest separable, else the highest-p one that differs, else the highest. */
-function ordered(units: Unit[]): Unit[] {
+ *  the rest separable, else the highest-p one that differs, else the highest.
+ *  `last` is the type placed just before these units, if any. */
+function ordered(units: Unit[], before: QuestionType | null): { out: Unit[]; last: QuestionType | null } {
   const left = [...units].sort((a, b) => b.p - a.p || a.indices[0] - b.indices[0]);
   const counts = new Map<QuestionType, number>();
   for (const unit of left) counts.set(unit.type, (counts.get(unit.type) ?? 0) + 1);
   const out: Unit[] = [];
-  let last: QuestionType | null = null;
+  let last: QuestionType | null = before;
   while (left.length > 0) {
     const fits = (unit: Unit) => {
       if (unit.type === last) return false;
@@ -197,7 +217,7 @@ function ordered(units: Unit[]): Unit[] {
     out.push(unit);
     last = unit.type;
   }
-  return out;
+  return { out, last };
 }
 
 export function planCards(picks: readonly PlanPick[], input: PlanInput): SessionPlan {
@@ -214,18 +234,26 @@ export function planCards(picks: readonly PlanPick[], input: PlanInput): Session
 
   // Spec D6, D10: in a session of at least BOARD_MIN_PICKS, four
   // multiple-choice picks whose forms and meanings all differ become one
-  // matching board; otherwise there is none.
-  const multipleChoice = cards.flatMap((card, index) => (card.type === 'multiple_choice' ? [index] : []));
+  // matching board; otherwise there is none. A return is never on it: it is
+  // asked last (phase 37 D6).
+  const multipleChoice = cards.flatMap((card, index) => (card.type === 'multiple_choice' && !picks[index].step ? [index] : []));
   const board = picks.length >= BOARD_MIN_PICKS ? boardPicks(picks, multipleChoice) : null;
   const onBoard = new Set(board ?? []);
 
-  const units: Unit[] = cards.flatMap((card, index) => (onBoard.has(index) ? [] : [{ indices: [index], ...card }]));
-  if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index].p)) });
+  const units: Unit[] = cards.flatMap((card, index) =>
+    onBoard.has(index) ? [] : [{ indices: [index], ...card, step: picks[index].step }],
+  );
+  if (board) units.push({ indices: board, type: 'matching', p: Math.max(...board.map((index) => cards[index].p)), step: false });
+
+  // Phase 37 (spec D6): the returns after every other card, so each is at least
+  // the rest of the session away from the answer that owed it.
+  const first = ordered(units.filter((unit) => !unit.step), null);
+  const returns = ordered(units.filter((unit) => unit.step), first.last);
 
   const order: number[] = [];
   const types: QuestionType[] = [];
   let start: number | null = null;
-  for (const unit of ordered(units)) {
+  for (const unit of [...first.out, ...returns.out]) {
     if (unit.type === 'matching') start = order.length;
     for (const index of unit.indices) {
       order.push(index);

@@ -5,6 +5,7 @@ import {
   STUB_GAP,
   STUB_GAP_LEMMA,
   STUB_SENTENCE,
+  STUB_SENTENCE_HEBREW,
   answerChoice,
   answerTyped,
   expectGeneration,
@@ -15,7 +16,7 @@ import {
 import { attachDiagnostics, diagnosticReport } from './support/diagnostics';
 import { tapUntil } from './support/interactions';
 import { seedMemory, type MemorySeed } from './support/memory';
-import { clearGemini, expectGeminiMatching, expectJudge, userText } from './support/mockServer';
+import { clearGemini, expectContext, expectGeminiMatching, expectJudge, userText } from './support/mockServer';
 import { stripIsolates } from './support/text';
 import { openApp, signUpLearner } from './support/users';
 import { withVoices } from './support/voices';
@@ -46,6 +47,8 @@ const WORDS = [
 ];
 const FORM_OF: Record<string, string> = Object.fromEntries(WORDS.map((w) => [w.meaning, w.form]));
 const FORMS = WORDS.map((w) => w.form);
+/** Phase 34 (spec D8). STUB_GAP's word in STUB_SENTENCE_HEBREW, which a sentence card marks. */
+const MARKED = 'קראה';
 
 /** Past a skipped seed, the six words looked up and saved through the API. */
 async function saveSixWords(request: APIRequestContext): Promise<string> {
@@ -98,8 +101,9 @@ const MEMORY: MemorySeed[] = [
   { gloss: 'צדף', dimension: 'written_productive', stability: 10, daysAgo: 19, level: 3 },
 ];
 
-/** Six saved words, their memory seeded, and a list session started. */
-async function reachSentenceSession(page: Page, request: APIRequestContext, username: string) {
+/** Six saved words, their memory seeded, and a list session started. Phase 38:
+ *  `gapAlternatives`, the words the stub says also fit the typed gap. */
+async function reachSentenceSession(page: Page, request: APIRequestContext, username: string, gapAlternatives: string[] = []) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
   await signUpLearner(page, username, 'ru');
@@ -107,13 +111,24 @@ async function reachSentenceSession(page: Page, request: APIRequestContext, user
   await seedMemory(username, MEMORY);
 
   await clearGemini(request);
-  await expectGeneration(request);
-  // Past a skipped seed the home screen offers create, not start, so openApp's default landing does not fit.
-  await openApp(page, 'create-button');
-  await page.getByTestId('create-button').click();
+  await expectGeneration(request, [], gapAlternatives);
+  // Phase 34 (spec D8). The context call names the practised word in a sentence
+  // card's Hebrew, the stub sentence's קראה, which the card marks. Asked of
+  // every position, since the order is the cards' p: a bare-word card given
+  // no sentence falls back on its saved example, as by default.
+  await expectContext(
+    request,
+    [1, 2, 3, 4, 5, 6].map((position) => ({ key: `q${position}`, sentence_word: MARKED })),
+  );
+  // Phase 43 (spec D7). Home makes the session itself: it lands on the switcher, then offers start.
+  await openApp(page, 'enrollment-switcher');
   await expect(page.getByTestId('start-button')).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 }
+
+/** Phase 38 (spec D4). The next answer the app sends, to read what it says. */
+const nextStepSent = (page: Page) =>
+  page.waitForRequest((sent) => sent.method() === 'POST' && sent.url().endsWith('/next-step'));
 
 /** Gets past a card this spec is not about: a choice answered right, a typed
  *  card by its saved form, and a sentence to translate by showing the answer. */
@@ -150,21 +165,39 @@ test('the sentence cards: a gap to choose, a gap to type, a sentence to translat
       await expect(page.getByTestId('sentence-gap')).toContainText(right);
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'cloze-typed') {
-      // A new sentence, its Hebrew always shown. Its gap is inflected, so the
-      // lemma is a wrong answer and the form the right one.
+      // A new sentence. Its gap is inflected, so the lemma is a wrong answer
+      // and the form the right one.
       await expect(page.getByText('השלימו את המילה החסרה ברוסית')).toBeVisible();
       expect(stripIsolates(await page.getByTestId('sentence-gap').textContent())).toBe('Вчера она _____ эту книгу');
+      // Phase 38 (spec D1): the Hebrew is a hint, closed until tapped.
+      await expect(page.getByTestId('sentence-translation')).toHaveCount(0);
+      await page.getByTestId('sentence-hint').click();
+      await expect(page.getByTestId('sentence-hint')).toHaveCount(0);
       await expect(page.getByTestId('sentence-translation')).toBeVisible();
+      // Phase 34 (spec D8): the Hebrew names the word the gap wants.
+      await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
+      // Phase 38 (spec D4): the answer says the hint was opened.
+      const sent = nextStepSent(page);
       await answerTyped(page, STUB_GAP);
+      expect((await sent).postDataJSON()).toMatchObject({ text: STUB_GAP, hint_opened: true });
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
       await page.getByTestId('continue-button').click();
     } else if (card.kind === 'translate') {
       // Translate the Hebrew sentence; a different order is the judge's to accept.
-      await expect(page.getByText('תרגמו לרוסית')).toBeVisible();
+      await expect(page.getByText('תרגמו את המשפט לרוסית')).toBeVisible();
+      // Phase 34 (spec D8): the sentence marks the practised word.
+      await expect(page.getByTestId('sentence-translation')).toHaveText(STUB_SENTENCE_HEBREW);
+      await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
       await expect(page.getByTestId('translation-reference')).toHaveCount(0);
+      // The marked word alone is asked again as the whole sentence, not sent.
+      await answerTyped(page, STUB_GAP);
+      await expect(page.getByTestId('word-only')).toHaveText('כתבו את כל המשפט, לא רק את המילה');
+      await expect(page.getByTestId('typed-input')).toHaveValue(STUB_GAP);
+      await expect(page.getByTestId('feedback-wrong')).not.toBeVisible();
       await expectJudge(request, 'right');
       await answerTyped(page, 'Она прочитала эту книгу вчера');
+      await expect(page.getByTestId('word-only')).not.toBeVisible();
       await expect(page.getByTestId('feedback-correct')).toBeVisible();
       await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
       await expect(page.getByText('תרגום לדוגמה:')).toBeVisible();
@@ -192,9 +225,115 @@ test('a typed gap refuses the lemma of its inflected word', async ({ page, reque
     if (card.kind === 'cloze-typed') break;
     await pass(page, card);
   }
+  // Phase 41 (spec D2): a word the rule calls wrong is checked against the gap; the lemma does not fit it.
+  await expectJudge(request, 'wrong');
+  const sent = nextStepSent(page);
   await answerTyped(page, STUB_GAP_LEMMA);
+  expect((await sent).postDataJSON()).toMatchObject({ text: STUB_GAP_LEMMA, check_fit: true });
   await expect(page.getByTestId('feedback-wrong')).toBeVisible();
   await expect(page.getByTestId('feedback-title')).toHaveText('התשובה הנכונה:');
+  expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(STUB_GAP);
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 38 (spec D2, D3). A word that fits the sentence read alone is right, says
+// another was meant, opens the Hebrew sentence and asks again.
+test('a typed gap takes a word that fits, opens its hint and asks again', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const FITS = 'купила';
+  await reachSentenceSession(page, request, 'e2e_sentences_fits_ru', [FITS]);
+
+  for (let position = 1; ; position++) {
+    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(6);
+    const card = await readCard(page, position, 6);
+    if (card.kind === 'cloze-typed') break;
+    await pass(page, card);
+  }
+  await expect(page.getByTestId('sentence-translation')).toHaveCount(0);
+  await expect(page.getByTestId('sentence-hint')).toBeVisible();
+
+  // Phase 38 (spec D4): answered without the hint, so it says so.
+  const first = nextStepSent(page);
+  await answerTyped(page, FITS);
+  expect((await first).postDataJSON()).toMatchObject({ text: FITS, hint_opened: false });
+  await expect(page.getByTestId('retry-notice')).toBeVisible();
+  expect(stripIsolates(await page.getByTestId('retry-right').textContent())).toBe(`✓ נכון, ${FITS} מתאים כאן.`);
+  await expect(page.getByTestId('retry-again')).toHaveText('אבל התכוונו למילה אחרת — היעזרו במשפט בעברית ונסו שוב');
+  // Opened by the second try, without a tap.
+  await expect(page.getByTestId('sentence-translation')).toBeVisible();
+  await expect(page.getByTestId('sentence-translation-mark')).toHaveText(MARKED);
+  await expect(page.getByTestId('sentence-hint')).toHaveCount(0);
+  await expect(page.getByTestId('continue-button')).toHaveCount(0);
+  await expect(page.getByTestId('typed-input')).toHaveValue('');
+
+  // The second try never says: the hint it opened is the app's doing.
+  const second = nextStepSent(page);
+  await answerTyped(page, STUB_GAP);
+  const retried = (await second).postDataJSON() as Record<string, unknown>;
+  expect(retried).toMatchObject({ text: STUB_GAP, retry: true });
+  expect(retried).not.toHaveProperty('hint_opened');
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
+  await expect(page.getByTestId('feedback-title')).toHaveText('נכון!');
+  await expect(page.getByTestId('retry-notice')).toHaveCount(0);
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 41 (spec D2, D3). A word the card's list missed, which the model says fits
+// the gap, is right as a listed one is: it says another was meant and asks again.
+test('a typed gap checks an unlisted word with the server, and one that fits asks again', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  const UNLISTED = 'нашла';
+  await reachSentenceSession(page, request, 'e2e_sentences_fit_check_ru');
+
+  for (let position = 1; ; position++) {
+    expect(position, 'the session asked no typed gap').toBeLessThanOrEqual(6);
+    const card = await readCard(page, position, 6);
+    if (card.kind === 'cloze-typed') break;
+    await pass(page, card);
+  }
+  await expectJudge(request, 'fits');
+  const first = nextStepSent(page);
+  await answerTyped(page, UNLISTED);
+  expect((await first).postDataJSON()).toMatchObject({ text: UNLISTED, check_fit: true });
+  await expect(page.getByTestId('retry-notice')).toBeVisible();
+  expect(stripIsolates(await page.getByTestId('retry-right').textContent())).toBe(`✓ נכון, ${UNLISTED} מתאים כאן.`);
+  await expect(page.getByTestId('sentence-translation')).toBeVisible();
+
+  const second = nextStepSent(page);
+  await answerTyped(page, STUB_GAP);
+  expect((await second).postDataJSON()).not.toHaveProperty('check_fit');
+  await expect(page.getByTestId('feedback-correct')).toBeVisible();
+
+  expect(diagnostics.pageErrors, report()).toEqual([]);
+});
+
+// Phase 45 (spec D1). Another word on the second try too: not "right", not wrong,
+// and the practised word named.
+test('a translation that uses another word on both tries is told it is still not the word', async ({ page, request }) => {
+  const diagnostics = attachDiagnostics(page, API_URL);
+  const report = () => diagnosticReport(diagnostics);
+  await reachSentenceSession(page, request, 'e2e_sentences_still_other_ru');
+
+  for (let position = 1; ; position++) {
+    expect(position, 'the session asked no translation').toBeLessThanOrEqual(6);
+    const card = await readCard(page, position, 6);
+    if (card.kind === 'translate') break;
+    await pass(page, card);
+  }
+  await expectJudge(request, 'other_word');
+  await answerTyped(page, 'Вчера она дочитала эту книгу');
+  await expect(page.getByTestId('retry-notice')).toBeVisible();
+
+  await expectJudge(request, 'other_word');
+  await answerTyped(page, 'Вчера она прочла эту книгу');
+  await expect(page.getByTestId('feedback-other')).toBeVisible();
+  await expect(page.getByTestId('feedback-correct')).toHaveCount(0);
+  await expect(page.getByTestId('feedback-wrong')).toHaveCount(0);
+  await expect(page.getByTestId('feedback-title')).toHaveText('עדיין לא המילה שתרגלנו:');
   expect(stripIsolates(await page.getByTestId('feedback-line').textContent())).toBe(STUB_GAP);
 
   expect(diagnostics.pageErrors, report()).toEqual([]);

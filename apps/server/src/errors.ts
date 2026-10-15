@@ -32,6 +32,18 @@ export class AnswerKindMismatch extends Error {
   }
 }
 
+// Phase 39 (spec D10). A typed answer written in another alphabet than the card's
+// answer language: refused ungraded, the card stays as it was.
+export class WrongScript extends Error {
+  constructor(
+    readonly questionId: string,
+    readonly language: string,
+  ) {
+    super(`the answer to ${questionId} is not written in ${language}'s alphabet`);
+    this.name = 'WrongScript';
+  }
+}
+
 export class UsernameTaken extends Error {
   constructor(readonly username: string) {
     super(`username ${username} is already taken`);
@@ -190,8 +202,9 @@ export class InvalidCursor extends Error {
   }
 }
 
-/** Phase 19. The enrollment already has a preparing or ready session
- *  (sessions_one_open_per_enrollment). */
+/** Phase 19. The enrollment already has an open session of the kind asked
+ *  for. Phase 43: a started one (sessions_one_started_per_enrollment) or one in
+ *  stock (sessions_one_stock_per_enrollment). */
 export class SessionOpen extends Error {
   constructor(readonly enrollmentId: string) {
     super(`enrollment ${enrollmentId} already has an open session`);
@@ -230,8 +243,10 @@ export class SessionNotReady extends Error {
   }
 }
 
-/** Phase 19. The model's distractors were unreadable or failed validation.
- *  Thrown inside the job so pg-boss retries it; never on the wire. */
+/** Phase 19. The model's distractors were unreadable or empty, or no dictionary
+ *  rows are left for any pick. A card that fails validation is refused, not thrown
+ *  (phase 48, spec D1, D5). Thrown inside the job so pg-boss retries it; never on
+ *  the wire. */
 export class InvalidDistractors extends Error {
   constructor(
     readonly sessionId: string,
@@ -317,6 +332,64 @@ export class EmailNotSent extends Error {
   constructor(readonly status: number | 'timeout' | 'network') {
     super(`sign-in email not sent (${status})`);
     this.name = 'EmailNotSent';
+  }
+}
+
+/** Phase 52 (spec D7). Expo's push service could not be reached, refused the request, ran out
+ *  of time, or answered with something other than tickets or receipts. One error for every
+ *  cause; the tick records it against the learner's reminder and goes on to the next. */
+export class PushUnavailable extends Error {
+  constructor(readonly detail: number | 'timeout' | 'network' | 'unreadable') {
+    super(`push service unavailable (${detail})`);
+    this.name = 'PushUnavailable';
+  }
+}
+
+/** Phase 52 (spec D1). The app reported a time zone `Intl` does not know. The
+ *  route answers 400; a wrong zone would give the learner the wrong day. */
+export class InvalidTimeZone extends Error {
+  constructor(readonly timeZone: string) {
+    super(`${timeZone} is not a time zone`);
+    this.name = 'InvalidTimeZone';
+  }
+}
+
+/** Phase 52 (spec D6). The reminder a tap reports is not the caller's, or does not exist, or
+ *  the id is not even a uuid. One error for all three, so the route's 404 cannot tell a
+ *  stranger's reminder from a missing one (ADR 0009 R7). */
+export class ReminderNotFound extends Error {
+  constructor(readonly reminderId: string) {
+    super(`no reminder ${reminderId}`);
+    this.name = 'ReminderNotFound';
+  }
+}
+
+/** Phase 53 (spec D2, D13). A target that does not exist, or an id that is not even a uuid:
+ *  one error for both, so the route's 404 cannot tell them apart. Another learner's target
+ *  is AccessDenied, as another learner's photo import is. */
+export class TargetNotFound extends Error {
+  constructor(readonly targetId: string) {
+    super(`no target ${targetId}`);
+    this.name = 'TargetNotFound';
+  }
+}
+
+/** Phase 53 (spec D1, ruling R-D10). A target that cannot be: a due date on or before the
+ *  learner's today, or, on create, no word to hold once its photos and typed words are
+ *  saved (400). */
+export class InvalidTarget extends Error {
+  constructor(readonly reason: 'due_date' | 'no_words') {
+    super(`invalid target: ${reason}`);
+    this.name = 'InvalidTarget';
+  }
+}
+
+/** Phase 53 (spec D1). A change to a target that is no longer active: ended early, or its
+ *  date has come (409). */
+export class TargetClosed extends Error {
+  constructor(readonly targetId: string) {
+    super(`target ${targetId} is closed`);
+    this.name = 'TargetClosed';
   }
 }
 

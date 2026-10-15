@@ -4,10 +4,15 @@ import { createFakeClock, createFakeJobRepo, createFakeLlmClient, createFakeLogg
 import { testRng } from '../../tests/support/testRng';
 import type { GlossRendering, SessionRecord } from '../domain/session';
 import { AnswerKindMismatch, NoSavedWords, SessionNotFound } from '../errors';
+import type { GlossFamiliesRepo } from '../repo/glossFamilies';
+import type { ModelCallRepo } from '../repo/modelCalls';
+import type { PronunciationRepo } from '../repo/pronunciationScores';
+import type { ReminderRepo } from '../repo/reminders';
 import type { MemoryRepo } from '../repo/memory';
 import type { ProgressRepo } from '../repo/progress';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
+import type { TargetRepo } from '../repo/targets';
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GrantRepo } from '../repo/grants';
 import type { UserRepo } from '../repo/users';
@@ -37,8 +42,20 @@ describe('repos', () => {
       findState: notStubbed,
       transition: notStubbed,
       findLatest: notStubbed,
-      findGlossesAnsweredOn: notStubbed,
-      countNewOn: notStubbed,
+      findAnswersOn: notStubbed,
+      findIntroducedOn: notStubbed,
+      // Phase 34 (spec D9).
+      resolveRetry: notStubbed,
+      resolvePendingRetry: notStubbed,
+      // Phase 43 (spec D1–D4).
+      markStarted: notStubbed,
+      lockNextSession: notStubbed,
+      findOpen: notStubbed,
+      findSessionGlosses: notStubbed,
+      findNewestDevices: notStubbed,
+      // Phase 53 (spec D12).
+      findStockChoice: notStubbed,
+      retireStock: notStubbed,
       // Phase 29: every session use case authorizes against this enrollment.
       findEnrollmentId: async () => 'e1',
       ...overrides,
@@ -55,6 +72,9 @@ describe('repos', () => {
     findRecentSentences: () => {
       throw new Error('submitAnswer must not read recent sentences');
     },
+    findRecentContexts: () => {
+      throw new Error('submitAnswer must not read recent contexts');
+    },
     insertGeneratedQuestions: () => {
       throw new Error('submitAnswer must not write generated questions');
     },
@@ -70,7 +90,7 @@ describe('repos', () => {
       throw new Error('the session service must not register a user');
     },
     // Read by learnerDay, wherever a session ends.
-    findDayContext: async () => ({ kind: 'learner' }),
+    findDayContext: async () => ({ kind: 'learner', timeZone: 'UTC' }),
     findByUsername: () => {
       throw new Error('the session service must not look a username up');
     },
@@ -82,6 +102,12 @@ describe('repos', () => {
     },
     findBotByName: () => {
       throw new Error('the session service must not look a bot up');
+    },
+    setTimeZone: () => {
+      throw new Error('the session service must not set a time zone');
+    },
+    findTimeZone: () => {
+      throw new Error('the session service must not read a time zone');
     },
     setBotDay: () => {
       throw new Error("the session service must not move a bot's day");
@@ -147,6 +173,9 @@ describe('repos', () => {
     repairVariantRenderings: () => {
       throw new Error('the session service must not write the dictionary tables');
     },
+    findLexemeForms: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
     findLexeme: () => {
       throw new Error('the session service must not read the dictionary tables');
     },
@@ -171,6 +200,21 @@ describe('repos', () => {
     },
     findSiblings: () => {
       throw new Error('these cases must not read a sibling');
+    },
+    // Phase 34 (spec D3). Read by prepareSession, which these cases are not.
+    findKnownRight: () => {
+      throw new Error('these cases must not read what the dictionary knows to be right');
+    },
+    // Phase 34. The accept job's and the backfill's: the session service writes
+    // no accepted answers (spec D1).
+    findRenderingForAccept: () => {
+      throw new Error('the session service must not read the dictionary tables');
+    },
+    storeAccepted: () => {
+      throw new Error('the session service must not write the dictionary tables');
+    },
+    findUnacceptedSavedRenderings: () => {
+      throw new Error('the session service must not read the dictionary tables');
     },
   };
 
@@ -207,9 +251,11 @@ describe('repos', () => {
     findWordsPage: forbidden,
     findWordSummaries: forbidden,
     findLemmaLexemes: forbidden,
+    markKnown: forbidden,
     findLemmaRenderings: forbidden,
     findSavedInLemma: forbidden,
     listSavedGlosses: forbidden,
+    findSavedWords: forbidden,
     countEntries: forbidden,
   };
 
@@ -265,14 +311,17 @@ describe('repos', () => {
         vocabulary: vocabularyRepo,
         progress: progressRepo,
         memory: memoryRepo,
+        glossFamilies: stub<GlossFamiliesRepo>({}),
         photoImport: photoImportRepo,
-        jobs: {
-          enqueue: () => {
-            throw new Error('the submit-answer use case must not enqueue a job');
-          },
-        },
+        modelCall: stub<ModelCallRepo>({}),
+        pronunciation: stub<PronunciationRepo>({}),
+        reminders: stub<ReminderRepo>({}),
+        target: stub<TargetRepo>({}),
+        // Phase 43 (spec D3). The one job an answer may ask for: the next session in stock.
+        jobs,
       });
   }
+  let jobs = createFakeJobRepo();
 
   it('throws SessionNotFound when the repository reports no such session', async () => {
     const service = createSessionService({
@@ -283,8 +332,12 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
+      translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await expect(
@@ -305,8 +358,9 @@ describe('repos', () => {
         answer: 'finestra',
         lemma: 'finestra',
         alternatives: [],
+        context: null,
       },
-      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0 },
+      { id: 'c2', type: 'multiple_choice', vocab_term_id: 'l2', question: 'casa', options: ['בית', 'דלת'], correct_option: 0, context: null },
     ],
     answers: [],
     complete: false,
@@ -317,6 +371,7 @@ describe('repos', () => {
 
   it('stores a typed answer with the verdict the learner was shown', async () => {
     const inserted: unknown[] = [];
+    jobs = createFakeJobRepo();
     const service = createSessionService({
       transaction: fakeTransaction(
         sessionRepoWith({
@@ -324,19 +379,29 @@ describe('repos', () => {
           insertAnswer: async (...args) => {
             inserted.push(args);
           },
+          // Phase 43 (spec D2). No start call came first: this answer starts it.
+          markStarted: async () => true,
         }),
       ),
       rng: testRng(7),
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
+      translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     const result = await service.submitAnswer('u1', 's1', 't1', { text: 'finestar' });
     expect(inserted).toEqual([['s1', 0, 't1', { text: 'finestar', verdict: 'near_miss' }]]);
     expect(result.answers[0]).toMatchObject({ is_correct: true, verdict: 'near_miss' });
+    // Phase 43 (spec D2, D3). A first answer that started the session asks for the next in stock.
+    expect(jobs.enqueued).toEqual([
+      { name: 'stock-session', data: { enrollment_id: 'e1', reason: 'answer' }, options: { singletonKey: 'e1' } },
+    ]);
   });
 
   it('refuses an option index on a typed card, writing nothing', async () => {
@@ -346,35 +411,55 @@ describe('repos', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
+      translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await expect(service.submitAnswer('u1', 's1', 't1', { option_index: 0 })).rejects.toBeInstanceOf(AnswerKindMismatch);
   });
 });
 
-// Phase 35 (spec D5, D10). What createNextSession reads for chooseWords, for a
-// list with no history: no memory, no levels, nothing asked or new today.
+// Phase 35 (spec D5, D10), phase 37 (D7). What createNextSession reads for
+// chooseWords, for a list with no history: no memory, no levels, nothing
+// answered or introduced today.
 const SAVED_AT = '2026-10-01T09:00:00.000000Z';
-const nothingToday: Pick<SessionRepo, 'findGlossesAnsweredOn' | 'countNewOn'> = { findGlossesAnsweredOn: async () => [], countNewOn: async () => 0 };
+/** Phase 39. The lexeme fields of a saved gloss: a lexeme of its own, so that no
+ *  two glosses here make a family (spec D1). */
+const lexeme = (lexemeId: string) => ({ lexemeId, lemma: lexemeId, form: lexemeId, order: [0, 0] as [number, number], knownAt: null });
+const LEXEME = lexeme('l1');
+/** Phase 39 (spec D4). No family stored yet. */
+const noFamilies = { glossFamilies: stub<GlossFamiliesRepo>({ load: async () => [] }) };
+// Phase 43 (spec D4, D5): and no session open, so create builds one with nothing in flight.
+const nothingToday: Pick<SessionRepo, 'findAnswersOn' | 'findIntroducedOn' | 'findOpen' | 'lockNextSession'> = {
+  findAnswersOn: async () => [],
+  findIntroducedOn: async () => [],
+  findOpen: async () => ({}),
+  lockNextSession: async () => {},
+};
 const noHistory = {
-  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const }) }),
+  ...noFamilies,
+  user: stub<UserRepo>({ findDayContext: async () => ({ kind: 'learner' as const, timeZone: 'UTC' }) }),
   memory: stub<MemoryRepo>({ findRows: async () => [] }),
   progress: stub<ProgressRepo>({ findRows: async () => [] }),
 };
 
-describe('createNextSession, phase 35 (spec D5, D10)', () => {
+describe('createNextSession, phase 35 (spec D5, D10) and phase 37 (D1, D7)', () => {
   const E = 'e1';
   const TODAY = '2026-10-11';
   const saved = [
-    { glossId: 'g_asked', key: 'כלב', variantId: 'v_asked', savedAt: '2026-10-11T08:00:00.000000Z' },
-    { glossId: 'g_due', key: 'עט', variantId: 'v_due', savedAt: '2026-09-01T08:00:00.000000Z' },
-    { glossId: 'g_new', key: 'חתול', variantId: 'v_new', savedAt: '2026-10-10T08:00:00.000000Z' },
+    { glossId: 'g_asked', key: 'כלב', variantId: 'v_asked', savedAt: '2026-10-11T08:00:00.000000Z', ...lexeme('l_asked') },
+    { glossId: 'g_due', key: 'עט', variantId: 'v_due', savedAt: '2026-09-01T08:00:00.000000Z', ...lexeme('l_due') },
+    { glossId: 'g_new', key: 'חתול', variantId: 'v_new', savedAt: '2026-10-10T08:00:00.000000Z', ...lexeme('l_new') },
   ];
   const DUE_STATE = { stability: 1, difficulty: 5, lastDay: '2026-09-01', reps: 1, lapses: 0, params: 'fsrs6-default' };
+  // Met this morning and missed: an Again leaves stability under a day.
+  const MISSED_STATE = { stability: 0.212, difficulty: 6.4, lastDay: TODAY, reps: 1, lapses: 1, params: 'fsrs6-default' };
 
-  it("chooses from memory, levels and the learner's day, and carries each pick's dimension, rung, level and R", async () => {
+  it("chooses from memory, levels, today's answers and the learner's day, and carries each pick's dimension, rung, level, R and return", async () => {
     const jobs = createFakeJobRepo();
     const reads: Record<string, unknown> = {};
     const service = createSessionService({
@@ -385,26 +470,31 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
         user: stub<UserRepo>({
           findDayContext: async (userId) => {
             reads.dayOf = userId;
-            return { kind: 'learner' as const };
+            return { kind: 'learner' as const, timeZone: 'UTC' };
           },
         }),
         session: stub<SessionRepo>({
           findLatest: async () => ({ id: 's0', status: 'completed', source: 'list' }) as never,
+          findOpen: async () => ({}),
+          lockNextSession: async () => {},
           insertPreparingSession: async () => 's1',
-          findGlossesAnsweredOn: async (enrollmentId, day) => {
-            reads.asked = [enrollmentId, day];
-            return ['g_asked'];
+          findAnswersOn: async (enrollmentId, day) => {
+            reads.answers = [enrollmentId, day];
+            return [{ glossId: 'g_asked', sessionId: 's0', type: 'multiple_choice', correct: false }];
           },
-          countNewOn: async (enrollmentId, day) => {
-            reads.newOn = [enrollmentId, day];
-            return 0;
+          findIntroducedOn: async (enrollmentId, day) => {
+            reads.introduced = [enrollmentId, day];
+            return ['g_asked'];
           },
         }),
         vocabulary: stub<VocabularyRepo>({ listSavedGlosses: async () => saved }),
         memory: stub<MemoryRepo>({
           findRows: async (input) => {
             reads.memory = input;
-            return [{ glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE }];
+            return [
+              { glossId: 'g_due', dimension: 'written_receptive', state: DUE_STATE, reachedOn: null },
+              { glossId: 'g_asked', dimension: 'written_receptive', state: MISSED_STATE, reachedOn: null },
+            ];
           },
         }),
         progress: stub<ProgressRepo>({
@@ -413,7 +503,9 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
             return [{ glossId: 'g_due', dimension: 'written_receptive', level: 4, lastStepOn: null, lastWrongOn: null }];
           },
         }),
+        ...noFamilies,
         dict: stub<DictRepo>({
+          findLexemeForms: async () => [],
           findGlossRenderings: async () =>
             saved.map((gloss, i) => ({ glossId: gloss.glossId, senseId: `s${i}`, variantId: gloss.variantId, form: `f${i}`, gloss: gloss.key, rank: 0 })),
         }),
@@ -423,8 +515,12 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
       logger: createFakeLogger(),
       now: createFakeClock(Date.parse(`${TODAY}T10:00:00Z`)),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
+      translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await service.createNextSession('u1', E, { listening: false, speaking: false });
@@ -432,19 +528,20 @@ describe('createNextSession, phase 35 (spec D5, D10)', () => {
     // The day is the learner's (ADR 0013), and every read is over the saved list.
     expect(reads).toEqual({
       dayOf: 'u1',
-      asked: [E, TODAY],
-      newOn: [E, TODAY],
+      answers: [E, TODAY],
+      introduced: [E, TODAY],
       memory: { enrollmentId: E, glossIds: ['g_asked', 'g_due', 'g_new'] },
       levels: { enrollmentId: E, glossIds: ['g_asked', 'g_due', 'g_new'], savedBy: null },
     });
     const { picks } = jobs.enqueued[0].data as { picks: Record<string, unknown>[] };
-    // DUE, then NEW, then what was asked today.
+    // Phase 37 (spec D3): the new word, then the word missed today as a return,
+    // at recall, then the due word.
     expect(picks).toEqual([
-      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number) },
-      { gloss_id: 'g_new', sense_id: 's2', variant_id: 'v_new', dimension: 'written_receptive', rung: 1, level: 1, r: null },
-      { gloss_id: 'g_asked', sense_id: 's0', variant_id: 'v_asked', dimension: 'written_receptive', rung: 1, level: 1, r: null },
+      { gloss_id: 'g_new', sense_id: 's2', variant_id: 'v_new', dimension: 'written_receptive', rung: 1, level: 1, r: null, step: false },
+      { gloss_id: 'g_asked', sense_id: 's0', variant_id: 'v_asked', dimension: 'written_receptive', rung: 2, level: 1, r: 1, step: true },
+      { gloss_id: 'g_due', sense_id: 's1', variant_id: 'v_due', dimension: 'written_receptive', rung: 1, level: 4, r: expect.any(Number), step: false },
     ]);
-    expect(picks[0].r).toBeLessThan(0.75);
+    expect(picks[2].r).toBeLessThan(0.75);
   });
 });
 
@@ -463,11 +560,12 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
           ...nothingToday,
         }),
         vocabulary: stub<VocabularyRepo>({
-          listSavedGlosses: async () => [{ glossId: 'g1', key: 'עט', variantId: 'v1', savedAt: SAVED_AT }],
+          listSavedGlosses: async () => [{ glossId: 'g1', key: 'עט', variantId: 'v1', savedAt: SAVED_AT, ...LEXEME }],
         }),
         ...noHistory,
         // Phase 31 (spec D12). The saved form's rendering, agreeing with the key.
         dict: stub<DictRepo>({
+          findLexemeForms: async () => [],
           findGlossRenderings: async () => [{ glossId: 'g1', senseId: 's1', variantId: 'v1', form: 'ручка', gloss: 'עט', rank: 0 }],
         }),
         jobs,
@@ -476,8 +574,12 @@ describe('createNextSession, phase 24 (spec D3, D5)', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
+      translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
 
     await service.createNextSession('u1', E, { listening: true, speaking });
@@ -509,10 +611,11 @@ describe('createNextSession, phase 31 (spec D12)', () => {
           ...nothingToday,
         }),
         vocabulary: stub<VocabularyRepo>({
-          listSavedGlosses: async () => [{ glossId: 'g1', key: 'אצבע', variantId: 'v_fingers', savedAt: SAVED_AT }],
+          listSavedGlosses: async () => [{ glossId: 'g1', key: 'אצבע', variantId: 'v_fingers', savedAt: SAVED_AT, ...LEXEME }],
         }),
         ...noHistory,
         dict: stub<DictRepo>({
+          findLexemeForms: async () => [],
           findGlossRenderings: async (input) => {
             reads.push(input);
             return renderings;
@@ -524,8 +627,12 @@ describe('createNextSession, phase 31 (spec D12)', () => {
       logger: createFakeLogger(),
       now: createFakeClock(0),
       llm: createFakeLlmClient(''),
+      contextLlm: createFakeLlmClient(''),
+      checkerLlm: createFakeLlmClient(''),
       transcriber: createFakeTranscriber(''),
       judge: createFakeLlmClient(''),
+      translationJudge: createFakeLlmClient(''),
+      soundAlikeThreshold: 0.95,
     });
     return { service, jobs, reads };
   }

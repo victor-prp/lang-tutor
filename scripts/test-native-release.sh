@@ -15,6 +15,9 @@ trap 'rm -rf "$FIXTURE"' EXIT
 
 status=0
 checks=0
+# The script reads the API address from .env.production; one from the caller's
+# shell would hide a missing one.
+unset EXPO_PUBLIC_API_URL EXPO_PUBLIC_APP_COMMIT
 
 ok() { checks=$((checks + 1)); printf '  ok         %s\n' "$1"; }
 fail() { checks=$((checks + 1)); printf '\n  FAIL       %s\n%s\n' "$1" "$2" >&2; status=1; }
@@ -60,18 +63,19 @@ case "$1" in
     [ "$SUBMIT_FAILS" = 1 ] && { echo "submission failed" >&2; exit 1; }
     exit 0 ;;
   update)
-    echo "eas $* APP_VERSION=${EXPO_PUBLIC_APP_VERSION:-unset}" >> "$LOG" ;;
+    echo "eas $* APP_VERSION=${EXPO_PUBLIC_APP_VERSION:-unset} APP_COMMIT=${EXPO_PUBLIC_APP_COMMIT:-unset} API_URL=${EXPO_PUBLIC_API_URL:-unset}" >> "$LOG" ;;
   *) echo "eas $*" >> "$LOG"; exit 2 ;;
 esac
 STUB
 chmod +x "$STUB/npx" "$STUB/eas"
 
-# A mobile directory with what the script reads: app.json and eas.json.
+# A mobile directory with what the script reads: app.json, eas.json and .env.production.
 MOBILE="$FIXTURE/mobile"
 mkdir -p "$MOBILE"
 with_project() {
   printf '{"expo":{"extra":{"eas":{"projectId":"p1"}}}}\n' > "$MOBILE/app.json"
   echo '{"submit":{"production":{"ios":{"ascAppId":"123"}}}}' > "$MOBILE/eas.json"
+  printf '# a comment\nEXPO_PUBLIC_API_URL=https://app.example\n' > "$MOBILE/.env.production"
 }
 with_project
 
@@ -116,6 +120,9 @@ said() { # said <label> <pattern>: the script's output contains it
 
 echo "Testing scripts/native-release.sh"
 
+# Phase 49 (spec D2): the commit an update is stamped with.
+commit=$(cd "$REPO" && git rev-parse --short=7 HEAD)
+
 for platform in android ios; do
   case "$platform" in
     android) switch=ANDROID_RELEASE other=IOS_RELEASE ;;
@@ -129,6 +136,13 @@ for platform in android ios; do
     "yes:eas update --branch production --platform $platform" "no:eas build " "no:eas submit"
   expect_calls "the update carries the tag and the build it targets as its message, and the tag as the app version" 0 \
     "yes:--message v2026.10.11.1 for build b1" "yes:APP_VERSION=v2026.10.11.1" "yes:--environment production"
+  # Phase 49 (spec D2): the tag's commit, as the About screen shows it.
+  expect_calls "the update carries the tag's commit" 0 "yes:APP_COMMIT=$commit"
+  # eas update --environment production reads no .env file, so an update built
+  # without this crashed at launch ("EXPO_PUBLIC_API_URL is not set") and every
+  # phone stayed on the build's own bundle.
+  expect_calls "the update carries the production API address from .env.production" 0 \
+    "yes:API_URL=https://app.example"
   expect_calls "the fingerprint and the newest build are this platform's" 0 \
     "yes:npx expo-updates fingerprint:generate --platform $platform" \
     "yes:eas build:list --platform $platform --build-profile production"
@@ -195,6 +209,16 @@ for platform in android ios; do
 
   fixture fp1 b1 fp1 b1; rm "$MOBILE/eas.json"; run "$platform"
   expect_calls "a tag from before phase 32 (no eas.json): skips, green" 0 "no:eas " "no:npx "
+  with_project
+
+  fixture fp1 b1 fp1 b1; printf '# nothing\n' > "$MOBILE/.env.production"; run "$platform"
+  expect_calls "no API address in .env.production: fails before asking EAS anything" 1 "no:eas " "no:npx "
+  said "and the error names the variable" 'EXPO_PUBLIC_API_URL'
+  with_project
+
+  fixture fp1 b1 fp1 b1; rm "$MOBILE/.env.production"; run "$platform"
+  expect_calls "no .env.production at all: fails the same way" 1 "no:eas " "no:npx "
+  said "with the same error" '::error::.*EXPO_PUBLIC_API_URL'
   with_project
 
   # Review finding: a rerun after a reverted native change whose submit failed.

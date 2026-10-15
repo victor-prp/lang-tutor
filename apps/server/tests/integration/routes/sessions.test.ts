@@ -9,7 +9,7 @@ import {
   seedUser,
 } from '../../support/seedUser';
 import { saveSessionGlosses } from '../../support/progressRows';
-import { insertListSession } from '../../support/questions';
+import { insertListSession, readStoredAnswers } from '../../support/questions';
 import { seedSavedSenses } from '../../support/vocabularyRows';
 import { createTestDb, type TestDb } from '../../support/testDb';
 import { createFakeLogger } from '../../support/fakes';
@@ -229,17 +229,45 @@ describe('POST /api/sessions/:id/next-step, phase 23', () => {
       answer: 'lantern',
       lemma: 'lantern',
       alternatives: ['lamp'],
+      context: null,
     });
 
-    const done = await step(questions[2].id, { text: 'lamp' });
+    // Phase 34 (spec D9): an alternative holds the card for its second try, and
+    // an empty retry gives it up.
+    const held = await (await step(questions[2].id, { text: 'lamp' })).json();
+    expect(held).toMatchObject({ complete: false, question: { id: questions[2].id }, pending_retry: { answer: 'lamp', wording: 'word' } });
+    const done = await step(questions[2].id, { text: '', retry: true });
     expect(done.status).toBe(200);
     const body = await done.json();
     expect(body).toMatchObject({ complete: true, score: { correct: 3, total: 3 }, missed_questions: [] });
-    // An alternative is right but says nothing about this sense: nothing rose.
+    // An alternative is right but says nothing about this sense, and a retry
+    // given up adds nothing: nothing rose.
     const lantern = body.progress.find((item: { form: string }) => item.form === 'lantern');
     expect(lantern).toMatchObject({ translation: 'פנס', raised: [] });
     const quill = body.progress.find((item: { form: string }) => item.form === 'quill');
     expect(quill).toMatchObject({ translation: 'נוצה', raised: ['written_receptive', 'written_productive'] });
+  });
+
+  // Phase 39 (spec D10). Hebrew in a card answered in the target language's alphabet.
+  it('422s a typed answer in the wrong alphabet and records nothing, a second try included', async () => {
+    const app = buildTestApp();
+    const { sessionId, questions } = await startMixed();
+    const step = (question_id: string, answer: object) =>
+      postJson(app, `/api/sessions/${sessionId}/next-step`, { question_id, ...answer });
+    await step(questions[0].id, { option_index: 0 });
+    await step(questions[1].id, { option_index: 0 });
+
+    const refused = await step(questions[2].id, { text: 'פנס' });
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({ error: "the answer is not written in English's alphabet" });
+    expect(await readStoredAnswers(t.db, sessionId)).toHaveLength(2);
+
+    const held = await (await step(questions[2].id, { text: 'lamp' })).json();
+    expect(held).toMatchObject({ pending_retry: { answer: 'lamp' } });
+    expect((await step(questions[2].id, { text: 'פנס', retry: true })).status).toBe(422);
+    const stored = await readStoredAnswers(t.db, sessionId);
+    expect(stored).toHaveLength(3);
+    expect(stored[2]).toMatchObject({ retry_state: 'pending', retry_answer_string: null });
   });
 
   it('400s an answer of the wrong kind, either way round', async () => {
@@ -423,12 +451,65 @@ describe('phase 19 session routes', () => {
     }
   });
 
-  it('a second create while one is open is 409 session_open', async () => {
+  // Phase 43 (spec D5). An unstarted session is the next one: create answers it.
+  it('a second create answers the session not yet started, 200', async () => {
     const app = buildTestApp();
-    await postJson(app, '/api/sessions', { enrollment_id: E() });
+    const first = await (await postJson(app, '/api/sessions', { enrollment_id: E() })).json();
+    const res = await postJson(app, '/api/sessions', { enrollment_id: E() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(first);
+  });
+
+  it('a create while a session is started is 409 session_open', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    await postJson(app, `/api/sessions/${seed.session_id}/next-step`, { question_id: seed.question.id, option_index: 0 });
     const res = await postJson(app, '/api/sessions', { enrollment_id: E() });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'session_open' });
+  });
+
+  // Phase 43 (spec D2).
+  it('start is 200, and 200 again once started', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    for (let i = 0; i < 2; i++) {
+      const res = await postJson(app, `/api/sessions/${seed.session_id}/start`, { listening: true, speaking: false });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ session_id: seed.session_id, status: 'ready' });
+    }
+    // Started: a second create is refused, as for a session with answers.
+    expect((await postJson(app, '/api/sessions', { enrollment_id: E() })).status).toBe(409);
+  });
+
+  it('start takes an empty body', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    expect((await postJson(app, `/api/sessions/${seed.session_id}/start`, {})).status).toBe(200);
+  });
+
+  it('start of a skipped session is 409 session_not_ready, of an unknown one 404, of another learner’s 403', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    await postJson(app, `/api/sessions/${seed.session_id}/skip`, {});
+    const skipped = await postJson(app, `/api/sessions/${seed.session_id}/start`, {});
+    expect(skipped.status).toBe(409);
+    expect(await skipped.json()).toEqual({ error: 'session_not_ready' });
+    expect((await postJson(app, '/api/sessions/00000000-0000-0000-0000-000000000000/start', {})).status).toBe(404);
+    const other = await (await postJson(app, '/api/sessions', { enrollment_id: enrollmentOf('u_2') }, 'u_2')).json();
+    expect((await postJson(app, `/api/sessions/${other.session_id}/start`, {})).status).toBe(403);
+  });
+
+  it('answering a session in stock while another is started is 409 session_open, and records nothing', async () => {
+    const app = buildTestApp();
+    const seed = await startSeed(app, E());
+    await postJson(app, `/api/sessions/${seed.session_id}/start`, {});
+    const { sessionId: stock, questions } = await startMixed();
+    const res = await postJson(app, `/api/sessions/${stock}/next-step`, { question_id: questions[0].id, option_index: 0 });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'session_open' });
+    expect(await readStoredAnswers(t.db, stock)).toEqual([]);
+    expect((await postJson(app, `/api/sessions/${stock}/start`, {})).status).toBe(409);
   });
 
   it('skip is 200 twice, and then the next create asks for saved words', async () => {

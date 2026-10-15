@@ -1,5 +1,13 @@
 import type { AnswerVerdict, NextStepResponse, Question } from '@lang-tutor/core/api';
-import { dimensionsTested, evaluate, isJudged, verdictCorrect, type Dimension } from '@lang-tutor/core/domain';
+import {
+  dimensionsTested,
+  evaluate,
+  evaluateRetry,
+  evidenceVerdict,
+  isJudged,
+  verdictCorrect,
+  type Dimension,
+} from '@lang-tutor/core/domain';
 
 import { ActrMemory, type ActrState } from './actr.ts';
 import { WEAK_P, liveDimensions } from './analysis.ts';
@@ -209,13 +217,22 @@ async function openSession(deps: PlayDeps, enrollmentId: string): Promise<string
 async function firstQuestion(deps: PlayDeps, sessionId: string): Promise<Question | null> {
   const poll = deps.poll ?? DEFAULT_POLL;
   const path = `/sessions/${sessionId}`;
-  const deadline = Date.now() + poll.timeoutMs;
+  const started = Date.now();
+  const deadline = started + poll.timeoutMs;
+  let waited = false;
   for (;;) {
     const view = await deps.api.session(sessionId);
-    if (view.status === 'ready') return view.question;
+    if (view.status === 'ready') {
+      // Phase 43 (ruling R1). A bot plays a session faster than one is prepared,
+      // so it meets the next one in stock still preparing: each wait is logged,
+      // which counts them.
+      if (waited) deps.log(`${deps.profile.name}: waited ${Date.now() - started} ms for session ${sessionId} to prepare`);
+      return view.question;
+    }
     if (view.status === 'failed') throw failure(path, 'the session failed to prepare');
     if (view.status !== 'preparing') return null;
     if (Date.now() > deadline) throw failure(path, `still preparing after ${poll.timeoutMs} ms`);
+    waited = true;
     await sleep(poll.intervalMs);
   }
 }
@@ -250,6 +267,10 @@ function countList(deps: PlayDeps, memory: BotMemory, hour: number): void {
 
 type Sent = { next: NextStepResponse; answer: string; verdict?: AnswerVerdict; correct: boolean; heard?: CardEntry['heard'] };
 
+/** Phase 34 (spec D9). Whether the server held `card` for its second try: a right answer that is
+ *  not the saved word comes back as the same card with `pending_retry` set. */
+const heldFor = (next: NextStepResponse, card: Question) => !next.complete && next.pending_retry !== null && next.question.id === card.id;
+
 async function answerCard(
   deps: PlayDeps,
   memory: BotMemory,
@@ -270,7 +291,22 @@ async function answerCard(
     for (const dim of new Set([...liveDimensions(profile.devices), ...dimensions])) recall[dim] = memory.recall(detail.word, dim);
   }
 
-  const sent = await send(deps, sessionId, card, decision);
+  const first = await send(deps, sessionId, card, decision, false);
+  let sent = first;
+  let retry: CardEntry['retry'];
+  // Phase 34 (spec D9). Held for a second try: the bot decides again, by its own memory as for
+  // any card, and answers with `retry`; a give-up there is "show me the answer" with `retry`.
+  // Sending the first answer again would only replay the hold. One retry, never more: a card
+  // still held after it is the server not finishing the card.
+  if (heldFor(first.next, card)) {
+    const again = decide(card, memory, state.saved, rng, profile);
+    const second = await send(deps, sessionId, card, again, true);
+    if (heldFor(second.next, card)) throw failure(`/sessions/${sessionId}`, `card ${card.id} still held after its second try`);
+    retry = { answer: second.answer, ...(second.verdict ? { verdict: second.verdict } : {}) };
+    // The score keeps the first answer; progress and memory read the retry when it was right.
+    const verdict = first.verdict ? evidenceVerdict(first.verdict, second.verdict ?? null) : second.verdict;
+    sent = { ...first, next: second.next, ...(verdict ? { verdict } : {}), heard: second.heard ?? first.heard };
+  }
 
   // Ruling 24: the bot learns what the server judged, not what it meant to do.
   if (detail.word) memory.learn(detail.word, { type: card.type, correct: sent.correct, verdict: sent.verdict });
@@ -294,52 +330,63 @@ async function answerCard(
     answer: sent.answer,
     ...(sent.verdict ? { verdict: sent.verdict } : {}),
     correct: sent.correct,
+    ...(retry ? { retry } : {}),
     ...(sent.heard ? { heard: sent.heard } : {}),
   });
   return sent.next;
 }
 
-async function send(deps: PlayDeps, sessionId: string, card: Question, decision: Decision): Promise<Sent> {
+/** One answer to `card`. `retry`: the second try at a card the server holds (phase 34, D9),
+ *  sent on the route the first went to, with `retry: true`. */
+async function send(deps: PlayDeps, sessionId: string, card: Question, decision: Decision, retry: boolean): Promise<Sent> {
   const { api } = deps;
   const question_id = card.id;
+  const flag = retry ? { retry: true } : {};
   switch (decision.kind) {
     case 'option': {
-      const next = await api.nextStep(sessionId, { question_id, option_index: decision.index });
+      const next = await api.nextStep(sessionId, { question_id, option_index: decision.index, ...flag });
       // The server's judgement, by the function it runs (packages/core).
       return { next, answer: `option:${decision.index}`, correct: evaluate(card, { option_index: decision.index }).is_correct };
     }
     case 'text': {
+      // On a second try an empty text gives up, which the server stores as gave_up.
+      const gaveUp = retry && decision.text.trim() === '';
       if (isJudged(card)) {
-        const judged = await api.judged(sessionId, { question_id, text: decision.text });
-        return { next: judged.next, answer: `text:${decision.text}`, verdict: judged.verdict, correct: verdictCorrect(judged.verdict) };
+        const judged = await api.judged(sessionId, { question_id, text: decision.text, ...flag });
+        // The judged route reports a given-up second try as wrong (phase 34, ruling R15).
+        const verdict = gaveUp ? 'gave_up' : judged.verdict;
+        return { next: judged.next, answer: `text:${decision.text}`, verdict, correct: verdictCorrect(verdict) };
       }
-      const next = await api.nextStep(sessionId, { question_id, text: decision.text });
-      const record = evaluate(card, { text: decision.text });
-      return { next, answer: `text:${decision.text}`, verdict: record.verdict, correct: record.is_correct };
+      const next = await api.nextStep(sessionId, { question_id, text: decision.text, ...flag });
+      const record = retry ? evaluateRetry(card, { text: decision.text }) : evaluate(card, { text: decision.text });
+      return { next, answer: `text:${decision.text}`, verdict: record.verdict, correct: verdictCorrect(record.verdict!) };
     }
     case 'pass':
-      return pass(deps, sessionId, card, decision.pass);
+      return pass(deps, sessionId, card, decision.pass, retry);
     case 'speak': {
       const passAs = card.type === 'read_aloud' ? 'skip' : 'show_answer';
       const audio = await deps.synthesize(decision.word, deps.profile.language);
       if (!audio) {
         deps.line.noVoice += 1;
         deps.log(`${deps.profile.name}: no voice to say "${decision.word}" (espeak-ng or ffmpeg missing): ${passAs}`);
-        return { ...(await pass(deps, sessionId, card, passAs)), heard: 'no_voice' };
+        return { ...(await pass(deps, sessionId, card, passAs, retry)), heard: 'no_voice' };
       }
-      const spoken = await api.speech(sessionId, { question_id, mime_type: 'audio/webm', audio: audio.toString('base64') });
+      const spoken = await api.speech(sessionId, { question_id, mime_type: 'audio/webm', audio: audio.toString('base64'), ...flag });
       if (spoken.verdict === 'unheard' || !spoken.next) {
-        // D16: an unheard answer records nothing; the bot takes "show me the answer".
+        // D16: an unheard answer records nothing; the bot takes "show me the answer". On a
+        // second try the card stays held, so that is the give-up, sent with `retry` too.
         deps.line.unheard += 1;
         deps.log(`${deps.profile.name}: "${decision.word}" came back unheard (heard "${spoken.heard}"): ${passAs}`);
-        return { ...(await pass(deps, sessionId, card, passAs)), heard: 'unheard' };
+        return { ...(await pass(deps, sessionId, card, passAs, retry)), heard: 'unheard' };
       }
       return { next: spoken.next, answer: `spoke:${decision.word}`, verdict: spoken.verdict, correct: true, heard: 'heard' };
     }
   }
 }
 
-async function pass(deps: PlayDeps, sessionId: string, card: Question, kind: 'skip' | 'show_answer'): Promise<Sent> {
-  const next = await deps.api.nextStep(sessionId, { question_id: card.id, pass: kind });
-  return { next, answer: `pass:${kind}`, verdict: kind === 'skip' ? 'skipped' : 'gave_up', correct: false };
+async function pass(deps: PlayDeps, sessionId: string, card: Question, kind: 'skip' | 'show_answer', retry: boolean): Promise<Sent> {
+  const next = await deps.api.nextStep(sessionId, { question_id: card.id, pass: kind, ...(retry ? { retry: true } : {}) });
+  // Any pass on a second try gives it up (packages/core evaluateRetry).
+  const verdict = retry || kind === 'show_answer' ? 'gave_up' : 'skipped';
+  return { next, answer: `pass:${kind}`, verdict, correct: false };
 }

@@ -22,6 +22,7 @@ function glossMerged(input: { lexemeId: string; userLanguageCode: string; surviv
     snapshots: input.counts.snapshots,
     questions: input.counts.questions,
     memberships: input.counts.memberships,
+    target_words: input.counts.targetWords,
   };
 }
 
@@ -168,7 +169,7 @@ export function createGlossService({
         });
         let raw: string;
         try {
-          raw = await client(prompt);
+          raw = await client({ ...prompt, record: { kind: 'gloss_merge' } });
         } catch (error) {
           if (!(error instanceof LlmUnavailable)) throw error;
           logger.info({

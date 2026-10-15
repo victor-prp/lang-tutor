@@ -18,7 +18,8 @@ const isolate = (text: string) => `\u2068${text}\u2069`;
 const HIDDEN_OFFSET = 200;
 
 export function FeedbackBanner({ feedback, onContinue }: Props) {
-  const isCorrect = feedback.tone === 'correct';
+  // Phase 45 (spec D1): `other` is neither right nor wrong, on the plain surface.
+  const tone = TONES[feedback.tone];
   const translateY = useRef(new Animated.Value(HIDDEN_OFFSET)).current;
   // The banner is absolutely positioned, so it sits outside the screen's
   // SafeAreaView padding and would otherwise run under the Android nav bar.
@@ -35,14 +36,14 @@ export function FeedbackBanner({ feedback, onContinue }: Props) {
 
   return (
     <Animated.View
-      testID={isCorrect ? 'feedback-correct' : 'feedback-wrong'}
+      testID={tone.testID}
       style={[
         styles.banner,
-        isCorrect ? styles.bannerCorrect : styles.bannerWrong,
+        tone.banner,
         { paddingBottom: insets.bottom + spacing.xl, transform: [{ translateY }] },
       ]}
     >
-      <Text style={[styles.title, isCorrect ? styles.titleCorrect : styles.titleWrong]} testID="feedback-title">
+      <Text style={[styles.title, tone.title]} testID="feedback-title">
         {feedback.title}
       </Text>
       {feedback.line === null ? null : (
@@ -71,6 +72,7 @@ const styles = StyleSheet.create({
   },
   bannerCorrect: { backgroundColor: colors.correctSurface },
   bannerWrong: { backgroundColor: colors.wrongSurface },
+  bannerOther: { backgroundColor: colors.surface, borderTopWidth: 1, borderColor: colors.border },
   title: {
     fontSize: fontSizes.lg,
     lineHeight: lineHeights.lg,
@@ -79,6 +81,7 @@ const styles = StyleSheet.create({
   },
   titleCorrect: { color: colors.correct },
   titleWrong: { color: colors.wrong },
+  titleOther: { color: colors.text },
   answer: {
     fontSize: fontSizes.md,
     lineHeight: lineHeights.md,
@@ -99,3 +102,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+const TONES = {
+  correct: { testID: 'feedback-correct', banner: styles.bannerCorrect, title: styles.titleCorrect },
+  wrong: { testID: 'feedback-wrong', banner: styles.bannerWrong, title: styles.titleWrong },
+  other: { testID: 'feedback-other', banner: styles.bannerOther, title: styles.titleOther },
+} as const;

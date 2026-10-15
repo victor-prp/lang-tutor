@@ -18,12 +18,18 @@ const MEANINGS_OF: Record<string, string[]> = { прочитала: ['קראה',
 // Hebrew that is no saved meaning of either word, so only the judge can accept it.
 const SYNONYM = 'מילה';
 
+/** Phase 39 (spec D5). Each word's two senses are a gloss family, and a session
+ *  asks one gloss of a family: two cards. */
+const CARDS = 2;
+
 /** Past the seed, four saved senses of two words, and the session on its
  *  meaning card, every card before it answered right. Phase 35 (spec D5, D6):
  *  בצל is due on written recognition, WR at R 0.85 (S 10, 19 days) and level 3,
- *  so it is asked by recall, a typed meaning; the other three are new words, a
- *  choice of meanings each. The order follows each card's chance of success,
- *  so the meaning card is found by its type. */
+ *  so it is asked by recall, a typed meaning. Phase 39 (spec D3): practised,
+ *  it is лук's current meaning, and קשת waits; one of прочитала's two new
+ *  meanings is asked, a choice of meanings, and the other waits. The order
+ *  follows each card's chance of success, so the meaning card is found by its
+ *  type. */
 async function reachMeaningCard(page: Page, request: APIRequestContext, username: string, report: () => string) {
   page.on('dialog', (dialog) => void dialog.accept());
   await withVoices(page, []);
@@ -40,17 +46,18 @@ async function reachMeaningCard(page: Page, request: APIRequestContext, username
   await page.getByTestId('translate-new-word').click();
   await lookUp(page, request, 'лук', LUK);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
-  await page.getByTestId('translate-back').click();
   await seedMemory(username, [{ gloss: 'בצל', dimension: 'written_receptive', stability: 10, daysAgo: 19, level: 3 }]);
 
   await clearGemini(request);
   await expectGeneration(request);
-  await page.getByTestId('create-button').click();
+  // Phase 43 (spec D7). Home makes the session itself, so the memory and the
+  // stubs are in place before going back.
+  await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await tapUntil(page, 'start-button', 'progress-label');
 
-  for (let position = 1; position <= 4; position++) {
-    const card = await readCard(page, position, 4);
+  for (let position = 1; position <= CARDS; position++) {
+    const card = await readCard(page, position, CARDS);
     if (card.kind === 'meaning') return { card, position };
     expect(card.kind, `position ${position}`).toBe('choice');
     await answerChoice(page, card, true);
@@ -61,8 +68,8 @@ async function reachMeaningCard(page: Page, request: APIRequestContext, username
 
 /** The rest of the session after the meaning card: choices, answered right. */
 async function finishSession(page: Page, after: number) {
-  for (let position = after + 1; position <= 4; position++) {
-    await answerChoice(page, await readCard(page, position, 4, 'choice'), true);
+  for (let position = after + 1; position <= CARDS; position++) {
+    await answerChoice(page, await readCard(page, position, CARDS, 'choice'), true);
     await page.getByTestId('continue-button').click();
   }
 }

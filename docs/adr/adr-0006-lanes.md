@@ -1,7 +1,7 @@
 # ADR 0006: Every checkout is self-contained
 
 - **Status:** Accepted
-- **Date:** 2026-09-16; R7 gains nightly QA's inbox port 2026-10-08 (phase 29); R3's key list gains `dict:lemmas:render` and `dict:glosses:merge` 2026-10-10 (phase 31); R3's command shows the script's missing-key branch 2026-10-10 (phase 31)
+- **Date:** 2026-09-16; R7 gains nightly QA's inbox port 2026-10-08 (phase 29); R3's key list gains `dict:lemmas:render` and `dict:glosses:merge` 2026-10-10 (phase 31); R3's command shows the script's missing-key branch 2026-10-10 (phase 31); R3's key list gains `dict:accept` 2026-10-11 (phase 34); R3's key list gains `rerun` 2026-10-14 (phase 51)
 - **Source:** [phase 15 design](../superpowers/specs/2026-09-16-lang-tutor-phase-15-lanes-design.md)
 
 ## Decision
@@ -37,7 +37,7 @@ from lane 0.
 |---|---|---|
 | R1 | `e2e/`, `apps/server/tests/`, `scripts/`, root `package.json` | a literal port `3001`, `3002`, `8081` or `8082` |
 | R2 | `e2e/`, `scripts/`, root `package.json` | a `lang_tutor` database name in a string literal or a URL path |
-| R3 | root `package.json` scripts `server`, `mobile`, `e2e`, `test:integration`, `lane:list`, `lane:down`, `db:*`, `dict:*` | a script body that does not invoke `lane-env.sh` |
+| R3 | root `package.json` scripts `server`, `mobile`, `rerun`, `e2e`, `test:integration`, `lane:list`, `lane:down`, `db:*`, `dict:*` | a script body that does not invoke `lane-env.sh` |
 
 `db:down`, `lane:clean` and `lane:abandon` are deliberately outside R3. Both act on the shared world from
 the main checkout rather than as a lane: `db:down` stops the shared containers, and
@@ -114,7 +114,7 @@ grep -rnE "['\"\`/]lang_tutor" e2e scripts package.json \
 # R3 — a start-or-test script that bypasses the wrapper, or has gone missing
 for key in server mobile e2e test:integration db:up db:migrate db:reseed \
            db:progress:recompute dict:export dict:restore dict:lemmas:render \
-           dict:glosses:merge lane:list lane:down; do
+           dict:glosses:merge dict:accept lane:list lane:down rerun; do
   line=$(grep -E "^    \"$key\": " package.json)
   if [ -z "$line" ]; then
     echo "\"$key\" is missing from package.json scripts"

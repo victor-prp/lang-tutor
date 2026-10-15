@@ -103,6 +103,9 @@ async function main(): Promise<void> {
     apiKey: gemini.apiKey,
     model: gemini.model,
     timeoutMs: TIMEOUT_MS,
+    // Phase 47 (ruling R6): a script, not the server; nothing is recorded.
+    onCall: async () => {},
+    now: Date.now,
   });
 
   // Sequential: thirteen calls at a few seconds each, against a modest quota.

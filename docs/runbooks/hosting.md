@@ -5,6 +5,16 @@ the image a `v*` tag built, against one Lightsail Postgres. Everything in AWS is
 under `terraform/`, run only through `scripts/infra.sh`. Design:
 [phase 30](../superpowers/specs/2026-10-08-lang-tutor-phase-30-hosting-design.md).
 
+Every `infra.sh` command reads the state bucket's name from `TF_STATE_BUCKET`, which go-live
+exported once. In a new terminal, first:
+
+```bash
+export TF_STATE_BUCKET="$(gh variable get TF_STATE_BUCKET)"
+```
+
+A `bootstrap` command also needs `TF_VAR_state_bucket="$TF_STATE_BUCKET"` and
+`TF_VAR_alert_email="$(gh variable get ALERT_EMAIL)"`.
+
 ## Go-live, once
 
 Run from the main checkout on `master`, after phase 30 has merged. Each step says what it
@@ -45,8 +55,9 @@ proves before the next one starts.
    read -rs KEY && aws secretsmanager create-secret --region eu-central-1 \
      --name wordspal/prod/GEMINI_API_KEY --secret-string "$KEY"; unset KEY
    ```
-5. **Bootstrap**: `TF_VAR_state_bucket="$TF_STATE_BUCKET" ./scripts/infra.sh bootstrap apply`.
-   It prints the two role ARNs and the repository URL.
+5. **Bootstrap**: `TF_VAR_state_bucket="$TF_STATE_BUCKET" TF_VAR_alert_email="<your address>" ./scripts/infra.sh bootstrap apply`.
+   It prints the two role ARNs and the repository URL. Since phase 40 it also creates the bots'
+   hourly trigger, whose token the bots runbook's *The hourly trigger* sets.
 6. **GitHub variables** (variables, not secrets: none of these is secret):
 
    ```bash
@@ -159,6 +170,11 @@ aws lightsail get-container-log --region eu-central-1 --service-name wordspal --
 `aws secretsmanager put-secret-value --region eu-central-1 --secret-id wordspal/prod/<NAME> --secret-string ...`,
 then `./scripts/infra.sh prod apply`: the environment changed, so Terraform creates a new
 deployment of the live tag.
+
+The bots' GitHub token is not one of these: it lives in an EventBridge connection, and the bots
+runbook's *The hourly trigger* replaces it, with no apply. `REMINDER_SECRET` is both: it is in
+Secrets Manager and in the connection that calls the reminder tick, so the reminders runbook's
+*Replacing the secret* changes both.
 
 ## Behind Lightsail's proxy
 

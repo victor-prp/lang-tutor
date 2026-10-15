@@ -37,23 +37,26 @@ test('past the seed, a session is built from the saved words', async ({ page, re
   await page.getByTestId('translate-new-word').click();
   await lookUp(page, request, 'лук', LUK);
   await tapAndWaitForWrite(page, page.getByTestId('translate-save-all'));
-  await page.getByTestId('translate-back').click();
 
-  // 4. Create questions. The job turns the session ready, and home's poll sees it.
+  // 4. Home makes the session itself (phase 43, spec D7): no צור שאלות. The
+  // generation is stubbed before going back, the job turns the session ready,
+  // and home's poll sees it.
   await clearGemini(request);
   await expectGeneration(request);
-  await page.getByTestId('create-button').click();
+  await page.getByTestId('translate-back').click();
   await expect(page.getByTestId('start-button'), `never became ready\n${report()}`).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('start-button')).toHaveText('התחל');
 
   // 5. Every card asks one of the saved words, whichever way round it asks.
+  // Phase 39 (spec D5): each word's two senses are a gloss family, and a
+  // session asks one gloss of a family, so two cards, one per word.
   await tapUntil(page, 'start-button', 'progress-label');
   const words: string[] = [];
-  for (let position = 1; position <= 4; position++) {
-    // Whatever type each card is: four words new to the memory model all take
-    // a choice of meanings today (phase 35, spec D6), but this test is about
+  for (let position = 1; position <= 2; position++) {
+    // Whatever type each card is: words new to the memory model all take a
+    // choice of meanings today (phase 35, spec D6), but this test is about
     // the words, not the types.
-    const card = await readCard(page, position, 4);
+    const card = await readCard(page, position, 2);
     if (card.kind === 'choice' || card.kind === 'meaning') {
       words.push(card.prompt);
       if (card.kind === 'choice') await answerChoice(page, card, true);
@@ -67,12 +70,15 @@ test('past the seed, a session is built from the saved words', async ({ page, re
     }
     await page.getByTestId('continue-button').click();
   }
-  expect(words.every((word) => ['прочитала', 'лук'].includes(word)), words.join(', ')).toBe(true);
+  expect([...words].sort(), words.join(', ')).toEqual(['лук', 'прочитала']);
 
-  // 6. Results lead to the next session, back on home.
+  // 6. Results lead home, to the next session: built in stock while this one
+  // was played (phase 43, spec D2, D3), so home offers start, not create.
   await expect(page.getByTestId('results-score')).toBeVisible();
   await page.getByTestId('results-next-session').click();
-  await expect(page.getByTestId('preparing-label').or(page.getByTestId('start-button'))).toBeVisible();
+  await expect(page.getByTestId('results-score')).toBeHidden();
+  await expect(page.getByTestId('start-button'), `no session in stock\n${report()}`).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('start-button')).toHaveText('התחל');
 
   expect(diagnostics.pageErrors, report()).toEqual([]);
 });

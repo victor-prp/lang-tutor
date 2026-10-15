@@ -73,6 +73,7 @@ function setup(opts: {
     },
     now: createFakeClock(...(opts.clock ?? [NOW])),
     logger,
+    stockSaveDelaySeconds: 30,
   });
   return { service, visionCalls, lookups, lookupActors, llm, logger };
 }

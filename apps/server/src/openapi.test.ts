@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { tmpdir } from 'node:os';
 
 import { createApp } from './app';
-import { createFakeAppDeps, createFakeBots } from '../tests/support/fakes';
+import { createFakeAppDeps, createFakeBots, createFakeReminderTick } from '../tests/support/fakes';
 
 // The "documentation cannot drift" proof, and a unit test: after phase 5
 // createApp accepts fakes, so generating the document needs no database.
@@ -19,9 +19,11 @@ describe('POST /api/sessions in the published document', () => {
     expect(doc.paths['/api/sessions'].post).toBeDefined();
   });
 
-  it('declares its 201, 400, 404 and 409, and the gate\'s 401 and 403', async () => {
+  // Phase 43 (spec D5): 200 answers the session in stock.
+  it('declares its 200, 201, 400, 404 and 409, and the gate\'s 401 and 403', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths['/api/sessions'].post.responses).sort()).toEqual([
+      '200',
       '201',
       '400',
       '401',
@@ -62,6 +64,7 @@ describe(`POST ${NEXT_STEP} in the published document`, () => {
       '403',
       '404',
       '409',
+      '422',
     ]);
   });
 
@@ -110,7 +113,7 @@ describe('the document as a whole', () => {
     );
   });
 
-  it('contains all twenty-seven paths and nothing else', async () => {
+  it('contains all thirty-eight paths and nothing else', async () => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths).sort()).toEqual([
       '/api/auth/email-otp/send-verification-otp',
@@ -120,6 +123,7 @@ describe('the document as a whole', () => {
       '/api/enrollments',
       '/api/enrollments/{id}/photo-imports',
       '/api/enrollments/{id}/sessions/current',
+      '/api/enrollments/{id}/targets',
       '/api/enrollments/{id}/vocabulary',
       '/api/enrollments/{id}/vocabulary/glosses/{gloss_id}',
       '/api/enrollments/{id}/vocabulary/word',
@@ -127,6 +131,11 @@ describe('the document as a whole', () => {
       '/api/grants/{id}',
       '/api/grants/{id}/accept',
       '/api/me',
+      '/api/me/push-devices',
+      '/api/me/push-devices/unregister',
+      '/api/me/reminders',
+      '/api/me/reminders/{id}/tap',
+      '/api/me/time-zone',
       '/api/photo-imports/{id}',
       '/api/photo-imports/{id}/discard',
       '/api/photo-imports/{id}/items/{position}',
@@ -137,6 +146,11 @@ describe('the document as a whole', () => {
       NEXT_STEP,
       '/api/sessions/{id}/skip',
       '/api/sessions/{id}/speech',
+      '/api/sessions/{id}/start',
+      '/api/targets/{id}',
+      '/api/targets/{id}/end',
+      '/api/targets/{id}/words',
+      '/api/targets/{id}/words/{gloss_id}',
       '/api/translations',
       '/api/users',
       '/health',
@@ -174,6 +188,37 @@ describe('the bot route in the published document', () => {
     expect(Object.keys(day.responses).sort()).toEqual(['204', '400', '401', '404']);
     expect(signIn.requestBody.content['application/json'].schema.required).toEqual(['name']);
     expect(day.requestBody.content['application/json'].schema.required.sort()).toEqual(['day', 'name']);
+  });
+});
+
+// Phase 52 (spec D5). The reminder tick is published only where it is mounted, as the bot route is.
+describe('the reminder tick in the published document', () => {
+  const TICK = '/api/internal/reminders/tick';
+  const withTick = async () => {
+    const res = await createApp({ ...createFakeAppDeps(), reminderTick: createFakeReminderTick() }).request('/openapi.json');
+    return await res.json();
+  };
+
+  it('is absent where REMINDER_SECRET is unset', async () => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths).filter((p) => p.startsWith('/api/internal'))).toEqual([]);
+    expect(doc.components?.securitySchemes?.reminderSecret).toBeUndefined();
+  });
+
+  it('adds exactly its one path where it is mounted', async () => {
+    const plain = Object.keys((await openApiDocument()).paths);
+    const doc = await withTick();
+    expect(Object.keys(doc.paths).sort()).toEqual([...plain, TICK].sort());
+  });
+
+  it('declares the bearer secret, not the session, a 202 and a 401, and no body', async () => {
+    const doc = await withTick();
+    expect(doc.components.securitySchemes.reminderSecret).toMatchObject({ type: 'http', scheme: 'bearer' });
+    const tick = doc.paths[TICK].post;
+    expect(tick.security).toEqual([{ reminderSecret: [] }]);
+    expect(Object.keys(tick.responses).sort()).toEqual(['202', '401']);
+    expect(tick.responses['202'].content['application/json'].schema.required).toEqual(['queued']);
+    expect(tick.requestBody).toBeUndefined();
   });
 });
 
@@ -226,6 +271,76 @@ describe('sign-in in the published document (phase 29)', () => {
     expect(Object.keys(op.responses).sort()).toEqual(['200', '401']);
     const schema = op.responses['200'].content['application/json'].schema;
     expect(schema.required.sort()).toEqual(['email', 'user']);
+  });
+
+  // Phase 52 (spec D1). The profile carries the zone the server holds, so the app reports its own
+  // only when it differs.
+  it('publishes the stored time zone on the profile, in GET /api/me and POST /api/users alike', async () => {
+    const doc = await openApiDocument();
+    const created = doc.paths['/api/users'].post.responses['201'].content['application/json'].schema;
+    expect(created.required).toContain('time_zone');
+    const me = doc.paths['/api/me'].get.responses['200'].content['application/json'].schema;
+    expect(me.properties.user.required).toContain('time_zone');
+  });
+
+  it('publishes PUT /api/me/time-zone: a profile is needed, and it answers no body', async () => {
+    const doc = await openApiDocument();
+    const op = doc.paths['/api/me/time-zone'].put;
+    expect(Object.keys(op.responses).sort()).toEqual(['204', '400', '401', '403']);
+    expect(op.responses['204'].content).toBeUndefined();
+    expect(op.requestBody.required).toBe(true);
+  });
+});
+
+// Phase 52 (spec D2, D4, D6, D10). Every reminder endpoint acts on the signed-in user, so each
+// needs a profile (403) and a session (401), and none names a user in its path or body.
+describe('the reminder endpoints in the published document (phase 52)', () => {
+  it.each([
+    ['/api/me/reminders', 'get', ['200', '401', '403']],
+    ['/api/me/reminders', 'put', ['200', '400', '401', '403']],
+    ['/api/me/push-devices', 'put', ['204', '400', '401', '403']],
+    ['/api/me/push-devices/unregister', 'post', ['204', '400', '401', '403']],
+    ['/api/me/reminders/{id}/tap', 'post', ['204', '401', '403', '404']],
+  ])('declares every status %s %s can return', async (path, method, statuses) => {
+    const doc = await openApiDocument();
+    const operation = doc.paths[path as string][method as string];
+    expect(Object.keys(operation.responses).sort()).toEqual(statuses);
+  });
+
+  it('publishes the settings in snake_case, with the time zone on the response only', async () => {
+    const doc = await openApiDocument();
+    const request = doc.paths['/api/me/reminders'].put.requestBody.content['application/json'].schema;
+    expect(request.required.sort()).toEqual(['daily_target', 'days', 'enabled', 'times']);
+    const response = doc.paths['/api/me/reminders'].get.responses['200'].content['application/json'].schema;
+    expect(response.required.sort()).toEqual(['daily_target', 'days', 'enabled', 'time_zone', 'times']);
+  });
+
+  it('answers the device and tap calls with no body, and a tap names only the reminder', async () => {
+    const doc = await openApiDocument();
+    for (const [path, method] of [
+      ['/api/me/push-devices', 'put'],
+      ['/api/me/push-devices/unregister', 'post'],
+      ['/api/me/reminders/{id}/tap', 'post'],
+    ]) {
+      expect(doc.paths[path][method].responses['204'].content).toBeUndefined();
+    }
+    expect(doc.paths['/api/me/reminders/{id}/tap'].post.parameters).toEqual([
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+    ]);
+  });
+
+  it('describes the 404 and the 400s with the error body the server returns', async () => {
+    const doc = await openApiDocument();
+    const cases: [string, string, string][] = [
+      ['/api/me/reminders/{id}/tap', 'post', '404'],
+      ['/api/me/reminders', 'put', '400'],
+      ['/api/me/push-devices', 'put', '400'],
+      ['/api/me/push-devices/unregister', 'post', '400'],
+    ];
+    for (const [path, method, status] of cases) {
+      const schema = doc.paths[path][method].responses[status].content['application/json'].schema;
+      expect(schema.required).toEqual(['error']);
+    }
   });
 });
 
@@ -366,7 +481,7 @@ describe('GET /health in the published document', () => {
   it('publishes the identity fields a caller needs to tell two lanes apart', async () => {
     const doc = await openApiDocument();
     const schema = doc.paths['/health'].get.responses['200'].content['application/json'].schema;
-    expect(schema.required.sort()).toEqual(['database', 'lane', 'ok', 'port', 'version']);
+    expect(schema.required.sort()).toEqual(['commit', 'database', 'lane', 'ok', 'port', 'version']);
   });
 });
 
@@ -381,6 +496,144 @@ describe('the vocabulary endpoints in the published document', () => {
   ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
     const doc = await openApiDocument();
     expect(Object.keys(doc.paths[path][method].responses).sort()).toEqual(statuses);
+  });
+});
+
+// Phase 53 (spec D2, D13). Seven operations on five paths, each the list owner's alone: so each
+// needs a session (401) and a profile (403), and the three that change words or the date, or end a
+// target, can find it closed (409).
+describe('the target endpoints in the published document (phase 53)', () => {
+  const TARGETS = '/api/enrollments/{id}/targets';
+  const TARGET = '/api/targets/{id}';
+  const END = '/api/targets/{id}/end';
+  const WORDS = '/api/targets/{id}/words';
+  const WORD = '/api/targets/{id}/words/{gloss_id}';
+
+  it.each([
+    [TARGETS, 'get', ['200', '401', '403', '404']],
+    [TARGETS, 'post', ['201', '400', '401', '403', '404', '409']],
+    [TARGET, 'get', ['200', '401', '403', '404']],
+    [TARGET, 'patch', ['200', '400', '401', '403', '404', '409']],
+    [END, 'post', ['204', '401', '403', '404', '409']],
+    [WORDS, 'post', ['200', '400', '401', '403', '404', '409']],
+    [WORD, 'delete', ['204', '401', '403', '404', '409']],
+  ])('%s %s declares exactly its statuses', async (path, method, statuses) => {
+    const doc = await openApiDocument();
+    expect(Object.keys(doc.paths[path][method].responses).sort()).toEqual(statuses);
+  });
+
+  // ADR 0003 R7: the published 400 describes the body the server returns, and an invalid target
+  // says why.
+  it('publishes the reason of an invalid target on the three 400s that can carry it', async () => {
+    const doc = await openApiDocument();
+    for (const [path, method] of [
+      [TARGETS, 'post'],
+      [TARGET, 'patch'],
+      [WORDS, 'post'],
+    ]) {
+      const schema = doc.paths[path][method].responses['400'].content['application/json'].schema;
+      expect([path, method, schema.required]).toEqual([path, method, ['error']]);
+      expect(schema.properties.error.type).toBe('string');
+      expect(schema.properties.reason.enum).toEqual(['due_date', 'no_words', 'unknown_import']);
+    }
+  });
+
+  it('describes every other failure with the error body the server returns', async () => {
+    const doc = await openApiDocument();
+    const cases: [string, string, string][] = [
+      [TARGETS, 'get', '404'],
+      [TARGETS, 'post', '404'],
+      [TARGETS, 'post', '409'],
+      [TARGET, 'get', '404'],
+      [TARGET, 'patch', '404'],
+      [TARGET, 'patch', '409'],
+      [END, 'post', '404'],
+      [END, 'post', '409'],
+      [WORDS, 'post', '404'],
+      [WORDS, 'post', '409'],
+      [WORD, 'delete', '404'],
+      [WORD, 'delete', '409'],
+    ];
+    for (const [path, method, status] of cases) {
+      const schema = doc.paths[path][method].responses[status].content['application/json'].schema;
+      expect([path, method, status, schema.required]).toEqual([path, method, status, ['error']]);
+      expect(schema.properties.error.type).toBe('string');
+    }
+  });
+
+  it('answers the end of a target and the removal of a word with no body', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths[END].post.responses['204'].content).toBeUndefined();
+    expect(doc.paths[WORD].delete.responses['204'].content).toBeUndefined();
+    expect(doc.paths[END].post.requestBody).toBeUndefined();
+    expect(doc.paths[WORD].delete.requestBody).toBeUndefined();
+  });
+
+  it('publishes the requests: a create names its kind, date and word lists, the others less', async () => {
+    const doc = await openApiDocument();
+    const create = doc.paths[TARGETS].post.requestBody;
+    expect(create.required).toBe(true);
+    expect(create.content['application/json'].schema.required.sort()).toEqual(['due_on', 'entries', 'kind', 'photo_import_ids']);
+    expect(create.content['application/json'].schema.properties.kind.enum).toEqual(['homework', 'exam']);
+    const date = doc.paths[TARGET].patch.requestBody;
+    expect(date.required).toBe(true);
+    expect(date.content['application/json'].schema.required).toEqual(['due_on']);
+    const add = doc.paths[WORDS].post.requestBody;
+    expect(add.required).toBe(true);
+    expect(add.content['application/json'].schema.required.sort()).toEqual(['entries', 'photo_import_ids']);
+  });
+
+  it('publishes a due date as a string in the form of a learner day, and the word lists with their bounds', async () => {
+    const doc = await openApiDocument();
+    const create = doc.paths[TARGETS].post.requestBody.content['application/json'].schema;
+    expect(create.properties.due_on.type).toBe('string');
+    expect(create.properties.due_on.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$');
+    expect(create.properties.photo_import_ids.maxItems).toBe(10);
+    expect(create.properties.entries.maxItems).toBe(50);
+  });
+
+  it('publishes the list with the learner day, and a target with its words and their readiness', async () => {
+    const doc = await openApiDocument();
+    const list = doc.paths[TARGETS].get.responses['200'].content['application/json'].schema;
+    expect(list.required.sort()).toEqual(['targets', 'today']);
+    expect(list.properties.targets.items.required.sort()).toEqual(['days_left', 'due_on', 'id', 'kind', 'ready_count', 'word_count']);
+    for (const [path, method, status] of [
+      [TARGETS, 'post', '201'],
+      [TARGET, 'get', '200'],
+      [TARGET, 'patch', '200'],
+      [WORDS, 'post', '200'],
+    ]) {
+      const target = doc.paths[path][method].responses[status].content['application/json'].schema;
+      expect(target.required.sort()).toEqual(['days_left', 'due_on', 'id', 'kind', 'ready_count', 'word_count', 'words']);
+      expect(target.properties.words.items.required.sort()).toEqual(['form', 'gloss_id', 'meaning', 'readiness']);
+      expect(target.properties.words.items.properties.readiness.enum).toEqual(['not_started', 'on_the_way', 'almost', 'ready']);
+    }
+  });
+
+  it('names the path parameters', async () => {
+    const doc = await openApiDocument();
+    expect(doc.paths[WORD].delete.parameters).toEqual([
+      { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+      { name: 'gloss_id', in: 'path', required: true, schema: { type: 'string' } },
+    ]);
+    expect(doc.paths[TARGET].get.parameters).toEqual([{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }]);
+  });
+
+  it('is open to no one without a session: each operation carries the session scheme and a 401', async () => {
+    const doc = await openApiDocument();
+    for (const [path, method] of [
+      [TARGETS, 'get'],
+      [TARGETS, 'post'],
+      [TARGET, 'get'],
+      [TARGET, 'patch'],
+      [END, 'post'],
+      [WORDS, 'post'],
+      [WORD, 'delete'],
+    ]) {
+      expect(doc.paths[path][method].security).toBeUndefined();
+      expect(doc.paths[path][method].responses['401']).toBeDefined();
+    }
+    expect(doc.security).toEqual([{ sessionCookie: [] }]);
   });
 });
 
@@ -407,7 +660,7 @@ describe('POST /api/sessions/{id}/judged-answer in the published document', () =
   it('declares every status it can return, and says it costs money', async () => {
     const doc = await openApiDocument();
     const op = doc.paths['/api/sessions/{id}/judged-answer'].post;
-    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '401', '403', '404', '409', '502']);
+    expect(Object.keys(op.responses).sort()).toEqual(['200', '400', '401', '403', '404', '409', '422', '502']);
     expect(op.description).toMatch(/costs money/);
   });
 });
@@ -416,6 +669,8 @@ describe('POST /api/sessions/{id}/judged-answer in the published document', () =
 // in its 403, and still says the gate's own 403 (a session without a profile).
 describe('the 403 of an owner-only or granted route in the published document', () => {
   const VOCABULARY = '/api/enrollments/{id}/vocabulary';
+  // Phase 53 (spec D2): a target is its list owner's alone, a tutor of the list included.
+  const OWNER_ONLY = /owner, who alone may read or change a target, a tutor of the list included/;
   it.each([
     [VOCABULARY, 'post', /accepted grant that allows adding words/],
     [VOCABULARY, 'get', /owner, who alone may read it/],
@@ -434,6 +689,13 @@ describe('the 403 of an owner-only or granted route in the published document', 
     ['/api/photo-imports/{id}/items/{position}', 'patch', /another learner's/],
     ['/api/photo-imports/{id}/save', 'post', /another learner's/],
     ['/api/photo-imports/{id}/discard', 'post', /another learner's/],
+    ['/api/enrollments/{id}/targets', 'get', OWNER_ONLY],
+    ['/api/enrollments/{id}/targets', 'post', OWNER_ONLY],
+    ['/api/targets/{id}', 'get', OWNER_ONLY],
+    ['/api/targets/{id}', 'patch', OWNER_ONLY],
+    ['/api/targets/{id}/end', 'post', OWNER_ONLY],
+    ['/api/targets/{id}/words', 'post', OWNER_ONLY],
+    ['/api/targets/{id}/words/{gloss_id}', 'delete', OWNER_ONLY],
     ['/api/translations', 'post', /another learner's enrollment/],
     ['/api/grants/{id}/accept', 'post', /owner, who alone may accept or decline an invite/],
     ['/api/grants/{id}', 'delete', /neither party to this grant/],

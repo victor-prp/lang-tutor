@@ -1,12 +1,17 @@
 import type { EnrollmentRepo } from '../repo/enrollments';
 import type { GlossRepo } from '../repo/glosses';
+import type { GlossFamiliesRepo } from '../repo/glossFamilies';
 import type { GrantRepo } from '../repo/grants';
 import type { JobRepo } from '../repo/jobs';
 import type { MemoryRepo } from '../repo/memory';
+import type { ModelCallRepo } from '../repo/modelCalls';
 import type { PhotoImportRepo } from '../repo/photoImports';
+import type { PronunciationRepo } from '../repo/pronunciationScores';
 import type { ProgressRepo } from '../repo/progress';
+import type { ReminderRepo } from '../repo/reminders';
 import type { QuestionRepo } from '../repo/questions';
 import type { SessionRepo } from '../repo/sessions';
+import type { TargetRepo } from '../repo/targets';
 import type { UserRepo } from '../repo/users';
 import type { DictRepo } from '../repo/dictionary';
 import type { VocabularyRepo } from '../repo/vocabulary';
@@ -25,8 +30,17 @@ export type Repos = {
   vocabulary: VocabularyRepo;
   progress: ProgressRepo;
   memory: MemoryRepo;
+  glossFamilies: GlossFamiliesRepo;
   jobs: JobRepo;
   photoImport: PhotoImportRepo;
+  // Phase 47 (spec D5). Written only by the model-call recorder.
+  modelCall: ModelCallRepo;
+  // Phase 50 (spec D3). Read before and written after a sound-alike call.
+  pronunciation: PronunciationRepo;
+  // Phase 52 (spec D2, D4, D6). Settings, devices and the log of each tick's decisions.
+  reminders: ReminderRepo;
+  // Phase 53 (spec D1, D8). Targets, their words, their log and each session's split.
+  target: TargetRepo;
 };
 
 /**

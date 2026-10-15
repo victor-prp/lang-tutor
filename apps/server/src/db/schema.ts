@@ -11,6 +11,7 @@ import {
   pgTable,
   primaryKey,
   real,
+  smallint,
   text,
   timestamp,
   unique,
@@ -127,6 +128,10 @@ export const users = pgTable(
     // alone (ADR 0013 R2).
     kind: text('kind').notNull().default('learner'),
     botDay: date('bot_day', { mode: 'string' }),
+    // Phase 52 (spec D1). The learner's IANA time zone, reported by the app on
+    // every launch (PUT /api/me/time-zone). The default is UTC, which is what
+    // the day was before and what a learner who never reports one keeps.
+    timeZone: text('time_zone').notNull().default('UTC'),
   },
   (t) => [
     check('users_kind_known', sql`${t.kind} in ('learner', 'bot')`),
@@ -349,6 +354,19 @@ export const dictVarTranslations = pgTable(
     // inflection: the lookup card's "also …", and right answers to a meaning
     // card built on this form (D13). Never more than five (tidyGlossList).
     alternatives: text('alternatives').array().notNull().default(sql`'{}'::text[]`),
+    // Phase 34 (spec D1). Every target-language word that translates this
+    // rendering in its sense, inflected to agree with it: the list every typed or
+    // spoken card built on the rendering accepts. Written only by the accept job,
+    // never more than ten, and empty both before the job has run and when it found
+    // nothing, which `accepted_at` tells apart.
+    acceptedAnswers: text('accepted_answers').array().notNull().default(sql`'{}'::text[]`),
+    // Phase 34 (spec D2). The form of the headword that agrees with the rendering
+    // in number and person (`ore` for שעות); null when it is the variant's own form.
+    answerForm: text('answer_form'),
+    // Phase 34 (spec D1). When the accept job last ran for this rendering; null =
+    // never. What "done" means, so a rendering the job found nothing for is not
+    // paid for again.
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
     // Both halves of the example live here, because an example belongs to the
     // form that was typed: `booked` shows "I booked a table", not "I want to
     // book a table". The source half is duplicated per target language, which is
@@ -370,6 +388,8 @@ export const dictVarTranslations = pgTable(
       t.rank,
     ),
     check('dict_var_translations_rank_nonneg', sql`${t.rank} >= 0`),
+    // Phase 34 (spec D1). The cap is ten here and on questions.alternatives.
+    check('dict_var_translations_accepted_answers_cap', sql`cardinality(${t.acceptedAnswers}) <= 10`),
     // Phase 18. The primary key leads with variant_id, so "which renderings does
     // this SENSE have in this language" — the drill-down's renderings (and,
     // until phase 31 counted glosses, the vocabulary list's sense count) —
@@ -625,6 +645,10 @@ export const vocabularyEntries = pgTable(
     // means "the owner"; the migration backfilled older rows to the owner.
     addedByUserId: text('added_by_user_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Phase 46 (spec D3). When a session's refresh first saw this gloss known: every
+    // live skill had reached KNOWN_STABILITY. Known for good from then on, in a family
+    // or not; null if never.
+    knownAt: timestamp('known_at', { withTimezone: true }),
   },
   (t) => [
     primaryKey({ name: 'vocabulary_entries_pkey', columns: [t.enrollmentId, t.glossId] }),
@@ -737,6 +761,10 @@ export const glossMemory = pgTable(
     reps: integer('reps').notNull(),
     lapses: integer('lapses').notNull(),
     params: text('params').notNull(),
+    // Phase 46 (spec D1). The learner day this skill's stability first reached
+    // KNOWN_STABILITY; kept after a lapse. Set by applySession, so the recompute
+    // rebuilds it.
+    reachedOn: date('reached_on', { mode: 'string' }),
   },
   (t) => [
     primaryKey({ name: 'gloss_memory_pkey', columns: [t.enrollmentId, t.glossId, t.dimension] }),
@@ -779,7 +807,7 @@ export const questions = pgTable(
     // than joined: a later repair may rewrite the rendering, and a question
     // records what was asked. Today's card prompts with the variant's form.
     prompt: text('prompt'),
-    // Phase 23. A typed card's other right answers, at most five.
+    // Phase 23. A typed card's other right answers, at most five; ten from phase 34.
     alternatives: text('alternatives').array(),
     // Phase 24. A tiles card's tiles: its letters and two more, shuffled.
     tiles: text('tiles').array(),
@@ -791,13 +819,33 @@ export const questions = pgTable(
     sentenceTranslation: text('sentence_translation'),
     gapStart: integer('gap_start'),
     gapEnd: integer('gap_end'),
+    // Phase 34 (spec D6, D7). A sentence that pins the sense of a card showing a
+    // bare word, and its translation, which is never shown and goes to the judge.
+    // Hebrew on a typed translation, say-the-translation or reverse choice; in the
+    // target language on a typed meaning or multiple choice. Null on every other type.
+    context: text('context'),
+    contextTranslation: text('context_translation'),
+    // The word the card marks in `context`, as offsets into it. Both null when the
+    // service could not find the word, and the sentence is then shown unmarked.
+    contextMarkStart: integer('context_mark_start'),
+    contextMarkEnd: integer('context_mark_end'),
+    // Phase 34 (spec D8). The practised word in `sentence_translation`, the Hebrew
+    // of a typed cloze or a sentence translation. Both null = shown unmarked.
+    sentenceMarkStart: integer('sentence_mark_start'),
+    sentenceMarkEnd: integer('sentence_mark_end'),
+    // Phase 34 (spec D2). The form of the headword the card asks for when the
+    // rendering it was built from has one of its own (`ore`); null = the variant's.
+    answerForm: text('answer_form'),
+    // Phase 39 (spec D6). The meanings a new_meaning card listed as known, in family
+    // order; set on that type and null on every other (questions_known_meanings_valid).
+    knownMeanings: text('known_meanings').array(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     check('questions_options_valid', sql`${t.options} is null or question_options_valid(${t.options})`),
     check(
       'questions_type_known',
-      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning', 'cloze_choice', 'cloze_typed', 'sentence_translation')`,
+      sql`${t.type} in ('multiple_choice', 'reverse_choice', 'typed_translation', 'listen_choice', 'dictation', 'matching', 'letter_tiles', 'read_aloud', 'say_translation', 'typed_meaning', 'cloze_choice', 'cloze_typed', 'sentence_translation', 'new_meaning')`,
     ),
     // Phase 23 and 24. Each type's shape (spec D13, phase 24 §2): a choice has
     // options, every type but the Hebrew-option ones stores the Hebrew prompt,
@@ -807,27 +855,56 @@ export const questions = pgTable(
     // Phase 27's meaning recall stores the meaning as its prompt and nothing else;
     // its sentence cards store the Hebrew meaning as the prompt, a cloze choice with
     // options, a typed cloze with alternatives, a translation with neither.
+    // Phase 34 (spec D1, D6, D8): at most ten alternatives, a context only on the five
+    // types that show a bare word, and a marked word in the Hebrew only on the two
+    // sentence types that ask it.
     check(
       'questions_shape_valid',
       sql`case ${t.type}
         when 'multiple_choice' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
+        when 'new_meaning' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
         when 'listen_choice' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
         when 'matching' then ${t.options} is not null and ${t.prompt} is null and ${t.alternatives} is null and ${t.tiles} is null
         when 'reverse_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'typed_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
-          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 10
         when 'dictation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'letter_tiles' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null
           and coalesce(array_length(${t.tiles}, 1), 0) between 5 and 12
         when 'read_aloud' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'say_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
-          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 10
         when 'typed_meaning' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'cloze_choice' then ${t.options} is not null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
         when 'cloze_typed' then ${t.options} is null and ${t.prompt} is not null and ${t.tiles} is null
-          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 5
+          and ${t.alternatives} is not null and coalesce(array_length(${t.alternatives}, 1), 0) <= 10
         when 'sentence_translation' then ${t.options} is null and ${t.prompt} is not null and ${t.alternatives} is null and ${t.tiles} is null
-        else false end`,
+        else false end
+        and (${t.type} in ('typed_translation', 'say_translation', 'reverse_choice', 'typed_meaning', 'multiple_choice', 'new_meaning')
+          or (${t.context} is null and ${t.contextTranslation} is null
+            and ${t.contextMarkStart} is null and ${t.contextMarkEnd} is null))
+        and (${t.type} in ('cloze_typed', 'sentence_translation')
+          or (${t.sentenceMarkStart} is null and ${t.sentenceMarkEnd} is null))`,
+    ),
+    // Phase 39 (spec D6). The card records the meanings it showed: some on a
+    // new_meaning, none on any other type. A new_meaning card also carries a context
+    // (the new meaning's example), as a multiple choice does.
+    check(
+      'questions_known_meanings_valid',
+      sql`(${t.type} = 'new_meaning') = (${t.knownMeanings} is not null and cardinality(${t.knownMeanings}) > 0)`,
+    ),
+    // Phase 34 (spec D6, D8). A mark names both ends or neither, and lies inside the
+    // sentence it marks; a context's translation and mark need a context. Null marks
+    // are valid: the word could not be found, and the sentence is shown unmarked.
+    check(
+      'questions_marks_valid',
+      sql`(${t.contextMarkStart} is null) = (${t.contextMarkEnd} is null)
+        and (${t.sentenceMarkStart} is null) = (${t.sentenceMarkEnd} is null)
+        and (${t.contextTranslation} is null or ${t.context} is not null)
+        and (${t.contextMarkStart} is null or (${t.context} is not null and ${t.contextMarkStart} >= 0
+          and ${t.contextMarkStart} < ${t.contextMarkEnd} and ${t.contextMarkEnd} <= length(${t.context})))
+        and (${t.sentenceMarkStart} is null or (${t.sentenceTranslation} is not null and ${t.sentenceMarkStart} >= 0
+          and ${t.sentenceMarkStart} < ${t.sentenceMarkEnd} and ${t.sentenceMarkEnd} <= length(${t.sentenceTranslation})))`,
     ),
     // Phase 27 (spec D11). The sentence columns belong to the three sentence
     // types, all four together, and the gap lies inside the sentence.
@@ -847,6 +924,84 @@ export const questions = pgTable(
     foreignKey({ name: 'questions_gloss_fk', columns: [t.glossId], foreignColumns: [dictGlosses.id] }),
     check('questions_owner_complete', sql`(${t.userId} is null) = (${t.enrollmentId} is null)`),
   ],
+);
+
+/**
+ * Phase 39 (spec D4). A family of two or more glosses of one lexeme in one
+ * enrollment, recorded so that it can be traced. The rule is derived on every
+ * session creation; these tables hold what it decided.
+ */
+export const glossFamilies = pgTable(
+  'gloss_families',
+  {
+    id: text('id').primaryKey(),
+    enrollmentId: text('enrollment_id')
+      .notNull()
+      .references(() => enrollments.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('gloss_families_enrollment_idx').on(t.enrollmentId)],
+);
+
+/**
+ * Phase 39 (spec D4). One row per saved gloss in a family. Keyed and referenced
+ * as gloss_progress is: through its vocabulary entry, so ADR 0011 holds and an
+ * unsaved gloss takes its row with it.
+ */
+export const glossFamilyMembers = pgTable(
+  'gloss_family_members',
+  {
+    enrollmentId: text('enrollment_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    familyId: text('family_id')
+      .notNull()
+      .references(() => glossFamilies.id, { onDelete: 'cascade' }),
+    state: text('state').notNull(),
+    position: integer('position').notNull(),
+    // Phase 39's known_at. Since phase 46 (spec D4) neither read nor written: the
+    // gloss's own vocabulary_entries.known_at took its place. It stays only because
+    // the old container still names it for its rollout minute (ADR 0010); a later
+    // phase drops it.
+    knownAt: timestamp('known_at', { withTimezone: true }),
+    since: timestamp('since', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'gloss_family_members_pkey', columns: [t.enrollmentId, t.glossId] }),
+    foreignKey({
+      name: 'gloss_family_members_entry_fk',
+      columns: [t.enrollmentId, t.glossId],
+      foreignColumns: [vocabularyEntries.enrollmentId, vocabularyEntries.glossId],
+    })
+      .onDelete('cascade')
+      .onUpdate('cascade'),
+    check('gloss_family_members_state_known', sql`${t.state} in ('known', 'current', 'waiting')`),
+    index('gloss_family_members_family_idx').on(t.familyId),
+  ],
+);
+
+/**
+ * Phase 39 (spec D4). Append-only: every change of a member and why. family_id and
+ * gloss_id carry no foreign key, so the log outlives a dissolved family and an
+ * unsaved gloss.
+ */
+export const glossFamilyEvents = pgTable(
+  'gloss_family_events',
+  {
+    id: text('id').primaryKey(),
+    enrollmentId: text('enrollment_id')
+      .notNull()
+      .references(() => enrollments.id, { onDelete: 'cascade' }),
+    familyId: text('family_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    sessionId: text('session_id').notNull(),
+    fromState: text('from_state'),
+    toState: text('to_state'),
+    evidence: jsonb('evidence').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('gloss_family_events_enrollment_at_idx').on(t.enrollmentId, t.at)],
 );
 
 export const sessions = pgTable(
@@ -874,6 +1029,21 @@ export const sessions = pgTable(
     // Phase 35 (spec D10). The learner's day the session counts for, set from
     // services/learnerDay.ts in the transaction that ends it; null until then.
     practiceDay: date('practice_day', { mode: 'string' }),
+    // Phase 43 (spec D1). When the session was started: by its start call or its
+    // first answer, whichever came first; never cleared. Null for a session
+    // nobody has started, which an open one in stock is.
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    // Phase 43 (spec D1). What the session was built for: a device with a voice
+    // for the target, and one that can record. Every insert here says which;
+    // the default is for the code before this phase, which the old container
+    // still runs for a minute after the new one migrates (ADR 0010).
+    listening: boolean('listening').notNull().default(false),
+    speaking: boolean('speaking').notNull().default(false),
+    // Phase 53 (spec D12). The learner day a list session's words were chosen,
+    // which the stale-stock check compares with today's: a stock chosen on an
+    // earlier day is replaced when the day's split no longer matches the one in
+    // session_targets. Null for a seed and for every session before this phase.
+    chosenOn: date('chosen_on', { mode: 'string' }),
   },
   (t) => [
     foreignKey({
@@ -890,12 +1060,16 @@ export const sessions = pgTable(
       'sessions_completed_consistent',
       sql`(${t.status} = 'completed') = (${t.completedAt} is not null)`,
     ),
-    // The one-open-session rule as a constraint. A concurrent second create
-    // fails here and becomes a 409, which no read-then-insert check could
-    // promise.
-    uniqueIndex('sessions_one_open_per_enrollment')
+    // Phase 43 (spec D1). Phase 19's one-open-session rule, split by started_at:
+    // one open session in stock and one started, per enrollment. A concurrent
+    // second of either fails here and becomes a 409, which no read-then-insert
+    // check could promise.
+    uniqueIndex('sessions_one_stock_per_enrollment')
       .on(t.enrollmentId)
-      .where(sql`${t.status} in ('preparing', 'ready')`),
+      .where(sql`${t.status} in ('preparing', 'ready') and ${t.startedAt} is null`),
+    uniqueIndex('sessions_one_started_per_enrollment')
+      .on(t.enrollmentId)
+      .where(sql`${t.status} = 'ready' and ${t.startedAt} is not null`),
     // The home screen's read: one enrollment's newest session. Nothing indexed
     // sessions by enrollment before, and this read runs on every focus and every
     // 3 s poll.
@@ -936,6 +1110,16 @@ export const answers = pgTable(
     // How the typed text was judged when it was answered: the history records
     // what the learner was told (spec D12).
     verdict: text('verdict'),
+    // Phase 34 (spec D9). A right answer that is not the saved word keeps the card
+    // open for one more try. `pending` holds the session where it is; `resolved`
+    // has the retry's text and verdict. Null on every other answer.
+    retryState: text('retry_state'),
+    retryText: text('retry_text'),
+    retryVerdict: text('retry_verdict'),
+    // Phase 38 (spec D4). Whether the learner opened a typed cloze's Hebrew sentence
+    // before its first answer. Null on every other card, from an older app, and
+    // never changed by a retry.
+    hintOpened: boolean('hint_opened'),
     answeredAt: timestamp('answered_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -962,6 +1146,27 @@ export const answers = pgTable(
     ),
     // Phase 27 (spec D11): a judged answer is at most 300 characters.
     check('answers_typed_text_length', sql`length(${t.typedText}) <= 300`),
+    // Phase 38 (spec D4). A hint is opened before a typed answer, never a choice.
+    check('answers_hint_opened_typed', sql`${t.hintOpened} is null or ${t.typedText} is not null`),
+    // Phase 34 (spec D9). A retry exists only after an `alternative` verdict, so a
+    // choice answer, whose verdict is null, never has one: `is true` and not a bare
+    // `=`, because a CHECK passes on null. Its text and verdict are set exactly when
+    // it is resolved, and judged as the first answer is.
+    check('answers_retry_state_known', sql`${t.retryState} in ('pending', 'resolved')`),
+    check(
+      'answers_retry_only_on_alternative',
+      sql`${t.retryState} is null or (${t.verdict} = 'alternative') is true`,
+    ),
+    check(
+      'answers_retry_resolved_complete',
+      sql`(${t.retryState} is not distinct from 'resolved') = (${t.retryText} is not null)
+        and (${t.retryState} is not distinct from 'resolved') = (${t.retryVerdict} is not null)`,
+    ),
+    check(
+      'answers_retry_verdict_known',
+      sql`${t.retryVerdict} in ('exact', 'near_miss', 'alternative', 'wrong', 'understood', 'gave_up', 'skipped')`,
+    ),
+    check('answers_retry_text_length', sql`length(${t.retryText}) <= 300`),
   ],
 );
 
@@ -1064,5 +1269,241 @@ export const photoImportItems = pgTable(
       sql`${t.reason} is null or ${t.reason} in ('sentence', 'no_meaning', 'not_in_language')`,
     ),
     check('photo_import_items_tick_needs_gloss', sql`not ${t.ticked} or ${t.chosenGlossId} is not null`),
+  ],
+);
+
+// Phase 47 (spec D2). One row per request to a model, whatever its outcome:
+// what was sent, what came back and how long it took, so a prompt can be
+// read, replayed and measured afterwards. A log, not part of the data model:
+// no foreign keys, so a record never fails on a session a reseed deleted
+// mid-call and never holds back a deletion (ruling R2), and no check on
+// `kind`, whose values are the server's ModelCallKind. Kept 7 days: each
+// record deletes what is older (ruling R3).
+export const modelCalls = pgTable(
+  'model_calls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+    kind: text('kind').notNull(),
+    model: text('model').notNull(),
+    sessionId: uuid('session_id'),
+    attempt: integer('attempt'),
+    enrollmentId: text('enrollment_id'),
+    userId: text('user_id'),
+    // The body as sent, with audio and image data replaced by their type and
+    // size; the key travels in a header and is never here.
+    request: jsonb('request').notNull(),
+    // The body as received; null when none arrived (a timeout, a network failure).
+    response: jsonb('response'),
+    httpStatus: integer('http_status'),
+    // The message LlmUnavailable carries, when the call failed.
+    error: text('error'),
+    durationMs: integer('duration_ms').notNull(),
+    // From the response's usageMetadata, so they count without reading the JSON.
+    promptTokens: integer('prompt_tokens'),
+    outputTokens: integer('output_tokens'),
+    thinkingTokens: integer('thinking_tokens'),
+    finishReason: text('finish_reason'),
+  },
+  (t) => [
+    index('model_calls_session_idx').on(t.sessionId, t.startedAt),
+    index('model_calls_enrollment_idx').on(t.enrollmentId, t.startedAt),
+    index('model_calls_user_idx').on(t.userId, t.startedAt),
+    index('model_calls_kind_idx').on(t.kind, t.startedAt),
+    index('model_calls_started_idx').on(t.startedAt),
+  ],
+);
+
+// Phase 50 (spec D3). How alike two words sound in a language, 0 to 1, asked
+// of a model once per pair and shared by every learner of the language: the
+// second look an unheard transcript gets. The score is stored, not a verdict,
+// so a new threshold applies to every row with no call. Keyed by what a
+// learner said, not by a dictionary entry, so it is no dict_ table, and
+// db:reseed leaves it alone. `form_a < form_b`: (sell, cell) and (cell, sell)
+// are one row. Written ON CONFLICT DO NOTHING: the first score stands.
+export const pronunciationScores = pgTable(
+  'pronunciation_scores',
+  {
+    languageCode: varchar('language_code', { length: 10 }).notNull(),
+    formA: text('form_a').notNull(),
+    formB: text('form_b').notNull(),
+    score: real('score').notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'pronunciation_scores_pkey', columns: [t.languageCode, t.formA, t.formB] }),
+    // "C": byte order, which is the code-point order orderedPair uses. The
+    // database's own collation could order a pair the other way.
+    check('pronunciation_scores_ordered', sql`${t.formA} < ${t.formB} collate "C"`),
+    check('pronunciation_scores_form_a_length', sql`length(${t.formA}) between 1 and 100`),
+    check('pronunciation_scores_form_b_length', sql`length(${t.formB}) between 1 and 100`),
+    check('pronunciation_scores_score_range', sql`${t.score} between 0 and 1`),
+  ],
+);
+
+// Phase 52 (spec D2). A learner's reminder schedule: one row, written whole by
+// PUT /api/me/reminders. A learner with no row has the defaults, which live in
+// one constant, DEFAULT_REMINDER_SETTINGS in domain/reminders.ts, so there is
+// no column default to keep in step with it. `days` are ISO weekdays (1 =
+// Monday), `times` are 'HH:MM' on the learner's clock; the service keeps both
+// sorted and distinct.
+export const reminderSettings = pgTable('reminder_settings', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull(),
+  dailyTarget: smallint('daily_target').notNull(),
+  days: smallint('days').array().notNull(),
+  times: text('times').array().notNull(),
+  updatedAt: timestamp('updated_at', tz).notNull().defaultNow(),
+});
+
+// Phase 52 (spec D4). One row per Expo push token. A token is a phone, not a
+// person: when a second account signs in on the same phone it registers the
+// same token, and the row moves to them (repo/reminders.ts upsertDevice).
+export const pushDevices = pgTable(
+  'push_devices',
+  {
+    token: text('token').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    platform: text('platform').notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', tz).notNull().defaultNow(),
+  },
+  (t) => [index('push_devices_user_idx').on(t.userId)],
+);
+
+// Phase 52 (spec D6). One row per decision about one slot of one learner's day:
+// the log that says what a tick decided and why, and what came of it (tickets,
+// receipts, the tap, the session). `outcome` starts as 'claimed' in the write
+// that wins the slot and is replaced by the result; a row left 'claimed' is a
+// slot whose send never landed. `session_id` carries no foreign key, so the log
+// outlives the session, as gloss_family_events does. `local_day` is a date on
+// the learner's clock (domain/learnerClock.ts); `slot` is 'HH:MM'. Unique on
+// (user_id, local_day, slot) is what makes a claim decide a slot once.
+export const reminders = pgTable(
+  'reminders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    localDay: date('local_day', { mode: 'string' }).notNull(),
+    slot: text('slot').notNull(),
+    decidedAt: timestamp('decided_at', tz).notNull().defaultNow(),
+    outcome: text('outcome').notNull(),
+    evidence: jsonb('evidence').notNull().default(sql`'{}'::jsonb`),
+    tickets: jsonb('tickets'),
+    receipts: jsonb('receipts'),
+    receiptsCheckedAt: timestamp('receipts_checked_at', tz),
+    tappedAt: timestamp('tapped_at', tz),
+    sessionId: text('session_id'),
+  },
+  (t) => [
+    unique('reminders_user_day_slot_key').on(t.userId, t.localDay, t.slot),
+    check('reminders_outcome_known', sql`${t.outcome} in ('claimed', 'sent', 'skip_target_met', 'failed')`),
+    index('reminders_user_day_idx').on(t.userId, t.localDay),
+  ],
+);
+
+// Phase 53 (spec D1). A learner's preparation for homework or a test: a kind, a
+// due date and words (target_words). `due_on` is a learner day (ADR 0013). A
+// target is active while today is before `due_on` and `ended_at` is null: on
+// `due_on` it ends by itself and nothing is written for that, bar the
+// `ended_on_date` event the first session chosen after it records (D8).
+// `ended_at` is the learner ending it early. The kind is a fact the picker reads
+// (domain/targets.ts TARGET_KINDS), never a skill filter (D3).
+export const targets = pgTable(
+  'targets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    enrollmentId: text('enrollment_id').notNull(),
+    kind: text('kind').notNull(),
+    dueOn: date('due_on', { mode: 'string' }).notNull(),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', tz),
+  },
+  (t) => [
+    foreignKey({ name: 'targets_enrollment_fk', columns: [t.enrollmentId], foreignColumns: [enrollments.id] }),
+    check('targets_kind_known', sql`${t.kind} in ('homework', 'exam')`),
+    // The picker's read on every session: one enrollment's targets by date.
+    index('targets_enrollment_due_idx').on(t.enrollmentId, t.dueOn),
+  ],
+);
+
+// Phase 53 (spec D1). A gloss in a target. A target word is always a saved word,
+// and the service keeps that true, not the schema: unsaving a word removes it from
+// every target (repo/targets.ts removeGlossFromTargets), and a gloss merge moves it
+// to the survivor (repo/glosses.ts mergeGlosses). The key is on dict_glosses because
+// ADR 0011 has every learner table hold a gloss.
+export const targetWords = pgTable(
+  'target_words',
+  {
+    targetId: uuid('target_id').notNull(),
+    glossId: text('gloss_id').notNull(),
+    addedAt: timestamp('added_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'target_words_pkey', columns: [t.targetId, t.glossId] }),
+    foreignKey({ name: 'target_words_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+    foreignKey({ name: 'target_words_gloss_fk', columns: [t.glossId], foreignColumns: [dictGlosses.id] }),
+    // Unsaving and a merge both find a gloss's targets.
+    index('target_words_gloss_idx').on(t.glossId),
+  ],
+);
+
+// Phase 53 (spec D8). Append-only: every change of a target, with the values
+// before and after and who made it. `session_id` is the session whose choosing
+// recorded `ended_on_date`; it and `actor_user_id` carry no foreign key, so the
+// log outlives both, as gloss_family_events does. `before` and `after` are the
+// service's own shapes, per kind.
+export const targetEvents = pgTable(
+  'target_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    targetId: uuid('target_id').notNull(),
+    kind: text('kind').notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    actorUserId: text('actor_user_id'),
+    sessionId: uuid('session_id'),
+    createdAt: timestamp('created_at', tz).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'target_events_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+    check(
+      'target_events_kind_known',
+      sql`${t.kind} in ('created', 'words_added', 'words_removed', 'date_changed', 'ended_early', 'ended_on_date')`,
+    ),
+    index('target_events_target_created_idx').on(t.targetId, t.createdAt),
+  ],
+);
+
+// Phase 53 (spec D8). One row per session and target it served: what the target
+// wished, the slots it was given, how many words came from it, why (a ShareReason
+// of domain/targets.ts) and the readiness the wish came from. Written in the
+// transaction that chooses the session's words; read back only by the stale-stock
+// check (D12). Nothing ties `picked` to `slots`: a target is handed slots the main
+// path could not use in a second pass, so it can pick more than it was given.
+export const sessionTargets = pgTable(
+  'session_targets',
+  {
+    sessionId: uuid('session_id').notNull(),
+    targetId: uuid('target_id').notNull(),
+    wish: integer('wish').notNull(),
+    slots: integer('slots').notNull(),
+    picked: integer('picked').notNull(),
+    reason: text('reason').notNull(),
+    daysLeft: integer('days_left').notNull(),
+    readyCount: integer('ready_count').notNull(),
+    wordCount: integer('word_count').notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'session_targets_pkey', columns: [t.sessionId, t.targetId] }),
+    foreignKey({ name: 'session_targets_session_fk', columns: [t.sessionId], foreignColumns: [sessions.id] }).onDelete('cascade'),
+    foreignKey({ name: 'session_targets_target_fk', columns: [t.targetId], foreignColumns: [targets.id] }).onDelete('cascade'),
+    check('session_targets_reason_known', sql`${t.reason} in ('exclusive', 'run_up', 'not_ready', 'steady')`),
   ],
 );

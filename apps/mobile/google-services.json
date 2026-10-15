@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "624876868721",
+    "project_id": "wordspal-a2bde",
+    "storage_bucket": "wordspal-a2bde.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:624876868721:android:2e168c5ec47ba84d0df7d0",
+        "android_client_info": {
+          "package_name": "ai.wordspal.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCMTXjIbmBnxm_oAb6A2FDDEX_x4R43I-U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -9,6 +9,9 @@ export type SpeechValue = {
   voicesLoaded: boolean;
   isPlaying: (text: string, language: string) => boolean;
   toggle: (text: string, language: string) => Promise<void>;
+  /** Phase 44. Speaks, never toggling off. */
+  say: (text: string, language: string) => Promise<void>;
+  stop: () => Promise<void>;
 };
 
 const SpeechContext = createContext<Speaker | null>(null);
@@ -40,5 +43,7 @@ export function useSpeech(): SpeechValue {
     voicesLoaded: loaded,
     isPlaying: (text, language) => playing?.text === text && playing.language === language,
     toggle: speaker.toggle,
+    say: speaker.say,
+    stop: speaker.stop,
   };
 }
