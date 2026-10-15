@@ -364,6 +364,35 @@ export class ReminderNotFound extends Error {
   }
 }
 
+/** Phase 53 (spec D2, D13). A target that does not exist, or an id that is not even a uuid:
+ *  one error for both, so the route's 404 cannot tell them apart. Another learner's target
+ *  is AccessDenied, as another learner's photo import is. */
+export class TargetNotFound extends Error {
+  constructor(readonly targetId: string) {
+    super(`no target ${targetId}`);
+    this.name = 'TargetNotFound';
+  }
+}
+
+/** Phase 53 (spec D1, ruling R-D10). A target that cannot be: a due date on or before the
+ *  learner's today, or, on create, no word to hold once its photos and typed words are
+ *  saved (400). */
+export class InvalidTarget extends Error {
+  constructor(readonly reason: 'due_date' | 'no_words') {
+    super(`invalid target: ${reason}`);
+    this.name = 'InvalidTarget';
+  }
+}
+
+/** Phase 53 (spec D1). A change to a target that is no longer active: ended early, or its
+ *  date has come (409). */
+export class TargetClosed extends Error {
+  constructor(readonly targetId: string) {
+    super(`target ${targetId} is closed`);
+    this.name = 'TargetClosed';
+  }
+}
+
 /** Phase 29 (spec D12). The signed-in user already has a profile. */
 export class ProfileExists extends Error {
   constructor(readonly userId: string) {

@@ -859,6 +859,50 @@ export const VocabularyWordQuerySchema = z.object({
   lemma: z.string().min(1).regex(/^[^\u0000]*$/),
 });
 
+// Phase 53 (spec D1, D4, D13). A target: a kind, a due date and words saved in the
+// enrollment, which sessions serve until the date. A learner day is ADR 0013's,
+// 'YYYY-MM-DD'. `days_left` counts from the learner's today, and a target is active
+// while it is at least 1. A word's readiness is its chance of being remembered on
+// the due date, in its weakest live skill, read against the kind's bars.
+export const TargetKindSchema = z.enum(['homework', 'exam']);
+export const TargetReadinessSchema = z.enum(['not_started', 'on_the_way', 'almost', 'ready']);
+export const LearnerDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const TargetSummarySchema = z.object({
+  id: z.string(),
+  kind: TargetKindSchema,
+  due_on: LearnerDaySchema,
+  days_left: z.number().int(),
+  word_count: z.number().int(),
+  ready_count: z.number().int(),
+});
+// The active targets, nearest due date first, and the day they were read on: the
+// app's date step offers the days after it.
+export const TargetListSchema = z.object({ today: LearnerDaySchema, targets: z.array(TargetSummarySchema) });
+// Ruling R-D11. `form` is the form the word was saved from, `meaning` the gloss's key.
+export const TargetWordSchema = z.object({
+  gloss_id: z.string(),
+  form: z.string(),
+  meaning: z.string(),
+  readiness: TargetReadinessSchema,
+});
+// Its words in the order they were added.
+export const TargetSchema = TargetSummarySchema.extend({ words: z.array(TargetWordSchema) });
+// Ruling R-D9. The words a create or an add brings, saved in the same transaction:
+// photo imports (one per photo; a failed one is skipped) and typed words.
+export const TargetWordsInputSchema = z.object({
+  photo_import_ids: z.array(z.string().min(1)).max(10),
+  entries: z.array(VocabularyEntryInputSchema).max(50),
+});
+// Ruling R-D10. Creating needs at least one word, which only the save can tell: a
+// photo may hold none, or fail.
+export const CreateTargetRequestSchema = TargetWordsInputSchema.extend({ kind: TargetKindSchema, due_on: LearnerDaySchema });
+export const AddTargetWordsRequestSchema = TargetWordsInputSchema.refine(
+  (body) => body.photo_import_ids.length + body.entries.length > 0,
+  { message: 'nothing to add' },
+);
+// Any day after the learner's today; the kind never changes.
+export const ChangeTargetDateRequestSchema = z.object({ due_on: LearnerDaySchema });
+
 // A closed set, because part_of_speech is half of dict_lexemes' unique key from
 // phase 12 on: free text would make (book,"verb phrase") and (book,"verb_phrase")
 // two lexemes, and the pre-phase-12 data already held 80 spellings of ten ideas.

@@ -21,6 +21,8 @@ export const PERMISSIONS = [
   'vocabulary.read',
   'session.practice',
   'photo_import.manage',
+  // Phase 53 (spec D2). Creating, changing, ending and reading targets: in no role.
+  'targets.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

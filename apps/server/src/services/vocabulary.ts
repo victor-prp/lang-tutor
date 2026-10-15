@@ -152,7 +152,20 @@ export function createVocabularyService({
         // Phase 31 (spec D14). A card on screen since before a merge names the
         // forwarded id: share-lock, resolve, and delete the survivor's entry.
         const resolved = await repos.gloss.resolveGlosses([glossId]);
-        await repos.vocabulary.deleteEntry({ enrollmentId, glossId: resolved.get(glossId)?.id ?? glossId });
+        const survivor = resolved.get(glossId)?.id ?? glossId;
+        await repos.vocabulary.deleteEntry({ enrollmentId, glossId: survivor });
+        // Phase 53 (spec D1). A target's words are saved ones: an unsaved word
+        // leaves every target that held it, each with a line in its log.
+        for (const targetId of await repos.target.removeGlossFromTargets(enrollmentId, survivor)) {
+          await repos.target.insertEvent({
+            targetId,
+            kind: 'words_removed',
+            before: { gloss_ids: [survivor] },
+            after: { reason: 'unsaved' },
+            actorUserId,
+            sessionId: null,
+          });
+        }
       });
       logger.info({ event: 'vocabulary_unsaved', enrollment_id: enrollmentId });
     },

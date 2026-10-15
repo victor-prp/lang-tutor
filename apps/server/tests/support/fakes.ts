@@ -21,6 +21,7 @@ import type { ReminderService } from '../../src/services/reminders';
 import type { LlmClient, LlmJsonRequest } from '../../src/services/llm';
 import type { LlmAudioRequest, SpeechTranscriber } from '../../src/services/speech';
 import type { SessionService } from '../../src/services/sessions';
+import type { TargetService } from '../../src/services/targets';
 import type { Repos, Transaction } from '../../src/services/transaction';
 import type { TranslationService } from '../../src/services/translations';
 import type { GrantService } from '../../src/services/grants';
@@ -114,6 +115,15 @@ export function createFakeAppDeps(): AppDeps {
     lookUpItem: unreachable,
     failItem: unreachable,
   };
+  const targets: TargetService = {
+    list: unreachable,
+    get: unreachable,
+    create: unreachable,
+    addWords: unreachable,
+    removeWord: unreachable,
+    changeDate: unreachable,
+    end: unreachable,
+  };
   return {
     sessions,
     users,
@@ -123,6 +133,7 @@ export function createFakeAppDeps(): AppDeps {
     grants,
     reminders,
     photoImports,
+    targets,
     glosses: { mergeLexeme: unreachable, planMerges: unreachable, applyMerges: unreachable },
     health: { ping: unreachable },
     identity: { lane: 'test', database: 'test_db', port: 0, version: 'test', commit: 'test' },

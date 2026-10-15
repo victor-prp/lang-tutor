@@ -39,8 +39,8 @@ describe('may', () => {
     expect(may(TUTOR_ID, OWNER, { ...accepted, role: 'parent' }, 'vocabulary.add')).toBe(false);
   });
 
-  // Phase 29 (spec D13). Owner-only: no role holds these.
-  it.each(['vocabulary.read', 'session.practice', 'photo_import.manage'] as const)(
+  // Phase 29 (spec D13). Owner-only: no role holds these. Phase 53 (spec D2): targets too.
+  it.each(['vocabulary.read', 'session.practice', 'photo_import.manage', 'targets.manage'] as const)(
     'lets the owner %s and refuses an accepted tutor',
     (permission) => {
       const grant = { ownerUserId: 'owner', granteeUserId: 'tutor', role: TUTOR, accepted: true };

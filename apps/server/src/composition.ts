@@ -35,6 +35,7 @@ import { createModelCallService } from './services/modelCalls';
 import { createPhotoImportService, type PhotoImportService } from './services/photoImports';
 import { createReminderService, type PushSender, type ReminderService } from './services/reminders';
 import { createSessionService, type SessionService } from './services/sessions';
+import { createTargetService, type TargetService } from './services/targets';
 import type { SpeechTranscriber } from './services/speech';
 import type { Repos } from './services/transaction';
 import { TRANSLATION_JUDGE_THINKING } from './domain/judge';
@@ -69,6 +70,8 @@ export type AppDeps = {
   // Phase 52 (spec D2, D4, D6). A learner's reminder schedule, their phones, and the tap.
   reminders: ReminderService;
   photoImports: PhotoImportService;
+  // Phase 53 (spec D1, D2, D10, D11). A learner's targets: made, changed, ended and read.
+  targets: TargetService;
   // Phase 31 (spec D7). The merge job's use case; no route reaches it. The
   // tool's plan and apply come with the type, unused here and composed with a
   // null model: db/cli.ts builds its own through createGlossTools.
@@ -359,6 +362,14 @@ export function createServerDeps(io: {
       lookup: translations.translate,
       now: io.now,
       logger: io.logger,
+      stockSaveDelaySeconds: io.stockSaveDelaySeconds,
+    }),
+    // Phase 53 (spec D10, D11). Saves photos and typed words with the target in one
+    // transaction, through the photo-import and vocabulary saves' own functions.
+    targets: createTargetService({
+      transaction,
+      logger: io.logger,
+      now: io.now,
       stockSaveDelaySeconds: io.stockSaveDelaySeconds,
     }),
     // No model composed here: the tool's tier 2 is built by createGlossTools.
