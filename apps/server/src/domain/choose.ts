@@ -131,6 +131,8 @@ type Candidate = {
   rows: ReadonlyMap<Dimension, number> | undefined;
   /** A return's place among the returns (D1). */
   opened: number;
+  /** Phase 54 (spec D2). Owed a return in a live skill: a return, or an unlearned gloss's ladder again. */
+  owed: boolean;
 };
 
 const byNeed = (a: Candidate, b: Candidate) => (a.need ?? 1) - (b.need ?? 1);
@@ -177,10 +179,10 @@ export function chooseWords(input: ChoiceInput): ChosenPick[] {
 /**
  * Phase 53 (spec D5, D6, rulings R-D6, R-D7). One call per session. Returns each pool's
  * picks, in pool order. In the first pass each pool takes steps 1–8 over its own words,
- * aiming for its slots and what the pools before it left unpicked: unused slots go forward.
+ * aiming for its slots and what the pools before it left unused: unused slots go forward.
  * A target's pool (one that lists its glosses) then fills those slots with its own words
  * answered today (step 9) before passing any on, so a target not ready keeps the whole
- * session (D5). In the second pass the slots still unpicked go back to the pools in the same
+ * session (D5). In the second pass the slots still unused go back to the pools in the same
  * order, each offered as many as remain, by the same rule. Only the third gives what is left
  * to the main path's words answered today, so those wait for every pool's other words
  * (phase 37 D3). A session still empty goes past the daily cap (ruling 15), the pools in
@@ -260,6 +262,7 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
         need,
         rows,
         opened: owed?.opened ?? 0,
+        owed: owed !== undefined,
       };
     });
 
@@ -268,8 +271,11 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   const of = (cls: ChoiceClass) => candidates.filter((candidate) => candidate.pick.cls === cls);
   const allReturns = of('STEP').sort((a, b) => a.opened - b.opened);
   const allDue = of('DUE').sort(byNeed);
-  // Newest saved first; the shuffle first makes equal save times fall at random.
-  const allFresh = shuffle(of('NEW'), input.rng).sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0));
+  // Newest saved first; the shuffle first makes equal save times fall at random. Phase 54 (spec
+  // D2): an unlearned gloss owed a return comes first, the earliest opened first, so a word missed
+  // in its ladder comes back as a ladder that day ahead of words saved after it.
+  const newest = shuffle(of('NEW'), input.rng).sort((a, b) => (a.savedAt < b.savedAt ? 1 : a.savedAt > b.savedAt ? -1 : 0));
+  const allFresh = [...newest.filter((candidate) => candidate.owed).sort((a, b) => a.opened - b.opened), ...newest.filter((candidate) => !candidate.owed)];
   const allExpand = of('EXPAND').sort(byNeed);
   const allNotDue = of('NOT_DUE').sort(byNeed);
   // D3: in the order today gives them, the least practised first; a waiting return last.
@@ -280,10 +286,11 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   const keys = new Set<string>();
   // Phase 39 (spec D5). The families of the picks so far, and the families a return
   // claimed: a claimed family is free to its claiming return alone, whichever pool
-  // holds that return.
+  // holds that return. Phase 54 (spec D2): an unlearned gloss owed a return, a ladder again,
+  // claims its family as a return does, the earliest opened first.
   const pickedFamilies = new Set<number | string>();
   const claims = new Map<number | string, string>();
-  for (const candidate of allReturns) {
+  for (const candidate of [...allReturns, ...allFresh.filter((fresh) => fresh.owed)].sort((a, b) => a.opened - b.opened)) {
     if (candidate.family !== undefined && !claims.has(candidate.family)) claims.set(candidate.family, candidate.pick.glossId);
   }
   const taken = new Set<string>();
@@ -295,7 +302,7 @@ export function choosePools(input: ChoiceInput, pools: readonly Pool[]): ChosenP
   let spoken = 0;
 
   // Open: no pick so far is the gloss or shares its key or family. Free: open, and its
-  // family claimed by no other gloss's return.
+  // family claimed by no other gloss's return (or owed ladder, phase 54).
   const open = (candidate: Candidate) =>
     !taken.has(candidate.pick.glossId) &&
     !keys.has(candidate.key) &&

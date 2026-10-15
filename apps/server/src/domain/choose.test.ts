@@ -686,6 +686,48 @@ describe('ladders (phase 54, spec D2, D4)', () => {
     expect(slotsOf(picks)).toBe(SESSION_LENGTH - 2);
   });
 
+  it('brings a word missed in its ladder back first, the earliest opened first, ahead of words saved after it', () => {
+    const picks = chooseWords(
+      input(
+        [
+          { id: 'first', state: { [WR]: again() } },
+          ...range(3, (i) => fresh(`later${i + 1}`)),
+          { id: 'second', state: { [WR]: again() } },
+          ...range(8, (i) => known(`k${i}`)),
+        ],
+        { steps: [step('second', WR, 5), step('first', WR, 1)] },
+      ),
+    );
+    expect(picks.map((pick) => [pick.glossId, pick.cls, pick.ladder])).toEqual([
+      ['first', 'NEW', true],
+      ['second', 'NEW', true],
+      ['later3', 'NEW', true],
+      ['k0', 'NOT_DUE', false],
+    ]);
+  });
+
+  it('lets a word owed its ladder again claim its family as a return does: a sibling in an earlier pool waits', () => {
+    const words = [{ id: 'missed', state: { [WR]: again() } }, known('kin', { [WR]: 0.4 }), ...range(6, (i) => known(`k${i}`))];
+    const families = { ...NO_FAMILIES, familyOf: new Map([['missed', 1], ['kin', 1]]) };
+    const [listed, main] = choosePools(input(words, { steps: [step('missed', WR)], families }), [
+      { glossIds: new Set(['kin']), slots: 2, owedNew: 0 },
+      { glossIds: null, slots: SESSION_LENGTH - 2, owedNew: 0 },
+    ]);
+    expect(ids(listed)).toEqual([]);
+    expect(main[0]).toMatchObject({ glossId: 'missed', cls: 'NEW', ladder: true });
+  });
+
+  it('holds the ceiling with more slots in play than three ladders take: pools of six and six, or one of fifteen', () => {
+    const words = range(30, (i) => fresh(`n${i}`));
+    const halves = choosePools(input(words), [
+      { glossIds: new Set(words.slice(0, 15).map((word) => word.id)), slots: 6, owedNew: 0 },
+      { glossIds: null, slots: 6, owedNew: 0 },
+    ]);
+    expect(halves.map(ladders)).toEqual([2, 1]);
+    const [one] = choosePools(input(words), [{ glossIds: null, slots: 15, owedNew: 0 }]);
+    expect(ladders(one)).toBe(NEW_PER_SESSION);
+  });
+
   it('holds the ceiling past the daily cap too (ruling 15): an empty session gets three ladders', () => {
     const picks = chooseWords(input(range(12, (i) => fresh(`n${i}`)), { newToday: DAY_NEW_CAP }));
     expect(ids(picks)).toEqual(['n11', 'n10', 'n9']);
