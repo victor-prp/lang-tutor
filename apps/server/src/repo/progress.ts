@@ -19,6 +19,8 @@ const TEXT_TYPES: ReadonlySet<string> = new Set([
   'dictation',
   'letter_tiles',
   'read_aloud',
+  // Phase 54 (spec D7). A seen answer is a text answer; without this its null options would be read as a choice.
+  'meet',
   'say_translation',
   'typed_meaning',
   'cloze_typed',

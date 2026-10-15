@@ -18,8 +18,11 @@
  * 3: phase 39 (spec D11). Two reasons. The `new_meaning` question type: an
  * older app cannot draw it. And the `wrong_script` refusal of a typed answer
  * in the wrong alphabet: a request an older app would have had graded.
+ *
+ * 4: phase 54 (spec D6). The meet question type and the seen answer: an older
+ * app cannot draw the card.
  */
-export const API_LEVEL = 3;
+export const API_LEVEL = 4;
 
 /** Written here and nowhere else (ADR 0012 R3). */
 export const API_LEVEL_HEADER = 'X-Api-Level';

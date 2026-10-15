@@ -79,6 +79,10 @@ describe('gradesFor, one test per row of the table', () => {
     expect(gradesFor({ type: 'say_translation', verdict: 'alternative' })).toEqual([]);
     expect(gradesFor({ type: 'say_translation', verdict: 'skipped' })).toEqual([]);
   });
+  // Phase 54 (spec D6). A meet card is ungraded: nothing is retrieved, nothing recorded.
+  it('the meet card, seen', () => {
+    expect(gradesFor({ type: 'meet', verdict: 'seen' })).toEqual([]);
+  });
   it('say the translation, typed fallback, grades as typed translation', () => {
     expect(gradesFor({ type: 'say_translation', verdict: 'exact' })).toEqual([p(WR, 3), p(WP, 3), p(SP, 3)]);
     expect(gradesFor({ type: 'say_translation', verdict: 'near_miss' })).toEqual([p(WR, 3), p(WP, 3), p(SP, 1)]);
@@ -99,6 +103,7 @@ describe('dimensionsTested', () => {
     expect(dimensionsTested('dictation')).toEqual([SR, SP]);
     expect(dimensionsTested('say_translation')).toEqual([SR, SK]);
     expect(dimensionsTested('read_aloud')).toEqual([]);
+    expect(dimensionsTested('meet')).toEqual([]);
   });
   it('matches the dimensions of a successful grade', () => {
     expect(gradesFor({ type: 'dictation', verdict: 'exact' }).map((g) => g.dimension)).toEqual(dimensionsTested('dictation'));

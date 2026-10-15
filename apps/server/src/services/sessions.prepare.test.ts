@@ -199,6 +199,7 @@ function world(opts: {
           case 'listen_choice':
             return { ...base, type: q.type, question: q.answerForm ?? q.form, part_of_speech: q.partOfSpeech, ...choice() };
           case 'read_aloud':
+          case 'meet':
             return { ...base, type: q.type, question: q.form, meaning: q.prompt! };
           case 'say_translation':
             return { ...base, type: q.type, question: q.prompt!, part_of_speech: q.partOfSpeech, answer: q.answerForm ?? q.form, lemma: q.lemma, alternatives: q.alternatives!, context };

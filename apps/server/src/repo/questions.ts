@@ -82,7 +82,8 @@ export const questionColumns = {
  * the form too (spoken, or beside its meanings); a dictation speaks the form
  * and keeps the Hebrew as its meaning; a tiles card asks the Hebrew. Phase 25: a
  * read-aloud card shows the form and keeps the Hebrew as its meaning; say the
- * translation asks the Hebrew, as the typed card does. A matching row comes back
+ * translation asks the Hebrew, as the typed card does. Phase 54: a meet card shows
+ * the form and keeps the Hebrew as its meaning. A matching row comes back
  * as a board of one, which withBoards joins.
  */
 export function questionFrom(row: QuestionRow, order: number[] | null): Question {
@@ -112,6 +113,9 @@ export function questionFrom(row: QuestionRow, order: number[] | null): Question
       return { ...base, type: 'dictation', question: row.form, meaning: row.prompt! };
     case 'read_aloud':
       return { ...base, type: 'read_aloud', question: row.form, meaning: row.prompt! };
+    case 'meet':
+      // Phase 54 (spec D6, D7). The form and the stored meaning, shaped as a read-aloud card.
+      return { ...base, type: 'meet', question: row.form, meaning: row.prompt! };
     case 'say_translation':
       return {
         ...base,

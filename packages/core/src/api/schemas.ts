@@ -144,6 +144,16 @@ export const ReadAloudQuestionSchema = z.object({
   meaning: z.string(),
 });
 
+// Phase 54 (spec D1, D6). A new word, shown before it is asked: its form, spoken,
+// and its meaning. Ungraded: answered with `seen`.
+export const MeetQuestionSchema = z.object({
+  id: z.string(),
+  type: z.literal('meet'),
+  vocab_term_id: z.string(),
+  question: z.string(),
+  meaning: z.string(),
+});
+
 // Phase 25 (spec D2). The meaning; the learner says the word. It carries what
 // the typed card carries, which is also what its typed form needs when the
 // learner cannot speak (spec D8).
@@ -240,6 +250,7 @@ export const QuestionSchema = z.discriminatedUnion('type', [
   MatchingQuestionSchema,
   LetterTilesQuestionSchema,
   ReadAloudQuestionSchema,
+  MeetQuestionSchema,
   SayTranslationQuestionSchema,
   TypedMeaningQuestionSchema,
   ClozeChoiceQuestionSchema,
@@ -265,6 +276,8 @@ export const AnswerVerdictSchema = z.enum([
   'understood',
   'gave_up',
   'skipped',
+  // Phase 54 (spec D6). A meet card, tapped through.
+  'seen',
 ]);
 
 // Scoring reads `is_correct` and nothing else, so any question type satisfies
@@ -423,6 +436,11 @@ export const NextStepRequestSchema = z.union([
     question_id: z.string().min(1),
     pass: z.enum(['skip', 'show_answer']),
     retry: z.boolean().optional(),
+  }),
+  // Phase 54 (spec D6). A meet card, tapped through.
+  z.object({
+    question_id: z.string().min(1),
+    seen: z.literal(true),
   }),
 ]);
 

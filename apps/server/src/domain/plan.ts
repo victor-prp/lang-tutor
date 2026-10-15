@@ -105,6 +105,9 @@ function eligible(type: QuestionType, pick: PlanPick, listening: boolean, speaki
       return pick.clozeGap;
     case 'matching':
       return false;
+    case 'meet':
+      // Phase 54 (spec D3, D5). A ladder's first card, which planCards places from a pick's ladder flag: never a rung's choice.
+      return false;
   }
 }
 

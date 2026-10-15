@@ -556,6 +556,24 @@ describe('rows that ask the model nothing', () => {
   });
 });
 
+// Phase 54 (spec D7). A meet card asks the models nothing, and stores the Hebrew meaning as its prompt.
+describe('the meet card generation', () => {
+  const row = { glossId: 'g-s', senseId: 's', variantId: 'v', lexemeId: 'l', form: 'gatto', lemma: 'gatto', partOfSpeech: 'noun', translation: 'חתול', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null };
+  it('asks the models nothing', () => {
+    expect(taskFor('meet')).toBeNull();
+  });
+  it('stores the Hebrew as the prompt, as a read aloud does', () => {
+    expect(generatedContent(row, 'meet', NOTHING_GENERATED, NO_EXTRAS)).toEqual(generatedContent(row, 'read_aloud', NOTHING_GENERATED, NO_EXTRAS));
+    expect(generatedContent(row, 'meet', NOTHING_GENERATED, NO_EXTRAS)).toEqual({
+      prompt: 'חתול',
+      options: null,
+      alternatives: null,
+      tiles: null,
+      ...NO_SENTENCE,
+    });
+  });
+});
+
 describe('phase 25 generation', () => {
   const row = { glossId: 'g-s', senseId: 's', variantId: 'v', lexemeId: 'l', form: 'gatto', lemma: 'gatto', partOfSpeech: 'noun', translation: 'חתול', example: null, exampleTranslation: null, acceptedAnswers: [], answerForm: null, acceptedAt: null };
   it('asks the typed task for say the translation, and nothing for read aloud', () => {
@@ -926,7 +944,7 @@ describe('the answer form (phase 34, spec D2, D12)', () => {
   it('stores it on no other card: a dictation, a read-aloud, a meaning card, a board word or a sentence card', () => {
     const sentence = { sentence: 'Ieri ho aspettato per ore.', translation: 'אתמול חיכיתי שעות.', gap: { start: 14, end: 22 }, alternatives: [] };
     const translate = { hebrew: 'חיכיתי שעות', reference: 'Ho aspettato per ore.', gap: { start: 3, end: 12 } };
-    for (const type of ['dictation', 'read_aloud', 'typed_meaning'] as const) {
+    for (const type of ['dictation', 'read_aloud', 'meet', 'typed_meaning'] as const) {
       expect(generatedContent(ORA, type, generated, NO_EXTRAS).answerForm).toBeNull();
     }
     expect(generatedContent(ORA, 'matching', generated, { ...NO_EXTRAS, board: { meanings: ['שעות', 'a', 'b', 'c', 'd'], own: 0 } }).answerForm).toBeNull();

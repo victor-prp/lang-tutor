@@ -5,6 +5,7 @@ import type {
   LetterTilesQuestion,
   ListenChoiceQuestion,
   MatchingQuestion,
+  MeetQuestion,
   MultipleChoiceQuestion,
   Question,
   ReadAloudQuestion,
@@ -546,5 +547,54 @@ describe('the second try (phase 34, spec D9)', () => {
       expect(evidenceVerdict('alternative', retry)).toBe('alternative');
     }
     expect(evidenceVerdict('exact', null)).toBe('exact');
+  });
+});
+
+// Phase 54 (spec D1, D6). A new word shown before it is asked: ungraded, answered with `seen`.
+const MEET: MeetQuestion = { id: 'e1', type: 'meet', vocab_term_id: 'l1', question: 'gatto', meaning: 'חתול' };
+
+describe('the meet card and the seen answer (phase 54, spec D6)', () => {
+  it('takes `seen` and nothing else, and no other card takes it', () => {
+    expect(answerFits(MEET, { seen: true })).toBe(true);
+    expect(answerFits(MEET, { option_index: 0 })).toBe(false);
+    expect(answerFits(MEET, { text: 'x' })).toBe(false);
+    expect(answerFits(MEET, { pass: 'skip' })).toBe(false);
+    expect(answerFits(MEET, { heard: 'gatto' })).toBe(false);
+    for (const card of [READ, SAY, MEANING, typed, makeQuestion(1)]) {
+      expect(answerFits(card, { seen: true })).toBe(false);
+    }
+  });
+
+  it('records `seen` as a wrong-looking, empty answer with no retry', () => {
+    expect(evaluate(MEET, { seen: true })).toEqual({
+      question_id: 'e1',
+      is_correct: false,
+      answer_string: '',
+      verdict: 'seen',
+      ...NO_RETRY,
+    });
+  });
+
+  it('is not a choice, and its right answer is its form', () => {
+    expect(isChoice(MEET)).toBe(false);
+    expect(rightAnswer(MEET)).toBe('gatto');
+  });
+
+  it('a seen verdict is not right', () => {
+    expect(verdictCorrect('seen')).toBe(false);
+  });
+
+  it('leaves a meet card out of the score total and of the missed list, as a skip', () => {
+    const mc = makeQuestion(1);
+    const answers = [evaluate(MEET, { seen: true }), evaluate(mc, { option_index: 0 })];
+    expect(score([MEET, mc], answers)).toEqual({ correct: 1, total: 1 });
+    expect(missed([MEET, mc], answers)).toEqual([]);
+    const wrong = [evaluate(MEET, { seen: true }), evaluate(mc, { option_index: 1 })];
+    expect(score([MEET, mc], wrong)).toEqual({ correct: 0, total: 1 });
+    expect(missed([MEET, mc], wrong).map((item) => item.question.id)).toEqual([mc.id]);
+  });
+
+  it('is shuffled as a text card is: not at all', () => {
+    expect(shuffleOptions(MEET, seededRng(1))).toBe(MEET);
   });
 });

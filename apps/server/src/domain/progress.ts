@@ -7,9 +7,10 @@ import { DIMENSIONS, MAX_LEVEL, badge, type Dimension } from '@lang-tutor/core/d
  */
 
 /** Phase 24. The types answered by an option, and by a text with its verdict.
- *  Phase 25: a speaking card's answer is stored as a text with its verdict too. */
+ *  Phase 25: a speaking card's answer is stored as a text with its verdict too.
+ *  Phase 54 (spec D7): so is a meet card's `seen`. */
 export type ChoiceAnswerType = 'multiple_choice' | 'new_meaning' | 'reverse_choice' | 'listen_choice' | 'matching' | 'cloze_choice';
-export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation' | 'typed_meaning' | 'cloze_typed' | 'sentence_translation';
+export type TextAnswerType = 'typed_translation' | 'dictation' | 'letter_tiles' | 'read_aloud' | 'say_translation' | 'typed_meaning' | 'cloze_typed' | 'sentence_translation' | 'meet';
 
 /** One answer as the rule reads it: which gloss, which exercise, and how it
  *  was judged. A choice is right or wrong; a text answer has its verdict. */
@@ -149,6 +150,9 @@ export function evidenceFor(answer: AnsweredQuestion): Evidence[] {
       // understood when speaking, and none of recall. Capped at 2, and nothing
       // downward: reading a word aloud shows nothing about understanding it.
       return answer.verdict === 'understood' ? [piece('spoken_productive', true, READ_ALOUD_MAX_LEVEL)] : [];
+    case 'meet':
+      // Phase 54 (spec D6). Shown, not asked: no evidence either way.
+      return [];
     case 'say_translation':
       switch (answer.verdict) {
         case 'understood':

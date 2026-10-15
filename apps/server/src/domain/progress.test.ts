@@ -314,6 +314,11 @@ describe('phase 25 evidence (spec D10)', () => {
     expect(evidenceFor({ glossId: s, type: 'read_aloud', verdict: 'skipped' })).toEqual([]);
   });
 
+  // Phase 54 (spec D6). A meet card asks nothing: it is evidence of nothing.
+  it('gives a meet card no evidence', () => {
+    expect(evidenceFor({ glossId: s, type: 'meet', verdict: 'seen' })).toEqual([]);
+  });
+
   it('says the translation as spoken_productive, credited down to spoken_receptive', () => {
     expect(evidenceFor({ glossId: s, type: 'say_translation', verdict: 'understood' })).toEqual([
       { dimension: 'spoken_receptive', correct: true, cap: null },
