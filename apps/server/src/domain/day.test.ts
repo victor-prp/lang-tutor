@@ -1,8 +1,16 @@
 import { describe, expect, it } from '@jest/globals';
 import { SESSION_LENGTH, type Dimension, type QuestionType } from '@lang-tutor/core/domain';
 
-import { chooseWords, liveDimensions, type ChoiceInput, type ChosenPick } from './choose';
-import { DAY_NEW_CAP, EXAM_RUN_UP_DAYS, KNOWN_STABILITY, RETURNS_PER_DAY, SPEAKING_PER_SESSION } from './chooseConstants';
+import { choosePools, chooseWords, liveDimensions, type ChoiceInput, type ChosenPick } from './choose';
+import {
+  DAY_NEW_CAP,
+  EXAM_RUN_UP_DAYS,
+  KNOWN_STABILITY,
+  LADDER_SLOTS,
+  NEW_PER_SESSION,
+  RETURNS_PER_DAY,
+  SPEAKING_PER_SESSION,
+} from './chooseConstants';
 import { LANE0_DAY } from './day.fixture';
 import { glossFamilies, type Families, type FamilyGloss } from './glossFamilies';
 import { applySession, type MemoryRow } from './memoryUpdate';
@@ -95,6 +103,8 @@ function answerOf(glossId: string, type: QuestionType, right: boolean): Answered
 }
 
 const keyOf = (glossId: string, dimension: Dimension) => `${glossId}|${dimension}`;
+/** Phase 54 (spec D4). The session slots `picks` take: a ladder LADDER_SLOTS, any other pick one. */
+const slotsOf = (picks: readonly ChosenPick[]) => picks.reduce((sum, pick) => sum + (pick.ladder ? LADDER_SLOTS : 1), 0);
 const dayAfter = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 
 /** `days` days of `count` sessions over `list`, each session ended as recordProgress
@@ -159,7 +169,7 @@ function runDays(
         listening: true,
         speaking: true,
         rng: () => 0.5,
-        families: { familyOf: families.familyOf, waiting },
+        families: { familyOf: families.familyOf, waiting, introductions: new Set(families.introductions.keys()) },
       };
       const targets = targetsOn?.(day, date).filter((target) => date < target.dueOn);
       const { picks, split } = targets
@@ -265,7 +275,11 @@ describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet, withF
   });
 
   it('2. recalls every word met before the last session later that day', () => {
-    const met = log.filter((card) => card.cls === 'NEW' && card.session < last);
+    // Phase 54 (spec D2): a word's first NEW card meets it; a word missed in its ladder is NEW
+    // again in a later session, and that card is its recall, as a return was.
+    const met = log.filter(
+      (card, i) => card.cls === 'NEW' && card.session < last && !log.slice(0, i).some((earlier) => earlier.glossId === card.glossId),
+    );
     expect(met.length).toBeGreaterThan(0);
     for (const card of met) {
       const recalled = log.some((later) => later.glossId === card.glossId && later.session > card.session && later.rung === 2 && RECALL.has(later.type));
@@ -301,8 +315,13 @@ describe.each(DAYS)('a day: %s (phase 37)', (_name, list, count, checkMet, withF
   it('5. asks a word done today only when no other word can be asked', () => {
     for (const { input, picks } of sessions) {
       if (!picks.some((pick) => pick.cls === 'DONE')) continue;
-      // Every word the session could ask besides the done ones was asked.
-      const others = chooseWords({ ...input, saved: input.saved.filter((gloss) => !input.done.has(gloss.glossId)), done: new Set() });
+      // Every word the session could ask besides the done ones was asked. Phase 54 (spec D4): the
+      // slot the speaking pick gave a word done today (phase 37 D4) was no other word's, so the
+      // session without them is that much shorter: a ladder that fits only there was no word to ask.
+      const spokeDone = picks.filter((pick) => pick.cls === 'SPEAK' && input.done.has(pick.glossId)).length;
+      const [others] = choosePools({ ...input, saved: input.saved.filter((gloss) => !input.done.has(gloss.glossId)), done: new Set() }, [
+        { glossIds: null, slots: SESSION_LENGTH - spokeDone, owedNew: 0 },
+      ]);
       const asked = new Set(picks.map((pick) => pick.glossId));
       expect(others.map((pick) => pick.glossId).filter((glossId) => !asked.has(glossId))).toEqual([]);
     }
@@ -506,11 +525,14 @@ const dayIndex = (date: string) => daysBetween(LANE0_DAY.today, date);
  * Spec D4–D6, as amended by the graded wish. Each session's recorded split, recomputed from the
  * session's own input: daysLeft and the word count from the target, the ready count from the
  * memory the session read, the wish from targetWish, the slots from splitSlots over the wishes.
- * Then the picks, exactly: each target, in pool order, its slots and the slots the targets before
- * it could not use, or all its words when it has fewer (they are all free: no family, no shared
- * key); the main path its share, the session's other slots. Lane 0's list always leaves the main
- * path words it has not answered today, so it fills its share, and no slot comes back to the
- * targets in a second pass (ruling R-D6): a target that took the main path's share fails here.
+ * Then the picks, exactly, in slots (phase 54, spec D4: a ladder takes LADDER_SLOTS, any other
+ * pick one): each target, in pool order, fills its slots and the slots the targets before it could
+ * not use, unless it has no word left, or all it has left are ladders that do not fit: fewer than
+ * LADDER_SLOTS slots free, or the session's NEW_PER_SESSION ladders spent (they are all free: no
+ * family, no shared key); the main path its share, the session's other slots, and the slots the
+ * targets passed on. Lane 0's list always leaves the main path words it has not answered today, so
+ * it fills them, and no slot comes back to the targets in a second pass (ruling R-D6): a target
+ * that took the main path's share fails here.
  */
 function expectSplitsByTheRules(run: TargetRun) {
   run.sessions.forEach((session, at) => {
@@ -539,20 +561,29 @@ function expectSplitsByTheRules(run: TargetRun) {
       })),
     });
 
+    const laddersSpent = session.picks.filter((pick) => pick.ladder).length >= NEW_PER_SESSION;
     let carried = 0;
-    const least = targets.map((target) => {
+    const fills = targets.map((target) => {
       const offered = slots.get(target.id)! + carried;
-      const fills = Math.min(offered, target.glossIds.length);
-      carried = offered - fills;
-      return fills;
+      const picked = picksOf(session, target.glossIds);
+      carried = offered - slotsOf(picked);
+      const left = target.glossIds.filter((glossId) => !picked.some((pick) => pick.glossId === glossId));
+      const ladders = left.every((glossId) => isLadder(glossId, session.input));
+      return carried === 0 || (carried > 0 && (left.length === 0 || (ladders && (carried < LADDER_SLOTS || laddersSpent))));
     });
     const mainShare = SESSION_LENGTH - [...slots.values()].reduce((sum, n) => sum + n, 0) + carried;
-    expect({ at, picked: targets.map((target) => picksOf(session, target.glossIds).length), main: mainPicks(run, at).length }).toEqual({
-      at,
-      picked: least,
-      main: mainShare,
-    });
+    expect({ at, fills, main: slotsOf(mainPicks(run, at)) }).toEqual({ at, fills: targets.map(() => true), main: mainShare });
   });
+}
+
+/** Phase 54 (spec D2, D4). A gloss the session would ask as a ladder: no right answer in any skill
+ *  (unlearned), not answered today, and no family's introduction. */
+function isLadder(glossId: string, input: ChoiceInput): boolean {
+  return (
+    !input.done.has(glossId) &&
+    !input.families.introductions.has(glossId) &&
+    !input.memory.some((row) => row.glossId === glossId && row.state.reps > row.state.lapses)
+  );
 }
 
 /** Spec D7: every word of the target, as it stands on its last day, was met before that day: the
@@ -686,8 +717,9 @@ describe.each<[TargetKind, number, ShareReason, number]>([
   it(`gets all ready and settles to its steady ${steady} of 10, the main path taking the rest`, () => {
     const settled = run.sessions.flatMap((session, at) => (session.split[0]?.reason === 'steady' ? [{ session, at }] : []));
     expect(settled.length).toBeGreaterThan(0);
+    // Phase 54 (spec D4): the main path's rest in slots, a ladder of its own taking three.
     for (const { session, at } of settled) {
-      expect({ at, target: picksOf(session, target.glossIds).length, main: mainPicks(run, at).length }).toEqual({
+      expect({ at, target: picksOf(session, target.glossIds).length, main: slotsOf(mainPicks(run, at)) }).toEqual({
         at,
         target: steady,
         main: SESSION_LENGTH - steady,
@@ -698,8 +730,9 @@ describe.each<[TargetKind, number, ShareReason, number]>([
   it(`asks ${lastShare} of 10 on its last day, all ready (${lastReason}), the main path the rest`, () => {
     const last = run.sessions.flatMap((session, at) => (session.split[0]?.daysLeft === 1 ? [{ session, at }] : []));
     expect(last).toHaveLength(SESSIONS_A_DAY);
+    // Phase 54 (spec D4): the main path's rest in slots, a ladder of its own taking three.
     for (const { session, at } of last) {
-      expect({ at, split: session.split[0], target: picksOf(session, target.glossIds).length, main: mainPicks(run, at).length }).toEqual({
+      expect({ at, split: session.split[0], target: picksOf(session, target.glossIds).length, main: slotsOf(mainPicks(run, at)) }).toEqual({
         at,
         split: expect.objectContaining({ reason: lastReason, readyCount: target.glossIds.length }),
         target: lastShare,

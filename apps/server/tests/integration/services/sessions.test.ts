@@ -3,6 +3,7 @@ import { SESSION_LENGTH } from '@lang-tutor/core/domain';
 
 import type { PgBoss } from 'pg-boss';
 
+import { NEW_PER_SESSION } from '../../../src/domain/chooseConstants';
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { startTestBoss, stopTestBoss } from '../../support/jobs';
 import { enrollmentOf, seedEnrollment, seedUser } from '../../support/seedUser';
@@ -153,7 +154,8 @@ describe('createNextSession', () => {
     const jobs = await boss.findJobs<PrepareSessionPayload>(PREPARE_SESSION);
     expect(jobs).toHaveLength(1);
     expect(jobs[0].data.session_id).toBe(created.sessionId);
-    expect(jobs[0].data.picks).toHaveLength(SESSION_LENGTH);
+    // Phase 54 (spec D4): twelve new words, three ladders, the session's ceiling.
+    expect(jobs[0].data.picks).toHaveLength(NEW_PER_SESSION);
     // Phase 24: listening on. Phase 35 (spec D6): no rotation step.
     expect(jobs[0].data).toMatchObject({ listening: true });
     expect(jobs[0].data).not.toHaveProperty('ordinal');

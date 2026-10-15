@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import type { PgBoss } from 'pg-boss';
 
+import { LADDER_SLOTS } from '../../../src/domain/chooseConstants';
 import { PREPARE_SESSION, type PrepareSessionPayload } from '../../../src/domain/jobs';
 import { createFakeLogger } from '../../support/fakes';
 import { jobPayloads, startTestBoss, stopTestBoss } from '../../support/jobs';
@@ -90,7 +91,9 @@ describe('createNextSession chooses the words (spec D5)', () => {
 
     const picks = await nextPicks();
     const ids = (from: Word[]) => from.map((word) => word.glossId).sort();
-    expect(picks).toHaveLength(8);
+    // Phase 54 (spec D4): the two new words are ladders, three slots each, so one word answered
+    // today fills the tenth slot, not three.
+    expect(picks).toHaveLength(6);
     // The new words (the reserve), newest first...
     expect(picks.slice(0, 2).map((pick) => pick.gloss_id)).toEqual([words[7].glossId, words[6].glossId]);
     for (const pick of picks.slice(0, 2)) expect(pick).toMatchObject({ dimension: 'written_receptive', rung: 1, r: null, step: false });
@@ -102,8 +105,9 @@ describe('createNextSession chooses the words (spec D5)', () => {
       expect(pick).toMatchObject({ dimension: 'written_receptive', rung: 1, step: false });
       expect(pick.r).toBeLessThan(0.75);
     }
-    // ...and last the words answered right today, in the dimension they would expand into.
-    expect(picks.slice(5).map((pick) => pick.gloss_id).sort()).toEqual(ids([words[0], words[1], words[3]]));
+    // ...and last a word answered right today, in the dimension it would expand into.
+    expect(picks.slice(5)).toHaveLength(1);
+    expect(ids([words[0], words[1], words[3]])).toContain(picks[5].gloss_id);
     for (const pick of picks.slice(5)) expect(pick).toMatchObject({ dimension: 'written_productive', rung: 1, r: null, step: false });
   });
 
@@ -113,7 +117,8 @@ describe('createNextSession chooses the words (spec D5)', () => {
     clock += DAY_MS;
 
     const picks = await nextPicks();
-    expect(picks).toHaveLength(10);
+    // Phase 54 (spec D4): the two words never met are ladders, three slots each.
+    expect(picks).toHaveLength(10 - 2 * LADDER_SLOTS + 2);
     const yesterday = new Set(words.slice(0, 10).map((word) => word.glossId));
     const expanded = picks.filter((pick) => yesterday.has(pick.gloss_id));
     expect(expanded.length).toBeGreaterThan(0);

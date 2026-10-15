@@ -26,8 +26,9 @@ export type TargetSessionInput = {
 };
 
 /** Spec D8. What one session gave one target. `picked` counts its pool's picks over every
- *  pass, so it passes `slots` when the main path leaves slots unpicked; a gloss in two
- *  targets counts for the one served first. */
+ *  pass, so it passes `slots` when the main path leaves slots unused; a gloss in two
+ *  targets counts for the one served first. Phase 54 (spec D4): picks, not slots, so a
+ *  ladder, three slots, counts one. */
 export type TargetSplit = {
   targetId: string;
   wish: number;

@@ -20,8 +20,13 @@ export const RUNG_R = 0.75;
 export const RECOGNITION_EXPONENT = 0.5;
 
 /** Research's choice. New words a session introduces before anything else fills it,
- *  when the due words leave room (phase 37 D3). */
+ *  when the due words leave room (phase 37 D3). Phase 54 (spec D4): also the most ladders a
+ *  session holds, across every pool and pass, the pass past the daily cap included. */
 export const NEW_PER_SESSION = 3;
+
+/** Phase 54 (spec D4). Slots of SESSION_LENGTH a new word's first session takes: its three
+ *  practice cards; the meet card is free. */
+export const LADDER_SLOTS = 3;
 
 /** Phase 37 (spec D3, D5). New words a session introduces however many words are due,
  *  while the daily cap allows: a fixed reserve outgrows a learner's sessions. */

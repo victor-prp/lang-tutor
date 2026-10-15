@@ -418,7 +418,8 @@ export function createSessionService({
         listening: devices.listening,
         speaking: devices.speaking,
         rng,
-        families: { familyOf: families.familyOf, waiting },
+        // Phase 54 (spec D2): a family's introduction keeps its new_meaning card, no ladder.
+        families: { familyOf: families.familyOf, waiting, introductions: new Set(families.introductions.keys()) },
       },
       targets: await repos.target.listActive(enrollmentId, today),
       speakable: new Map(members.map((member) => [member.glossId, member.speakable])),
