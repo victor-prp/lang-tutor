@@ -2,6 +2,8 @@
 
 - **Status:** Victor said "Go till PR, subagents" on 2026-10-15 after approving the one-pager
   in chat: the design is self-approved (CLAUDE.md, *Continue till PR*). Rulings are at the end.
+  Implemented on branch `phase-54-meet-new-words`, subagent-driven, seven tasks and a final
+  review; D2, D4 and D5 carry amendments from the run (R5, R8, R10).
 - **Date:** 2026-10-15
 - **Source:** `drafts/2026-10-15-new-word-introduction-one-pager.md` (main checkout), and the
   chat that led to it; the research behind it is `drafts/reports/opus-medium - New word initial
@@ -98,9 +100,12 @@ exceptions that keep today's rule:
   stays a single `new_meaning` card, not a ladder (Out).
 
 An unlearned gloss **owed a return** is `NEW`, not `STEP`: a word missed in its ladder comes
-back later in the day as a ladder again, never as a cold recall card. Its answers there count
-as that return in `dayState`, as any answer in a later session does, so it comes back at most
-`RETURNS_PER_DAY` times a day.
+back later in the day as a ladder again, never as a cold recall card. A later session in which
+it is answered counts as one return in `dayState`, however many of its cards that session asks
+(amended in the run, R8: before ladders a word had one card a session, so "one answer" and "one
+session" were the same), so it comes back at most `RETURNS_PER_DAY` times a day. Owed
+re-ladders come before the other new words, the earliest owed first, and claim their family as
+a return does.
 
 The picker reads this from the memory rows it is already given (`reps`, `lapses`); no new
 query. It is also given the glosses `glossFamilies` introduces (`ChoiceInput.families` gains
@@ -159,7 +164,8 @@ In the picker (`choosePools`'s `run`):
 - `TargetSplit.picked` still counts picks.
 
 So a session is at most 10 graded cards plus up to three meet cards. A list of nothing but new
-words gives three ladders and one more card: thirteen cards. A backlog of due words still lets
+words gives three ladders: twelve cards, nine of them graded; with any other word to ask, one
+more card: thirteen (amended in the run, R10). A backlog of due words still lets
 one new word in (`NEW_FLOOR`), as a ladder: three slots, seven reviews, eleven cards. A session
 may end with fewer than ten graded cards when only new words are left and fewer than three
 slots are free.
@@ -171,19 +177,22 @@ slots are free.
 1. The **ladder stream**, stage by stage: every ladder's meet card in pick order, then every
    P1, then every P2, then every P3. With three ladders this is M_A M_B M_C A1 B1 C1 A2 B2 C2
    A3 B3 C3: two other cards between each of a word's cards.
-2. The **other cards** (every non-return unit, the board as one unit), ordered as today
-   (highest chance first, no type twice in a row where it can be avoided).
+2. The **other cards**: every non-return unit (the board as one unit), ordered as today
+   (highest chance first, no type twice in a row where it can be avoided), then the returns,
+   ordered as today (amended in the run, R5).
 3. The two are **merged evenly**: with `a` of the stream's `L` cards and `b` of the `O` other
    units placed, the stream places its next card when `O = 0` or `(a + ½) / L ≤ (b + ½) / O`,
    else the other list does; but a ladder card that would follow a card of its own word goes
    after the next other unit instead, while one is left. (Stage order makes that happen only
    with a single ladder.)
-4. The **returns** come last, as today (phase 37 D6).
+4. The **returns** therefore come after every non-return card, as phase 37 D6 wants, but a
+   ladder's cards can sit between them, so a return can separate two cards of a ladder.
 
 So no two cards of one word are ever adjacent while the session has another card to put between
-them, the gaps are even (research: the shape of the spacing does not matter, only that it is
-spaced; Latimier et al. 2021), and the typed P3s fall late in the session. A session of one
-ladder and nothing else is its four cards in a row.
+them (with one ladder and `k` other units, at most `max(0, 3 − k)` adjacent pairs), the gaps are
+even (research: the shape of the spacing does not matter, only that it is spaced; Latimier et
+al. 2021), and the typed P3s fall late in the session. A session of one ladder and nothing else
+is its four cards in a row.
 
 ### D6. Wire and app
 
@@ -240,7 +249,7 @@ guesses at a meet card.
 - **Plan (`plan.test.ts`):** a ladder's four types in order; ladder cards outside
   `MAX_PER_TYPE` and off the board; the stream and the even merge for one, two and three
   ladders with and without other cards; no two cards of a word adjacent while another card
-  exists; returns last.
+  exists; returns after every non-return card, separating a ladder's cards where needed.
 - **Core (`quiz.test.ts`, `memoryGrades.test.ts`):** `seen` fits only a meet card; a meet card
   out of the score and the missed list; no grades.
 - **Prepare job (integration):** a session with a ladder writes meet, P1, P2, P3 for its gloss;
@@ -250,7 +259,10 @@ guesses at a meet card.
   day is a meet card followed by P1, P2, P3; no session holds more than three ladders; no two
   cards of one word are adjacent in a session with another card. The thirty-word learner meets
   all thirty words, three a session at most. Phase 53's outcomes still hold; its ready-on-due
-  measures are re-measured and reported, not lowered.
+  measures are re-measured and reported, not lowered. (As run: outcomes 8–11 in every run, a
+  learner who keeps forgetting one word, phase 53's checks restated in slots where D4 changes
+  them (R1–R3), row 1's ready-on-due as a five-phase mean held to master's (R6), the families
+  check as an aggregate held to master's (R7).)
 - **e2e:** a new spec plays a session whose new word shows its meet card (the form, the meaning,
   the arrival utterance), **המשך** moves on with no banner, and its three practice cards follow.
   `kindOnScreen` learns the meet card. The specs that play an unseeded new word and expect a
@@ -263,4 +275,58 @@ guesses at a meet card.
 
 ## Rulings
 
-(Recorded during the run.)
+Made during the run under *Continue till PR*; each says what it costs if wrong.
+
+- **R1. A new learner's first sessions** (phase 37 outcome "meets up to the daily limit in six
+  sessions") are restated: each session meets at most `NEW_PER_SESSION` ladders and at least one
+  while unmet words and the daily cap allow, and no session leaves `LADDER_SLOTS` slots unused
+  while it could take another ladder. The old figure assumed new words fill sessions, which D4
+  removes on purpose. *If wrong:* a new learner meets fewer words a day than wanted;
+  `DAY_NEW_CAP` and `NEW_PER_SESSION` are one-line constants.
+- **R2. Targets in slots.** Phase 53's "exam alone" and "homework fills before the main path"
+  are checked in slots: a target takes every slot it can fill, and the one or two slots no ladder
+  fits pass on to the next pool. *If wrong:* an exam's eve can show one main-path card.
+- **R3. A target larger than the ceiling** (row 5, 70–80 words, a pace of 24–43 a day): each
+  day meets at least min(pace, what the ceiling allows), counting first meetings only, and every
+  word unmet on the last day is one the ceiling could not reach. Target pacing and a "this is a
+  lot" warning are Out. *If wrong:* a very large list near its date is not all met.
+- **R4. Small picker choices.** A re-ladder keeps `rungFor`'s rung, which the plan ignores; a
+  target of only new words can leave the main path a one-slot run with no speaking pick; a
+  re-ladder counts toward the daily cap, so after 15 introductions a missed word waits for
+  tomorrow; a low-R re-ladder counts toward `HARD_CAP`; a family's new meaning answered Again
+  leaves the introductions and comes back as a full ladder. *If wrong:* each is an edge case
+  costing a speaking pick, a same-day retry, a hard review or two slots.
+- **R5. Returns separate a ladder's cards** (D5 amended). With returns strictly last, a lone
+  ladder's cards sat back to back even when returns could go between them; "never back to back"
+  outranks phase 37 D6's "strictly last", whose aim (distance from the answer that owed the
+  return) the earlier session already gives. *If wrong:* a return comes a few cards before the
+  session's last ladder card.
+- **R6. Row 1's ready-on-due — flag for Victor.** Phase 53 measured the exam's readiness on one
+  phase of the fixed learner's miss rhythm (0.65). That number moves with where the misses land:
+  on master the five phases give 0.40–0.65, mean 0.57. Phase 54 measures the five-phase mean and
+  holds it to master's 0.57; the branch measures 0.58 (0.70 0.50 0.60 0.60 0.50). The simulated
+  learner models the ladder's slot cost but not its encoding benefit. Row 2 keeps its single
+  phase and 0.85 (0.90). *If wrong:* this masks a real ~0.02 drop in exam readiness.
+- **R7. The families check as an aggregate.** Each first meaning must be known at least once
+  over the five phases, and the five phases together must know at least as many (gloss, phase)
+  pairs over the seven non-waiting glosses as phase 53's code (11; branch 14). A per-word count
+  moved with the miss rhythm (h0: 1 of 5 here, 20 vs 22 of 30 across learners missing every
+  4th–8th card, while single words went 68 → 94 of 150). *If wrong:* one word's real drop can
+  hide inside the aggregate.
+- **R8. One return per later session** (D2 amended; final review). Counting a return per answer
+  let a ladder's 3–4 answers spend every return in one comeback. *If wrong:* a hopeless word can
+  be laddered up to three more times a day.
+- **R9. Prepare job.** A lone meet card cannot be produced (a ladder's typed translation is
+  never refused, phase 48 D1), so `dropLoneMeets` is unit-tested only; a meet card counts toward
+  `MIN_SESSION_CARDS`. *If wrong:* a heavily refused session can keep as few as four graded
+  cards.
+- **R10. D4's card count** corrected: an all-new list gives three ladders, twelve cards.
+- **R11. The app's `seen()`** is covered by unit tests of its pure parts and by `meet.spec.ts`
+  (exact wire body, no banner): the repo has no hook test setup. *If wrong:* a regression in the
+  hook's guards is caught only by e2e.
+- **R12. The bots.** Only the ACT-R bot learns from a meet card (a 0.5 feedback trace in written
+  and spoken receptive); the FSRS control bot mirrors the server, which writes no memory. A
+  ladder is not "the same word again" in the weekly report, and its typed card is not off-rung in
+  metric (d). *If wrong:* the control bot under-models the meet card.
+- **R13. Missed list.** The results screen lists a missed word once, not once per ladder card
+  (final review).
