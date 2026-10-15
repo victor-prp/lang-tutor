@@ -330,3 +330,40 @@ test('a new-meaning card answered wrong picks another option', () => {
   assert.notEqual((d as { index: number }).index, 1);
   assert.equal(d.detail.outcome, 'wrong');
 });
+
+// Phase 54 (spec D8). A meet card shows a new word and asks nothing: the bot answers `seen`,
+// never guesses at it, and the card is no wrong answer.
+const meet: Card = { ...base, type: 'meet', question: 'dog', meaning: 'כלב' };
+
+test('a meet card is answered seen, with no draw and no recall asked', () => {
+  const m = memory(0);
+  const noDraw: () => number = () => {
+    throw new Error('a meet card draws nothing');
+  };
+  // Whatever the bot is like: a meet card takes one answer.
+  for (const behaviour of [calm, { slip: 1, gaveUp: 1 }]) {
+    const d = decide(meet, m, saved, noDraw, behaviour);
+    assert.equal(d.kind, 'seen');
+    assert.equal(d.detail.word, 'dog');
+    assert.equal(d.detail.unmatched, false);
+    assert.equal(d.detail.outcome, 'seen');
+    assert.deepEqual(d.detail.dimensions, []);
+    assert.deepEqual(d.detail.event, { type: 'meet', verdict: 'seen' });
+  }
+  assert.equal(m.asked.length, 0);
+});
+
+test('a meet card matches by the form it shows, the lemma too', () => {
+  assert.equal(matchCard(meet, saved)?.form, 'dog');
+  const inflected: SavedWord[] = [{ form: 'хочешь', meaning: 'רוצה', lemma: 'хотеть', key: 'לרצות' }];
+  assert.equal(matchCard({ ...meet, question: 'хотеть', meaning: 'לרצות' }, inflected)?.form, 'хочешь');
+});
+
+test('a meet card the bot cannot match is still answered seen, and counted unmatched', () => {
+  const d = decide({ ...meet, question: 'zebra' }, memory(1), saved, always(0.5), calm);
+  assert.equal(d.kind, 'seen');
+  assert.equal(d.detail.word, null);
+  assert.equal(d.detail.unmatched, true);
+  assert.equal(d.detail.outcome, 'unmatched');
+  assert.equal(d.detail.event, null);
+});

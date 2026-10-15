@@ -223,3 +223,24 @@ test('a new-meaning card is placed as a written recognition choice and counts as
   assert.equal(view[1]?.dimension, WR);
   assert.notEqual(view[1]?.r, null);
 });
+
+test('a meet card is placed on no dimension and leaves the weeks\' numbers as they were', () => {
+  // Phase 54 (spec D8). The server writes nothing for a meet card, so the replay grades nothing for
+  // it, and the picker chose no dimension for it: it is in none of (a) to (d).
+  const asked = [
+    card(1, 'multiple_choice', 'x', true, { [WR]: 0.2 }),
+    card(2, 'multiple_choice', 'x', true, { [WR]: 0.5 }),
+    card(3, 'multiple_choice', 'x', true, { [WR]: 0.6 }),
+  ];
+  const meet = (day: number) => card(day, 'meet', 'x', false, { [WR]: 0.1 }, { verdict: 'seen' });
+  const withMeet = [meet(1), asked[0], asked[1], meet(2), asked[2]];
+
+  const view = serverView(withMeet);
+  assert.deepEqual([view[0], view[3]], [null, null]);
+  assert.deepEqual(
+    [view[1], view[2], view[4]],
+    serverView(asked),
+  );
+  const days = [day(1, 10, 5), day(2, 10, 5), day(3, 10, 5)];
+  assert.deepEqual(weekNumbers(stateWith(withMeet, days), 1, noMemory, WRITTEN), weekNumbers(stateWith(asked, days), 1, noMemory, WRITTEN));
+});

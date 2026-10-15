@@ -42,9 +42,9 @@ export type CardEntry = {
   recall: Partial<Record<Dimension, number>>;
   /** The chance of a right answer the bot drew against, guessing included. */
   p: number;
-  /** What the bot meant to do. */
+  /** What the bot meant to do. A meet card is `seen`: tapped through, with nothing to get right. */
   outcome: Outcome;
-  /** What it sent: the option's index, the text, `pass:<kind>`, or `spoke:<text>`. */
+  /** What it sent: the option's index, the text, `pass:<kind>`, `spoke:<text>`, or `seen`. */
   answer: string;
   /** The server's verdict, which the bot learns from (ruling 24); absent on a choice. On a
    *  card held for a second try (phase 34, spec D9), the one the server keeps for progress and
@@ -67,6 +67,7 @@ export type DayLine = {
   /** False when a failed request ended the day early: the day is played again next run. */
   completed: boolean;
   sessions: number;
+  /** Cards asked. A meet card (phase 54, spec D8) asks nothing and is left out, as the server's score leaves it out. */
   cards: number;
   right: number;
   newWords: number;

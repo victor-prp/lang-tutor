@@ -311,8 +311,12 @@ async function answerCard(
   // Ruling 24: the bot learns what the server judged, not what it meant to do.
   if (detail.word) memory.learn(detail.word, { type: card.type, correct: sent.correct, verdict: sent.verdict });
 
-  line.cards += 1;
-  if (sent.correct) line.right += 1;
+  // Phase 54 (spec D8). A meet card asks nothing: like the server's score, the day's count leaves it
+  // out (the log keeps it), so a new word's meet card is neither a card right nor one missed.
+  if (card.type !== 'meet') {
+    line.cards += 1;
+    if (sent.correct) line.right += 1;
+  }
   if (detail.unmatched) line.unmatched += 1;
   state.log.push({
     day: deps.day,
@@ -363,6 +367,12 @@ async function send(deps: PlayDeps, sessionId: string, card: Question, decision:
     }
     case 'pass':
       return pass(deps, sessionId, card, decision.pass, retry);
+    case 'seen': {
+      // Phase 54 (spec D6, D8). A meet card takes `seen` and no retry: the server never holds it.
+      const next = await api.nextStep(sessionId, { question_id, seen: true });
+      const record = evaluate(card, { seen: true });
+      return { next, answer: 'seen', verdict: record.verdict, correct: record.is_correct };
+    }
     case 'speak': {
       const passAs = card.type === 'read_aloud' ? 'skip' : 'show_answer';
       const audio = await deps.synthesize(decision.word, deps.profile.language);

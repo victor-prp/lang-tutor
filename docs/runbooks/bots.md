@@ -176,7 +176,9 @@ gh issue list --label bots --state all
 
 - **Each run's comment** has a line per bot: sessions, cards, right, new words, unheard (spoken
   answers the transcription missed), no voice (espeak-ng or ffmpeg missing on the runner),
-  unmatched (cards the bot could not tie to a saved word) and failed requests. "day not
+  unmatched (cards the bot could not tie to a saved word) and failed requests. A new word's meet
+  card (phase 54) is answered `seen`, as the app's **המשך** does; it is in the bot's log but in
+  neither "cards" nor "right", as the server's score leaves it out. "day not
   finished" means a failed request ended that bot's day; the next run goes on with it from where it
   stopped (words already saved and sessions already played are not repeated), and the third
   failure counts it as played so the others are not held back. A bot's state is committed

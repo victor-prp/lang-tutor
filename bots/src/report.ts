@@ -185,7 +185,10 @@ export function weekSummary(state: BotState, week: number, memory: BotMemory): W
   const last = week * DAYS_PER_WEEK;
   const inWeek = (day: number) => day >= first && day <= last;
   const days = state.days.filter((d) => inWeek(d.day));
-  const cards = state.log.filter((c) => inWeek(c.day));
+  // Phase 54 (spec D8). A meet card asks nothing, so it is no card asked: the week's counts, its
+  // types and the words asked again leave it out, as the server's score does. The log keeps it.
+  const asked = (c: { type: QuestionType }) => c.type !== 'meet';
+  const cards = state.log.filter((c) => inWeek(c.day) && asked(c));
 
   const byType: WeekSummary['byType'] = {};
   for (const c of cards) {
@@ -198,7 +201,7 @@ export function weekSummary(state: BotState, week: number, memory: BotMemory): W
   const lastAsked = new Map<string, number>();
   const cameBack: WeekSummary['cameBack'] = [];
   for (const c of state.log) {
-    if (c.word === null) continue;
+    if (c.word === null || !asked(c)) continue;
     const before = lastAsked.get(c.word);
     if (before !== undefined && c.day > before && inWeek(c.day)) cameBack.push({ word: c.word, afterDays: c.day - before });
     lastAsked.set(c.word, c.day);

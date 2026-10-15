@@ -164,3 +164,27 @@ test('the week\'s summary and the prompt carry what D20 names', () => {
     assert.ok(prompt.includes(fact), `the prompt names ${fact}:\n${prompt}`);
   }
 });
+
+test('a meet card is no card asked: the week\'s counts, types and repeats leave it out', () => {
+  // Phase 54 (spec D8). A new word's ladder is a meet card and three asked ones, in one session.
+  const state: BotState = {
+    ...newState({ name: 'steady-en', memory: 'actr' }),
+    saved: [{ form: 'kettle', meaning: 'm', glossId: 'g', day: 1 }],
+    days: [{ ...newLine(1), played: true, completed: true, sessions: 1, cards: 3, right: 2, newWords: 1 }],
+    log: [
+      card(1, 's1', 'kettle', false, 'meet'),
+      card(1, 's1', 'kettle', true),
+      card(1, 's1', 'kettle', true, 'reverse_choice'),
+      card(1, 's1', 'kettle', false, 'typed_translation'),
+    ],
+  };
+  const summary = weekSummary(state, 1, { setTime() {}, recall: () => 1, learn() {} });
+  assert.equal(summary.cards, 3);
+  assert.equal(summary.right, 2);
+  assert.deepEqual(summary.byType, {
+    multiple_choice: { cards: 1, right: 1 },
+    reverse_choice: { cards: 1, right: 1 },
+    typed_translation: { cards: 1, right: 0 },
+  });
+  assert.deepEqual(summary.repeated, [{ word: 'kettle', times: 3 }]);
+});

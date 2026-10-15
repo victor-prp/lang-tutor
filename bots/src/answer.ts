@@ -23,14 +23,15 @@ export type Behaviour = {
   gaveUp: number;
 };
 
-export type Outcome = 'right' | 'near_miss' | 'wrong' | 'gave_up' | 'unmatched';
+/** `seen`: a meet card, tapped through (phase 54, spec D8). It asks nothing, so it is neither right nor wrong. */
+export type Outcome = 'right' | 'near_miss' | 'wrong' | 'gave_up' | 'unmatched' | 'seen';
 
 export type Detail = {
   /** The saved word the card matched, or null. */
   word: string | null;
   unmatched: boolean;
   dimensions: Dimension[];
-  /** The chance of a right answer drawn against, guessing floor included. 1 for read aloud, 0 if unmatched. */
+  /** The chance of a right answer drawn against, guessing floor included. 1 for read aloud and a meet card, which retrieve nothing, 0 if unmatched. */
   p: number;
   outcome: Outcome;
   /** The outcome as the grades table reads it, for `memory.learn`; null when nothing was learnt. */
@@ -41,7 +42,9 @@ export type Action =
   | { kind: 'option'; index: number }
   | { kind: 'text'; text: string }
   | { kind: 'pass'; pass: 'show_answer' }
-  | { kind: 'speak'; word: string };
+  | { kind: 'speak'; word: string }
+  // Phase 54 (spec D8). A meet card takes this and nothing else.
+  | { kind: 'seen' };
 
 export type Decision = Action & { detail: Detail };
 
@@ -57,6 +60,7 @@ function shown(card: Card): { forms: string[]; meanings: string[] } {
     case 'listen_choice':
     case 'dictation':
     case 'read_aloud':
+    case 'meet':
     case 'typed_meaning':
     case 'matching':
       return { forms: [card.question], meanings: [] };
@@ -142,6 +146,15 @@ export function decide(card: Card, memory: BotMemory, saved: readonly SavedWord[
       word: card.question,
       detail: detail({ outcome: 'right', word: word?.form ?? null, p: 1, event: { type, verdict: 'understood' } }),
     };
+  }
+
+  // Phase 54 (spec D8). A meet card shows a new word and asks nothing: the bot taps through it and
+  // never guesses. It draws nothing, whatever the bot is like, and the word is a study for its memory.
+  if (card.type === 'meet') {
+    const word = matchCard(card, saved);
+    return word
+      ? { kind: 'seen', detail: detail({ outcome: 'seen', word: word.form, p: 1, event: { type, verdict: 'seen' } }) }
+      : { kind: 'seen', detail: detail({ outcome: 'unmatched', unmatched: true }) };
   }
 
   const matched = matchCard(card, saved);

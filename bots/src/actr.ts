@@ -86,6 +86,11 @@ export function guess(p: number, optionCount: number): number {
 
 /** Strength of the trace a card adds to a dimension, relative to a full practice trace. */
 export const SEEN_ANSWER_WEIGHT = 0.5;
+/**
+ * Phase 54 (spec D8). What a meet card exposes: the word written and said aloud, with its
+ * meaning. Receptive only, since nothing is asked of the learner.
+ */
+export const MEET_DIMENSIONS: readonly Dimension[] = ['written_receptive', 'spoken_receptive'];
 /** Productive practice also exercises the receptive side of the same modality. */
 export const TRANSFER_RECEPTIVE = 0.3;
 /** Written and spoken practice of the same kind feed each other a little. */
@@ -147,12 +152,18 @@ export class ActrMemory implements BotMemory {
   }
 
   learn(word: string, event: LearnEvent): void {
-    const dims = dimensionsTested(event.type);
     const add = (dimension: Dimension, weight: number) => {
       const key = `${word}|${dimension}`;
       this.state.traces[key] = addTrace(this.state.traces[key] ?? [], this.now, weight);
     };
     this.shiftFor(word);
+    // Phase 54 (spec D8). A meet card is a study of the word: the feedback a wrong answer leaves
+    // (the right answer, shown) and no answer of the learner's own, so no full trace and no transfer.
+    if (event.type === 'meet') {
+      for (const dimension of MEET_DIMENSIONS) add(dimension, SEEN_ANSWER_WEIGHT);
+      return;
+    }
+    const dims = dimensionsTested(event.type);
     for (const dimension of dims) {
       add(dimension, 1);
       // The right answer is shown afterwards, right or wrong: a weaker trace.

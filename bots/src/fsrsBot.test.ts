@@ -30,3 +30,13 @@ test('a wrong answer grades Again and the state survives a JSON round trip', () 
   copy.setTime({ day: '2026-01-02', hour: 8 });
   assert.equal(copy.recall('cat', 'written_productive'), retrievability(review(null, 1, '2026-01-01'), '2026-01-02'));
 });
+
+test('a meet card teaches nothing: the grades table gives an ungraded card no grade', () => {
+  // Phase 54 (spec D8). The control bot forgets as the picker assumes, and the server writes no
+  // memory for a meet card, so the bot's memory of the word does not move either.
+  const m = new FsrsMemory();
+  m.setTime({ day: '2026-01-01', hour: 8 });
+  m.learn('cat', { type: 'meet', verdict: 'seen' });
+  assert.deepEqual(m.state, {});
+  assert.equal(m.recall('cat', 'written_receptive'), 0);
+});
